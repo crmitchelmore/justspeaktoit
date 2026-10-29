@@ -50,7 +50,8 @@ module IOSProfileBootstrap
     "#{unsigned_token}.#{base64url(raw_signature)}"
   end
 
-  # Thin transport: performs one HTTPS request and returns [status, raw_body].
+  # Thin transport: one GET retry for a transport failure, never for HTTP status.
+  # Non-GET requests are not replayed. Returns [status, raw_body].
   # Tests substitute any object responding to call(method:, path:, body:).
   class HttpTransport
     def initialize(api_base:, token:)
@@ -64,7 +65,8 @@ module IOSProfileBootstrap
       request["Authorization"] = "Bearer #{@token}"
       request["Content-Type"] = "application/json"
       request.body = JSON.generate(body) if body
-      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) { |http| http.request(request) }
+      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, open_timeout: 10,
+        read_timeout: 60, write_timeout: 60, max_retries: method == Net::HTTP::Get ? 1 : 0) { |http| http.request(request) }
       [Integer(response.code), response.body]
     end
   end

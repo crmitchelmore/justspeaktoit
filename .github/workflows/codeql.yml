@@ -14,10 +14,35 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      swift: ${{ steps.paths.outputs.swift }}
+    steps:
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: paths
+        with:
+          filters: |
+            swift:
+              - 'Sources/**'
+              - 'Package.swift'
+              - 'Package.resolved'
+              - 'Resources/**'
+              - '.github/workflows/codeql.yml'
+              - '.github/actions/setup-apple-toolchain/**'
   analyze:
     name: Analyze
-    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
-    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    needs: changes
+    # A skipped job still reports a check; event-level path filters can leave
+    # required checks pending. Unknown/failed path detection runs the scan.
+    if: >-
+      always() && (github.event_name != 'pull_request' ||
+      needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
+    runs-on: macos-15
     # CodeQL tracing slows the Swift build, so this gets more headroom than
     # the plain CI build jobs.
     timeout-minutes: 60
@@ -33,15 +58,40 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-apple-toolchain
+        with:
+          xcode-version: "26.2"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
 
+      # Cache dependency sources only. Compiled objects must remain uncached so
+      # CodeQL observes every compiler invocation during the traced build.
+      - name: Cache Swift dependency sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            .build/repositories
+            .build/checkouts
+            .build/artifacts
+          key: codeql-${{ runner.os }}-${{ runner.arch }}-sources-${{ hashFiles('Package.resolved') }}
+          restore-keys: codeql-${{ runner.os }}-${{ runner.arch }}-sources-
+
+      - name: Resolve pinned dependencies with bounded network retries
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if swift package resolve --force-resolved-versions; then exit 0; fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            sleep "$((attempt * 5))"
+          done
+
       - name: Build
-        run: swift build
+        run: swift build --disable-automatic-resolution
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

@@ -307,4 +307,72 @@ module IOSProfileBootstrap
       assert transport.drained?
     end
   end
+
+
+  # Real Net::HTTP request/retry machinery over owned in-process socket pairs.
+  # Only connect is replaced: there is no DNS, TCP, TLS or Apple request.
+  class HttpTransportRetryTest < Minitest::Test
+    def with_connections(script)
+      require "socket"
+      http = Net::HTTP.new("fixture.invalid", 443, nil)
+      sockets = []
+      attempts = []
+      http.define_singleton_method(:connect) do
+        outcome = script.fetch(attempts.length)
+        attempts << outcome
+        client, peer = Socket.pair(:UNIX, :STREAM, 0)
+        sockets.concat([client, peer])
+        @socket = Net::BufferedIO.new(client, read_timeout: @read_timeout, write_timeout: @write_timeout)
+        if outcome == :reset
+          @socket.define_singleton_method(:readline) { raise Errno::ECONNRESET }
+        else
+          body = JSON.generate("data" => [])
+          peer.write("HTTP/1.1 #{outcome} Fixture\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}")
+        end
+      end
+      transport = HttpTransport.new(api_base: "https://fixture.invalid", token: "SYNTHETIC")
+      Net::HTTP.stub(:new, ->(*_arguments) { http }) { yield transport, attempts, http }
+    ensure
+      sockets&.each { |socket| socket.close unless socket.closed? }
+    end
+
+    def test_get_retries_one_reset_then_returns_response_with_existing_timeouts
+      with_connections([:reset, 200]) do |transport, attempts, http|
+        assert_equal [200, '{"data":[]}'], transport.call(method: Net::HTTP::Get, path: "/fixture")
+        assert_equal [:reset, 200], attempts
+        assert_equal 1, http.max_retries
+        assert_equal 10, http.open_timeout
+        assert_equal 60, http.read_timeout
+        assert_equal 60, http.write_timeout
+        assert http.use_ssl?
+      end
+    end
+
+    def test_get_persistent_reset_is_bounded_to_two_connection_attempts
+      with_connections([:reset, :reset]) do |transport, attempts, _http|
+        assert_raises(Errno::ECONNRESET) { transport.call(method: Net::HTTP::Get, path: "/fixture") }
+        assert_equal [:reset, :reset], attempts
+      end
+    end
+
+    def test_post_and_other_non_get_requests_are_never_replayed_on_reset
+      [Net::HTTP::Post, Net::HTTP::Put].each do |method|
+        with_connections([:reset]) do |transport, attempts, http|
+          assert_raises(Errno::ECONNRESET) { transport.call(method: method, path: "/fixture", body: {"test" => true}) }
+          assert_equal [:reset], attempts
+          assert_equal 0, http.max_retries
+        end
+      end
+    end
+
+    def test_authentication_and_server_http_statuses_are_not_transport_retries
+      [403, 500].each do |status|
+        with_connections([status]) do |transport, attempts, _http|
+          error = assert_raises(ApiError) { Client.new(transport: transport).get("/fixture") }
+          assert_equal status, error.status
+          assert_equal [status], attempts
+        end
+      end
+    end
+  end
 end

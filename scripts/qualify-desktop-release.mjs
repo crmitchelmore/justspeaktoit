@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { runReleaseCommand as run } from './release-command.mjs';
 import { validateManifest } from './release-train-lib.mjs';
-import { desktopDownloads, desktopWorkflows, latestDesktopRun, liveArtifact, reusableDesktopRun, validateDesktopReceipt } from './desktop-release-lib.mjs';
+import { desktopDownloads, desktopWorkflows, latestDesktopRun, liveArtifact, projectDesktopRun, reusableDesktopRun, validateDesktopReceipt } from './desktop-release-lib.mjs';
 import { publishDesktopDownloads } from './publish-desktop-downloads.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/justspeaktoit';
@@ -19,9 +19,6 @@ const startedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 // intact. Tag refs make every checkout and nested runtime use the frozen source.
 const pending = new Set(desktopWorkflows);
 const runs = {};
-const project = observed => ({...Object.fromEntries(
-    ['id', 'head_sha', 'head_branch', 'event', 'status', 'conclusion', 'html_url', 'path'].map(key => [key, observed[key]])),
-    repository: observed.head_repository?.full_name});
 for (const workflow of desktopWorkflows) {
     const pages = JSON.parse(gh('api', '--paginate', '--slurp',
         `repos/${repo}/actions/workflows/${workflow}/runs?event=push&branch=main&head_sha=${manifest.source}&per_page=100`));
@@ -31,7 +28,7 @@ for (const workflow of desktopWorkflows) {
     if (existing && download && !liveArtifact(JSON.parse(gh('api',
         `repos/${repo}/actions/runs/${existing.id}/artifacts?per_page=100`)).artifacts, download.artifact)) existing = undefined;
     if (existing) {
-        runs[workflow] = project(existing);
+        runs[workflow] = projectDesktopRun(existing);
         pending.delete(workflow);
         console.log(`Reused ${workflow}: ${existing.html_url}`);
     } else gh('workflow', 'run', workflow, '--repo', repo, '--ref', tag);
@@ -45,15 +42,15 @@ while (pending.size) {
         const observed = latestDesktopRun(pages.flatMap(page => page.workflow_runs), manifest, startedAt);
         if (!observed || observed.status !== 'completed') continue;
         if (observed.conclusion !== 'success') throw Error(`Desktop qualification failed: ${observed.html_url}`);
-        runs[workflow] = project(observed);
+        runs[workflow] = projectDesktopRun(observed);
         pending.delete(workflow);
         console.log(`Verified ${workflow}: ${observed.html_url}`);
     }
     if (pending.size) await setTimeout(30_000);
 }
-const downloads = publishDesktopDownloads(manifest, runs);
+const publication = publishDesktopDownloads(manifest, runs);
 const receipt = validateDesktopReceipt(manifest, {status: 'verified', source: manifest.source,
-    tag, build: manifest.build, checkedAt: new Date().toISOString(), runs, downloads});
+    tag, build: manifest.build, checkedAt: new Date().toISOString(), ...publication});
 const directory = mkdtempSync(join(tmpdir(), 'desktop-release-'));
 const path = join(directory, 'desktop-qualification.json');
 writeFileSync(path, JSON.stringify(receipt, null, 2) + '\n');

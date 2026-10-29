@@ -1,58 +1,94 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { runReleaseCommand as run } from './release-command.mjs';
 import { validateManifest } from './release-train-lib.mjs';
-import { desktopDownloads, liveArtifact, validateDesktopReceipt, verifyDesktopDownload } from './desktop-release-lib.mjs';
+import { desktopDownloadFile, desktopDownloads, desktopWorkflows, liveArtifact, projectDesktopRun,
+    validateDesktopReceipt, verifyDesktopDownload } from './desktop-release-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/justspeaktoit';
-const gh = (...args) => run('gh', args);
 const json = path => JSON.parse(readFileSync(path, 'utf8'));
+
+function receiptFor(manifest, runs) {
+    return {status: 'verified', source: manifest.source, tag: manifest.tag, build: manifest.build, runs};
+}
+
+function currentDesktopRuns(manifest, runs, command) {
+    validateDesktopReceipt(manifest, receiptFor(manifest, runs), repo);
+    const current = {};
+    for (const workflow of desktopWorkflows) {
+        const stored = runs[workflow];
+        const observed = JSON.parse(command('gh', ['api', `repos/${repo}/actions/runs/${stored.id}`]));
+        if (observed.id !== stored.id || !Number.isSafeInteger(observed.run_attempt) || observed.run_attempt < 1 ||
+            (stored.run_attempt !== undefined && stored.run_attempt !== observed.run_attempt)) {
+            throw Error(`Desktop qualification run changed: ${workflow}`);
+        }
+        current[workflow] = projectDesktopRun(observed);
+    }
+    return validateDesktopReceipt(manifest, receiptFor(manifest, current), repo).runs;
+}
 
 // Copies each qualifying run's bundle onto the manifest release under a
 // stable name, after checking its bytes against that run's own evidence.
-export function publishDesktopDownloads(manifest, runs) {
+export function publishDesktopDownloads(manifest, runs, command = run) {
+    const gh = (...args) => command('gh', args);
+    // Admit every current workflow before any download or release write. Old
+    // receipts without attempt numbers are upgraded from fresh successful runs.
+    const current = currentDesktopRuns(manifest, runs, command);
     const directory = mkdtempSync(join(tmpdir(), 'desktop-downloads-'));
     try {
         const downloads = {};
         for (const spec of desktopDownloads) {
-            const runID = runs[spec.workflow]?.id;
+            const runID = current[spec.workflow].id;
             const listed = JSON.parse(gh('api', `repos/${repo}/actions/runs/${runID}/artifacts?per_page=100`));
             if (!liveArtifact(listed.artifacts, spec.artifact)) throw Error(`${spec.workflow} run ${runID} has no live ${spec.artifact}`);
             const target = join(directory, spec.artifact);
             gh('run', 'download', String(runID), '--repo', repo, '--name', spec.artifact, '--dir', target);
             const evidence = json(join(target, spec.kind === 'windows' ? 'bundle-evidence.json' : 'build-provenance.json'));
-            const fileName = spec.kind === 'windows' ? evidence.zip?.name : 'JustSpeakToIt-x86_64.flatpak';
-            const bytes = readFileSync(join(target, fileName ?? ''));
+            const fileName = desktopDownloadFile(spec, manifest, evidence);
+            const bytes = readFileSync(join(target, fileName));
             const sha256 = createHash('sha256').update(bytes).digest('hex');
             verifyDesktopDownload(spec, manifest, evidence, sha256);
             const published = join(directory, spec.asset);
             copyFileSync(join(target, fileName), published);
-            gh('release', 'upload', manifest.tag, published, '--repo', repo, '--clobber');
             downloads[spec.asset] = {workflow: spec.workflow, run: runID, architecture: spec.architecture,
                 bytes: bytes.length, sha256};
-            console.log(`Published ${spec.asset} (${bytes.length} bytes, ${sha256}) from run ${runID}`);
         }
-        return downloads;
+        // Stage and validate all three bundles before publishing any of them.
+        for (const spec of desktopDownloads) {
+            gh('release', 'upload', manifest.tag, join(directory, spec.asset), '--repo', repo, '--clobber');
+            console.log(`Published ${spec.asset} from run ${downloads[spec.asset].run}`);
+        }
+        return {runs: current, downloads};
     } finally {
         rmSync(directory, {recursive: true, force: true});
     }
 }
 
 // Backfill: node scripts/publish-desktop-downloads.mjs <manifest-tag>
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-    const tag = process.argv[2];
+export function backfillDesktopDownloads(tag, command = run) {
+    const gh = (...args) => command('gh', args);
     if (!/^(alpha-build|stable-candidate)-[1-9][0-9]*$/.test(tag ?? '')) throw Error('Immutable manifest tag required');
-    const manifest = validateManifest(JSON.parse(run('git', ['for-each-ref', '--format=%(contents)', `refs/tags/${tag}`])));
+    const manifest = validateManifest(JSON.parse(command('git', ['for-each-ref', '--format=%(contents)', `refs/tags/${tag}`])));
+    if (manifest.tag !== tag || command('git', ['rev-parse', `${tag}^{commit}`]) !== manifest.source) {
+        throw Error('Manifest source mismatch');
+    }
     const directory = mkdtempSync(join(tmpdir(), 'desktop-receipt-'));
     try {
         gh('release', 'download', tag, '--repo', repo, '--pattern', 'desktop-qualification.json', '--dir', directory);
-        const receipt = validateDesktopReceipt(manifest, json(join(directory, 'desktop-qualification.json')));
-        publishDesktopDownloads(manifest, receipt.runs);
+        const path = join(directory, 'desktop-qualification.json');
+        const receipt = validateDesktopReceipt(manifest, json(path), repo);
+        const publication = publishDesktopDownloads(manifest, receipt.runs, command);
+        const updated = validateDesktopReceipt(manifest, {...receipt, ...publication, checkedAt: new Date().toISOString()}, repo);
+        writeFileSync(path, JSON.stringify(updated, null, 2) + '\n');
+        gh('release', 'upload', tag, path, '--repo', repo, '--clobber');
+        return updated;
     } finally {
         rmSync(directory, {recursive: true, force: true});
     }
 }
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) backfillDesktopDownloads(process.argv[2]);

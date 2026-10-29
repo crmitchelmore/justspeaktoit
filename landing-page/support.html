@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Support — JustSpeakToIt</title>
+  <meta name="description" content="Get help with Just Speak to It recording, transcription, permissions, and updates.">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" href="/favicon.svg?v=20260909" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
+  <link rel="canonical" href="https://justspeaktoit.com/support">
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&amp;f[]=general-sans@400,500,600&amp;display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #121417;
+      --surface: #191c21;
+      --text: #f5f3f0;
+      --muted: #adb4bd;
+      --accent: #ff9166;
+      --border: rgba(255, 255, 255, 0.1);
+      --display: 'Cabinet Grotesk', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --body: 'General Sans', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 90% 0%, rgba(255, 107, 61, 0.18), transparent 34rem),
+        var(--bg);
+      color: var(--text);
+      font-family: var(--body);
+      font-size: 17px;
+      line-height: 1.7;
+    }
+
+    a { color: var(--accent); }
+
+    .nav {
+      border-bottom: 1px solid var(--border);
+      background: rgba(18, 20, 23, 0.88);
+      backdrop-filter: blur(18px);
+    }
+
+    .nav__inner,
+    main,
+    footer {
+      width: min(100% - 2rem, 860px);
+      margin-inline: auto;
+    }
+
+    .nav__inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 68px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      font-family: var(--display);
+      font-size: 1.1rem;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .back {
+      color: var(--muted);
+      font-size: 0.95rem;
+      text-decoration: none;
+    }
+
+    main { padding: 5rem 0 3rem; }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1, h2 { font-family: var(--display); line-height: 1.15; }
+    h1 { margin: 0.4rem 0 1rem; font-size: clamp(2.5rem, 8vw, 4.4rem); }
+    h2 { margin: 2.6rem 0 0.7rem; font-size: 1.55rem; }
+    p, li { color: var(--muted); }
+    strong { color: var(--text); }
+
+    .summary {
+      margin: 2rem 0 3rem;
+      padding: 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: linear-gradient(145deg, rgba(255, 107, 61, 0.09), var(--surface));
+    }
+
+    .summary p { margin: 0; color: var(--text); }
+    ul { padding-left: 1.4rem; }
+    li + li { margin-top: 0.55rem; }
+
+    footer {
+      padding: 2rem 0 4rem;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    @media (max-width: 540px) {
+      body { font-size: 16px; }
+      main { padding-top: 3.5rem; }
+      .back { font-size: 0.88rem; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav" aria-label="Primary navigation">
+    <div class="nav__inner">
+      <a class="brand" href="/"><img src="/favicon.svg?v=20260909" width="32" height="32" alt="">Just Speak to It</a>
+      <a class="back" href="/">Back to the app</a>
+    </div>
+  </nav>
+
+  <main>
+    <p class="eyebrow">Support</p>
+    <h1>How can we help?</h1>
+    <section class="summary" aria-label="Contact support">
+      <p>For questions, troubleshooting, or help with Just Speak to It, email
+        <a href="mailto:hello@justspeaktoit.com">hello@justspeaktoit.com</a>.
+        You do not need a GitHub account to contact us.</p>
+    </section>
+    <h2>Recording and permissions</h2>
+    <p>If recording cannot start, check that Just Speak to It has microphone permission in your device’s Settings.
+      Apple Speech also needs Speech Recognition permission. If you use a cloud provider, check that its API key
+      is configured and its account has access to the selected model.</p>
+    <h2>Tell us what happened</h2>
+    <p>Include your device model, operating system version, app version, the model or provider you selected,
+      and the steps that led to the problem. If there is an error message, include its text.</p>
+    <p>Never send API keys, passwords, or private recordings. Remove personal information from screenshots
+      and transcripts before sharing them.</p>
+    <h2>Updates and privacy</h2>
+    <p>Find the current Mac download on the <a href="/">app website</a>.
+      Read our <a href="/privacy">privacy policy</a> for details about local and cloud processing.</p>
+    <h2>Report a reproducible bug</h2>
+    <p>If you prefer GitHub, you can <a href="https://github.com/crmitchelmore/justspeaktoit/issues">report an issue</a>.
+      GitHub issues are public; use email for private support questions.</p>
+  </main>
+
+  <footer>
+    © 2026 JustSpeakToIt. All rights reserved.
+  </footer>
+</body>
+</html>

@@ -19,6 +19,10 @@ test('deployed styles and motion get new URLs only when their content changes', 
   const build = async () => {
     execFileSync(process.execPath, [path.join(fixture, 'build.mjs')]);
     const html = await readFile(path.join(fixture, 'dist/index.html'), 'utf8');
+    assert.match(html, /href="\/support"/);
+    const support = await readFile(path.join(fixture, 'dist/support.html'), 'utf8');
+    assert.match(support, /mailto:hello@justspeaktoit\.com/);
+    assert.match(support, /Never send API keys/);
     const stylesheet = html.match(/href="\/(site\.[a-f0-9]{12}\.css)"/)?.[1];
     assert.ok(stylesheet, 'Production HTML must reference a fingerprinted stylesheet');
     assert.ok(!html.includes('href="/site.css"'), 'Do not reuse the stale stylesheet URL');

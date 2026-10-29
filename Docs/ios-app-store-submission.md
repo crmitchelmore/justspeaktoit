@@ -189,10 +189,21 @@ These are historical observations. Fresh App Store Connect readback is required
 to establish the current versions, review state, TestFlight build and public
 availability before preparing a submission.
 
-That audit could not recover the rejection reason through the API or a retained
-rejection email. Read Resolution Center in App Store Connect before preparing a
-new submission, because the original reason may still apply and the repository
-work in this document does not establish that it was resolved.
+The original Resolution Center message was read on 29 October 2026. Apple's
+30 July review of **2.23.5 (181)** identified five issues:
+
+- The Transcribe button was missing on iPad Pro 11-inch (M4).
+- Tapping the microphone produced an error on iPad and iPhone 17 Pro Max.
+- The GitHub issues URL was not an adequate support page.
+- Reviewers requested API keys for testing cloud features.
+- The camera permission text needed a concrete explanation and example.
+
+Before resubmission, verify the selected candidate's iPad layout and clean-install
+recording flow, confirm its camera purpose string, and provide appropriate review
+access without publishing credentials. Use `https://justspeaktoit.com/support`
+for the listing only after verifying that the deployed page is available. The
+page provides email support without requiring a GitHub account. Code, metadata
+and upload success do not establish that these review issues have been resolved.
 
 For local release/reconciliation authentication, see the
 [1Password credential setup](alpha-stable-release-trains.md#local-apple-release-credentials-from-1password).

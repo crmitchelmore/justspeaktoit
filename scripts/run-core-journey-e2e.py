@@ -55,6 +55,32 @@ INTERLEAVED_CASE_RESULT = re.compile(
     re.MULTILINE,
 )
 
+# A console payload may contain balanced double-quoted values before a full
+# XCTest terminal. Recover that separate shape only for an exact Apple case
+# whose ordinary started record appeared earlier; a start is never completion.
+APPLE_CASE_STARTED = re.compile(
+    r"^Test Case '-\[(\w+)\.(\w+) ([^\]'\"\r\n]+)\]' started\.\r?$",
+    re.MULTILINE,
+)
+QUOTED_INTERLEAVED_CASE_RESULT = re.compile(
+    r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{1,9}[+-]\d{4} "
+    r"[^\s\[\]]+\[\d+:\d+\] \[[^\]\r\n]+\] [^'\"\r\n]*"
+    r"(?:\"[^'\"\r\n]*\"[^'\"\r\n]*)+?"
+    r"Test Case '-\[(?P<apple_module>\w+)\.(?P<apple>\w+) (?P<apple_case>[^\]'\"\r\n]+)\]' "
+    r"(?P<status>passed|failed|skipped) \([0-9]+(?:\.[0-9]+)? seconds\)\.\r?$",
+    re.MULTILINE,
+)
+
+
+def quoted_interleaved_results(output):
+    started = {}
+    for match in APPLE_CASE_STARTED.finditer(output):
+        started.setdefault(match.group(1, 2, 3), match.start())
+    for match in QUOTED_INTERLEAVED_CASE_RESULT.finditer(output):
+        key = match.group("apple_module", "apple", "apple_case")
+        if started.get(key, match.start()) < match.start():
+            yield match
+
 
 # A console record can splice between an Apple case's closing bracket and its
 # completion quote. Recover only this typed, two-physical-line shape; never join
@@ -84,7 +110,8 @@ def case_results(output):
     """Yield completed XCTest cases, retaining module identity when emitted."""
     interleaved = (match for match in INTERLEAVED_CASE_RESULT.finditer(output)
                    if match.group("apple") and not any(char in match.group("apple_case") for char in "\r\n"))
-    for match in heapq.merge(CASE_RESULT.finditer(output), interleaved, SPLICED_CASE_RESULT.finditer(output),
+    for match in heapq.merge(CASE_RESULT.finditer(output), interleaved, quoted_interleaved_results(output),
+                            SPLICED_CASE_RESULT.finditer(output),
                             MODULE_SPLICED_CASE_RESULT.finditer(output), key=lambda result: result.start()):
         groups = match.groupdict()
         yield {

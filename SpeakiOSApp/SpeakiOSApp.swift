@@ -42,10 +42,10 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        if HostedUnitTestLaunch.isActive { return true }
         // A new app process cannot own the previous process's recording. Reset
         // before launch actions can start a session, never on foreground entry.
         SharedTranscriptionState.shared.clearRecordingState()
+        if HostedUnitTestLaunch.isActive { return true }
         UNUserNotificationCenter.current().delegate = self
         TranscriptReadyNotificationRoute.reconcileDisabledPreference()
         Task { await TranscriptReadyNotificationRoute.registerCategory() }

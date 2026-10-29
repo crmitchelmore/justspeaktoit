@@ -29,11 +29,19 @@ Evidence: [Apple reconciliation](https://github.com/crmitchelmore/justspeaktoit/
 
 ## Reconciliation behavior
 
-Scheduled runs select the newest Alpha by numeric ordinal, plus Alphas selected
-by frozen Stable candidates, excluding expired Alphas. Every Stable candidate
+Scheduled runs select the newest Alpha by numeric ordinal, Alphas selected by
+frozen Stable candidates, the identity-bound `alpha-latest` target, and Alphas
+with identity-bound pending Apple receipts. A newer allocation cannot silently
+supersede current or pending boundaries. A complete paginated GitHub observation
+snapshot is validated before Apple work; failed reads or source/build/notes
+mismatches stop reconciliation. Proven receipt absence is distinct from failure.
+The existing ordinary 90-day manifest-age eligibility remains; expired Alpha
+counts and expired current/Stable-selected boundaries are reported explicitly.
+Expired historical receipts are not fetched, and ledger age is not a fresh
+observation of Apple's actual build expiry. Every Stable candidate
 remains observable for its independent Apple publication boundary. A historical
-rejection no longer poisons every hourly run unless it is still selected for a
-Stable candidate. `workflow_dispatch` accepts an optional immutable `tag` for
+rejection remains actionable only while its Alpha is selected by one of these
+boundaries. `workflow_dispatch` accepts an optional immutable `tag` for
 explicit historical troubleshooting, including expired builds.
 
 API GETs retry HTTP 429/500/502/503/504 at most three attempts. Authentication,

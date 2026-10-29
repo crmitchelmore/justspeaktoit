@@ -24,6 +24,15 @@ private final class OneShotBackgroundFetchCompletion {
     }
 }
 
+/// SpeakiOSTests run inside this app. A real launch starts CloudKit key sync,
+/// push registration, the Watch session and the full SwiftUI tree (first-run
+/// onboarding, hands-free, shared-import drain), whose main-actor work races
+/// the tests' own timing on slow hosted simulators. XCTest sets this variable
+/// only in a hosting process; UI tests launch the app without it.
+enum HostedUnitTestLaunch {
+    static let isActive = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+}
+
 final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     /// Well inside iOS's background-notification allowance, and far longer
     /// than a routine incremental sync needs.
@@ -33,6 +42,7 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        if HostedUnitTestLaunch.isActive { return true }
         // A new app process cannot own the previous process's recording. Reset
         // before launch actions can start a session, never on foreground entry.
         SharedTranscriptionState.shared.clearRecordingState()
@@ -153,43 +163,51 @@ struct SpeakiOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            NavigationStack {
-                ContentView()
+            if HostedUnitTestLaunch.isActive {
+                Color.clear
+            } else {
+                self.appContent
             }
-                .tint(.brandAccent)
-                .environmentObject(deepLinkRouter)
-                .environment(\.iOSKeyboardEnabled, FeatureFlags.iOSKeyboardEnabled)
-                .environment(
-                    \.iOSKeyboardDirectCaptureEnabled,
-                    FeatureFlags.iOSKeyboardDirectCaptureEnabled
-                )
-                .onOpenURL { url in
-                    deepLinkRouter.handle(url)
-                    runPendingCaptureAction()
+        }
+    }
+
+    private var appContent: some View {
+        NavigationStack {
+            ContentView()
+        }
+            .tint(.brandAccent)
+            .environmentObject(deepLinkRouter)
+            .environment(\.iOSKeyboardEnabled, FeatureFlags.iOSKeyboardEnabled)
+            .environment(
+                \.iOSKeyboardDirectCaptureEnabled,
+                FeatureFlags.iOSKeyboardDirectCaptureEnabled
+            )
+            .onOpenURL { url in
+                deepLinkRouter.handle(url)
+                runPendingCaptureAction()
+            }
+            .task {
+                // A link that cold-launched the app is queued before the
+                // scene is active; drain it once the view is up.
+                runPendingCaptureAction()
+                guard FeatureFlags.iOSKeyboardEnabled else {
+                    KeyboardInstantDictationStore.shared.setEnabled(false)
+                    return
                 }
-                .task {
-                    // A link that cold-launched the app is queued before the
-                    // scene is active; drain it once the view is up.
-                    runPendingCaptureAction()
-                    guard FeatureFlags.iOSKeyboardEnabled else {
-                        KeyboardInstantDictationStore.shared.setEnabled(false)
-                        return
-                    }
+                keyboardInstantDictation.activate()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                runPendingCaptureAction()
+                if FeatureFlags.iOSKeyboardEnabled {
                     keyboardInstantDictation.activate()
                 }
-                .onChange(of: scenePhase) { _, newPhase in
-                    guard newPhase == .active else { return }
-                    runPendingCaptureAction()
-                    if FeatureFlags.iOSKeyboardEnabled {
-                        keyboardInstantDictation.activate()
-                    }
-                    // Foreground entry reconciles Watch imports interrupted by
-                    // suspension and replays unconfirmed acks (issue #674).
-                    if FeatureFlags.watchCaptureEnabled {
-                        WatchCaptureReceiver.shared.reconcilePendingWork()
-                    }
+                // Foreground entry reconciles Watch imports interrupted by
+                // suspension and replays unconfirmed acks (issue #674).
+                if FeatureFlags.watchCaptureEnabled {
+                    WatchCaptureReceiver.shared.reconcilePendingWork()
                 }
-        }
+            }
     }
 
     /// Performs a capture deep link once the scene is actually active.

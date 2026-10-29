@@ -180,6 +180,7 @@ private final class StartupDiagnosticRun {
                 "enteredWaitFailed": receipt === session.entered, "doneWaitFailed": receipt === done,
                 "taskStarted": taskStarted, "taskCaught": taskCaught, "doneFulfillReturned": doneFulfillReturned,
                 "exitDeferEntered": exitDeferEntered, "sessionEntered": session.startEntered,
+                "sessionStartExitObserved": session.startExitObserved,
                 "sessionCancelEntered": session.cancelEntered, "continuationResumeIssued": session.resumeIssued,
                 "foregroundClaimCallbackEntered": foregroundClaimCallbackEntered
             ]
@@ -235,6 +236,7 @@ private final class StartupDiagnosticSession: IOSRecordingSession {
     var returnsNormallyOnCancel = false
     var cancellations = 0
     private(set) var startEntered = false
+    private(set) var startExitObserved = false
     private(set) var cancelEntered = false
     private(set) var resumeIssued = false
     private var cancelled = false
@@ -247,6 +249,7 @@ private final class StartupDiagnosticSession: IOSRecordingSession {
         try await self.start()
     }
     func start() async throws {
+        defer { self.startExitObserved = true }
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             self.startEntered = true

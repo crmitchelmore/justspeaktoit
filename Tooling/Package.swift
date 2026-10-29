@@ -1,7 +1,7 @@
 // swift-tools-version: 5.9
 import PackageDescription
 
-// Lint tooling graph, resolved independently of the application/test graph in
+// Lint and format tooling graph, resolved independently of the application/test graph in
 // the repository root. SwiftLint pins an exact swift-syntax version, while
 // swift-snapshot-testing (root Package.swift) constrains swift-syntax
 // differently; sharing one graph let an unrelated test dependency silently
@@ -17,6 +17,7 @@ import PackageDescription
 let package = Package(
     name: "SpeakTooling",
     dependencies: [
-        .package(url: "https://github.com/realm/SwiftLint.git", from: "0.65.0")
+        .package(url: "https://github.com/realm/SwiftLint.git", from: "0.65.0"),
+        .package(url: "https://github.com/nicklockwood/SwiftFormat.git", exact: "0.63.0")
     ]
 )

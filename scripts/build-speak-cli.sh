@@ -56,8 +56,9 @@ cd "$ROOT_DIR"
 # The slices are built separately and joined with lipo: a single swift build
 # invocation passing both arch flags fails to plan the package graph
 # ("duplicate key found: ID(moduleName: \"CommandLineTool\", packageIdentity:
-# swiftformat)") because the SwiftFormat plugin dependency is modelled once
-# per architecture (issue #759).
+# swiftformat)") because the SwiftFormat plugin dependency was modelled once
+# per architecture (issue #759). SwiftFormat now lives in Tooling/, but the
+# per-slice build is kept as the simpler, already-qualified path.
 echo "==> Building speak (release, arm64)"
 xcrun swift build ${TRAIN_SWIFT_FLAGS[@]+"${TRAIN_SWIFT_FLAGS[@]}"} --product speak --configuration release --arch arm64
 ARM64_BINARY="$(xcrun swift build ${TRAIN_SWIFT_FLAGS[@]+"${TRAIN_SWIFT_FLAGS[@]}"} --product speak --configuration release \

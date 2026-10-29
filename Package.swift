@@ -478,12 +478,11 @@ let package = portableCoreBuild ? portablePackage : Package(
     ],
     dependencies: [
         .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),
-        // SwiftLint intentionally lives in Tooling/Package.swift, not here: it
-        // pins an exact swift-syntax version that conflicts with
-        // swift-snapshot-testing's constraint, and sharing one graph let a test
-        // dependency silently downgrade the linter (issue #677). Run it via
-        // `make lint` / scripts/swiftlint.sh.
-        .package(url: "https://github.com/nicklockwood/SwiftFormat.git", from: "0.53.6"),
+        // SwiftLint and SwiftFormat intentionally live in Tooling/Package.swift,
+        // not here: SwiftLint pins an exact swift-syntax version that conflicts
+        // with swift-snapshot-testing's constraint (issue #677), and neither is
+        // linked by any target, so keeping them here only made every app, iOS
+        // and CLI build clone them. Run them via `make lint` / `make format`.
         .package(url: "https://github.com/jaywcjlove/PermissionFlow.git", exact: "2.11.2"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0"),

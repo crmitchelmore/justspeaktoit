@@ -140,7 +140,7 @@ Run lint/format directly with SwiftPM when needed, for example:
 
 ```bash
 swift package plugin --allow-writing-to-package-directory swiftlint --strict --target SpeakApp
-swift package plugin --allow-writing-to-package-directory swiftformat --target SpeakApp
+./scripts/swiftformat.sh Sources/SpeakApp
 ```
 
 ## Transcription Providers

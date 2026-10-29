@@ -38,7 +38,7 @@ REQUIRED_SUITES = (
 # 'Module.Suite.method' or 'Suite.method'. Match case completion, never a suite
 # heading or the unrelated Swift Testing runner's "0 tests passed" summary.
 CASE_RESULT = re.compile(
-    r"^Test Case '(?:-\[(?:(?P<apple_module>\w+)\.)?(?P<apple>\w+) (?P<apple_case>[^\]]+)\]"
+    r"^Test Case '(?:-\[(?:(?P<apple_module>\w+)\.)?(?P<apple>\w+) (?P<apple_case>[^\]'\"\r\n]+)\]"
     r"|(?:(?P<portable_module>\w+)\.)?(?P<portable>\w+)\.(?P<portable_case>\w+))' "
     r"(?P<status>passed|failed|skipped)\b",
     re.MULTILINE,
@@ -106,19 +106,48 @@ MODULE_SPLICED_CASE_RESULT = re.compile(
 )
 
 
+# A typed console record can divide the method token too. This additional
+# two-line shape is bounded and needs an earlier ordinary start with the exact
+# reconstructed identity; balanced quoted console values are data, not examples.
+METHOD_SPLICED_CASE_RESULT = re.compile(
+    r"^Test Case '-\[(?P<apple_module>\w{1,128})\.(?P<apple>\w{1,128}) "
+    r"(?P<case_prefix>test\w{1,255})"
+    r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{1,9}[+-]\d{4} "
+    r"[^\s\[\]]{1,128}\[\d{1,10}:\d{1,10}\] \[[^\]\r\n]{1,128}\] "
+    r"(?P<console_payload>[^'\r\n\x00]{0,4096})\r?\n"
+    r"(?P<case_suffix>\w{1,255})\]' (?P<status>passed|failed|skipped) "
+    r"\([0-9]{1,10}(?:\.[0-9]{1,9})? seconds\)\.\r?$",
+    re.MULTILINE,
+)
+
+
+def method_spliced_results(output):
+    started = {}
+    for match in APPLE_CASE_STARTED.finditer(output):
+        started.setdefault(match.group(1, 2, 3), match.start())
+    for match in METHOD_SPLICED_CASE_RESULT.finditer(output):
+        key = (match.group("apple_module"), match.group("apple"),
+               match.group("case_prefix") + match.group("case_suffix"))
+        if (match.group("console_payload").count('"') % 2 == 0
+                and started.get(key, match.start()) < match.start()):
+            yield match
+
+
 def case_results(output):
     """Yield completed XCTest cases, retaining module identity when emitted."""
     interleaved = (match for match in INTERLEAVED_CASE_RESULT.finditer(output)
                    if match.group("apple") and not any(char in match.group("apple_case") for char in "\r\n"))
     for match in heapq.merge(CASE_RESULT.finditer(output), interleaved, quoted_interleaved_results(output),
                             SPLICED_CASE_RESULT.finditer(output),
-                            MODULE_SPLICED_CASE_RESULT.finditer(output), key=lambda result: result.start()):
+                            MODULE_SPLICED_CASE_RESULT.finditer(output), method_spliced_results(output),
+                            key=lambda result: result.start()):
         groups = match.groupdict()
         yield {
             "module": (groups.get("module_prefix", "") + groups.get("module_suffix", "")
                        or groups.get("apple_module") or groups.get("portable_module")),
             "suite": groups.get("apple") or groups.get("portable"),
-            "case": groups.get("apple_case") or groups.get("portable_case"),
+            "case": (groups.get("case_prefix", "") + groups.get("case_suffix", "")
+                     or groups.get("apple_case") or groups.get("portable_case")),
             "status": match.group("status"),
         }
 

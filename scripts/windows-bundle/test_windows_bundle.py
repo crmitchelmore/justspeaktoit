@@ -647,6 +647,19 @@ class ApplicationInputTests(unittest.TestCase):
         resources = BUILD.load_application(self.app, self.policy)["resources"]
         self.assertEqual(resources["SpeakApp_FutureFeature.resources/nested/catalog.json"], b'{"future": true}')
 
+    def test_test_support_fixtures_stay_in_producer_but_out_of_production(self):
+        for name in ("SpeakTestSupport", "SpeakApp_SpeakTestSupport", "SpeakApp_SpeakTestSupportTools"):
+            directory = self.app / (name + ".resources")
+            directory.mkdir()
+            (directory / "fixture.json").write_bytes(b"fixture bytes")
+        resources = BUILD.load_application(self.app, self.policy)["resources"]
+        self.assertEqual(resources, {
+            "SpeakApp_SpeakCore.resources/Info.plist": b"<plist/>",
+            "SpeakApp_SpeakTestSupportTools.resources/fixture.json": b"fixture bytes",
+        })
+        for name in ("SpeakTestSupport", "SpeakApp_SpeakTestSupport"):
+            self.assertEqual((self.app / (name + ".resources") / "fixture.json").read_bytes(), b"fixture bytes")
+
 
 class SwiftRuntimeSourceTests(unittest.TestCase):
     MANIFEST = ('<BurnManifest xmlns="http://wixtoolset.org/schemas/v4/2008/Burn">'

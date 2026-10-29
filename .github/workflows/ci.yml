@@ -24,7 +24,7 @@ jobs:
     # Route only the explicitly reviewed revision to the native pool.
     # Every selected native runner must also admit this revision locally.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -57,6 +57,9 @@ jobs:
       - name: Test XCTest crash-report collector
         run: python3 -B -m unittest discover -s scripts/tests -p test_macos_xctest_crashes.py -v
 
+      - name: Test CLI debug-symbol packaging contracts
+        run: python3 -B -m unittest discover -s scripts/tests -p test_mac_cli_symbols.py -v
+
       # Swift build state embeds absolute paths. Scope both exact and fallback
       # keys to the architecture, stable host identity and checkout workspace.
       - name: Cache Swift packages
@@ -72,7 +75,7 @@ jobs:
         # cached .build that the coverage-enabled swift test below cannot reuse
         # (coverage instrumentation changes compiler flags for every target),
         # forcing a second full rebuild of the whole module graph inside the
-        # 30-minute job budget.
+        # 45-minute job budget.
         run: SWIFT_FLAGS=--enable-code-coverage make build
 
       - name: Verify brand asset sizes and appearance variants

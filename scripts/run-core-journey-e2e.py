@@ -8,8 +8,10 @@ import os
 from pathlib import Path
 import re
 import signal
+import stat
 import subprocess
 import sys
+import threading
 import time
 
 # Exact suite names, not source filenames: one file can contain several suites.
@@ -119,6 +121,137 @@ def stop_process_group(process):
     process.wait()
 
 
+class BuildProgressObserver:
+    """Optional log observations, never compiler activity or emission timestamps."""
+
+    command = ("swift", "build", "--build-tests", "--enable-code-coverage")
+    interval = 5
+    maximum_samples = 192
+    maximum_read = 16 * 1024
+    maximum_total_read = 3 * 1024 * 1024
+    maximum_json = 64 * 1024
+    progress = re.compile(rb"^\[([0-9]{1,7})/([0-9]{1,7})\] (.*)$")
+    phases = ((b"Compiling ", "compiling"), (b"Emitting module ", "emittingModule"),
+              (b"Linking ", "linking"), (b"Copying ", "copying"), (b"Wrapping AST ", "wrappingAST"))
+
+    def __init__(self, log_path, identity=None):
+        self.log_path = log_path
+        self.identity = identity
+        self.started = time.monotonic()
+        self.stopped = False
+        self.exited = False
+        self.remaining = self.maximum_total_read
+        self.attempts = 0
+        self.previous_size = None
+        self.previous_elapsed = 0
+        self.lock = threading.Lock()
+        self.samples = []
+        self.read_status = "notObserved"
+
+    @classmethod
+    def project_progress(cls, data, offset):
+        # A tail read may cut either boundary. Only complete physical records
+        # count; no suffix, filename, module name or arbitrary text is retained.
+        lines = data.split(b"\n")[:-1]
+        if offset:
+            lines = lines[1:]
+        result = None
+        for line in lines:
+            match = cls.progress.fullmatch(line.rstrip(b"\r"))
+            if match is None:
+                continue
+            completed, total = int(match[1]), int(match[2])
+            if not 0 <= completed <= total <= 1_000_000 or total == 0:
+                continue
+            phase = next((label for prefix, label in cls.phases if match[3].startswith(prefix)), "other")
+            result = {"completed": completed, "total": total, "phase": phase}
+        return result
+
+    def sample(self, descriptor):
+        if self.attempts >= self.maximum_samples or self.remaining <= 0:
+            return False
+        self.attempts += 1
+        elapsed = min(86_400_000, max(self.previous_elapsed, int((time.monotonic() - self.started) * 1000)))
+        self.previous_elapsed = elapsed
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or (self.identity is not None
+                and (metadata.st_dev, metadata.st_ino) != self.identity):
+            raise ValueError("unavailable owned regular log")
+        size = metadata.st_size
+        if not 0 <= size <= 2 ** 53 - 1:
+            raise ValueError("unavailable log size")
+        count = min(size, self.maximum_read, self.remaining)
+        offset = max(0, size - count)
+        # Reserve before reading: a partial read followed by an OS exception
+        # cannot regain allowance for another read. No shared lock covers I/O.
+        self.remaining -= count
+        data = os.pread(descriptor, count, offset)
+        if len(data) > count:
+            raise ValueError("unavailable log read")
+        self.remaining += count - len(data)
+        sample = {"elapsedMilliseconds": elapsed, "logBytes": size,
+                  "logGrowth": self.previous_size is not None and size > self.previous_size,
+                  "tailTruncated": offset > 0,
+                  "progress": self.project_progress(data, offset)}
+        self.previous_size = size
+        with self.lock:
+            self.samples.append(sample)
+            self.read_status = "sampled"
+        return True
+
+    def run(self):
+        descriptor = None
+        try:
+            descriptor = os.open(self.log_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            # Only this daemon waits. The command owner never joins or waits
+            # for a read/close/sleep, including when the filesystem is stuck.
+            pause = threading.Event()
+            while not self.stopped and self.sample(descriptor):
+                if not self.stopped:
+                    pause.wait(self.interval)
+        except Exception:
+            # Optional diagnostics never expose OS errors or affect the gate.
+            with self.lock:
+                self.read_status = "unavailable"
+        finally:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            self.exited = True
+
+    def start(self):
+        threading.Thread(target=self.run, name="build-log-observer", daemon=True).start()
+
+    def finish(self, artifacts_dir):
+        # Called only after command timing capture and any owned kill/reap.
+        # A blocked worker can retain its descriptor until wrapper exit.
+        self.stopped = True
+        samples = None
+        read_status = "unknown"
+        remaining = None
+        if self.lock.acquire(blocking=False):
+            try:
+                samples = list(self.samples)
+                read_status = self.read_status
+                remaining = self.remaining
+            finally:
+                self.lock.release()
+        payload = {"schemaVersion": 1, "snapshotStatus": "captured" if samples is not None else "lockBusy",
+                   "stopRequested": True, "workerExitObserved": self.exited,
+                   "compilerActivityObserved": False, "timeOrigin": "observerBootstrap",
+                   "sampleCapReached": None if samples is None else len(samples) >= self.maximum_samples,
+                   "reservedReadBytes": None if remaining is None else self.maximum_total_read - remaining,
+                   "readStatus": read_status, "samples": samples}
+        try:
+            encoded = json.dumps(payload, separators=(",", ":")) + "\n"
+            if len(encoded.encode("utf-8")) <= self.maximum_json:
+                (artifacts_dir / "progress.json").write_text(encoded, encoding="utf-8")
+        except Exception:
+            pass
+
+
 def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, stage="test"):
     artifacts_dir = Path(artifacts_dir)
     started = time.monotonic()
@@ -127,6 +260,7 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
     errors = []
     counts = {}
     process = None
+    observer = None
     log_path = artifacts_dir / "test.log"
 
     def record_error(message):
@@ -142,6 +276,15 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
         with log_path.open("w", encoding="utf-8") as log:
             log.write("command: " + " ".join(command) + "\n")
             log.flush()
+            if stage == "build" and tuple(command) == BuildProgressObserver.command:
+                try:
+                    metadata = os.fstat(log.fileno())
+                    observer = BuildProgressObserver(log_path, (metadata.st_dev, metadata.st_ino))
+                    observer.start()
+                except InterruptedError:
+                    raise
+                except Exception:
+                    pass
             # A separate process group lets a timeout terminate XCTest and any
             # compiler descendants too. Killing only `swift` leaks those jobs.
             command_started = time.monotonic()
@@ -176,6 +319,11 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
             except OSError as error:
                 record_error(f"Could not stop test process group: {error}")
         elapsed = time.monotonic() - started
+        if observer is not None:
+            try:
+                observer.finish(artifacts_dir)
+            except Exception:
+                pass
         timing = f"core_journey_elapsed_seconds={elapsed:.3f}\n"
         try:
             (artifacts_dir / "timing.txt").write_text(timing, encoding="utf-8")

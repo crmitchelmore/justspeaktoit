@@ -33,6 +33,9 @@ inputs:
     default: ""
 
 outputs:
+  symbols-dir:
+    description: Verified CLI dSYMs, separate from the end-user archives
+    value: ${{ steps.paths.outputs.symbols-dir }}
   arm64-zip:
     description: Path to speak-<version>-arm64.zip
     value: ${{ steps.paths.outputs.arm64-zip }}
@@ -64,6 +67,7 @@ runs:
         VERSION="${{ inputs.version }}"
         {
           echo "output-dir=$OUTPUT_DIR"
+          echo "symbols-dir=$OUTPUT_DIR/symbols"
           echo "arm64-zip=$OUTPUT_DIR/speak-${VERSION}-arm64.zip"
           echo "x86_64-zip=$OUTPUT_DIR/speak-${VERSION}-x86_64.zip"
           echo "manifest=$OUTPUT_DIR/speak-cli-manifest.json"

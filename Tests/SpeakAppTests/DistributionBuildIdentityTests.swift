@@ -481,11 +481,11 @@ final class DistributionBuildIdentityTests: XCTestCase {
         // and joined with lipo, and the result must be verified universal.
         XCTAssertFalse(script.contains("--arch arm64 --arch x86_64"))
         XCTAssertTrue(
-            script.contains("swift build \"${TRAIN_SWIFT_FLAGS[@]}\" --product speak"
+            script.contains("swift build ${TRAIN_SWIFT_FLAGS[@]+\"${TRAIN_SWIFT_FLAGS[@]}\"} --product speak"
                 + " --configuration release --arch arm64")
         )
         XCTAssertTrue(
-            script.contains("swift build \"${TRAIN_SWIFT_FLAGS[@]}\" --product speak"
+            script.contains("swift build ${TRAIN_SWIFT_FLAGS[@]+\"${TRAIN_SWIFT_FLAGS[@]}\"} --product speak"
                 + " --configuration release --arch x86_64")
         )
         XCTAssertTrue(script.contains("lipo -create"))

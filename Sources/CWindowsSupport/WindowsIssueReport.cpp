@@ -312,11 +312,15 @@ LRESULT formMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
             emitAction(form->state, JSTI_ISSUE_OPEN); break;
         }
         return 0;
-    case WM_CLOSE:
-        emitAction(form->state, JSTI_ISSUE_CLOSE);
-        form->state->retire();
-        retireUI(form->state);
+    case WM_CLOSE: {
+        // The callback may synchronously destroy the form. Keep its state alive
+        // without reading the form again after invoking external code.
+        auto state = form->state;
+        emitAction(state, JSTI_ISSUE_CLOSE);
+        state->retire();
+        retireUI(state);
         return 0;
+    }
     case WM_NCDESTROY:
         form->state->window = nullptr;
         SetWindowLongPtrW(window, GWLP_USERDATA, 0);
@@ -795,6 +799,40 @@ bool jsti_issue_report_self_test(std::string &error) {
             error = "Issue report explicit close lost preview or host ownership."; return false;
         }
         jsti_smoke_stage("issue.explicit-close.validated.before-local-destruction");
+    }
+    // A close callback may synchronously destroy this exact preview before
+    // WM_CLOSE resumes. Its state must still retire without touching the form.
+    auto reentrant = std::make_shared<State>();
+    JSTIIssueReport reentrantReport{reentrant};
+    if (jsti_issue_report_present(&reentrantReport, id, "Reentrant close", "Safe draft", "{}", "", "", 1, 0, 0) != 0 ||
+        !presentUI(reentrant) || !reentrant->window) {
+        reentrant->retire(); retireUI(reentrant);
+        error = "Issue report reentrant-close fixture presentation failed."; return false;
+    }
+    struct ReentrantCloseObservation {
+        HWND window;
+        int calls = 0, event = 0;
+        std::string ticket;
+        bool destroyed = false, goneBeforeReturn = false;
+    } reentrantClosed{reentrant->window};
+    actionCallback = [](int event, const char *ticket, int, void *context) {
+        auto *closed = static_cast<ReentrantCloseObservation *>(context);
+        ++closed->calls; closed->event = event; closed->ticket = ticket;
+        if (event == JSTI_EVENT_ISSUE_REPORT_CLOSE) {
+            closed->destroyed = DestroyWindow(closed->window) != FALSE;
+            closed->goneBeforeReturn = !IsWindow(closed->window);
+        }
+    };
+    actionContext = &reentrantClosed;
+    SendDlgItemMessageW(reentrantClosed.window, closeButton, BM_CLICK, 0, 0);
+    actionCallback = originalCallback; actionContext = originalContext;
+    if (!reentrantClosed.destroyed || !reentrantClosed.goneBeforeReturn ||
+        reentrantClosed.calls != 1 || reentrantClosed.event != JSTI_EVENT_ISSUE_REPORT_CLOSE ||
+        reentrantClosed.ticket != id || !reentrant->isRetired() || reentrant->window ||
+        IsWindow(reentrantClosed.window) || ownerWindow != healthyOwner || !IsWindow(healthyOwner) ||
+        actionCallback != originalCallback || actionContext != originalContext) {
+        reentrant->retire(); retireUI(reentrant);
+        error = "Issue report reentrant close lost preview, state, or host ownership."; return false;
     }
     jsti_smoke_stage("issue.explicit-closes.returned");
     // A distinct pending session proves loop shutdown settles an accepted

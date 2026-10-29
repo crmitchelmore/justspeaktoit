@@ -53,7 +53,7 @@ def safe_patch(files):
         name, patch = file['filename'], file.get('patch', '')
         # Credentials and binary/generated content should never be sent for review.
         sensitive = re.search(r'(^|/)(\.env(?:\.|$)|.*\.(?:pem|p12|p8|key|mobileprovision)$)', name, re.I)
-        secret = re.search(r'sk-[A-Za-z0-9_-]{20,}|-----BEGIN .*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{20,}', patch)
+        secret = re.search(r'sk-[A-Za-z0-9_-]{20,}|-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{20,}', patch)
         if sensitive or secret or not patch or size + len(patch) > MAX_PATCH_CHARS:
             omitted.append(name)
             continue

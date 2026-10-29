@@ -5,6 +5,7 @@ export const digest = value => createHash('sha256').update(value).digest('hex');
 export const surfaces = ['mac-direct', 'mac-store', 'ios'];
 export function validateManifest(manifest) {
     if (manifest.schema !== 1 || !['alpha', 'stable'].includes(manifest.train)) throw Error('Invalid release manifest');
+    if (manifest.desktopQualification !== undefined && manifest.desktopQualification !== 1) throw Error('Unsupported desktop qualification contract');
     if (!/^[a-f0-9]{40}$/.test(manifest.source)) throw Error('A full immutable source SHA is required');
     if (!/^(alpha-build|stable-candidate)-[1-9][0-9]*$/.test(manifest.tag)) throw Error('Invalid release tag');
     if (!manifest.tag.startsWith(manifest.train === 'alpha' ? 'alpha-build-' : 'stable-candidate-')) throw Error('Release tag/train mismatch');

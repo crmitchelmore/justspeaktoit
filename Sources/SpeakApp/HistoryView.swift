@@ -19,7 +19,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   @State private var selectedModelFilter: String? = nil
   @State private var availableModels: [String] = []
   @State private var persistenceNotice: String?
-  @State private var historyLoadFailed = false
+  @State private var historyLoadState: HistoryLoadState = .loading
   @State private var historyStats: HistoryStatistics = .init(
     totalSessions: 0,
     cumulativeRecordingDuration: 0,
@@ -33,7 +33,14 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   @State private var isImportingFiles: Bool = false
   @State private var showImportAlert: Bool = false
   @State private var importAlertMessage: String?
-  @State private var isInitialLoad: Bool = true
+  private var isInitialLoad: Bool {
+    historyLoadState == .loading && historyItems.isEmpty
+  }
+
+  private var historyLoadFailed: Bool {
+    if case .failed = historyLoadState { return true }
+    return false
+  }
 
   private func clearAllHistory(deleteRecordings: Bool) async {
     await MainActor.run { isClearingAll = true }
@@ -189,16 +196,11 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .frame(maxWidth: 1100, alignment: .center)
       }
       .onAppear {
+        historyLoadState = environment.history.loadState
         historyItems = environment.history.allItems
         recomputeFilteredItems()
         availableModels = computeAvailableModels(from: historyItems)
         historyStats = environment.history.statistics
-        // Delay to show skeleton briefly for improved perceived performance
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-          withAnimation(.easeOut(duration: 0.3)) {
-            isInitialLoad = false
-          }
-        }
       }
       .onReceive(environment.history.$items) { items in
         let previous = historyItems
@@ -225,11 +227,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
       }
       .onReceive(environment.history.$persistenceError) { persistenceNotice = $0 }
       .onReceive(environment.history.$loadState) { state in
-        if case .failed = state {
-          historyLoadFailed = true
-        } else {
-          historyLoadFailed = false
-        }
+        historyLoadState = state
       }
       .onChange(of: searchText) { _, _ in recomputeFilteredItems() }
       .onChange(of: showErrorsOnly) { _, _ in recomputeFilteredItems() }

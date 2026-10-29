@@ -87,6 +87,22 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   }
 });
 
+test('Debug dependency resolution bypasses shared repositories in commands and recorded diagnostics', () => {
+  const body = jobBodies['build-macos'];
+  const commandLines = body.split('\n').filter((line) => !line.trimStart().startsWith('#'));
+  const commands = commandLines.flatMap((line) => line.match(/\bswift (?:build|test) [^\n]+/g) ?? []);
+  // make build receives the same option through SWIFT_FLAGS; the five direct
+  // invocations include tests, isolated diagnostics and coverage path queries.
+  assert.equal(commands.length, 5);
+  for (const command of commands) {
+    assert.ok(command.includes('--disable-dependency-cache'), command);
+  }
+  assert.equal((body.match(/"--disable-dependency-cache"/g) ?? []).length, 2,
+    'both recorded History argv values must describe the actual diagnostic');
+  assert.match(body, /^    timeout-minutes: 45$/m);
+  assert.doesNotMatch(body, /swift package (?:reset|clean)|rm -rf.*\.build/);
+});
+
 test('macOS Debug and Core Journey share coverage instrumentation and cache keys', () => {
   const body = jobBodies['build-macos'];
   const journey = jobBodies['core-journey-e2e'];
@@ -97,8 +113,8 @@ test('macOS Debug and Core Journey share coverage instrumentation and cache keys
     assert.equal(consumer[1].trim(), producer[1].trim());
   }
   assert.match(body, /^\s+timeout-minutes: 45$/m);
-  assert.match(body, /name: Build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS=--enable-code-coverage make build/);
-  assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage/);
+  assert.match(body, /name: Build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS="--enable-code-coverage --disable-dependency-cache" make build/);
+  assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage --disable-dependency-cache/);
   assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),
     'Build must run before Test (Debug) so the coverage-enabled cache is already warm');
   assert.ok(body.indexOf('name: Test (Debug)') < body.indexOf('name: Build SpeakCore (App Store flavour)'),

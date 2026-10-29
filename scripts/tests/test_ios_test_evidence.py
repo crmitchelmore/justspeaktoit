@@ -38,6 +38,44 @@ def interleaved_completion(suite, method="testResult", status="passed", target="
 
 
 class IOSCoverageTests(unittest.TestCase):
+    def test_method_splice_counts_exact_started_identity_once_and_preserves_mixed_outcomes(self):
+        console = '2026-10-29 11:46:01.775482+0000 App[100:200] [default] Error "(null)"'
+        ordinary = completion("CaptureDeepLinkTests", "testSplitName")
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=newline):
+                start = "Test Case '-[SpeakiOSTests.CaptureDeepLinkTests testSplitName]' started." + newline
+                spliced = ordinary.replace("testSplitName", "testSplit" + console + newline + "Name")
+                spliced = spliced.rstrip("\n") + newline
+                expected = gate.summarize(passing_log() + ordinary, "success")
+                output = passing_log() + start + spliced
+                self.assertEqual(gate.summarize(output + ordinary + spliced, "success"), expected)
+                for status in ("failed", "skipped"):
+                    result = gate.summarize(output + spliced.replace("' passed", "' " + status), "success")
+                    self.assertEqual(result["unique_cases"], 6)
+                    self.assertEqual(result["counts"][status], 1)
+                    if status == "failed":
+                        self.assertTrue(result["errors"])
+                self.assertTrue(gate.summarize(output, "failure")["errors"])
+
+    def test_method_splice_foreign_unstarted_and_incomplete_records_cannot_supply_ios_coverage(self):
+        console = '2026-10-29 11:46:01.775482+0000 App[100:200] [default] Error "(null)"'
+        ordinary = completion("OpenRouterAudioSettingsTests", "testSplitName")
+        terminal = ordinary.replace("testSplitName", "testSplit" + console + "\nName")
+        start = "Test Case '-[SpeakiOSTests.OpenRouterAudioSettingsTests testSplitName]' started.\n"
+        for output in (terminal, terminal + start,
+                       start.replace("SpeakiOSTests", "OtherTests") + terminal,
+                       (start + terminal).replace("SpeakiOSTests", "OtherTests"),
+                       start + terminal.replace("[100:200]", "[not:a-thread]"),
+                       start + terminal.replace("\nName", "\nextra\nName")):
+            with self.subTest(output=output):
+                result = gate.summarize(output, "success")
+                self.assertEqual(result["unique_cases"], 0)
+                self.assertTrue(result["errors"])
+        for status in ("failed", "skipped"):
+            result = gate.summarize(start + terminal.replace("' passed", "' " + status) + passing_log(), "success")
+            self.assertEqual(result["counts"][status], 1)
+            self.assertTrue(result["errors"])
+
     def test_quoted_observed_console_terminal_counts_once_with_exact_prior_start(self):
         method = "testCallbacksAndMaxDurationAreRefusedOnOtherVerbs"
         ordinary = completion("CaptureDeepLinkTests", method)

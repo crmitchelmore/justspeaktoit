@@ -47,7 +47,13 @@ final class BatchCleanupTransportTests: XCTestCase {
             XCTAssertEqual(outcome, .success)
         } catch {
             switch outcome {
-            case .deadline: XCTAssertEqual(error as? BoundedHTTPExchange.Failure, .timedOut)
+            case .deadline:
+                let diagnostic = error as NSError
+                XCTAssertEqual(
+                    error as? BoundedHTTPExchange.Failure, .timedOut,
+                    "Cleanup deadline error: type=\(String(reflecting: type(of: error))) "
+                        + "domain=\(diagnostic.domain) code=\(diagnostic.code)"
+                )
             case .transportFailure: XCTAssertEqual((error as? URLError)?.code, .cannotConnectToHost)
             case .success: XCTFail("Unexpected cleanup error: \(error)")
             }

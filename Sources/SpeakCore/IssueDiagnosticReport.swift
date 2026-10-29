@@ -39,9 +39,27 @@ public struct IssueDiagnosticReport: Sendable {
         omittedSections: Set<Section> = [],
         observedHandoff: RequestDiagnosticContext?
     ) {
+        self.init(
+            context: context, recordedModels: recordedModels, environment: environment,
+            failures: failures, events: events, omittedSections: omittedSections,
+            observedHandoff: observedHandoff, postProcessingObservation: nil
+        )
+    }
+
+    public init(
+        context: RequestDiagnosticContext? = nil,
+        recordedModels: [RequestDiagnosticContext.ModelSelection] = [],
+        environment: RequestDiagnosticContext.Environment = .unavailable,
+        failures: [RequestDiagnosticContext.Failure] = [],
+        events: [RequestDiagnosticContext.Event] = [],
+        omittedSections: Set<Section> = [],
+        observedHandoff: RequestDiagnosticContext?,
+        postProcessingObservation: RequestDiagnosticContext.PostProcessingObservation?
+    ) {
         let payload = Payload(
             context: context, recordedModels: recordedModels, environment: environment,
-            failures: failures, events: events, omittedSections: omittedSections, observedHandoff: observedHandoff
+            failures: failures, events: events, omittedSections: omittedSections, observedHandoff: observedHandoff,
+            postProcessingObservation: postProcessingObservation
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
@@ -97,6 +115,7 @@ private extension IssueDiagnosticReport {
         let contextState: String
         let context: RequestDiagnosticContext?
         let observedHandoff: RequestDiagnosticContext?
+        let postProcessingHandoff: RequestDiagnosticContext?
         let recordedModels: [RequestDiagnosticContext.ModelSelection]?
         let environment: RequestDiagnosticContext.Environment?
         let failures: [RequestDiagnosticContext.Failure]?
@@ -109,31 +128,39 @@ private extension IssueDiagnosticReport {
             context: RequestDiagnosticContext?, recordedModels: [RequestDiagnosticContext.ModelSelection],
             environment: RequestDiagnosticContext.Environment, failures: [RequestDiagnosticContext.Failure],
             events: [RequestDiagnosticContext.Event], omittedSections: Set<Section>,
-            observedHandoff: RequestDiagnosticContext?
+            observedHandoff: RequestDiagnosticContext?,
+            postProcessingObservation: RequestDiagnosticContext.PostProcessingObservation?
         ) {
+            let phase = postProcessingObservation?.sanitized
+            let combinedFailures = failures + (phase?.finalFailure.map { [$0] } ?? [])
+            let combinedEvents = events + (phase?.fallbackObserved == true
+                ? [.init(stage: .postProcessing, outcome: .fallback)] : [])
             let removeAll = omittedSections == Set(Section.allCases)
             self.contextState = removeAll ? "userRemoved" : context?.provenance.rawValue ?? "missingLegacyContext"
             self.context = Self.projectContext(removeAll ? nil : context, omittedSections: omittedSections)
             let handoff = observedHandoff?.provenance == .observedHandoff ? observedHandoff : nil
             self.observedHandoff = Self.projectContext(removeAll ? nil : handoff, omittedSections: omittedSections)
+            self.postProcessingHandoff = Self.projectContext(
+                removeAll ? nil : phase?.handoff, omittedSections: omittedSections
+            )
             self.recordedModels = omittedSections.contains(.models) ? nil : recordedModels.prefix(8).map(\.sanitized)
             self.environment = omittedSections.contains(.environment) ? nil : .init(
                 platform: environment.platform, architecture: environment.architecture, channel: environment.channel,
                 appVersion: environment.appVersion, appBuild: environment.appBuild, osVersion: environment.osVersion,
                 microphonePermission: environment.microphonePermission
             )
-            self.failures = omittedSections.contains(.failures) ? nil : failures.prefix(8).map {
+            self.failures = omittedSections.contains(.failures) ? nil : combinedFailures.prefix(8).map {
                 .init(stage: $0.stage, code: $0.code, domain: $0.domain, httpStatus: $0.httpStatus)
             }
-            self.timeline = omittedSections.contains(.timeline) ? nil : events.prefix(16).map {
+            self.timeline = omittedSections.contains(.timeline) ? nil : combinedEvents.prefix(16).map {
                 .init(stage: $0.stage, outcome: $0.outcome, elapsedMilliseconds: $0.elapsedMilliseconds)
             }
             self.omittedSections = Section.allCases.filter { omittedSections.contains($0) }
             self.omissionReason = omittedSections.isEmpty ? nil : "userRemoved"
             self.truncated = Truncation(
                 recordedModels: omittedSections.contains(.models) ? 0 : max(0, recordedModels.count - 8),
-                failures: omittedSections.contains(.failures) ? 0 : max(0, failures.count - 8),
-                timeline: omittedSections.contains(.timeline) ? 0 : max(0, events.count - 16)
+                failures: omittedSections.contains(.failures) ? 0 : max(0, combinedFailures.count - 8),
+                timeline: omittedSections.contains(.timeline) ? 0 : max(0, combinedEvents.count - 16)
             )
         }
 
@@ -158,6 +185,7 @@ private extension IssueDiagnosticReport {
             try values.encode(contextState, forKey: .contextState)
             try values.encodeIfPresent(context, forKey: .context)
             try values.encodeIfPresent(observedHandoff, forKey: .observedHandoff)
+            try values.encodeIfPresent(postProcessingHandoff, forKey: .postProcessingHandoff)
             try values.encodeIfPresent(recordedModels, forKey: .recordedModels)
             try values.encodeIfPresent(environment, forKey: .environment)
             try values.encodeIfPresent(failures, forKey: .failures)
@@ -171,5 +199,5 @@ private extension IssueDiagnosticReport {
 
 private enum IssueDiagnosticPayloadKeys: String, CodingKey {
     case schemaVersion, contextState, context, observedHandoff, recordedModels, environment, failures, timeline
-    case omittedSections, omissionReason, truncated
+    case omittedSections, omissionReason, truncated, postProcessingHandoff
 }

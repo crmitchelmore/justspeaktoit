@@ -4532,9 +4532,11 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     jsti_smoke_stage("window.cleanup-sidebar.begin");
     if (!cleanupPreviewSelfTest(window))
         return jsti::fail("Cleanup preview bounds, coalescing, navigation or retirement failed.", error, errorCapacity);
+    jsti_smoke_stage("window.cleanup-preview.returned");
     if (!sidebarStartupSelfTest())
         return jsti::fail("Sidebar pre-window retention, real control application or delivery ownership failed.",
                           error, errorCapacity);
+    jsti_smoke_stage("window.sidebar-startup.returned");
     jsti_smoke_stage("window.cleanup-sidebar.returned");
     const JSTISidebarShortcut unknownSidebar[] = {{"unknown-page", 1, "Ctrl+1"}};
     if (jsti_window_set_sidebar_shortcuts(unknownSidebar, 1, 1) != -1)

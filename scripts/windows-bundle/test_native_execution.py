@@ -1163,6 +1163,8 @@ foreach ($encoded in ([Console]::In.ReadToEnd() | ConvertFrom-Json -Depth 8)) {
 
 class DiagnosticRuntimeClosureTests(unittest.TestCase):
     def setUp(self):
+        # macOS temp aliases must not masquerade as an injected runtime symlink.
+        self.enterContext(mock.patch.object(tempfile, "tempdir", str(pathlib.Path(tempfile.gettempdir()).resolve())))
         self.directory = tempfile.TemporaryDirectory(prefix="owned-diagnostic-runtime-")
         self.addCleanup(self.directory.cleanup)
         self.root = pathlib.Path(self.directory.name)

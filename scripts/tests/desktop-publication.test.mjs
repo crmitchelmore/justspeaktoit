@@ -61,8 +61,20 @@ function fixture() {
             writeFileSync(join(args[args.indexOf('--dir')+1], 'desktop-qualification.json'), JSON.stringify(state.receipt));
             return '';
         }
+        if (args[0] === 'release' && args[1] === 'view') {
+            if (state.failReceiptInspection) throw Error('Synthetic receipt inspection failure');
+            if (state.concurrentReceiptAtInspection) state.receipt = state.concurrentReceiptAtInspection;
+            return JSON.stringify({assets:state.receipt === undefined ? [] : [{name:'desktop-qualification.json'}]});
+        }
         if (args[0] === 'release' && args[1] === 'upload') {
             const name = basename(args[3]);
+            if (name === 'desktop-qualification.json' && !args.includes('--clobber')) {
+                if (state.concurrentReceiptAtRestore) state.receipt = state.concurrentReceiptAtRestore;
+                if (state.receipt !== undefined) throw Error('Synthetic asset already exists');
+            }
+            if (name === 'desktop-qualification.json' && state.failReceiptBeforeDelete) {
+                throw Error('Synthetic pre-delete receipt failure');
+            }
             if (state.failUpload === name) throw Error('Synthetic upload failure');
             if (name === 'desktop-qualification.json' && state.receiptFailures > 0) {
                 state.receiptFailures--;
@@ -200,4 +212,57 @@ test('failed local receipt restoration retains the original upload failure', () 
         return true;
     });
     assert.equal(f.receipt, undefined);
+});
+
+
+test('receipt failure before deletion leaves the original asset untouched', () => {
+    const f = fixture();
+    const original = structuredClone(f.receipt);
+    f.failReceiptBeforeDelete = true;
+    assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), /Synthetic pre-delete receipt failure/);
+    assert.deepEqual(f.receipt, original);
+    assert.equal(f.commands.filter(x => x[1] === 'release' && x[2] === 'upload' &&
+        x[4].endsWith('/desktop-qualification.json')).length, 1);
+});
+
+test('receipt recovery preserves a newer concurrent receipt observed before restoration', () => {
+    const f = fixture();
+    const newer = {...structuredClone(f.receipt), checkedAt:'newer-writer'};
+    f.receiptFailures = 1;
+    f.concurrentReceiptAtInspection = newer;
+    assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), /Synthetic receipt upload failure/);
+    assert.deepEqual(f.receipt, newer);
+    assert.equal(f.commands.filter(x => x[1] === 'release' && x[2] === 'upload' &&
+        x[4].endsWith('/desktop-qualification.json')).length, 1);
+});
+
+test('create-only recovery cannot overwrite a concurrent receipt arriving after inspection', () => {
+    const f = fixture();
+    const newer = {...structuredClone(f.receipt), checkedAt:'racing-writer'};
+    f.receiptFailures = 1;
+    f.concurrentReceiptAtRestore = newer;
+    assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), error => {
+        assert.ok(error instanceof AggregateError);
+        assert.equal(error.errors[0].message, 'Synthetic receipt upload failure');
+        assert.equal(error.errors[1].message, 'Synthetic asset already exists');
+        return true;
+    });
+    assert.deepEqual(f.receipt, newer);
+    const restoration = f.commands.filter(x => x[1] === 'release' && x[2] === 'upload' &&
+        x[4].endsWith('/desktop-qualification.json')).at(-1);
+    assert.equal(restoration.includes('--clobber'), false);
+});
+
+test('receipt inspection failure refuses restoration and retains both errors', () => {
+    const f = fixture();
+    f.receiptFailures = 1;
+    f.failReceiptInspection = true;
+    assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), error => {
+        assert.ok(error instanceof AggregateError);
+        assert.equal(error.errors[0].message, 'Synthetic receipt upload failure');
+        assert.equal(error.errors[1].message, 'Synthetic receipt inspection failure');
+        return true;
+    });
+    assert.equal(f.commands.filter(x => x[1] === 'release' && x[2] === 'upload' &&
+        x[4].endsWith('/desktop-qualification.json')).length, 1);
 });

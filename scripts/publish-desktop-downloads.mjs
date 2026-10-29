@@ -88,11 +88,16 @@ export function backfillDesktopDownloads(tag, command = run) {
         try {
             gh('release', 'upload', tag, path, '--repo', repo, '--clobber');
         } catch (uploadError) {
-            // --clobber deletes the old asset first; restore its exact bytes if
-            // replacement fails, while keeping the failed publication visible.
+            // A failed replacement may leave the original or a concurrent
+            // writer's receipt intact. Never delete either during recovery.
             try {
-                writeFileSync(path, previousBytes);
-                gh('release', 'upload', tag, path, '--repo', repo, '--clobber');
+                const release = JSON.parse(gh('release', 'view', tag, '--repo', repo, '--json', 'assets'));
+                if (!Array.isArray(release.assets)) throw Error('Cannot inspect desktop receipt assets');
+                if (!release.assets.some(asset => asset.name === 'desktop-qualification.json')) {
+                    writeFileSync(path, previousBytes);
+                    // Create only: a concurrent upload after the read must win.
+                    gh('release', 'upload', tag, path, '--repo', repo);
+                }
             } catch (restoreError) {
                 throw new AggregateError([uploadError, restoreError], 'Desktop receipt upload and restoration failed');
             }

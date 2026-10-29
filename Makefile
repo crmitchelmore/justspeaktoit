@@ -48,6 +48,7 @@ test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
 	node --test scripts/tests/*.test.mjs
 	node --test .github/scripts/dependabot-merge.test.mjs
 	ruby scripts/tests/release_apple_test.rb
+	ruby scripts/tests/apple_reconciliation_test.rb
 	ruby scripts/tests/mac_review_notes_test.rb
 	ruby scripts/tests/apple_release_credentials_test.rb
 	ruby scripts/tests/create_ios_app_store_profile_test.rb

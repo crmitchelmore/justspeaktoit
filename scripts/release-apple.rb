@@ -28,7 +28,20 @@ module AppleRelease
       # Renew for every request, including long processing/review reconciliation.
       @transport = IOSProfileBootstrap::HttpTransport.new(api_base: 'https://api.appstoreconnect.apple.com',
         token: IOSProfileBootstrap.jwt_token(key_id: @key_id, issuer_id: @issuer, private_key: @key))
-      super
+      attempts = 0
+      begin
+        attempts += 1
+        super
+      rescue IOSProfileBootstrap::ApiError => error
+        # Only reads are safe to retry: never replay review submissions or writes.
+        raise unless method == Net::HTTP::Get && [429, 500, 502, 503, 504].include?(error.status) && attempts < 3
+        retry_pause(attempts)
+        retry
+      end
+    end
+
+    def retry_pause(attempt)
+      sleep(attempt)
     end
 
     def patch(path, body)

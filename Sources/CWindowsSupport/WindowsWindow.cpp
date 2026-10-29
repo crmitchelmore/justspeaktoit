@@ -4435,7 +4435,10 @@ int jsti_shell_open_directory(const char *path, char *error, size_t errorCapacit
     return 0;
 }
 
+static void jsti_smoke_stage(const char *stage);
+
 static bool cleanupPreviewSelfTest(HWND window) {
+    jsti_smoke_stage("window.cleanup-preview.enter");
     const int page = state.page;
     const bool ready = state.historyPresentationReady;
     std::wstring originalText(static_cast<size_t>(GetWindowTextLengthW(GetDlgItem(window, transcriptID))) + 1, 0);
@@ -4444,9 +4447,11 @@ static bool cleanupPreviewSelfTest(HWND window) {
     GetDlgItemTextW(window, statusID, &originalStatus[0], static_cast<int>(originalStatus.size()));
     int recording;
     { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
+    jsti_smoke_stage("window.cleanup-preview.snapshot.returned");
     showPage(window, dashboardPage);
     jsti_window_update(nullptr, nullptr, 2);
     applyUpdate(window);
+    jsti_smoke_stage("window.cleanup-preview.initial-update.returned");
     const uint64_t first = jsti_window_begin_cleanup_preview();
     bool okay = jsti_window_cleanup_preview("first", first) == 0 &&
         jsti_window_cleanup_preview("latest", first) == 0;
@@ -4454,23 +4459,28 @@ static bool cleanupPreviewSelfTest(HWND window) {
     wchar_t actual[128] = {};
     GetDlgItemTextW(window, transcriptID, actual, 128);
     okay = okay && wcscmp(actual, L"latest") == 0 && !IsWindowEnabled(GetDlgItem(window, copyID));
+    jsti_smoke_stage("window.cleanup-preview.first-preview.returned");
     showPage(window, generalPage);
     showPage(window, dashboardPage);
     okay = okay && jsti_window_cleanup_preview("away/back stale", first) == 1;
+    jsti_smoke_stage("window.cleanup-preview.navigation.returned");
     const uint64_t second = jsti_window_begin_cleanup_preview();
     okay = okay && second != first && jsti_window_cleanup_preview("replacement", second) == 0;
     jsti_window_end_cleanup_preview(first);
     applyUpdate(window);
     GetDlgItemTextW(window, transcriptID, actual, 128);
     okay = okay && wcscmp(actual, L"replacement") == 0;
+    jsti_smoke_stage("window.cleanup-preview.replacement.returned");
     okay = okay && jsti_window_cleanup_preview(std::string(65536, 'x').c_str(), second) == 0;
     jsti_window_end_cleanup_preview(second);
     applyUpdate(window);
     GetDlgItemTextW(window, transcriptID, actual, 128);
     okay = okay && wcscmp(actual, L"replacement") == 0;
+    jsti_smoke_stage("window.cleanup-preview.maximum-preview.returned");
     okay = okay && jsti_window_cleanup_preview("retired", second) == 1 &&
         jsti_window_cleanup_preview(std::string(65537, 'x').c_str(), second) == -1 &&
         jsti_window_cleanup_preview("\xff", second) == -1;
+    jsti_smoke_stage("window.cleanup-preview.retired-inputs.returned");
     jsti_window_update(nullptr, nullptr, recording);
     applyUpdate(window);
     state.historyPresentationReady = ready;
@@ -4478,6 +4488,7 @@ static bool cleanupPreviewSelfTest(HWND window) {
     SetDlgItemTextW(window, transcriptID, originalText.c_str());
     SetDlgItemTextW(window, statusID, originalStatus.c_str());
     updateHistoryControls(window, recording);
+    jsti_smoke_stage("window.cleanup-preview.restore.returned");
     return okay;
 }
 

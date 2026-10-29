@@ -158,6 +158,7 @@ typedef struct UI {
     GtkButton *retry;
     GtkButton *correction_results;
     GtkButton *export_button;
+    GtkButton *issue_button;
     GtkButton *open_audio;
     GtkButton *recordings_folder;
     GtkButton *recordings_choose;
@@ -351,6 +352,7 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.retry), idle && has_record);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.correction_results), idle && presented);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.export_button), idle && presented && has_text);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.issue_button), idle && presented);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.open_audio), has_record);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.play), has_record && (idle || ui.playback_state != 0));
     gtk_widget_set_sensitive(GTK_WIDGET(ui.stop_play), has_record && ui.playback_state != 0);
@@ -984,6 +986,13 @@ static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) 
     g_clear_pointer(&ui.export_text, g_free);
 }
 
+static void on_issue_report(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.state == JSTI_STATE_IDLE && ui.selected_id != NULL &&
+        g_strcmp0(ui.presented_id, ui.selected_id) == 0)
+        emit(JSTI_EVENT_HISTORY_ISSUE_REPORT, ui.selected_id, 0);
+}
+
 static void on_export(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     if (ui.selected_id == NULL || ui.export_text != NULL) return;
@@ -1029,6 +1038,7 @@ static void on_import(GtkButton *button, gpointer data) {
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
     retire_cleanup_preview();
+    jsti_issue_reports_close();
     jsti_troubleshooting_close();
     jsti_api_keys_close();
     jsti_permissions_close();
@@ -1534,6 +1544,8 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     g_signal_connect(read_aloud.button, "clicked", G_CALLBACK(on_read_aloud), NULL);
     ui.retry = GTK_BUTTON(gtk_button_new_with_label("Retry"));
     ui.export_button = GTK_BUTTON(gtk_button_new_with_label("Export…"));
+    ui.issue_button = GTK_BUTTON(gtk_button_new_with_label("Create Issue with Details…"));
+    g_signal_connect(ui.issue_button, "clicked", G_CALLBACK(on_issue_report), NULL);
     ui.open_audio = GTK_BUTTON(gtk_button_new_with_label("Open audio"));
     g_signal_connect(ui.retry, "clicked", G_CALLBACK(on_retry), NULL);
     g_signal_connect(ui.export_button, "clicked", G_CALLBACK(on_export), NULL);
@@ -1543,6 +1555,9 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.export_button));
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.open_audio));
     gtk_box_append(GTK_BOX(ui.detail), actions);
+    gtk_widget_set_halign(GTK_WIDGET(ui.issue_button), GTK_ALIGN_END);
+    gtk_widget_set_size_request(GTK_WIDGET(ui.issue_button), -1, 44);
+    gtk_box_append(GTK_BOX(ui.detail), GTK_WIDGET(ui.issue_button));
     GtkWidget *management = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_set_halign(management, GTK_ALIGN_END);
     ui.correction_results = GTK_BUTTON(gtk_button_new_with_label("Correction results"));
@@ -2098,6 +2113,7 @@ static void build_window(void) {
     jsti_style_install();
     GtkWidget *window = adw_application_window_new(GTK_APPLICATION(ui.application));
     ui.window = GTK_WINDOW(window);
+    jsti_issue_reports_bind(ui.window);
     gtk_window_set_title(ui.window, "Just Speak to It");
     gtk_window_set_default_size(ui.window, 1080, 760);
     gtk_widget_set_size_request(window, 360, 480);
@@ -2400,6 +2416,7 @@ int32_t jsti_window_run(
     g_signal_connect(ui.application, "activate", G_CALLBACK(on_activate), NULL);
     g_signal_connect(ui.application, "command-line", G_CALLBACK(on_command_line), NULL);
     int status = g_application_run(G_APPLICATION(ui.application), argc, argv);
+    jsti_issue_reports_close();
     jsti_hands_free_guard_stop();
     jsti_setup_close();
     retire_migration_restore();
@@ -6019,6 +6036,7 @@ static gboolean migration_restore_self_test(void) {
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_hands_free_guard_self_test(error, capacity) != 0) return -1;
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    if (jsti_issue_report_self_test(error, capacity) != 0) return -1;
     const JSTIAboutLink invalid_about_link = {"Invalid", "file:///not-an-update"};
     if (ui.about_details == NULL || ui.about_links == NULL ||
         strstr(gtk_label_get_text(ui.about_details), "Version:") == NULL ||

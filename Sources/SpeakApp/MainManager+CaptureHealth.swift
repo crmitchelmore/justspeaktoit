@@ -129,7 +129,7 @@ extension MainManager {
     }
   }
 
-  func makeHistoryDiagnosticContext() -> HistoryDiagnosticContext {
+  func makeHistoryDiagnosticContext(includeRequestedContext: Bool = false) -> HistoryDiagnosticContext {
     let health = buildCaptureHealthSnapshot()
     let info = Bundle.main.infoDictionary
     let appVersion = info?["CFBundleShortVersionString"] as? String ?? "unknown"
@@ -156,16 +156,66 @@ extension MainManager {
       transcriptionMode: appSettings.effectiveTranscriptionModeDisplayName,
       transcriptionModel: currentTranscriptionModelIdentifier(),
       postProcessingModel: appSettings.postProcessingModel,
-      speedMode: appSettings.speedMode.displayName
+      speedMode: appSettings.speedMode.displayName,
+      requestContext: includeRequestedContext ? Self.requestedDiagnosticContext(settings: appSettings) : nil
     )
   }
 
   func attachFailureDiagnostics(to session: ActiveSession) {
-    session.diagnosticContext = makeHistoryDiagnosticContext()
+    Self.attachFailureDiagnostics(to: session) {
+      self.makeHistoryDiagnosticContext(includeRequestedContext: false)
+    }
+  }
+
+  static func attachFailureDiagnostics(to session: ActiveSession, fallback: () -> HistoryDiagnosticContext) {
+    // Delayed failure handling must keep this session's admission, not today's settings.
+    if session.diagnosticContext == nil { session.diagnosticContext = fallback() }
     let description = "Diagnostic snapshot captured for issue report"
     if !session.events.contains(where: { $0.kind == .error && $0.description == description }) {
       session.events.append(HistoryEvent(kind: .error, description: description))
     }
+  }
+
+  static func requestedDiagnosticContext(settings: AppSettings) -> RequestDiagnosticContext {
+    let mode: RequestDiagnosticContext.Mode
+    let model: String
+    let streaming: Bool
+    switch settings.transcriptionMode {
+    case .liveNative:
+      mode = .live
+      model = settings.liveTranscriptionModel
+      streaming = true
+    case .batchRemote:
+      mode = .batch
+      model = settings.batchTranscriptionModel
+      streaming = false
+    case .localModel:
+      mode = .local
+      streaming = settings.localTranscriptionMode == .streaming
+      model = streaming ? settings.localStreamingModelSource : settings.localTranscriptionModel
+    }
+    let destination: RequestDiagnosticContext.Destination
+    switch settings.textOutputMethod {
+    case .clipboardOnly: destination = .clipboard
+    case .accessibilityOnly: destination = .accessibility
+    case .smart: destination = .unknown // Smart routing has not chosen an output transport yet.
+    }
+    let seconds = settings.liveModelCapabilities.postStopFinalizeBudget
+    let budget = settings.transcriptionMode == .liveNative && seconds.isFinite && (0...86_400).contains(seconds)
+      ? Int((seconds * 1_000).rounded()) : nil
+    return RequestDiagnosticContext(
+      provenance: .admission, model: .project(model),
+      postProcessingModel: .project(ModelCatalog.resolvedPostProcessingModel(settings.postProcessingModel)),
+      // This helper has no owner-supplied override receipt; never infer one from UI/global state.
+      mode: mode, origin: .unknown,
+      language: .project(settings.preferredLocaleIdentifier), destination: destination,
+      options: .init(
+        postProcessingEnabled: settings.postProcessingEnabled,
+        diarizationEnabled: streaming && model.hasPrefix("modulate/")
+          ? settings.modulateSpeakerDiarizationEnabled : nil,
+        streamingEnabled: streaming, finalizationBudgetMilliseconds: budget
+      )
+    )
   }
 
   private func captureHealthProviderLabel(for modelID: String) -> String {

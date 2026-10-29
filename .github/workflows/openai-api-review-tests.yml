@@ -1,0 +1,24 @@
+name: OpenAI API Review Tests
+on:
+  pull_request:
+    paths:
+      - .github/scripts/openai-api-review.py
+      - .github/scripts/test_openai_api_review.py
+      - .github/workflows/openai-api-review*.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/scripts/openai-api-review.py
+      - .github/scripts/test_openai_api_review.py
+      - .github/workflows/openai-api-review*.yml
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: python3 -I .github/scripts/test_openai_api_review.py

@@ -1,0 +1,39 @@
+name: OpenAI API Review
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, ready_for_review, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: Open PR number to review (one review per head commit)
+        required: true
+        type: string
+permissions:
+  contents: read
+  pull-requests: write
+concurrency:
+  group: openai-api-review-${{ github.event.pull_request.number || inputs.pr-number }}
+  cancel-in-progress: false
+jobs:
+  review:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.draft == false &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Only trusted base code runs with credentials; PR contents are API data.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Review current PR diff with the Responses API
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_REVIEW_API_KEY: ${{ secrets.OPENAI_REVIEW_API_KEY }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr-number }}
+        run: python3 -I .github/scripts/openai-api-review.py

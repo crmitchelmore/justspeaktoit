@@ -60,7 +60,7 @@ event or project setting was changed.
 | Phase-one events | macOS has daily activity, onboarding call sites, and first-transcription success. Daily deduplication occurs at app startup and records the date after a best-effort capture; this does not establish multi-day-running-app coverage or successful durable delivery. |
 | Typed catalogue | Closed event/dimension types, scalar encoding, language/context bounding, and catalogue tests exist. The catalogue test checks Swift cases/properties; it does not read the Markdown table, so automatic catalogue-to-docs drift coverage remains missing. |
 | Disclosures | `Docs/PRIVACY.md`, `SECURITY.md`, and `landing-page/privacy.html` describe initial direct-macOS collection. A checked-in web page does not prove publication or server retention enforcement. Store disclosures/archive manifests remain separate gated work. |
-| Distribution | Factory allows direct macOS; iOS does not initialize this transport. `release-appstore.yml` checks that PostHog keys and transport symbols are absent. Release inspector parity, keyboard binary/network audits, and store rollout are not complete. |
+| Distribution | Factory allows direct macOS; iOS does not initialize this transport. The Mac App Store release workflow, which checked that PostHog keys and transport symbols were absent, is retired with that surface. Release inspector parity, keyboard binary/network audits, and store rollout are not complete. |
 
 Cancellation stops queued work and requests still controlled by the client. It
 cannot recall bytes a server already received before withdrawal. The new tests

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
 import { buildCatalogue, mergeEntries } from './release-notes-catalogue-lib.mjs';
-import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/justspeaktoit';
 const run = runReleaseCommand;
@@ -97,14 +97,14 @@ if(command === 'allocate' || command === 'prepare') {
     const versions=train === 'alpha' ? config.versions : {mac:required('mac-version'),ios:required('ios-version')};
     const manifest={schema:1,train,tag,source,...allocation,createdAt:new Date().toISOString(),ci:proof,
         desktopQualification:1,selectedAlpha:alpha?.tag ?? null,toolchain:'Xcode 26.2',dependenciesHash:digest(git('show',`${source}:Package.resolved`)),surfaces:{}};
-    for(const surface of surfaces) {
+    for(const surface of frozenSurfaces(alpha)) {
         const platform=surface === 'ios'?'ios':'mac';
-        const base=train === 'alpha' ? git('rev-parse', `${source}^1`) : baseline(all,surface);
+        const base=train === 'alpha' ? git('rev-parse', `${source}^1`) : retiredSurfaces.includes(surface) ? manifest.surfaces['mac-direct'].baseline : baseline(all,surface);
         git('merge-base','--is-ancestor',base,source);
         const commits=parseCommits(git('log','--first-parent','--reverse','--format=%H%x1f%s%x1f%b%x1e',`${base}..${source}`));
         const notes=notesFor(commits,platform,`https://github.com/${repo}/compare/${base}...${source}`);
         const storeNotes=notes.length <= 4000 ? notes : notes.slice(0,3900)+'\nFull release notes are available in the app.';
-        manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : `${1000+Math.floor(allocation.ordinal/10000)}.${Math.floor(allocation.ordinal/100)%100}.${allocation.ordinal%100}`,version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes)};
+        manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : `${1000+Math.floor(allocation.ordinal/10000)}.${Math.floor(allocation.ordinal/100)%100}.${allocation.ordinal%100}`,version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes),...(retiredSurfaces.includes(surface)?{retired:true}:{})};
     }
     validateManifest(manifest);
     if(train === 'stable') assertStableVersionAdvance(versions.mac, all.filter(r=>!r.draft && !r.prerelease && /^mac-v\d+\.\d+\.\d+$/.test(r.tag_name)).map(r=>r.tag_name.slice(5)));

@@ -194,9 +194,12 @@ owner action in App Store Connect.
    Review cumulative notes in the draft release. Alpha continues independently.
 4. The repository owner runs **Publish Stable**, supplying the candidate and
    exact reviewed manifest SHA-256. This is the publication approval.
-5. Direct Mac publishes verified candidate assets and updates Homebrew. Apple
-   submissions use `AFTER_APPROVAL`; publication receipts advance Apple note
-   baselines only after the exact build is publicly available.
+5. Direct Mac publishes verified candidate assets and updates Homebrew. It
+   requires its own verified receipt and desktop qualification, not the Apple
+   candidates. Each Apple surface is submitted with `AFTER_APPROVAL` only when its
+   own candidate receipt verified; an unverified Apple candidate is skipped and
+   keeps its previous Stable. Publication receipts advance Apple note baselines
+   only after the exact build is publicly available.
 
 Each surface has its own published baseline. TestFlight delivery, an upload, a
 review submission and a rejected version do not advance it. Initial Apple Store

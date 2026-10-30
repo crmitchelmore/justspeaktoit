@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {digest, validateManifest, frozenSurfaces, nextAllocation, effectiveCommits, notesFor, canAdvance} from '../release-train-lib.mjs';
+import {digest, validateManifest, frozenSurfaces, stablePublicationSurfaces, nextAllocation, effectiveCommits, notesFor, canAdvance} from '../release-train-lib.mjs';
 import {mergeEntries} from '../release-notes-catalogue-lib.mjs';
 const source='a'.repeat(40), prior='b'.repeat(40);
 test('manifest rejects changed frozen notes and moving source refs',()=>{
@@ -19,6 +19,16 @@ test('Stable freezes retired surfaces only for Alpha sources that still validate
  assert.equal(validateManifest(m),m);
  m.surfaces['mac-store']={...entry,notes:'Changed',retired:true};
  assert.throws(()=>validateManifest(m),/mac-store/);
+});
+test('Stable direct Mac publishes independently of an unverified Apple candidate',()=>{
+ const m={source,surfaces:{'mac-direct':{build:'1',notesHash:'m'},ios:{build:'2',notesHash:'i'}}};
+ const mac={status:'verified',source,build:'1',notesHash:'m'}, ios={status:'verified',source,build:'2',notesHash:'i'};
+ assert.deepEqual(stablePublicationSurfaces(m,{'mac-direct':mac,ios}),['mac-direct','ios']);
+ assert.deepEqual(stablePublicationSurfaces(m,{'mac-direct':mac}),['mac-direct']);
+ assert.deepEqual(stablePublicationSurfaces(m,{'mac-direct':mac,ios:{...ios,status:'invalid'}}),['mac-direct']);
+ assert.throws(()=>stablePublicationSurfaces(m,{ios}),/mac-direct/);
+ assert.throws(()=>stablePublicationSurfaces(m,{'mac-direct':{...mac,status:'invalid'},ios}),/mac-direct/);
+ assert.throws(()=>stablePublicationSurfaces(m,{'mac-direct':mac,ios:{...ios,build:'3'}}),/does not match/);
 });
 test('allocation advances despite same minute retries and never uses Alpha ordinal for Stable',()=>{
  const old={train:'alpha',ordinal:42,build:'202609091400'};

@@ -21,11 +21,14 @@ jobs:
   publish:
     if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
     runs-on: macos-15
+    outputs:
+      apple: ${{ steps.publish.outputs.apple }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - name: Approve frozen candidate and publish verified direct Mac artefacts
+      - id: publish
+        name: Approve frozen candidate and publish verified direct Mac artefacts
         env:
           GH_TOKEN: ${{ github.token }}
           HOMEBREW_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -40,11 +43,13 @@ jobs:
         run: node scripts/release-train.mjs withdraw --tag "$CANDIDATE"
   submit-apple:
     needs: publish
+    # Only Apple surfaces whose candidate receipts verified are submitted.
+    if: needs.publish.outputs.apple != '' && needs.publish.outputs.apple != '[]'
     runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
-        surface: [ios]
+        surface: ${{ fromJSON(needs.publish.outputs.apple) }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:

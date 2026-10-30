@@ -64,7 +64,15 @@ function fixture() {
         if (args[0] === 'release' && args[1] === 'view') {
             if (state.failReceiptInspection) throw Error('Synthetic receipt inspection failure');
             if (state.concurrentReceiptAtInspection) state.receipt = state.concurrentReceiptAtInspection;
-            return JSON.stringify({assets:state.receipt === undefined ? [] : [{name:'desktop-qualification.json'}]});
+            if (state.partialReceiptAtInspection) {
+                return JSON.stringify({assets:[{name:'desktop-qualification.json', state:'starter', size:0}]});
+            }
+            return JSON.stringify({assets:state.receipt === undefined ? [] :
+                [{name:'desktop-qualification.json', state:'uploaded', size:1}]});
+        }
+        if (args[0] === 'release' && args[1] === 'delete-asset') {
+            state.partialReceiptAtInspection = false;
+            return '';
         }
         if (args[0] === 'release' && args[1] === 'upload') {
             const name = basename(args[3]);
@@ -251,6 +259,19 @@ test('create-only recovery cannot overwrite a concurrent receipt arriving after 
     const restoration = f.commands.filter(x => x[1] === 'release' && x[2] === 'upload' &&
         x[4].endsWith('/desktop-qualification.json')).at(-1);
     assert.equal(restoration.includes('--clobber'), false);
+});
+
+test('receipt recovery replaces an incomplete listed receipt with the prior bytes', () => {
+    const f = fixture();
+    const original = JSON.stringify(f.receipt);
+    f.receiptFailures = 1;
+    f.partialReceiptAtInspection = true;
+    assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), /Synthetic receipt upload failure/);
+    assert.equal(JSON.stringify(f.receipt), original);
+    const deletion = f.commands.findIndex(x => x[1] === 'release' && x[2] === 'delete-asset');
+    const restoration = f.commands.findLastIndex(x => x[1] === 'release' && x[2] === 'upload');
+    assert.ok(deletion >= 0 && deletion < restoration);
+    assert.equal(f.commands[restoration].includes('--clobber'), false);
 });
 
 test('receipt inspection failure refuses restoration and retains both errors', () => {

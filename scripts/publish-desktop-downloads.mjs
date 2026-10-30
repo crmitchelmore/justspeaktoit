@@ -93,7 +93,11 @@ export function backfillDesktopDownloads(tag, command = run) {
             try {
                 const release = JSON.parse(gh('release', 'view', tag, '--repo', repo, '--json', 'assets'));
                 if (!Array.isArray(release.assets)) throw Error('Cannot inspect desktop receipt assets');
-                if (!release.assets.some(asset => asset.name === 'desktop-qualification.json')) {
+                const listed = release.assets.find(asset => asset.name === 'desktop-qualification.json');
+                // An interrupted upload can leave a listed, empty `starter` asset.
+                const complete = listed?.state === 'uploaded' && listed.size > 0;
+                if (!complete) {
+                    if (listed) gh('release', 'delete-asset', tag, listed.name, '--repo', repo, '--yes');
                     writeFileSync(path, previousBytes);
                     // Create only: a concurrent upload after the read must win.
                     gh('release', 'upload', tag, path, '--repo', repo);

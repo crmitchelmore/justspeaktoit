@@ -79,7 +79,11 @@ final class SettingsCredentialUITests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 15))
         search.tap()
         search.typeText("Alibaba")
-        if app.keyboards.buttons["Search"].exists { app.keyboards.buttons["Search"].tap() }
+        if app.keyboards.buttons["Search"].exists {
+            app.keyboards.buttons["Search"].tap()
+            // Finish the search keyboard handoff before tapping the secure field.
+            try wait { !app.keyboards.firstMatch.exists }
+        }
         XCTAssertTrue(app.staticTexts["Alibaba Model Studio"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.secureTextFields["API Key"].waitForExistence(timeout: 15))
     }
@@ -87,7 +91,9 @@ final class SettingsCredentialUITests: XCTestCase {
     private func save(_ app: XCUIApplication, value: String, success: Bool) throws {
         let field = app.secureTextFields["API Key"]
         try reveal(field, in: app)
+        try wait { field.isEnabled && field.isHittable }
         field.tap()
+        try wait { app.keyboards.firstMatch.exists }
         field.typeText(value)
         XCTAssertEqual(app.searchFields.firstMatch.value as? String, "Alibaba")
         let save = app.buttons["apiKeysSaveButton"]

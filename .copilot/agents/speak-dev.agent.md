@@ -44,7 +44,7 @@ make test
 make lint
 
 # Format
-swift package plugin --allow-writing-to-package-directory swiftformat
+./scripts/swiftformat.sh .
 ```
 
 # Repository structure

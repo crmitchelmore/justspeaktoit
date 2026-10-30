@@ -5,6 +5,8 @@ import Foundation
 /// UIKit cannot condition a later write atomically on cross-process ownership.
 @MainActor
 protocol PolishPasteboard: AnyObject {
+    /// Read-back of the same pasteboard `write` targets, used only to verify the raw write.
+    var string: String? { get }
     func write(_ text: String)
 }
 
@@ -19,6 +21,8 @@ final class SystemPolishPasteboard: PolishPasteboard {
     init(clipboard: TranscriptClipboard) {
         self.clipboard = clipboard
     }
+
+    var string: String? { self.clipboard.string }
 
     func write(_ text: String) {
         self.clipboard.copy(text)
@@ -41,6 +45,9 @@ final class PolishClipboard {
         guard !text.isEmpty else { return }
         pasteboard.write(text)
     }
+
+    /// Observes the pasteboard the raw write went to, never a different system instance.
+    var string: String? { pasteboard.string }
 }
 
 /// Owns one provider task and its terminal cleanup, including providers that

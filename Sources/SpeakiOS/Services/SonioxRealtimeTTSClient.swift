@@ -195,6 +195,9 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
 
     func stop(streamID: String?) {
         guard streamID == nil || self.streamID == streamID else { return }
+        // Only release the shared session this player activated. An idle stop must not
+        // block the main actor or deactivate audio owned by recording or another voice.
+        let ownedSession = engine != nil
         player?.stop()
         engine?.stop()
         player = nil
@@ -205,6 +208,7 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
         frameAccumulator.reset()
         drainContinuation?.resume()
         drainContinuation = nil
+        guard ownedSession else { return }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 

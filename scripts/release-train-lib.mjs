@@ -8,6 +8,26 @@ export const surfaces = ['mac-direct', 'ios'];
 export const retiredSurfaces = ['mac-store'];
 // Stable workers run the selected Alpha's exact source, whose validator may still
 // require retired surfaces. Freeze a compatibility entry only for those sources.
+// Direct Mac Stable publication requires its own verified receipt; each Apple
+// surface is submitted only when its candidate receipt verified independently.
+export function stablePublicationSurfaces(manifest, receipts) {
+    const publish = [];
+    for (const surface of surfaces) {
+        const receipt = receipts[surface];
+        const required = surface === 'mac-direct';
+        if (!receipt && !required) continue;
+        if (!receipt) throw Error(`Candidate not verified: ${surface}`);
+        const matches = receipt.source === manifest.source && receipt.build === manifest.surfaces[surface].build
+            && receipt.notesHash === manifest.surfaces[surface].notesHash;
+        if (receipt.status === 'verified' && !matches) throw Error(`Candidate receipt does not match manifest: ${surface}`);
+        if (receipt.status !== 'verified') {
+            if (required) throw Error(`Candidate not verified: ${surface}`);
+            continue;
+        }
+        publish.push(surface);
+    }
+    return publish;
+}
 export const frozenSurfaces = alpha => [...surfaces, ...retiredSurfaces.filter(s => alpha?.surfaces?.[s])];
 export function validateManifest(manifest) {
     if (manifest.schema !== 1 || !['alpha', 'stable'].includes(manifest.train)) throw Error('Invalid release manifest');

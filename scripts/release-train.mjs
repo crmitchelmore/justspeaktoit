@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
 import { buildCatalogue, mergeEntries } from './release-notes-catalogue-lib.mjs';
-import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, stablePublicationSurfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/justspeaktoit';
 const run = runReleaseCommand;
@@ -201,9 +201,10 @@ if(command === 'allocate' || command === 'prepare') {
     }
     const directory=join(temp,'approved'); mkdirSync(directory);
     gh('release','download',manifest.tag,'--repo',repo,'--dir',directory);
-    for(const surface of surfaces) {
-        const receipt=json(join(directory,`${surface}-receipt.json`));
-        if(receipt.source !== manifest.source || receipt.build !== manifest.surfaces[surface].build || receipt.notesHash !== manifest.surfaces[surface].notesHash || receipt.status !== 'verified') throw Error(`Candidate not verified: ${surface}`);
+    const receipts=Object.fromEntries(surfaces.map(s=>[s,join(directory,`${s}-receipt.json`)]).filter(([,p])=>existsSync(p)).map(([s,p])=>[s,json(p)]));
+    const verified=stablePublicationSurfaces(manifest,receipts);
+    for(const surface of verified) {
+        const receipt=receipts[surface];
         for(const [asset,hash] of Object.entries(receipt.assets)) {
             if(digest(readFileSync(join(directory,asset))) !== hash) throw Error(`Candidate asset changed: ${asset}`);
         }
@@ -230,6 +231,9 @@ if(command === 'allocate' || command === 'prepare') {
     const arm=assets.find(a=>a.endsWith('-arm64.dmg')), universal=assets.find(a=>a.endsWith('-universal.dmg'));
     const cliArm=assets.find(a=>a.endsWith('-arm64.zip')), cliIntel=assets.find(a=>a.endsWith('-x86_64.zip'));
     execFileSync('bash',['scripts/update-homebrew-tap.sh',manifest.surfaces['mac-direct'].version,direct.assets[arm],direct.assets[universal],direct.assets[cliArm],direct.assets[cliIntel]],{stdio:'inherit',env:{...process.env,GH_TOKEN:process.env.HOMEBREW_TOKEN}});
+    const apple=verified.filter(s=>s!=='mac-direct');
+    output('apple',JSON.stringify(apple));
+    for(const s of surfaces.filter(s=>!verified.includes(s))) console.log(`${s}: candidate not verified; not submitted with ${tag}`);
     console.log(`Published verified Stable ${tag}; Apple review follows independently`);
  } else if(command === 'withdraw') {
     const manifest=manifestFor(required('tag'));

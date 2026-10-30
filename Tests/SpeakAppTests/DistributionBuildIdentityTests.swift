@@ -22,24 +22,6 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(manifest.contains("PRODUCT_BUNDLE_IDENTIFIER\": .string(macBundleIdentifier)"))
     }
 
-    func testMacAppStoreWorkflow_exportsTheAppStoreIdentifier() throws {
-        let workflow = try String(
-            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-appstore.yml"),
-            encoding: .utf8
-        )
-
-        XCTAssertTrue(workflow.contains("BUNDLE_ID: com.justspeaktoit.mac.appstore"))
-        XCTAssertTrue(workflow.contains("<key>BUNDLE_ID_PLACEHOLDER</key>"))
-        XCTAssertFalse(workflow.contains("<key>com.justspeaktoit.mac</key>"))
-        XCTAssertTrue(workflow.contains("APPLE_TEAM_ID.$BUNDLE_ID"))
-        XCTAssertTrue(workflow.contains("com.apple.application-identifier"))
-        XCTAssertTrue(workflow.contains("com.apple.developer.icloud-container-identifiers"))
-        XCTAssertTrue(workflow.contains("$MAC_CLOUD_CONTAINER"))
-        XCTAssertTrue(workflow.contains("$0 == container"))
-        XCTAssertFalse(workflow.contains("grep -Fq \"iCloud.com.justspeaktoit\""))
-        XCTAssertFalse(workflow.contains("Entitlements.application-identifier"))
-    }
-
     func testDirectMacRelease_runsKeychainTestsBeforeInstallingSigningKeychain() throws {
         let workflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),

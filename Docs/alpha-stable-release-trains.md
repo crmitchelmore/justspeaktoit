@@ -82,8 +82,8 @@ build, or establish live vault/API access; those require separate verification.
 ## Alpha
 
 Every successful main push CI allocates an immutable annotated
-`alpha-build-N` tag containing a manifest. Independent workers build direct Mac,
-Mac App Store and iOS from that exact source. Allocation is idempotent; manual
+`alpha-build-N` tag containing a manifest. Independent workers build direct Mac
+and iOS from that exact source. Allocation is idempotent; manual
 `rebuild` creates a new build number for an expired or invalid Apple upload.
 Hourly reconciliation retries missing deliveries, dispatching at most three
 sources per pass and checking every page of active runs to avoid duplicate
@@ -166,6 +166,18 @@ paid-access feature gate unchanged while preventing that eager scene metadata
 expansion. `SpeakAppSceneMetadataTests` exercises the associated-type witness
 without starting app services. Local ad-hoc launch acceptance does not replace
 the signed archive/export and notarisation gates on the release runner.
+
+## Retired Mac App Store surface
+
+The Mac App Store surface (`mac-store`) is retired from both trains. Its App
+Sandbox breaks core dictation features (global hotkeys, accessibility text
+insertion), and its Public Alpha TestFlight group never reached
+`IN_BETA_TESTING`, so no Alpha could satisfy the Stable gate. Release manifests
+now freeze only `mac-direct` and `ios`. Historical manifests and their
+`mac-store-receipt.json` assets are kept as evidence but ignored by allocation,
+reconciliation, Prepare Stable and Publish Stable. The existing App Store
+listing and its users are not changed by this pipeline; delisting is a separate
+owner action in App Store Connect.
 
 ## Stable
 

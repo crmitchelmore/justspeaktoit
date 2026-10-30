@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto';
 import { deterministicNotes, filterCommitsForTrack, markdownToHTML } from './release-notes-lib.mjs';
 
 export const digest = value => createHash('sha256').update(value).digest('hex');
-export const surfaces = ['mac-direct', 'mac-store', 'ios'];
+// The Mac App Store surface is retired: its sandbox breaks core dictation features.
+// Historical manifests may still carry a mac-store entry; it is ignored.
+export const surfaces = ['mac-direct', 'ios'];
 export function validateManifest(manifest) {
     if (manifest.schema !== 1 || !['alpha', 'stable'].includes(manifest.train)) throw Error('Invalid release manifest');
     if (manifest.desktopQualification !== undefined && manifest.desktopQualification !== 1) throw Error('Unsupported desktop qualification contract');

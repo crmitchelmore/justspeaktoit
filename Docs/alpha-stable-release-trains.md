@@ -175,7 +175,11 @@ insertion), and its Public Alpha TestFlight group never reached
 `IN_BETA_TESTING`, so no Alpha could satisfy the Stable gate. Release manifests
 now freeze only `mac-direct` and `ios`. Historical manifests and their
 `mac-store-receipt.json` assets are kept as evidence but ignored by allocation,
-reconciliation, Prepare Stable and Publish Stable. The existing App Store
+reconciliation, Prepare Stable and Publish Stable. Stable workers run the selected
+Alpha's exact source, so when that Alpha still froze `mac-store`, Prepare Stable
+copies a deterministic `mac-store` entry marked `retired` (sharing the direct
+Mac baseline) so the older validator can parse the candidate. That entry is
+never dispatched, receipted or published. The existing App Store
 listing and its users are not changed by this pipeline; delisting is a separate
 owner action in App Store Connect.
 

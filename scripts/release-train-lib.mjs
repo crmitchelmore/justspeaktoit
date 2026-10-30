@@ -3,8 +3,12 @@ import { deterministicNotes, filterCommitsForTrack, markdownToHTML } from './rel
 
 export const digest = value => createHash('sha256').update(value).digest('hex');
 // The Mac App Store surface is retired: its sandbox breaks core dictation features.
-// Historical manifests may still carry a mac-store entry; it is ignored.
+// Historical manifests may still carry a mac-store entry; it is never dispatched or receipted.
 export const surfaces = ['mac-direct', 'ios'];
+export const retiredSurfaces = ['mac-store'];
+// Stable workers run the selected Alpha's exact source, whose validator may still
+// require retired surfaces. Freeze a compatibility entry only for those sources.
+export const frozenSurfaces = alpha => [...surfaces, ...retiredSurfaces.filter(s => alpha?.surfaces?.[s])];
 export function validateManifest(manifest) {
     if (manifest.schema !== 1 || !['alpha', 'stable'].includes(manifest.train)) throw Error('Invalid release manifest');
     if (manifest.desktopQualification !== undefined && manifest.desktopQualification !== 1) throw Error('Unsupported desktop qualification contract');
@@ -14,8 +18,9 @@ export function validateManifest(manifest) {
     if (!/^\d+$/.test(manifest.build)) throw Error('Invalid upload build');
     if (!Number.isSafeInteger(manifest.ordinal) || manifest.ordinal < 1 || !manifest.tag.endsWith(`-${manifest.ordinal}`)) throw Error('Invalid allocation ordinal');
     if (!/^[a-f0-9]{64}$/.test(manifest.dependenciesHash)) throw Error('Missing frozen dependency hash');
-    for (const surface of surfaces) {
+    for (const surface of [...surfaces, ...retiredSurfaces.filter(s => manifest.surfaces[s])]) {
         const item = manifest.surfaces[surface];
+        if (!item) throw Error(`Missing release surface: ${surface}`);
         if (!/^\d+(?:\.\d+){0,2}$/.test(item.build)) throw Error("Missing per-surface build number");
         if (surface === 'mac-direct' && item.build !== manifest.build) throw Error('Direct build does not match allocation');
         if (surface !== 'mac-direct' && !/^[1-9]\d{0,3}(?:\.\d{1,2}){0,2}$/.test(item.build)) throw Error('Invalid Apple upload build components');

@@ -41,6 +41,16 @@ function fixture() {
         if (command === 'git' && args[0] === 'for-each-ref') return JSON.stringify(state.manifest);
         if (command === 'git' && args[0] === 'rev-parse') return state.target;
         assert.equal(command, 'gh');
+        if (args[0] === 'api' && args[1] === '--method' && args[2] === 'DELETE') {
+            const id = Number(args[3].match(/\/releases\/assets\/(\d+)$/)?.[1]);
+            if (state.concurrentReceiptAtDelete) {
+                state.receipt = state.concurrentReceiptAtDelete;
+                state.partialReceiptAtInspection = false;
+            }
+            if (!state.partialReceiptAtInspection || id !== 7) throw Error('Synthetic asset not found');
+            state.partialReceiptAtInspection = false;
+            return '';
+        }
         if (args[0] === 'api') {
             const id = Number(args[1].match(/\/runs\/(\d+)/)?.[1]);
             if (!args[1].includes('/artifacts')) return JSON.stringify(state.live[id]);
@@ -65,14 +75,10 @@ function fixture() {
             if (state.failReceiptInspection) throw Error('Synthetic receipt inspection failure');
             if (state.concurrentReceiptAtInspection) state.receipt = state.concurrentReceiptAtInspection;
             if (state.partialReceiptAtInspection) {
-                return JSON.stringify({assets:[{name:'desktop-qualification.json', state:'starter', size:0}]});
+                return JSON.stringify({assets:[{id:7, name:'desktop-qualification.json', state:'starter', size:0}]});
             }
             return JSON.stringify({assets:state.receipt === undefined ? [] :
-                [{name:'desktop-qualification.json', state:'uploaded', size:1}]});
-        }
-        if (args[0] === 'release' && args[1] === 'delete-asset') {
-            state.partialReceiptAtInspection = false;
-            return '';
+                [{id:8, name:'desktop-qualification.json', state:'uploaded', size:1}]});
         }
         if (args[0] === 'release' && args[1] === 'upload') {
             const name = basename(args[3]);
@@ -268,10 +274,26 @@ test('receipt recovery replaces an incomplete listed receipt with the prior byte
     f.partialReceiptAtInspection = true;
     assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), /Synthetic receipt upload failure/);
     assert.equal(JSON.stringify(f.receipt), original);
-    const deletion = f.commands.findIndex(x => x[1] === 'release' && x[2] === 'delete-asset');
+    const deletion = f.commands.findIndex(x => x[1] === 'api' && x[3] === 'DELETE');
     const restoration = f.commands.findLastIndex(x => x[1] === 'release' && x[2] === 'upload');
     assert.ok(deletion >= 0 && deletion < restoration);
+    assert.match(f.commands[deletion][4], /\/releases\/assets\/7$/);
     assert.equal(f.commands[restoration].includes('--clobber'), false);
+});
+
+test('receipt recovery keeps a complete receipt that replaced the incomplete one before deletion', () => {
+    const f = fixture();
+    const newer = {...f.receipt, checkedAt:'2099-01-01T00:00:00.000Z'};
+    f.receiptFailures = 1;
+    f.partialReceiptAtInspection = true;
+    f.concurrentReceiptAtDelete = newer;
+    assert.throws(() => backfillDesktopDownloads(f.manifest.tag, f.command), error => {
+        assert.ok(error instanceof AggregateError);
+        assert.equal(error.errors[1].message, 'Synthetic asset not found');
+        return true;
+    });
+    assert.deepEqual(f.receipt, newer);
+    assert.equal(f.commands.some(x => x[1] === 'release' && x[2] === 'delete-asset'), false);
 });
 
 test('receipt inspection failure refuses restoration and retains both errors', () => {

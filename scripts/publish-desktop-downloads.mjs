@@ -97,7 +97,12 @@ export function backfillDesktopDownloads(tag, command = run) {
                 // An interrupted upload can leave a listed, empty `starter` asset.
                 const complete = listed?.state === 'uploaded' && listed.size > 0;
                 if (!complete) {
-                    if (listed) gh('release', 'delete-asset', tag, listed.name, '--repo', repo, '--yes');
+                    // Delete by the inspected id, never by name: a concurrent
+                    // replacement gets a new id and so survives this delete.
+                    if (listed) {
+                        if (!Number.isSafeInteger(listed.id)) throw Error('Cannot identify incomplete desktop receipt');
+                        gh('api', '--method', 'DELETE', `repos/${repo}/releases/assets/${listed.id}`);
+                    }
                     writeFileSync(path, previousBytes);
                     // Create only: a concurrent upload after the read must win.
                     gh('release', 'upload', tag, path, '--repo', repo);

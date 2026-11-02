@@ -7,7 +7,7 @@ await mkdir(output, { recursive: true });
 // Keep preview builds complete, including clean privacy URLs and Apple associations.
 // Only Alpha endpoints invoke the Worker; Stable routes stay on static Pages.
 for (const asset of [
-  '_worker.js', '_routes.json', 'index.html', 'privacy.html', 'site.css', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png',
+  '_worker.js', '_routes.json', 'index.html', 'privacy.html', 'support.html', 'site.css', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png',
   'icon-192.png', 'icon-512.png', 'site.webmanifest',
   'download-architecture.js', 'voice-motion.js', 'images', '.well-known', '_headers', '_redirects',
 ]) {

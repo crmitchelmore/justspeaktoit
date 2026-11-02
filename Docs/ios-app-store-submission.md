@@ -150,13 +150,13 @@ the current provider list. Replace them with something like this:
 > Just Speak to It does not require an account, and no demo account is needed.
 >
 > Transcription without any API key: Apple Speech runs on device and is the
-> default. Tap Transcribe to start and stop a recording. Cloud providers are
+> default. Tap the microphone button to start and stop a recording. Cloud providers are
 > optional. Dedicated review credentials and the matching model selection steps
 > are supplied separately in private App Review information.
 >
 > Permissions and why each one is requested:
 > - Microphone and Speech Recognition: recording and transcribing dictation.
-> - Camera: Settings > Transfer from Mac scans a QR code shown by the Mac app to
+> - Camera: Settings > Sync > Import from QR Code scans a QR code shown by the Mac app to
 >   copy settings across. The camera is used for nothing else.
 > - Local Network: there is no shipping Send to Mac sender or pairing screen on
 >   iOS. Do not claim an available iPhone-to-Mac transfer workflow.
@@ -214,6 +214,14 @@ integration before fresh readback; configured references alone do not prove
 credential or API access.
 
 ## Regression cover
+
+The July rejection remains an `UNRESOLVED_ISSUES` submission. After the owner
+approves a corrected candidate and the review findings are resolved, the release
+worker reuses that submission and its exact app-version item, marks the item
+resolved, and verifies `READY_FOR_REVIEW` before resubmitting. It refuses
+ambiguous active submissions or unrelated items; it never removes them. See
+[Apple's resubmission procedure](https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/manage-a-submission-with-unresolved-issues)
+and [review-item update contract](https://developer.apple.com/documentation/appstoreconnectapi/reviewsubmissionitemupdaterequest/data-data.dictionary/attributes-data.dictionary).
 
 Stable candidate 3 archived successfully on 30 October 2026 but stopped before
 upload with `Extension SpeakReleaseTrain mismatch`. The widget's source plist

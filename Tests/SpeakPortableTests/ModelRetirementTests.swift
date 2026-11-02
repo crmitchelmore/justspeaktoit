@@ -137,6 +137,17 @@ final class ModelRetirementTests: XCTestCase {
         }
     }
 
+    func testSpeechRequests_refuseShutDownModelBeforeBuildingARequest() throws {
+        let before = ModelRetirement.utcDate("2027-01-05")!, after = ModelRetirement.utcDate("2027-01-06")!
+        for model in OpenAITTSModel.allCases {
+            let request = OpenAITTSRequest(model: model, voiceID: "openai/alloy", speed: 1, format: .wav)
+            XCTAssertNoThrow(try OpenAITTSAPI.validate(text: "Hi", request: request, at: before))
+            XCTAssertThrowsError(try OpenAITTSAPI.validate(text: "Hi", request: request, at: after)) {
+                XCTAssertTrue($0 is ModelRetiredError, "\($0)")
+            }
+        }
+    }
+
     func testNotice_usesLocaleIndependentDate() throws {
         let retirement = try XCTUnwrap(ModelRetirements.retirement(for: "openai/whisper-1"))
         XCTAssertTrue(retirement.notice.hasPrefix("Retiring 26 Feb 2027:"))

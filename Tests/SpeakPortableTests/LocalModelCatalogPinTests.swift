@@ -46,6 +46,11 @@ final class LocalModelCatalogPinTests: XCTestCase {
         }
     }
 
+    func testNemotronSizeBackfillAppliesOnlyToKnownExports() {
+        XCTAssertNil(LocalStreamingModelSource.knownApproximateSizeMB(
+            repoID: "someone/nemotron-3.5-asr-streaming-0.6b-finetune", modelName: "custom"))
+    }
+
     func testRecommendedSourcesLoadWithoutRewritesAndAgreeWithSizeBackfill() {
         for source in ModelCatalog.localStreamingSources {
             XCTAssertEqual(

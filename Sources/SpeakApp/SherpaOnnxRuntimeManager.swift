@@ -148,7 +148,12 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     } catch is CancellationError {
       runtimeState = previousState
     } catch {
-      runtimeState = .failed(error.localizedDescription)
+      // A failed upgrade can leave the previous runtime usable; keep offering it.
+      if (try? await ensureRuntimeAvailable()) != nil, !Task.isCancelled {
+        runtimeState = .installed
+      } else {
+        runtimeState = .failed(error.localizedDescription)
+      }
     }
   }
 
@@ -340,6 +345,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
       throw SherpaOnnxRuntimeError.downloadFailed("Hugging Face returned HTTP \(http.statusCode) for \(filename).")
     }
+    try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
     try fileManager.moveItem(at: downloadedURL, to: destination)
   }
 

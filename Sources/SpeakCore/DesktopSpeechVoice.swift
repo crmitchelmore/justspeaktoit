@@ -88,7 +88,9 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .speechmatics(let voice): "\(voice.displayName) — Speechmatics English"
         case .openai(let model, let voice):
             "\(voice.name) — OpenAI \(model.displayName)"
-                + (model.retirement.map { " (retiring \($0.shutdownDay))" } ?? "")
+                + (model.retirement.map {
+                    " (\($0.isRetired(at: Date()) ? "retired" : "retiring") \($0.shutdownDay))"
+                } ?? "")
         case .openaiRealtime: "\(name) — OpenAI \(OpenAIRealtimeSpeech.displayName)"
         case .elevenlabs(let model, let voice): "\(voice.displayName) — \(model.displayName)"
         }
@@ -120,7 +122,8 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .mistral: .naturalSpeech
         case .soniox: .soniox
         case .gemini, .groq, .speechmatics: .naturalSpeech
-        case .openai, .openaiRealtime: .openai
+        case .openai: .openai
+        case .openaiRealtime: .openaiRealtime
         case .elevenlabs: .naturalSpeech
         }
     }

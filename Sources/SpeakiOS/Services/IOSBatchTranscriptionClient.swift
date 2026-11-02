@@ -18,7 +18,8 @@ struct IOSBatchTranscriptionClient {
     func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
         // Credential resolution uses the trimmed ID. Use the same ID for both
         // route selection and the provider request, including file-only callers.
-        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = ModelRetirements.successor(for: trimmed, mode: .batch) ?? trimmed
         try ModelRetirements.ensureAvailable(model)
         switch IOSBatchTranscriptionRoute.route(for: model) {
         case .fileSpeech(let provider):

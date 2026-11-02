@@ -78,8 +78,10 @@ public struct OpenAIBatchClient: TranscriptionProvider {
 
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
-    let modelName = model.split(separator: "/").last.map(String.init) ?? model
-    try ModelRetirements.ensureAvailable("openai/\(modelName)", at: now())
+    let requested = "openai/" + (model.split(separator: "/").last.map(String.init) ?? model)
+    let catalogID = ModelRetirements.successor(for: requested, mode: .batch, at: now()) ?? requested
+    try ModelRetirements.ensureAvailable(catalogID, at: now())
+    let modelName = String(catalogID.dropFirst("openai/".count))
     var fields = [
       OpenAICompatibleBatchTranscriptionClient.FormField(name: "model", value: modelName),
       .init(name: "response_format", value: responseFormat(for: modelName))

@@ -9,9 +9,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     public static let customOptionID = "__model_custom__"
 
     /// Announced shutdowns are labelled and shut-down entries hidden by
-    /// `ModelRetirements`; the normalisers move saved selections at the same time.
-    public static let liveTranscription: [Option] = ModelRetirements.current(
-        appleLiveTranscriptionOptions + [
+    /// `ModelRetirements` on each read, so a process running across a shutdown
+    /// stops offering the model; the normalisers move saved selections.
+    public static var liveTranscription: [Option] { ModelRetirements.current(scheduledLiveTranscription) }
+    public static var batchTranscription: [Option] { ModelRetirements.current(scheduledBatchTranscription) }
+
+    private static let scheduledLiveTranscription: [Option] = appleLiveTranscriptionOptions + [
         Option(
             id: "apple/local/Dictation", displayName: "Apple Dictation",
             description: "Alternative on-device engine that mirrors system dictation.",
@@ -144,9 +147,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "OpenAI API key.",
             estimatedLatencyMs: 280, latencyTier: .fast)
     ] + AzureTranscriptionModels.liveOptions + AlibabaSpeechModels.liveOptions
-        + [FileSpeechProvider.reson8LiveOption])
+        + [FileSpeechProvider.reson8LiveOption]
 
-    public static let batchTranscription: [Option] = ModelRetirements.current(
+    private static let scheduledBatchTranscription: [Option] =
         appleBatchTranscriptionOptions + AlibabaSpeechModels.batchOptions + [
         Option(
             id: BatchTranscriptionModelIdentifiers.cartesiaInkWhisper, displayName: "Cartesia Ink Whisper (Batch)",
@@ -337,7 +340,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Scribe v2 fine-tuned for clinical audio: fewer errors on medical terminology, "
                 + "with the same languages, pricing and word-level timestamps as Scribe v2.",
             estimatedLatencyMs: 800, latencyTier: .fast)
-    ] + AzureTranscriptionModels.batchOptions + FileSpeechProvider.batchOptions)
+    ] + AzureTranscriptionModels.batchOptions + FileSpeechProvider.batchOptions
 
     /// Current ElevenLabs batch speech-to-text model. ElevenLabs removed
     /// `scribe_v1` (and its experimental variant) on 2026-07-09.

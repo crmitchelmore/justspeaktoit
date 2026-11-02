@@ -81,12 +81,34 @@ final class OpenAIRealtimeSpeechTests: XCTestCase {
         }
     }
 
-    func testReadingFidelityToleratesPunctuationButNotAddedAnswers() {
-        XCTAssertEqual(OpenAIRealtimeSpeech.readingFidelity(expected: "Hello, world!", spoken: "hello world"), 1)
-        XCTAssertLessThan(OpenAIRealtimeSpeech.readingFidelity(
-            expected: "Is it raining?", spoken: "Is it raining? I can't check the weather, sorry."),
-            OpenAIRealtimeSpeech.minimumReadingFidelity)
-        XCTAssertEqual(OpenAIRealtimeSpeech.readingFidelity(expected: "Hello", spoken: ""), 0)
+    func testReadingCheckRequiresEveryWordButToleratesPunctuationAndSpokenNumerals() {
+        let faithful = OpenAIRealtimeSpeech.isFaithfulReading
+        XCTAssertTrue(faithful("Hello, world!", "hello world"))
+        XCTAssertTrue(faithful("The year is 2026.", "The year is two thousand and twenty six."))
+        XCTAssertTrue(faithful("It costs 5 dollars.", "It costs five dollars."))
+        XCTAssertFalse(faithful(
+            "Do not open the door until the alarm stops.", "Do open the door until the alarm stops."),
+            "Dropping one word, such as a negation, changes the meaning")
+        XCTAssertFalse(faithful("Is it raining?", "Is it raining? I can't check the weather, sorry."))
+        XCTAssertFalse(faithful("Hello", ""))
+    }
+
+    func testAChunkWithoutAudioFailsInsteadOfDroppingItsText() async {
+        let socket = ScriptedRealtimeSpeechSocket { text in
+            .reply(audio: text.contains("Omega") ? Data() : Data([1]), transcript: text, audioTokens: 1)
+        }
+        let text = String(repeating: "Alpha words here. ", count: 60)
+            + String(repeating: "Omega words here. ", count: 60)
+        await assertFails(socket, text: text, with: .noAudio)
+    }
+
+    func testMissingUsageMakesCostUnknownRatherThanFree() throws {
+        let frame = Data(#"{"type":"response.done","response":{"status":"completed"}}"#.utf8)
+        guard case .done(_, _, let usage) = try XCTUnwrap(OpenAIRealtimeSpeechEvent(frame: frame)) else {
+            return XCTFail("Expected response.done")
+        }
+        XCTAssertNil(usage.cost)
+        XCTAssertNotNil(OpenAIRealtimeSpeechUsage().cost)
     }
 
     func testDesktopRealtimeVoicesAreSeparateFromRetiringSpeechModels() throws {
@@ -97,6 +119,8 @@ final class OpenAIRealtimeSpeechTests: XCTestCase {
         XCTAssertTrue(DesktopSpeechVoice.voices.contains(marin))
         XCTAssertEqual(try DesktopSpeechVoice.resolved(modelID: marin.modelID, voiceID: marin.id), marin)
         XCTAssertNil(VoiceSynthesisPricing.ratePerThousandCharacters(for: marin))
+        XCTAssertEqual(marin.capabilities.speedRange, OpenAIRealtimeSpeech.speedRange,
+                       "Speeds the Realtime API rejects fail validation before synthesis")
 
         // Existing selections keep resolving to the speech-API route they name.
         let legacy = try DesktopSpeechVoice.resolved(modelID: "openai/tts-1", voiceID: "openai/alloy")

@@ -32,9 +32,9 @@ public enum OpenAIRealtimeSpeech {
     /// Short responses keep the reading instruction dominant and bound each
     /// response well inside the model's 32,000 output tokens.
     public static let chunkCharacters = 1_000
-    /// Minimum share of input words the spoken transcript must reproduce in
-    /// order. Tolerates numerals read as words; rejects answers and summaries.
-    public static let minimumReadingFidelity = 0.85
+    /// Spoken words allowed beyond the input for each numeral it contains, so
+    /// "2026" may be read as "two thousand and twenty six".
+    static let spokenWordsPerNumeral = 8
 
     /// Documented realtime voices, in the guide's order.
     public static let voices: [(id: String, name: String)] = [
@@ -97,10 +97,24 @@ public enum OpenAIRealtimeSpeech {
 
     /// Ordered share of `expected` words found in `spoken` (longest common
     /// subsequence over case- and punctuation-folded words).
-    public static func readingFidelity(expected: String, spoken: String) -> Double {
-        let lhs = words(expected), rhs = words(spoken)
-        guard !lhs.isEmpty else { return rhs.isEmpty ? 1 : 0 }
-        guard !rhs.isEmpty else { return 0 }
+    /// Whether the spoken transcript is a verbatim reading of `expected`.
+    ///
+    /// Every input word must be spoken, in order, so dropping one word ("not")
+    /// fails. Numerals cannot be checked language-independently, so they are not
+    /// required. Instead each one allows a few extra spoken words, plus a small
+    /// allowance for symbols read aloud ("&" as "and"). Anything more is an
+    /// answer or commentary.
+    public static func isFaithfulReading(expected: String, spoken: String) -> Bool {
+        let input = words(expected), rhs = words(spoken)
+        let isNumeral: (String) -> Bool = { $0.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains) }
+        let lhs = input.filter { !isNumeral($0) }
+        let numerals = input.count - lhs.count
+        let matched = commonSubsequenceLength(lhs, rhs)
+        let allowedExtra = numerals * spokenWordsPerNumeral + max(2, lhs.count / 10)
+        return matched == lhs.count && rhs.count - matched <= allowedExtra
+    }
+
+    private static func commonSubsequenceLength(_ lhs: [String], _ rhs: [String]) -> Int {
         var previous = [Int](repeating: 0, count: rhs.count + 1)
         for word in lhs {
             var current = [Int](repeating: 0, count: rhs.count + 1)
@@ -110,8 +124,7 @@ public enum OpenAIRealtimeSpeech {
             }
             previous = current
         }
-        // Extra spoken words beyond the input (an added answer) also count against it.
-        return Double(previous[rhs.count]) / Double(max(lhs.count, rhs.count))
+        return previous[rhs.count]
     }
 
     private static func words(_ text: String) -> [String] {
@@ -125,37 +138,6 @@ public enum OpenAIRealtimeSpeech {
             return nil
         }
         return String(data: data, encoding: .utf8)
-    }
-}
-
-/// Token usage OpenAI reports on `response.done`.
-public struct OpenAIRealtimeSpeechUsage: Equatable, Sendable {
-    public var inputTextTokens = 0
-    public var cachedInputTokens = 0
-    public var outputTextTokens = 0
-    public var outputAudioTokens = 0
-
-    public init() {}
-
-    /// Text $0.60 / cached $0.06 / text out $2.40 / audio out $20 per million
-    /// tokens (model page, read 2026-11-02).
-    public var cost: Decimal {
-        let uncached = max(inputTextTokens - cachedInputTokens, 0)
-        let microDollars = Decimal(uncached) * Decimal(string: "0.6")!
-            + Decimal(cachedInputTokens) * Decimal(string: "0.06")!
-            + Decimal(outputTextTokens) * Decimal(string: "2.4")!
-            + Decimal(outputAudioTokens) * 20
-        return microDollars / 1_000_000
-    }
-
-    mutating func add(_ object: [String: Any]?) {
-        guard let object else { return }
-        let input = object["input_token_details"] as? [String: Any]
-        let output = object["output_token_details"] as? [String: Any]
-        inputTextTokens += input?["text_tokens"] as? Int ?? 0
-        cachedInputTokens += input?["cached_tokens"] as? Int ?? 0
-        outputTextTokens += output?["text_tokens"] as? Int ?? 0
-        outputAudioTokens += output?["audio_tokens"] as? Int ?? 0
     }
 }
 
@@ -313,13 +295,13 @@ public struct OpenAIRealtimeSpeechSynthesizer: Sendable {
             }
             try await socket.send(frame)
             let spoken = try await socket.receiveResponse(usage: &usage)
-            guard OpenAIRealtimeSpeech.readingFidelity(expected: chunk, spoken: spoken.transcript)
-                >= OpenAIRealtimeSpeech.minimumReadingFidelity else {
+            guard OpenAIRealtimeSpeech.isFaithfulReading(expected: chunk, spoken: spoken.transcript) else {
                 throw OpenAIRealtimeSpeechError.notAReading
             }
+            // A chunk with no audio would silently drop its text from the reading.
+            guard !spoken.audio.isEmpty else { throw OpenAIRealtimeSpeechError.noAudio }
             pcm.append(spoken.audio)
         }
-        guard !pcm.isEmpty else { throw OpenAIRealtimeSpeechError.noAudio }
         return Result(pcm: pcm, usage: usage)
     }
 }
@@ -387,6 +369,7 @@ private final class RealtimeSpeechSocket: @unchecked Sendable {
                 usage.cachedInputTokens += reported.cachedInputTokens
                 usage.outputTextTokens += reported.outputTextTokens
                 usage.outputAudioTokens += reported.outputAudioTokens
+                usage.isComplete = usage.isComplete && reported.isComplete
                 guard status == "completed" else {
                     throw OpenAIRealtimeSpeechError.incomplete(status: status, reason: reason)
                 }

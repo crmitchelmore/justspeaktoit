@@ -18,7 +18,14 @@ exists; a matching date alone is not compatibility:
   `ModelRetiredError`: "<model> was retired by its provider on <day>. Choose
   another model in Settings: …". Nothing silently switches model or drops a
   feature. The guard runs in the shared OpenAI and Mistral batch clients, the
-  shared Voxtral live client and the iOS batch client.
+  shared Voxtral live client, the iOS batch client and the shared OpenAI speech
+  request builder (Mac and desktop).
+
+Both checks are evaluated when they are used, not at launch. Pickers re-filter
+the catalogue on each read, and Mac and iOS apply automatic successors when a
+recording resolves its model. An app left running across a shutdown day
+therefore stops offering the model and moves equivalent selections without a
+restart.
 
 Custom and OpenRouter identifiers are never touched. Permanent migrations stay
 in `batchTranscriptionSuccessors`/`liveTranscriptionSuccessors`; the sets are
@@ -57,17 +64,26 @@ file playback is unchanged.
   speech-API voices are never remapped.
 - **Reading, not replying:** each ≤1,000-character chunk is an out-of-band
   response (`conversation: "none"`) with strict read-aloud instructions. The
-  audio transcript is compared word by word with the input; below 85% match the
-  chunk is rejected (`notAReading`) instead of played. Incomplete, failed or
-  cancelled responses are errors, never truncated audio.
-- **Limits:** speed 0.25–1.5 (outside that is an error, not clamped); 120 s
-  deadline; audio is played after the whole text is synthesised, not streamed.
+  audio transcript must contain every input word in order, so a dropped word
+  such as "not" rejects the chunk (`notAReading`) instead of playing it.
+  Numerals are exempt, since "2026" may be read as words in any language. Each
+  numeral allows a few extra spoken words, with a small allowance for symbols
+  read aloud. A longer addition is treated as an answer. Expansions such as "Dr"
+  read as "doctor" are also rejected: strictness is preferred to wrong speech.
+  A chunk with no audio, and an incomplete, failed or cancelled response, are
+  errors, never truncated audio.
+- **Limits:** speed 0.25–1.5 (outside that is an error, not clamped; the voice
+  capabilities and the Mac slider use this range); 120 s deadline; audio is
+  played after the whole text is synthesised, not streamed. Output is always
+  WAV, so the Mac File Format picker is disabled for these voices.
 - **Cost:** token-based ($20 per million audio output tokens, $0.6 text input),
   computed from each `response.done` usage, so there is no per-character rate.
+  If any response omits usage, the cost is unknown (`nil`), never $0. The Mac
+  records this cost; desktop usage records only audio duration for these voices.
 - **Evidence:** protocol, chunking, guard, error and timeout paths are tested
   against a scripted socket (`OpenAIRealtimeSpeechTests`). **No live call was
-  made** (no authorised credential), so verbatim fidelity, the 85% threshold,
-  latency, real cost per character and voice quality are not yet accepted.
+  made** (no authorised credential), so verbatim fidelity, the reading check's
+  false-rejection rate, latency, real cost per character and voice quality are not yet accepted.
 
 Sources: [OpenAI deprecations](https://developers.openai.com/api/docs/deprecations),
 [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe),

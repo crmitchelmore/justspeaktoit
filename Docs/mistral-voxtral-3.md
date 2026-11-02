@@ -1,7 +1,10 @@
 # Mistral Voxtral 3
 
-The 20 October 2026 models are explicit **public-preview** choices. Existing
-Voxtral 2 selections and defaults remain unchanged. All direct Mistral models
+The 20 October 2026 models are explicit **public-preview** choices. Voxtral 2
+batch (`voxtral-mini-latest`) and realtime 2602 were deprecated on 31 October
+2026 and retire on 30 April 2027. Until then their selections remain unchanged
+and labelled; on that day they move to Mini Transcribe 3 and Realtime 3 (see
+[speech model upgrades](speech-model-upgrades-2026-11.md)). All direct Mistral models
 reuse the existing `mistral.apiKey` credential; OpenRouter is not involved.
 
 | Choice | API model | Published estimate |

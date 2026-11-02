@@ -25,7 +25,7 @@ public struct MistralBatchClient: TranscriptionProvider {
     multipartStaging: SharedMultipartUploadStaging,
     keywords: [String],
     durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 },
-    now: @escaping @Sendable () -> Date = { Date() }
+    now: @escaping @Sendable () -> Date
   ) {
     self.now = now
     self.session = session
@@ -33,6 +33,19 @@ public struct MistralBatchClient: TranscriptionProvider {
     self.baseURL = baseURL
     self.multipartStaging = multipartStaging
     self.durationResolver = durationResolver
+  }
+
+  public init(
+    session: URLSession = .shared,
+    baseURL: URL = URL(string: "https://api.mistral.ai/v1")!,
+    multipartStaging: SharedMultipartUploadStaging,
+    keywords: [String],
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
+  ) {
+    self.init(
+      session: session, baseURL: baseURL, multipartStaging: multipartStaging,
+      keywords: keywords, durationResolver: durationResolver, now: { Date() }
+    )
   }
 
   /// Source-compatible overload preserved for callers predating keyword hints.

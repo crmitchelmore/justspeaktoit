@@ -27,7 +27,7 @@ public struct OpenAIBatchClient: TranscriptionProvider {
     staging: SharedMultipartUploadStaging? = nil,
     keywords: [String],
     durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 },
-    now: @escaping @Sendable () -> Date = { Date() }
+    now: @escaping @Sendable () -> Date
   ) {
     self.now = now
     self.session = session
@@ -36,6 +36,20 @@ public struct OpenAIBatchClient: TranscriptionProvider {
     self.baseURL = baseURL
     self.validationServiceName = validationServiceName
     self.durationResolver = durationResolver
+  }
+
+  public init(
+    session: URLSession = .shared,
+    baseURL: URL = URL(string: "https://api.openai.com/v1")!,
+    validationServiceName: String = "OpenAI",
+    staging: SharedMultipartUploadStaging? = nil,
+    keywords: [String],
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
+  ) {
+    self.init(
+      session: session, baseURL: baseURL, validationServiceName: validationServiceName,
+      staging: staging, keywords: keywords, durationResolver: durationResolver, now: { Date() }
+    )
   }
 
   /// Source-compatible overload preserved for callers predating keyword hints.

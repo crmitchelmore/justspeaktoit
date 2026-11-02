@@ -472,7 +472,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     /// Keeps catalogue defaults and retired-model migration identical on Mac and iPhone.
     /// Unknown identifiers remain valid because the Mac supports custom OpenRouter batch models.
-    public static func normalizedBatchTranscriptionModel(_ identifier: String?, at date: Date = Date()) -> String {
+    public static func normalizedBatchTranscriptionModel(_ identifier: String?) -> String {
+        normalizedBatchTranscriptionModel(identifier, at: Date())
+    }
+
+    public static func normalizedBatchTranscriptionModel(_ identifier: String?, at date: Date) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if let successor = batchTranscriptionSuccessors[trimmed]
             ?? ModelRetirements.successor(for: trimmed, mode: .batch, at: date) {
@@ -771,7 +775,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     /// Apple speech follows this device's preferred engine and retired streams
     /// follow their successor. Current and custom remote identifiers are kept.
-    public static func normalizedLiveTranscriptionModel(_ identifier: String?, at date: Date = Date()) -> String {
+    public static func normalizedLiveTranscriptionModel(_ identifier: String?) -> String {
+        normalizedLiveTranscriptionModel(identifier, at: Date())
+    }
+
+    public static func normalizedLiveTranscriptionModel(_ identifier: String?, at date: Date) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if AppleLocalModels.isAppleSpeechModel(trimmed) || trimmed.isEmpty {
             return AppleLocalModels.preferredSpeechModelID

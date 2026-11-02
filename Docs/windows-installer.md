@@ -80,8 +80,8 @@ publish (from `main`) or blank to rehearse the current Alpha.
 
 | Property | Provided by | Status |
 |---|---|---|
-| Windows will install the package at all | A signature chaining to a trusted root, publisher = manifest | Rehearsed in CI with a test certificate; public signature awaits the owner's Artifact Signing setup |
-| Publisher name shown in App Installer | Identity validation of the signing account | Owner action ([setup](#setting-up-azure-artifact-signing)) |
+| Windows will install the package at all | A signature chaining to a trusted root, publisher = manifest | Rehearsed in CI with a test certificate; public signature awaits the owner's choice of route |
+| Publisher name shown in App Installer | Identity validation of the signing account | Owner action ([routes](#routes-for-a-uk-individual-november-2026)) |
 | Signature valid after the certificate expires | RFC 3161 timestamp (`http://timestamp.acs.microsoft.com`) | Checked by the `sign` job |
 | No SmartScreen "unrecognised app" prompt | Reputation earned by the signing identity over time and downloads | Not guaranteed. A trusted signature replaces "Unknown publisher" with the validated name; SmartScreen may still warn on early downloads of a new identity until consecutive releases signed with it build reputation |
 | Store verification | Microsoft Store certification | Not used (direct download) |
@@ -89,15 +89,12 @@ publish (from `main`) or blank to rehearse the current Alpha.
 | Clean-device install and update | `verify` on clean hosted runners | Per release, in CI; physical Windows 10/11 machines remain a manual check |
 
 **Owner actions to publish.** Nothing ships until the owner, not an agent,
-completes [Setting up Azure Artifact Signing](#setting-up-azure-artifact-signing).
-The same `windows-signing` environment settings drive both the developer
-`sign` job and the installer. Eligibility decides the route:
-a UK individual cannot use Artifact Signing (individuals: US and Canada
-only); a UK limited company can. Basic tier is $9.99 a month on a paid Azure
-subscription. If neither applies, an OV certificate (for example Certum Open
-Source) can sign through `sign-windows-installer.ps1 -CertificateThumbprint`
-on a Windows machine, and the publishing steps can be run by hand; see
-[Choosing a signing route](#choosing-a-signing-route-september-2026).
+chooses and enrols in a signing route. The publisher is an individual in the
+UK, so Azure Artifact Signing (individuals: US and Canada only) is not
+available; see [Routes for a UK individual](#routes-for-a-uk-individual-november-2026)
+for the options, costs and enrolment steps. The pipeline below is wired for
+Artifact Signing and rehearsed with a job-only test certificate; it does not
+switch provider until a route is chosen.
 
 ## Identity and version
 
@@ -283,28 +280,99 @@ migration).
 | Route | Price | Who can use it | Notes |
 |---|---|---|---|
 | [Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/overview) (formerly Trusted Signing) | Basic $9.99/month (5,000 signatures, one profile of each type); Premium $99.99/month (100,000, ten); $0.005 per extra signature ([pricing](https://azure.microsoft.com/pricing/details/artifact-signing/)) | Public Trust: organisations in the US, Canada, EU, UK, Australia, New Zealand, Japan, South Korea, Singapore, Switzerland, Norway and Israel; individual developers in the US and Canada only ([prerequisites](https://learn.microsoft.com/azure/artifact-signing/quickstart#prerequisites)). Needs a paid (not free or trial) Azure subscription | Keys in FIPS 140-3 Level 3 HSMs, short-lived certificates renewed automatically, no token, GitHub OIDC. Subject is the validated legal name; no custom CN or O. Not EV |
-| [Microsoft Store](https://learn.microsoft.com/windows/apps/package-and-deploy/code-signing-options) (Partner Center) | Free registration for individuals and companies | Worldwide | The Store re-signs the MSIX after certification. Store distribution only: it does not sign a package you host yourself |
-| OV certificate on a token or cloud HSM (for example [Certum](https://www.certum.eu/en/code-signing-certificates/) Open Source Code Signing, SSL.com eSigner, DigiCert KeyLocker) | Certum Open Source from about EUR 25 a year, plus about EUR 85 once for a card and reader if not using its cloud HSM; commercial OV about $150 to $300 a year | Worldwide; Certum's Open Source certificate is issued to individuals who maintain open-source projects | Private keys must live on hardware (CA/Browser Forum, June 2023). Signs through `sign-windows-package.ps1`; cloud HSMs that need interactive 2FA suit local signing better than CI |
-| EV certificate | $400+ a year | Worldwide | Since 2024 EV no longer bypasses SmartScreen reputation, so it offers nothing extra here |
-| [SignPath Foundation](https://signpath.org/) | Free for qualifying open-source projects | OSI-licensed, released, actively maintained projects | Signs through SignPath's pipeline with the Foundation's certificate, so the publisher is SignPath Foundation rather than the project owner |
+| [Microsoft Store](https://learn.microsoft.com/windows/apps/package-and-deploy/code-signing-options) (Partner Center) | Free for individual developers ([new flow](https://learn.microsoft.com/windows/apps/publish/whats-new-individual-developer), government ID and selfie) | Individuals in nearly 200 markets, including the UK | The Store re-signs the MSIX after certification. Store distribution only: it does not sign a package you host yourself |
+| Individual (IV) or OV certificate on a token or cloud HSM (for example [Certum](https://shop.certum.eu/open-source-code-signing-on-simplysign.html) Open Source Code Signing in the Cloud, [SSL.com IV](https://www.ssl.com/products/software-integrity/code-signing/iv/) with eSigner, DigiCert KeyLocker) | Certum Open Source in the Cloud EUR 49 a year; SSL.com IV $129 a year plus [eSigner](https://www.ssl.com/guide/esigner-pricing-for-code-signing/) from $20 a month (20 signings) or $180 a year (240) | Worldwide individuals. Certum's Open Source certificate is for open-source maintainers; GlobalSign no longer issues to individuals | Private keys must live on hardware (CA/Browser Forum, June 2023). Certum's SimplySign needs a phone-app code per session and has no vendor-supported CI flow; SSL.com documents headless GitHub Actions signing with a TOTP secret |
+| EV certificate | $400+ a year | Organisations only | Since 2024 EV no longer bypasses SmartScreen reputation, so it offers nothing extra here |
+| [SignPath Foundation](https://signpath.org/terms) | Free for qualifying open-source projects | OSI-licensed (MIT qualifies), released, actively maintained, no proprietary components; any country | Signs MSIX and MSIX bundles ([formats](https://docs.signpath.io/artifact-configuration/reference)) in SignPath's HSM with the Foundation's certificate, so the publisher is SignPath Foundation rather than the project owner. Needs a "Code signing policy" page, named approvers, MFA, and per-release approval |
 
-**Recommendation: Azure Artifact Signing, Basic tier.** For an open-source
-indie shipping an MSIX outside the Store it is the cheapest publicly trusted
-route (about $120 a year), keeps the key off every machine, works from
-GitHub Actions with no stored secret, and SmartScreen treats it like OV. It is
-available if the publisher is an organisation in one of the listed countries
-(a UK limited company qualifies) or an individual in the US or Canada. An
-individual elsewhere, for example a sole developer in the UK, cannot use it.
+**Artifact Signing** is the cheapest publicly trusted route for an
+organisation in one of the listed countries or an individual in the US or
+Canada (about $120 a year, no stored secret, GitHub OIDC). It is not
+available to this project's publisher, an individual in the UK.
 
-**Fallback: an OV code signing certificate in a cloud HSM or on a token**,
-for example Certum's Open Source Code Signing certificate for an individual
-maintainer, signed locally through `sign-windows-package.ps1`. If the project
-prefers not to hold any certificate, SignPath Foundation is the free OSS
-alternative, at the cost of its name as publisher. The Store is the right
-choice only if Windows builds are to be distributed through the Store.
+### Routes for a UK individual (November 2026)
 
-SmartScreen may still warn on the first downloads of any newly signed build;
-reputation builds as consecutive releases are signed with the same identity.
+Each route below is open to a UK individual without forming a company.
+Whichever route ships first fixes the package family: the MSIX `Publisher`
+must equal the signing subject, so moving later between a personal
+certificate, SignPath Foundation and the Store changes the identity and
+existing installs do not upgrade across it.
+
+| | Microsoft Store | SignPath Foundation | SSL.com IV + eSigner | Certum Open Source (cloud) |
+|---|---|---|---|---|
+| Cost | Free | Free | $129/yr certificate + eSigner $180/yr (240 signings) or more | EUR 49/yr |
+| Name users see | Publisher display name set in Partner Center | "SignPath Foundation" | Owner's verified legal name | "Open Source Developer" + owner's legal name |
+| Key custody | Microsoft re-signs; no key held | SignPath HSM; no key held | SSL.com cloud HSM; TOTP secret in a GitHub environment can sign | Certum cloud HSM; phone-app code per session |
+| Unattended CI | Yes (Partner Center submission API) | Yes (GitHub Actions connector), with a human approval per release | Yes, documented GitHub Action; MSIX through SignTool needs a pilot | No vendor-supported route |
+| Install and update | Store install, Store updates | Website `.appinstaller`, as built | Website `.appinstaller`, as built | Website `.appinstaller`, signed by hand on a Windows PC |
+| SmartScreen | Store installs are not download-gated | Shared Foundation identity | New identity; builds reputation | New identity; builds reputation |
+
+Every signing in each release counts: the pipeline signs each architecture's
+package and the bundle (three signatures), so an eSigner tier must cover
+every Alpha that is published, not only Stable.
+
+**Recommendation: the Microsoft Store.** It is the simplest route that is
+actually open to a UK individual: free, no certificate or key to custody, no
+legal name inside a certificate, installs without the "unknown publisher"
+and SmartScreen download prompts, and Windows updates it. The existing MSIX
+bundle is reused; only its identity changes to the values Partner Center
+reserves, and the Store, not `sign`, signs it. The website CTA would link to
+the Store listing; the description keeps the beta label.
+
+If the owner also wants a direct website download, add **SignPath
+Foundation** when showing "SignPath Foundation" as publisher is acceptable
+(free, no personal name), otherwise **SSL.com IV + eSigner** (own legal name,
+about $310 a year, after a one-off MSIX pilot). Certum is cheapest but would
+make every release depend on the owner signing by hand.
+
+SmartScreen may still warn on the first downloads of any newly signed direct
+build; reputation builds as consecutive releases are signed with the same
+identity.
+
+#### Owner steps: Microsoft Store
+
+Done by the owner only; each step creates an account or accepts terms.
+
+1. Go to <https://storedeveloper.microsoft.com>, choose **Get started for
+   free** > **Individual developer**, sign in with a Microsoft account with
+   MFA, and complete ID and selfie verification. Review the pre-filled
+   profile and choose the publisher display name users will see.
+2. In Partner Center > Apps and games, **reserve the name** "Just Speak to
+   It". From Product identity copy `Package/Identity/Name`,
+   `Package/Identity/Publisher` and `PublisherDisplayName`.
+3. Tell the maintainers those three values. They are not secrets. An agent
+   then builds the bundle with that identity and the `runFullTrust`
+   justification and adds an upload job.
+4. Provide a privacy policy URL and age rating, upload the first package by
+   hand, and submit for certification.
+5. Only if automated submission is wanted later: register an Entra ID app for
+   the Partner Center submission API and store its credentials in a
+   `main`-only environment.
+
+#### Owner steps: SignPath Foundation (direct download)
+
+1. Add a "Code signing policy" page to the website listing approvers and the
+   privacy statement required by [the terms](https://signpath.org/terms).
+2. Apply for the free OSS subscription at <https://signpath.org>, linking the
+   repository, and accept SignPath's terms. Enable MFA on SignPath and
+   GitHub.
+3. After approval, install the SignPath GitHub App on the repository and
+   share the organisation, project and signing policy slugs. An agent then
+   adds a `signpath` provider to `sign`; each release waits for an approver.
+
+#### Owner steps: SSL.com IV + eSigner (direct download)
+
+1. Order an IV code signing certificate at
+   <https://www.ssl.com/products/software-integrity/code-signing/iv/>,
+   choosing eSigner cloud delivery, and pay.
+2. Complete identity validation (government ID and liveness check).
+3. Enrol the certificate in eSigner, choose a subscription tier, and set
+   automated signing to get a TOTP secret.
+4. Store the username, password, credential ID and TOTP secret as secrets in
+   the `main`-only `windows-signing` environment. Tell the maintainers the
+   certificate subject, which becomes `WINDOWS_MSIX_PUBLISHER`. An agent then
+   adds an `sslcom` provider to `sign` and runs a rehearsal before any
+   release.
 
 ### Setting up Azure Artifact Signing
 

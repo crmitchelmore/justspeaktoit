@@ -117,17 +117,33 @@ maintainer account ([requirements](https://docs.flathub.org/docs/for-app-authors
 [submission](https://docs.flathub.org/docs/for-app-authors/submission),
 [verification](https://docs.flathub.org/docs/for-app-authors/verification)):
 
-1. Prepare a submission manifest that builds from a tagged `git` source of this
-   repository instead of the local `type: dir` source, with the same pinned
-   SwiftPM sources.
+1. Write, by hand, a submission manifest that builds from a tagged `git`
+   source of this repository instead of the local `type: dir` source, with
+   the same pinned SwiftPM sources. Flathub's
+   [generative AI policy](https://docs.flathub.org/docs/for-app-authors/requirements#generative-ai-policy)
+   bars AI-generated or AI-assisted content in Flathub manifests, and bars
+   AI agents from opening or writing the submission pull request, its
+   description or replies. The manifest in this repository was produced with
+   agent help, so it is a technical reference only, not the submission.
 2. Add Linux screenshots (hosted at stable URLs) and a release entry per
    version to the metainfo; run `flatpak-builder-lint appstream` and
    `flatpak-builder-lint repo` on a built repo.
-3. Sign in to GitHub as the owner and open the submission pull request to
-   `flathub/flathub` (this accepts Flathub's terms); answer the reviewers.
+3. Sign in to GitHub as the owner (2FA required) and open the submission
+   pull request to `flathub/flathub` against the `new-pr` branch, titled
+   "Add com.justspeaktoit.JustSpeakToIt" (this accepts Flathub's terms).
+   Disclose which parts of the app were AI-generated and roughly how much,
+   justify each `finish-args` permission, and answer reviewers personally.
+   Accept the maintainer invitation within a week of approval.
 4. After acceptance, verify the app id's domain by publishing the token
    Flathub gives at `https://justspeaktoit.com/.well-known/org.flathub.VerifiedApps.txt`.
 5. Point the website CTA at `https://flathub.org/apps/com.justspeaktoit.JustSpeakToIt`.
+
+Eligibility does not depend on the owner's country and submission is free.
+The app id's domain (`justspeaktoit.com`) is owner-controlled and the
+project is MIT-licensed and upstream, so it meets the id, licence and
+conflicting-submission rules. Acceptance is at the volunteer reviewers'
+discretion, with no fixed timescale; they also weigh development history and
+the extent of AI-generated code.
 
 Flathub then builds, signs and serves updates. Network, audio, display and
 portal permissions in `finish-args` will be reviewed; `--talk-name` for the

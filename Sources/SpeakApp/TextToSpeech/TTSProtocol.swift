@@ -408,7 +408,19 @@ struct VoiceCatalog {
       traits: [.neutral, .clear, .multilingual],
       previewURL: nil
     )
-  ]
+  ] + openaiRealtimeVoices
+
+  /// Separate, explicitly chosen voices on the Realtime API: the speech-API
+  /// models above shut down on 6 January 2027 and are never moved here.
+  static let openaiRealtimeVoices: [TTSVoice] = OpenAIRealtimeSpeech.voices.map {
+    TTSVoice(
+      id: OpenAIRealtimeSpeech.voiceIDPrefix + $0.id,
+      name: "\($0.name) – \(OpenAIRealtimeSpeech.displayName)",
+      provider: .openai,
+      traits: [.neutral, .multilingual],
+      previewURL: nil
+    )
+  }
 
   /// Offline Azure fallback: the conventional neural voices plus the current
   /// MAI models. A keyed resource's own listing replaces the neural part.

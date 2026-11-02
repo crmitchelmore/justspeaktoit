@@ -4,6 +4,7 @@ import worker from '../src/index.js';
 import { issueAccessToken } from '../src/auth/session.js';
 import { Repository } from '../src/data/repository.js';
 import { QuotaClient } from '../src/quota.js';
+import { billingPeriod } from '../src/entitlement.js';
 import { QuotaDurableObject } from '../src/do/quota.js';
 import { pendingKey, receiptKey, type SettlementReceipt, type SettlementRequest,
   type SettlementResponse } from '../src/do/settlement.js';
@@ -61,7 +62,7 @@ async function operation(user: string, input: SettlementRequest): Promise<Settle
     return response.json<SettlementResponse>();
   });
 }
-async function reserve(userId: string, key = KEY, units = 100, period = '2026-10'): Promise<SettlementReceipt> {
+async function reserve(userId: string, key = KEY, units = 100, period = billingPeriod(now())): Promise<SettlementReceipt> {
   const result = await operation(userId, { kind: 'operation_reserve', userId, idempotencyKey: key,
     operation: 'post_processing', ownerId: crypto.randomUUID(), provider: 'openrouter', model: 'openai/gpt-5-mini',
     unitKind: 'tokens', period, units, correlationId: 'synthetic-correlation', nowSeconds: now(), limits: LIMITS });
@@ -80,7 +81,7 @@ async function measure(user: string, item: SettlementReceipt, units = 60): Promi
 async function ledger(user: string): Promise<Record<string, unknown>[]> {
   return (await env.DB.prepare('SELECT * FROM usage_ledger WHERE user_id=?1').bind(user).all()).results;
 }
-async function snapshot(user: string, period = '2026-10') {
+async function snapshot(user: string, period = billingPeriod(now())) {
   return new QuotaClient(env.QUOTA, LIMITS).status(user, period, now());
 }
 async function rejectLedger(): Promise<void> {
@@ -295,7 +296,8 @@ describe('durable receipt ownership, periods and alarms', () => {
   it('does not relabel inherited or legacy-expired committed estimates as verified usage', async () => {
     const a = await account();
     await runInDurableObject(stub(a.userId), async (_instance, state) => {
-      await state.storage.put('period:2026-10', { period: '2026-10', audioSecondsCommitted: 0, tokensCommitted: 20 });
+      const period = billingPeriod(now());
+      await state.storage.put(`period:${period}`, { period, audioSecondsCommitted: 0, tokensCommitted: 20 });
     });
     const state = await snapshot(a.userId); expect(state.tokensUsed).toBe(20); expect(state.tokensMeasured).toBeUndefined();
   });
@@ -316,7 +318,7 @@ describe('durable receipt ownership, periods and alarms', () => {
     await measure(a.userId, second, 20);
     await new Repository(env.DB).recordUsage({ userId: a.userId, idempotencyKey: KEY, operation: 'post_processing',
       provider: 'openrouter', model: 'openai/gpt-5-mini', unitKind: 'tokens', units: 99,
-      billingPeriod: '2026-10', correlationId: 'different', nowSeconds: now() });
+      billingPeriod: first.billingPeriod, correlationId: 'different', nowSeconds: now() });
     await alarm(a.userId);
     expect((await receipt(a.userId))?.lastFailure).toBe('ledger_conflict');
     expect((await receipt(a.userId, KEY + '-second'))?.phase).toBe('settled');
@@ -470,7 +472,7 @@ describe('installed alarm recovery and fairness', () => {
       expect(markers).toHaveLength(Number(priorPending) + Number(committed));
       if (committed) expect(afterReset.entries[pendingKey(restored)]).toBe(KEY);
       if (prior !== undefined) expect(afterReset.entries[pendingKey(prior)]).toBe(prior.idempotencyKey);
-      expect(afterReset.entries['period:2026-10']).toMatchObject({ tokensCommitted:
+      expect(afterReset.entries[`period:${item.billingPeriod}`]).toMatchObject({ tokensCommitted:
         (priorPending ? 30 : 0) + (committed ? 20 : 0) });
       expect(afterReset.entries['reservations']).toEqual(committed ? [] : beforeReset.entries['reservations']);
       expect((await snapshot(a.userId)).tokensHeld).toBe(held);

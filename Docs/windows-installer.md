@@ -1,15 +1,100 @@
-# Windows developer MSIX package
+# Windows installer and developer MSIX package
 
-This is the first installer slice for Windows x64: an **unsigned developer
-MSIX package** built from the verified self-contained runtime bundle with
-Microsoft's MakeAppx, plus a lifecycle test that signs it with an ephemeral
-certificate on a disposable CI runner and installs, launches, upgrades and
-uninstalls it. It is not an Alpha or Stable release, not signed for
-distribution and not an updater. An ARM64 package of the same identity is
-built from the ARM64 bundle by `windows-arm64.yml`
-([Windows ARM64](windows-arm64.md)). No install receipt exists until the
-`package-lifecycle` job has passed for a revision (see
-[Evidence](#evidence-at-this-checkpoint)).
+This page covers two packages:
+
+- the **public beta installer**: one signed `.msixbundle` (x64 and ARM64)
+  opened through an App Installer file, with automatic updates; and
+- the **developer MSIX**, an unsigned per-architecture package used only for
+  CI lifecycle checks. The rest of this page, from
+  [Identity and version](#identity-and-version), describes it.
+
+## Public beta installer
+
+| URL | Purpose |
+|---|---|
+| <https://justspeaktoit.com/alpha/download/windows> | Website CTA. Redirects to the App Installer file once a signed installer is qualified; until then to the developer ZIP (`?arch=arm64` for ARM64, x64 otherwise) |
+| <https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller> | The App Installer file (`application/appinstaller`, served as a download). Windows' App Installer opens it, picks the package for the PC's architecture and rechecks the same URL for updates. 503 until a signed installer is qualified |
+| <https://justspeaktoit.com/alpha/windows/installer.json> | `{available, channel, tag, build, version, publisher, appInstaller}` for the qualified installer, or `{available: false}` |
+
+The file is a download rather than an `ms-appinstaller:` link because Microsoft
+[disabled that protocol by default](https://learn.microsoft.com/windows/msix/app-installer/installing-windows10-apps-web)
+in December 2023. Opening the downloaded `.appinstaller` shows the App
+Installer dialog with the publisher name, then installs; no ZIP, Swift
+runtime or SDK is involved, and Start, the execution aliases
+`JustSpeakToIt.exe` and `JustSpeakToItCLI.exe`, and Settings > Apps uninstall
+work as for any packaged app. Windows 10 2004 (10.0.19041) or later with App
+Installer is required.
+
+**Identity.** `scripts/windows-package/package-identity-beta.json` declares
+package name `com.justspeaktoit.windows`, display name "Just Speak to It
+(Beta)" and no default publisher: the publisher is always the signing
+certificate's exact subject (`WINDOWS_MSIX_PUBLISHER`). It is a separate
+package family from the developer MSIX and shares its data directory, so
+History and settings carry over. The publisher becomes part of the package
+family name, so **the first public publisher is permanent**: a later change
+means users uninstall and reinstall.
+
+**Version.** The release manifest's 12-digit build `YYYYMMDDhhmm` becomes
+`YYYY.MMDD.hhmm.0` (for example `202610301641` gives `2026.1030.1641.0`), so
+every later Alpha or Stable candidate is a newer package.
+
+**Updates.** The App Installer file asks Windows to check on launch every 12
+hours (with a prompt, not blocking launch) and in a background task. A newer
+signed bundle under the same identity installs over the old one; Windows
+refuses a lower version.
+
+**Pipeline** (`.github/workflows/windows-installer.yml`, called by
+`alpha-release.yml` for each Alpha after desktop qualification):
+
+1. `sources` takes the release manifest's qualified x64 and ARM64 runtime
+   bundles from `desktop-qualification.json`, checking each artifact still
+   matches the published bytes.
+2. `rehearse` (every change and every Alpha, on `windows-2022` and
+   `windows-11-arm`) builds both beta packages and the bundle, signs it with an
+   ephemeral non-exportable CI certificate trusted only for the job, and runs
+   `test-windows-installer.ps1`: install through `Add-AppxPackage
+   -AppInstallerFile`, exactly one registration at the expected version,
+   native architecture, publisher and update URI, both aliases, an upgrade, a
+   refused downgrade, uninstall and removal of registration and aliases.
+3. `sign` (environment `windows-signing`, `main` only) builds the same bundle
+   with `WINDOWS_MSIX_PUBLISHER`, signs it with Azure Artifact Signing over
+   GitHub OIDC, timestamps it, checks `signtool verify /pa`, the signer subject
+   and the unchanged payload, and writes `<bundle>.sign.json`. Without the
+   signing settings it logs that and stops: nothing is published.
+4. `stage` uploads the signed bundle and the production `.appinstaller` to the
+   manifest's release.
+5. `verify` installs that published file on clean x64 and ARM64 runners with no
+   imported trust (the certificate must chain to a public root), and upgrades
+   from the previously qualified installer when there is one.
+6. `promote` records `windows-installer.json` on the release and only then
+   advances `windows-installer-pointer.json` on `alpha-latest` to a newer
+   build. The website follows that pointer, which can lag the Alpha pointer.
+
+Manual run: Actions > Windows installer > Run workflow, with a manifest tag to
+publish (from `main`) or blank to rehearse the current Alpha.
+
+**What signing does and does not give.** Keep these separate:
+
+| Property | Provided by | Status |
+|---|---|---|
+| Windows will install the package at all | A signature chaining to a trusted root, publisher = manifest | Rehearsed in CI with a test certificate; public signature awaits the owner's Artifact Signing setup |
+| Publisher name shown in App Installer | Identity validation of the signing account | Owner action ([setup](#setting-up-azure-artifact-signing)) |
+| Signature valid after the certificate expires | RFC 3161 timestamp (`http://timestamp.acs.microsoft.com`) | Checked by the `sign` job |
+| No SmartScreen "unrecognised app" prompt | Reputation earned by the signing identity over time and downloads | Not guaranteed. A trusted signature replaces "Unknown publisher" with the validated name; SmartScreen may still warn on early downloads of a new identity until consecutive releases signed with it build reputation |
+| Store verification | Microsoft Store certification | Not used (direct download) |
+| Malware scanning | Microsoft Defender at download/install | Normal OS behaviour |
+| Clean-device install and update | `verify` on clean hosted runners | Per release, in CI; physical Windows 10/11 machines remain a manual check |
+
+**Owner actions to publish.** Nothing ships until the owner, not an agent,
+completes [Setting up Azure Artifact Signing](#setting-up-azure-artifact-signing).
+The same `windows-signing` environment settings drive both the developer
+`sign` job and the installer. Eligibility decides the route:
+a UK individual cannot use Artifact Signing (individuals: US and Canada
+only); a UK limited company can. Basic tier is $9.99 a month on a paid Azure
+subscription. If neither applies, an OV certificate (for example Certum Open
+Source) can sign through `sign-windows-installer.ps1 -CertificateThumbprint`
+on a Windows machine, and the publishing steps can be run by hand; see
+[Choosing a signing route](#choosing-a-signing-route-september-2026).
 
 ## Identity and version
 

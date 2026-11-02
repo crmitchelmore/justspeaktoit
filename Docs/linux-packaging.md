@@ -81,3 +81,58 @@ packaging-branch success is not evidence for current main. The
 native synthetic checks from physical desktop acceptance. Interactive GNOME/KDE
 portal consent, physical microphone/output, Wayland shortcuts/insertion, login
 monitoring, Vulkan execution and ARM64 remain unqualified by this hosted check.
+
+## Installing, updating and removing
+
+Each Alpha whose desktop qualification passed publishes the CI bundle as
+`JustSpeakToIt-linux-x86_64.flatpak`, served at
+<https://justspeaktoit.com/alpha/download/linux-x86_64>. The bundle is built with
+`--runtime-repo` pointing at Flathub, so on any distribution with Flatpak
+installed:
+
+```sh
+flatpak install --user ./JustSpeakToIt-linux-x86_64.flatpak
+```
+
+or opening the file in GNOME Software or KDE Discover installs the app and
+pulls the GNOME 50 runtime from Flathub (adding the Flathub remote if needed).
+The menu entry, icon and the "Start or Stop Dictation" action come from the
+package's desktop file and AppStream metadata. `flatpak run
+com.justspeaktoit.JustSpeakToIt` starts it; `flatpak uninstall
+com.justspeaktoit.JustSpeakToIt` removes it (add `--delete-data` to remove its
+data too).
+
+**Updates are manual for now.** A single-file bundle has no update source, so
+`flatpak update` and the software centres do not see new builds; installing a
+newer bundle over the old one keeps the app's data. The bundle carries no
+signature of its own beyond the HTTPS download from GitHub Releases.
+
+**Recommended next step: Flathub.** Flathub is the established route for
+signed, automatically updated Flatpaks, and the software centres on most
+distributions already list it, so it gives the "open, install, update" path
+without a bespoke repository or signing key. The project already uses the
+Flathub runtime, SDK extension and `flatpak-builder-lint manifest`. Submission
+is free but needs the owner, because it creates a public listing and a
+maintainer account ([requirements](https://docs.flathub.org/docs/for-app-authors/requirements),
+[submission](https://docs.flathub.org/docs/for-app-authors/submission),
+[verification](https://docs.flathub.org/docs/for-app-authors/verification)):
+
+1. Prepare a submission manifest that builds from a tagged `git` source of this
+   repository instead of the local `type: dir` source, with the same pinned
+   SwiftPM sources.
+2. Add Linux screenshots (hosted at stable URLs) and a release entry per
+   version to the metainfo; run `flatpak-builder-lint appstream` and
+   `flatpak-builder-lint repo` on a built repo.
+3. Sign in to GitHub as the owner and open the submission pull request to
+   `flathub/flathub` (this accepts Flathub's terms); answer the reviewers.
+4. After acceptance, verify the app id's domain by publishing the token
+   Flathub gives at `https://justspeaktoit.com/.well-known/org.flathub.VerifiedApps.txt`.
+5. Point the website CTA at `https://flathub.org/apps/com.justspeaktoit.JustSpeakToIt`.
+
+Flathub then builds, signs and serves updates. Network, audio, display and
+portal permissions in `finish-args` will be reviewed; `--talk-name` for the
+status notifier and `--device=dri` are common and documented above.
+
+A self-hosted OSTree repository with a `.flatpakref` would also give updates,
+but needs a GPG signing key, hosting and repository maintenance owned by the
+project, so it is not used.

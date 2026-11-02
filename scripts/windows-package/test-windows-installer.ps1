@@ -13,8 +13,10 @@ step:
     publisher and the machine's native architecture, with the expected
     App Installer update URI;
   * the CLI execution alias answers --version and --help from the package;
-  * an upgrade keeps the family, and a direct install of the older bundle is
-    refused and leaves the newer version installed;
+  * with -UpgradeAppInstaller (local rehearsals, whose update URI is a file),
+    publishing the newer file at the update URI makes Windows report an update
+    for the installed package, applying it keeps the family, and a direct
+    install of the older bundle is refused and leaves the newer version;
   * uninstall removes the registration and both execution aliases.
 
 The script never imports a certificate. The rehearsal wrapper trusts its
@@ -47,6 +49,10 @@ if (-not $hosted -and -not $DisposableMachine) {
     throw 'This test installs and removes the Just Speak to It beta. Run it on a GitHub-hosted runner or a throwaway VM with -DisposableMachine.'
 }
 if ([bool] $UpgradeAppInstaller -ne [bool] $UpgradeVersion) { throw 'Pass -UpgradeAppInstaller and -UpgradeVersion together.' }
+$updateTarget = [System.Uri] $ExpectedUpdateUri
+if ($UpgradeAppInstaller -and -not $updateTarget.IsFile) {
+    throw 'An upgrade rehearsal publishes the newer file at the update URI, so that URI must be a local file.'
+}
 if ($UpgradeVersion -and ([version] $UpgradeVersion -le [version] $ExpectedVersion)) { throw 'The upgrade must be newer.' }
 
 $identity = Read-JstiJson (Join-Path $PSScriptRoot 'package-identity-beta.json')
@@ -104,6 +110,29 @@ function Get-UpdateUri([string] $FullName) {
         if ($info) { return [string] $info.Uri }
         return $null
     } catch { return 'unavailable: ' + $_.Exception.Message }
+}
+
+function Wait-WinRT($Operation, [type] $ResultType) {
+    $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+        $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+        $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
+    $task = $asTask.MakeGenericMethod($ResultType).Invoke($null, @($Operation))
+    if (-not $task.Wait(120000)) { throw 'The Windows Runtime operation did not finish in 120 s.' }
+    return $task.Result
+}
+
+function Get-UpdateAvailability([string] $FullName) {
+    # The same check App Installer runs on launch and in its background task.
+    try {
+        Add-Type -AssemblyName System.Runtime.WindowsRuntime
+        $null = [Windows.Management.Deployment.PackageManager, Windows.Management.Deployment, ContentType = WindowsRuntime]
+        $resultType = [Windows.ApplicationModel.PackageUpdateAvailabilityResult, Windows.ApplicationModel, ContentType = WindowsRuntime]
+        $package = (New-Object Windows.Management.Deployment.PackageManager).FindPackageForUser('', $FullName)
+        $result = Wait-WinRT $package.CheckUpdateAvailabilityAsync() $resultType
+        $extended = $null
+        if ($result.ExtendedError) { $extended = '0x{0:X8}' -f $result.ExtendedError.HResult }
+        return [ordered]@{ availability = [string] $result.Availability; extendedError = $extended }
+    } catch { return [ordered]@{ availability = 'unavailable'; extendedError = $_.Exception.Message } }
 }
 
 function Invoke-Deployment([string] $Label, [scriptblock] $Operation) {
@@ -190,8 +219,14 @@ try {
         Assert-Check 'The upgrade .appinstaller keeps the update URI and publisher' (
             $upgrade.uri -eq $ExpectedUpdateUri -and $upgrade.mainBundle.publisher -ceq $ExpectedPublisher -and
             $upgrade.mainBundle.version -eq $UpgradeVersion) $upgrade
-        $record = Invoke-Deployment 'upgrade' { Add-AppxPackage -AppInstallerFile $UpgradeAppInstaller }
-        Assert-Check 'Upgrade through the .appinstaller file succeeds' $record.succeeded $record
+        # Publish the newer file where the installed package looks for updates, as a release does.
+        Copy-Item -LiteralPath $UpgradeAppInstaller -Destination $updateTarget.LocalPath -Force
+        $availability = Get-UpdateAvailability $installed.PackageFullName
+        $report.updateAvailability = $availability
+        Add-Check 'Windows reports the published update for the installed package' (
+            $availability.availability -in @('Available', 'Required')) $availability
+        $record = Invoke-Deployment 'upgrade' { Add-AppxPackage -AppInstallerFile $updateTarget.LocalPath }
+        Assert-Check 'Applying the update from the update URI succeeds' $record.succeeded $record
         $upgraded = Assert-Installed 'upgrade' $UpgradeVersion
         Assert-Check 'The upgrade keeps the package family' ($upgraded.PackageFamilyName -eq $installed.PackageFamilyName) @{
             before = $installed.PackageFamilyName; after = $upgraded.PackageFamilyName }

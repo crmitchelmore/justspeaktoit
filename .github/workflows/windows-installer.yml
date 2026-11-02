@@ -273,33 +273,17 @@ jobs:
         with:
           name: windows-installer-appinstaller
           path: candidate
-      # Upgrades from the currently published installer when there is one.
-      - name: Install, upgrade from the live release, and uninstall without importing any certificate
+      # The live update URI still serves the previous release until promotion, so this job proves a
+      # clean install of the candidate; the rehearsal proves updates through a published file.
+      - name: Install and uninstall without importing any certificate
         shell: powershell
         env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.sources.outputs.version }}
           PUBLISHER: ${{ needs.sign.outputs.publisher }}
         run: |
-          $arguments = @{ ExpectedPublisher = $env:PUBLISHER; ExpectedUpdateUri = $env:APPINSTALLER_URI
-            Workspace = (Join-Path $env:RUNNER_TEMP 'verify') }
-          $assets = @(gh release view alpha-latest --repo $env:GITHUB_REPOSITORY --json assets --jq '.assets[].name')
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $pointer = $null
-          if ($assets -contains 'windows-installer-pointer.json') {
-            gh release download alpha-latest --repo $env:GITHUB_REPOSITORY --pattern windows-installer-pointer.json --dir current
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            $pointer = Get-Content current/windows-installer-pointer.json -Raw | ConvertFrom-Json
-          }
-          if ($pointer -and $pointer.publisher -ceq $env:PUBLISHER -and [version] $pointer.version -lt [version] $env:VERSION) {
-            gh release download $pointer.tag --repo $env:GITHUB_REPOSITORY --pattern JustSpeakToIt.appinstaller --dir previous
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            ./scripts/windows-package/test-windows-installer.ps1 @arguments -AppInstaller previous/JustSpeakToIt.appinstaller `
-              -ExpectedVersion $pointer.version -UpgradeAppInstaller candidate/JustSpeakToIt.appinstaller -UpgradeVersion $env:VERSION
-          } else {
-            ./scripts/windows-package/test-windows-installer.ps1 @arguments -AppInstaller candidate/JustSpeakToIt.appinstaller `
-              -ExpectedVersion $env:VERSION
-          }
+          ./scripts/windows-package/test-windows-installer.ps1 -AppInstaller candidate/JustSpeakToIt.appinstaller `
+            -ExpectedVersion $env:VERSION -ExpectedPublisher $env:PUBLISHER -ExpectedUpdateUri $env:APPINSTALLER_URI `
+            -Workspace (Join-Path $env:RUNNER_TEMP 'verify')
       - name: Upload clean-install evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

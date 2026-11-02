@@ -54,8 +54,10 @@ refuses a lower version.
    ephemeral non-exportable CI certificate trusted only for the job, and runs
    `test-windows-installer.ps1`: install through `Add-AppxPackage
    -AppInstallerFile`, exactly one registration at the expected version,
-   native architecture, publisher and update URI, both aliases, an upgrade, a
-   refused downgrade, uninstall and removal of registration and aliases.
+   native architecture, publisher and update URI, both aliases, then the newer
+   file published at the update URI, Windows reporting that update for the
+   installed package (`CheckUpdateAvailabilityAsync`), applying it, a refused
+   downgrade, uninstall and removal of registration and aliases.
 3. `sign` (environment `windows-signing`, `main` only) builds the same bundle
    with `WINDOWS_MSIX_PUBLISHER`, signs it with Azure Artifact Signing over
    GitHub OIDC, timestamps it, checks `signtool verify /pa`, the signer subject
@@ -64,8 +66,9 @@ refuses a lower version.
 4. `stage` uploads the signed bundle and the production `.appinstaller` to the
    manifest's release.
 5. `verify` installs that published file on clean x64 and ARM64 runners with no
-   imported trust (the certificate must chain to a public root), and upgrades
-   from the previously qualified installer when there is one.
+   imported trust (the certificate must chain to a public root). The live
+   update URI still serves the previous release until promotion, so this job
+   proves a clean install; step 2 proves the update path.
 6. `promote` records `windows-installer.json` on the release and only then
    advances `windows-installer-pointer.json` on `alpha-latest` to a newer
    build. The website follows that pointer, which can lag the Alpha pointer.

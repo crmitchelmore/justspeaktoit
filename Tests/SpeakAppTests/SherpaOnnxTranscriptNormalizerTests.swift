@@ -58,4 +58,13 @@ final class SherpaOnnxTranscriptNormalizerTests: XCTestCase {
             "I think I can test this"
         )
     }
+
+    func testNemotronKeepsNativeCasing() {
+        let modelID = LocalStreamingModelSource(
+            repoID: NemotronLocalModels.repoID,
+            modelName: NemotronLocalModels.multilingual560ms.modelName
+        ).id
+
+        XCTAssertEqual(SherpaOnnxTranscriptNormalizer.normalize("HTTP API JSON", modelID: modelID), "HTTP API JSON")
+    }
 }

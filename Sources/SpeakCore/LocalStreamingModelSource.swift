@@ -72,6 +72,9 @@ public extension LocalStreamingModelSource {
         if searchText.contains("en-kroko-2025-08-06") {
             return 71
         }
+        if NemotronLocalModels.isMultilingual(searchText) {
+            return NemotronLocalModels.multilingualDownloadSizeMB
+        }
         if searchText.contains("nemotron-speech-streaming-en-0.6b") {
             return 632
         }

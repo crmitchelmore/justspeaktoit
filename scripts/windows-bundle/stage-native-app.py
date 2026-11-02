@@ -67,6 +67,8 @@ def stage(bin_path, output, architecture, commit, versions=None, *, strip_tool=N
             raise StageError("%s is a %s image, not a native %s executable" % (name, image.architecture, architecture))
         if name == "speak.exe" and image.subsystem != windows_pe.IMAGE_SUBSYSTEM_WINDOWS_CUI:
             raise StageError("speak.exe must use the console subsystem")
+        if name == APPLICATION and image.subsystem != windows_pe.IMAGE_SUBSYSTEM_WINDOWS_GUI:
+            raise StageError("SpeakWindows.exe must use the windows subsystem so launching it opens no console")
         tests = sorted(module for module in image.imports() + image.delay_imports() if module.lower() in TEST_MODULES)
         if tests:
             raise StageError(name + " imports " + ", ".join(tests) + "; stage it before building tests")

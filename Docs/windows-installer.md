@@ -236,9 +236,14 @@ failed or cancelled deployment leaves the previous registration in place.
 The lifecycle test checks each case below rather than relying on that
 statement.
 
-The executable uses the console subsystem (as the portable bundle does), so a
-Start menu launch also opens a console window. Changing the linker subsystem
-is a production build change in `Package.swift`, outside this slice.
+`SpeakWindows.exe` links with the windows subsystem (`/SUBSYSTEM:WINDOWS`,
+entry `mainCRTStartup`, in `Package.swift`), so Start menu, startup and
+shortcut launches open no console window; `stage-native-app.py` refuses a
+console-subsystem build. Diagnostic flags such as `--self-test` write to
+redirected handles as before; run from a terminal without redirection, the app
+attaches to that terminal's console, but the shell does not wait, so use
+`Start-Process -Wait -NoNewWindow` or pipe the output. `speak.exe` stays a
+console program.
 
 ## Signing
 
@@ -572,4 +577,5 @@ establish public trust, physical-machine acceptance, updates or a Stable release
   present on the Server runner); SmartScreen and reputation for a signed
   build; the microphone consent prompt under the package identity; saving,
   using and removing a real credential across upgrade and uninstall; high-DPI
-  logos with scale variants and a resource index; and the console window.
+  logos with scale variants and a resource index; and a visual check that a
+  Start menu launch opens no console window.

@@ -333,6 +333,12 @@ if windowsTargetBuild {
             name: "SpeakWindows", dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakDesktopSync", "SpeakSync",
                 "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsAutomation"
+            ],
+            // A windowed app: Start menu and startup launches open no console.
+            // Swift emits `main`, so the CRT entry is mainCRTStartup, not WinMain.
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "/SUBSYSTEM:WINDOWS", "-Xlinker", "/ENTRY:mainCRTStartup"],
+                             .when(platforms: [.windows]))
             ]
         ),
         .testTarget(

@@ -141,6 +141,9 @@ class ReleaseAppleTest < Minitest::Test
   def test_ios_only_candidate_submits_ios_through_existing_approval_and_review_gates
     client=StableClient.new
     delivery(client,train:'stable',klass:ApprovedDelivery,scope:'ios-only').submit
+    submission=client.calls.find { |call| call[:method] == :patch && call[:path] == '/v1/reviewSubmissions/existing-review' }
+    refute_nil submission
+    assert_equal({submitted:true},submission[:body][:data][:attributes])
     assert_equal 'WAITING_FOR_REVIEW',client.reviews.first['attributes']['state']
   end
   def test_ios_only_candidate_rejects_mac_surface_before_apple_access

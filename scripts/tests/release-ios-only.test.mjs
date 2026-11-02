@@ -8,7 +8,7 @@ import {digest} from '../release-train-lib.mjs';
 
 const script=resolve('scripts/release-train.mjs');
 const source='a'.repeat(40), baseline='b'.repeat(40);
-function fixture(t, {receiptStatus='verified', newer=false, prepare=false}={}) {
+function fixture(t, {receiptStatus='verified', newer=false, newerIosVersion='3.3.0', prepare=false}={}) {
  const root=mkdtempSync(join(tmpdir(),'ios-only-release-'));
  t.after(()=>rmSync(root,{recursive:true,force:true}));
  const bin=join(root,'bin'), assets=join(root,'assets'); mkdirSync(bin); mkdirSync(assets);
@@ -20,7 +20,7 @@ function fixture(t, {receiptStatus='verified', newer=false, prepare=false}={}) {
   mkdirSync(join(root,'Config'));
   writeFileSync(join(root,'Config','ReleasePipeline.json'),JSON.stringify({publishedBaselines:{ios:null}}));
  }
- if(newer) manifests['stable-candidate-2']={...manifest,publicationScope:'all',ordinal:2,tag:'stable-candidate-2',surfaces:{...manifest.surfaces,ios:{...entry,version:'3.3.0'}}};
+ if(newer) manifests['stable-candidate-2']={...manifest,publicationScope:'all',ordinal:2,tag:'stable-candidate-2',surfaces:{...manifest.surfaces,ios:{...entry,version:newerIosVersion}}};
  writeFileSync(join(root,'manifests.json'),JSON.stringify(manifests));
  writeFileSync(join(assets,'ios-receipt.json'),JSON.stringify({status:receiptStatus,source,build:entry.build,notesHash:entry.notesHash,assets:{}}));
  const harness=`#!${process.execPath}
@@ -78,6 +78,12 @@ test('iOS-only preparation refuses an unverified Alpha before allocating a candi
  const f=fixture(t,{prepare:true,receiptStatus:'processing'}), result=f.runPrepare();
  assert.notEqual(result.status,0); assert.match(result.stderr,/Selected Alpha is not verified: ios/);
  assert.ok(f.commands().every(c=>!c.args.includes('-a') && !c.args.includes('create')));
+});
+test('iOS-only publication refuses a candidate superseded for the same iOS version',t=>{
+ const f=fixture(t,{newer:true,newerIosVersion:'3.2.0'}), result=f.run();
+ assert.notEqual(result.status,0);
+ assert.match(result.stderr,/A newer candidate supersedes this platform\/version/);
+ assert.ok(f.commands().every(c=>!c.args.includes('upload')));
 });
 test('iOS-only publication approves exact candidate and emits only iOS without Mac publication',t=>{
  const f=fixture(t,{newer:true}), result=f.run();

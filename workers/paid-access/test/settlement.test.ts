@@ -81,8 +81,11 @@ async function measure(user: string, item: SettlementReceipt, units = 60): Promi
 async function ledger(user: string): Promise<Record<string, unknown>[]> {
   return (await env.DB.prepare('SELECT * FROM usage_ledger WHERE user_id=?1').bind(user).all()).results;
 }
-async function snapshot(user: string, period = billingPeriod(now())) {
-  return new QuotaClient(env.QUOTA, LIMITS).status(user, period, now());
+async function snapshot(user: string, period?: string) {
+  // Follow the operation's reserved month even if the test crosses a month boundary.
+  const reservedPeriod = period ?? (await receipt(user))?.billingPeriod;
+  expect(reservedPeriod).toBeDefined();
+  return new QuotaClient(env.QUOTA, LIMITS).status(user, reservedPeriod!, now());
 }
 async function rejectLedger(): Promise<void> {
   await env.DB.prepare(`CREATE TRIGGER settlement_fail_ledger BEFORE INSERT ON usage_ledger
@@ -294,12 +297,12 @@ describe('durable receipt ownership, periods and alarms', () => {
   });
 
   it('does not relabel inherited or legacy-expired committed estimates as verified usage', async () => {
-    const a = await account();
+    const a = await account(); const period = billingPeriod(now());
     await runInDurableObject(stub(a.userId), async (_instance, state) => {
-      const period = billingPeriod(now());
       await state.storage.put(`period:${period}`, { period, audioSecondsCommitted: 0, tokensCommitted: 20 });
     });
-    const state = await snapshot(a.userId); expect(state.tokensUsed).toBe(20); expect(state.tokensMeasured).toBeUndefined();
+    const state = await snapshot(a.userId, period);
+    expect(state.tokensUsed).toBe(20); expect(state.tokensMeasured).toBeUndefined();
   });
 
   it('rejects different owners/measurements and isolates the same key across accounts', async () => {
@@ -356,7 +359,7 @@ describe('durable receipt ownership, periods and alarms', () => {
     expect(next).not.toBeNull();
     expect(await runDurableObjectAlarm(stub(a.userId))).toBe(true);
     expect(await ledger(a.userId)).toHaveLength(27);
-    expect((await snapshot(a.userId)).tokensUsed).toBe(27);
+    expect((await snapshot(a.userId, billingPeriod(time))).tokensUsed).toBe(27);
   });
 
   it('generic release/finalise cannot bypass ownership of a tracked operation', async () => {

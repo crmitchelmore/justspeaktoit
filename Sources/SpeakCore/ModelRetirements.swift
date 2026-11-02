@@ -3,11 +3,14 @@ import Foundation
 /// Provider-announced shutdowns for models the app still offers.
 ///
 /// Until the shutdown day the entry stays selectable and its description says
-/// when it stops working and what replaces it, so no price, language or feature
-/// change happens silently. From the shutdown day (UTC) the catalogue hides the
-/// entry and both transcription normalisers move saved selections to the
-/// successor. The dates live in the app itself so builds that are never updated
-/// still migrate before the provider starts rejecting requests.
+/// when it stops working and what replaces it. From the shutdown day (UTC) the
+/// catalogue hides the entry. Saved selections move automatically only when the
+/// successor is a verified equivalent: same request features, same response
+/// shape and a generally available model. Otherwise the saved selection, and
+/// with it the user's intent (speaker labels, timestamps, a Stable model), is
+/// kept and requests fail with `ModelRetiredError` until the user chooses a
+/// replacement. The dates live in the app so builds that are never updated
+/// still stop calling a dead model.
 public struct ModelRetirement: Sendable, Equatable {
     public enum Mode: Sendable, Equatable {
         case batch
@@ -19,9 +22,11 @@ public struct ModelRetirement: Sendable, Equatable {
     public let mode: Mode
     /// First UTC day on which the provider no longer serves the model.
     public let shutdownDay: String
-    /// Catalogue entry that replaces it, or `nil` when no compatible
-    /// replacement exists on the same API.
+    /// Verified-equivalent catalogue entry saved selections move to, or `nil`
+    /// when moving would change features or guarantees.
     public let successorID: String?
+    /// Suggested explicit choice when there is no automatic successor.
+    public let recommendedID: String?
     /// What changes for someone who moves to the successor.
     public let migrationNote: String
 
@@ -31,6 +36,18 @@ public struct ModelRetirement: Sendable, Equatable {
 
     public func isRetired(at date: Date) -> Bool {
         date >= shutdownDate
+    }
+
+    public init(
+        id: String, mode: Mode, shutdownDay: String,
+        successorID: String? = nil, recommendedID: String? = nil, migrationNote: String
+    ) {
+        self.id = id
+        self.mode = mode
+        self.shutdownDay = shutdownDay
+        self.successorID = successorID
+        self.recommendedID = recommendedID
+        self.migrationNote = migrationNote
     }
 
     /// Short, locale-independent notice appended to catalogue descriptions.
@@ -63,8 +80,9 @@ public enum ModelRetirements {
     public static let all: [ModelRetirement] = [
         ModelRetirement(
             id: "openai/whisper-1", mode: .batch, shutdownDay: "2027-02-26",
-            successorID: gptTranscribe,
-            migrationNote: "moves to GPT Transcribe ($0.0045/min)."),
+            recommendedID: gptTranscribe,
+            migrationNote: "choose GPT Transcribe ($0.0045/min). It returns no segment timestamps, "
+                + "so this selection is not moved automatically."),
         ModelRetirement(
             id: "openai/gpt-4o-transcribe", mode: .batch, shutdownDay: "2027-02-26",
             successorID: gptTranscribe,
@@ -75,9 +93,8 @@ public enum ModelRetirements {
             migrationNote: "moves to GPT Transcribe ($0.0045/min, up from $0.003)."),
         ModelRetirement(
             id: "openai/gpt-4o-transcribe-diarize", mode: .batch, shutdownDay: "2027-02-26",
-            successorID: gptTranscribe,
-            migrationNote: "moves to GPT Transcribe, which has no speaker labels. "
-                + "Choose Scribe v2, Soniox or Gemini 3.5 Transcribe to keep speakers."),
+            migrationNote: "OpenAI has no speaker-labelling successor. Choose Scribe v2, Soniox or "
+                + "Gemini 3.5 Transcribe to keep speakers; this selection is not moved automatically."),
         ModelRetirement(
             id: "openai/gpt-4o-mini-transcribe-streaming", mode: .live, shutdownDay: "2027-02-26",
             successorID: gptLiveTranscribe,
@@ -86,21 +103,25 @@ public enum ModelRetirements {
             id: "openai/gpt-4o-transcribe-streaming", mode: .live, shutdownDay: "2027-02-26",
             successorID: gptLiveTranscribe,
             migrationNote: "moves to GPT Live Transcribe ($0.017/min, up from $0.006)."),
+        // Voxtral 3 is a public preview; a Stable selection is never moved onto it.
         ModelRetirement(
             id: "mistral/voxtral-mini-latest", mode: .batch, shutdownDay: "2027-04-30",
-            successorID: MistralVoxtral3.miniBatchID,
-            migrationNote: "moves to Voxtral Mini Transcribe 3 ($0.0035/min, public preview)."),
+            recommendedID: MistralVoxtral3.miniBatchID,
+            migrationNote: "choose a replacement such as Voxtral Mini Transcribe 3 "
+                + "($0.0035/min, public preview); this selection is not moved automatically."),
         ModelRetirement(
             id: MistralVoxtralRealtime.liveCatalogID, mode: .live, shutdownDay: "2027-04-30",
-            successorID: MistralVoxtral3.realtimeID,
-            migrationNote: "moves to Voxtral Realtime 3 ($0.008/min, up from $0.006; public preview).")
+            recommendedID: MistralVoxtral3.realtimeID,
+            migrationNote: "choose a replacement such as Voxtral Realtime 3 "
+                + "($0.008/min, public preview); this selection is not moved automatically.")
     ] + OpenAITTSModel.allCases.map {
         // OpenAI's named successor, gpt-realtime-2.1-mini, is a Realtime
         // conversational model that `/v1/audio/speech` does not accept.
         ModelRetirement(
             id: $0.desktopModelIdentifier, mode: .speech, shutdownDay: "2027-01-06",
-            successorID: nil,
-            migrationNote: "OpenAI has no replacement on the speech API; choose another voice provider.")
+            recommendedID: OpenAIRealtimeSpeech.catalogID,
+            migrationNote: "choose OpenAI Realtime 2.1 mini or another voice provider; "
+                + "this selection is not moved automatically.")
     }
 
     public static func retirement(for id: String) -> ModelRetirement? {
@@ -117,6 +138,14 @@ public enum ModelRetirements {
 
     public static func isRetired(_ id: String, at date: Date = Date()) -> Bool {
         retirement(for: id)?.isRetired(at: date) ?? false
+    }
+
+    /// Throws when a saved selection names a shut-down model with no automatic
+    /// successor, so the request fails with an actionable message instead of
+    /// reaching the provider or silently switching models.
+    public static func ensureAvailable(_ id: String, at date: Date = Date()) throws {
+        guard let retirement = retirement(for: id), retirement.isRetired(at: date) else { return }
+        throw ModelRetiredError(retirement: retirement)
     }
 
     /// Hides shut-down entries and labels those with an announced shutdown.
@@ -136,6 +165,16 @@ public enum ModelRetirements {
                 contextLength: option.contextLength
             )
         }
+    }
+}
+
+/// A saved model has shut down and needs an explicit replacement choice.
+public struct ModelRetiredError: LocalizedError, Equatable, Sendable {
+    public let retirement: ModelRetirement
+
+    public var errorDescription: String? {
+        "\(retirement.id) was retired by its provider on \(retirement.shutdownDay). "
+            + "Choose another model in Settings: \(retirement.migrationNote)"
     }
 }
 

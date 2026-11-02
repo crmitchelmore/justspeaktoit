@@ -18,6 +18,7 @@ public struct OpenAIBatchClient: TranscriptionProvider {
   private let keywords: [String]
   private let validationServiceName: String
   private let durationResolver: @Sendable (URL) async -> TimeInterval
+  private let now: @Sendable () -> Date
 
   public init(
     session: URLSession = .shared,
@@ -25,8 +26,10 @@ public struct OpenAIBatchClient: TranscriptionProvider {
     validationServiceName: String = "OpenAI",
     staging: SharedMultipartUploadStaging? = nil,
     keywords: [String],
-    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 },
+    now: @escaping @Sendable () -> Date = { Date() }
   ) {
+    self.now = now
     self.session = session
     self.staging = staging
     self.keywords = keywords
@@ -62,6 +65,7 @@ public struct OpenAIBatchClient: TranscriptionProvider {
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
     let modelName = model.split(separator: "/").last.map(String.init) ?? model
+    try ModelRetirements.ensureAvailable("openai/\(modelName)", at: now())
     var fields = [
       OpenAICompatibleBatchTranscriptionClient.FormField(name: "model", value: modelName),
       .init(name: "response_format", value: responseFormat(for: modelName))

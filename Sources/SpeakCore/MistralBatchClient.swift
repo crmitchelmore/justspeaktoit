@@ -17,14 +17,17 @@ public struct MistralBatchClient: TranscriptionProvider {
   private let keywords: [String]
   private let multipartStaging: SharedMultipartUploadStaging
   private let durationResolver: @Sendable (URL) async -> TimeInterval
+  private let now: @Sendable () -> Date
 
   public init(
     session: URLSession = .shared,
     baseURL: URL = URL(string: "https://api.mistral.ai/v1")!,
     multipartStaging: SharedMultipartUploadStaging,
     keywords: [String],
-    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 },
+    now: @escaping @Sendable () -> Date = { Date() }
   ) {
+    self.now = now
     self.session = session
     self.keywords = keywords
     self.baseURL = baseURL
@@ -57,6 +60,7 @@ public struct MistralBatchClient: TranscriptionProvider {
     }
 
     try Task.checkCancellation()
+    try ModelRetirements.ensureAvailable("mistral/\(modelID(from: model))", at: now())
     let endpoint = baseURL.appendingPathComponent("audio/transcriptions")
     var request = URLRequest(url: endpoint)
     request.httpMethod = "POST"

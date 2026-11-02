@@ -12,7 +12,14 @@ final class LocalModelCatalogPinTests: XCTestCase {
         )
 
         XCTAssertEqual(previous.count, 7)
-        XCTAssertEqual(ModelCatalog.localStreamingSources, previous)
+        let previousIDs = Set(previous.map(\.id))
+        let current = ModelCatalog.localStreamingSources
+        XCTAssertEqual(current.filter { previousIDs.contains($0.id) }, previous)
+        // The only additions are the natively qualified multilingual Nemotron 3.5 exports.
+        XCTAssertEqual(current.filter { !previousIDs.contains($0.id) }.map(\.modelName), [
+            "sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-1120ms-int8-2026-06-11",
+            "sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11"
+        ])
     }
 
     func testPostProcessingCatalogueMatchesThePreviousMacOSListFieldForField() throws {

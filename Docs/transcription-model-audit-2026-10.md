@@ -7,7 +7,8 @@ or request protocol. `SpeakCore.ModelCatalog` remains the canonical catalogue.
 Existing defaults and custom identifiers are preserved.
 
 > **November 2026 follow-up:** [speech model upgrades](speech-model-upgrades-2026-11.md)
-> adds the dated OpenAI/Voxtral 2 retirement schedule, local multilingual
+> adds the dated OpenAI/Voxtral 2 retirement schedule, opt-in OpenAI Realtime
+> speech voices, local multilingual
 > Nemotron 3.5 and the Distil-Whisper v3.5 export blocker. Rows below are the
 > October snapshot.
 

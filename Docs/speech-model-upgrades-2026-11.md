@@ -8,40 +8,66 @@ below were rechecked against first-party pages on 2 November 2026.
 `Sources/SpeakCore/ModelRetirements.swift` is the one schedule shared by every
 platform. Until a model's shutdown day (UTC) it stays selectable and its picker
 description begins with "Retiring <date>: …". From that day the catalogue hides
-it and the batch/live normalisers move saved selections to the successor, so a
-build that is never updated still stops calling a dead model. Custom and
-OpenRouter identifiers are never touched. Permanent migrations stay in
-`batchTranscriptionSuccessors`/`liveTranscriptionSuccessors`; the two sets are
-disjoint and each successor is a current entry of the same mode (tested in
-`ModelRetirementTests`).
+it. What happens to a saved selection depends on whether a verified equivalent
+exists; a matching date alone is not compatibility:
 
-| Saved model | Shuts down | Moves to | Notes |
+- **Automatic:** only when the successor accepts the same inputs and returns the
+  same output shape. The batch/live normalisers move the saved ID on the day.
+- **Explicit choice:** otherwise the saved ID is kept, as the record of what the
+  user asked for, and every request fails before reaching the provider with
+  `ModelRetiredError`: "<model> was retired by its provider on <day>. Choose
+  another model in Settings: …". Nothing silently switches model or drops a
+  feature. The guard runs in the shared OpenAI and Mistral batch clients, the
+  shared Voxtral live client and the iOS batch client.
+
+Custom and OpenRouter identifiers are never touched. Permanent migrations stay
+in `batchTranscriptionSuccessors`/`liveTranscriptionSuccessors`; the sets are
+disjoint and each automatic successor is a current entry of the same mode
+(tested in `ModelRetirementTests`).
+
+| Saved model | Shuts down | On that day | Why |
 | --- | --- | --- | --- |
-| `openai/whisper-1`, `openai/gpt-4o-transcribe` | 2027-02-26 | GPT Transcribe | $0.0045/min |
-| `openai/gpt-4o-mini-transcribe` | 2027-02-26 | GPT Transcribe | Up from $0.003/min |
-| `openai/gpt-4o-transcribe-diarize` | 2027-02-26 | GPT Transcribe | **Loses speaker labels**; notice suggests Scribe v2, Soniox or Gemini 3.5 Transcribe |
-| `openai/gpt-4o(-mini)-transcribe-streaming` | 2027-02-26 | GPT Live Transcribe | $0.017/min |
-| `mistral/voxtral-mini-latest` (Voxtral 2) | 2027-04-30 | Voxtral Mini Transcribe 3 | $0.0035/min, public preview |
-| Voxtral Realtime 2602 | 2027-04-30 | Voxtral Realtime 3 | $0.008/min (up from $0.006), public preview |
-| OpenAI `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts` | 2027-01-06 | none | See blocker below |
-
-Selections move on the provider's retirement date rather than now because the
-deprecated models still work, OpenAI's tiers are cheaper today, and both
-Voxtral 3 successors are previews. Voxtral 2 and 3 use the same batch client
-(`language`, `context_bias`); the app never requested Voxtral 2 diarisation,
-so nothing is lost. Live language detection stays automatic.
+| `openai/gpt-4o-transcribe`, `openai/gpt-4o-mini-transcribe` | 2027-02-26 | Moves to GPT Transcribe | Same text output; $0.0045/min (Mini was $0.003) |
+| `openai/gpt-4o(-mini)-transcribe-streaming` | 2027-02-26 | Moves to GPT Live Transcribe | Same live deltas; $0.017/min |
+| `openai/whisper-1` | 2027-02-26 | Kept; error until user chooses (GPT Transcribe recommended) | GPT Transcribe has no `verbose_json` segment timestamps |
+| `openai/gpt-4o-transcribe-diarize` | 2027-02-26 | Kept; error until user chooses | OpenAI has no speaker-labelling successor; error points to Scribe v2, Soniox or Gemini 3.5 Transcribe |
+| `mistral/voxtral-mini-latest` (Voxtral 2) | 2027-04-30 | Kept; error until user chooses (Mini Transcribe 3 recommended) | Successor is a public preview |
+| Voxtral Realtime 2602 | 2027-04-30 | Kept; error until user chooses (Realtime 3 recommended) | Preview; $0.008/min, up from $0.006 |
+| OpenAI `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts` | 2027-01-06 | Kept; user chooses (GPT Realtime 2.1 mini recommended) | Different API and voices; see below |
 
 GPT Transcribe and GPT Live Transcribe now have per-minute estimates from their
 model pages. The app does not use `/v1/audio/translations`, and
-`gpt-realtime-whisper` is not retiring.
+`gpt-realtime-whisper` is not retiring. Voxtral 2 and 3 share a batch client
+(`language`, `context_bias`), so the preview is a one-click choice, not a
+code migration.
 
-**OpenAI TTS blocker:** OpenAI recommends `gpt-realtime-2.1-mini`, which is a
-Realtime-session model and is not accepted by `/v1/audio/speech`. Substituting
-the string would break playback, and a Realtime speech path is a new transport
-outside the file playback architecture. The Mac voice settings and the desktop
-voice list label the three models with the shutdown date; on that day users
-must choose another voice provider. A same-API successor, or a deliberate
-Realtime speech design, is follow-up work.
+## OpenAI Realtime speech voices (Mac, Windows, Linux)
+
+OpenAI's recommended successor, `gpt-realtime-2.1-mini`, is not accepted by
+`/v1/audio/speech`. The new shared `OpenAIRealtimeSpeechSynthesizer`
+(`Sources/SpeakCore/OpenAIRealtimeSpeech.swift`) speaks through a Realtime
+WebSocket instead and returns 24 kHz PCM16, which each host wraps as WAV, so
+file playback is unchanged.
+
+- **Opt-in voices**, not a fourth quality tier: saved tiers map to the retiring
+  models, so the ten Realtime voices (`alloy`, `ash`, `ballad`, `coral`, `echo`,
+  `sage`, `shimmer`, `verse`, `marin`, `cedar`) appear as separate
+  `openai/realtime/<voice>` entries labelled "GPT Realtime 2.1 mini". They reuse
+  the OpenAI key. `fable`, `nova`, `onyx` have no Realtime equivalent, so saved
+  speech-API voices are never remapped.
+- **Reading, not replying:** each ≤1,000-character chunk is an out-of-band
+  response (`conversation: "none"`) with strict read-aloud instructions. The
+  audio transcript is compared word by word with the input; below 85% match the
+  chunk is rejected (`notAReading`) instead of played. Incomplete, failed or
+  cancelled responses are errors, never truncated audio.
+- **Limits:** speed 0.25–1.5 (outside that is an error, not clamped); 120 s
+  deadline; audio is played after the whole text is synthesised, not streamed.
+- **Cost:** token-based ($20 per million audio output tokens, $0.6 text input),
+  computed from each `response.done` usage, so there is no per-character rate.
+- **Evidence:** protocol, chunking, guard, error and timeout paths are tested
+  against a scripted socket (`OpenAIRealtimeSpeechTests`). **No live call was
+  made** (no authorised credential), so verbatim fidelity, the 85% threshold,
+  latency, real cost per character and voice quality are not yet accepted.
 
 Sources: [OpenAI deprecations](https://developers.openai.com/api/docs/deprecations),
 [GPT Transcribe](https://developers.openai.com/api/docs/models/gpt-transcribe),

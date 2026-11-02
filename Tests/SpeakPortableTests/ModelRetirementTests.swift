@@ -97,8 +97,13 @@ final class ModelRetirementTests: XCTestCase {
             _ = try await openAI.transcribeFile(at: audio, apiKey: "k", model: "openai/whisper-1", language: nil)
             XCTFail("Expected ModelRetiredError")
         } catch { XCTAssertTrue(error is ModelRetiredError, "\(error)") }
-        let mistral = MistralBatchClient(
-            multipartStaging: .posixShared, keywords: [], now: { after })
+        let neverStaged = SharedMultipartUploadStaging(
+            directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
+            securityPolicy: .init(
+                prepareDirectory: { _, _ in XCTFail("Retired model reached upload staging") },
+                createFile: { _, _ in XCTFail("Retired model reached upload staging"); return false }
+            ))
+        let mistral = MistralBatchClient(multipartStaging: neverStaged, keywords: [], now: { after })
         do {
             _ = try await mistral.transcribeFile(
                 at: audio, apiKey: "k", model: "mistral/voxtral-mini-latest", language: nil)

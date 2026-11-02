@@ -51,15 +51,16 @@ def main(argv=None):
         args.output.write_bytes(data)
         print(data.decode("utf-8"), end="")
     else:
-        packages = {}
+        packages, originals = {}, {}
         for value in args.package:
             architecture, _, path = value.partition("=")
             path = pathlib.Path(path)
             if architecture in packages or not path.is_file():
                 parser.error("--package needs distinct ARCH=FILE values naming existing files: " + value)
-            packages[architecture] = (path.name, windows_msix.sha256(path.read_bytes()))
+            originals[architecture] = path.read_bytes()
+            packages[architecture] = (path.name, windows_msix.sha256(originals[architecture]))
         result = windows_installer.verify_bundle(args.bundle, name, args.publisher, args.version, packages,
-                                                 args.signed)
+                                                 args.signed, originals)
         text = json.dumps(result, indent=2, sort_keys=True) + "\n"
         if args.evidence:
             args.evidence.write_text(text, encoding="utf-8")

@@ -127,12 +127,27 @@ def _bundle_manifest(archive):
     return names, ET.fromstring(archive.read(names[BUNDLE_MANIFEST]))
 
 
-def verify_bundle(bundle_path, name, publisher, version, packages, signed):
+def _same_entries(data, original, file_name):
+    with zipfile.ZipFile(io.BytesIO(data)) as bundled, zipfile.ZipFile(io.BytesIO(original)) as source:
+        bundled_names, source_names = sorted(bundled.namelist()), sorted(source.namelist())
+        if bundled_names != source_names:
+            raise PackageError("bundled %s entries differ: added %r, missing %r" % (
+                file_name, sorted(set(bundled_names) - set(source_names))[:5],
+                sorted(set(source_names) - set(bundled_names))[:5]))
+        changed = [entry for entry in source_names if bundled.read(entry) != source.read(entry)]
+        if changed:
+            raise PackageError("bundled %s changes %d entries, for example %r" % (file_name, len(changed), changed[:5]))
+
+
+def verify_bundle(bundle_path, name, publisher, version, packages, signed, originals=None):
     """Check a bundle holds exactly ``packages`` ({architecture: (file name, sha256)}) under one identity.
 
     Every inner package must carry the bundle's name, publisher and version and
     the declared architecture; their bytes must be the packages MakeAppx was
-    given. Signing a bundle adds only its AppxSignature.p7x.
+    given. Signing a bundle adds only its AppxSignature.p7x. If MakeAppx stored a
+    package as a different ZIP container, ``originals`` ({architecture: bytes})
+    lets the check accept it only when every entry, including the block map
+    that the bundle signature covers, is byte-for-byte the original's.
     """
     bundle_path = pathlib.Path(bundle_path)
     try:
@@ -164,15 +179,20 @@ def verify_bundle(bundle_path, name, publisher, version, packages, signed):
             inner = {}
             for architecture, (file_name, digest) in sorted(packages.items()):
                 data = archive.read(names[file_name])
-                if windows_msix.sha256(data) != digest:
-                    raise PackageError("bundle holds different bytes for " + file_name)
+                repacked = windows_msix.sha256(data) != digest
+                if repacked:
+                    original = (originals or {}).get(architecture)
+                    if original is None or windows_msix.sha256(original) != digest:
+                        raise PackageError("bundle holds different bytes for " + file_name)
+                    _same_entries(data, original, file_name)
                 with zipfile.ZipFile(io.BytesIO(data)) as package:
                     manifest = ET.fromstring(package.read(windows_msix.APPX_MANIFEST))
                 found = manifest.find("f:Identity", windows_msix.NAMESPACES)
                 if {key: found.get(key) for key in ("Name", "Publisher", "Version", "ProcessorArchitecture")} != dict(
                         expected, ProcessorArchitecture=architecture):
                     raise PackageError("inner package identity differs for " + file_name)
-                inner[architecture] = {"fileName": file_name, "sha256": digest, "bytes": len(data)}
+                inner[architecture] = {"fileName": file_name, "sha256": digest, "bytes": len(data),
+                                       "bundledSha256": windows_msix.sha256(data), "repacked": repacked}
     except (zipfile.BadZipFile, ET.ParseError, KeyError) as error:
         raise PackageError("bundle is unreadable: %s" % error)
     data = bundle_path.read_bytes()

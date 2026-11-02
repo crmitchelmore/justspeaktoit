@@ -215,6 +215,25 @@ class BundleVerificationTests(unittest.TestCase):
         with self.assertRaises(windows_msix.PackageError):
             self.verify(self.root / "broken.msixbundle")
 
+    def test_a_repacked_container_is_accepted_only_with_identical_entries(self):
+        def repack(data, change=None):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(io.BytesIO(data)) as source, zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as out:
+                for entry in source.namelist():
+                    out.writestr(entry, (change or {}).get(entry, source.read(entry)))
+            return buffer.getvalue()
+        originals = {architecture: data for architecture, (_, data) in self.packages.items()}
+        repacked = {architecture: (name, repack(data)) for architecture, (name, data) in self.packages.items()}
+        path = make_bundle(self.root / "repacked.msixbundle", repacked)
+        with self.assertRaises(windows_msix.PackageError):
+            self.verify(path)
+        result = windows_installer.verify_bundle(path, NAME, PUBLISHER, VERSION, self.expected, False, originals)
+        self.assertTrue(result["packages"]["x64"]["repacked"])
+        changed = dict(repacked, x64=(repacked["x64"][0], repack(originals["x64"], {"speak.exe": b"other"})))
+        with self.assertRaisesRegex(windows_msix.PackageError, "speak.exe"):
+            windows_installer.verify_bundle(make_bundle(self.root / "changed.msixbundle", changed), NAME, PUBLISHER,
+                                            VERSION, self.expected, False, originals)
+
 
 if __name__ == "__main__":
     unittest.main()

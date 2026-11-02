@@ -55,10 +55,12 @@ if(tool==='git') {
 } else throw Error('Unexpected publication side effect: '+args.join(' '));
 `;
  for(const tool of ['git','gh']) writeFileSync(join(bin,tool),harness,{mode:0o755});
- const run=(command='publish',hash=digest(JSON.stringify(manifest,null,2)+'\n'),actor='owner')=>spawnSync(process.execPath,[script,command,'--tag',manifest.tag,'--approved-hash',hash],{cwd:root,encoding:'utf8',env:{...process.env,PATH:bin+':'+process.env.PATH,FIXTURE_ROOT:root,GITHUB_REPOSITORY:'owner/repo',GITHUB_ACTOR:actor,GITHUB_RUN_ID:'17',RUNNER_TEMP:root}});
- const runPrepare=()=>spawnSync(process.execPath,[script,'prepare','--alpha','alpha-build-1','--ios-version','3.3.0','--scope','ios-only'],{cwd:root,encoding:'utf8',env:{...process.env,PATH:bin+':'+process.env.PATH,FIXTURE_ROOT:root,EXPECT_PREPARE:'1',GITHUB_REPOSITORY:'owner/repo',RUNNER_TEMP:root}});
+ const outputFile=join(root,'github-output');
+ const env={...process.env,PATH:bin+':'+process.env.PATH,FIXTURE_ROOT:root,GITHUB_REPOSITORY:'owner/repo',GITHUB_OUTPUT:outputFile,RUNNER_TEMP:root};
+ const run=(command='publish',hash=digest(JSON.stringify(manifest,null,2)+'\n'),actor='owner')=>spawnSync(process.execPath,[script,command,'--tag',manifest.tag,'--approved-hash',hash],{cwd:root,encoding:'utf8',env:{...env,GITHUB_ACTOR:actor,GITHUB_RUN_ID:'17'}});
+ const runPrepare=()=>spawnSync(process.execPath,[script,'prepare','--alpha','alpha-build-1','--ios-version','3.3.0','--scope','ios-only'],{cwd:root,encoding:'utf8',env:{...env,EXPECT_PREPARE:'1'}});
  const commands=()=>readFileSync(join(root,'commands.jsonl'),'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
- return {root,manifest,run,runPrepare,commands};
+ return {root,manifest,run,runPrepare,commands,output:()=>readFileSync(outputFile,'utf8')};
 }
 test('iOS-only preparation freezes scope without Mac version, receipt or desktop qualification',t=>{
  const f=fixture(t,{prepare:true}), result=f.runPrepare();
@@ -69,6 +71,7 @@ test('iOS-only preparation freezes scope without Mac version, receipt or desktop
  assert.equal(manifest.surfaces.ios.version,'3.3.0');
  assert.equal(manifest.surfaces['mac-direct'].version,'3.2.0');
  assert.equal(manifest.surfaces['mac-direct'].baseline,baseline);
+ assert.equal(f.output(),`tag=stable-candidate-2\nsource=${source}\n`);
  assert.ok(f.commands().every(c=>!c.args.some(a=>a.includes('desktop-qualification') || a.includes('mac-direct-receipt'))));
 });
 test('iOS-only preparation refuses an unverified Alpha before allocating a candidate',t=>{
@@ -79,7 +82,7 @@ test('iOS-only preparation refuses an unverified Alpha before allocating a candi
 test('iOS-only publication approves exact candidate and emits only iOS without Mac publication',t=>{
  const f=fixture(t,{newer:true}), result=f.run();
  assert.equal(result.status,0,result.stderr);
- assert.match(result.stdout,/apple=\["ios"\]/);
+ assert.equal(f.output(),'apple=["ios"]\n');
  const approval=JSON.parse(readFileSync(join(f.root,'observed-approval.json'),'utf8'));
  assert.equal(approval.manifestHash,digest(JSON.stringify(f.manifest,null,2)+'\n'));
  assert.equal(approval.actor,'owner');

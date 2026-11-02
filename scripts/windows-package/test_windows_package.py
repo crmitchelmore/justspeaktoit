@@ -173,7 +173,8 @@ class IdentityTests(unittest.TestCase):
         alias = windows_msix.load_identity()["cli"]["executionAlias"]
         native = (windows_msix.REPOSITORY / "Sources/CWindowsSupport/WindowsAutomationSettings.cpp").read_text(
             encoding="utf-8")
-        self.assertIn('L"\\\\Microsoft\\\\WindowsApps\\\\%s"' % alias, native)
+        self.assertIn('L"%s"' % alias, native)
+        self.assertIn('L"\\\\Microsoft\\\\WindowsApps\\\\"', native)
 
     def test_publisher_id_matches_windows_for_known_publishers(self):
         self.assertEqual(windows_msix.publisher_id(

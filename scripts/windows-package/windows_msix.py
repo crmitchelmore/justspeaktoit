@@ -1,4 +1,4 @@
-"""Dependency-free helpers for the unsigned Windows developer MSIX package (x64 or ARM64).
+"""Dependency-free helpers for the Windows MSIX packages (developer and beta channels, x64 or ARM64).
 
 The layout builder, the package verifier and the lifecycle test support share
 this module. It never runs Windows tooling: MakeAppx, SignTool and the
@@ -28,6 +28,16 @@ from xml.sax.saxutils import escape
 HERE = pathlib.Path(__file__).resolve().parent
 REPOSITORY = HERE.parent.parent
 IDENTITY_PATH = HERE / "package-identity.json"
+BETA_IDENTITY_PATH = HERE / "package-identity-beta.json"
+IDENTITY_PATHS = {"developer": IDENTITY_PATH, "beta": BETA_IDENTITY_PATH}
+# The reviewed execution aliases of each channel. The native automation
+# settings (WindowsAutomationSettings.cpp) choose the CLI alias by package name.
+CHANNEL_IDENTITIES = {
+    "developer": {"name": "com.justspeaktoit.windows.developer", "executionAlias": "JustSpeakToItDeveloper.exe",
+                  "cliExecutionAlias": "JustSpeakToItDeveloperCLI.exe"},
+    "beta": {"name": "com.justspeaktoit.windows", "executionAlias": "JustSpeakToIt.exe",
+             "cliExecutionAlias": "JustSpeakToItCLI.exe"},
+}
 TEMPLATE_PATH = HERE / "AppxManifest.xml.in"
 PACKAGE_MANIFEST = "package-manifest.json"
 APPX_MANIFEST = "AppxManifest.xml"
@@ -143,25 +153,36 @@ def package_identity(identity, version, publisher, architecture="x64"):
 
 
 def check_execution_identity(data):
+    expected = CHANNEL_IDENTITIES.get(data.get("channel"))
+    if expected is None:
+        raise PackageError("unknown package channel: %r" % (data.get("channel"),))
     application = data["application"]
     for key in ("executable", "executionAlias"):
         value = application.get(key)
         if not isinstance(value, str) or not EXECUTABLE_PATTERN.fullmatch(value) or FILE_NAME_FORBIDDEN.search(value):
             raise PackageError(key + " must be an .exe file name without a directory")
     if data.get("cli") != {"id": "JustSpeakToItCLI", "executable": BUNDLE.CLI,
-                           "executionAlias": "JustSpeakToItDeveloperCLI.exe"}:
-        raise PackageError("cli must declare exactly JustSpeakToItCLI, speak.exe and the developer CLI execution alias")
+                           "executionAlias": expected["cliExecutionAlias"]}:
+        raise PackageError("cli must declare exactly JustSpeakToItCLI, speak.exe and the %s CLI execution alias"
+                           % data["channel"])
     if (application["id"] != "JustSpeakToIt" or application["executable"] != BUNDLE.APPLICATION
-            or application["executionAlias"] != "JustSpeakToItDeveloper.exe"):
-        raise PackageError("the existing GUI application id, executable and developer alias must not be retargeted")
+            or application["executionAlias"] != expected["executionAlias"]):
+        raise PackageError("the existing GUI application id, executable and %s alias must not be retargeted"
+                           % data["channel"])
 
 
 def load_identity(path=IDENTITY_PATH):
+    """Load and check a channel identity: ``developer`` (package-identity.json) or ``beta``."""
     data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
-    if data.get("schemaVersion") != 1 or data.get("channel") != "developer" or data.get("releaseTrain") is not None:
-        raise PackageError("package-identity.json must describe the developer channel outside the release trains")
-    validate_name(data["identity"]["name"])
-    validate_publisher(data["identity"]["developerPublisher"])
+    channel = data.get("channel")
+    if data.get("schemaVersion") != 1 or channel not in CHANNEL_IDENTITIES or data.get("releaseTrain") is not None:
+        raise PackageError("package identity must describe the developer or beta channel outside the release trains")
+    if validate_name(data["identity"]["name"]) != CHANNEL_IDENTITIES[channel]["name"]:
+        raise PackageError("the %s channel must keep its reviewed package name" % channel)
+    if channel == "developer":
+        validate_publisher(data["identity"]["developerPublisher"])
+    elif "developerPublisher" in data["identity"]:
+        raise PackageError("the beta channel has no default publisher; supply the signing certificate subject")
     supported = sorted(target["msixArchitecture"] for target in windows_targets.TARGETS.values())
     architectures = data["identity"].get("processorArchitectures")
     if (not isinstance(architectures, list) or not architectures or len(set(architectures)) != len(architectures)
@@ -682,7 +703,11 @@ def build_layout(bundle_dir, output_dir, version, publisher=None, expected_commi
                  identity=None, source_root=REPOSITORY):
     """Write ``output_dir/layout`` (the exact package payload) and its evidence."""
     identity = identity or load_identity()
-    publisher = validate_publisher(publisher or identity["identity"]["developerPublisher"])
+    publisher = publisher or identity["identity"].get("developerPublisher")
+    if publisher is None:
+        raise PackageError("the %s channel needs --publisher: the signing certificate's exact subject"
+                           % identity["channel"])
+    publisher = validate_publisher(publisher)
     version = validate_version(version)
     bundle_dir, output_dir = pathlib.Path(bundle_dir).resolve(), pathlib.Path(output_dir).resolve()
     if bundle_dir == output_dir or bundle_dir in output_dir.parents or output_dir in bundle_dir.parents:
@@ -718,8 +743,8 @@ def build_layout(bundle_dir, output_dir, version, publisher=None, expected_commi
     identity_record = package_identity(identity, version, publisher, architecture)
     package_manifest = {
         "schemaVersion": 1,
-        "package": dict(identity_record, kind="unsigned Windows %s developer MSIX payload" % (
-                            windows_targets.target(architecture)["displayName"]), signed=False,
+        "package": dict(identity_record, kind="unsigned Windows %s %s MSIX payload" % (
+                            windows_targets.target(architecture)["displayName"], identity["channel"]), signed=False,
                         channel=identity["channel"], releaseTrain=None),
         "fileSystem": identity["fileSystem"],
         "capabilities": identity["capabilities"],

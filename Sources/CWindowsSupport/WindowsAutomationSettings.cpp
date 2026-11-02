@@ -1,6 +1,8 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsLoginItem.hpp"
 #include "WindowsSupportInternal.hpp"
+#include <appmodel.h>
+#include <cwchar>
 #include <exception>
 #include <mutex>
 #include <utility>
@@ -360,16 +362,30 @@ bool moduleDirectory(std::wstring &directory) {
     return true;
 }
 
-// The packaged CLI's execution alias, as scripts/windows-package/
-// package-identity.json declares it (cli.executionAlias).
+// The packaged CLI's execution alias for the running package's channel, as
+// scripts/windows-package/package-identity*.json declare it (cli.executionAlias).
+const wchar_t *packagedAliasName() {
+    wchar_t family[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1]{};
+    UINT32 length = PACKAGE_FAMILY_NAME_MAX_LENGTH + 1;
+    if (GetCurrentPackageFamilyName(&length, family) != ERROR_SUCCESS) return nullptr;
+    // A family name is <package name>_<publisher id>.
+    static constexpr wchar_t developer[] = L"com.justspeaktoit.windows.developer_";
+    static constexpr wchar_t beta[] = L"com.justspeaktoit.windows_";
+    if (_wcsnicmp(family, developer, wcslen(developer)) == 0) return L"JustSpeakToItDeveloperCLI.exe";
+    if (_wcsnicmp(family, beta, wcslen(beta)) == 0) return L"JustSpeakToItCLI.exe";
+    return nullptr;
+}
+
 bool packagedAlias(std::wstring &path) {
+    const wchar_t *alias = packagedAliasName();
+    if (!alias) return false;
     DWORD size = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
     if (size == 0 || size > 32768) return false;
     std::wstring root(size, L'\0');
     size = GetEnvironmentVariableW(L"LOCALAPPDATA", &root[0], size);
     if (size == 0 || size >= root.size()) return false;
     root.resize(size);
-    path = root + L"\\Microsoft\\WindowsApps\\JustSpeakToItDeveloperCLI.exe";
+    path = root + L"\\Microsoft\\WindowsApps\\" + alias;
     return true;
 }
 

@@ -132,10 +132,28 @@ class ReleaseAppleTest < Minitest::Test
       true
     end
   end
-  def delivery(client, train: 'alpha', surface: 'ios', klass: Delivery)
+  def delivery(client, train: 'alpha', surface: 'ios', klass: Delivery, scope: nil)
     notes='Frozen notes'
     manifest={'train'=>train,'source'=>'a'*40,'tag'=>'alpha-build-1','surfaces'=>{surface=>{'version'=>'3.2.0','build'=>'1000.0.1','notes'=>notes,'notesHash'=>Digest::SHA256.hexdigest(notes),'storeNotes'=>notes,'storeNotesHash'=>Digest::SHA256.hexdigest(notes)}}}
+    manifest['publicationScope']=scope unless scope.nil?
     klass.new(client:client,manifest:manifest,surface:surface)
+  end
+  def test_ios_only_candidate_submits_ios_through_existing_approval_and_review_gates
+    client=StableClient.new
+    delivery(client,train:'stable',klass:ApprovedDelivery,scope:'ios-only').submit
+    assert_equal 'WAITING_FOR_REVIEW',client.reviews.first['attributes']['state']
+  end
+  def test_ios_only_candidate_rejects_mac_surface_before_apple_access
+    client=FakeClient.new
+    error=assert_raises(RuntimeError) { delivery(client,train:'stable',surface:'mac-store',scope:'ios-only') }
+    assert_match 'outside the approved publication scope',error.message
+    assert_empty client.calls
+  end
+  def test_scope_cannot_be_unknown_or_applied_to_alpha
+    client=FakeClient.new
+    assert_raises(RuntimeError) { delivery(client,train:'stable',scope:'invalid') }
+    assert_raises(RuntimeError) { delivery(client,scope:'ios-only') }
+    assert_empty client.calls
   end
   def test_stable_resubmission_reuses_rejected_item_and_observes_resolution_before_submit
     client=StableClient.new

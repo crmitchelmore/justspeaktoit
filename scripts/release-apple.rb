@@ -71,6 +71,10 @@ module AppleRelease
       raise 'Notes changed after approval' unless Digest::SHA256.hexdigest(@item.fetch('notes')) == @item.fetch('notesHash')
       raise 'Store notes changed after approval' unless Digest::SHA256.hexdigest(@item.fetch('storeNotes')) == @item.fetch('storeNotesHash')
       @train = manifest.fetch('train')
+      if manifest.key?('publicationScope')
+        raise 'Invalid Stable publication scope' unless @train == 'stable' && %w[all ios-only].include?(manifest['publicationScope'])
+        raise 'Apple surface is outside the approved publication scope' if manifest['publicationScope'] == 'ios-only' && surface != 'ios'
+      end
       @pipeline = JSON.parse(File.read('Config/ReleasePipeline.json'))
       @app = @pipeline.fetch('apple').fetch(@train).fetch(surface)
       raise "Alpha App Store Connect record not configured for #{surface}" unless @app

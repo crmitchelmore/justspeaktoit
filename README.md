@@ -47,8 +47,10 @@ Stable is recommended for everyday use. After commissioning, Alpha will receive 
 credentials and iCloud storage. Alpha does not take over your existing hotkey.
 
 - [iOS Alpha on TestFlight](https://testflight.apple.com/join/puF4WhdS)
-- [macOS Alpha on TestFlight](https://testflight.apple.com/join/8huvWyXq)
 - Direct macOS Alpha: [Apple Silicon](https://justspeaktoit.com/alpha/download/arm64) · [Intel / universal](https://justspeaktoit.com/alpha/download/universal)
+
+The Mac App Store and macOS TestFlight builds are retired. On the Mac, use the
+direct download above or the Stable DMGs; both keep receiving updates.
 
 The Alpha train is being commissioned; these links become downloadable after
 signing, Apple processing and beta review finish. Alpha uses its own update feed

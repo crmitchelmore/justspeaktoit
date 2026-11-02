@@ -202,5 +202,12 @@ credential or API access.
 
 ## Regression cover
 
+Stable candidate 3 archived successfully on 30 October 2026 but stopped before
+upload with `Extension SpeakReleaseTrain mismatch`. The widget's source plist
+omitted the Stable train; Alpha generation supplied its own value and hid the
+gap. Keep the explicit Stable default in the widget plist and the actual-plist
+archive regression in `scripts/tests/release-train-archive.test.mjs`. Preserve
+the archive identity check; a successful archive alone is not upload readiness.
+
 `Tests/SpeakCoreTests/IOSAppStoreComplianceTests.swift` asserts each of the
 above that lives in the repo. It runs in the macOS test job.

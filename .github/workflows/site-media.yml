@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 50
     env:
       CAPTURE: ${{ github.workspace }}/.artifacts/site-media
+      # The sandboxed UI test runner can write only under /tmp.
+      SHOTS: /tmp/jsti-site-media
     steps:
       - uses: actions/checkout@v7.0.1
         timeout-minutes: 2
@@ -51,6 +53,9 @@ jobs:
         run: |
           mkdir -p "$CAPTURE"
           swift scripts/site-media/select-display-mode.swift | tee "$CAPTURE/display-modes.txt"
+          defaults write com.apple.dock autohide -bool true
+          killall Dock || true
+          sleep 3
           system_profiler SPDisplaysDataType | tee -a "$CAPTURE/display-modes.txt"
 
       - name: Start screen recording
@@ -66,7 +71,8 @@ jobs:
         timeout-minutes: 10
         run: |
           xctestrun=$(find "$RUNNER_TEMP/DerivedData/Build/Products" -name '*.xctestrun' | head -1)
-          TEST_RUNNER_SITE_MEDIA_OUTPUT="$CAPTURE" xcodebuild test-without-building -xctestrun "$xctestrun" \
+          mkdir -p "$SHOTS"
+          TEST_RUNNER_SITE_MEDIA_OUTPUT="$SHOTS" xcodebuild test-without-building -xctestrun "$xctestrun" \
             -destination platform=macOS -only-testing:SpeakAppUITests/SiteMediaCaptureUITests \
             -resultBundlePath "$CAPTURE/SiteMedia.xcresult"
 
@@ -79,6 +85,7 @@ jobs:
             kill -INT "$pid" || true
             for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
           fi
+          cp -R "$SHOTS"/. "$CAPTURE"/ || true
           ls -la "$CAPTURE"
 
       - name: Render demo video

@@ -4,6 +4,7 @@ import XCTest
 /// Captures website media from the real Debug app with fictional History and the
 /// batch fixture (synthetic audio, fixed transcript). Skipped unless the
 /// site-media workflow passes TEST_RUNNER_SITE_MEDIA_OUTPUT; not a qualification gate.
+/// The sandboxed UI runner writes under /tmp; the workflow collects that directory.
 final class SiteMediaCaptureUITests: XCTestCase {
     private let fixtureBundleID = "com.justspeaktoit.core-journey-fixture"
     private let transcript = "Remind me to send the revised launch notes to the team before Friday."
@@ -16,6 +17,7 @@ final class SiteMediaCaptureUITests: XCTestCase {
         guard let path = ProcessInfo.processInfo.environment["SITE_MEDIA_OUTPUT"], !path.isEmpty else {
             throw XCTSkip("Site media capture runs only from the site-media workflow")
         }
+        guard path.hasPrefix("/tmp/") else { throw XCTSkip("SITE_MEDIA_OUTPUT must be under /tmp") }
         output = URL(fileURLWithPath: path, isDirectory: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
     }
@@ -34,7 +36,7 @@ final class SiteMediaCaptureUITests: XCTestCase {
         app.launchEnvironment["SPEAK_CORE_JOURNEY_SITE_MEDIA"] = "1"
         app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
         addTeardownBlock {
-            try? self.writeMarks()
+            XCTAssertNoThrow(try self.writeMarks())
             if fixture.state != .notRunning { fixture.terminate() }
             if app.state != .notRunning { app.terminate() }
             UserDefaults.standard.removePersistentDomain(forName: suiteName)
@@ -108,7 +110,7 @@ final class SiteMediaCaptureUITests: XCTestCase {
     }
 
     private func save(_ screenshot: XCUIScreenshot, name: String) {
-        try? screenshot.pngRepresentation.write(to: output.appendingPathComponent("\(name).png"))
+        XCTAssertNoThrow(try screenshot.pngRepresentation.write(to: output.appendingPathComponent("\(name).png")))
         let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
         attachment.lifetime = .keepAlways

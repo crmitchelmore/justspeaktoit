@@ -10,8 +10,11 @@ for mode in modes {
     print("mode \(mode.width)x\(mode.height) pixels \(mode.pixelWidth)x\(mode.pixelHeight)")
 }
 let hiDPI = modes.filter { $0.pixelWidth >= $0.width * 2 && $0.width >= 1024 && $0.width <= 1600 }
-guard let best = hiDPI.max(by: { $0.width < $1.width }) else {
-    print("No HiDPI mode; keeping \(CGDisplayPixelsWide(display))x\(CGDisplayPixelsHigh(display))")
+// Hosted virtual displays may offer only 1x modes: then take 1600x900 so the
+// default 1080x720 window and the fixture editor both fit without cropping.
+guard let best = hiDPI.max(by: { $0.width < $1.width })
+    ?? modes.first(where: { $0.width == 1600 && $0.height == 900 }) else {
+    print("No preferred mode; keeping \(CGDisplayPixelsWide(display))x\(CGDisplayPixelsHigh(display))")
     exit(0)
 }
 var config: CGDisplayConfigRef?

@@ -13,6 +13,7 @@ final class CoreJourneyTargetApp: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installEditMenu()
         let field = NSTextView(frame: NSRect(x: 24, y: 48, width: 592, height: 288))
         field.isEditable = true
         field.isRichText = false
@@ -46,5 +47,20 @@ final class CoreJourneyTargetApp: NSObject, NSApplicationDelegate {
         window.makeFirstResponder(field)
         NSApp.activate(ignoringOtherApps: true)
         self.window = window
+    }
+
+    /// Without a main menu AppKit has nowhere to route Command-V, so a paste
+    /// keystroke would never reach the text view the way it does in real editors.
+    private func installEditMenu() {
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        editItem.submenu = edit
+        let main = NSMenu()
+        main.addItem(NSMenuItem(title: "Core Journey Target", action: nil, keyEquivalent: ""))
+        main.addItem(editItem)
+        NSApplication.shared.mainMenu = main
     }
 }

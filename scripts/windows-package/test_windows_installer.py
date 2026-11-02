@@ -137,11 +137,20 @@ class AppInstallerTests(unittest.TestCase):
 
 def make_package(architecture, publisher=PUBLISHER, version=VERSION):
     identity = windows_msix.load_identity(windows_msix.BETA_IDENTITY_PATH)
+    files = {windows_msix.APPX_MANIFEST: windows_msix.render_manifest(identity, version, publisher,
+                                                                     architecture=architecture),
+             "speak.exe": b"payload " + architecture.encode()}
+    blockmap = '<BlockMap xmlns="%s" HashMethod="%s">%s</BlockMap>' % (
+        windows_msix.BLOCKMAP_NAMESPACE, windows_msix.SHA256_METHOD, "".join(
+            '<File Name="%s" Size="%d">%s</File>' % (name, len(data), "".join(
+                '<Block Hash="%s"/>' % value for value in windows_msix.block_hashes(data)))
+            for name, data in sorted(files.items())))
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr(windows_msix.APPX_MANIFEST,
-                         windows_msix.render_manifest(identity, version, publisher, architecture=architecture))
-        archive.writestr("speak.exe", b"payload " + architecture.encode())
+        for name, data in files.items():
+            archive.writestr(name, data)
+        archive.writestr(windows_msix.BLOCKMAP_PART, blockmap)
+        archive.writestr(windows_msix.CONTENT_TYPES_PART, "<Types></Types>")
     return buffer.getvalue()
 
 
@@ -233,6 +242,39 @@ class BundleVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(windows_msix.PackageError, "speak.exe"):
             windows_installer.verify_bundle(make_bundle(self.root / "changed.msixbundle", changed), NAME, PUBLISHER,
                                             VERSION, self.expected, False, originals)
+
+    def test_signing_the_bundle_may_sign_inner_packages_without_changing_their_payload(self):
+        def sign(data, extra=None, blockmap=None):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(io.BytesIO(data)) as source, zipfile.ZipFile(buffer, "w") as out:
+                for entry in source.namelist():
+                    content = source.read(entry)
+                    if entry == windows_msix.BLOCKMAP_PART:
+                        content = blockmap if blockmap is not None else content.replace(
+                            b"</BlockMap>", b'<File Name="AppxMetadata\\CodeIntegrity.cat" Size="3"/></BlockMap>')
+                    if entry == windows_msix.CONTENT_TYPES_PART:
+                        content = content.replace(b"</Types>", b'<Default Extension="p7x" ContentType="x"/></Types>')
+                    out.writestr(entry, content)
+                out.writestr(windows_msix.SIGNATURE_PART, b"PKCX")
+                out.writestr(windows_msix.CODE_INTEGRITY_PART, b"cat")
+                for entry, content in (extra or {}).items():
+                    out.writestr(entry, content)
+            return buffer.getvalue()
+        originals = {architecture: data for architecture, (_, data) in self.packages.items()}
+        signed = {architecture: (name, sign(data)) for architecture, (name, data) in self.packages.items()}
+        path = make_bundle(self.root / "signed.msixbundle", signed, signed=True)
+        result = windows_installer.verify_bundle(path, NAME, PUBLISHER, VERSION, self.expected, True, originals)
+        self.assertTrue(result["packages"]["arm64"]["repacked"])
+        with self.assertRaises(windows_msix.PackageError):
+            windows_installer.verify_bundle(make_bundle(self.root / "unsigned-inner.msixbundle", signed), NAME,
+                                            PUBLISHER, VERSION, self.expected, False, originals)
+        for label, inner in (("extra entry", sign(originals["x64"], {"evil.dll": b"x"})),
+                             ("rewritten block map", sign(originals["x64"], blockmap=b'<BlockMap xmlns="%s" HashMethod="x"/>'
+                                                          % windows_msix.BLOCKMAP_NAMESPACE.encode()))):
+            tampered = dict(signed, x64=(signed["x64"][0], inner))
+            with self.assertRaises(windows_msix.PackageError, msg=label):
+                windows_installer.verify_bundle(make_bundle(self.root / (label + ".msixbundle"), tampered, signed=True),
+                                                NAME, PUBLISHER, VERSION, self.expected, True, originals)
 
 
 if __name__ == "__main__":

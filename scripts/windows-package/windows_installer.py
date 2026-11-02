@@ -127,16 +127,28 @@ def _bundle_manifest(archive):
     return names, ET.fromstring(archive.read(names[BUNDLE_MANIFEST]))
 
 
-def _same_entries(data, original, file_name):
+def _same_entries(data, original, file_name, signed):
+    """Check a bundled package is ``original`` apart from what SignTool adds when it signs the bundle.
+
+    Signing a bundle also signs each inner package: that adds AppxSignature.p7x
+    and, for packages with executables, AppxMetadata/CodeIntegrity.cat, lists the
+    catalogue in the block map and registers both content types. Every other
+    entry, and every payload hash in the block map, must be unchanged.
+    """
+    signing = {windows_msix.SIGNATURE_PART, windows_msix.CODE_INTEGRITY_PART} if signed else set()
+    rewritten = {windows_msix.BLOCKMAP_PART, windows_msix.CONTENT_TYPES_PART} if signed else set()
     with zipfile.ZipFile(io.BytesIO(data)) as bundled, zipfile.ZipFile(io.BytesIO(original)) as source:
-        bundled_names, source_names = sorted(bundled.namelist()), sorted(source.namelist())
-        if bundled_names != source_names:
+        bundled_names, source_names = set(bundled.namelist()), set(source.namelist())
+        added, missing = bundled_names - source_names, source_names - bundled_names
+        if missing or not added <= signing or (signed and windows_msix.SIGNATURE_PART not in added):
             raise PackageError("bundled %s entries differ: added %r, missing %r" % (
-                file_name, sorted(set(bundled_names) - set(source_names))[:5],
-                sorted(set(source_names) - set(bundled_names))[:5]))
-        changed = [entry for entry in source_names if bundled.read(entry) != source.read(entry)]
+                file_name, sorted(added)[:5], sorted(missing)[:5]))
+        changed = sorted(entry for entry in source_names - rewritten if bundled.read(entry) != source.read(entry))
         if changed:
             raise PackageError("bundled %s changes %d entries, for example %r" % (file_name, len(changed), changed[:5]))
+        if signed and windows_msix._blockmap_entries(source.read(windows_msix.BLOCKMAP_PART), set()) != \
+                windows_msix._blockmap_entries(bundled.read(windows_msix.BLOCKMAP_PART), {windows_msix.CODE_INTEGRITY_PART}):
+            raise PackageError("signing changed the block map of " + file_name)
 
 
 def verify_bundle(bundle_path, name, publisher, version, packages, signed, originals=None):
@@ -184,7 +196,7 @@ def verify_bundle(bundle_path, name, publisher, version, packages, signed, origi
                     original = (originals or {}).get(architecture)
                     if original is None or windows_msix.sha256(original) != digest:
                         raise PackageError("bundle holds different bytes for " + file_name)
-                    _same_entries(data, original, file_name)
+                    _same_entries(data, original, file_name, signed)
                 with zipfile.ZipFile(io.BytesIO(data)) as package:
                     manifest = ET.fromstring(package.read(windows_msix.APPX_MANIFEST))
                 found = manifest.find("f:Identity", windows_msix.NAMESPACES)

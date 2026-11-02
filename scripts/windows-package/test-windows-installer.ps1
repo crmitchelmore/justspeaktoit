@@ -153,7 +153,8 @@ function Invoke-Deployment([string] $Label, [scriptblock] $Operation) {
             } catch { $record.log = @('Get-AppxLog failed: ' + $_.Exception.Message) }
         }
     }
-    foreach ($package in Get-Registrations) {
+    $registrations = Get-Registrations
+    foreach ($package in $registrations) {
         if (-not $script:owned.Contains($package.PackageFullName)) { $script:owned.Add($package.PackageFullName) }
     }
     $record.seconds = [math]::Round($watch.Elapsed.TotalSeconds, 2)
@@ -255,13 +256,14 @@ try {
     if (-not $failures.Contains($_.Exception.Message)) { $failures.Add($_.Exception.Message) }
 } finally {
     $removed = New-Object System.Collections.ArrayList
-    foreach ($package in Get-Registrations) {
+    $registrations = Get-Registrations
+    foreach ($package in $registrations) {
         if ($owned.Contains($package.PackageFullName)) {
             try { Remove-AppxPackage -Package $package.PackageFullName; [void] $removed.Add($package.PackageFullName) }
             catch { $failures.Add("Cleanup could not remove $($package.PackageFullName): $($_.Exception.Message)") }
         }
     }
-    $report.cleanup = [ordered]@{ removed = $removed; remaining = @(Get-Registrations | ForEach-Object { $_.PackageFullName }) }
+    $report.cleanup = [ordered]@{ removed = $removed; remaining = @((Get-Registrations) | ForEach-Object { $_.PackageFullName }) }
     $report.failures = @($failures)
     Write-JstiJson (Join-Path $evidenceDirectory 'installer-lifecycle.json') $report
 }

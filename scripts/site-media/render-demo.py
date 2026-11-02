@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Cut the raw screen recording into the website demo using the UI test's scene marks.
 
-Only scheduling time is removed (launch, the gesture driver's 15 s stop window);
+Only scheduling time is removed (launch, the wait before the gesture driver starts,
+the driver's 15 s stop window);
 every kept frame is the unedited screen. Writes MP4, WebM, poster and WebVTT captions.
 """
 import json
@@ -21,7 +22,8 @@ SCENES = [
     ("show-mac-dashboard", 0.3, "show-mac-history", 0.0,
      "Dashboard in the real macOS app, filled with fictional sample History"),
     ("show-mac-history", 0.0, "tour-finished", 0.0, "History keeps every dictation, searchable"),
-    ("editor-ready", 0.0, "recording", 0.3, "Double-tap the shortcut in any app to start dictating"),
+    ("recording", -4.0, "recording", 0.3,
+     "In another app, a double-tap of the shortcut starts dictation (sent by the test driver)"),
     ("recording", 0.3, "recording-captured", 1.2,
      "Recording. This demo plays a synthetic audio clip, not a live microphone"),
     ("completed", -1.0, "paste", 0.0,

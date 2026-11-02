@@ -446,6 +446,19 @@ em { font-style: italic; }
 
 .capture img { width: 100%; height: auto; }
 
+.capture picture { display: block; }
+
+.demo { margin-top: 2.5rem; }
+
+.demo video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: calc(var(--radius-lg) - 8px);
+  background: #000;
+}
+
 .capture figcaption {
   display: flex;
   flex-wrap: wrap;

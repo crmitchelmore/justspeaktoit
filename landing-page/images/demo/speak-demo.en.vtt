@@ -1,0 +1,22 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:06.810
+Dashboard in the real macOS app, filled with fictional sample History
+
+00:00:06.810 --> 00:00:12.197
+History keeps every dictation, searchable
+
+00:00:12.197 --> 00:00:16.497
+In another app, a double-tap of the shortcut starts dictation (sent by the test driver)
+
+00:00:16.497 --> 00:00:19.716
+Recording. This demo plays a synthetic audio clip, not a live microphone
+
+00:00:19.716 --> 00:00:23.245
+Stop with one tap. A test fixture returns fixed text instead of a speech provider
+
+00:00:23.245 --> 00:00:28.507
+Clipboard output mode: Speak copies the text, then ⌘V pastes it
+
+00:00:28.507 --> 00:00:36.304
+The new dictation is saved to History

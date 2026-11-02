@@ -833,6 +833,13 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
           }
 
+          if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .openai,
+            let retirement = OpenAITTSModel.standard.retirement {
+            Text("OpenAI speech models: \(retirement.notice)")
+              .font(.caption)
+              .foregroundStyle(.orange)
+          }
+
           if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .soniox {
             Picker("Soniox Region", selection: settingsBinding(\AppSettings.sonioxTTSRegion)) {
               ForEach(SonioxTTSRegion.allCases) { region in

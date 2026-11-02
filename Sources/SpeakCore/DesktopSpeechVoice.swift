@@ -80,7 +80,9 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .gemini(let voice, let model): "\(voice.displayName) — \(model.displayName)"
         case .groq(let voice): "\(voice.displayName) — Groq"
         case .speechmatics(let voice): "\(voice.displayName) — Speechmatics English"
-        case .openai(let model, let voice): "\(voice.name) — OpenAI \(model.displayName)"
+        case .openai(let model, let voice):
+            "\(voice.name) — OpenAI \(model.displayName)"
+                + (model.retirement.map { " (retiring \($0.shutdownDay))" } ?? "")
         case .elevenlabs(let model, let voice): "\(voice.displayName) — \(model.displayName)"
         }
     }

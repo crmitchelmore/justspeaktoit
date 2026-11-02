@@ -8,7 +8,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     public static let customOptionID = "__model_custom__"
 
-    public static let liveTranscription: [Option] =
+    /// Announced shutdowns are labelled and shut-down entries hidden by
+    /// `ModelRetirements`; the normalisers move saved selections at the same time.
+    public static let liveTranscription: [Option] = ModelRetirements.current(
         appleLiveTranscriptionOptions + [
         Option(
             id: "apple/local/Dictation", displayName: "Apple Dictation",
@@ -142,9 +144,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "OpenAI API key.",
             estimatedLatencyMs: 280, latencyTier: .fast)
     ] + AzureTranscriptionModels.liveOptions + AlibabaSpeechModels.liveOptions
-        + [FileSpeechProvider.reson8LiveOption]
+        + [FileSpeechProvider.reson8LiveOption])
 
-    public static let batchTranscription: [Option] =
+    public static let batchTranscription: [Option] = ModelRetirements.current(
         appleBatchTranscriptionOptions + AlibabaSpeechModels.batchOptions + [
         Option(
             id: BatchTranscriptionModelIdentifiers.cartesiaInkWhisper, displayName: "Cartesia Ink Whisper (Batch)",
@@ -335,7 +337,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Scribe v2 fine-tuned for clinical audio: fewer errors on medical terminology, "
                 + "with the same languages, pricing and word-level timestamps as Scribe v2.",
             estimatedLatencyMs: 800, latencyTier: .fast)
-    ] + AzureTranscriptionModels.batchOptions + FileSpeechProvider.batchOptions
+    ] + AzureTranscriptionModels.batchOptions + FileSpeechProvider.batchOptions)
 
     /// Current ElevenLabs batch speech-to-text model. ElevenLabs removed
     /// `scribe_v1` (and its experimental variant) on 2026-07-09.
@@ -470,9 +472,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     /// Keeps catalogue defaults and retired-model migration identical on Mac and iPhone.
     /// Unknown identifiers remain valid because the Mac supports custom OpenRouter batch models.
-    public static func normalizedBatchTranscriptionModel(_ identifier: String?) -> String {
+    public static func normalizedBatchTranscriptionModel(_ identifier: String?, at date: Date = Date()) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if let successor = batchTranscriptionSuccessors[trimmed] {
+        if let successor = batchTranscriptionSuccessors[trimmed]
+            ?? ModelRetirements.successor(for: trimmed, mode: .batch, at: date) {
             return successor
         }
         if trimmed == AppleLocalModels.speechTranscriberModelID,
@@ -768,12 +771,14 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     /// Apple speech follows this device's preferred engine and retired streams
     /// follow their successor. Current and custom remote identifiers are kept.
-    public static func normalizedLiveTranscriptionModel(_ identifier: String?) -> String {
+    public static func normalizedLiveTranscriptionModel(_ identifier: String?, at date: Date = Date()) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if AppleLocalModels.isAppleSpeechModel(trimmed) || trimmed.isEmpty {
             return AppleLocalModels.preferredSpeechModelID
         }
-        return liveTranscriptionSuccessors[trimmed] ?? trimmed
+        return liveTranscriptionSuccessors[trimmed]
+            ?? ModelRetirements.successor(for: trimmed, mode: .live, at: date)
+            ?? trimmed
     }
 
     public static let defaultPostProcessingModel = "openai/gpt-5-mini"

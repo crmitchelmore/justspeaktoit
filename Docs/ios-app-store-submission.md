@@ -151,7 +151,8 @@ the current provider list. Replace them with something like this:
 >
 > Transcription without any API key: Apple Speech runs on device and is the
 > default. Tap Transcribe to start and stop a recording. Cloud providers are
-> optional and need the reviewer's own key, entered in Settings > API Keys.
+> optional. Dedicated review credentials and the matching model selection steps
+> are supplied separately in private App Review information.
 >
 > Permissions and why each one is requested:
 > - Microphone and Speech Recognition: recording and transcribing dictation.
@@ -172,8 +173,9 @@ the current provider list. Replace them with something like this:
 > Island. Start Recording, Stop Recording, Toggle Recording and transcript-copy
 > actions are registered in Shortcuts, which is how the Action Button flow works.
 
-If cloud transcription should be reviewable, attach a provider key in the review
-notes rather than leaving the reviewer on Apple Speech alone.
+Apple explicitly requested API keys in the original rejection. Supply dedicated,
+limited review credentials in private App Review information, with tested setup
+steps; never commit those credentials.
 
 ### Privacy policy URL
 
@@ -189,10 +191,21 @@ These are historical observations. Fresh App Store Connect readback is required
 to establish the current versions, review state, TestFlight build and public
 availability before preparing a submission.
 
-That audit could not recover the rejection reason through the API or a retained
-rejection email. Read Resolution Center in App Store Connect before preparing a
-new submission, because the original reason may still apply and the repository
-work in this document does not establish that it was resolved.
+Resolution Center was read on 2 November 2026. Apple's 30 July review of
+**2.23.5 (181)** reported these unresolved issues:
+
+| Guideline | Review finding | Required verification before resubmission |
+| --- | --- | --- |
+| 4 — Design | Transcribe button absent on iPad Pro 11-inch (M4), iPadOS 26.6 | Verify the recording control on iPad in portrait and landscape, including a fresh install. |
+| 2.1(a) — Completeness | Microphone tap displayed an error on iPad and iPhone 17 Pro Max | Complete fresh-install permission and real microphone transcription on supported hardware. Simulator transcript fixtures do not prove this. |
+| 1.5 — Developer Information | GitHub issues URL did not provide adequate support information | Deploy and verify `https://justspeaktoit.com/support`, then update the listing's Support URL. |
+| 2.1 — Information Needed | Apple requested API keys | Supply dedicated review credentials through private App Review information and verify the documented provider journey; do not ask reviewers to supply their own keys. |
+| 5.1.1(ii) — Privacy | Camera purpose string did not explain its use with an example | Verify the signed bundle contains the current QR-code/settings/API-key-transfer explanation. |
+
+The current source addresses the camera wording. The other rows require fresh
+runtime, deployment or App Store Connect evidence; a merged change alone does
+not close the rejection. Keep review credentials out of repository files,
+public issues and screenshots.
 
 For local release/reconciliation authentication, see the
 [1Password credential setup](alpha-stable-release-trains.md#local-apple-release-credentials-from-1password).

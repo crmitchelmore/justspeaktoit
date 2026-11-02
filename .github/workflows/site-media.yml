@@ -26,8 +26,6 @@ jobs:
     timeout-minutes: 50
     env:
       CAPTURE: ${{ github.workspace }}/.artifacts/site-media
-      # The sandboxed UI test runner can write only under /tmp.
-      SHOTS: /tmp/jsti-site-media
     steps:
       - uses: actions/checkout@v7.0.1
         timeout-minutes: 2
@@ -71,8 +69,7 @@ jobs:
         timeout-minutes: 10
         run: |
           xctestrun=$(find "$RUNNER_TEMP/DerivedData/Build/Products" -name '*.xctestrun' | head -1)
-          mkdir -p "$SHOTS"
-          TEST_RUNNER_SITE_MEDIA_OUTPUT="$SHOTS" xcodebuild test-without-building -xctestrun "$xctestrun" \
+          TEST_RUNNER_SITE_MEDIA_CAPTURE=1 xcodebuild test-without-building -xctestrun "$xctestrun" \
             -destination platform=macOS -only-testing:SpeakAppUITests/SiteMediaCaptureUITests \
             -resultBundlePath "$CAPTURE/SiteMedia.xcresult"
 
@@ -85,7 +82,15 @@ jobs:
             kill -INT "$pid" || true
             for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
           fi
-          cp -R "$SHOTS"/. "$CAPTURE"/ || true
+          ls -la "$CAPTURE"
+
+      - name: Export captures from result bundle
+        if: always()
+        timeout-minutes: 3
+        run: |
+          xcrun xcresulttool export attachments --path "$CAPTURE/SiteMedia.xcresult" \
+            --output-path "$CAPTURE/attachments"
+          python3 scripts/site-media/collect-attachments.py "$CAPTURE/attachments" "$CAPTURE"
           ls -la "$CAPTURE"
 
       - name: Render demo video

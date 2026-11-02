@@ -3,23 +3,20 @@ import XCTest
 
 /// Captures website media from the real Debug app with fictional History and the
 /// batch fixture (synthetic audio, fixed transcript). Skipped unless the
-/// site-media workflow passes TEST_RUNNER_SITE_MEDIA_OUTPUT; not a qualification gate.
-/// The sandboxed UI runner writes under /tmp; the workflow collects that directory.
+/// site-media workflow passes TEST_RUNNER_SITE_MEDIA_CAPTURE; not a qualification gate.
+/// The sandboxed UI runner cannot write files, so screenshots and scene marks are kept
+/// as named attachments that the workflow exports from the result bundle.
 final class SiteMediaCaptureUITests: XCTestCase {
     private let fixtureBundleID = "com.justspeaktoit.core-journey-fixture"
     private let transcript = "Remind me to send the revised launch notes to the team before Friday."
     private var marks: [[String: Any]] = []
-    private var output: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
         continueAfterFailure = false
-        guard let path = ProcessInfo.processInfo.environment["SITE_MEDIA_OUTPUT"], !path.isEmpty else {
+        guard ProcessInfo.processInfo.environment["SITE_MEDIA_CAPTURE"] == "1" else {
             throw XCTSkip("Site media capture runs only from the site-media workflow")
         }
-        guard path.hasPrefix("/tmp/") else { throw XCTSkip("SITE_MEDIA_OUTPUT must be under /tmp") }
-        output = URL(fileURLWithPath: path, isDirectory: true)
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
     }
 
     @MainActor
@@ -36,7 +33,7 @@ final class SiteMediaCaptureUITests: XCTestCase {
         app.launchEnvironment["SPEAK_CORE_JOURNEY_SITE_MEDIA"] = "1"
         app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
         addTeardownBlock {
-            XCTAssertNoThrow(try self.writeMarks())
+            XCTAssertNoThrow(try self.attachMarks())
             if fixture.state != .notRunning { fixture.terminate() }
             if app.state != .notRunning { app.terminate() }
             UserDefaults.standard.removePersistentDomain(forName: suiteName)
@@ -110,7 +107,6 @@ final class SiteMediaCaptureUITests: XCTestCase {
     }
 
     private func save(_ screenshot: XCUIScreenshot, name: String) {
-        XCTAssertNoThrow(try screenshot.pngRepresentation.write(to: output.appendingPathComponent("\(name).png")))
         let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
         attachment.lifetime = .keepAlways
@@ -125,8 +121,11 @@ final class SiteMediaCaptureUITests: XCTestCase {
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "hold frame")], timeout: seconds)
     }
 
-    private func writeMarks() throws {
+    private func attachMarks() throws {
         let data = try JSONSerialization.data(withJSONObject: marks, options: [.prettyPrinted])
-        try data.write(to: output.appendingPathComponent("marks.json"))
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "marks.json"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

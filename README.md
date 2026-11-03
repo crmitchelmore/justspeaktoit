@@ -47,8 +47,10 @@ Stable is recommended for everyday use. After commissioning, Alpha will receive 
 credentials and iCloud storage. Alpha does not take over your existing hotkey.
 
 - [iOS Alpha on TestFlight](https://testflight.apple.com/join/puF4WhdS)
-- [macOS Alpha on TestFlight](https://testflight.apple.com/join/8huvWyXq)
 - Direct macOS Alpha: [Apple Silicon](https://justspeaktoit.com/alpha/download/arm64) · [Intel / universal](https://justspeaktoit.com/alpha/download/universal)
+
+The Mac App Store and macOS TestFlight builds are retired. On the Mac, use the
+direct download above or the Stable DMGs; both keep receiving updates.
 
 The Alpha train is being commissioned; these links become downloadable after
 signing, Apple processing and beta review finish. Alpha uses its own update feed
@@ -140,7 +142,7 @@ Run lint/format directly with SwiftPM when needed, for example:
 
 ```bash
 swift package plugin --allow-writing-to-package-directory swiftlint --strict --target SpeakApp
-swift package plugin --allow-writing-to-package-directory swiftformat --target SpeakApp
+./scripts/swiftformat.sh Sources/SpeakApp
 ```
 
 ## Transcription Providers
@@ -151,7 +153,7 @@ Just Speak to It supports multiple live and batch transcription backends on macO
 
 - **Live**: Apple Speech (`apple/local/SFSpeechRecognizer`), Apple Dictation (`apple/local/Dictation`), local FluidAudio Parakeet Realtime EOU (`local/streaming/fluidaudio/parakeet-realtime-eou-120m`), Deepgram (`deepgram/nova-3-streaming`, `deepgram/flux-general-en-streaming`, `deepgram/flux-general-multi-streaming`), Cartesia (`cartesia/ink-2-streaming`), Google Gemini 3.5 Transcribe Live (`google/gemini-3.5-transcribe-live`, public preview), Modulate (`modulate/velma-2-stt-streaming`), AssemblyAI (`assemblyai/universal-3-5-pro-streaming`), Soniox (`soniox/stt-rt-v5-streaming`), ElevenLabs Scribe (`elevenlabs/scribe-v2-streaming`), Meta Muse Voice Transcribe (`meta/muse-voice-transcribe-1.0-streaming`), and OpenAI Realtime (`openai/gpt-realtime-whisper-streaming`, `openai/gpt-4o-mini-transcribe-streaming`, `openai/gpt-4o-transcribe-streaming`).
 - **Batch**: Meta Muse Voice Transcribe (`meta/muse-voice-transcribe-1.0`), OpenAI Whisper / GPT-4o Transcribe (`openai/whisper-1`, `openai/gpt-4o-mini-transcribe`, `openai/gpt-4o-transcribe`, `openai/gpt-4o-transcribe-diarize`), Groq Whisper (`groq/whisper-large-v3-turbo`), Soniox (`soniox/stt-async-v5`), Rev.ai (`revai/default`), Deepgram (`deepgram/nova-3`), Modulate (`modulate/velma-2-stt-batch`, `modulate/velma-2-stt-batch-english-vfast`), AssemblyAI (`assemblyai/universal-3-5-pro`, `assemblyai/universal-2`), ElevenLabs Scribe (`elevenlabs/scribe_v2`), Google Gemini 3.5 Transcribe (`google/gemini-3.5-transcribe`, public preview), and OpenRouter audio models such as `google/gemini-3.1-flash-lite` (the default), `google/gemini-2.5-flash`, and `openai/gpt-4o-audio-preview-2024-12-17`.
-- **Voice output (TTS)**: ElevenLabs, OpenAI, Azure Cognitive Services, Deepgram Aura (`Sources/SpeakCore/DeepgramTTSCatalog.swift`), Soniox TTS v2 (`tts-rt-v2`, 60+ languages; `Sources/SpeakCore/SonioxTTSCatalog.swift`), Cartesia Sonic 3.6 (macOS; `sonic-3.6` over `/tts/bytes`, `Sources/SpeakCore/CartesiaTTSCatalog.swift`), and macOS system voices.
+- **Voice output (TTS)**: ElevenLabs, OpenAI (speech API tiers, plus opt-in GPT Realtime 2.1 mini voices; `Sources/SpeakCore/OpenAIRealtimeSpeech.swift`), Azure Cognitive Services, Deepgram Aura (`Sources/SpeakCore/DeepgramTTSCatalog.swift`), Soniox TTS v2 (`tts-rt-v2`, 60+ languages; `Sources/SpeakCore/SonioxTTSCatalog.swift`), Cartesia Sonic 3.6 (macOS; `sonic-3.6` over `/tts/bytes`, `Sources/SpeakCore/CartesiaTTSCatalog.swift`), and macOS system voices.
 - API keys are stored in the Keychain. The ElevenLabs, Soniox and Cartesia keys are each reused across that provider's TTS and transcription models.
 - The Parakeet model is downloaded on demand, runs entirely on the Mac through Apache-2.0-licensed FluidAudio/Core ML, supports English, and is distributed under the NVIDIA Open Model License.
 

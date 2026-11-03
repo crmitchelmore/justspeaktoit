@@ -239,7 +239,7 @@ private final class RecordingTranscriptPasteboard: TranscriptPasteboard {
     private(set) var changeCount = 0
     private(set) var writes: [Write] = []
     private(set) var currentText: String?
-
+    var string: String? { self.currentText }
     func setItems(_ items: [[String: Any]], options: [UIPasteboard.OptionsKey: Any]) {
         self.writes.append(Write(items: items, options: options))
         guard self.acceptsWrites else { return }

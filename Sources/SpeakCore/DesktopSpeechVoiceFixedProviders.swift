@@ -9,6 +9,16 @@ extension DesktopSpeechVoice {
     }
 
     private static func openaiSelection(model: String?, identifier: String?) throws -> Self? {
+        // Checked first: realtime identifiers share the `openai/` prefix.
+        if model == OpenAIRealtimeSpeech.catalogID
+            || identifier?.hasPrefix(OpenAIRealtimeSpeech.voiceIDPrefix) == true {
+            guard model == nil || model == OpenAIRealtimeSpeech.catalogID
+                || model == OpenAITTSCatalog.providerIdentifier,
+                let identifier, let voice = OpenAIRealtimeSpeech.voiceID(fromProviderVoiceID: identifier) else {
+                throw VoiceSynthesisConfigurationError.unsupportedVoice
+            }
+            return .openaiRealtime(voice)
+        }
         guard model == OpenAITTSCatalog.providerIdentifier
             || model?.hasPrefix(OpenAITTSCatalog.voiceIDPrefix) == true
             || OpenAITTSCatalog.models.contains(where: { $0.rawValue == model })

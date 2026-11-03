@@ -4,9 +4,12 @@ import XCTest
 
 final class OpenAITTSCatalogueParityTests: XCTestCase {
     func testMacCatalogue_PreservesCanonicalIdentifiersOrderNamesAndTraits() {
-        XCTAssertEqual(VoiceCatalog.openaiVoices.map(\.id), OpenAITTSCatalog.voices.map(\.providerVoiceID))
-        XCTAssertEqual(VoiceCatalog.openaiVoices.map(\.name), OpenAITTSCatalog.voices.map(\.name))
-        for (mac, core) in zip(VoiceCatalog.openaiVoices, OpenAITTSCatalog.voices) {
+        let speechAPI = Array(VoiceCatalog.openaiVoices.prefix(OpenAITTSCatalog.voices.count))
+        XCTAssertEqual(speechAPI.map(\.id), OpenAITTSCatalog.voices.map(\.providerVoiceID))
+        XCTAssertEqual(speechAPI.map(\.name), OpenAITTSCatalog.voices.map(\.name))
+        XCTAssertEqual(Array(VoiceCatalog.openaiVoices.dropFirst(speechAPI.count).map(\.id)),
+                       OpenAIRealtimeSpeech.voices.map { OpenAIRealtimeSpeech.voiceIDPrefix + $0.id })
+        for (mac, core) in zip(speechAPI, OpenAITTSCatalog.voices) {
             XCTAssertEqual(mac.traits.map(\.rawValue), core.traits.map(\.rawValue))
             XCTAssertEqual(mac.provider, .openai)
             XCTAssertNil(mac.previewURL)

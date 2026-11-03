@@ -392,8 +392,8 @@ representation, and [Project.swift](../Project.swift) derives bundle IDs, groups
 feeds from the selected train. [ReleasePipeline.json](../Config/ReleasePipeline.json), not prose copied elsewhere,
 records commissioning state; at this base its `enabled` value is `true`.
 
-Successful main CI can allocate an immutable Alpha manifest and dispatch independent Mac direct, Mac App Store and iOS
-workers. Upload, processing, TestFlight assignment, merge success and public delivery are distinct states. Stable starts
+Successful main CI can allocate an immutable Alpha manifest and dispatch independent Mac direct and iOS
+workers (the Mac App Store surface is retired). Upload, processing, TestFlight assignment, merge success and public delivery are distinct states. Stable starts
 with an owner-selected Alpha source and `prepare-stable.yml`; `publish-stable.yml` requires the repository owner to
 supply the exact reviewed frozen-manifest SHA-256. See the [Alpha and Stable release-train guide](alpha-stable-release-trains.md).
 

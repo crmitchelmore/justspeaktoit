@@ -91,7 +91,7 @@ lint: ## Run strict SwiftLint (isolated Tooling graph) against the checked-in de
 
 .PHONY: format
 format: ## Auto-fix formatting and lint violations where possible
-	swift package plugin --allow-writing-to-package-directory swiftformat --recursive
+	./scripts/swiftformat.sh .
 	./scripts/swiftlint.sh lint --fix --format
 
 .PHONY: update-tooling

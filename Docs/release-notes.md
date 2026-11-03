@@ -95,9 +95,7 @@ same backfill locally (it needs an authenticated `gh` CLI) when refreshing it:
 node scripts/update-release-notes-catalogue.mjs --backfill --platform mac --limit 12
 ```
 
-The Mac App Store workflow backfills the same `mac-v*` history and verifies the
-archive against the explicit version, so direct and App Store builds show the
-same notes. The iOS workflow requires a `release_notes_source_tag`; automated
+The Mac App Store release surface is retired. The iOS workflow requires a `release_notes_source_tag`; automated
 paired releases pass their new `mac-v*` tag, while an iOS-only release must name
 the existing `mac-v*` or `ios-v*` tag that describes its changes. It generates
 from that tag, stores the entry on the iOS track, and verifies the archived app.

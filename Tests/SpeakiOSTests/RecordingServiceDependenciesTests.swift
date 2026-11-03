@@ -385,8 +385,7 @@ final class DependencySession: IOSRecordingSession {
         if let finish { return try await finish() }
         return TranscriptionResult(
             text: self.partialText, segments: [], confidence: nil, duration: 1,
-            modelIdentifier: "test", cost: nil, rawPayload: nil, debugInfo: nil
-        )
+            modelIdentifier: "test", cost: nil, rawPayload: nil, debugInfo: nil)
     }
     func cancel() {}
     func awaitCancellationSettled() async {}
@@ -395,6 +394,7 @@ final class DependencySession: IOSRecordingSession {
 @MainActor
 final class DependencyPasteboard: PolishPasteboard {
     var writes: [String] = []
+    var string: String? { self.writes.last }
     func write(_ text: String) { self.writes.append(text) }
 }
 #endif

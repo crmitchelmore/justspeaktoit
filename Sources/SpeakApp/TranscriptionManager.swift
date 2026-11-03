@@ -406,7 +406,8 @@ extension TranscriptionManager {
     if appSettings.transcriptionMode == .localModel {
       return appSettings.localTranscriptionModel
     }
-    return appSettings.batchTranscriptionModel
+    let saved = appSettings.batchTranscriptionModel
+    return ModelRetirements.successor(for: saved, mode: .batch) ?? saved
   }
 
   /// Whether the live route for the current mode captures through
@@ -462,7 +463,8 @@ extension TranscriptionManager {
     availableStreamingSourceIDs: @autoclosure () -> Set<String>
   ) throws -> String {
     guard transcriptionMode == .localModel, localTranscriptionMode == .streaming else {
-      return liveTranscriptionModel
+      // A running app crossing a shutdown day follows the automatic successor.
+      return ModelRetirements.successor(for: liveTranscriptionModel, mode: .live) ?? liveTranscriptionModel
     }
 
     guard localStreamingModelSource.hasPrefix("local/streaming/"),

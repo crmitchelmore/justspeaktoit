@@ -122,7 +122,7 @@ test('CI preserves the selected Xcode and validates helper changes through both 
 });
 
 test('release workers retain equivalent setup and protected order for old and new frozen sources', () => {
-  for (const name of ['release-mac', 'release-ios', 'release-appstore']) {
+  for (const name of ['release-mac', 'release-ios']) {
     assert.ok(steps(workflow(name)).some(step => step.uses === helper), `${name}: shared setup must be exercised`);
     assert.deepEqual(releaseSequence(name, true), releaseSequence(name, false), name);
     const sequence = releaseSequence(name, true);
@@ -144,7 +144,6 @@ test('release workers retain equivalent setup and protected order for old and ne
       ordered(sequence, ['Load frozen release manifest', 'Stamp immutable app metadata', 'Xcode 26.2', 'Tuist',
         'Install App Store Connect API Key', 'Reuse an already uploaded manifest build', 'Generate Xcode Project']);
       assert.equal(generation.condition, "steps.preflight.outputs.skip_upload != 'true'");
-      if (name === 'release-appstore') assert.match(workflow(name), /if: always\(\)/);
     }
   }
 });

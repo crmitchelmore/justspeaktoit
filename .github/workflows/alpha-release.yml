@@ -75,13 +75,6 @@ jobs:
     with:
       manifest: ${{ needs.allocate.outputs.tag }}
     secrets: inherit
-  mac-store:
-    needs: allocate
-    if: needs.allocate.outputs.tag != ''
-    uses: ./.github/workflows/release-appstore.yml
-    with:
-      manifest: ${{ needs.allocate.outputs.tag }}
-    secrets: inherit
   desktop-qualification:
     needs: allocate
     if: needs.allocate.outputs.tag != ''

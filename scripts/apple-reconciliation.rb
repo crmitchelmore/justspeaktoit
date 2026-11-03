@@ -7,7 +7,10 @@ require 'tempfile'
 module AppleRelease
   PENDING_APPLE_RECEIPTS = %w[processing waiting_for_beta_review_slot beta_review_pending beta_processing].freeze
   APPLE_RECEIPT_STATES = (PENDING_APPLE_RECEIPTS + %w[verified invalid beta_rejected]).freeze
-  APPLE_RECEIPT_NAMES = %w[ios-receipt.json mac-store-receipt.json].freeze
+  # The Mac App Store surface is retired; historical mac-store receipts are ignored.
+  APPLE_SURFACES = %w[ios].freeze
+  RETIRED_RECEIPT_NAMES = %w[mac-store-receipt.json].freeze
+  APPLE_RECEIPT_NAMES = APPLE_SURFACES.map { |surface| "#{surface}-receipt.json" }.freeze
   class ReconciliationInputError < StandardError; end
 
   # Only GitHub's existing persisted observations are read here. No Apple client
@@ -25,7 +28,7 @@ module AppleRelease
     def releases
       projection = '.[] | select(.tag_name == "alpha-latest" or (.tag_name | startswith("alpha-build-"))) | '
       projection += '{tag_name, assets: [.assets[] | select(.name == "alpha-pointer.json" or '
-      projection += '.name == "ios-receipt.json" or .name == "mac-store-receipt.json") | {id, name, size}]} | tojson'
+      projection += '.name == "ios-receipt.json") | {id, name, size}]} | tojson'
       raw = read(['gh', 'api', '--paginate', "repos/#{REPO}/releases?per_page=100", '--jq', projection], MAX_METADATA_BYTES)
       raw.lines.reject { |line| line.strip.empty? }.map { |line| JSON.parse(line) }
     rescue StandardError
@@ -101,7 +104,7 @@ module AppleRelease
         manifest['source'].is_a?(String) && manifest['source'].match?(/\A[0-9a-f]{40}\z/) &&
         manifest['build'].is_a?(String) && manifest['build'].match?(/\A[0-9]+\z/)
       Time.iso8601(manifest.fetch('createdAt'))
-      %w[ios mac-store].each do |surface|
+      APPLE_SURFACES.each do |surface|
         item = manifest.fetch('surfaces').fetch(surface)
         raise ReconciliationInputError unless item.is_a?(Hash) && item['build'].is_a?(String) &&
           item['build'].match?(/\A[0-9]+(?:\.[0-9]+)*\z/) && item['notes'].is_a?(String) &&
@@ -124,6 +127,7 @@ module AppleRelease
       next if tag != 'alpha-latest' && Time.iso8601(by_tag.fetch(tag).fetch('createdAt')) < now - 90 * 86_400
       assets = {}
       release.fetch('assets').each do |asset|
+        next if asset.is_a?(Hash) && RETIRED_RECEIPT_NAMES.include?(asset['name'])
         raise ReconciliationInputError unless asset.is_a?(Hash) && asset['name'].is_a?(String) &&
           (APPLE_RECEIPT_NAMES + ['alpha-pointer.json']).include?(asset['name']) && !assets.key?(asset['name'])
         assets[asset.fetch('name')] = asset

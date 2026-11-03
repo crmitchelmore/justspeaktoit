@@ -48,14 +48,18 @@ else process.exit(2);
  return {output,calls,dispatches:calls.filter(a=>a[0]==='workflow').map(a=>a.at(-1))};
 }
 
-for(const surface of ['ios','mac-store']) {
- test(`source-bound invalid ${surface} skips frozen retry without consuming newer-source slots`,t=>{
-  const result=reconcile(t,{surface});
-  assert.deepEqual(result.dispatches,['b','c','d'].map(s=>'source='+s.repeat(40)));
-  assert.match(result.output,/invalid Apple upload requires an explicit new build attempt/);
-  assert.equal(result.calls.some(a=>a[0]==='release'),false,'retain existing release evidence');
- });
-}
+test('source-bound invalid ios skips frozen retry without consuming newer-source slots',t=>{
+ const result=reconcile(t,{surface:'ios'});
+ assert.deepEqual(result.dispatches,['b','c','d'].map(s=>'source='+s.repeat(40)));
+ assert.match(result.output,/invalid Apple upload requires an explicit new build attempt/);
+ assert.equal(result.calls.some(a=>a[0]==='release'),false,'retain existing release evidence');
+});
+
+test('a retired mac-store receipt neither blocks nor suppresses its source',t=>{
+ const result=reconcile(t,{surface:'mac-store'});
+ assert.deepEqual(result.dispatches,['a','b','c'].map(s=>'source='+s.repeat(40)));
+ assert.doesNotMatch(result.output,/invalid Apple upload requires/);
+});
 
 for(const mismatch of ['source','build','notesHash']) {
  test(`an invalid receipt with mismatched ${mismatch} cannot suppress its source`,t=>{

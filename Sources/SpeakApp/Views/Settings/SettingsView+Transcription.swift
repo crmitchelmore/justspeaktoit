@@ -1127,6 +1127,11 @@ extension SettingsView {
               .font(.caption)
               .foregroundStyle(.secondary)
           }
+          if NemotronLocalModels.isMultilingual(source.modelName) {
+            Text(NemotronLocalModels.settingsSummary)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
         Button {
           addSelectedStreamingModelSource()
@@ -1520,9 +1525,16 @@ extension SettingsView {
       Spacer()
       switch sherpaRuntime.runtimeState {
       case .installed:
-        Text("Installed")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.green)
+        if sherpaRuntime.runtimeUpdateAvailable {
+          Button("Update Runtime") {
+            Task { await sherpaRuntime.installRuntime() }
+          }
+          .speakTooltip("Install sherpa-onnx \(SherpaOnnxRuntimeManager.pinnedRuntimeVersion), needed by Nemotron 3.5.")
+        } else {
+          Text("Installed")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.green)
+        }
       case .installing:
         ProgressView()
           .controlSize(.small)
@@ -1560,6 +1572,10 @@ extension SettingsView {
   private var sherpaRuntimeDetail: String {
     switch sherpaRuntime.runtimeState {
     case .installed:
+      if sherpaRuntime.runtimeUpdateAvailable {
+        return "Installed \(sherpaRuntime.installedRuntimeVersion ?? "runtime") is older than "
+          + "\(SherpaOnnxRuntimeManager.pinnedRuntimeVersion); existing models still work."
+      }
       return "Ready for local streaming on this Mac."
     case .installing:
       return "Installing the pinned Python sherpa-onnx package."

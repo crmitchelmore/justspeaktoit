@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
 import { buildCatalogue, mergeEntries } from './release-notes-catalogue-lib.mjs';
-import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, stablePublicationSurfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/justspeaktoit';
 const run = runReleaseCommand;
@@ -97,14 +97,14 @@ if(command === 'allocate' || command === 'prepare') {
     const versions=train === 'alpha' ? config.versions : {mac:required('mac-version'),ios:required('ios-version')};
     const manifest={schema:1,train,tag,source,...allocation,createdAt:new Date().toISOString(),ci:proof,
         desktopQualification:1,selectedAlpha:alpha?.tag ?? null,toolchain:'Xcode 26.2',dependenciesHash:digest(git('show',`${source}:Package.resolved`)),surfaces:{}};
-    for(const surface of surfaces) {
+    for(const surface of frozenSurfaces(alpha)) {
         const platform=surface === 'ios'?'ios':'mac';
-        const base=train === 'alpha' ? git('rev-parse', `${source}^1`) : baseline(all,surface);
+        const base=train === 'alpha' ? git('rev-parse', `${source}^1`) : retiredSurfaces.includes(surface) ? manifest.surfaces['mac-direct'].baseline : baseline(all,surface);
         git('merge-base','--is-ancestor',base,source);
         const commits=parseCommits(git('log','--first-parent','--reverse','--format=%H%x1f%s%x1f%b%x1e',`${base}..${source}`));
         const notes=notesFor(commits,platform,`https://github.com/${repo}/compare/${base}...${source}`);
         const storeNotes=notes.length <= 4000 ? notes : notes.slice(0,3900)+'\nFull release notes are available in the app.';
-        manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : `${1000+Math.floor(allocation.ordinal/10000)}.${Math.floor(allocation.ordinal/100)%100}.${allocation.ordinal%100}`,version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes)};
+        manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : `${1000+Math.floor(allocation.ordinal/10000)}.${Math.floor(allocation.ordinal/100)%100}.${allocation.ordinal%100}`,version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes),...(retiredSurfaces.includes(surface)?{retired:true}:{})};
     }
     validateManifest(manifest);
     if(train === 'stable') assertStableVersionAdvance(versions.mac, all.filter(r=>!r.draft && !r.prerelease && /^mac-v\d+\.\d+\.\d+$/.test(r.tag_name)).map(r=>r.tag_name.slice(5)));
@@ -201,9 +201,10 @@ if(command === 'allocate' || command === 'prepare') {
     }
     const directory=join(temp,'approved'); mkdirSync(directory);
     gh('release','download',manifest.tag,'--repo',repo,'--dir',directory);
-    for(const surface of surfaces) {
-        const receipt=json(join(directory,`${surface}-receipt.json`));
-        if(receipt.source !== manifest.source || receipt.build !== manifest.surfaces[surface].build || receipt.notesHash !== manifest.surfaces[surface].notesHash || receipt.status !== 'verified') throw Error(`Candidate not verified: ${surface}`);
+    const receipts=Object.fromEntries(surfaces.map(s=>[s,join(directory,`${s}-receipt.json`)]).filter(([,p])=>existsSync(p)).map(([s,p])=>[s,json(p)]));
+    const verified=stablePublicationSurfaces(manifest,receipts);
+    for(const surface of verified) {
+        const receipt=receipts[surface];
         for(const [asset,hash] of Object.entries(receipt.assets)) {
             if(digest(readFileSync(join(directory,asset))) !== hash) throw Error(`Candidate asset changed: ${asset}`);
         }
@@ -230,6 +231,9 @@ if(command === 'allocate' || command === 'prepare') {
     const arm=assets.find(a=>a.endsWith('-arm64.dmg')), universal=assets.find(a=>a.endsWith('-universal.dmg'));
     const cliArm=assets.find(a=>a.endsWith('-arm64.zip')), cliIntel=assets.find(a=>a.endsWith('-x86_64.zip'));
     execFileSync('bash',['scripts/update-homebrew-tap.sh',manifest.surfaces['mac-direct'].version,direct.assets[arm],direct.assets[universal],direct.assets[cliArm],direct.assets[cliIntel]],{stdio:'inherit',env:{...process.env,GH_TOKEN:process.env.HOMEBREW_TOKEN}});
+    const apple=verified.filter(s=>s!=='mac-direct');
+    output('apple',JSON.stringify(apple));
+    for(const s of surfaces.filter(s=>!verified.includes(s))) console.log(`${s}: candidate not verified; not submitted with ${tag}`);
     console.log(`Published verified Stable ${tag}; Apple review follows independently`);
  } else if(command === 'withdraw') {
     const manifest=manifestFor(required('tag'));

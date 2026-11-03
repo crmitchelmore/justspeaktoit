@@ -25,7 +25,7 @@ end
 client = AppleRelease::Client.new
 selected.each do |manifest|
   tag = manifest.fetch('tag')
-  %w[ios mac-store].each do |surface|
+  AppleRelease::APPLE_SURFACES.each do |surface|
     begin
       delivery=AppleRelease::Delivery.new(client:client,manifest:manifest,surface:surface)
       delivery.distribute(wait_seconds:0) if delivery.build

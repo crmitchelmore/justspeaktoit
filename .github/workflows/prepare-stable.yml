@@ -50,12 +50,6 @@ jobs:
     with:
       manifest: ${{ needs.prepare.outputs.tag }}
     secrets: inherit
-  mac-store:
-    needs: prepare
-    uses: ./.github/workflows/release-appstore.yml
-    with:
-      manifest: ${{ needs.prepare.outputs.tag }}
-    secrets: inherit
   desktop-qualification:
     needs: prepare
     if: needs.prepare.outputs.tag != ''

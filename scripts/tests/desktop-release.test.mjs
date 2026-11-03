@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {desktopWorkflows, latestDesktopRun, reusableDesktopRun, desktopQualificationComplete, validateDesktopReceipt} from '../desktop-release-lib.mjs';
+import {desktopDownloads, desktopWorkflows, latestDesktopRun, liveArtifact, reusableDesktopRun, desktopQualificationComplete, validateDesktopReceipt, verifyDesktopDownload} from '../desktop-release-lib.mjs';
 const manifest = {source: 'a'.repeat(40), tag: 'stable-candidate-2', build: '202610281200'};
 const run = {id: 3, head_sha: manifest.source, head_branch: manifest.tag,
     event: 'workflow_dispatch', status: 'completed', conclusion: 'success', created_at: '2026-10-28T12:00:01Z'};
@@ -47,4 +47,28 @@ test('missing or mismatched desktop evidence stays eligible for Alpha recovery',
     assert.equal(desktopQualificationComplete(required, {...receipt(),source:'b'.repeat(40)}), false);
     assert.equal(desktopQualificationComplete(required, receipt()), true);
     assert.equal(desktopQualificationComplete(manifest, undefined), true);
+});
+
+test('published downloads come only from qualifying workflows and match their own evidence', () => {
+    const digest = 'c'.repeat(64);
+    for (const spec of desktopDownloads) assert.ok(desktopWorkflows.includes(spec.workflow));
+    assert.deepEqual(desktopDownloads.map(spec => spec.architecture), ['x64', 'arm64', 'x86_64']);
+    const [x64, arm64, flatpak] = desktopDownloads;
+    const bundle = architecture => ({application: {sourceCommit: manifest.source}, architecture,
+        zip: {name: 'justspeaktoit-windows-developer.zip', sha256: digest}});
+    assert.equal(verifyDesktopDownload(x64, manifest, bundle('x64'), digest), 'justspeaktoit-windows-developer.zip');
+    assert.throws(() => verifyDesktopDownload(x64, manifest, bundle('arm64'), digest));
+    assert.throws(() => verifyDesktopDownload(arm64, manifest, bundle('arm64'), 'd'.repeat(64)));
+    assert.throws(() => verifyDesktopDownload(arm64, {...manifest, source: 'b'.repeat(40)}, bundle('arm64'), digest));
+    assert.throws(() => verifyDesktopDownload(x64, manifest, {...bundle('x64'), zip: {name: '../x.zip', sha256: digest}}, digest));
+    const provenance = {sourceSHA: manifest.source, builtRevision: manifest.source, bundleSHA256: digest};
+    assert.equal(verifyDesktopDownload(flatpak, manifest, provenance, digest), 'JustSpeakToIt-x86_64.flatpak');
+    assert.throws(() => verifyDesktopDownload(flatpak, manifest, {...provenance, builtRevision: 'b'.repeat(40)}, digest));
+    assert.throws(() => verifyDesktopDownload(flatpak, manifest, provenance, 'd'.repeat(64)));
+});
+test('expired or ambiguous artifacts cannot supply a download', () => {
+    assert.equal(liveArtifact([{name: 'a', expired: false}], 'a').name, 'a');
+    assert.equal(liveArtifact([{name: 'a', expired: true}], 'a'), undefined);
+    assert.equal(liveArtifact([{name: 'a', expired: false}, {name: 'a', expired: false}], 'a'), undefined);
+    assert.equal(liveArtifact([], 'a'), undefined);
 });

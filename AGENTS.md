@@ -106,9 +106,9 @@ of hand-maintained structure documentation.
 ```bash
 make lint                                          # strict SwiftLint against the baseline
 ./scripts/swiftlint.sh lint --strict Sources/SpeakApp  # lint a subset
-swift package plugin --allow-writing-to-package-directory swiftformat --target SpeakApp
+./scripts/swiftformat.sh Sources/SpeakApp          # format a subset (isolated Tooling graph)
 ```
-- SwiftLint resolves through the isolated `Tooling/` graph (pinned in `Tooling/Package.resolved`) so app/test dependency changes cannot downgrade the linter; upgrade it intentionally with `make update-tooling`.
+- SwiftLint and SwiftFormat resolve through the isolated `Tooling/` graph (pinned in `Tooling/Package.resolved`) so app/test dependency changes cannot downgrade the linter; upgrade it intentionally with `make update-tooling`.
 - CI SwiftLint also runs with `.swiftlint-baseline.json`; the baseline is line-number-sensitive, so prefer exact-line inline suppressions when unblocking lint to avoid baseline drift.
 
 ## MCP Tools

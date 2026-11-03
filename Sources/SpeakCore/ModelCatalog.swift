@@ -8,8 +8,13 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     public static let customOptionID = "__model_custom__"
 
-    public static let liveTranscription: [Option] =
-        appleLiveTranscriptionOptions + [
+    /// Announced shutdowns are labelled and shut-down entries hidden by
+    /// `ModelRetirements` on each read, so a process running across a shutdown
+    /// stops offering the model; the normalisers move saved selections.
+    public static var liveTranscription: [Option] { ModelRetirements.current(scheduledLiveTranscription) }
+    public static var batchTranscription: [Option] { ModelRetirements.current(scheduledBatchTranscription) }
+
+    private static let scheduledLiveTranscription: [Option] = appleLiveTranscriptionOptions + [
         Option(
             id: "apple/local/Dictation", displayName: "Apple Dictation",
             description: "Alternative on-device engine that mirrors system dictation.",
@@ -144,7 +149,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     ] + AzureTranscriptionModels.liveOptions + AlibabaSpeechModels.liveOptions
         + [FileSpeechProvider.reson8LiveOption]
 
-    public static let batchTranscription: [Option] =
+    private static let scheduledBatchTranscription: [Option] =
         appleBatchTranscriptionOptions + AlibabaSpeechModels.batchOptions + [
         Option(
             id: BatchTranscriptionModelIdentifiers.cartesiaInkWhisper, displayName: "Cartesia Ink Whisper (Batch)",
@@ -471,8 +476,13 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// Keeps catalogue defaults and retired-model migration identical on Mac and iPhone.
     /// Unknown identifiers remain valid because the Mac supports custom OpenRouter batch models.
     public static func normalizedBatchTranscriptionModel(_ identifier: String?) -> String {
+        normalizedBatchTranscriptionModel(identifier, at: Date())
+    }
+
+    public static func normalizedBatchTranscriptionModel(_ identifier: String?, at date: Date) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if let successor = batchTranscriptionSuccessors[trimmed] {
+        if let successor = batchTranscriptionSuccessors[trimmed]
+            ?? ModelRetirements.successor(for: trimmed, mode: .batch, at: date) {
             return successor
         }
         if trimmed == AppleLocalModels.speechTranscriberModelID,
@@ -769,11 +779,17 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// Apple speech follows this device's preferred engine and retired streams
     /// follow their successor. Current and custom remote identifiers are kept.
     public static func normalizedLiveTranscriptionModel(_ identifier: String?) -> String {
+        normalizedLiveTranscriptionModel(identifier, at: Date())
+    }
+
+    public static func normalizedLiveTranscriptionModel(_ identifier: String?, at date: Date) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if AppleLocalModels.isAppleSpeechModel(trimmed) || trimmed.isEmpty {
             return AppleLocalModels.preferredSpeechModelID
         }
-        return liveTranscriptionSuccessors[trimmed] ?? trimmed
+        return liveTranscriptionSuccessors[trimmed]
+            ?? ModelRetirements.successor(for: trimmed, mode: .live, at: date)
+            ?? trimmed
     }
 
     public static let defaultPostProcessingModel = "openai/gpt-5-mini"

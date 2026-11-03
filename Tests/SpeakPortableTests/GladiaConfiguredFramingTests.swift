@@ -19,6 +19,8 @@ final class GladiaConfiguredFramingTests: XCTestCase {
             }
             XCTAssertEqual(socket.sentAudio.map(\.count), [3_200, 3_200])
             let finish = try await fixture.beginFinish(in: self)
+            // The drain deadline is armed before the padded tail send runs.
+            await waitUntil("padded final frame") { socket.sentAudio.count == 3 }
             XCTAssertEqual(socket.sentAudio.map(\.count), [3_200, 3_200, 1_600])
             let bytes = socket.sentAudio.reduce(into: Data()) { $0.append($1) }
             XCTAssertEqual(bytes.prefix(original.count), original)

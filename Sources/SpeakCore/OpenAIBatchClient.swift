@@ -18,6 +18,25 @@ public struct OpenAIBatchClient: TranscriptionProvider {
   private let keywords: [String]
   private let validationServiceName: String
   private let durationResolver: @Sendable (URL) async -> TimeInterval
+  private let now: @Sendable () -> Date
+
+  public init(
+    session: URLSession = .shared,
+    baseURL: URL = URL(string: "https://api.openai.com/v1")!,
+    validationServiceName: String = "OpenAI",
+    staging: SharedMultipartUploadStaging? = nil,
+    keywords: [String],
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 },
+    now: @escaping @Sendable () -> Date
+  ) {
+    self.now = now
+    self.session = session
+    self.staging = staging
+    self.keywords = keywords
+    self.baseURL = baseURL
+    self.validationServiceName = validationServiceName
+    self.durationResolver = durationResolver
+  }
 
   public init(
     session: URLSession = .shared,
@@ -27,12 +46,10 @@ public struct OpenAIBatchClient: TranscriptionProvider {
     keywords: [String],
     durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
   ) {
-    self.session = session
-    self.staging = staging
-    self.keywords = keywords
-    self.baseURL = baseURL
-    self.validationServiceName = validationServiceName
-    self.durationResolver = durationResolver
+    self.init(
+      session: session, baseURL: baseURL, validationServiceName: validationServiceName,
+      staging: staging, keywords: keywords, durationResolver: durationResolver, now: { Date() }
+    )
   }
 
   /// Source-compatible overload preserved for callers predating keyword hints.
@@ -61,7 +78,10 @@ public struct OpenAIBatchClient: TranscriptionProvider {
 
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
-    let modelName = model.split(separator: "/").last.map(String.init) ?? model
+    let requested = "openai/" + (model.split(separator: "/").last.map(String.init) ?? model)
+    let catalogID = ModelRetirements.successor(for: requested, mode: .batch, at: now()) ?? requested
+    try ModelRetirements.ensureAvailable(catalogID, at: now())
+    let modelName = String(catalogID.dropFirst("openai/".count))
     var fields = [
       OpenAICompatibleBatchTranscriptionClient.FormField(name: "model", value: modelName),
       .init(name: "response_format", value: responseFormat(for: modelName))

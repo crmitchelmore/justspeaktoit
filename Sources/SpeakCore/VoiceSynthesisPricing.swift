@@ -13,6 +13,9 @@ public enum VoiceSynthesisPricing {
         case .openai(.mini, _):
             return "OpenAI mini TTS uses text/audio token pricing. Binary WAV responses report no usage tokens "
                 + "or billing receipts; characters and PCM duration are not token counts. Charges are unestimated."
+        case .openaiRealtime:
+            return "\(OpenAIRealtimeSpeech.displayName) bills text and audio tokens, which character counts "
+                + "cannot estimate. Desktop usage records the audio duration, not a cost; charges are unestimated."
         case .openai:
             return "OpenAI TTS-1/HD estimates use submitted characters after segmentation. "
                 + "Observed Unicode scalars and provider billing counts may differ; estimates are not charges."
@@ -54,6 +57,7 @@ public enum VoiceSynthesisPricing {
         case .groq(let voice): return voice.model.costPerThousandCharacters
         case .speechmatics: return SpeechmaticsTTSAPI.estimatedCostPerThousandCharacters
         case .openai(let model, _): return model.costPerThousandCharacters
+        case .openaiRealtime: return nil
         case .elevenlabs: return ElevenLabsTTSAPI.estimatedCostPerThousandCharacters
         case .deepgram(let voice):
             return voice.model == DeepgramSpeechCatalog.flux ? nil : DeepgramTTSAPI.costPerThousandCharacters

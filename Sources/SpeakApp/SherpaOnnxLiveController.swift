@@ -26,6 +26,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   private var stderrPipe: Pipe?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var currentModel: String?
+  private var currentLanguage: String?
   /// The model the running sidecar loaded. Held for the whole session so a
   /// settings change mid-recording cannot retag the results of this one.
   private var activeModelID: String?
@@ -59,6 +60,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   }
 
   func configure(language: String?, model: String) {
+    currentLanguage = language
     currentModel = model
   }
 
@@ -235,8 +237,17 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       "--joiner", bundle.joiner.path,
       "--feature-dim", "\(bundle.featureDim)",
       "--model-type", bundle.modelType
-    ]
+    ] + Self.languageArguments(for: bundle, language: currentLanguage)
     return process
+  }
+
+  /// Only language-ID prompted models get a prompt, and only for an explicit
+  /// supported choice: a wrong forced language can suppress the transcript.
+  nonisolated static func languageArguments(for bundle: SherpaOnnxModelBundle, language: String?) -> [String] {
+    guard bundle.supportsLanguageHint,
+      let hint = NemotronLocalModels.languageHint(forLocaleIdentifier: language)
+    else { return [] }
+    return ["--language", hint]
   }
 
   private func handleSidecarOutput(_ data: Data) {

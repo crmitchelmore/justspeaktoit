@@ -96,9 +96,21 @@ for product in "${PRODUCTS[@]}"; do
 done
 
 echo "==> Diagnosing public API against ${BASELINE} for: ${PRODUCTS[*]}"
-output=$(swift package diagnose-api-breaking-changes "$BASELINE" "${product_args[@]}" 2>&1)
-status=$?
-echo "$output"
+# Stream the same public diagnostics while retaining the exact text for the existing gate.
+output_file="$baseline_manifest_dir/diagnose-output.log"
+swift package diagnose-api-breaking-changes "$BASELINE" "${product_args[@]}" 2>&1 | tee "$output_file"
+pipeline_status=("${PIPESTATUS[@]}")
+status=${pipeline_status[0]}
+if [[ ${pipeline_status[1]} -ne 0 ]]; then
+    echo "==> Unable to retain public API diagnostics" >&2
+    [[ $status -eq 0 ]] && status=1
+    exit "$status"
+fi
+if ! output=$(cat "$output_file"); then
+    echo "==> Unable to read retained public API diagnostics" >&2
+    [[ $status -eq 0 ]] && status=1
+    exit "$status"
+fi
 
 if [[ $status -eq 0 ]]; then
     echo "==> Public API is compatible with ${BASELINE}"

@@ -252,6 +252,7 @@ extension TranscriptionRecordingServiceTextTests {
         }
     }
 
+    // swiftlint:disable:next function_body_length
     private func assertRawOnly(
         destination: HardwareTriggerDestination?,
         keyAvailable: Bool,
@@ -287,7 +288,11 @@ extension TranscriptionRecordingServiceTextTests {
             let pending = try XCTUnwrap(admission.continuation)
             let itemID = try XCTUnwrap(history.items.first?.id)
             XCTAssertTrue(history.reprocessingIDs.contains(itemID))
-            let (settled, observation) = postProcessingReceipt(history, id: itemID)
+            let facts = PolishReceiptFacts(
+                destination: destination, keyAvailable: keyAvailable, fails: fails, copy: copy
+            )
+            facts.noteAdmission(history.reprocessingIDs.contains(itemID))
+            let (settled, observation) = postProcessingReceipt(history, id: itemID, facts: facts)
             defer { observation.cancel() }
             if copy.changed { board.string = copy.text }
             if fails {
@@ -296,7 +301,13 @@ extension TranscriptionRecordingServiceTextTests {
                 pending.resume(returning: "Polished transcript")
             }
             admission.continuation = nil
+            facts.noteResumed()
+            let failuresBeforeWait = testRun?.failureCount
             await fulfillment(of: [settled], timeout: 2)
+            if let failuresBeforeWait, let failuresAfterWait = testRun?.failureCount,
+               failuresAfterWait > failuresBeforeWait {
+                facts.reportFailure(processing: history.reprocessingIDs.contains(itemID))
+            }
         } else {
             XCTAssertNil(admission.continuation, "Missing key must leave the initial raw copy intact")
         }
@@ -319,14 +330,14 @@ extension TranscriptionRecordingServiceTextTests {
         )
     }
     private func postProcessingReceipt(
-        _ history: iOSHistoryManager, id: UUID
+        _ history: iOSHistoryManager, id: UUID, facts: PolishReceiptFacts? = nil
     ) -> (XCTestExpectation, AnyCancellable) {
         let settled = expectation(description: "Admitted History polish reached its terminal receipt")
         // Require this row's admission before observing its terminal removal; ignore an initial empty set.
         let observation = history.$reprocessingIDs
             .drop(while: { !$0.contains(id) })
             .first(where: { !$0.contains(id) })
-            .sink { _ in settled.fulfill() }
+            .sink { _ in facts?.noteTerminal(); settled.fulfill() }
         return (settled, observation)
     }
     private func historyWithStorage(
@@ -361,6 +372,37 @@ extension TranscriptionRecordingServiceTextTests {
     }
 }
 #endif
+private final class PolishReceiptFacts: @unchecked Sendable {
+    private let lock = NSLock()
+    private let variant: [String: Any]
+    private var admissionObserved = false
+    private var continuationResumed = false
+    private var terminalReceived = false
+
+    init(destination: HardwareTriggerDestination?, keyAvailable: Bool, fails: Bool,
+         copy: (changed: Bool, text: String?)) {
+        variant = ["destination": destination == nil ? "legacyAutomatic" : "clipboardAndPostProcess",
+                   "keyAvailable": keyAvailable, "processorFails": fails, "copyChanged": copy.changed,
+                   "copyHasText": copy.text != nil, "copyMatchesRaw": copy.text == "Raw transcript"]
+    }
+
+    func noteAdmission(_ observed: Bool) { lock.withLock { admissionObserved = observed } }
+    func noteResumed() { lock.withLock { continuationResumed = true } }
+    func noteTerminal() { lock.withLock { terminalReceived = true } }
+
+    // Failure-time snapshot after the original wait; not an exact deadline or event-order proof.
+    func reportFailure(processing: Bool) {
+        let phases = lock.withLock {
+            ["admissionObserved": admissionObserved, "continuationResumed": continuationResumed,
+             "terminalReceived": terminalReceived, "processingAtSnapshot": processing]
+        }
+        let payload: [String: Any] = ["schema": 1, "fixture": "automaticPolishReceipt", "variant": variant,
+                                      "phases": phases]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              data.count <= 1024 else { return }
+        try? FileHandle.standardError.write(contentsOf: data + Data([10]))
+    }
+}
 @MainActor
 private struct RecordingHistoryFixture {
     let history: iOSHistoryManager
@@ -395,4 +437,4 @@ private final class RecordingTestPasteboard: PolishPasteboard {
         writes.append(text)
     }
 }
-#endif
+#endif // swiftlint:disable:this file_length

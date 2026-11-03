@@ -68,6 +68,74 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
         XCTAssertEqual(spec.featureDim, 128)
     }
 
+    func testSpecification_nemotron35_pinsArchiveRuntimeAndLanguagePrompt() throws {
+        for variant in NemotronLocalModels.multilingualVariants {
+            let source = try XCTUnwrap(
+                ModelCatalog.localStreamingSources.first { $0.modelName == variant.modelName }
+            )
+            let spec = try SherpaOnnxRuntimeManager.specification(for: source)
+
+            XCTAssertEqual(spec.modelType, "transducer")
+            XCTAssertEqual(spec.featureDim, 128)
+            XCTAssertEqual(spec.encoder, "\(variant.modelName)/encoder.int8.onnx")
+            XCTAssertEqual(spec.archiveURL, variant.archiveURL)
+            XCTAssertEqual(spec.archiveSHA256, variant.archiveSHA256)
+            XCTAssertEqual(spec.minimumRuntimeVersion, NemotronLocalModels.minimumRuntimeVersion)
+            XCTAssertTrue(spec.supportsLanguageHint)
+            XCTAssertEqual(source.backend, .sherpaOnnx)
+        }
+    }
+
+    func testSpecification_englishNemotron_keepsOlderRuntimeWithoutLanguagePrompt() throws {
+        let source = LocalStreamingModelSource(
+            repoID: "k2-fsa/sherpa-onnx",
+            modelName: "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25"
+        )
+
+        let spec = try SherpaOnnxRuntimeManager.specification(for: source)
+
+        XCTAssertNil(spec.minimumRuntimeVersion)
+        XCTAssertFalse(spec.supportsLanguageHint)
+    }
+
+    func testRuntimePin_satisfiesEveryModelMinimum() {
+        XCTAssertTrue(
+            SherpaOnnxRuntimeManager.isVersion(
+                SherpaOnnxRuntimeManager.pinnedRuntimeVersion,
+                atLeast: NemotronLocalModels.minimumRuntimeVersion
+            )
+        )
+        XCTAssertFalse(SherpaOnnxRuntimeManager.isVersion("1.13.2", atLeast: "1.13.5"))
+        XCTAssertTrue(SherpaOnnxRuntimeManager.isVersion("1.13.10", atLeast: "1.13.5"))
+        XCTAssertTrue(SherpaOnnxRuntimeManager.isVersion("2.0", atLeast: "1.13.5"))
+        XCTAssertFalse(SherpaOnnxRuntimeManager.isVersion("0", atLeast: "1.13.5"))
+    }
+
+    func testLanguageArguments_onlyForPromptedModelsAndExplicitChoices() {
+        func bundle(hint: Bool) -> SherpaOnnxModelBundle {
+            let url = URL(fileURLWithPath: "/tmp")
+            return SherpaOnnxModelBundle(
+                source: LocalStreamingModelSource(repoID: "k2-fsa/sherpa-onnx", modelName: "m"),
+                directory: url, tokens: url, encoder: url, decoder: url, joiner: url,
+                featureDim: 128, modelType: "transducer", supportsLanguageHint: hint
+            )
+        }
+        XCTAssertEqual(
+            SherpaOnnxLiveController.languageArguments(for: bundle(hint: true), language: "ja"),
+            ["--language", "ja"]
+        )
+        XCTAssertEqual(SherpaOnnxLiveController.languageArguments(for: bundle(hint: true), language: nil), [])
+        XCTAssertEqual(SherpaOnnxLiveController.languageArguments(for: bundle(hint: false), language: "ja"), [])
+    }
+
+    func testSidecarScript_setsLanguageOptionOnlyWhenProvided() {
+        let script = SherpaOnnxRuntimeManager.sidecarScript
+
+        XCTAssertTrue(script.contains("parser.add_argument(\"--language\", default=None)"))
+        XCTAssertTrue(script.contains("if args.language:\n        # Language-ID"))
+        XCTAssertTrue(script.contains("stream.set_option(\"language\", args.language)"))
+    }
+
     func testSidecarScript_routesModelTypesToMatchingRecognizers() {
         let script = SherpaOnnxRuntimeManager.sidecarScript
 

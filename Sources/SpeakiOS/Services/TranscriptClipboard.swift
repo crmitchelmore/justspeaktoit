@@ -61,6 +61,7 @@ struct TranscriptClipboardPolicy: Equatable, Sendable {
 @MainActor
 protocol TranscriptPasteboard: AnyObject {
     var changeCount: Int { get }
+    var string: String? { get }
     func setItems(_ items: [[String: Any]], options: [UIPasteboard.OptionsKey: Any])
 }
 
@@ -91,6 +92,8 @@ final class TranscriptClipboard {
         self.now = now
         self.policy = policy
     }
+
+    var string: String? { self.pasteboard.string }
 
     @discardableResult
     func copy(_ text: String) -> Bool {

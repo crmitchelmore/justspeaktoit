@@ -82,8 +82,8 @@ build, or establish live vault/API access; those require separate verification.
 ## Alpha
 
 Every successful main push CI allocates an immutable annotated
-`alpha-build-N` tag containing a manifest. Independent workers build direct Mac,
-Mac App Store and iOS from that exact source. Allocation is idempotent; manual
+`alpha-build-N` tag containing a manifest. Independent workers build direct Mac
+and iOS from that exact source. Allocation is idempotent; manual
 `rebuild` creates a new build number for an expired or invalid Apple upload.
 Hourly reconciliation retries missing deliveries, dispatching at most three
 sources per pass and checking every page of active runs to avoid duplicate
@@ -167,6 +167,22 @@ expansion. `SpeakAppSceneMetadataTests` exercises the associated-type witness
 without starting app services. Local ad-hoc launch acceptance does not replace
 the signed archive/export and notarisation gates on the release runner.
 
+## Retired Mac App Store surface
+
+The Mac App Store surface (`mac-store`) is retired from both trains. Its App
+Sandbox breaks core dictation features (global hotkeys, accessibility text
+insertion), and its Public Alpha TestFlight group never reached
+`IN_BETA_TESTING`, so no Alpha could satisfy the Stable gate. Release manifests
+now freeze only `mac-direct` and `ios`. Historical manifests and their
+`mac-store-receipt.json` assets are kept as evidence but ignored by allocation,
+reconciliation, Prepare Stable and Publish Stable. Stable workers run the selected
+Alpha's exact source, so when that Alpha still froze `mac-store`, Prepare Stable
+copies a deterministic `mac-store` entry marked `retired` (sharing the direct
+Mac baseline) so the older validator can parse the candidate. That entry is
+never dispatched, receipted or published. The existing App Store
+listing and its users are not changed by this pipeline; delisting is a separate
+owner action in App Store Connect.
+
 ## Stable
 
 1. Select a delivered and tested `alpha-build-N` and explicit Mac/iOS versions.
@@ -178,9 +194,12 @@ the signed archive/export and notarisation gates on the release runner.
    Review cumulative notes in the draft release. Alpha continues independently.
 4. The repository owner runs **Publish Stable**, supplying the candidate and
    exact reviewed manifest SHA-256. This is the publication approval.
-5. Direct Mac publishes verified candidate assets and updates Homebrew. Apple
-   submissions use `AFTER_APPROVAL`; publication receipts advance Apple note
-   baselines only after the exact build is publicly available.
+5. Direct Mac publishes verified candidate assets and updates Homebrew. It
+   requires its own verified receipt and desktop qualification, not the Apple
+   candidates. Each Apple surface is submitted with `AFTER_APPROVAL` only when its
+   own candidate receipt verified; an unverified Apple candidate is skipped and
+   keeps its previous Stable. Publication receipts advance Apple note baselines
+   only after the exact build is publicly available.
 
 Each surface has its own published baseline. TestFlight delivery, an upload, a
 review submission and a rejected version do not advance it. Initial Apple Store
@@ -223,9 +242,22 @@ source as the Apple builds, including its pinned runtime dependencies.
 The controller records exact workflow run IDs, source, tag and build in
 `desktop-qualification.json` only after every workflow succeeds. Publish Stable
 requires that matching receipt for new manifests. Existing frozen manifests are
-unchanged. These builds remain CI developer artifacts; qualification does not
-publish installers or establish signing, physical-device acceptance, update
-channels, feature parity or separate Alpha/Stable Windows and Linux identities.
+unchanged. Before writing the receipt, the controller copies the qualifying
+runs' Windows x64 and ARM64 runtime bundles and the Linux x86_64 Flatpak onto
+the manifest release as `JustSpeakToIt-windows-x64-developer.zip`,
+`JustSpeakToIt-windows-arm64-developer.zip` and
+`JustSpeakToIt-linux-x86_64.flatpak`, after checking each file's SHA-256 and
+source commit against that run's own bundle evidence or Flatpak provenance.
+The receipt records each download's run, architecture, size and digest. Workflow
+artifacts expire after 14 days, so a reusable main run whose bundle has expired
+is dispatched again rather than reused. `node scripts/publish-desktop-downloads.mjs <tag>`
+backfills an already verified release from its receipt's runs. The website's
+`/alpha/download/windows-x64`, `/alpha/download/windows-arm64` and
+`/alpha/download/linux-x86_64` follow the Alpha pointer and answer 503 when that
+Alpha has no published desktop download. These remain unsigned developer
+builds; qualification does not publish installers or establish signing,
+physical-device acceptance, update channels, feature parity or separate
+Alpha/Stable Windows and Linux identities.
 No separate public Windows/Linux version inputs are introduced yet: the
 immutable manifest tag and build identify the developer qualification source.
 Public platform versions and download links belong with those distribution

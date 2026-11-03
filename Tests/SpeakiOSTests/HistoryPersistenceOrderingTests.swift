@@ -323,9 +323,11 @@ extension HistoryPersistenceOrderingTests {
         return try decoder.decode([iOSHistoryItem].self, from: Data(contentsOf: file))
     }
 
-    func completed(_ expectations: XCTestExpectation...) async -> Bool {
+    func completed(
+        _ expectations: XCTestExpectation..., file: StaticString = #filePath, line: UInt = #line
+    ) async -> Bool {
         let result = await XCTWaiter.fulfillment(of: expectations, timeout: 2)
-        if result != .completed { XCTFail("Ordered History operation did not settle") }
+        if result != .completed { XCTFail("Ordered History operation did not settle", file: file, line: line) }
         return result == .completed
     }
 }

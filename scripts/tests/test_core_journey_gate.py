@@ -20,6 +20,118 @@ SPEC.loader.exec_module(gate)
 
 
 class CoverageTests(unittest.TestCase):
+    def test_ordinary_apple_method_identity_refuses_multiline_and_quoted_examples(self):
+        for method in ("testBad\nextra", "testBad\rextra", "testBad'example", 'testBad"example'):
+            with self.subTest(method=method):
+                output = f"Test Case '-[Module.Required {method}]' passed (0.001 seconds).\n"
+                self.assertEqual(list(gate.case_results(output)), [])
+                self.assertTrue(gate.coverage_errors(output, ["Required"])[0])
+        for newline in ("\n", "\r\n"):
+            output = "Test Case '-[Module.Required testValid_1]' passed (0.001 seconds)." + newline
+            self.assertEqual(list(gate.case_results(output)), [{
+                "module": "Module", "suite": "Required", "case": "testValid_1", "status": "passed",
+            }])
+
+    def test_method_splice_requires_exact_prior_start_and_preserves_status_and_order(self):
+        console = '2026-10-29 11:46:01.775482+0000 App[100:200] [default] Error "(null)"'
+        for newline in ("\n", "\r\n"):
+            for status in ("passed", "failed", "skipped"):
+                with self.subTest(newline=newline, status=status):
+                    output = "Test Case '-[Module.Required testBefore]' passed (0.001 seconds)." + newline
+                    output += "Test Case '-[Module.Required testSplitName]' started." + newline
+                    output += f"Test Case '-[Module.Required testSplit{console}{newline}Name]' "
+                    output += f"{status} (0.009 seconds).{newline}"
+                    output += "Test Case 'Module.Required.testAfter' passed (0.001 seconds)." + newline
+                    results = list(gate.case_results(output))
+                    self.assertEqual([row["case"] for row in results], ["testBefore", "testSplitName", "testAfter"])
+                    self.assertEqual(results[1], {"module": "Module", "suite": "Required",
+                                                  "case": "testSplitName", "status": status})
+                    self.assertEqual(bool(gate.coverage_errors(output, ["Required"])[0]), status != "passed")
+
+    def test_method_splice_refuses_unstarted_foreign_examples_and_cross_record_abuse(self):
+        console = '2026-10-29 11:46:01.775482+0000 App[100:200] [default] Error "(null)"'
+        start = "Test Case '-[Module.Required testSplitName]' started.\n"
+        terminal = f"Test Case '-[Module.Required testSplit{console}\nName]' passed (0.009 seconds).\n"
+        invalid = (
+            terminal, terminal + start,
+            start.replace("Module.", "Other.") + terminal,
+            start.replace("Required ", "Other ") + terminal,
+            start.replace("testSplitName", "testOther") + terminal,
+            start + terminal.replace(console, "arbitrary output"),
+            start + terminal.replace("[100:200]", "[not:a-thread]"),
+            start + terminal.replace('"(null)"', '"unbalanced'),
+            start + 'example: ' + terminal,
+            start + 'print("' + terminal.rstrip("\n") + '")\n',
+            start + terminal.replace(console, console + " 'quoted example'"),
+            start + terminal.replace("\nName", "\nextra\nName"),
+            start + terminal.replace("\nName", "\n" + console + "\nName"),
+            start + terminal.replace("\nName", "\rName"),
+            start + terminal.replace('"(null)"', '"(null)\r"'),
+            start + terminal.replace('"(null)"', '"(null)\n"'),
+            start + terminal.replace("\nName", "\n"),
+            start + terminal.replace("(0.009 seconds).", ""),
+            start + terminal.replace("(0.009 seconds).", "(nan seconds)."),
+            start + terminal.replace("(0.009 seconds).", "(-0.009 seconds)."),
+            start + terminal.replace("(0.009 seconds).", "(0.009 seconds). trailing text"),
+            start + terminal.replace("' passed", "' started"),
+            start + terminal.replace(console, console + "x" * 4097),
+        )
+        for output in invalid:
+            with self.subTest(output=output):
+                self.assertEqual(list(gate.method_spliced_results(output)), [])
+                self.assertTrue(gate.coverage_errors(output, ["Required"])[0])
+
+    def test_quoted_console_terminal_requires_prior_start_and_preserves_order_and_status(self):
+        prefix = ('2026-10-29 02:08:30.244431+0000 JustSpeakToIt[100:200] [default] '
+                  'Error Domain=LSApplicationWorkspaceErrorDomain Code=115 "(null)" '
+                  'UserInfo={_LSFile=LSDOpenService.mm, _LSLine=282, _LSFunc')
+        for newline in ("\n", "\r\n"):
+            for status in ("passed", "failed", "skipped"):
+                with self.subTest(newline=newline, status=status):
+                    output = "Test Case '-[Module.Required testBefore]' passed (0.001 seconds)." + newline
+                    output += "Test Case '-[Module.Required testQuoted]' started." + newline
+                    output += prefix + f"Test Case '-[Module.Required testQuoted]' {status} (0.003 seconds)." + newline
+                    output += "tion=-[_LSDOpenClient openURL:fileHandle:options:completionHandler:]}" + newline
+                    output += "Test Case 'Module.Required.testAfter' passed (0.001 seconds)." + newline
+                    cases = list(gate.case_results(output))
+                    self.assertEqual([case["case"] for case in cases], ["testBefore", "testQuoted", "testAfter"])
+                    self.assertEqual(cases[1], {"module": "Module", "suite": "Required",
+                                               "case": "testQuoted", "status": status})
+                    errors, counts = gate.coverage_errors(output, ["Required"])
+                    self.assertEqual(counts["Required"][status], 3 if status == "passed" else 1)
+                    self.assertEqual(bool(errors), status != "passed")
+
+    def test_quoted_console_terminal_needs_an_earlier_exact_full_apple_identity(self):
+        prefix = '2026-10-29 02:08:30.244431+0000 App[100:200] [default] Error "(null)" '
+        terminal = prefix + "Test Case '-[Module.Required testQuoted]' passed (0.003 seconds).\n"
+        start = "Test Case '-[Module.Required testQuoted]' started.\n"
+        for before, after in (("", ""), ("", start), (start.replace("Module.", "Other."), ""),
+                              (start.replace("Required ", "Other "), ""),
+                              (start.replace("testQuoted", "testOther"), ""),
+                              (start.replace("Module.", ""), ""), (start.replace("started.", "started"), "")):
+            with self.subTest(before=before, after=after):
+                self.assertEqual(list(gate.case_results(before + terminal + after)), [])
+        # A later duplicate start must not erase the earlier admission.
+        self.assertEqual(len(list(gate.case_results(start + terminal + start))), 1)
+        self.assertEqual(list(gate.case_results(start)), [])
+
+    def test_quoted_console_recovery_rejects_examples_and_incomplete_physical_records(self):
+        start = "Test Case '-[Module.Required testQuoted]' started.\n"
+        prefix = '2026-10-29 02:08:30.244431+0000 App[100:200] [default] Error "(null)" '
+        terminal = "Test Case '-[Module.Required testQuoted]' passed (0.003 seconds)."
+        invalid = (prefix + '"example ' + terminal + '"', prefix + "'example " + terminal + "'",
+                   "arbitrary prefix " + terminal, 'print("' + terminal + '")',
+                   prefix.replace("[100:200]", "[not:a-thread]") + terminal,
+                   prefix.replace('"(null)"', '"unterminated') + terminal,
+                   prefix + terminal + " trailing text", prefix + terminal.removesuffix(" (0.003 seconds)."),
+                   prefix + terminal.replace("testQuoted", "testQuoted\nextra"),
+                   prefix + terminal.replace("Test Case", "Test Suite"),
+                   prefix + terminal.replace("-[Module.Required testQuoted]", "Module.Required.testQuoted"))
+        for record in invalid:
+            with self.subTest(record=record):
+                self.assertEqual(list(gate.case_results(start + record + "\n")), [])
+                self.assertTrue(gate.coverage_errors(start + record + "\n", ["Required"])[0])
+
     def test_module_token_splice_preserves_status_identity_and_mixed_order(self):
         console = "2026-10-28 02:58:13.934192+0000 JustSpeakToIt[6608:33822] [api] Updating content"
         for newline in ("\n", "\r\n"):
@@ -63,8 +175,8 @@ class CoverageTests(unittest.TestCase):
             with self.subTest(output=output):
                 self.assertEqual(list(gate.case_results(output)), [])
                 self.assertTrue(gate.coverage_errors(output, ["Required"])[0])
-        # The unchanged legacy regex can parse this as an unrelated unqualified
-        # suite. It must never gain the reconstructed module/required identity.
+        # An arbitrary splice must never gain the reconstructed module/required
+        # identity through either ordinary parsing or typed recovery.
         arbitrary = valid.replace(console, "arbitrary output")
         self.assertEqual(list(gate.MODULE_SPLICED_CASE_RESULT.finditer(arbitrary)), [])
         self.assertTrue(gate.coverage_errors(arbitrary, ["Required"])[0])

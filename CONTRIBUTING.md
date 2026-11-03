@@ -109,7 +109,7 @@ We use Conventional Commits:
 make lint
 
 # Run SwiftFormat
-swift package plugin --allow-writing-to-package-directory swiftformat
+./scripts/swiftformat.sh .
 ```
 
 ### Code Organization

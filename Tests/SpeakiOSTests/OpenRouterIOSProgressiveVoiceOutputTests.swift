@@ -186,11 +186,15 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
         let queuedReturned = expectation(description: "Cancelled queued request refused")
         let transportStopped = expectation(description: "Explicit stop cancelled prior transport")
         let observation = ProgressiveTransportObservation()
-        StubURLProtocol.handler = { _ in .hang }
+        StubURLProtocol.handler = { _ in
+            observation.note(.stubHandlerEntered)
+            return .hang
+        }
         StubURLProtocol.onStartLoading = { observation.note(.requestStarted); started.fulfill() }
         StubURLProtocol.onStopLoading = { observation.stop(); transportStopped.fulfill() }
         defer { session.invalidateAndCancel(); StubURLProtocol.reset() }
         let prior = Task {
+            observation.note(.priorTaskEntered)
             defer { observation.note(.priorReturned); firstReturned.fulfill() }
             do { try await speak(); XCTFail("Held prior request must cancel") } catch {
                 XCTAssertTrue(error is CancellationError)
@@ -231,7 +235,10 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
 
 private final class ProgressiveTransportObservation: @unchecked Sendable {
     private let lock = NSLock()
-    enum Phase: Hashable { case requestStarted, priorReturned, queuedReturned, explicitStopIssued, transportStopped }
+    enum Phase: Hashable {
+        case priorTaskEntered, stubHandlerEntered, requestStarted, priorReturned, queuedReturned
+        case explicitStopIssued, transportStopped
+    }
     enum Wait: String { case requestStart, queuedReturn, explicitStop }
     private var count = 0
     private var phases: Set<Phase> = []
@@ -243,7 +250,9 @@ private final class ProgressiveTransportObservation: @unchecked Sendable {
     func reportFailure(_ result: XCTWaiter.Result, wait: Wait) {
         guard result != .completed else { return }
         let facts = lock.withLock {
-            ["requestStarted": phases.contains(.requestStarted), "priorReturned": phases.contains(.priorReturned),
+            ["priorTaskEntered": phases.contains(.priorTaskEntered),
+             "stubHandlerEntered": phases.contains(.stubHandlerEntered),
+             "requestStarted": phases.contains(.requestStarted), "priorReturned": phases.contains(.priorReturned),
              "queuedReturned": phases.contains(.queuedReturned),
              "explicitStopIssued": phases.contains(.explicitStopIssued),
              "transportStopped": phases.contains(.transportStopped)]

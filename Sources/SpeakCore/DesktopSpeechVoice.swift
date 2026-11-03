@@ -14,6 +14,8 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     case groq(GroqTTSVoice)
     case speechmatics(SpeechmaticsTTSVoice)
     case openai(OpenAITTSModel, OpenAITTSVoice)
+    /// Explicitly chosen Realtime API voice (a documented realtime voice id).
+    case openaiRealtime(String)
     case elevenlabs(ElevenLabsTTSModels.Model, ElevenLabsTTSVoice)
 
     public var id: String {
@@ -29,6 +31,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .groq(let voice): voice.providerVoiceID
         case .speechmatics(let voice): voice.providerVoiceID
         case .openai(_, let voice): voice.providerVoiceID
+        case .openaiRealtime(let voice): OpenAIRealtimeSpeech.voiceIDPrefix + voice
         case .elevenlabs(_, let voice): voice.providerVoiceID
         }
     }
@@ -46,6 +49,8 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .groq(let voice): voice.displayName
         case .speechmatics(let voice): voice.displayName
         case .openai(_, let voice): voice.name
+        case .openaiRealtime(let voice):
+            OpenAIRealtimeSpeech.voices.first { $0.id == voice }?.name ?? voice
         case .elevenlabs(_, let voice): voice.displayName
         }
     }
@@ -63,6 +68,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .groq(let voice): voice.model.desktopModelIdentifier
         case .speechmatics: SpeechmaticsTTSCatalog.providerIdentifier
         case .openai(let model, _): model.desktopModelIdentifier
+        case .openaiRealtime: OpenAIRealtimeSpeech.catalogID
         case .elevenlabs(let model, _): model.desktopModelIdentifier
         }
     }
@@ -80,7 +86,12 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .gemini(let voice, let model): "\(voice.displayName) — \(model.displayName)"
         case .groq(let voice): "\(voice.displayName) — Groq"
         case .speechmatics(let voice): "\(voice.displayName) — Speechmatics English"
-        case .openai(let model, let voice): "\(voice.name) — OpenAI \(model.displayName)"
+        case .openai(let model, let voice):
+            "\(voice.name) — OpenAI \(model.displayName)"
+                + (model.retirement.map {
+                    " (\($0.isRetired(at: Date()) ? "retired" : "retiring") \($0.shutdownDay))"
+                } ?? "")
+        case .openaiRealtime: "\(name) — OpenAI \(OpenAIRealtimeSpeech.displayName)"
         case .elevenlabs(let model, let voice): "\(voice.displayName) — \(model.displayName)"
         }
     }
@@ -96,7 +107,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .gemini: GeminiTTSCatalog.credentialIdentifier
         case .groq: GroqTTSCatalog.credentialIdentifier
         case .speechmatics: SpeechmaticsTTSCatalog.credentialIdentifier
-        case .openai: OpenAITTSCatalog.credentialIdentifier
+        case .openai, .openaiRealtime: OpenAITTSCatalog.credentialIdentifier
         case .elevenlabs: ElevenLabsTTSCatalog.credentialIdentifier
         }
     }
@@ -112,6 +123,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .soniox: .soniox
         case .gemini, .groq, .speechmatics: .naturalSpeech
         case .openai: .openai
+        case .openaiRealtime: .openaiRealtime
         case .elevenlabs: .naturalSpeech
         }
     }
@@ -138,6 +150,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         for model in OpenAITTSCatalog.models {
             voices.append(contentsOf: OpenAITTSCatalog.voices(for: model).map { Self.openai(model, $0) })
         }
+        voices.append(contentsOf: OpenAIRealtimeSpeech.voices.map { Self.openaiRealtime($0.id) })
         for model in ElevenLabsTTSModels.all {
             voices.append(contentsOf: ElevenLabsTTSCatalog.voices.map { Self.elevenlabs(model, $0) })
         }

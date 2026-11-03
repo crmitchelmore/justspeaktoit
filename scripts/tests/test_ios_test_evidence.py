@@ -38,6 +38,90 @@ def interleaved_completion(suite, method="testResult", status="passed", target="
 
 
 class IOSCoverageTests(unittest.TestCase):
+    def test_method_splice_counts_exact_started_identity_once_and_preserves_mixed_outcomes(self):
+        console = '2026-10-29 11:46:01.775482+0000 App[100:200] [default] Error "(null)"'
+        ordinary = completion("CaptureDeepLinkTests", "testSplitName")
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=newline):
+                start = "Test Case '-[SpeakiOSTests.CaptureDeepLinkTests testSplitName]' started." + newline
+                spliced = ordinary.replace("testSplitName", "testSplit" + console + newline + "Name")
+                spliced = spliced.rstrip("\n") + newline
+                expected = gate.summarize(passing_log() + ordinary, "success")
+                output = passing_log() + start + spliced
+                self.assertEqual(gate.summarize(output + ordinary + spliced, "success"), expected)
+                for status in ("failed", "skipped"):
+                    result = gate.summarize(output + spliced.replace("' passed", "' " + status), "success")
+                    self.assertEqual(result["unique_cases"], 6)
+                    self.assertEqual(result["counts"][status], 1)
+                    if status == "failed":
+                        self.assertTrue(result["errors"])
+                self.assertTrue(gate.summarize(output, "failure")["errors"])
+
+    def test_method_splice_foreign_unstarted_and_incomplete_records_cannot_supply_ios_coverage(self):
+        console = '2026-10-29 11:46:01.775482+0000 App[100:200] [default] Error "(null)"'
+        ordinary = completion("OpenRouterAudioSettingsTests", "testSplitName")
+        terminal = ordinary.replace("testSplitName", "testSplit" + console + "\nName")
+        start = "Test Case '-[SpeakiOSTests.OpenRouterAudioSettingsTests testSplitName]' started.\n"
+        for output in (terminal, terminal + start,
+                       start.replace("SpeakiOSTests", "OtherTests") + terminal,
+                       (start + terminal).replace("SpeakiOSTests", "OtherTests"),
+                       start + terminal.replace("[100:200]", "[not:a-thread]"),
+                       start + terminal.replace("\nName", "\nextra\nName")):
+            with self.subTest(output=output):
+                result = gate.summarize(output, "success")
+                self.assertEqual(result["unique_cases"], 0)
+                self.assertTrue(result["errors"])
+        for status in ("failed", "skipped"):
+            result = gate.summarize(start + terminal.replace("' passed", "' " + status) + passing_log(), "success")
+            self.assertEqual(result["counts"][status], 1)
+            self.assertTrue(result["errors"])
+
+    def test_quoted_observed_console_terminal_counts_once_with_exact_prior_start(self):
+        method = "testCallbacksAndMaxDurationAreRefusedOnOtherVerbs"
+        ordinary = completion("CaptureDeepLinkTests", method)
+        start = f"Test Case '-[SpeakiOSTests.CaptureDeepLinkTests {method}]' started.\n"
+        prefix = ('2026-10-29 02:08:30.244431+0000 JustSpeakToIt[100:200] [default] '
+                  'Error Domain=LSApplicationWorkspaceErrorDomain Code=115 "(null)" '
+                  'UserInfo={_LSFile=LSDOpenService.mm, _LSLine=282, _LSFunc')
+        baseline = gate.summarize(passing_log() + ordinary, "success")
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=newline):
+                embedded = prefix + ordinary.rstrip("\n") + newline
+                embedded += "tion=-[_LSDOpenClient openURL:fileHandle:options:completionHandler:]}" + newline
+                output = passing_log() + start.replace("\n", newline) + embedded
+                self.assertEqual(gate.summarize(output, "success"), baseline)
+                self.assertEqual(gate.summarize(output + ordinary + embedded, "success"), baseline)
+        self.assertEqual(baseline["unique_cases"], 6)
+        self.assertEqual(baseline["errors"], [])
+
+    def test_quoted_console_failure_skip_and_failed_command_keep_gate_rejected(self):
+        prefix = '2026-10-29 02:08:30.244431+0000 App[100:200] [default] Error "(null)" '
+        start = "Test Case '-[SpeakiOSTests.OpenRouterAudioSettingsTests testSelection]' started.\n"
+        for status in ("failed", "skipped"):
+            with self.subTest(status=status):
+                embedded = prefix + completion("OpenRouterAudioSettingsTests", "testSelection", status)
+                for output in (start + embedded + passing_log(), passing_log() + start + embedded * 2):
+                    result = gate.summarize(output, "success")
+                    self.assertEqual(result["unique_cases"], 5)
+                    self.assertEqual(result["counts"][status], 1)
+                    self.assertTrue(result["errors"])
+        self.assertTrue(gate.summarize(passing_log() + start + prefix +
+                                     completion("OpenRouterAudioSettingsTests", "testSelection"), "failure")["errors"])
+
+    def test_quoted_console_foreign_or_unstarted_cases_never_supply_ios_coverage(self):
+        prefix = '2026-10-29 02:08:30.244431+0000 App[100:200] [default] Error "(null)" '
+        terminal = completion("OpenRouterAudioSettingsTests")
+        start = "Test Case '-[SpeakiOSTests.OpenRouterAudioSettingsTests testResult]' started.\n"
+        for output in (prefix + terminal, prefix + terminal + start,
+                       start.replace("SpeakiOSTests", "OtherTests") + prefix + terminal,
+                       start + prefix + terminal.replace("SpeakiOSTests", "OtherTests"),
+                       (start + prefix + terminal).replace("SpeakiOSTests", "OtherTests"),
+                       start + prefix + '"example ' + terminal.rstrip("\n") + '"\n'):
+            with self.subTest(output=output):
+                result = gate.summarize(output, "success")
+                self.assertEqual(result["unique_cases"], 0)
+                self.assertTrue(result["errors"])
+
     def test_module_splice_recovers_exact_target_and_deduplicates_mixed_replay(self):
         console = "2026-10-28 02:58:13.934192+0000 JustSpeakToIt[6608:33822] [api] Updating content"
         ordinary = completion("TranscriptionRecordingServiceTextTests", "testStopWhenNotRunningReturnsEmptyNoOpResult")

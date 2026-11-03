@@ -70,13 +70,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
 
+      # Keep dependency fetches in this workspace: the shared SwiftPM repository
+      # cache can reference a missing directory. Retain the compiled .build cache.
       - name: Build
         # Match the Test (Debug) step flag. A plain debug build here produces a
         # cached .build that the coverage-enabled swift test below cannot reuse
         # (coverage instrumentation changes compiler flags for every target),
         # forcing a second full rebuild of the whole module graph inside the
         # 45-minute job budget.
-        run: SWIFT_FLAGS=--enable-code-coverage make build
+        run: SWIFT_FLAGS="--enable-code-coverage --disable-dependency-cache" make build
 
       - name: Verify brand asset sizes and appearance variants
         run: node --test scripts/tests/brand-assets.test.mjs
@@ -94,7 +96,7 @@ jobs:
 
       - name: Test (Debug)
         id: debug_tests
-        run: python3 scripts/with-test-keychain.py swift test --enable-code-coverage
+        run: python3 scripts/with-test-keychain.py swift test --enable-code-coverage --disable-dependency-cache
 
       - name: Collect existing Debug XCTest crash reports
         id: debug_crash_collection
@@ -130,7 +132,7 @@ jobs:
           mkdir -m 700 "$directory"
           printf '%s\n' \
             '{"purpose":"isolated_history_fixture_diagnostic","status":"not_completed",' \
-            '"command":["python3","scripts/with-test-keychain.py","swift","test","--skip-build","--enable-code-coverage","--filter","DesktopLivePolishHistoryTests"],' \
+            '"command":["python3","scripts/with-test-keychain.py","swift","test","--skip-build","--enable-code-coverage","--disable-dependency-cache","--filter","DesktopLivePolishHistoryTests"],' \
             '"expected_cases":["SpeakDesktopTests.DesktopLivePolishHistoryTests.testControlRecordWithoutSession_RoundTripsRawAndPolishedValues",' \
             '"SpeakDesktopTests.DesktopLivePolishHistoryTests.testControlResultAfterFinish_RoundTripsSuccessfulPolish",' \
             '"SpeakDesktopTests.DesktopLivePolishHistoryTests.testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient"],' \
@@ -138,7 +140,7 @@ jobs:
             '"selection_verified":false,"parity_qualification":false}' > "$directory/result.json"
           echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
           set +e
-          python3 scripts/with-test-keychain.py swift test --skip-build --enable-code-coverage --filter DesktopLivePolishHistoryTests 2>&1 |
+          python3 scripts/with-test-keychain.py swift test --skip-build --enable-code-coverage --disable-dependency-cache --filter DesktopLivePolishHistoryTests 2>&1 |
             python3 -c '
           import json, pathlib, sys
           directory = pathlib.Path(sys.argv[1])
@@ -167,7 +169,7 @@ jobs:
           directory = Path(sys.argv[1])
           command_status, capture_status = map(int, sys.argv[2:])
           command = ["python3", "scripts/with-test-keychain.py", "swift", "test",
-                     "--skip-build", "--enable-code-coverage", "--filter",
+                     "--skip-build", "--enable-code-coverage", "--disable-dependency-cache", "--filter",
                      "DesktopLivePolishHistoryTests"]
           methods = [
               "testControlRecordWithoutSession_RoundTripsRawAndPolishedValues",
@@ -273,16 +275,16 @@ jobs:
         # `#if APP_STORE` branches that only the Mac App Store build exercises.
         # Runs after the test steps because the extra -Xswiftc flag invalidates
         # the shared debug build cache for the targets it rebuilds.
-        run: swift build -Xswiftc -DAPP_STORE --target SpeakCore
+        run: swift build --disable-dependency-cache -Xswiftc -DAPP_STORE --target SpeakCore
 
       - name: Report Coverage
         if: always()
         run: |
-          BIN_PATH=$(swift build --show-bin-path)
+          BIN_PATH=$(swift build --disable-dependency-cache --show-bin-path)
           XCTEST_PATH=$(find "$BIN_PATH" -name '*.xctest' -type d | head -1)
           if [ -n "$XCTEST_PATH" ]; then
             EXEC_PATH="$XCTEST_PATH/Contents/MacOS/$(basename "$XCTEST_PATH" .xctest)"
-            COV_DIR=$(swift test --show-codecov-path 2>/dev/null || echo "")
+            COV_DIR=$(swift test --disable-dependency-cache --show-codecov-path 2>/dev/null || echo "")
             if [ -n "$COV_DIR" ] && [ -f "$COV_DIR" ]; then
               echo "### Test Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
               xcrun llvm-cov report "$EXEC_PATH" \

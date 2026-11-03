@@ -123,14 +123,16 @@ class AppleReconciliationTest < Minitest::Test
   def test_each_bound_pending_surface_is_retained_independently_of_newest_allocation
     old = alpha(42); newest = alpha(43)
     AppleRelease::PENDING_APPLE_RECEIPTS.each do |status|
-      %w[ios mac-store].each do |surface|
-        reader = snapshot_reader(old.fetch('tag') => {"#{surface}-receipt.json" => receipt(old, status: status, surface: surface)})
-        assert_equal %w[alpha-build-43 alpha-build-42], selected([old, newest], reader), "#{surface} #{status}"
-      end
+      reader = snapshot_reader(old.fetch('tag') => {'ios-receipt.json' => receipt(old, status: status)})
+      assert_equal %w[alpha-build-43 alpha-build-42], selected([old, newest], reader), status
     end
+  end
+
+  def test_retired_mac_store_receipts_do_not_retain_historical_alphas
+    old = alpha(42); newest = alpha(43)
     reader = snapshot_reader(old.fetch('tag') => {'ios-receipt.json' => receipt(old, status: 'verified'),
       'mac-store-receipt.json' => receipt(old, surface: 'mac-store')})
-    assert_equal %w[alpha-build-43 alpha-build-42], selected([old, newest], reader)
+    assert_equal ['alpha-build-43'], selected([old, newest], reader)
   end
 
   def test_terminal_historical_receipts_are_excluded_but_current_pointer_still_retained

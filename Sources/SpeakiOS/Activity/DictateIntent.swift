@@ -128,12 +128,14 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
             throw DictateIntentError.alreadyRecording
         }
 
-        let parameters = try CaptureParameterResolution.resolve(
-            destinationID: destination?.rawValue,
-            language: language,
-            model: model,
-            source: source
-        )
+        let parameters = try await journalingRefusedStartParameters(service: service) {
+            try CaptureParameterResolution.resolve(
+                destinationID: destination?.rawValue,
+                language: language,
+                model: model,
+                source: source
+            )
+        }
         // Clamped through the policy, not trusted from the parameter: a
         // Shortcut can pass a variable rather than use the picker, and
         // `inclusiveRange` is a hint to the editor, not a guarantee.

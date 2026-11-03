@@ -194,6 +194,67 @@ final class CaptureIntentTerminalDiagnosticTests: XCTestCase {
         }
     }
 
+    func testRefusedStartParameterRecordsItsOwnCodeBeforeAnyAdmission() async throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        self.seedJournal(harness)
+        let service = harness.makeService()
+        do {
+            _ = try await journalingRefusedStartParameters(service: service) {
+                try CaptureParameterResolution.resolve(language: "private-language-zz")
+            }
+            XCTFail("An unknown language must be refused")
+        } catch { XCTAssertEqual(error as? CaptureParameterFailure, .unknownLanguage) }
+        XCTAssertEqual(
+            CaptureOutcomeJournal.lastFailureCode(defaults: harness.defaults), "start_parameter_unknownLanguage"
+        )
+        XCTAssertEqual(harness.defaults.string(forKey: "captureHealth.lastOutcome.v1"), "failed")
+        XCTAssertFalse(String(describing: self.journal(harness)).contains("private-"))
+        XCTAssertTrue(harness.activityStarts.isEmpty)
+        XCTAssertNil(service.lastSessionError)
+        XCTAssertEqual(service.state, .idle)
+    }
+
+    func testRefusedStartParameterCannotOverwriteRunningOrForegroundCapture() async throws {
+        for foregroundOwned in [false, true] {
+            let harness = try DependencyHarness()
+            defer { harness.cleanUp() }
+            self.seedJournal(harness)
+            let ownership = ForegroundRecordingOwnership()
+            let owner = UUID()
+            let service = harness.makeService(foregroundOwnership: ownership)
+            if foregroundOwned {
+                XCTAssertTrue(ownership.claim(owner))
+            } else {
+                try await service.startRecording(requiresLiveActivity: false)
+            }
+            let before = self.journal(harness)
+            do {
+                _ = try await journalingRefusedStartParameters(service: service) {
+                    throw CaptureParameterFailure.invalidSource
+                }
+                XCTFail("The refusal still propagates to the intent")
+            } catch {}
+            XCTAssertEqual(self.journal(harness), before)
+            if foregroundOwned {
+                ownership.release(owner)
+            } else {
+                _ = await service.stopRecording(destination: .historyOnly)
+            }
+        }
+    }
+
+    func testResolvedStartParametersLeaveJournalUntouched() async throws {
+        let harness = try DependencyHarness()
+        defer { harness.cleanUp() }
+        self.seedJournal(harness)
+        let before = self.journal(harness)
+        let service = harness.makeService()
+        let parameters = try await journalingRefusedStartParameters(service: service) { .none }
+        XCTAssertEqual(parameters, .none)
+        XCTAssertEqual(self.journal(harness), before)
+    }
+
     private var privateFrameworkError: Error {
         NSError(domain: "private-framework", code: 1, userInfo: [NSLocalizedDescriptionKey: "private-transcript-key"])
     }

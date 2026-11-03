@@ -156,22 +156,41 @@ func startRecordingWithForegroundRecovery(
 /// else and letting the user find out afterwards.
 @available(iOS 18, *)
 private func resolvedRunParameters(
+    service: TranscriptionRecordingService,
     destination: CaptureDestinationAppEnum?,
     language: String?,
     model: String?,
     source: String?
-) throws -> CaptureRunParameters {
-    try CaptureParameterResolution.resolve(
-        destinationID: destination?.rawValue,
-        language: language,
-        model: model,
-        source: source,
-        // Validate against what iOS can actually execute, not just what the
-        // cross-platform catalogue can spell. A Mac-only streaming provider or
-        // a batch entry with no iOS upload route is refused here rather than
-        // accepted and then run as something else.
-        vocabulary: CaptureModelSupport.vocabulary
-    )
+) async throws -> CaptureRunParameters {
+    try await journalingRefusedStartParameters(service: service) {
+        try CaptureParameterResolution.resolve(
+            destinationID: destination?.rawValue,
+            language: language,
+            model: model,
+            source: source,
+            // Validate against what iOS can actually execute, not just what the
+            // cross-platform catalogue can spell. A Mac-only streaming provider or
+            // a batch entry with no iOS upload route is refused here rather than
+            // accepted and then run as something else.
+            vocabulary: CaptureModelSupport.vocabulary
+        )
+    }
+}
+
+/// Resolves a start intent's parameters, journaling a refusal under its own
+/// diagnostic code. The refusal happens before the foreground helper, so
+/// without this the health screen would keep reporting an older run (#996).
+@available(iOS 18, *)
+func journalingRefusedStartParameters(
+    service: TranscriptionRecordingService,
+    _ resolve: () throws -> CaptureRunParameters
+) async throws -> CaptureRunParameters {
+    do {
+        return try resolve()
+    } catch let failure as CaptureParameterFailure {
+        await service.recordRefusedStartParameters(failure)
+        throw failure
+    }
 }
 
 /// Idempotent start intent for users who wire their Action Button / Shortcut
@@ -244,7 +263,8 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, LiveActivityIntent
         // A refused parameter is reported as itself. Folding it into the
         // generic "check your permissions" line below would send the user to
         // the wrong place entirely.
-        let parameters = try resolvedRunParameters(
+        let parameters = try await resolvedRunParameters(
+            service: service,
             destination: destination,
             language: language,
             model: model,
@@ -372,7 +392,8 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
         } else if await ForegroundRecordingOwnership.shared.isOwned || SharedTranscriptionState.shared.isRecording {
             throw ToggleRecordingError.alreadyRecordingInApp
         } else {
-            let parameters = try resolvedRunParameters(
+            let parameters = try await resolvedRunParameters(
+                service: service,
                 destination: destination,
                 language: language,
                 model: model,

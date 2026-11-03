@@ -22,6 +22,19 @@ final class MissingLiveAPIKeyAlertTests: XCTestCase {
     XCTAssertFalse(alert.message.contains("live transcription"))
   }
 
+  func testMessage_namesMinimumPermissionsAndOpensGuideKeyPage() {
+    let provider = TranscriptionProviderMetadata(
+      id: "deepgram",
+      displayName: "Deepgram",
+      website: "https://deepgram.com"
+    )
+
+    let alert = MissingLiveAPIKeyAlert(provider: provider, modelDisplayName: "Nova-3")
+
+    XCTAssertTrue(alert.message.hasSuffix("Create the key with only: Member role."))
+    XCTAssertEqual(alert.keyPageURL, APIKeyGuidance.creationURL(for: "deepgram.apiKey"))
+  }
+
   func testProviderMetadataAPIKeyURL_usesProviderWebsite() {
     let provider = TranscriptionProviderMetadata(
       id: "cartesia",

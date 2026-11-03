@@ -96,6 +96,12 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
     
     var keychainIdentifier: String { "\(rawValue).apiKey" }
 
+    /// Onboarding sets the key up for transcription; an OpenRouter key also
+    /// serves post-processing.
+    var guideUses: APIKeyUses {
+        self == .openrouter ? [.transcription, .postProcessing] : .transcription
+    }
+
     /// The live streaming transcription model this provider maps to, if any.
     /// Selecting such a provider during onboarding switches the app to remote
     /// streaming so the freshly-added key is used immediately.
@@ -840,6 +846,18 @@ struct APIKeyStepView: View {
                     Text(state.selectedProvider.apiKeyInstructions)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+
+                    if let summary = APIKeyGuidance.promptSummary(
+                        for: state.selectedProvider.keychainIdentifier, uses: state.selectedProvider.guideUses
+                    ) {
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    APIKeyGuideDisclosure(
+                        identifier: state.selectedProvider.keychainIdentifier, uses: state.selectedProvider.guideUses
+                    )
                 }
 
                 VStack(alignment: .leading, spacing: 6) {

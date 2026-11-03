@@ -35,7 +35,9 @@ final class APIKeyGuidanceTests: XCTestCase {
     func testMinimumPermissions_FollowTheSelectedUsesAndUnionSharedKeys() throws {
         let elevenLabs = try XCTUnwrap(APIKeyGuidance.guide(for: "elevenlabs.apiKey"))
         XCTAssertEqual(elevenLabs.minimumPermissions(for: .transcription), ["Speech to Text", "User: Read"])
-        XCTAssertEqual(elevenLabs.minimumPermissions(for: .voiceOutput), ["Text to Speech", "Voices: Read", "User: Read"])
+        XCTAssertEqual(
+            elevenLabs.minimumPermissions(for: .voiceOutput), ["Text to Speech", "Voices: Read", "User: Read"]
+        )
         XCTAssertEqual(
             elevenLabs.minimumPermissions(for: [.transcription, .voiceOutput]),
             ["Speech to Text", "Text to Speech", "Voices: Read", "User: Read"]

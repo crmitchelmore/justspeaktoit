@@ -41,11 +41,13 @@ struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
     let providerName: String
     let modelName: String
     let apiKeyURL: URL?
+    let permissionSummary: String?
 
     var title: String { "API key required" }
 
     var message: String {
-        "\(providerName) needs an API key for transcription with \(modelName). Add it now and try again."
+        let base = "\(providerName) needs an API key for transcription with \(modelName). Add it now and try again."
+        return permissionSummary.map { base + " " + $0 } ?? base
     }
 
     @MainActor
@@ -60,7 +62,8 @@ struct IOSMissingTranscriptionAPIKeyAlert: Identifiable {
 
         providerName = route.provider.displayName
         modelName = ModelCatalog.friendlyName(for: modelID)
-        apiKeyURL = route.provider.apiKeyURL
+        apiKeyURL = APIKeyCatalog.keyPageURL(for: apiKeyIdentifier) ?? route.provider.apiKeyURL
+        permissionSummary = APIKeyGuidance.promptSummary(for: apiKeyIdentifier, uses: .transcription)
     }
 }
 #endif

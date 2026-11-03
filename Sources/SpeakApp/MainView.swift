@@ -45,7 +45,7 @@ struct MainView: View {
         selection = .settings(.apiKeys)
         environment.main.missingLiveAPIKeyAlert = nil
       }
-      if let url = alert.provider.apiKeyURL {
+      if let url = alert.keyPageURL {
         Button("Get API Key") {
           NSWorkspace.shared.open(url)
           environment.main.missingLiveAPIKeyAlert = nil

@@ -11,8 +11,8 @@ import Foundation
 /// and model bytes; the conservative host-support aggregate is not a runtime receipt.
 public extension ModelCatalog {
     /// Downloadable sherpa-onnx streaming sources: Parakeet v3 first, then
-    /// Nemotron, then lightweight Zipformer models. WhisperKit live models come
-    /// from `localTranscription`.
+    /// English Nemotron (NVIDIA's pick for English-only use), multilingual
+    /// Nemotron 3.5, then lightweight Zipformer models. WhisperKit live models come from `localTranscription`.
     static let localStreamingSources: [LocalStreamingModelSource] = [
         LocalStreamingModelSource(
             repoID: ParakeetLocalModels.tdtV3Int8RepoID,
@@ -40,6 +40,20 @@ public extension ModelCatalog {
                 string: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
                     + "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2"
             )
+        ),
+        LocalStreamingModelSource(
+            repoID: NemotronLocalModels.repoID,
+            modelName: NemotronLocalModels.multilingual1120ms.modelName,
+            runtime: "sherpa-onnx streaming runtime",
+            approximateSizeMB: NemotronLocalModels.multilingualDownloadSizeMB,
+            archiveURL: NemotronLocalModels.multilingual1120ms.archiveURL
+        ),
+        LocalStreamingModelSource(
+            repoID: NemotronLocalModels.repoID,
+            modelName: NemotronLocalModels.multilingual560ms.modelName,
+            runtime: "sherpa-onnx streaming runtime",
+            approximateSizeMB: NemotronLocalModels.multilingualDownloadSizeMB,
+            archiveURL: NemotronLocalModels.multilingual560ms.archiveURL
         ),
         LocalStreamingModelSource(
             repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",

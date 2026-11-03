@@ -58,3 +58,6 @@ API breakage: enumelement MistralTTSModel.voxtralMiniTTS3 has been added as a ne
 # Named local-Mac capture waits add one command; existing cases, raw values and
 # initializers remain. Repository dispatchers and clients handle the new case.
 API breakage: enumelement AutomationCommand.awaitTranscript has been added as a new enum case
+# Opt-in OpenAI Realtime speech voices add one desktop voice route; existing
+# cases, identifiers and resolution are unchanged. Repository switches handle it.
+API breakage: enumelement DesktopSpeechVoice.openaiRealtime has been added as a new enum case

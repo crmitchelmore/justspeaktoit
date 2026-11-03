@@ -66,6 +66,11 @@ public enum TranscriptionPricing {
         "openai/gpt-4o-mini-transcribe": rate("0.003"),
         "openai/gpt-4o-transcribe-streaming": rate("0.006"),
         "openai/gpt-4o-mini-transcribe-streaming": rate("0.003"),
+        // GPT Transcribe and GPT Live Transcribe bill per audio minute:
+        // https://developers.openai.com/api/docs/models/gpt-transcribe and
+        // https://developers.openai.com/api/docs/models/gpt-live-transcribe (checked 2026-11-02).
+        OpenAITranscriptionModels.gptTranscribeCatalogID: rate("0.0045"),
+        OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID: rate("0.017"),
         // Mode-specific PAYG rates, including current streaming promotions:
         // https://deepgram.com/pricing (checked 2026-09-12).
         "deepgram/nova-3": rate("0.0043"),

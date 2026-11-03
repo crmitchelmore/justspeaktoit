@@ -77,6 +77,9 @@ public struct DesktopSpeechSynthesis: Sendable {
         case .openai:
             return try await DesktopOpenAISpeechSynthesis(session: session).synthesize(
                 source, voice: voice, options: options, credential: credential)
+        case .openaiRealtime(let voiceID):
+            return try await DesktopOpenAISpeechSynthesis(session: session).synthesizeRealtime(
+                source, voice: voice, voiceID: voiceID, options: options, credential: credential)
         case .elevenlabs:
             return try await DesktopElevenLabsSpeechSynthesis(session: session).synthesize(
                 source, voice: voice, credential: credential)

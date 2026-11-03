@@ -29,6 +29,13 @@ public enum OpenAITTSAPI {
     public static let speedRange: ClosedRange<Double> = 0.25...4
 
     public static func validate(text: String, request: OpenAITTSRequest) throws {
+        try validate(text: text, request: request, at: Date())
+    }
+
+    /// Also refuses a model OpenAI has shut down, so a saved selection fails
+    /// with an actionable message rather than reaching `/v1/audio/speech`.
+    public static func validate(text: String, request: OpenAITTSRequest, at date: Date) throws {
+        try ModelRetirements.ensureAvailable(request.model.desktopModelIdentifier, at: date)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw OpenAITTSAPIError.emptyText
         }

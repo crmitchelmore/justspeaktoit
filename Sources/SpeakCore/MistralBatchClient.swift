@@ -17,6 +17,23 @@ public struct MistralBatchClient: TranscriptionProvider {
   private let keywords: [String]
   private let multipartStaging: SharedMultipartUploadStaging
   private let durationResolver: @Sendable (URL) async -> TimeInterval
+  private let now: @Sendable () -> Date
+
+  public init(
+    session: URLSession = .shared,
+    baseURL: URL = URL(string: "https://api.mistral.ai/v1")!,
+    multipartStaging: SharedMultipartUploadStaging,
+    keywords: [String],
+    durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 },
+    now: @escaping @Sendable () -> Date
+  ) {
+    self.now = now
+    self.session = session
+    self.keywords = keywords
+    self.baseURL = baseURL
+    self.multipartStaging = multipartStaging
+    self.durationResolver = durationResolver
+  }
 
   public init(
     session: URLSession = .shared,
@@ -25,11 +42,10 @@ public struct MistralBatchClient: TranscriptionProvider {
     keywords: [String],
     durationResolver: @escaping @Sendable (URL) async -> TimeInterval = { _ in 0 }
   ) {
-    self.session = session
-    self.keywords = keywords
-    self.baseURL = baseURL
-    self.multipartStaging = multipartStaging
-    self.durationResolver = durationResolver
+    self.init(
+      session: session, baseURL: baseURL, multipartStaging: multipartStaging,
+      keywords: keywords, durationResolver: durationResolver, now: { Date() }
+    )
   }
 
   /// Source-compatible overload preserved for callers predating keyword hints.
@@ -57,6 +73,7 @@ public struct MistralBatchClient: TranscriptionProvider {
     }
 
     try Task.checkCancellation()
+    try ModelRetirements.ensureAvailable("mistral/\(modelID(from: model))", at: now())
     let endpoint = baseURL.appendingPathComponent("audio/transcriptions")
     var request = URLRequest(url: endpoint)
     request.httpMethod = "POST"

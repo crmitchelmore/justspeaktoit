@@ -194,6 +194,39 @@ final class CaptureIntentTerminalDiagnosticTests: XCTestCase {
         }
     }
 
+    private var privateFrameworkError: Error {
+        NSError(domain: "private-framework", code: 1, userInfo: [NSLocalizedDescriptionKey: "private-transcript-key"])
+    }
+
+    private func start(_ service: TranscriptionRecordingService) async throws {
+        try await startRecordingWithForegroundRecovery(service: service, start: { request in
+            try await self.startAttempt(service, request: request)
+        }, continueInForeground: { _ in XCTFail("This failure must not trigger foreground recovery") })
+    }
+
+    private func startAttempt(
+        _ service: TranscriptionRecordingService, request: CaptureConfigurationRequest
+    ) async throws {
+        try await service.startRecording(destination: nil, configurationRequest: request)
+    }
+
+    private func seedJournal(_ harness: DependencyHarness) {
+        CaptureOutcomeJournal.record(
+            .failed, failure: iOSTranscriptionError.permissionDenied(.microphone),
+            at: Date(timeIntervalSince1970: 100), defaults: harness.defaults
+        )
+    }
+
+    private func journal(_ harness: DependencyHarness) -> [String: AnyHashable] {
+        (harness.defaults.persistentDomain(forName: harness.suite) ?? [:])
+            .filter { $0.key.hasPrefix("captureHealth.last") }
+            .compactMapValues { $0 as? AnyHashable }
+    }
+}
+
+@available(iOS 18, *)
+@MainActor
+extension CaptureIntentTerminalDiagnosticTests {
     func testRefusedStartParameterRecordsItsOwnCodeBeforeAnyAdmission() async throws {
         let harness = try DependencyHarness()
         defer { harness.cleanUp() }
@@ -253,35 +286,6 @@ final class CaptureIntentTerminalDiagnosticTests: XCTestCase {
         let parameters = try await journalingRefusedStartParameters(service: service) { .none }
         XCTAssertEqual(parameters, .none)
         XCTAssertEqual(self.journal(harness), before)
-    }
-
-    private var privateFrameworkError: Error {
-        NSError(domain: "private-framework", code: 1, userInfo: [NSLocalizedDescriptionKey: "private-transcript-key"])
-    }
-
-    private func start(_ service: TranscriptionRecordingService) async throws {
-        try await startRecordingWithForegroundRecovery(service: service, start: { request in
-            try await self.startAttempt(service, request: request)
-        }, continueInForeground: { _ in XCTFail("This failure must not trigger foreground recovery") })
-    }
-
-    private func startAttempt(
-        _ service: TranscriptionRecordingService, request: CaptureConfigurationRequest
-    ) async throws {
-        try await service.startRecording(destination: nil, configurationRequest: request)
-    }
-
-    private func seedJournal(_ harness: DependencyHarness) {
-        CaptureOutcomeJournal.record(
-            .failed, failure: iOSTranscriptionError.permissionDenied(.microphone),
-            at: Date(timeIntervalSince1970: 100), defaults: harness.defaults
-        )
-    }
-
-    private func journal(_ harness: DependencyHarness) -> [String: AnyHashable] {
-        (harness.defaults.persistentDomain(forName: harness.suite) ?? [:])
-            .filter { $0.key.hasPrefix("captureHealth.last") }
-            .compactMapValues { $0 as? AnyHashable }
     }
 }
 #endif

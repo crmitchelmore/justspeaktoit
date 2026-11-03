@@ -1,7 +1,8 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index.js';
 import { issueAccessToken } from '../src/auth/session.js';
+import { billingPeriod } from '../src/entitlement.js';
 import { Repository } from '../src/data/repository.js';
 import { QuotaClient } from '../src/quota.js';
 import { billingPeriod } from '../src/entitlement.js';
@@ -128,12 +129,16 @@ async function observe(user: string, response: Response, count: number): Promise
 }
 
 describe('actual routed settlement faults', () => {
+  // Routes bill the period derived from the clock, so pin the clock for each test and read that same period.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(Date.now()); });
+  afterEach(() => { vi.useRealTimers(); });
+  const current = (): string => billingPeriod(now());
   it('retains measured quota/receipt when the actual D1 ledger rejects writes, then reconciles once', async () => {
     const a = await account(); const count = provider(); await rejectLedger();
     const first = await worker.fetch(request(a.token), env);
     expect(first.status).toBe(200); expect(await first.json()).toMatchObject({ text: 'Synthetic result.' });
     expect((await receipt(a.userId))?.phase).toBe('ledger_pending');
-    expect((await snapshot(a.userId)).tokensUsed).toBe(60); expect(await ledger(a.userId)).toHaveLength(0);
+    expect((await snapshot(a.userId, current())).tokensUsed).toBe(60); expect(await ledger(a.userId)).toHaveLength(0);
     await observe(a.userId, first, count.calls);
     await env.DB.prepare('DELETE FROM request_claims WHERE user_id=?1').bind(a.userId).run();
     const retry = await worker.fetch(request(a.token), env);
@@ -141,7 +146,7 @@ describe('actual routed settlement faults', () => {
     await env.DB.prepare('DROP TRIGGER settlement_fail_ledger').run(); await alarm(a.userId);
     expect((await receipt(a.userId))?.phase).toBe('settled');
     expect(await ledger(a.userId)).toHaveLength(1); expect((await ledger(a.userId))[0]?.units).toBe(60);
-    expect(count.calls).toBe(1); expect((await snapshot(a.userId)).tokensUsed).toBe(60);
+    expect(count.calls).toBe(1); expect((await snapshot(a.userId, current())).tokensUsed).toBe(60);
     await observe(a.userId, retry, count.calls);
   });
 
@@ -158,7 +163,7 @@ describe('actual routed settlement faults', () => {
     });
     const first = await worker.fetch(request(a.token), env); expect(first.status).toBe(200); expect(injected).toBe(true);
     const retry = await worker.fetch(request(a.token), env); expect(retry.status).toBe(409);
-    expect(count.calls).toBe(1); expect((await snapshot(a.userId)).tokensUsed).toBe(60);
+    expect(count.calls).toBe(1); expect((await snapshot(a.userId, current())).tokensUsed).toBe(60);
     expect(await ledger(a.userId)).toHaveLength(1); await observe(a.userId, retry, count.calls);
   });
 
@@ -183,7 +188,7 @@ describe('actual routed settlement faults', () => {
     await observe(a.userId, first, count.calls);
     const retry = await worker.fetch(request(a.token), env); expect(retry.status).toBe(409);
     await alarm(a.userId); expect((await receipt(a.userId))?.phase).toBe('settled');
-    expect(await ledger(a.userId)).toHaveLength(1); expect((await snapshot(a.userId)).tokensUsed).toBe(60);
+    expect(await ledger(a.userId)).toHaveLength(1); expect((await snapshot(a.userId, current())).tokensUsed).toBe(60);
     expect(count.calls).toBe(1); await observe(a.userId, retry, count.calls);
   });
 
@@ -208,7 +213,7 @@ describe('actual routed settlement faults', () => {
       const a = await account(); const count = provider(usage ?? null);
       const result = await worker.fetch(request(a.token), env);
       expect(await result.json()).toMatchObject({ error: { code: 'outcome_unknown' } });
-      const state = await snapshot(a.userId); expect(state.tokensMeasured).toBe(0);
+      const state = await snapshot(a.userId, current()); expect(state.tokensMeasured).toBe(0);
       expect(state.tokensHeld).toBeGreaterThan(0); expect(state.tokensUsed).toBe(state.tokensHeld);
       expect(await ledger(a.userId)).toHaveLength(0); expect(count.calls).toBe(1);
       expect((await worker.fetch(request(a.token), env)).status).toBe(409);
@@ -217,7 +222,7 @@ describe('actual routed settlement faults', () => {
   it('settles genuine explicit zero without charging the reserved estimate', async () => {
     const a = await account(); const count = provider({ prompt_tokens: 0, completion_tokens: 0 });
     expect((await worker.fetch(request(a.token), env)).status).toBe(200);
-    expect((await snapshot(a.userId)).tokensUsed).toBe(0); expect((await ledger(a.userId))[0]?.units).toBe(0);
+    expect((await snapshot(a.userId, current())).tokensUsed).toBe(0); expect((await ledger(a.userId))[0]?.units).toBe(0);
     expect(count.calls).toBe(1);
   });
 

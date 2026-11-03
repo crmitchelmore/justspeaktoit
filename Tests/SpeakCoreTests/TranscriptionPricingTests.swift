@@ -100,8 +100,6 @@ final class TranscriptionPricingTests: XCTestCase {
             AlibabaSpeechModels.qwen35,
             AlibabaSpeechModels.qwen38,
             "openai/gpt-realtime-whisper-streaming",
-            "openai/gpt-live-transcribe-streaming",
-            "openai/gpt-transcribe",
             "openai/gpt-4o-transcribe-diarize",
             "openai/gpt-audio",
             "thinkingmachines/inkling",

@@ -51,6 +51,7 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
 
     private let apiKey: String
     private let model: String
+    private let now: @Sendable () -> Date
     /// The rate `session.update` declares and the caller's PCM is encoded at.
     let sampleRate: Int
     let makeConnection: ConnectionFactory
@@ -78,7 +79,7 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
         )
     }
 
-    public init(
+    public convenience init(
         apiKey: String,
         model: String = MistralVoxtralRealtime.apiModelID,
         sampleRate: Int = 16_000,
@@ -87,6 +88,19 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
         }
     ) {
+        self.init(apiKey: apiKey, model: model, sampleRate: sampleRate,
+                  makeConnection: makeConnection, schedule: schedule, now: { Date() })
+    }
+
+    public init(
+        apiKey: String,
+        model: String,
+        sampleRate: Int,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler,
+        now: @escaping @Sendable () -> Date
+    ) {
+        self.now = now
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.model = model.isEmpty ? MistralVoxtralRealtime.apiModelID : model
         self.sampleRate = sampleRate
@@ -113,6 +127,12 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
             }
             guard request != nil else {
                 fail(StreamingClientError.invalidURL, active, &effects)
+                return nil
+            }
+            do {
+                try ModelRetirements.ensureAvailable("mistral/\(model)-streaming", at: now())
+            } catch {
+                fail(error, active, &effects)
                 return nil
             }
             return active

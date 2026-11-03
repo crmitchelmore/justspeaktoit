@@ -11,6 +11,7 @@ enum SherpaOnnxRuntimeError: LocalizedError {
   case unsupportedModel(String)
   case downloadFailed(String)
   case processFailed(String)
+  case runtimeUpdateRequired(installed: String, required: String)
 
   var errorDescription: String? {
     switch self {
@@ -24,6 +25,9 @@ enum SherpaOnnxRuntimeError: LocalizedError {
       return "Could not download the sherpa-onnx model files. \(details)"
     case .processFailed(let details):
       return "sherpa-onnx failed to start. \(details)"
+    case .runtimeUpdateRequired(let installed, let required):
+      return "This model needs sherpa-onnx \(required) or later, but \(installed) is installed. "
+        + "Choose Update Runtime in Local Streaming settings."
     }
   }
 }
@@ -39,6 +43,8 @@ struct SherpaOnnxModelBundle: Equatable, Sendable {
   /// sherpa-onnx model type: "transducer" runs the online recognizer;
   /// "nemo_transducer" runs the offline recognizer (e.g. NVIDIA Parakeet TDT).
   let modelType: String
+  /// Whether the sidecar may pass a per-stream language prompt.
+  var supportsLanguageHint = false
 }
 
 @MainActor
@@ -58,7 +64,19 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     }
   }
 
+  /// The sherpa-onnx version `installRuntime()` installs. Older installed
+  /// runtimes keep serving models whose specification allows them.
+  nonisolated static let pinnedRuntimeVersion = "1.13.5"
+
   @Published private(set) var runtimeState: InstallState = .notInstalled
+  /// Version reported by the installed runtime, when it reports one.
+  @Published private(set) var installedRuntimeVersion: String?
+
+  var runtimeUpdateAvailable: Bool {
+    guard runtimeState.isInstalled else { return false }
+    // A runtime too old to report its version is older than the pin.
+    return !Self.isVersion(installedRuntimeVersion ?? "0", atLeast: Self.pinnedRuntimeVersion)
+  }
   @Published private(set) var modelStates: [String: InstallState] = [:]
 
   private let fileManager: FileManager
@@ -122,15 +140,20 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
       pythonExecutableCache = python
       _ = try await Self.runProcess(
         executableURL: python,
-        arguments: ["-m", "pip", "install", "sherpa-onnx==1.13.2"]
+        arguments: ["-m", "pip", "install", "sherpa-onnx==\(Self.pinnedRuntimeVersion)"]
       )
-      try await ensureRuntimeAvailable()
+      _ = try await ensureRuntimeAvailable()
       try Task.checkCancellation()
       runtimeState = .installed
     } catch is CancellationError {
       runtimeState = previousState
     } catch {
-      runtimeState = .failed(error.localizedDescription)
+      // A failed upgrade can leave the previous runtime usable; keep offering it.
+      if (try? await ensureRuntimeAvailable()) != nil, !Task.isCancelled {
+        runtimeState = .installed
+      } else {
+        runtimeState = .failed(error.localizedDescription)
+      }
     }
   }
 
@@ -186,7 +209,8 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
       decoder: directory.appendingPathComponent(spec.decoder),
       joiner: directory.appendingPathComponent(spec.joiner),
       featureDim: spec.featureDim,
-      modelType: spec.modelType
+      modelType: spec.modelType,
+      supportsLanguageHint: spec.supportsLanguageHint
     )
     guard fileManager.fileExists(atPath: bundle.tokens.path),
       fileManager.fileExists(atPath: bundle.encoder.path),
@@ -234,15 +258,19 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
 
   func ensureReady(sourceID: String) async throws -> SherpaOnnxModelBundle {
     let source = try source(for: sourceID)
-    try await ensureRuntimeAvailable()
+    let version = try await ensureRuntimeAvailable()
     try Task.checkCancellation()
+    if let required = try Self.specification(for: source).minimumRuntimeVersion,
+      !Self.isVersion(version ?? "0", atLeast: required) {
+      throw SherpaOnnxRuntimeError.runtimeUpdateRequired(installed: version ?? "an older version", required: required)
+    }
     return try bundle(for: source)
   }
 
   private func refreshRuntimeState() async {
     guard runtimeState != .installing else { return }
     do {
-      try await ensureRuntimeAvailable()
+      _ = try await ensureRuntimeAvailable()
       try Task.checkCancellation()
       runtimeState = .installed
     } catch is CancellationError {
@@ -252,19 +280,40 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     }
   }
 
-  private func ensureRuntimeAvailable() async throws {
+  /// Confirms the module imports and returns the version it reports, if any.
+  @discardableResult
+  private func ensureRuntimeAvailable() async throws -> String? {
     let python = try pythonExecutable()
     do {
-      _ = try await Self.runProcess(
+      let output = try await Self.runProcess(
         executableURL: python,
         arguments: ["-c", "import sherpa_onnx; print(getattr(sherpa_onnx, '__version__', 'ok'))"],
         timeout: LocalProcessRunner.probeTimeout
       )
+      let reported = output.split(whereSeparator: \.isNewline).last.map(String.init)
+      let version = reported.flatMap { $0.first?.isNumber == true ? $0 : nil }
+      installedRuntimeVersion = version
+      return version
     } catch is CancellationError {
       throw CancellationError()
     } catch {
       throw SherpaOnnxRuntimeError.runtimeUnavailable(error.localizedDescription)
     }
+  }
+
+  /// Numeric dotted-version comparison; non-numeric suffixes are ignored.
+  nonisolated static func isVersion(_ version: String, atLeast minimum: String) -> Bool {
+    func parts(_ value: String) -> [Int] {
+      value.split(separator: ".").map { Int($0.prefix { $0.isNumber }) ?? 0 }
+    }
+    let lhs = parts(version)
+    let rhs = parts(minimum)
+    for index in 0..<max(lhs.count, rhs.count) {
+      let left = index < lhs.count ? lhs[index] : 0
+      let right = index < rhs.count ? rhs[index] : 0
+      if left != right { return left > right }
+    }
+    return true
   }
 
   private func source(for sourceID: String) throws -> LocalStreamingModelSource {
@@ -296,6 +345,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
       throw SherpaOnnxRuntimeError.downloadFailed("Hugging Face returned HTTP \(http.statusCode) for \(filename).")
     }
+    try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
     try fileManager.moveItem(at: downloadedURL, to: destination)
   }
 
@@ -365,8 +415,8 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
   }
 
   nonisolated static func specification(for source: LocalStreamingModelSource) throws -> ModelSpecification {
-    if let parakeet = parakeetSpecification(for: source) {
-      return parakeet
+    if let nvidia = parakeetSpecification(for: source) ?? multilingualNemotronSpecification(for: source) {
+      return nvidia
     }
     let repo = source.repoID.lowercased()
     if repo.contains("en-20m-2023-02-17") {
@@ -416,6 +466,27 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     throw SherpaOnnxRuntimeError.unsupportedModel(source.displayName)
   }
 
+  /// NVIDIA Nemotron 3.5: multilingual cache-aware transducer. Needs the pinned
+  /// runtime that added it and honours an explicit language hint.
+  private nonisolated static func multilingualNemotronSpecification(
+    for source: LocalStreamingModelSource
+  ) -> ModelSpecification? {
+    guard NemotronLocalModels.isMultilingual("\(source.repoID) \(source.modelName)") else { return nil }
+    let root = source.modelName
+    let variant = NemotronLocalModels.variant(named: root)
+    return ModelSpecification(
+      tokens: "\(root)/tokens.txt",
+      encoder: "\(root)/encoder.int8.onnx",
+      decoder: "\(root)/decoder.int8.onnx",
+      joiner: "\(root)/joiner.int8.onnx",
+      featureDim: 128,
+      archiveURL: source.archiveURL ?? variant?.archiveURL,
+      archiveSHA256: variant?.archiveSHA256,
+      minimumRuntimeVersion: NemotronLocalModels.minimumRuntimeVersion,
+      supportsLanguageHint: true
+    )
+  }
+
   /// NVIDIA Parakeet v3: offline NeMo TDT transducer. Decoded by the offline
   /// recognizer (model_type "nemo_transducer", greedy search) with the 128-dim
   /// mel features the NeMo export was trained on.
@@ -449,6 +520,10 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     var modelType: String = "transducer"
     /// Pinned archive checksum, verified after download when present.
     var archiveSHA256: String?
+    /// Oldest sherpa-onnx release known to decode this export.
+    var minimumRuntimeVersion: String?
+    /// Language-ID prompted models accept a per-stream language option.
+    var supportsLanguageHint = false
 
     var files: [String] { [tokens, encoder, decoder, joiner] }
   }
@@ -491,6 +566,9 @@ def run_online(args):
         provider="cpu",
     )
     stream = recognizer.create_stream()
+    if args.language:
+        # Language-ID prompted exports (Nemotron 3.5) only; unset auto-detects.
+        stream.set_option("language", args.language)
     last_text = ""
 
     while True:
@@ -667,6 +745,7 @@ def main():
     parser.add_argument("--joiner", required=True)
     parser.add_argument("--feature-dim", type=int, default=80)
     parser.add_argument("--model-type", default="transducer")
+    parser.add_argument("--language", default=None)
     args = parser.parse_args()
 
     if args.model_type == "transducer":

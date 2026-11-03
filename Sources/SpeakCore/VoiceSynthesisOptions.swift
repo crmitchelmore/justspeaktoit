@@ -83,6 +83,8 @@ public struct VoiceSynthesisCapabilities: Equatable, Sendable {
     public static let cartesia = Self(speed: true, pitch: false, ssml: false, speedRange: CartesiaTTSAPI.speedRange)
     public static let soniox = Self(speed: true, pitch: false, ssml: false, speedRange: SonioxTTSAPI.speedRange)
     public static let openai = Self(speed: true, pitch: false, ssml: false, speedRange: OpenAITTSAPI.speedRange)
+    public static let openaiRealtime = Self(
+        speed: true, pitch: false, ssml: false, speedRange: OpenAIRealtimeSpeech.speedRange)
 }
 
 public enum VoiceSynthesisConfigurationError: LocalizedError, Equatable {

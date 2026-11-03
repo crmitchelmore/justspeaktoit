@@ -732,7 +732,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         let modelID = keyboardProfile?.transcriptionModelIdentifier
             ?? parameters.modelID
             ?? (usesBatch ? settings.batchTranscriptionModel : settings.selectedModel)
-        return (modelID, usesBatch)
+        // A running app crossing a shutdown day follows the automatic successor.
+        let successor = ModelRetirements.successor(for: modelID, mode: usesBatch ? .batch : .live)
+        return (successor ?? modelID, usesBatch)
     }
 
     /// Refuses a named model this device cannot honour, before any microphone

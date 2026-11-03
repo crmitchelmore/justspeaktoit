@@ -14,6 +14,9 @@ actor OpenAITTSClient: TextToSpeechClient {
   }
 
   func synthesize(text: String, voice: String, settings: TTSSettings) async throws -> TTSResult {
+    if let realtimeVoice = OpenAIRealtimeSpeech.voiceID(fromProviderVoiceID: voice) {
+      return try await synthesizeRealtime(text: text, voice: voice, realtimeVoice: realtimeVoice, settings: settings)
+    }
     let selection = OpenAITTSRequest(
       model: try OpenAITTSCatalog.model(forQualityIdentifier: settings.quality.rawValue),
       voiceID: voice, speed: settings.speed, format: responseFormat(for: settings.format)
@@ -68,8 +71,38 @@ actor OpenAITTSClient: TextToSpeechClient {
     )
   }
 
+  /// Opt-in voices on the Realtime API. Always WAV: the socket returns PCM.
+  private func synthesizeRealtime(
+    text: String, voice: String, realtimeVoice: String, settings: TTSSettings
+  ) async throws -> TTSResult {
+    guard let apiKey = try? await secureStorage.secret(identifier: provider.apiKeyIdentifier),
+      !apiKey.isEmpty
+    else {
+      throw TTSError.apiKeyMissing(provider)
+    }
+    let result: OpenAIRealtimeSpeechSynthesizer.Result
+    do {
+      result = try await OpenAIRealtimeSpeechSynthesizer(session: session)
+        .synthesize(text: text, voice: realtimeVoice, speed: settings.speed, apiKey: apiKey)
+    } catch let error as OpenAIRealtimeSpeechError {
+      throw TTSError.synthesisFailure(error.localizedDescription)
+    }
+    guard let wav = PCMWaveWriter.wavData(pcm: result.pcm, sampleRate: OpenAIRealtimeSpeech.sampleRate) else {
+      throw TTSError.synthesisFailure("OpenAI returned audio Speak could not write as WAV")
+    }
+    let outputURL = try await saveAudioData(wav, format: .wav)
+    return TTSResult(
+      audioURL: outputURL,
+      provider: provider,
+      voice: voice,
+      duration: try await getAudioDuration(url: outputURL),
+      characterCount: text.count,
+      cost: result.usage.cost
+    )
+  }
+
   func listVoices() async throws -> [TTSVoice] {
-    return VoiceCatalog.openaiVoices
+    VoiceCatalog.openaiVoices
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {

@@ -17,11 +17,11 @@ enum SherpaOnnxTranscriptNormalizer {
 
   /// Whether the model supplies its own casing and punctuation.
   ///
-  /// Parakeet v3 does, and the rescue below damages it: `HTTP API JSON` becomes
-  /// `Http api json` because the text reads as uppercase-dominated (issue #679).
+  /// Parakeet v3 and Nemotron do, and the rescue below damages it: `HTTP API JSON`
+  /// becomes `Http api json` because the text reads as uppercase-dominated (issue #679).
   static func emitsNativeCasing(modelID: String?) -> Bool {
-    guard let modelID else { return false }
-    return modelID.lowercased().contains("parakeet")
+    guard let modelID = modelID?.lowercased() else { return false }
+    return modelID.contains("parakeet") || modelID.contains("nemotron")
   }
 
   private static func isUppercaseDominated(_ text: String) -> Bool {

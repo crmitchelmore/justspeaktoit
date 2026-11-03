@@ -254,6 +254,10 @@ struct SettingsView: View {
     return orderedEntries.compactMap { itemsByID[$0.id] }
   }
 
+  private var usesRealtimeVoice: Bool {
+    OpenAIRealtimeSpeech.voiceID(fromProviderVoiceID: settings.defaultTTSVoice) != nil
+  }
+
   private var overviewPostProcessingValue: String {
     if settings.isActiveAssemblyAILiveModel {
       return "Keyterms only"
@@ -833,6 +837,14 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
           }
 
+          if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .openai,
+            OpenAIRealtimeSpeech.voiceID(fromProviderVoiceID: settings.defaultTTSVoice) == nil,
+            let retirement = OpenAITTSModel.standard.retirement {
+            Text("OpenAI speech models: \(retirement.notice)")
+              .font(.caption)
+              .foregroundStyle(.orange)
+          }
+
           if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .soniox {
             Picker("Soniox Region", selection: settingsBinding(\AppSettings.sonioxTTSRegion)) {
               ForEach(SonioxTTSRegion.allCases) { region in
@@ -872,7 +884,8 @@ struct SettingsView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             }
-            Slider(value: settingsBinding(\AppSettings.ttsSpeed), in: 0.5...2.0, step: 0.1)
+            Slider(
+              value: settingsBinding(\AppSettings.ttsSpeed), in: usesRealtimeVoice ? 0.5...1.5 : 0.5...2.0, step: 0.1)
               .speakTooltip("Adjust playback speed from 0.5x (slower) to 2.0x (faster)")
           }
 
@@ -900,7 +913,13 @@ struct SettingsView: View {
               }
             }
             .pickerStyle(.segmented)
+            .disabled(usesRealtimeVoice)
             .speakTooltip("Choose the audio file format for exported speech")
+            if usesRealtimeVoice {
+              Text("OpenAI Realtime voices always save WAV.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
           }
 
           settingsToggle(

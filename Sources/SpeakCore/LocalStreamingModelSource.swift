@@ -72,6 +72,9 @@ public extension LocalStreamingModelSource {
         if searchText.contains("en-kroko-2025-08-06") {
             return 71
         }
+        if repoID == NemotronLocalModels.repoID, NemotronLocalModels.variant(named: modelName) != nil {
+            return NemotronLocalModels.multilingualDownloadSizeMB
+        }
         if searchText.contains("nemotron-speech-streaming-en-0.6b") {
             return 632
         }

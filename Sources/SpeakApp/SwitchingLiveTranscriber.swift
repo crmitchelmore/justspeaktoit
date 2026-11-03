@@ -195,13 +195,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if AppleLocalModels.isSpeechAnalyzerModel(model) {
       return controllers.speechAnalyzer
     }
-    if let route = controllerRoutes.first(where: { model.hasPrefix($0.prefix) }) {
-      return route.controller
-    }
-    // SwitchingLiveTranscriber only routes live transcription models, and
-    // OpenAI's only live transcription transport is the Realtime WebSocket
-    // API. So any openai/* live model is handled by the realtime controller.
-    if model.hasPrefix("openai/") { return controllers.openAIRealtime }
+    if let controller = cloudController(for: model) { return controller }
     if FluidAudioParakeetModel.matches(model) { return controllers.fluidAudio }
     if WhisperKitStreamingModel.matches(model) { return controllers.whisperKit }
     #if !APP_STORE
@@ -213,31 +207,39 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     return controllers.native
   }
 
-  private var controllerRoutes: [(prefix: String, controller: any LiveTranscriptionController)] {
-    [
-      ("assemblyai/", controllers.sharedClient),
-      ("deepgram/", controllers.deepgram),
-      ("modulate/", controllers.modulate),
-      ("elevenlabs/", controllers.elevenlabs),
-      ("soniox/", controllers.soniox),
-      ("cartesia/", controllers.cartesia),
-      ("gladia/", controllers.sharedClient),
-      // Gemini 3.5 Transcribe Live runs on the shared SpeakCore client, so it
-      // needs no bespoke controller or audio processor.
-      (GeminiTranscribeModels.liveCatalogID, controllers.sharedClient),
-      ("xai/", controllers.sharedClient),
-      ("azure/", controllers.sharedClient),
-      ("alibaba/", controllers.sharedClient),
-      // Meta Muse Voice Transcribe streams through the shared SpeakCore client,
-      // so it uses the same macOS capture controller as xAI.
-      ("meta/", controllers.sharedClient),
-      // Speechmatics, Rev.ai and Mistral Voxtral all run on the shared
-      // SpeakCore clients, which is what makes them work on iPhone too.
-      ("speechmatics/", controllers.sharedClient),
-      ("revai/", controllers.sharedClient),
-      ("mistral/", controllers.sharedClient),
-      ("reson8/", controllers.sharedClient)
-    ]
+  /// The controller that owns a cloud live model, chosen by the shared
+  /// `LiveTranscriptionProviderID` so a newly catalogued provider fails to
+  /// compile here until the Mac decides how it streams. Most providers run on
+  /// the shared SpeakCore client; the rest keep a dedicated controller.
+  private func cloudController(for model: String) -> (any LiveTranscriptionController)? {
+    guard let provider = Self.cloudProvider(for: model) else { return nil }
+    switch provider {
+    case .apple: return nil
+    // OpenAI's only live transcription transport is the Realtime WebSocket
+    // API, so any openai/* live model is handled by the realtime controller.
+    case .openai: return controllers.openAIRealtime
+    case .deepgram: return controllers.deepgram
+    case .modulate: return controllers.modulate
+    case .elevenlabs: return controllers.elevenlabs
+    case .soniox: return controllers.soniox
+    case .cartesia: return controllers.cartesia
+    case .assemblyai, .gladia, .google, .xai, .azure, .alibaba, .meta, .speechmatics, .revai, .mistral, .reson8:
+      return controllers.sharedClient
+    }
+  }
+
+  /// The cloud provider that owns `model`'s exact identifier prefix, or `nil`
+  /// for on-device and unrecognised identifiers. Matching is case-sensitive and
+  /// untrimmed, and only Gemini's live catalogue model is claimed under
+  /// `google/`, so an unknown identifier never reaches a cloud controller it
+  /// did not reach before.
+  static func cloudProvider(for model: String) -> LiveTranscriptionProviderID? {
+    guard let slash = model.firstIndex(of: "/"),
+          let provider = LiveTranscriptionProviderID(rawValue: String(model[..<slash])),
+          provider != .apple
+    else { return nil }
+    if provider == .google, !model.hasPrefix(GeminiTranscribeModels.liveCatalogID) { return nil }
+    return provider
   }
 
   private func applyDelegateAndConfiguration() {

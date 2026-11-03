@@ -59,6 +59,16 @@ public struct APIKeyCatalogEntry: Equatable, Sendable, Identifiable {
     public var label: String {
         identifier == OpenAITTSCatalog.credentialIdentifier ? "OpenAI Voice Output" : providerName
     }
+
+    /// Least-privilege creation guidance for this credential, if catalogued.
+    public var guide: APIKeyProviderGuide? { APIKeyGuidance.guide(for: identifier) }
+
+    /// The entry format followed by the minimum permissions and expiry advice
+    /// for the uses this platform merged into the entry.
+    public var setupHint: String {
+        guard let guide else { return format.entryHint }
+        return format.entryHint + " " + guide.compactHint(for: uses)
+    }
 }
 
 /// A credential requirement contributed by one model or voice route.
@@ -116,7 +126,8 @@ public enum APIKeyCatalog {
                     identifier: source.identifier,
                     providerName: providerName(for: source.identifier, fallback: source.providerName),
                     uses: source.use,
-                    keyPageURL: source.keyPageURL ?? keyPageURL(for: source.identifier)
+                    keyPageURL: APIKeyGuidance.creationURL(for: source.identifier)
+                        ?? source.keyPageURL ?? keyPageURL(for: source.identifier)
                 )
             }
         }
@@ -138,27 +149,29 @@ public enum APIKeyCatalog {
         identifier == AzureSpeechConfiguration.credentialIdentifier ? "Azure Speech" : fallback
     }
 
-    /// Where the provider issues keys, derived from the same catalogue metadata
-    /// the per-feature editors use. Only HTTPS pages are returned.
+    /// Where the provider issues keys: the guide's creation page, else the
+    /// same catalogue metadata the per-feature editors use. Only HTTPS pages
+    /// are returned.
     public static func keyPageURL(for identifier: String) -> URL? {
-        let url: URL?
+        guard let url = APIKeyGuidance.creationURL(for: identifier) ?? metadataKeyPageURL(for: identifier),
+              url.scheme?.lowercased() == "https", url.host != nil else { return nil }
+        return url
+    }
+
+    private static func metadataKeyPageURL(for identifier: String) -> URL? {
         switch identifier {
         case openRouterIdentifier:
-            url = OpenRouterService.apiKeysURL
+            return OpenRouterService.apiKeysURL
         case "openai.apiKey", OpenAITTSCatalog.credentialIdentifier:
-            url = URL(string: "https://platform.openai.com/api-keys")
+            return URL(string: "https://platform.openai.com/api-keys")
         case GroqTTSCatalog.credentialIdentifier:
-            url = URL(string: GroqBatchClient(keywords: []).metadata.website)
+            return URL(string: GroqBatchClient(keywords: []).metadata.website)
         default:
             if let provider = FileSpeechProvider.allCases.first(where: { "\($0.rawValue).apiKey" == identifier }) {
-                url = URL(string: provider.metadata.website)
-            } else {
-                url = LiveTranscriptionProviderID.allCases
-                    .first { $0.apiKeyIdentifier == identifier }?.apiKeyURL
+                return URL(string: provider.metadata.website)
             }
+            return LiveTranscriptionProviderID.allCases.first { $0.apiKeyIdentifier == identifier }?.apiKeyURL
         }
-        guard let url, url.scheme?.lowercased() == "https", url.host != nil else { return nil }
-        return url
     }
 
     /// A non-reversible hint for a saved value: never more than the last four

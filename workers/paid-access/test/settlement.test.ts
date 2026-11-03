@@ -5,7 +5,6 @@ import { issueAccessToken } from '../src/auth/session.js';
 import { billingPeriod } from '../src/entitlement.js';
 import { Repository } from '../src/data/repository.js';
 import { QuotaClient } from '../src/quota.js';
-import { billingPeriod } from '../src/entitlement.js';
 import { QuotaDurableObject } from '../src/do/quota.js';
 import { pendingKey, receiptKey, type SettlementReceipt, type SettlementRequest,
   type SettlementResponse } from '../src/do/settlement.js';

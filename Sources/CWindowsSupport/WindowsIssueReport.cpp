@@ -279,9 +279,10 @@ LRESULT formMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
         return 0;
     }
     case WM_COMMAND:
-        if (LOWORD(wparam) == IDCANCEL || LOWORD(wparam) == closeButton) {
-            SendMessageW(window, WM_CLOSE, 0, 0); return 0;
-        }
+        if (LOWORD(wparam) == IDCANCEL) { SendMessageW(window, WM_CLOSE, 0, 0); return 0; }
+        // The Close button is still inside its click handler; destroying its
+        // parent here would free the button underneath it. Close afterwards.
+        if (LOWORD(wparam) == closeButton) { PostMessageW(window, WM_CLOSE, 0, 0); return 0; }
         if (HIWORD(wparam) != BN_CLICKED || !IsWindowEnabled(GetDlgItem(window, LOWORD(wparam)))) break;
         switch (LOWORD(wparam)) {
         case includeBox: {
@@ -618,6 +619,15 @@ static void jsti_smoke_stage(const char *stage) {
     std::fflush(stderr);
 }
 
+// Click Close as a user would, then deliver the deferred WM_CLOSE it posts.
+static void clickClose(HWND window) {
+    SendDlgItemMessageW(window, closeButton, BM_CLICK, 0, 0);
+    MSG message;
+    for (int i = 0; i < 64 && IsWindow(window) && PeekMessageW(&message, window, 0, 0, PM_REMOVE); ++i) {
+        TranslateMessage(&message); DispatchMessageW(&message);
+    }
+}
+
 bool jsti_issue_report_self_test(std::string &error) {
     jsti_smoke_stage("issue.self-test.enter");
     // No clipboard/browser/chooser side effects. These run inside the existing
@@ -787,7 +797,7 @@ bool jsti_issue_report_self_test(std::string &error) {
         jsti_smoke_stage("issue.explicit-close.presentation-validated");
         const HWND closingWindow = closing->window;
         jsti_smoke_stage("issue.explicit-close.dispatch.begin");
-        if (command == closeButton) SendDlgItemMessageW(closingWindow, closeButton, BM_CLICK, 0, 0);
+        if (command == closeButton) clickClose(closingWindow);
         else SendMessageW(closingWindow, WM_COMMAND, MAKEWPARAM(IDCANCEL, 0), 0);
         jsti_smoke_stage("issue.explicit-close.dispatch.returned");
         actionCallback = originalCallback; actionContext = originalContext;
@@ -824,7 +834,7 @@ bool jsti_issue_report_self_test(std::string &error) {
         }
     };
     actionContext = &reentrantClosed;
-    SendDlgItemMessageW(reentrantClosed.window, closeButton, BM_CLICK, 0, 0);
+    clickClose(reentrantClosed.window);
     actionCallback = originalCallback; actionContext = originalContext;
     if (!reentrantClosed.destroyed || !reentrantClosed.goneBeforeReturn ||
         reentrantClosed.calls != 1 || reentrantClosed.event != JSTI_EVENT_ISSUE_REPORT_CLOSE ||

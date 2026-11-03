@@ -185,8 +185,11 @@ owner action in App Store Connect.
 
 ## Stable
 
-1. Select a delivered and tested `alpha-build-N` and explicit Mac/iOS versions.
-2. Run **Prepare Stable**. It freezes source, dependency lock, per-surface
+1. Select a delivered and tested `alpha-build-N` and explicit versions for the
+   surfaces being published.
+2. Run **Prepare Stable** with scope `all` (the existing combined release) or
+   `ios-only`. The latter requires an iOS version and ignores the Mac version.
+   It freezes the publication scope, source, dependency lock, per-surface
    publication baseline, versions, builds and exact release-note hashes in a
    `stable-candidate-N` manifest. It rebuilds using Stable identities.
 3. Validate candidate downloads, Stable archive identity and runtime. Apple
@@ -201,6 +204,16 @@ owner action in App Store Connect.
    keeps its previous Stable. Publication receipts advance Apple note baselines
    only after the exact build is publicly available.
 
+For `ios-only`, only the selected Alpha's iOS delivery receipt is required.
+Prepare Stable builds only iOS; Mac builds and desktop qualification are skipped.
+Publish Stable requires a matching verified iOS candidate receipt and the same
+exact-hash owner approval, then submits only iOS. It creates no Mac release and
+does not update Homebrew, Sparkle or website downloads. The manifest retains
+unselected surface metadata for compatibility, but its frozen `publicationScope`
+limits workers and publication. Historical manifests without this field keep
+the combined-release behavior. Changing scope requires a new candidate and
+approval; it cannot be supplied as a publication-time override.
+
 Each surface has its own published baseline. TestFlight delivery, an upload, a
 review submission and a rejected version do not advance it. Initial Apple Store
 releases therefore include the full initial history. Paired reverts cancel only
@@ -211,7 +224,7 @@ notes; direct assets are checked against recorded SHA-256 before promotion.
 
 To complete distribution verification, verify Alpha profiles contain only Alpha groups and
 cloud containers; deploy the matching CloudKit schemas; build signed archives on
-all three surfaces; install Alpha alongside Stable on target devices; verify data
+the selected surfaces; install Alpha alongside Stable on target devices; verify data
 and permission isolation; exercise direct Mac Alpha N to N+1 updates; and confirm
 public TestFlight availability. Store beta links without an available approved
 build are setup evidence only.

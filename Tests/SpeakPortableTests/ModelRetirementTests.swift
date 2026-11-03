@@ -62,7 +62,7 @@ final class ModelRetirementTests: XCTestCase {
     /// actionable error, and nothing silently switches model.
     func testLossyRetirements_keepSelectionAndFailWithActionableError() throws {
         for id in [
-            "openai/whisper-1", "openai/gpt-4o-transcribe-diarize",
+            "openai/whisper-1", "openai/gpt-4o-transcribe-diarize", "openai/gpt-audio",
             "mistral/voxtral-mini-latest", MistralVoxtralRealtime.liveCatalogID
         ] {
             let retirement = try XCTUnwrap(ModelRetirements.retirement(for: id))

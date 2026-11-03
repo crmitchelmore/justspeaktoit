@@ -180,6 +180,28 @@ final class OpenRouterInlineAudioClientTests: XCTestCase {
         XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)
     }
 
+    /// GPT Audio shuts down on 2027-01-20 and OpenRouter lists no successor, so from that day
+    /// the saved selection fails before any request instead of reaching a dead route.
+    func testShutDownGPTAudio_failsWithRetirementBeforeAnyRequest() async throws {
+        StubURLProtocol.handler = { request in .ok(Data(Self.response.utf8), url: request.url!) }
+        let before = ModelRetirement.utcDate("2027-01-19")!, after = ModelRetirement.utcDate("2027-01-20")!
+        func client(at date: Date) -> OpenRouterInlineAudioTranscriptionClient {
+            OpenRouterInlineAudioTranscriptionClient(
+                apiKey: "test-openrouter-key", session: StubURLProtocol.makeSession(), now: { date })
+        }
+        _ = try await client(at: before).transcribeFile(at: audioFile("wav"), model: "openai/gpt-audio", language: nil)
+        XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
+        StubURLProtocol.reset()
+        do {
+            _ = try await client(at: after).transcribeFile(
+                at: audioFile("wav"), model: " openai/gpt-audio ", language: nil)
+            XCTFail("Expected ModelRetiredError")
+        } catch { XCTAssertTrue(error is ModelRetiredError, "\(error)") }
+        XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)
+        XCTAssertTrue(OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.contains("openai/gpt-audio"),
+                      "a shut-down entry stays routed so the saved selection reports the retirement")
+    }
+
     // MARK: - Helpers
 
     private static let response = #"{"choices":[{"message":{"role":"assistant","content":"hello world"}}]}"#

@@ -40,10 +40,15 @@ disjoint and each automatic successor is a current entry of the same mode
 | `openai/gpt-4o-transcribe-diarize` | 2027-02-26 | Kept; error until user chooses | OpenAI has no speaker-labelling successor; error points to Scribe v2, Soniox or Gemini 3.5 Transcribe |
 | `mistral/voxtral-mini-latest` (Voxtral 2) | 2027-04-30 | Kept; error until user chooses (Mini Transcribe 3 recommended) | Successor is a public preview |
 | Voxtral Realtime 2602 | 2027-04-30 | Kept; error until user chooses (Realtime 3 recommended) | Preview; $0.008/min, up from $0.006 |
+| `openai/gpt-audio` (OpenRouter) | 2027-01-20 | Kept; error until user chooses (GPT Transcribe recommended) | OpenAI names `gpt-audio-1.5`, but OpenRouter does not list it (models API, 3 Nov 2026) |
 | OpenAI `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts` | 2027-01-06 | Kept; user chooses (GPT Realtime 2.1 mini recommended) | Different API and voices; see below |
 
 GPT Transcribe and GPT Live Transcribe now have per-minute estimates from their
-model pages. The app does not use `/v1/audio/translations`, and
+model pages. GPT Audio is guarded in the shared OpenRouter audio-chat client
+and stays routed after shutdown so a saved selection reports the retirement.
+When OpenRouter lists `openai/gpt-audio-1.5`, qualify it and add it as a new
+entry; the saved GPT Audio choice is not remapped. The app does not use
+`/v1/audio/translations`, and
 `gpt-realtime-whisper` is not retiring. Voxtral 2 and 3 share a batch client
 (`language`, `context_bias`), so the preview is a one-click choice, not a
 code migration.

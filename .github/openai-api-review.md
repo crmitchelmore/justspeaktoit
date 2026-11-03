@@ -32,7 +32,7 @@ credits first, then other available API balance; this workflow does not enforce
 a subscription-credit-only ledger or a monthly dollar ceiling. Monitor the linked
 organization's billing and disable this workflow if you want to stop review spend.
 
-Validation: `python3 .github/scripts/test_openai_api_review.py` and
+Validation: `python3 scripts/tests/test_openai_api_review.py` (also run by `make test-tooling`) and
 `actionlint .github/workflows/openai-api-review.yml`.
 
 References: [subscription API credits](https://developers.openai.com/api/docs/guides/chatgpt-api-credits),

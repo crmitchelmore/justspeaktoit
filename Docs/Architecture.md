@@ -432,7 +432,7 @@ been eliminated.
   exhaustive switch over `LiveTranscriptionProviderID`, so a new case fails to compile until it is assigned (normally
   the shared client); Deepgram, Modulate, ElevenLabs, Soniox and Cartesia keep dedicated Mac controllers and OpenAI
   keeps its platform adapters. `ProviderCatalogueCoverageTests` fails when a catalogued live model has no factory
-  client or a batch model has no route on either platform.
+  client, and `BatchCatalogueCoverageTests` when a batch model has no route on either platform.
   AssemblyAI's bounded shared-route fold and outstanding provider/device gates are recorded in
   [the parity inventory](assemblyai-shared-live-parity.md).
 - New history fields require an explicit decision about local-only versus the nine-field sync projection and migrations

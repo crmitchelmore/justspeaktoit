@@ -46,6 +46,12 @@ command -v xvfb-run >/dev/null
 command -v readelf >/dev/null || { echo 'readelf from binutils is required.' >&2; exit 1; }
 flatpak install --user -y --noninteractive --reinstall --bundle "$bundle"
 
+# Size baseline (#1295): the bundle file, then the installed app deployment
+# without the shared runtime, which the user may already have.
+echo '== package size (bytes)'
+echo "bundle $(stat -c %s "$bundle")"
+echo "installed-app $(du -sb "$(flatpak info --user --show-location "$app")" | cut -f1)"
+
 echo '== Flatpak Spawn portal (required by the sandboxed PNG loader)'
 timeout 60 flatpak run --command=flatpak-spawn "$app" --sandbox --watch-bus /usr/bin/true
 

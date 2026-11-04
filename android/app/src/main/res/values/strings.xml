@@ -53,4 +53,30 @@
     <string name="failure_left_app">Dictation stopped because the app left the screen.</string>
     <string name="failure_unavailable">The selected recognition is not available.</string>
     <string name="failure_unknown">Dictation failed.</string>
+    <string name="mode_cloud">Cloud</string>
+    <string name="privacy_cloud">Audio is uploaded to %1$s with your key and transcribed by %2$s. It is deleted from this phone afterwards.</string>
+    <string name="privacy_cloud_generic">Audio is uploaded to the cloud provider you chose, using your key.</string>
+    <string name="status_mode_needs_key">Add a %1$s key in Settings to use %2$s.</string>
+    <string name="state_transcribing">Transcribing with %1$s…</string>
+    <string name="failure_invalid_key">The provider rejected the API key. Check it in Settings.</string>
+
+    <string name="cleanup_running">Cleaning up with OpenRouter…</string>
+    <string name="cleanup_applied">Cleaned up with OpenRouter</string>
+    <string name="cleanup_failed">Cleanup failed, so this is the original transcript.</string>
+    <string name="action_skip_cleanup">Skip cleanup</string>
+    <string name="action_show_original">Show original</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="action_back">Back</string>
+    <string name="settings_keys_title">API keys</string>
+    <string name="settings_keys_note">Keys are encrypted with a key held in this phone\'s Android Keystore. They are never backed up or shown again after saving.</string>
+    <string name="settings_key_saved">Saved</string>
+    <string name="settings_key_not_set">Not set</string>
+    <string name="settings_key_label">%1$s API key</string>
+    <string name="action_save">Save</string>
+    <string name="action_remove">Remove</string>
+    <string name="settings_cloud_model_title">Cloud transcription model</string>
+    <string name="settings_cleanup_title">Clean up transcripts</string>
+    <string name="settings_cleanup_note">Sends the final transcript to OpenRouter to fix punctuation and spelling. Needs an OpenRouter key. If cleanup fails, the original transcript is kept.</string>
+    <string name="settings_cleanup_needs_key">Add an OpenRouter key to use cleanup.</string>
 </resources>

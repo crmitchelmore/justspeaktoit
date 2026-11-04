@@ -88,6 +88,7 @@ class AndroidSpeechEngine(context: Context) {
                     null
                 }
             RecognitionMode.SpeechService -> SpeechRecognizer.createSpeechRecognizer(context)
+            RecognitionMode.Cloud -> null
         }
         if (created == null) {
             onEvent(DictationEvent.Error(DictationFailure.Unavailable))

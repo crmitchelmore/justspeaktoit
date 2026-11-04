@@ -21,6 +21,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -54,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justspeaktoit.android.R
+import com.justspeaktoit.android.dictation.CleanupStatus
 import com.justspeaktoit.android.dictation.DictationFailure
 import com.justspeaktoit.android.dictation.DictationState
 import com.justspeaktoit.android.dictation.DictationUiState
@@ -69,7 +71,7 @@ import java.util.Locale
 
 enum class MicPermission { Granted, NotRequested, Denied, DeniedPermanently }
 
-class DictationActions(
+data class DictationActions(
     val onRecordTapped: () -> Unit,
     val onStop: () -> Unit,
     val onCancel: () -> Unit,
@@ -77,6 +79,8 @@ class DictationActions(
     val onDownloadModel: () -> Unit,
     val onClear: () -> Unit,
     val onOpenSettings: () -> Unit,
+    val onShowSettings: () -> Unit,
+    val onShowOriginal: () -> Unit,
 )
 
 @Composable
@@ -96,16 +100,25 @@ fun DictationScreen(
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                text = stringResource(R.string.app_name),
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = actions.onShowSettings, enabled = !state.dictation.isActive) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_settings),
+                        contentDescription = stringResource(R.string.settings_title),
+                    )
+                }
+            }
             ModeSection(state, actions)
-            TranscriptCard(state.dictation)
+            TranscriptCard(state)
             PermissionNotice(permission, actions)
             RecordControls(state, level, actions)
-            ResultActions(state.dictation, snackbar, actions.onClear)
+            ResultActions(state, snackbar, actions)
         }
     }
 }
@@ -136,11 +149,7 @@ private fun ModeSection(state: DictationUiState, actions: DictationActions) {
     val availability = state.activeAvailability ?: return
     val languageName = Locale.forLanguageTag(state.onDeviceLanguageTag).displayName
     Text(
-        text = if (availability.usable) {
-            stringResource(availability.mode.privacyNote())
-        } else {
-            availability.explanation(languageName)
-        },
+        text = availability.explanation(languageName, state),
         style = MaterialTheme.typography.bodyMedium,
         color = if (availability.usable) {
             MaterialTheme.colorScheme.onSurfaceVariant
@@ -156,7 +165,8 @@ private fun ModeSection(state: DictationUiState, actions: DictationActions) {
 }
 
 @Composable
-private fun TranscriptCard(dictation: DictationState) {
+private fun TranscriptCard(state: DictationUiState) {
+    val dictation = state.dictation
     val (text, secondary) = when (dictation) {
         is DictationState.Listening -> dictation.partial to true
         is DictationState.Finishing -> dictation.partial to true
@@ -167,7 +177,7 @@ private fun TranscriptCard(dictation: DictationState) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                text = statusText(dictation),
+                text = statusText(state),
                 style = MaterialTheme.typography.labelLarge,
                 color = if (dictation is DictationState.Failed) {
                     MaterialTheme.colorScheme.error
@@ -179,6 +189,7 @@ private fun TranscriptCard(dictation: DictationState) {
             if (dictation is DictationState.Failed && text.isNotEmpty()) {
                 Text(stringResource(R.string.unfinished_label), style = MaterialTheme.typography.labelMedium)
             }
+            CleanupNote(state.cleanup)
             Text(
                 text = text.ifEmpty { stringResource(R.string.transcript_placeholder) },
                 style = MaterialTheme.typography.bodyLarge,
@@ -264,7 +275,32 @@ private fun LevelHalo(level: StateFlow<Float>) {
 }
 
 @Composable
-private fun ResultActions(dictation: DictationState, snackbar: SnackbarHostState, onClear: () -> Unit) {
+private fun CleanupNote(cleanup: CleanupStatus) {
+    val text = when (cleanup) {
+        CleanupStatus.Running -> R.string.cleanup_running
+        CleanupStatus.Applied -> R.string.cleanup_applied
+        CleanupStatus.Failed -> R.string.cleanup_failed
+        CleanupStatus.None -> return
+    }
+    Text(
+        stringResource(text),
+        style = MaterialTheme.typography.labelMedium,
+        color = if (cleanup == CleanupStatus.Failed) {
+            MaterialTheme.colorScheme.error
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
+}
+
+@Composable
+private fun ResultActions(state: DictationUiState, snackbar: SnackbarHostState, actions: DictationActions) {
+    val dictation = state.dictation
+    if (state.cleanup == CleanupStatus.Running) {
+        TextButton(onClick = actions.onCancel) { Text(stringResource(R.string.action_skip_cleanup)) }
+        return
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val copiedMessage = stringResource(R.string.copied)
@@ -287,23 +323,39 @@ private fun ResultActions(dictation: DictationState, snackbar: SnackbarHostState
                 }
             }
         }
-        TextButton(onClick = onClear) { Text(stringResource(R.string.action_clear)) }
+        if (state.cleanup == CleanupStatus.Applied) {
+            TextButton(onClick = actions.onShowOriginal) { Text(stringResource(R.string.action_show_original)) }
+        }
+        TextButton(onClick = actions.onClear) { Text(stringResource(R.string.action_clear)) }
     }
 }
 
 @Composable
-private fun statusText(dictation: DictationState): String = when (dictation) {
+private fun statusText(state: DictationUiState): String = when (val dictation = state.dictation) {
     DictationState.Idle -> stringResource(R.string.state_ready)
     is DictationState.Starting -> stringResource(R.string.state_starting)
     is DictationState.Listening -> stringResource(R.string.state_listening)
-    is DictationState.Finishing -> stringResource(R.string.state_finishing)
+    is DictationState.Finishing -> if (dictation.mode == RecognitionMode.Cloud) {
+        stringResource(R.string.state_transcribing, state.cloudModel.provider.displayName)
+    } else {
+        stringResource(R.string.state_finishing)
+    }
     is DictationState.Done -> stringResource(R.string.state_done)
     is DictationState.Failed -> stringResource(dictation.failure.message())
 }
 
 @Composable
-private fun ModeAvailability.explanation(languageName: String): String = when (status) {
-    ModeStatus.Ready -> stringResource(mode.privacyNote())
+private fun ModeAvailability.explanation(languageName: String, state: DictationUiState): String = when (status) {
+    ModeStatus.Ready -> if (mode == RecognitionMode.Cloud) {
+        stringResource(R.string.privacy_cloud, state.cloudModel.provider.displayName, state.cloudModel.displayName)
+    } else {
+        stringResource(mode.privacyNote())
+    }
+    ModeStatus.NeedsKey -> stringResource(
+        R.string.status_mode_needs_key,
+        state.cloudModel.provider.displayName,
+        state.cloudModel.displayName,
+    )
     ModeStatus.NeedsDownload -> stringResource(R.string.status_mode_needs_download, languageName)
     ModeStatus.Downloading -> stringResource(R.string.status_mode_downloading, languageName)
     ModeStatus.LanguageUnsupported -> stringResource(R.string.status_mode_language_unsupported, languageName)
@@ -321,12 +373,14 @@ private fun ModeAvailability.explanation(languageName: String): String = when (s
 private fun RecognitionMode.label(): Int = when (this) {
     RecognitionMode.OnDevice -> R.string.mode_on_device
     RecognitionMode.SpeechService -> R.string.mode_speech_service
+    RecognitionMode.Cloud -> R.string.mode_cloud
 }
 
 @StringRes
 private fun RecognitionMode.privacyNote(): Int = when (this) {
     RecognitionMode.OnDevice -> R.string.privacy_on_device
     RecognitionMode.SpeechService -> R.string.privacy_speech_service
+    RecognitionMode.Cloud -> R.string.privacy_cloud_generic
 }
 
 @StringRes
@@ -345,5 +399,6 @@ private fun DictationFailure.message(): Int = when (this) {
     DictationFailure.LanguageUnavailable -> R.string.failure_language_unavailable
     DictationFailure.LeftApp -> R.string.failure_left_app
     DictationFailure.Unavailable -> R.string.failure_unavailable
+    DictationFailure.InvalidKey -> R.string.failure_invalid_key
     DictationFailure.Unknown -> R.string.failure_unknown
 }

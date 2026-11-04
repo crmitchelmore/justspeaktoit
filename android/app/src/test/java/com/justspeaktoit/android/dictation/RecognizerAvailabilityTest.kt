@@ -47,6 +47,16 @@ class RecognizerAvailabilityTest {
     }
 
     @Test
+    fun testCloud_needsKeyAndIsNeverTheDefault() {
+        val none = RecognizerCapabilities(34, speechServiceAvailable = false, onDeviceAvailable = false)
+        val withKey = RecognizerAvailability.evaluate(none, LanguageSupport.Unknown, cloudKeySaved = true)
+        assertEquals(ModeStatus.Ready, withKey.single { it.mode == RecognitionMode.Cloud }.status)
+        assertNull(RecognizerAvailability.defaultMode(withKey))
+        val noKey = RecognizerAvailability.evaluate(none, LanguageSupport.Unknown)
+        assertEquals(ModeStatus.NeedsKey, noKey.single { it.mode == RecognitionMode.Cloud }.status)
+    }
+
+    @Test
     fun testDefaultMode_isNullWhenNothingCanRecognise() {
         val none = RecognizerCapabilities(34, speechServiceAvailable = false, onDeviceAvailable = false)
         assertNull(RecognizerAvailability.defaultMode(RecognizerAvailability.evaluate(none, LanguageSupport.Unknown)))

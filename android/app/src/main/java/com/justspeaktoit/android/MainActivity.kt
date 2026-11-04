@@ -7,18 +7,23 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justspeaktoit.android.dictation.DictationViewModel
 import com.justspeaktoit.android.ui.DictationActions
 import com.justspeaktoit.android.ui.DictationScreen
 import com.justspeaktoit.android.ui.MicPermission
+import com.justspeaktoit.android.ui.SettingsActions
+import com.justspeaktoit.android.ui.SettingsScreen
 import com.justspeaktoit.android.ui.theme.JustSpeakTheme
 
 class MainActivity : ComponentActivity() {
@@ -45,12 +50,34 @@ class MainActivity : ComponentActivity() {
             onDownloadModel = viewModel::downloadOnDeviceModel,
             onClear = viewModel::clearResult,
             onOpenSettings = ::openAppSettings,
+            onShowSettings = {},
+            onShowOriginal = viewModel::showOriginal,
         )
         setContent {
             val state by viewModel.state.collectAsStateWithLifecycle()
             val mic by permission
+            var showSettings by rememberSaveable { mutableStateOf(false) }
             JustSpeakTheme {
-                DictationScreen(state = state, level = viewModel.level, permission = mic, actions = actions)
+                if (showSettings) {
+                    BackHandler { showSettings = false }
+                    SettingsScreen(
+                        state = state,
+                        actions = SettingsActions(
+                            onBack = { showSettings = false },
+                            onSaveKey = viewModel::saveKey,
+                            onRemoveKey = viewModel::removeKey,
+                            onChooseModel = viewModel::chooseCloudModel,
+                            onCleanupChanged = viewModel::setCleanupEnabled,
+                        ),
+                    )
+                } else {
+                    DictationScreen(
+                        state = state,
+                        level = viewModel.level,
+                        permission = mic,
+                        actions = actions.copy(onShowSettings = { showSettings = true }),
+                    )
+                }
             }
         }
     }

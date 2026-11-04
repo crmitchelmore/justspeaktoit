@@ -257,7 +257,7 @@ sessions:
     title: "iPhone"
     setup:
       - "Install TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later on an iPhone with an Action Button (iOS 26+)."
-      - "In the app: API keys for OpenRouter (polish), OpenAI and Deepgram saved; Settings \u203a Action Button & Shortcuts: Destination = Copy & Polish."
+      - "In the app: API keys for OpenRouter (polish), OpenAI and Deepgram saved; Settings \u203a Action Button & Shortcuts \u203a When Recording Stops = Copy & Polish (default is Auto)."
       - "Settings \u203a Transcription \u203a Where transcription runs = Local (Apple SpeechTranscriber)."
       - "iOS Settings \u203a Action Button \u203a Controls: choose Transcribe Voice (Just Speak to It Alpha)."
       - "Have Notes open on a scratch note, AirPods in their case, and your Mac (same Apple ID, Handoff on) nearby."
@@ -270,6 +270,8 @@ sessions:
         minutes: 6
         core: true
         build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        prerequisites:
+          - "Simulator-only pre-check, 4 Nov 2026 (not device evidence): raw text on the clipboard at Stop and a later copy kept, via deep links and the simulator transcript hook. Still pending on a physical iPhone."
         steps:
           - "Force-quit Just Speak to It in the App Switcher."
           - "From the Home Screen, press and hold the Action Button, say \"raw clipboard, um, test\", then press and hold again to stop."
@@ -311,6 +313,8 @@ sessions:
         minutes: 6
         core: true
         build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        prerequisites:
+          - "Simulator-only pre-check, 4 Nov 2026: the Focus Capture Overrides settings text matches. Filter behaviour still pending on a physical iPhone."
         steps:
           - "iOS Settings \u203a Focus \u203a Do Not Disturb \u203a Add Filter \u203a Just Speak to It Alpha \u203a Capture Overrides: Destination = History Only."
           - "Turn Do Not Disturb on, copy MARKER2 in Notes, then press and hold the Action Button and open the app."
@@ -369,6 +373,8 @@ sessions:
         minutes: 7
         core: true
         build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        prerequisites:
+          - "Simulator-only pre-check, 4 Nov 2026 (not device evidence): 1-minute expiry cleared the clipboard. Universal Clipboard and all device behaviour still pending."
         steps:
           - "App Settings \u203a Privacy Information \u203a Clipboard: Transcript expiry = 1 minute, Allow Universal Clipboard off."
           - "On the Mac copy MACMARK; on the iPhone record \"local only\" with the Action Button and stop."
@@ -385,6 +391,8 @@ sessions:
         minutes: 6
         core: false
         build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        prerequisites:
+          - "Simulator-only pre-check, 4 Nov 2026: setup screen copy renders, including at the largest text size. Pickers, hints and recording still pending."
         steps:
           - "Read the app's Settings \u203a Action Button & Shortcuts \u203a Set Up Transcribe Voice and follow it to add Transcribe Voice to Control Center."
           - "Tap the control to record \"control test\", tap again to stop, and paste."
@@ -399,6 +407,8 @@ sessions:
         minutes: 6
         core: false
         build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        prerequisites:
+          - "Simulator-only pre-check, 4 Nov 2026, inconclusive: no banner appeared while a result Live Activity was showing, even with Live Activities off. Still pending on a physical iPhone."
         steps:
           - "Settings \u203a Behavior: Live Activities off; Settings \u203a Saved Results: Transcript Ready Alerts on, Allow."
           - "Start a recording, say \"alert one\", go Home, stop with Transcribe Voice in Control Center, then tap the banner."

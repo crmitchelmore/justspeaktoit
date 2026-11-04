@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognitionSupport
 import android.speech.RecognitionSupportCallback
@@ -22,6 +24,9 @@ class AndroidSpeechEngine(context: Context) {
     private val context = context.applicationContext
     private var recognizer: SpeechRecognizer? = null
     private var modelDownloader: SpeechRecognizer? = null
+    private var supportProbe: SpeechRecognizer? = null
+    private var probeGeneration = 0L
+    private val handler = Handler(Looper.getMainLooper())
     private var session = 0L
 
     fun capabilities(): RecognizerCapabilities = RecognizerCapabilities(
@@ -31,8 +36,13 @@ class AndroidSpeechEngine(context: Context) {
             SpeechRecognizer.isOnDeviceRecognitionAvailable(context),
     )
 
-    /** Reports on-device support for [languageTag]; before API 33 the answer is always unknown. */
+    /**
+     * Reports on-device support for [languageTag] exactly once; before API 33 the answer is always
+     * unknown. A newer check supersedes an outstanding one, and a service that does not answer
+     * within [SUPPORT_TIMEOUT_MS] is reported as unknown so the other modes stay usable.
+     */
     fun checkOnDeviceLanguage(languageTag: String, onResult: (LanguageResolution) -> Unit) {
+        releaseProbe()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || !capabilities().onDeviceAvailable) {
             onResult(LanguageResolution(LanguageSupport.Unknown, languageTag))
             return
@@ -42,29 +52,44 @@ class AndroidSpeechEngine(context: Context) {
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun checkSupport(languageTag: String, onResult: (LanguageResolution) -> Unit) {
-        val probe = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        val generation = probeGeneration
+        val unknown = LanguageResolution(LanguageSupport.Unknown, languageTag)
+        fun deliver(result: LanguageResolution) {
+            if (generation != probeGeneration) return
+            releaseProbe()
+            onResult(result)
+        }
+        val probe = try {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        } catch (e: UnsupportedOperationException) {
+            onResult(unknown)
+            return
+        }
+        supportProbe = probe
+        handler.postDelayed({ deliver(unknown) }, SUPPORT_TIMEOUT_MS)
         probe.checkRecognitionSupport(
             recognitionIntent(languageTag, RecognitionMode.OnDevice),
             context.mainExecutor,
             object : RecognitionSupportCallback {
-                override fun onSupportResult(support: RecognitionSupport) {
-                    probe.destroy()
-                    onResult(
-                        RecognizerAvailability.resolveLanguage(
-                            languageTag,
-                            installed = support.installedOnDeviceLanguages,
-                            pending = support.pendingOnDeviceLanguages,
-                            supported = support.supportedOnDeviceLanguages,
-                        ),
-                    )
-                }
+                override fun onSupportResult(support: RecognitionSupport) = deliver(
+                    RecognizerAvailability.resolveLanguage(
+                        languageTag,
+                        installed = support.installedOnDeviceLanguages,
+                        pending = support.pendingOnDeviceLanguages,
+                        supported = support.supportedOnDeviceLanguages,
+                    ),
+                )
 
-                override fun onError(error: Int) {
-                    probe.destroy()
-                    onResult(LanguageResolution(LanguageSupport.Unknown, languageTag))
-                }
+                override fun onError(error: Int) = deliver(unknown)
             },
         )
+    }
+
+    private fun releaseProbe() {
+        probeGeneration++
+        handler.removeCallbacksAndMessages(null)
+        supportProbe?.destroy()
+        supportProbe = null
     }
 
     /** Asks the system to download the on-device model; progress is shown by the system. */
@@ -72,23 +97,32 @@ class AndroidSpeechEngine(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         // Kept alive until close() so the request is not dropped when the service unbinds.
         modelDownloader?.destroy()
-        modelDownloader = SpeechRecognizer.createOnDeviceSpeechRecognizer(context).also {
-            it.triggerModelDownload(recognitionIntent(languageTag, RecognitionMode.OnDevice))
+        modelDownloader = try {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(context).also {
+                it.triggerModelDownload(recognitionIntent(languageTag, RecognitionMode.OnDevice))
+            }
+        } catch (e: UnsupportedOperationException) {
+            null
         }
     }
 
     fun start(mode: RecognitionMode, languageTag: String, onEvent: (DictationEvent) -> Unit, onLevel: (Float) -> Unit) {
         release()
         val id = ++session
-        val created = when (mode) {
-            RecognitionMode.OnDevice ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-                } else {
-                    null
-                }
-            RecognitionMode.SpeechService -> SpeechRecognizer.createSpeechRecognizer(context)
-            RecognitionMode.Cloud -> null
+        // Availability can change after it was checked; the factories then throw rather than return.
+        val created = try {
+            when (mode) {
+                RecognitionMode.OnDevice ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                    } else {
+                        null
+                    }
+                RecognitionMode.SpeechService -> SpeechRecognizer.createSpeechRecognizer(context)
+                RecognitionMode.Cloud -> null
+            }
+        } catch (e: UnsupportedOperationException) {
+            null
         }
         if (created == null) {
             onEvent(DictationEvent.Error(DictationFailure.Unavailable))
@@ -112,6 +146,7 @@ class AndroidSpeechEngine(context: Context) {
 
     fun close() {
         cancel()
+        releaseProbe()
         modelDownloader?.destroy()
         modelDownloader = null
     }
@@ -135,6 +170,10 @@ class AndroidSpeechEngine(context: Context) {
                 putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             }
         }
+
+    private companion object {
+        const val SUPPORT_TIMEOUT_MS = 3_000L
+    }
 
     private inner class Listener(
         private val id: Long,

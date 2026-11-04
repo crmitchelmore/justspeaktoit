@@ -3,6 +3,7 @@ package com.justspeaktoit.android.cloud
 import com.justspeaktoit.android.dictation.DictationFailure
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -58,6 +59,24 @@ class CloudWireTest {
         assertEquals(
             "Hello there.",
             CloudWire.cleanupText("""{"choices":[{"message":{"role":"assistant","content":"Hello there."}}]}"""),
+        )
+    }
+
+    @Test
+    fun testNonStringOrUnfinishedOutput_isRejected() {
+        listOf("""{"text":null}""", """{"text":42}""", """{"text":{"a":1}}""").forEach { body ->
+            assertEquals(DictationFailure.Server, assertThrows(CloudException::class.java) { CloudWire.transcriptText(body) }.failure)
+        }
+        listOf(
+            """{"choices":[{"finish_reason":"length","message":{"content":"Partial"}}]}""",
+            """{"choices":[{"finish_reason":"content_filter","message":{"content":"x"}}]}""",
+            """{"choices":[{"message":{"content":null}}]}""",
+        ).forEach { body ->
+            assertThrows(CloudException::class.java) { CloudWire.cleanupText(body) }
+        }
+        assertEquals(
+            "Done.",
+            CloudWire.cleanupText("""{"choices":[{"finish_reason":"stop","message":{"content":"Done."}}]}"""),
         )
     }
 

@@ -132,7 +132,7 @@ private fun ModeSection(state: DictationUiState, actions: DictationActions) {
         }
         return
     }
-    val active = state.activeMode
+    val active = state.displayedMode
     Text(stringResource(R.string.mode_picker_label), style = MaterialTheme.typography.labelLarge)
     SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
         state.options.forEachIndexed { index, option ->
@@ -400,5 +400,6 @@ private fun DictationFailure.message(): Int = when (this) {
     DictationFailure.LeftApp -> R.string.failure_left_app
     DictationFailure.Unavailable -> R.string.failure_unavailable
     DictationFailure.InvalidKey -> R.string.failure_invalid_key
+    DictationFailure.KeyUnavailable -> R.string.failure_key_unavailable
     DictationFailure.Unknown -> R.string.failure_unknown
 }

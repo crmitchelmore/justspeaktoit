@@ -29,6 +29,7 @@ enum class DictationFailure {
     LeftApp,
     Unavailable,
     InvalidKey,
+    KeyUnavailable,
     Unknown,
 }
 

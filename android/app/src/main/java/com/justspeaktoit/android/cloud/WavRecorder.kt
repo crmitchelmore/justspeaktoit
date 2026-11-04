@@ -62,6 +62,8 @@ class WavRecorder(
     private val file: File,
     private val onLevel: (Float) -> Unit,
     private val onLimitReached: () -> Unit,
+    /** Called on the capture thread when the microphone or disk fails mid-recording. */
+    private val onCaptureFailed: () -> Unit,
     private val maxSeconds: Int = 600,
 ) {
     @Volatile private var running = false
@@ -118,6 +120,8 @@ class WavRecorder(
         } catch (e: java.io.IOException) {
             failed = true
         }
+        // Stopping the session releases the AudioRecord; the owner does that on this signal.
+        if (failed && running) onCaptureFailed()
     }
 
     private fun capture(audio: AudioRecord) {

@@ -2,6 +2,7 @@ package com.justspeaktoit.android.security
 
 import java.security.GeneralSecurityException
 import java.util.Base64
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
@@ -48,26 +49,40 @@ object SealedBox {
         return VERSION + Base64.getEncoder().encodeToString(sealed)
     }
 
-    /** @throws GeneralSecurityException when the value was tampered with, moved or the key changed. */
+    /**
+     * @throws InvalidSealedValueException when the value is malformed, tampered with, moved to another
+     *   name or sealed by a different key: it can never be opened and is safe to discard.
+     * @throws GeneralSecurityException for operational failures (for example a Keystore that is
+     *   briefly unavailable), which say nothing about the stored value.
+     */
     fun open(key: SecretKey, encoded: String, associatedData: ByteArray): ByteArray {
-        if (!encoded.startsWith(VERSION)) throw GeneralSecurityException("Unknown sealed format")
+        if (!encoded.startsWith(VERSION)) throw InvalidSealedValueException("Unknown sealed format")
         val bytes = try {
             Base64.getDecoder().decode(encoded.removePrefix(VERSION))
         } catch (e: IllegalArgumentException) {
-            throw GeneralSecurityException("Malformed sealed value", e)
+            throw InvalidSealedValueException("Malformed sealed value", e)
         }
-        if (bytes.size <= IV_BYTES) throw GeneralSecurityException("Truncated sealed value")
+        if (bytes.size <= IV_BYTES) throw InvalidSealedValueException("Truncated sealed value")
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, bytes, 0, IV_BYTES))
         cipher.updateAAD(associatedData)
-        return cipher.doFinal(bytes, IV_BYTES, bytes.size - IV_BYTES)
+        return try {
+            cipher.doFinal(bytes, IV_BYTES, bytes.size - IV_BYTES)
+        } catch (e: AEADBadTagException) {
+            throw InvalidSealedValueException("Authentication failed", e)
+        }
     }
 }
 
+/** A sealed value that can never be opened with the current key and name. */
+class InvalidSealedValueException(message: String, cause: Throwable? = null) :
+    GeneralSecurityException(message, cause)
+
 /**
  * Encrypts every value with a key supplied by [keyProvider] (the Android Keystore in production).
- * A value that can no longer be decrypted, for example after the Keystore key was lost in a device
- * restore, is deleted and reported as absent so the user is asked to enter it again.
+ * A value that fails authentication, for example after the Keystore key was lost in a device
+ * restore, is deleted and reported as absent so the user is asked to enter it again. Any other
+ * failure is thrown and the stored value is kept.
  */
 class EncryptedSecretStore(
     private val backing: SecretBacking,
@@ -76,11 +91,10 @@ class EncryptedSecretStore(
     override fun read(name: String): String? {
         requireValidName(name)
         val sealed = backing.get(name) ?: return null
-        // Resolve the key first: a transient Keystore failure must not delete the stored value.
-        val key = keyProvider()
+        // Only a value proven unopenable is discarded; Keystore or cipher failures propagate and keep it.
         return try {
-            SealedBox.open(key, sealed, name.toByteArray()).toString(Charsets.UTF_8)
-        } catch (e: GeneralSecurityException) {
+            SealedBox.open(keyProvider(), sealed, name.toByteArray()).toString(Charsets.UTF_8)
+        } catch (e: InvalidSealedValueException) {
             backing.delete(name)
             null
         }

@@ -54,10 +54,46 @@ class CloudParityTest {
     }
 
     @Test
-    fun testGptTranscribe_usesLanguageHintsArrayLikeMac() {
-        val models = RepoSources.speakCore("OpenAITranscriptionModels.swift")
-        assertTrue(models.contains("usesLanguageHintsArray(apiModelName) ? \"languages[]\" : \"language\""))
-        assertEquals("languages[]", CloudCatalog.transcriptionModel("openai/gpt-transcribe").languageField)
-        assertEquals("language", CloudCatalog.transcriptionModel("groq/whisper-large-v3-turbo").languageField)
+    fun testLanguageField_followsSwiftSelectionRule() {
+        val swift = RepoSources.speakCore("OpenAITranscriptionModels.swift")
+        val constants = swiftStringConstants(swift)
+        assertTrue(swift.contains("usesLanguageHintsArray(apiModelName) ? \"languages[]\" : \"language\""))
+        // The families named inside usesLanguageHintsArray, resolved to their API names.
+        val body = swift.substringAfter("func usesLanguageHintsArray").substringBefore("\n    }")
+        val families = Regex("belongs\\(apiModelName, to: (\\w+)\\)").findAll(body)
+            .map { constants.getValue(it.groupValues[1]) }.toList()
+        assertTrue("No language-hint families found", families.isNotEmpty())
+        CloudCatalog.transcriptionModels.forEach { model ->
+            val name = model.apiName.lowercase()
+            val usesArray = families.any { name == it || name.startsWith("$it-") }
+            assertEquals(model.catalogId, if (usesArray) "languages[]" else "language", model.languageField)
+        }
+    }
+
+    /**
+     * Android offers every non-retiring model of the providers it implements, so a model added to
+     * the Mac catalogue fails this test until Android supports it or records why it cannot.
+     */
+    @Test
+    fun testTranscriptionModels_coverEveryNonRetiringMacModelForSupportedProviders() {
+        val openAI = RepoSources.speakCore("OpenAITranscriptionModels.swift")
+        val constants = swiftStringConstants(openAI)
+        val direct = openAI.substringAfter("directBatchModelIDs: Set<String> = [").substringBefore("]")
+            .split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            .map { if (it.startsWith("\"")) it.trim('"') else constants.getValue(it) }
+        val catalog = RepoSources.speakCore("ModelCatalog.swift")
+        val groq = Regex("id: \"(groq/[^\"]+)\"").findAll(catalog).map { it.groupValues[1] }.toSet()
+        val retirements = RepoSources.speakCore("ModelRetirements.swift")
+        val retiring = Regex("id: \"([^\"]+)\", mode: \\.batch").findAll(retirements).map { it.groupValues[1] }.toSet()
+        val expected = (direct + groq).toSet() - retiring - ANDROID_EXCLUSIONS.keys
+        assertEquals(expected, CloudCatalog.transcriptionModels.map { it.catalogId }.toSet())
+    }
+
+    private fun swiftStringConstants(swift: String): Map<String, String> =
+        Regex("static let (\\w+) = \"([^\"]+)\"").findAll(swift).associate { it.groupValues[1] to it.groupValues[2] }
+
+    private companion object {
+        /** Mac models Android deliberately does not offer, with the reason. Empty today. */
+        val ANDROID_EXCLUSIONS: Map<String, String> = emptyMap()
     }
 }

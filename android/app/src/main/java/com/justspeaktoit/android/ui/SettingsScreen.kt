@@ -116,6 +116,9 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
             HorizontalDivider()
             SectionTitle(R.string.settings_keys_title)
             Text(stringResource(R.string.settings_keys_note), style = MaterialTheme.typography.bodyMedium)
+            if (state.keyStoreError) {
+                Text(stringResource(R.string.settings_key_error), color = MaterialTheme.colorScheme.error)
+            }
             CloudCatalog.providers.forEach { provider ->
                 KeyRow(provider, saved = provider in state.savedKeys, actions)
             }

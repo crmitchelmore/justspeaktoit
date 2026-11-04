@@ -7,6 +7,27 @@ import java.net.URL
 import java.util.UUID
 
 /**
+ * Lets another thread abort a blocking request: [cancel] disconnects the connection, which makes
+ * any blocked write or read fail immediately.
+ */
+class CallHandle {
+    @Volatile private var connection: HttpURLConnection? = null
+
+    @Volatile var cancelled = false
+        private set
+
+    internal fun attach(conn: HttpURLConnection) {
+        connection = conn
+        if (cancelled) conn.disconnect()
+    }
+
+    fun cancel() {
+        cancelled = true
+        connection?.disconnect()
+    }
+}
+
+/**
  * Blocking HTTPS client for OpenAI-compatible APIs; call from a background dispatcher. Keys are
  * only sent as bearer tokens and never logged.
  */
@@ -14,7 +35,7 @@ class CloudClient(
     private val connectTimeoutMs: Int = 15_000,
     private val readTimeoutMs: Int = 120_000,
 ) {
-    fun transcribe(model: CloudModel, apiKey: String, audio: File, languageTag: String?): String {
+    fun transcribe(model: CloudModel, apiKey: String, audio: File, languageTag: String?, call: CallHandle): String {
         val multipart = CloudWire.multipart(
             fields = CloudWire.transcriptionFields(model, languageTag),
             fileField = "file",
@@ -22,7 +43,8 @@ class CloudClient(
             mimeType = "audio/wav",
             boundary = "jsti-" + UUID.randomUUID(),
         )
-        val body = post("${model.provider.baseUrl}/audio/transcriptions", apiKey, multipart.contentType) { conn ->
+        val url = "${model.provider.baseUrl}/audio/transcriptions"
+        val body = post(url, apiKey, multipart.contentType, call) { conn ->
             conn.setFixedLengthStreamingMode(multipart.contentLength(audio.length()))
             conn.outputStream.use { out ->
                 out.write(multipart.head)
@@ -33,17 +55,25 @@ class CloudClient(
         return CloudWire.transcriptText(body)
     }
 
-    fun cleanup(apiKey: String, transcript: String): String {
+    fun cleanup(apiKey: String, transcript: String, call: CallHandle): String {
         val json = CloudWire.cleanupBody(CloudCatalog.CLEANUP_MODEL, transcript).toByteArray()
-        val body = post("${CloudProvider.OpenRouter.baseUrl}/chat/completions", apiKey, "application/json") { conn ->
+        val url = "${CloudProvider.OpenRouter.baseUrl}/chat/completions"
+        val body = post(url, apiKey, "application/json", call) { conn ->
             conn.setFixedLengthStreamingMode(json.size)
             conn.outputStream.use { it.write(json) }
         }
         return CloudWire.cleanupText(body)
     }
 
-    private fun post(url: String, apiKey: String, contentType: String, write: (HttpURLConnection) -> Unit): String {
+    private fun post(
+        url: String,
+        apiKey: String,
+        contentType: String,
+        call: CallHandle,
+        write: (HttpURLConnection) -> Unit,
+    ): String {
         val conn = URL(url).openConnection() as HttpURLConnection
+        call.attach(conn)
         try {
             conn.requestMethod = "POST"
             conn.doOutput = true

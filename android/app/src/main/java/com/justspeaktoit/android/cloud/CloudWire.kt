@@ -58,11 +58,21 @@ object CloudWire {
         .toString()
 
     /** @throws CloudException when the body is not the expected JSON. */
-    fun transcriptText(body: String): String = parse { JSONObject(body).getString("text") }
+    fun transcriptText(body: String): String = parse { JSONObject(body).requireString("text") }
 
+    /** Rejects output the model did not finish (for example `finish_reason: "length"`). */
     fun cleanupText(body: String): String = parse {
-        JSONObject(body).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+        val choice = JSONObject(body).getJSONArray("choices").getJSONObject(0)
+        val finish = choice.opt("finish_reason")
+        if (finish is String && finish != "stop") {
+            throw CloudException(DictationFailure.Server, "Cleanup did not finish: $finish")
+        }
+        choice.getJSONObject("message").requireString("content")
     }
+
+    // Android's getString() coerces null, numbers and objects to text; only a real string is a transcript.
+    private fun JSONObject.requireString(name: String): String =
+        opt(name) as? String ?: throw CloudException(DictationFailure.Server, "Missing $name")
 
     private inline fun parse(block: () -> String): String = try {
         block().trim()

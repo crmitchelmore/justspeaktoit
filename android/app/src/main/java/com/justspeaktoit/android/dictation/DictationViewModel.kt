@@ -3,6 +3,7 @@ package com.justspeaktoit.android.dictation
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.justspeaktoit.android.cloud.CallHandle
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
 import com.justspeaktoit.android.cloud.CloudException
@@ -16,13 +17,21 @@ import com.justspeaktoit.android.settings.AppPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.security.GeneralSecurityException
+import java.security.ProviderException
 import java.util.Locale
 
 /** Optional OpenRouter cleanup of a final transcript. A failure keeps the original text. */
@@ -41,15 +50,29 @@ data class DictationUiState(
     val cleanupEnabled: Boolean = false,
     val cleanup: CleanupStatus = CleanupStatus.None,
     val originalTranscript: String? = null,
+    /** Set when a key could not be saved or removed securely. */
+    val keyStoreError: Boolean = false,
 ) {
+    /** The mode a new session would use. */
     val activeMode: RecognitionMode?
         get() = chosenMode ?: RecognizerAvailability.defaultMode(options)
 
-    val activeAvailability: ModeAvailability?
-        get() = options.firstOrNull { it.mode == activeMode }
+    /** While a session runs, its own mode, so a refresh can never relabel its privacy. */
+    val displayedMode: RecognitionMode?
+        get() = when (dictation) {
+            is DictationState.Starting -> dictation.mode
+            is DictationState.Listening -> dictation.mode
+            is DictationState.Finishing -> dictation.mode
+            else -> activeMode
+        }
 
+    val activeAvailability: ModeAvailability?
+        get() = options.firstOrNull { it.mode == displayedMode }
+
+    /** Starting waits for a coherent availability result for the current language. */
     val canStart: Boolean
-        get() = !dictation.isActive && cleanup != CleanupStatus.Running && activeAvailability?.usable == true
+        get() = !dictation.isActive && !checkingAvailability && cleanup != CleanupStatus.Running &&
+            options.firstOrNull { it.mode == activeMode }?.usable == true
 
     /** Cleanup runs only when switched on and an OpenRouter key exists. */
     val cleanupReady: Boolean
@@ -121,18 +144,41 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         _state.update { it.copy(cleanupEnabled = enabled) }
     }
 
-    fun saveKey(provider: CloudProvider, key: String) {
-        secrets.write(provider.credentialId, key.trim())
+    fun saveKey(provider: CloudProvider, key: String) =
+        updateKeys { secrets.write(provider.credentialId, key.trim()) }
+
+    fun removeKey(provider: CloudProvider) = updateKeys { secrets.remove(provider.credentialId) }
+
+    private fun updateKeys(change: () -> Unit) {
+        val ok = try {
+            change()
+            true
+        } catch (e: GeneralSecurityException) {
+            false
+        } catch (e: ProviderException) {
+            false
+        }
+        _state.update { it.copy(keyStoreError = !ok) }
         refreshAvailability()
     }
 
-    fun removeKey(provider: CloudProvider) {
-        secrets.remove(provider.credentialId)
-        refreshAvailability()
-    }
+    private var downloadWatch: Job? = null
 
+    /**
+     * Requests the model, then rechecks support until it is installed or the wait ends, so Start
+     * becomes available without leaving the app (the platform reports progress only via rechecks).
+     */
     fun downloadOnDeviceModel() {
         engine.requestOnDeviceModel(_state.value.onDeviceLanguageTag)
+        downloadWatch?.cancel()
+        downloadWatch = viewModelScope.launch {
+            repeat(DOWNLOAD_CHECKS) {
+                delay(DOWNLOAD_CHECK_INTERVAL_MS)
+                refreshAvailability()
+                val status = _state.value.options.firstOrNull { it.mode == RecognitionMode.OnDevice }?.status
+                if (status != ModeStatus.NeedsDownload && status != ModeStatus.Downloading) return@launch
+            }
+        }
     }
 
     fun start() {
@@ -200,10 +246,12 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun startCloud() {
         val file = File(cacheDir, "dictation-${System.nanoTime()}.wav")
-        val rec = WavRecorder(
+        lateinit var rec: WavRecorder
+        rec = WavRecorder(
             file = file,
             onLevel = { _level.value = it },
-            onLimitReached = { viewModelScope.launch { stop() } },
+            onLimitReached = { viewModelScope.launch { if (recorder === rec) stop() } },
+            onCaptureFailed = { viewModelScope.launch { if (recorder === rec) failCapture() } },
         )
         if (!rec.start()) {
             file.delete()
@@ -215,16 +263,21 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         dispatch(DictationEvent.Ready)
     }
 
+    private fun failCapture() {
+        discardRecording()
+        dispatch(DictationEvent.Error(DictationFailure.Audio))
+    }
+
     private fun finishCloud() {
         val rec = recorder ?: return
         val file = recording ?: return
-        recorder = null
-        recording = null
         val model = _state.value.cloudModel
         val language = _state.value.languageTag
         work = viewModelScope.launch {
             val event = try {
-                val bytes = withContext(Dispatchers.IO) { rec.stop() }
+                // The recorder stays owned (and releasable by onCleared) until stop() has finished.
+                val bytes = withContext(NonCancellable + Dispatchers.IO) { rec.stop() }
+                releaseOwnership(rec)
                 when {
                     bytes < 0 -> DictationEvent.Error(DictationFailure.Audio)
                     bytes < MIN_AUDIO_BYTES -> DictationEvent.Error(DictationFailure.NoSpeech)
@@ -234,28 +287,74 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                             DictationEvent.Error(DictationFailure.InvalidKey)
                         } else {
                             DictationEvent.Final(
-                                withContext(Dispatchers.IO) { cloud.transcribe(model, key, file, language) },
+                                cloudCall(TRANSCRIBE_DEADLINE_MS) { call ->
+                                    cloud.transcribe(model, key, file, language, call)
+                                },
                             )
                         }
                     }
                 }
             } catch (e: CloudException) {
                 DictationEvent.Error(e.failure)
+            } catch (e: GeneralSecurityException) {
+                DictationEvent.Error(DictationFailure.KeyUnavailable)
+            } catch (e: ProviderException) {
+                DictationEvent.Error(DictationFailure.KeyUnavailable)
             } finally {
+                releaseOwnership(rec)
                 withContext(NonCancellable + Dispatchers.IO) { file.delete() }
             }
+            // A cancelled upload must not deliver a late result into a newer session.
+            ensureActive()
             onEngineEvent(event)
         }
     }
 
+    /** Stops capture without a result. Ownership is kept until the recorder has really stopped. */
     private fun discardRecording() {
         val rec = recorder ?: return
         val file = recording
-        recorder = null
-        recording = null
-        viewModelScope.launch(Dispatchers.IO) {
-            rec.stop()
-            file?.delete()
+        viewModelScope.launch {
+            withContext(NonCancellable + Dispatchers.IO) {
+                rec.stop()
+                file?.delete()
+            }
+            releaseOwnership(rec)
+        }
+    }
+
+    private fun releaseOwnership(rec: WavRecorder) {
+        if (recorder === rec) {
+            recorder = null
+            recording = null
+        }
+    }
+
+    /**
+     * Runs a blocking request with an overall [deadlineMs]. Cancelling the coroutine or reaching the
+     * deadline disconnects the request, so no upload or response read outlives the session.
+     */
+    private suspend fun <T> cloudCall(deadlineMs: Long, block: (CallHandle) -> T): T {
+        val call = CallHandle()
+        return try {
+            withTimeout(deadlineMs) {
+                coroutineScope {
+                    val watchdog = launch {
+                        try {
+                            awaitCancellation()
+                        } finally {
+                            call.cancel()
+                        }
+                    }
+                    try {
+                        withContext(Dispatchers.IO) { block(call) }
+                    } finally {
+                        watchdog.cancel()
+                    }
+                }
+            }
+        } catch (e: TimeoutCancellationException) {
+            throw CloudException(DictationFailure.NetworkTimeout, "Request deadline reached", e)
         }
     }
 
@@ -270,8 +369,12 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         work = viewModelScope.launch {
             val cleaned = try {
                 val key = withContext(Dispatchers.IO) { secrets.read(CloudProvider.OpenRouter.credentialId) }
-                key?.let { withContext(Dispatchers.IO) { cloud.cleanup(it, done.transcript) } }
+                key?.let { cloudCall(CLEANUP_DEADLINE_MS) { call -> cloud.cleanup(it, done.transcript, call) } }
             } catch (e: CloudException) {
+                null
+            } catch (e: GeneralSecurityException) {
+                null
+            } catch (e: ProviderException) {
                 null
             }
             _state.update {
@@ -308,6 +411,10 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     private companion object {
         /** About a quarter of a second; shorter recordings cannot contain a word. */
         const val MIN_AUDIO_BYTES = WavFormat.BYTES_PER_SECOND / 4
+        const val TRANSCRIBE_DEADLINE_MS = 180_000L
+        const val CLEANUP_DEADLINE_MS = 60_000L
+        const val DOWNLOAD_CHECK_INTERVAL_MS = 5_000L
+        const val DOWNLOAD_CHECKS = 60
     }
 }
 

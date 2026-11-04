@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.security.GeneralSecurityException
@@ -66,11 +67,17 @@ class EncryptedSecretStoreTest {
     fun testKeyProviderFailure_doesNotDeleteStoredValue() {
         store.write("openai.apiKey", "sk-keep")
         val unavailable = EncryptedSecretStore(backing) { throw GeneralSecurityException("keystore locked") }
-        try {
-            unavailable.read("openai.apiKey")
-        } catch (expected: GeneralSecurityException) {
-            // The failure must surface rather than look like a missing key.
-        }
+        assertThrows(GeneralSecurityException::class.java) { unavailable.read("openai.apiKey") }
+        assertEquals("sk-keep", store.read("openai.apiKey"))
+    }
+
+    @Test
+    fun testCipherInitFailure_surfacesAndKeepsStoredValue() {
+        store.write("openai.apiKey", "sk-keep")
+        val wrongKind = KeyGenerator.getInstance("HmacSHA256").generateKey()
+        val failing = EncryptedSecretStore(backing) { wrongKind }
+        val error = assertThrows(GeneralSecurityException::class.java) { failing.read("openai.apiKey") }
+        assertFalse(error is InvalidSealedValueException)
         assertEquals("sk-keep", store.read("openai.apiKey"))
     }
 
@@ -86,12 +93,7 @@ class EncryptedSecretStoreTest {
     @Test
     fun testMalformedValues_areRejected() {
         listOf("", "v1:", "v1:!!!", "v2:AAAA", "v1:AAAA").forEach { bad ->
-            try {
-                SealedBox.open(key, bad, ByteArray(0))
-                throw AssertionError("Expected rejection for '$bad'")
-            } catch (expected: GeneralSecurityException) {
-                // Rejected as intended.
-            }
+            assertThrows(InvalidSealedValueException::class.java) { SealedBox.open(key, bad, ByteArray(0)) }
         }
     }
 

@@ -32,9 +32,9 @@ Status key:
 | Start/stop dictation | **Launch, done** | One large record button; Stop asks the recogniser for its final result. |
 | Live partial text | **Launch, done** | `EXTRA_PARTIAL_RESULTS`; partials replace the hypothesis and are always styled as provisional. |
 | Final transcript | **Launch, done** | Only a non-empty final result becomes "Transcript ready". Errors, silence and cancellations never look successful; partial words are offered as "Unfinished text". |
-| On-device (private) recognition | **Launch, done** | `SpeechRecognizer.createOnDeviceSpeechRecognizer` on Android 12+. Availability, language support and missing models are detected and explained; a model download can be requested on Android 13+. |
+| On-device (private) recognition | **Launch, done** | `SpeechRecognizer.createOnDeviceSpeechRecognizer` on Android 12+. Availability, language support and missing models are detected and explained (a support check that does not answer within 3 seconds counts as unknown). On Android 13+ a model download can be requested, and support is rechecked every 5 seconds until it installs. |
 | Apple Speech server recognition | **Android equivalent, done** | "Speech service" mode uses the default `RecognitionService`, labelled as possibly sending audio to its provider. |
-| No silent cloud fallback | **Launch, done** | The user's mode choice is never changed during or between sessions; an unusable choice disables Start with the reason. |
+| No silent cloud fallback | **Launch, done** | A running session keeps its mode and privacy label even if availability changes. An explicit choice is kept for the app's lifetime (persisted in milestone 2); without one, the app picks on-device, then the speech service, and labels which. An unusable choice disables Start with the reason. |
 | Copy | **Launch, done** | Clipboard; Android 13+ shows the system confirmation. |
 | Share | **Launch, done** | Standard share sheet (`ACTION_SEND`). |
 | Auto-paste / insert at cursor | **Android equivalent, planned** | Android does not allow unrestricted cross-app insertion. The equivalent is an input method (IME) that commits text into the focused field (milestone 4). Accessibility-service insertion is rejected: Play policy and privacy cost are too high. |
@@ -75,6 +75,6 @@ Unit tests and CI cannot prove these; they gate closing the epic:
 3. A device with no recognition service, or with it disabled, shows the reason and no Start.
 4. Microphone permission denial, permanent denial and Settings recovery.
 5. Interruptions: incoming call, Bluetooth headset connect/disconnect, and leaving the app.
-6. Speech-service and Cloud modes with no network fail visibly, without a false success.
-8. Cloud mode with a real OpenAI and Groq key, an invalid key ("rejected the API key"), and cleanup with an OpenRouter key; owner-only, as these calls are paid.
+6. Speech-service and Cloud modes with no network either return a genuine transcript (speech service with an installed offline model) or fail visibly; they never show a false success.
 7. Battery and latency notes for a five-minute dictation series.
+8. Cloud mode with a real OpenAI and Groq key, an invalid key ("rejected the API key"), and cleanup with an OpenRouter key; owner-only, as these calls are paid.

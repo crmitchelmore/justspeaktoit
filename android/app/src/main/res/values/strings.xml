@@ -58,6 +58,8 @@
     <string name="privacy_cloud_generic">Audio is uploaded to the cloud provider you chose, using your key.</string>
     <string name="status_mode_needs_key">Add a %1$s key in Settings to use %2$s.</string>
     <string name="state_transcribing">Transcribing with %1$s…</string>
+    <string name="failure_key_unavailable">The saved API key could not be unlocked. Try again; if it keeps failing, enter it again in Settings.</string>
+    <string name="settings_key_error">The key could not be saved securely. Try again.</string>
     <string name="failure_invalid_key">The provider rejected the API key. Check it in Settings.</string>
 
     <string name="cleanup_running">Cleaning up with OpenRouter…</string>

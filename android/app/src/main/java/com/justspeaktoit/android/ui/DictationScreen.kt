@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -82,6 +83,8 @@ data class DictationActions(
     val onShowSettings: () -> Unit,
     val onShowOriginal: () -> Unit,
     val onShowHistory: () -> Unit = {},
+    val onConfirmSharedAudio: () -> Unit = {},
+    val onDismissSharedAudio: () -> Unit = {},
 )
 
 @Composable
@@ -127,6 +130,29 @@ fun DictationScreen(
             RecordControls(state, level, actions)
             ResultActions(state, snackbar, actions)
         }
+    }
+    if (state.sharedAudio != null) {
+        AlertDialog(
+            onDismissRequest = actions.onDismissSharedAudio,
+            title = { Text(stringResource(R.string.shared_audio_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.shared_audio_body,
+                        state.cloudModel.provider.displayName,
+                        state.cloudModel.displayName,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = actions.onConfirmSharedAudio) {
+                    Text(stringResource(R.string.action_transcribe))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = actions.onDismissSharedAudio) { Text(stringResource(R.string.action_cancel)) }
+            },
+        )
     }
 }
 
@@ -408,5 +434,8 @@ internal fun DictationFailure.message(): Int = when (this) {
     DictationFailure.Unavailable -> R.string.failure_unavailable
     DictationFailure.InvalidKey -> R.string.failure_invalid_key
     DictationFailure.KeyUnavailable -> R.string.failure_key_unavailable
+    DictationFailure.MissingKey -> R.string.failure_missing_key
+    DictationFailure.AudioTooLarge -> R.string.failure_audio_too_large
+    DictationFailure.UnsupportedAudio -> R.string.failure_unsupported_audio
     DictationFailure.Unknown -> R.string.failure_unknown
 }

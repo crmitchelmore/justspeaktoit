@@ -1,6 +1,8 @@
 package com.justspeaktoit.android.dictation
 
 import android.app.Application
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.justspeaktoit.android.cloud.CallHandle
@@ -9,6 +11,7 @@ import com.justspeaktoit.android.cloud.CloudClient
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
 import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.history.AtomicHistoryFile
@@ -42,6 +45,8 @@ import java.security.GeneralSecurityException
 import java.security.ProviderException
 import java.util.Locale
 
+data class SharedAudioOffer(val uri: Uri, val mimeType: String?)
+
 /** Optional OpenRouter cleanup of a final transcript. A failure keeps the original text. */
 enum class CleanupStatus { None, Running, Applied, Failed }
 
@@ -67,6 +72,8 @@ data class DictationUiState(
     val retention: Retention = Retention.Month,
     /** The last history change could not be written; it is retried with the next change. */
     val historyError: Boolean = false,
+    /** Audio another app shared, waiting for the user to confirm the upload. */
+    val sharedAudio: SharedAudioOffer? = null,
 ) {
     /** The mode a new session would use. */
     val activeMode: RecognitionMode?
@@ -149,6 +156,105 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                     onDeviceLanguageTag = resolution.languageTag,
                     checkingAvailability = false,
                 )
+            }
+            maybeAutoStart()
+        }
+    }
+
+    private var autoStartPending = false
+
+    /**
+     * Starts dictation as soon as availability is known, for the Quick Settings tile, shortcut and
+     * permission grant. If the chosen mode is unusable nothing starts and its reason stays visible.
+     */
+    fun requestAutoStart() {
+        if (_state.value.dictation.isActive) return
+        autoStartPending = true
+        maybeAutoStart()
+    }
+
+    private fun maybeAutoStart() {
+        if (!autoStartPending || _state.value.checkingAvailability) return
+        autoStartPending = false
+        start()
+    }
+
+    /**
+     * Audio shared by another app is only uploaded after the user confirms, so no app can spend
+     * the user's cloud credit by sending audio here.
+     */
+    fun offerSharedAudio(uri: Uri, mimeType: String?) {
+        if (_state.value.dictation.isActive) return
+        _state.update { it.copy(sharedAudio = SharedAudioOffer(uri, mimeType)) }
+    }
+
+    fun dismissSharedAudio() {
+        _state.update { it.copy(sharedAudio = null) }
+    }
+
+    fun confirmSharedAudio() {
+        val offer = _state.value.sharedAudio ?: return
+        _state.update { it.copy(sharedAudio = null) }
+        transcribeSharedAudio(offer.uri, offer.mimeType)
+    }
+
+    private fun transcribeSharedAudio(uri: Uri, mimeType: String?) {
+        val current = _state.value
+        if (current.dictation.isActive || current.cleanup == CleanupStatus.Running) return
+        val model = current.cloudModel
+        val language = current.languageTag
+        val resolver = getApplication<Application>().contentResolver
+        _state.update { it.copy(cleanup = CleanupStatus.None, originalTranscript = null) }
+        sessionModelId = model.catalogId
+        dispatch(DictationEvent.Start(RecognitionMode.Cloud))
+        dispatch(DictationEvent.StopRequested)
+        work = viewModelScope.launch {
+            val file = File(cacheDir, "shared-${System.nanoTime()}")
+            val event = try {
+                val format = SharedAudio.format(mimeType ?: resolver.getType(uri))
+                    ?: throw CloudException(DictationFailure.UnsupportedAudio, "Unsupported audio")
+                val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
+                    ?: throw CloudException(DictationFailure.MissingKey, "No key")
+                withContext(Dispatchers.IO) { copyLimited(resolver, uri, file) }
+                DictationEvent.Final(
+                    cloudCall(TRANSCRIBE_DEADLINE_MS) { call ->
+                        cloud.transcribe(model, key, file, language, call, format)
+                    },
+                )
+            } catch (e: CloudException) {
+                DictationEvent.Error(e.failure)
+            } catch (e: GeneralSecurityException) {
+                DictationEvent.Error(DictationFailure.KeyUnavailable)
+            } catch (e: ProviderException) {
+                DictationEvent.Error(DictationFailure.KeyUnavailable)
+            } catch (e: IOException) {
+                DictationEvent.Error(DictationFailure.Audio)
+            } catch (e: SecurityException) {
+                DictationEvent.Error(DictationFailure.Audio)
+            } finally {
+                withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+            }
+            ensureActive()
+            onEngineEvent(event)
+        }
+    }
+
+    /** Copies at most [SharedAudio.MAX_BYTES], failing early rather than uploading a file a provider rejects. */
+    private fun copyLimited(resolver: ContentResolver, uri: Uri, target: File) {
+        val input = resolver.openInputStream(uri) ?: throw IOException("Unreadable audio")
+        input.use { source ->
+            target.outputStream().use { out ->
+                val buffer = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val read = source.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    if (total > SharedAudio.MAX_BYTES) {
+                        throw CloudException(DictationFailure.AudioTooLarge, "Audio too large")
+                    }
+                    out.write(buffer, 0, read)
+                }
             }
         }
     }

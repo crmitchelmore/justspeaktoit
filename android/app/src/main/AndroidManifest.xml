@@ -30,11 +30,38 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Audio shared from other apps is transcribed with the chosen cloud model. -->
+            <intent-filter android:label="@string/share_audio_label">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
         </activity>
+
+        <!--
+            Private entry for the Quick Settings tile and launcher shortcut. It is not exported, so
+            other apps cannot start the microphone through it.
+        -->
+        <activity-alias
+            android:name=".DictateEntry"
+            android:exported="false"
+            android:targetActivity=".MainActivity" />
+
+        <service
+            android:name=".surfaces.DictateTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_mic"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
 import { buildCatalogue, mergeEntries } from './release-notes-catalogue-lib.mjs';
-import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, stablePublicationSurfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, publicationSurfaces, stablePublicationSurfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/justspeaktoit';
 const run = runReleaseCommand;
@@ -57,25 +57,27 @@ function baseline(all, surface) {
 function ensureRelease(manifest, all) {
     if(all.some(r=>r.tag_name===manifest.tag)) return;
     const bytes=JSON.stringify(manifest,null,2)+'\n';
-    const body=`${manifest.tag}\n\nSource: ${manifest.source}\n\nManifest SHA-256: ${digest(bytes)}\n\n${surfaces.map(s=>`## ${s} ${manifest.surfaces[s].version} (${manifest.surfaces[s].build})\n${manifest.surfaces[s].notes}`).join('\n')}`;
+    const body=`${manifest.tag}\n\nSource: ${manifest.source}\n\nPublication scope: ${manifest.publicationScope ?? 'all'}\n\nManifest SHA-256: ${digest(bytes)}\n\n${publicationSurfaces(manifest).map(s=>`## ${s} ${manifest.surfaces[s].version} (${manifest.surfaces[s].build})\n${manifest.surfaces[s].notes}`).join('\n')}`;
     gh('release','create',manifest.tag,save('release-manifest.json',bytes),'--repo',repo,'--draft','--prerelease','--latest=false','--title',manifest.tag,'--notes-file',save('review.md',body));
 }
 if(command === 'allocate' || command === 'prepare') {
     const all=releases();
     const train=command === 'allocate' ? 'alpha' : 'stable';
+    const scope=train === 'stable' ? option('scope', 'all') : undefined;
+    const selected=publicationSurfaces({train, ...(scope === undefined ? {} : {publicationScope:scope})});
     const alpha=train === 'stable' ? manifestFor(required('alpha')) : null;
     const source=alpha?.source ?? required('source');
     const proof=ci(source);
     if(alpha) {
         if(alpha.train !== 'alpha') throw Error('Select an Alpha build');
         const release=all.find(r=>r.tag_name===alpha.tag);
-        for(const surface of surfaces) {
+        for(const surface of selected) {
             const asset=release?.assets.find(a=>a.name===`${surface}-receipt.json`);
             if(!asset) throw Error(`Selected Alpha has no delivery receipt: ${surface}`);
             const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream'));
             if(receipt.status !== 'verified' || receipt.source !== alpha.source || receipt.build !== alpha.surfaces[surface].build || receipt.notesHash !== alpha.surfaces[surface].notesHash) throw Error(`Selected Alpha is not verified: ${surface} (status: ${receipt.status}). Run Reconcile Apple release delivery and retry once the receipt is verified.`);
         }
-        if (alpha.desktopQualification === 1) {
+        if (selected.includes('mac-direct') && alpha.desktopQualification === 1) {
             const asset = release?.assets.find(a => a.name === 'desktop-qualification.json');
             if (!asset) throw Error('Selected Alpha has no desktop qualification receipt');
             validateDesktopReceipt(alpha, JSON.parse(gh('api', `repos/${repo}/releases/assets/${asset.id}`, '-H', 'Accept: application/octet-stream')));
@@ -94,10 +96,18 @@ if(command === 'allocate' || command === 'prepare') {
     const allocation=nextAllocation(manifests,train);
     const tag=`${train === 'alpha'?'alpha-build':'stable-candidate'}-${allocation.ordinal}`;
     const config=json('Config/ReleasePipeline.json');
-    const versions=train === 'alpha' ? config.versions : {mac:required('mac-version'),ios:required('ios-version')};
+    const versions=train === 'alpha' ? config.versions : {mac:selected.includes('mac-direct') ? required('mac-version') : alpha.surfaces['mac-direct'].version,ios:required('ios-version')};
     const manifest={schema:1,train,tag,source,...allocation,createdAt:new Date().toISOString(),ci:proof,
-        desktopQualification:1,selectedAlpha:alpha?.tag ?? null,toolchain:'Xcode 26.2',dependenciesHash:digest(git('show',`${source}:Package.resolved`)),surfaces:{}};
+        ...(selected.includes('mac-direct') ? {desktopQualification:1} : {}),
+        ...(scope === undefined ? {} : {publicationScope:scope}),
+        selectedAlpha:alpha?.tag ?? null,toolchain:'Xcode 26.2',dependenciesHash:digest(git('show',`${source}:Package.resolved`)),surfaces:{}};
     for(const surface of frozenSurfaces(alpha)) {
+        if(scope === 'ios-only' && surface !== 'ios') {
+            // Retain the selected source's compatibility metadata without
+            // requiring a Mac version, publication baseline or qualification.
+            manifest.surfaces[surface]={...alpha.surfaces[surface],build:surface === 'mac-direct' ? allocation.build : `${1000+Math.floor(allocation.ordinal/10000)}.${Math.floor(allocation.ordinal/100)%100}.${allocation.ordinal%100}`};
+            continue;
+        }
         const platform=surface === 'ios'?'ios':'mac';
         const base=train === 'alpha' ? git('rev-parse', `${source}^1`) : retiredSurfaces.includes(surface) ? manifest.surfaces['mac-direct'].baseline : baseline(all,surface);
         git('merge-base','--is-ancestor',base,source);
@@ -107,7 +117,7 @@ if(command === 'allocate' || command === 'prepare') {
         manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : `${1000+Math.floor(allocation.ordinal/10000)}.${Math.floor(allocation.ordinal/100)%100}.${allocation.ordinal%100}`,version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes),...(retiredSurfaces.includes(surface)?{retired:true}:{})};
     }
     validateManifest(manifest);
-    if(train === 'stable') assertStableVersionAdvance(versions.mac, all.filter(r=>!r.draft && !r.prerelease && /^mac-v\d+\.\d+\.\d+$/.test(r.tag_name)).map(r=>r.tag_name.slice(5)));
+    if(train === 'stable' && selected.includes('mac-direct')) assertStableVersionAdvance(versions.mac, all.filter(r=>!r.draft && !r.prerelease && /^mac-v\d+\.\d+\.\d+$/.test(r.tag_name)).map(r=>r.tag_name.slice(5)));
     git('config','user.name','github-actions[bot]'); git('config','user.email','github-actions[bot]@users.noreply.github.com');
     git('tag','-a',tag,source,'-F',save('allocation.json',manifest)); git('push','origin',`refs/tags/${tag}`);
     ensureRelease(manifest,all);
@@ -115,6 +125,7 @@ if(command === 'allocate' || command === 'prepare') {
 } else if(command === 'configure') {
     const manifest=manifestFor(required('tag')); const surface=required('surface');
     if(!surfaces.includes(surface)) throw Error('Invalid surface');
+    if(!publicationSurfaces(manifest).includes(surface)) throw Error('Worker surface is outside the approved publication scope');
     if(git('rev-parse','HEAD') !== manifest.source) throw Error('Worker checked out wrong source');
     if(digest(readFileSync('Package.resolved','utf8').trim()) !== manifest.dependenciesHash) throw Error('Dependency lock does not match tested source');
     const config=json('Sources/SpeakCore/Resources/ReleaseTrains.json')[manifest.train];
@@ -195,7 +206,7 @@ if(command === 'allocate' || command === 'prepare') {
     const all=releases();
     for(const release of all.filter(r=>r.tag_name.startsWith('stable-candidate-'))) {
         const newer=manifestFor(release.tag_name);
-        if(newer.ordinal > manifest.ordinal && surfaces.some(s=>newer.surfaces[s].version === manifest.surfaces[s].version)) {
+        if(newer.ordinal > manifest.ordinal && publicationSurfaces(manifest).some(s=>publicationSurfaces(newer).includes(s) && newer.surfaces[s].version === manifest.surfaces[s].version)) {
             throw Error('A newer candidate supersedes this platform/version; prepare it again to select this source explicitly');
         }
     }
@@ -210,6 +221,12 @@ if(command === 'allocate' || command === 'prepare') {
         }
     }
     if (manifest.desktopQualification === 1) validateDesktopReceipt(manifest, json(join(directory, 'desktop-qualification.json')));
+    if (manifest.publicationScope === 'ios-only') {
+        upload(manifest.tag,'approval.json',{manifestHash:digest(bytes),actor:process.env.GITHUB_ACTOR,run:process.env.GITHUB_RUN_ID,approvedAt:new Date().toISOString()},true);
+        output('apple',JSON.stringify(verified));
+        console.log(`Approved iOS-only Stable ${manifest.tag}; Apple review follows independently`);
+        process.exit(0);
+    }
     const direct=json(join(directory,'mac-direct-receipt.json'));
     if(Object.keys(direct.assets).length !== 8) throw Error('Direct Mac candidate must have both DMGs, feeds and signed CLI');
     const tag=`mac-v${manifest.surfaces['mac-direct'].version}`;
@@ -238,6 +255,7 @@ if(command === 'allocate' || command === 'prepare') {
  } else if(command === 'withdraw') {
     const manifest=manifestFor(required('tag'));
     if(manifest.train !== 'stable') throw Error('Stable only');
+    if(!publicationSurfaces(manifest).includes('mac-direct')) process.exit(0);
     const all=releases();
     const approvalAsset=all.find(r=>r.tag_name===manifest.tag)?.assets.find(a=>a.name==='approval.json');
     if(!approvalAsset) process.exit(0);

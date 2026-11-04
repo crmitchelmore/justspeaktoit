@@ -194,6 +194,36 @@ The other steps stay eager on purpose:
 - The HUD panel is built at launch so its first appearance at recording start
   does not pay for window and hosting-view creation.
 
+### Start-to-capture path (#611)
+
+Real-Mac History data puts recognised hotkey to capture live at p50 109 ms and
+p95 193 ms; the target is under 100 ms. A temporary per-step timer in a
+release build, driven through the automation socket with a staged recorder,
+measured the steps between `startSession` and capture live:
+
+| Step | Time |
+| --- | ---: |
+| Profile, guards and API-key check | under 1 ms |
+| `TextOutputTarget.capture()` (focused element) | 0.5-38 ms |
+| HUD "Getting ready", including a microphone TCC query | about 14 ms |
+| `startRecording` microphone TCC query | about 13 ms |
+| `AVAudioRecorder.record()` on a staged recorder | 47-73 ms |
+
+A command-line benchmark found each `AVCaptureDevice.authorizationStatus(for:)`
+call costs 15-35 ms, with no caching between calls.
+`AVAudioApplication.recordPermission` costs 13-20 ms, so switching APIs does not
+help. The start path queried the status twice in a row. The HUD now uses the
+cached status, and `startRecording` keeps the single authoritative check
+before the microphone opens. That removes one query, about 13-20 ms, from every
+start. The HUD's health is still refreshed as soon as capture is live, and a
+missing permission still fails the start with its own error.
+
+`record()` dominates what remains. Removing it would mean writing the
+recording from the live engine's tap instead of a second `AVAudioRecorder`, a
+larger change outside this step. Real hotkey timings after the change need a
+new History sample on the owner's Mac. Automated UI or hotkey runs must not
+take over that Mac, so these figures come from ordinary use.
+
 Test-support migration fixtures are excluded at final Windows/Linux production
 staging, while producer artifacts keep the fixtures needed by tests. No runtime
 dependency, language, codec, model, offline capability or update support is

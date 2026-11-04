@@ -59,10 +59,159 @@ class ReleaseAppleTest < Minitest::Test
       (@receipts ||= []) << [status,extra]
     end
   end
-  def delivery(client, train: 'alpha', surface: 'ios')
+  class StableClient < FakeClient
+    attr_accessor :reviews, :items, :observe_resolution
+    def initialize
+      super
+      @bundle_id='com.justspeaktoit.ios'
+      @reviews=[{'id'=>'existing-review','attributes'=>{'platform'=>'IOS','state'=>'UNRESOLVED_ISSUES'}}]
+      @items=[{'id'=>'rejected-item','attributes'=>{'state'=>'REJECTED'},
+        'relationships'=>{'appStoreVersion'=>{'data'=>{'type'=>'appStoreVersions','id'=>'stable-version'}}}}]
+      @observe_resolution=true
+    end
+    def list(path)
+      case path
+      when '/v1/apps/6758528955/appStoreVersions?limit=200'
+        @calls << {method: :list, path: path}
+        [{'id'=>'stable-version','attributes'=>{'platform'=>'IOS','versionString'=>'3.2.0','appStoreState'=>'REJECTED'}}]
+      when '/v1/appStoreVersions/stable-version/appStoreVersionLocalizations'
+        @calls << {method: :list, path: path}
+        [{'id'=>'english','attributes'=>{'locale'=>'en-US'}}]
+      when '/v1/apps/6758528955/reviewSubmissions?limit=200'
+        @calls << {method: :list, path: path}
+        reviews
+      when %r{\A/v1/reviewSubmissions/[^/]+/items(?:\?|\z)}
+        @calls << {method: :list, path: path}
+        items
+      else
+        super
+      end
+    end
+    def get(path)
+      if path.start_with?('/v1/reviewSubmissionItems/')
+        @calls << {method: :get, path: path}
+        return {'data'=>items.find { |item| path.end_with?(item['id']) }}
+      end
+      if path.start_with?('/v1/reviewSubmissions/')
+        @calls << {method: :get, path: path}
+        return {'data'=>reviews.find { |review| path.end_with?(review['id']) }}
+      end
+      super
+    end
+    def post(path,body)
+      result=super
+      if path == '/v1/reviewSubmissions'
+        raise 'Existing unresolved submission must be reused' unless reviews.empty?
+        reviews << {'id'=>'new-review','attributes'=>{'platform'=>'IOS','state'=>'READY_FOR_REVIEW'}}
+        return {'data'=>reviews.last}
+      end
+      if path == '/v1/reviewSubmissionItems'
+        items << {'id'=>'new-item','attributes'=>{'state'=>'READY_FOR_REVIEW'},
+          'relationships'=>{'appStoreVersion'=>{'data'=>{'id'=>'stable-version'}}}}
+        return {'data'=>items.last}
+      end
+      result
+    end
+    def patch(path,body)
+      result=super
+      if path.start_with?('/v1/reviewSubmissionItems/') && observe_resolution
+        items.find { |item| path.end_with?(item['id']) }['attributes']['state']='READY_FOR_REVIEW'
+      elsif path.start_with?('/v1/reviewSubmissions/')
+        reviews.find { |review| path.end_with?(review['id']) }['attributes']['state']='WAITING_FOR_REVIEW'
+      end
+      result
+    end
+  end
+  class ApprovedDelivery < Delivery
+    attr_accessor :invalid_approval
+    def system(*args)
+      raise 'Unexpected external command in test' unless args[0,3] == ['gh','release','download']
+      approval={manifestHash: invalid_approval ? 'wrong' : Digest::SHA256.hexdigest(JSON.pretty_generate(@manifest)+"\n"),
+        actor: @repo.split('/').first}
+      File.write(File.join(args[args.index('--dir')+1], 'approval.json'), JSON.generate(approval))
+      true
+    end
+  end
+  def delivery(client, train: 'alpha', surface: 'ios', klass: Delivery, scope: nil)
     notes='Frozen notes'
     manifest={'train'=>train,'source'=>'a'*40,'tag'=>'alpha-build-1','surfaces'=>{surface=>{'version'=>'3.2.0','build'=>'1000.0.1','notes'=>notes,'notesHash'=>Digest::SHA256.hexdigest(notes),'storeNotes'=>notes,'storeNotesHash'=>Digest::SHA256.hexdigest(notes)}}}
-    Delivery.new(client:client,manifest:manifest,surface:surface)
+    manifest['publicationScope']=scope unless scope.nil?
+    klass.new(client:client,manifest:manifest,surface:surface)
+  end
+  def test_ios_only_candidate_submits_ios_through_existing_approval_and_review_gates
+    client=StableClient.new
+    delivery(client,train:'stable',klass:ApprovedDelivery,scope:'ios-only').submit
+    submission=client.calls.find { |call| call[:method] == :patch && call[:path] == '/v1/reviewSubmissions/existing-review' }
+    refute_nil submission
+    assert_equal({submitted:true},submission[:body][:data][:attributes])
+    assert_equal 'WAITING_FOR_REVIEW',client.reviews.first['attributes']['state']
+  end
+  def test_ios_only_candidate_rejects_mac_surface_before_apple_access
+    client=FakeClient.new
+    error=assert_raises(RuntimeError) { delivery(client,train:'stable',surface:'mac-store',scope:'ios-only') }
+    assert_match 'outside the approved publication scope',error.message
+    assert_empty client.calls
+  end
+  def test_scope_cannot_be_unknown_or_applied_to_alpha
+    client=FakeClient.new
+    assert_raises(RuntimeError) { delivery(client,train:'stable',scope:'invalid') }
+    assert_raises(RuntimeError) { delivery(client,scope:'ios-only') }
+    assert_empty client.calls
+  end
+  def test_stable_resubmission_reuses_rejected_item_and_observes_resolution_before_submit
+    client=StableClient.new
+    delivery(client,train:'stable',klass:ApprovedDelivery).submit
+    assert_empty client.posts
+    writes=client.calls.select { |call| call[:method] == :patch }
+    resolution=writes.find { |call| call[:path] == '/v1/reviewSubmissionItems/rejected-item' }
+    assert_equal({resolved:true},resolution[:body][:data][:attributes])
+    resolution_read=client.calls.index { |call| call[:method] == :get && call[:path] == resolution[:path] }
+    submission=client.calls.index { |call| call[:method] == :patch && call[:path] == '/v1/reviewSubmissions/existing-review' }
+    assert_operator resolution_read,:<,submission
+  end
+  def test_stable_resubmission_does_not_submit_when_resolution_is_not_observed
+    client=StableClient.new;client.observe_resolution=false
+    error=assert_raises(RuntimeError) { delivery(client,train:'stable',klass:ApprovedDelivery).submit }
+    assert_match 'not ready for review',error.message
+    refute client.calls.any? { |call| call[:method] == :patch && call[:path].start_with?('/v1/reviewSubmissions/') }
+  end
+  def test_stable_resubmission_preserves_other_items
+    client=StableClient.new
+    client.items.first['relationships']['appStoreVersion']['data']['id']='another-version'
+    error=assert_raises(RuntimeError) { delivery(client,train:'stable',klass:ApprovedDelivery).submit }
+    assert_match 'another submission item',error.message
+    assert_empty client.posts
+    refute client.calls.any? { |call| call[:method] == :patch && call[:path].start_with?('/v1/reviewSubmission') }
+  end
+  def test_stable_resubmission_refuses_ambiguous_active_reviews
+    client=StableClient.new
+    client.reviews << {'id'=>'another-review','attributes'=>{'platform'=>'IOS','state'=>'READY_FOR_REVIEW'}}
+    error=assert_raises(RuntimeError) { delivery(client,train:'stable',klass:ApprovedDelivery).submit }
+    assert_match 'Multiple active review submissions',error.message
+    assert_empty client.posts
+  end
+  def test_stable_resubmission_requires_exact_owner_approval
+    client=StableClient.new
+    d=delivery(client,train:'stable',klass:ApprovedDelivery);d.invalid_approval=true
+    assert_raises(RuntimeError) { d.submit }
+    refute client.calls.any? { |call| %i[patch post].include?(call[:method]) }
+  end
+  def test_stable_resubmission_does_not_add_items_to_an_unresolved_review
+    client=StableClient.new;client.items=[]
+    error=assert_raises(RuntimeError) { delivery(client,train:'stable',klass:ApprovedDelivery).submit }
+    assert_match 'no matching item',error.message
+    assert_empty client.posts
+  end
+  def test_stable_resubmission_can_resume_after_item_resolution
+    client=StableClient.new;client.items.first['attributes']['state']='READY_FOR_REVIEW'
+    delivery(client,train:'stable',klass:ApprovedDelivery).submit
+    assert_empty client.posts
+    refute client.calls.any? { |call| call[:method] == :patch && call[:path].start_with?('/v1/reviewSubmissionItems/') }
+  end
+  def test_stable_first_submission_still_creates_a_new_review
+    client=StableClient.new;client.reviews=[];client.items=[]
+    delivery(client,train:'stable',klass:ApprovedDelivery).submit
+    assert_equal ['/v1/reviewSubmissions','/v1/reviewSubmissionItems'],client.posts
   end
   def test_beta_description_is_created_once_and_existing_copy_is_preserved
     client=FakeClient.new; d=delivery(client)

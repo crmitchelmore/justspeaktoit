@@ -7,10 +7,22 @@ import SwiftUI
 struct PostProcessingSettingsView: View {
     @ObservedObject var settings: AppSettings
 
+    private var modelOptions: [ModelCatalog.Option] {
+        var options = AppSettings.postProcessingModels
+        if !options.contains(where: { $0.id == settings.postProcessingModel }),
+           let retained = CleanupModelSelection.retainedOption(settings.postProcessingModel) {
+            options.append(retained)
+        }
+        return options
+    }
+
     var body: some View {
         Form {
+            Section("Model discovery") {
+                CleanupModelDiscoveryView(selection: $settings.postProcessingModel)
+            }
             Section("Model") {
-                ForEach(Array(AppSettings.postProcessingModels.enumerated()), id: \.offset) { _, model in
+                ForEach(Array(modelOptions.enumerated()), id: \.offset) { _, model in
                     Button {
                         settings.postProcessingModel = model.id
                     } label: {

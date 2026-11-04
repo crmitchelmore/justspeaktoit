@@ -52,6 +52,7 @@ let appleCoreSources: [String] = [
     "CaptureSafetyClaim.swift",
     "CaptureSelfTest.swift",
     "CaptureWatchdogs.swift",
+    "CleanupModelDiscoveryView.swift",
     "DeepgramBalanceClient.swift",
     "DeprecatedCompatibility.swift",
     "DeviceIdentityStore.swift",

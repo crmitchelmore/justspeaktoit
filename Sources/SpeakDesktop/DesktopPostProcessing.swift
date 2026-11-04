@@ -113,7 +113,7 @@ public enum DesktopPostProcessing { // swiftlint:disable:this type_body_length
         }
     }
 
-    public static var remoteModels: [ModelCatalog.Option] { ModelCatalog.cloudPostProcessing }
+    public static var remoteModels: [ModelCatalog.Option] { CleanupModelDiscoveryStore.shared.options() }
 
     public static var localModels: [ModelCatalog.Option] {
         ModelCatalog.postProcessing.filter { $0.id == LocalPostProcessingModel.builtInRulesModelID }
@@ -123,7 +123,8 @@ public enum DesktopPostProcessing { // swiftlint:disable:this type_body_length
     public static var models: [ModelCatalog.Option] { remoteModels + localModels }
 
     public static func nativeModels(selected: String? = nil) -> [ModelCatalog.Option] {
-        models + DesktopLocalLLMModels.choices(selected: selected).filter {
+        CleanupModelDiscoveryStore.shared.options(selected: selected) + localModels
+            + DesktopLocalLLMModels.choices(selected: selected).filter {
             LocalPostProcessingModel.isDownloadedModelID($0.id)
         }
     }
@@ -148,7 +149,8 @@ public enum DesktopPostProcessing { // swiftlint:disable:this type_body_length
     public static func mode(for modelIdentifier: String) -> Mode? {
         if localModels.contains(where: { $0.id == modelIdentifier }) { return .local }
         if LocalPostProcessingModel.isDownloadedModelID(modelIdentifier) { return .localLLM }
-        return remoteModels.contains(where: { $0.id == modelIdentifier }) ? .remote : nil
+        return CleanupModelSelection.modelID(from: modelIdentifier) != nil
+            || remoteModels.contains(where: { $0.id == modelIdentifier }) ? .remote : nil
     }
 
     public static func modelIdentifier(forSelection index: Int) -> String? {
@@ -164,7 +166,7 @@ public enum DesktopPostProcessing { // swiftlint:disable:this type_body_length
         let identifier = mode(for: options.modelIdentifier) == .remote
             ? options.modelIdentifier : options.lastRemoteModelIdentifier
         guard let identifier, mode(for: identifier) == .remote else { return nil }
-        return models.firstIndex { $0.id == identifier }
+        return nativeModels(selected: options.modelIdentifier).firstIndex { $0.id == identifier }
     }
 
     /// Applies the Apple settings' retired-model migration

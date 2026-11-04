@@ -26,6 +26,10 @@ Provider, region and service tier may change the actual price. Picker descriptio
 flag the base-rate limitation; the existing two-rate metadata is not a complete
 billing estimator. Reasoning usage can also affect the bill.
 
+The optional discovery layer added alongside this refresh is documented in
+[cleanup model discovery](cleanup-model-discovery.md). The evidence below describes
+the bundled entries; discovery preserves their metadata and defaults.
+
 ## Runtime compatibility
 
 Cleanup uses the existing OpenRouter `/api/v1/chat/completions` route and
@@ -57,13 +61,13 @@ metadata assertions in `ModelCatalogTests` remain intact. The exact cloud projec
 protect a single shared catalogue. No scheduler, release-notes generation model,
 transcription model or runtime audio-discovery catalogue is changed.
 
-## Local validation (4 November 2026)
+## Initial bundled-change validation (4 November 2026)
 
 - Strict repository lint (`make lint`): 0 violations across 2,641 Swift files.
 - `python3 scripts/verify-portable-core-boundary.py`: passed.
 - `git diff --check`: passed.
 - Compared all three new entries against the fetched API JSON: exact IDs, base
-  rates and context matched. Removing the single added catalogue block reproduces
+  rates and context matched. At the initial bundled-only commit, removing the single added catalogue block reproduced
   the original file byte-for-byte.
 - `xcrun swift test --filter ModelCatalogTests`: blocked before compilation by
   MacStorageGuard (internal free space below its 25 GiB minimum, exit 75). No

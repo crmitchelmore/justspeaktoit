@@ -306,6 +306,7 @@ extension SettingsView {
 
   private var remotePostProcessingSection: some View {
     VStack(alignment: .leading, spacing: 12) {
+      CleanupModelDiscoveryView(selection: settingsBinding(\AppSettings.postProcessingModel))
       ModelPicker(
         title: "Remote Post-processing Model",
         help: """

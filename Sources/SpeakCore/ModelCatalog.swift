@@ -839,7 +839,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// and custom local cleanup models installed by the user.
     public static func normalizedPostProcessingModel(_ identifier: String?) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if trimmed.hasPrefix("local/post-processing/") { return trimmed }
+        if trimmed.hasPrefix("local/post-processing/") || CleanupModelSelection.modelID(from: trimmed) != nil {
+            return trimmed
+        }
         if postProcessing.contains(where: { $0.id == trimmed }) { return trimmed }
         return defaultPostProcessingModel
     }
@@ -859,6 +861,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "—" }
 
+        if let discovered = CleanupModelSelection.modelID(from: trimmed) { return discovered }
         if let exact = optionsByID[trimmed.lowercased()] {
             return exact.displayName
         }

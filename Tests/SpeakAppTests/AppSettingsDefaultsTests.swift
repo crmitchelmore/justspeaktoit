@@ -26,6 +26,17 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testDiscoveredCleanupSelectionSurvivesRelaunchWithoutDiscoveryCache() {
+        let selection = "openrouter/cleanup/openai/future-model"
+        defaults.set(selection, forKey: "postProcessingModel")
+        defaults.set(false, forKey: CleanupModelSelection.preferenceKey)
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.postProcessingModel, selection)
+        settings.postProcessingModel = "openrouter/cleanup/openai/another-model"
+        XCTAssertEqual(AppSettings(defaults: defaults).postProcessingModel, settings.postProcessingModel)
+    }
+
+    @MainActor
     func testPortablePreferenceDefaultsMatchCanonicalMacSettings() throws {
         let settings = AppSettings(defaults: defaults)
         let portable = try DesktopConfiguration()

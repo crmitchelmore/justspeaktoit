@@ -35,7 +35,7 @@ extension WindowsNative {
             }
         }
         guard result == 0 else { throw WindowsNativeError(message: "Could not configure post-processing controls.") }
-        guard jsti_window_set_cleanup_sources(DesktopPostProcessing.remoteModels.count) == 0 else {
+        guard jsti_window_set_cleanup_sources(local) == 0 else {
             throw WindowsNativeError(message: "Could not configure local/remote cleanup sources.")
         }
         picker.publish(models)

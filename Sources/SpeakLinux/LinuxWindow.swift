@@ -202,7 +202,7 @@ enum LinuxWindow {
             )
             return
         }
-        if jsti_window_set_cleanup_sources(DesktopPostProcessing.remoteModels.count) != 0 {
+        if jsti_window_set_cleanup_sources(local) != 0 {
             LinuxHostPlatform.update("Could not configure local/remote cleanup sources.")
             return
         }

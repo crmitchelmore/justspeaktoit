@@ -656,7 +656,8 @@ public final class AppSettings: ObservableObject {
         let postEnabled = defaults.bool(forKey: DefaultsKey.postProcessingEnabled.storageKey)
         let storedPostModel = defaults.string(forKey: DefaultsKey.postProcessingModel.storageKey)
         let normalizedPostModel = ModelCatalog.normalizedPostProcessingModel(storedPostModel)
-        let postModel = Self.postProcessingModels.contains { $0.id == normalizedPostModel }
+        let postModel = (Self.postProcessingModels.contains { $0.id == normalizedPostModel }
+            || CleanupModelSelection.modelID(from: normalizedPostModel) != nil)
             ? normalizedPostModel
             : ModelCatalog.defaultPostProcessingModel
         let autoPost = defaults.bool(forKey: DefaultsKey.autoPostProcess.rawValue)

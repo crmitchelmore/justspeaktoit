@@ -32,10 +32,10 @@ class EncryptedSecretStoreTest {
 
     @Test
     fun testWriteRead_roundTripsWithoutStoringPlaintext() {
-        store.write("OPENAI_API_KEY", "sk-test-123")
-        assertEquals("sk-test-123", store.read("OPENAI_API_KEY"))
-        assertFalse(backing.map.getValue("OPENAI_API_KEY").contains("sk-test-123"))
-        assertTrue(backing.map.getValue("OPENAI_API_KEY").startsWith("v1:"))
+        store.write("openai.apiKey", "sk-test-123")
+        assertEquals("sk-test-123", store.read("openai.apiKey"))
+        assertFalse(backing.map.getValue("openai.apiKey").contains("sk-test-123"))
+        assertTrue(backing.map.getValue("openai.apiKey").startsWith("v1:"))
     }
 
     @Test
@@ -47,40 +47,40 @@ class EncryptedSecretStoreTest {
 
     @Test
     fun testCiphertextMovedToAnotherName_isRejectedAndRemoved() {
-        store.write("DEEPGRAM_API_KEY", "dg-secret")
-        backing.map["GROQ_API_KEY"] = backing.map.getValue("DEEPGRAM_API_KEY")
-        assertNull(store.read("GROQ_API_KEY"))
-        assertFalse(backing.map.containsKey("GROQ_API_KEY"))
-        assertEquals("dg-secret", store.read("DEEPGRAM_API_KEY"))
+        store.write("deepgram.apiKey", "dg-secret")
+        backing.map["groq.apiKey"] = backing.map.getValue("deepgram.apiKey")
+        assertNull(store.read("groq.apiKey"))
+        assertFalse(backing.map.containsKey("groq.apiKey"))
+        assertEquals("dg-secret", store.read("deepgram.apiKey"))
     }
 
     @Test
     fun testLostKey_reportsAbsentAndClearsUndecryptableValue() {
-        store.write("OPENAI_API_KEY", "sk-old")
+        store.write("openai.apiKey", "sk-old")
         val restored = EncryptedSecretStore(backing) { newKey() }
-        assertNull(restored.read("OPENAI_API_KEY"))
+        assertNull(restored.read("openai.apiKey"))
         assertTrue(backing.map.isEmpty())
     }
 
     @Test
     fun testKeyProviderFailure_doesNotDeleteStoredValue() {
-        store.write("OPENAI_API_KEY", "sk-keep")
+        store.write("openai.apiKey", "sk-keep")
         val unavailable = EncryptedSecretStore(backing) { throw GeneralSecurityException("keystore locked") }
         try {
-            unavailable.read("OPENAI_API_KEY")
+            unavailable.read("openai.apiKey")
         } catch (expected: GeneralSecurityException) {
             // The failure must surface rather than look like a missing key.
         }
-        assertEquals("sk-keep", store.read("OPENAI_API_KEY"))
+        assertEquals("sk-keep", store.read("openai.apiKey"))
     }
 
     @Test
     fun testTamperedValue_isRejected() {
-        store.write("OPENAI_API_KEY", "sk-test")
-        val bytes = Base64.getDecoder().decode(backing.map.getValue("OPENAI_API_KEY").removePrefix("v1:"))
+        store.write("openai.apiKey", "sk-test")
+        val bytes = Base64.getDecoder().decode(backing.map.getValue("openai.apiKey").removePrefix("v1:"))
         bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 1).toByte()
-        backing.map["OPENAI_API_KEY"] = "v1:" + Base64.getEncoder().encodeToString(bytes)
-        assertNull(store.read("OPENAI_API_KEY"))
+        backing.map["openai.apiKey"] = "v1:" + Base64.getEncoder().encodeToString(bytes)
+        assertNull(store.read("openai.apiKey"))
     }
 
     @Test
@@ -109,7 +109,7 @@ class EncryptedSecretStoreTest {
     fun testNames_listsOnlyValidSecretNames() {
         store.write("B_KEY", "1")
         store.write("A_KEY", "2")
-        backing.map["unrelated.pref"] = "x"
+        backing.map["not a secret name"] = "x"
         assertEquals(listOf("A_KEY", "B_KEY"), store.names().toList())
     }
 

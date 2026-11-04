@@ -44,7 +44,7 @@ Status key:
 | Background recording | **Launch, done (honest stop)** | Leaving the app cancels the session and reports "Dictation stopped because the app left the screen". A foreground service for longer sessions is assessed with the IME/tile milestone. |
 | Interruptions and audio focus | **Launch, partial** | The platform recogniser owns capture and audio focus; its audio/busy/client errors are surfaced as failures. Calls and route changes need physical-device evidence. |
 | Process death | **Launch, honest loss** | An in-flight session is discarded, never restored as complete. Durable recovery arrives with history (milestone 3). |
-| BYOK secure storage | **Launch, done (storage)** | AES-256-GCM with a non-exportable Android Keystore key; ciphertext bound to the secret name, excluded from backup and device transfer. Key entry UI arrives with the first cloud provider. |
+| BYOK secure storage | **Launch, done (storage)** | AES-256-GCM with a non-exportable Android Keystore key; ciphertext bound to the secret name (Mac identifiers such as `openai.apiKey`), excluded from backup and device transfer. Key entry UI arrives with the first cloud provider. |
 | Cloud transcription providers | **Planned (milestone 2)** | Batch upload first (OpenAI, Deepgram, Groq, ElevenLabs, AssemblyAI); streaming providers follow. Model IDs mirror `Sources/SpeakCore/ModelCatalog.swift`. No paid calls in CI. |
 | Post-processing / cleanup | **Planned (milestone 2)** | OpenRouter cleanup with the same prompt semantics as the Mac `PostProcessingManager`; empty transcripts stay empty. |
 | History and recovery | **Planned (milestone 3)** | App-private storage with retention controls; failed sessions recorded as failed. |

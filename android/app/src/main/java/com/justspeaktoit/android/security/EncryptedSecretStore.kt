@@ -103,13 +103,13 @@ class EncryptedSecretStore(
     override fun names(): Set<String> = backing.keys().filterTo(sortedSetOf()) { NAME.matches(it) }
 
     companion object {
-        /** Matches the Mac app's secret names, for example `OPENAI_API_KEY`. */
-        private val NAME = Regex("[A-Z][A-Z0-9_]{0,63}")
+        /** Matches the Mac app's credential identifiers, for example `openai.apiKey`. */
+        private val NAME = Regex("[A-Za-z][A-Za-z0-9_.-]{0,63}")
 
         fun isValidName(name: String): Boolean = NAME.matches(name)
 
         private fun requireValidName(name: String) {
-            require(isValidName(name)) { "Secret names use upper-case letters, digits and underscores" }
+            require(isValidName(name)) { "Secret names use letters, digits, dots, dashes and underscores" }
         }
     }
 }

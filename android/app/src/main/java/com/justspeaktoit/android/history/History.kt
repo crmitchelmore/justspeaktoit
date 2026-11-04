@@ -107,11 +107,13 @@ interface HistoryFile {
  * Keeps history in memory and writes it through on every change. Callers serialise access (the
  * ViewModel runs these on a single-threaded dispatcher), so no locking is needed here.
  *
- * The cache is updated before each write, so if a write fails the change stays visible and is
- * persisted by the next successful write instead of being lost.
+ * The cache is updated before each write. If a write fails the cache stays authoritative (it is
+ * "dirty"): additions, replacements and deletions remain as made, and every later change or
+ * refresh retries the write instead of re-reading the stale file.
  */
 class HistoryStore(private val file: HistoryFile, private val now: () -> Long = System::currentTimeMillis) {
     private var entries: List<HistoryEntry>? = null
+    private var dirty = false
 
     /** The entries as last changed, including any not yet persisted. */
     val cached: List<HistoryEntry> get() = entries.orEmpty()
@@ -121,10 +123,10 @@ class HistoryStore(private val file: HistoryFile, private val now: () -> Long = 
      * always deletes the file when retention is Off or nothing in it could be read.
      */
     fun load(retention: Retention): List<HistoryEntry> {
+        if (dirty) return save(HistoryPolicy.prune(cached, now(), retention))
         val stored = file.read()
         val loaded = stored?.let(HistoryCodec::decode).orEmpty()
-        val unsaved = entries.orEmpty().filter { e -> loaded.none { it.id == e.id } }
-        val pruned = HistoryPolicy.prune(loaded + unsaved, now(), retention)
+        val pruned = HistoryPolicy.prune(loaded, now(), retention)
         val mustRewrite = pruned != loaded || (stored != null && loaded.isEmpty())
         return if (mustRewrite) save(pruned) else pruned.also { entries = it }
     }
@@ -148,7 +150,9 @@ class HistoryStore(private val file: HistoryFile, private val now: () -> Long = 
 
     private fun save(next: List<HistoryEntry>): List<HistoryEntry> {
         entries = next
+        dirty = true
         if (next.isEmpty()) file.delete() else file.write(HistoryCodec.encode(next))
+        dirty = false
         return next
     }
 }

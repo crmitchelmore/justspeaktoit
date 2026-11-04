@@ -113,6 +113,26 @@ class HistoryTest {
     }
 
     @Test
+    fun testStore_failedDeleteAndReplaceSurviveRefreshUntilWritten() {
+        val file = MemoryFile()
+        val store = HistoryStore(file) { now }
+        store.add(entry("a", 0), Retention.Month)
+        store.add(entry("b", 0).copy(createdAtMs = now + 1), Retention.Month)
+        file.failWrites = true
+        assertThrows(java.io.IOException::class.java) { store.remove("a", Retention.Month) }
+        assertThrows(java.io.IOException::class.java) {
+            store.replace(entry("b", 0).copy(createdAtMs = now + 1, text = "Clean."), Retention.Month)
+        }
+        // A refresh while the disk still fails keeps the pending changes rather than the stale file.
+        assertThrows(java.io.IOException::class.java) { store.load(Retention.Month) }
+        assertEquals(listOf("b"), store.cached.map { it.id })
+        assertEquals("Clean.", store.cached.single().text)
+        file.failWrites = false
+        assertEquals(listOf("b"), store.load(Retention.Month).map { it.id })
+        assertEquals(listOf("Clean."), HistoryCodec.decode(file.text!!).map { it.text })
+    }
+
+    @Test
     fun testStore_removeAndReplaceApplyRetention() {
         var clock = now
         val file = MemoryFile()

@@ -106,6 +106,9 @@ and embedded CLI sizes in the `release-mac.yml` job summary. The Flatpak
 installed check (`scripts/linux-flatpak-checks.sh`) now logs the bundle size
 and the installed app deployment size, excluding the shared GNOME runtime, in
 `flatpak-installed-checks.log` in the `justspeaktoit-flatpak-x86_64` artifact.
+The first CI measurement (PR #1339, Linux Flatpak run 41813047402, from Alpha 45
+source plus this change) was a 46,465,824-byte bundle and a 223,107,509-byte
+installed app deployment.
 
 ### Mac CLI symbols
 
@@ -139,8 +142,8 @@ Thinning: All compatible device variants**. Xcode then writes an
 
 - iOS: App Store Connect thinned download and install sizes for a pre and post
   build, using the steps above.
-- Flatpak: the installed size of an earlier bundle as a baseline. CI records
-  the size of each new bundle from now on.
+- Flatpak: no earlier installed-size baseline exists. CI records each new
+  bundle's sizes from now on, starting with the figures above.
 - Mac universal: an owner decision on whether the legacy download should keep
   embedding the CLI. This is the single largest optional component.
 - Startup: end-to-end launch (process start to first usable window and menu

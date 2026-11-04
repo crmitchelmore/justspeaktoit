@@ -25,6 +25,10 @@ cd android
 CI runs the same tasks in [`.github/workflows/android.yml`](../.github/workflows/android.yml)
 and uploads the debug APK as the `justspeaktoit-android-debug` artefact.
 
+Pull requests that change only `android/**`, `.github/workflows/android.yml` or
+`Docs/android-*.md` skip the macOS and iOS jobs in `ci.yml`. The required checks still
+report, and any other changed file, or a push to `main`, runs every Apple gate.
+
 ### Package feeds
 
 By default Gradle resolves from Google Maven, Maven Central and the Gradle Plugin Portal.

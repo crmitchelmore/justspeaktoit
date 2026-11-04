@@ -196,6 +196,9 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// recording can be discarded *after* its transcript has landed, never at
     /// the moment the provider replied.
     private var deliveringSession: (any IOSRecordingSession)?
+    /// The cloud model this run would have used had the network been up,
+    /// when offline routing substituted on-device recognition (issue #999).
+    private var offlineIntendedModel: String?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
@@ -403,6 +406,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         captureStopNotice = nil
         recordingWarning = nil
         providerFallbackNotice = nil
+        offlineIntendedModel = nil
         currentTrigger = keyboardProfile == nil ? trigger : .keyboard
         // A model the catalogue only lists for batch transcription cannot run in
         // streaming mode, so an explicit `model=` (from a capture link or a
@@ -834,6 +838,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
         switch decision {
         case .use(let route):
+            if route.notice != nil { self.offlineIntendedModel = self.currentModel }
             self.currentModel = route.modelID
             if let notice = route.notice { self.providerFallbackNotice = notice }
             return route.requiresStrictOnDeviceRecognition
@@ -1191,6 +1196,10 @@ public final class TranscriptionRecordingService: ObservableObject {
                 }
             )
             : nil
+        if let historyItem, let intended = offlineIntendedModel,
+           let recording = deliveringSession?.safetyRecordingID {
+            dependencies.tagOfflineCapture(historyItem, recording, intended)
+        }
         // Cancellation can retire this completion while its admitted History write
         // finishes. Keep that durable receipt, but never deliver a retired run or
         // clear a replacement run's state. cancelRecording already owns teardown.

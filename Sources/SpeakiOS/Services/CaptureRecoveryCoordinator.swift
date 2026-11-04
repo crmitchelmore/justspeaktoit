@@ -188,9 +188,14 @@ public final class CaptureRecoveryCoordinator: ObservableObject {
     /// with the saved-recording library's re-transcribe action, so both routes
     /// resolve the model, key and language the same way.
     public static func transcribe(url: URL) async throws -> String {
+        try await Self.transcribe(url: url, model: Self.recoveryModel())
+    }
+
+    /// Re-transcribes a saved file with a named batch model. Offline upgrades
+    /// (issue #999) use the model the capture was meant to run with.
+    static func transcribe(url: URL, model: String) async throws -> String {
         let settings = AppSettings.shared
         await settings.ensureKeysLoaded()
-        let model = Self.recoveryModel()
         // A failed Keychain load is not a missing key (issue #930): refuse
         // rather than submit the placeholder empty credential.
         try settings.requireAvailableCredentials(for: model, purpose: .batchTranscription)

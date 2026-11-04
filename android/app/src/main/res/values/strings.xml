@@ -106,4 +106,13 @@
     <string name="shared_audio_title">Transcribe shared audio?</string>
     <string name="shared_audio_body">The audio will be uploaded to %1$s and transcribed by %2$s using your API key.</string>
     <string name="action_transcribe">Transcribe</string>
+    <string name="keyboard_name">Just Speak to It dictation</string>
+    <string name="keyboard_ready">Tap the microphone to dictate</string>
+    <string name="keyboard_listening">Listening (%1$s)</string>
+    <string name="keyboard_password_field">Dictation is off in password fields.</string>
+    <string name="keyboard_needs_permission">Tap the microphone to open Just Speak to It and allow microphone access.</string>
+    <string name="keyboard_unavailable">No on-device or speech-service recognition is available. Open Just Speak to It for details.</string>
+    <string name="keyboard_switch">Switch</string>
+    <string name="keyboard_delete">Delete</string>
+    <string name="keyboard_enter">Enter</string>
 </resources>

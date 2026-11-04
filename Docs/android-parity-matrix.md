@@ -37,7 +37,7 @@ Status key:
 | No silent cloud fallback | **Launch, done** | A running session keeps its mode and privacy label even if availability changes. An explicit choice is kept for the app's lifetime (persisted in milestone 2); without one, the app picks on-device, then the speech service, and labels which. An unusable choice disables Start with the reason. |
 | Copy | **Launch, done** | Clipboard; Android 13+ shows the system confirmation. |
 | Share | **Launch, done** | Standard share sheet (`ACTION_SEND`). |
-| Auto-paste / insert at cursor | **Android equivalent, planned** | Android does not allow unrestricted cross-app insertion. The equivalent is an input method (IME) that commits text into the focused field (next milestone). Accessibility-service insertion is rejected: Play policy and privacy cost are too high. See [entry and output surfaces](android-input-surfaces.md). |
+| Auto-paste / insert at cursor | **Android equivalent, done** | The dictation keyboard (IME) commits final transcripts into the focused field, with partials shown as composing text. It is disabled in password fields and uses no cloud. Accessibility-service insertion is rejected because Play policy and the privacy cost are too high. See [entry and output surfaces](android-input-surfaces.md). |
 | Global hotkey | **Android equivalent, done** | A Quick Settings tile and a launcher shortcut open the app and start dictation through a non-exported entry. Background hotkeys are not possible on Android. |
 | Menu bar / HUD | **Android equivalent, planned** | Foreground-service notification with Stop while a session runs, if longer sessions are added; otherwise the in-app screen. |
 | Microphone permission onboarding | **Launch, done** | Runtime request on first use, rationale after a denial, and a Settings link after a permanent denial. |
@@ -55,7 +55,7 @@ Status key:
 | Usage insights | **Planned (later)** | Local-only statistics derived from history. |
 | Voice output (TTS) | **Planned (later)** | Android `TextToSpeech` first, cloud voices later. |
 | Downloaded local models (Parakeet, WhisperKit, etc.) | **Planned (assess)** | Assess ML Kit GenAI speech recognition and on-device Whisper runtimes against size and battery; the platform recogniser covers launch. |
-| Keyboard extension (iOS) | **Android equivalent, planned** | IME, next milestone. |
+| Keyboard extension (iOS) | **Android equivalent, done** | Dictation keyboard (IME). |
 | Share extension | **Android equivalent, done (audio)** | Share target for audio. Text in is not needed, as cleanup runs on dictated text. |
 | Widgets / Live Activity | **Deferred** | The Quick Settings tile and shortcut cover quick start; a home-screen widget only if it adds value. |
 | Watch app | **Not applicable (for now)** | Wear OS is out of scope for the first release. |
@@ -79,4 +79,5 @@ Unit tests and CI cannot prove these; they gate closing the epic:
 7. Battery and latency notes for a five-minute dictation series.
 8. Cloud mode with a real OpenAI and Groq key, an invalid key ("rejected the API key"), and cleanup with an OpenRouter key; owner-only, as these calls are paid.
 9. Quick Settings tile and shortcut on a locked and an unlocked device; sharing a WhatsApp voice note (OGG/Opus) and an M4A recording.
+10. Dictation keyboard in a messaging app, a browser field and a password field (disabled), including switching keyboards mid-dictation and denying the microphone permission.
 

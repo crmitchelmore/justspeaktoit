@@ -17,6 +17,8 @@ const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+)
 const nativeEligibleJobs = [
   'build-macos', 'release-validation', 'api-compatibility', 'lint', 'core-journey-e2e',
 ];
+const armFallbackJobs = new Set(['lint', 'release-validation']);
+const hostedFallback = (id) => (armFallbackJobs.has(id) ? 'macos-latest' : 'macos-26-intel');
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
@@ -149,13 +151,17 @@ test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
   assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
   // Intel appears only as the hosted fallback of the native-eligible jobs.
   assert.doesNotMatch(workflow, /runs-on: macos-26-intel/);
-  for (const id of nativeEligibleJobs) assert.match(jobBodies[id], /\|\| '\["macos-26-intel"\]'\) \}\}/, id);
+  // Lint and Release stay on hosted ARM: on Intel they exceeded their job budgets.
+  for (const id of nativeEligibleJobs) {
+    const hosted = hostedFallback(id);
+    assert.ok(jobBodies[id].includes(`|| '["${hosted}"]') }}`), id);
+  }
 });
 
 test('native pool still requires the exact reviewed source and trusted event', () => {
   for (const id of nativeEligibleJobs) {
     // Restore-only gates must share build-macos's hosted architecture to hit its cache.
-    const fallback = ['macos-26-intel'];
+    const fallback = [hostedFallback(id)];
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
       ['jsti-macos-build', 'macOS']);
     assert.deepEqual(route(id, routingContext(), {

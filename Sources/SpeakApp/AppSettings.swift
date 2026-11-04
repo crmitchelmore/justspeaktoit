@@ -1029,6 +1029,13 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     /// Serialises login-item changes so the most recent request is applied last.
     private static let loginItemQueue = DispatchQueue(label: "com.justspeaktoit.login-item", qos: .utility)
 
+    /// Waits for queued login-item changes, so quitting cannot abandon the latest toggle.
+    static func drainLoginItemChanges() async {
+      await withCheckedContinuation { continuation in
+        loginItemQueue.async { continuation.resume() }
+      }
+    }
+
     static let live = SystemDependencies(
       fileManager: .default,
       setActivationPolicy: { NSApplication.shared.setActivationPolicy($0) },

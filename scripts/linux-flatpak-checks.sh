@@ -48,9 +48,16 @@ flatpak install --user -y --noninteractive --reinstall --bundle "$bundle"
 
 # Size baseline (#1295): the bundle file, then the installed app deployment
 # without the shared runtime, which the user may already have.
+# Assignments, not echo arguments, so a failed measurement stops the checks.
+bundle_bytes=$(stat -c %s "$bundle")
+installed_location=$(flatpak info --user --show-location "$app")
+installed_bytes=$(du -sb "$installed_location" | cut -f1)
+for value in "$bundle_bytes" "$installed_bytes"; do
+  [[ "$value" =~ ^[0-9]+$ ]] || { echo "Invalid package size measurement: '$value'" >&2; exit 1; }
+done
 echo '== package size (bytes)'
-echo "bundle $(stat -c %s "$bundle")"
-echo "installed-app $(du -sb "$(flatpak info --user --show-location "$app")" | cut -f1)"
+echo "bundle $bundle_bytes"
+echo "installed-app $installed_bytes"
 
 echo '== Flatpak Spawn portal (required by the sandboxed PNG loader)'
 timeout 60 flatpak run --command=flatpak-spawn "$app" --sandbox --watch-bus /usr/bin/true

@@ -143,8 +143,9 @@ Thinning: All compatible device variants**. Xcode then writes an
   the size of each new bundle from now on.
 - Mac universal: an owner decision on whether the legacy download should keep
   embedding the CLI. This is the single largest optional component.
-- Startup: end-to-end launch and first-recording latency on real Windows,
-  Linux and iOS devices. The deferred model discovery and History changes
+- Startup: end-to-end launch (process start to first usable window and menu
+  bar item) and first-recording latency on the Mac, and on real Windows, Linux
+  and iOS devices. On the Mac, only `WireUp.bootstrap` has been measured. The deferred model discovery and History changes
   have unit-level coverage only.
 
 ## Responsiveness

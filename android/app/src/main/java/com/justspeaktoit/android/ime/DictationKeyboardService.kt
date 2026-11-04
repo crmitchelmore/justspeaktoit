@@ -7,7 +7,6 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService
-import android.os.Build
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
@@ -171,9 +170,11 @@ class DictationKeyboardService : InputMethodService() {
             is DictationState.Listening -> ic?.setComposingText(s.partial, 1)
             is DictationState.Finishing -> ic?.setComposingText(s.partial, 1)
             is DictationState.Done -> {
-                // Remove the provisional text first, so the spacing check sees the real preceding character.
-                ic?.setComposingText("", 1)
-                ic?.commitText(KeyboardPolicy.textToCommit(s.transcript, ic.getTextBeforeCursor(1, 0)), 1)
+                if (ic != null) {
+                    // Remove the provisional text first, so the spacing check sees the real preceding character.
+                    ic.setComposingText("", 1)
+                    ic.commitText(KeyboardPolicy.textToCommit(s.transcript, ic.getTextBeforeCursor(1, 0)), 1)
+                }
                 state = DictationState.Idle
             }
             is DictationState.Failed -> ic?.setComposingText("", 1)
@@ -208,7 +209,7 @@ class DictationKeyboardService : InputMethodService() {
 
     private fun switchKeyboard() {
         if (state.isActive) cancelSession()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && switchToNextInputMethod(false)) return
+        if (switchToNextInputMethod(false)) return
         getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showInputMethodPicker()
     }
 

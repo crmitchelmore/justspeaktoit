@@ -23,7 +23,9 @@ class CloudParityTest {
 
     @Test
     fun testTranscriptionModels_existInMacCatalogue() {
-        val catalog = RepoSources.speakCore("ModelCatalog.swift")
+        // Some catalogue IDs are named constants declared in OpenAITranscriptionModels.swift.
+        val catalog = RepoSources.speakCore("ModelCatalog.swift") +
+            RepoSources.speakCore("OpenAITranscriptionModels.swift")
         CloudCatalog.transcriptionModels.forEach { model ->
             assertTrue("${model.catalogId} missing from ModelCatalog", catalog.contains("\"${model.catalogId}\""))
             assertTrue("${model.catalogId} name drifted", catalog.contains("\"${model.displayName}\""))

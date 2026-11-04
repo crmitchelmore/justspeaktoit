@@ -50,7 +50,7 @@ class HistoryActions(
 )
 
 @Composable
-fun HistoryScreen(entries: List<HistoryEntry>, retention: Retention, actions: HistoryActions) {
+fun HistoryScreen(entries: List<HistoryEntry>, retention: Retention, saveFailed: Boolean, actions: HistoryActions) {
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     Scaffold { padding ->
         LazyColumn(
@@ -83,6 +83,11 @@ fun HistoryScreen(entries: List<HistoryEntry>, retention: Retention, actions: Hi
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (saveFailed) {
+                item {
+                    Text(stringResource(R.string.history_save_failed), color = MaterialTheme.colorScheme.error)
+                }
             }
             if (entries.isEmpty()) {
                 item {

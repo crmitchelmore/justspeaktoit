@@ -106,32 +106,49 @@ interface HistoryFile {
 /**
  * Keeps history in memory and writes it through on every change. Callers serialise access (the
  * ViewModel runs these on a single-threaded dispatcher), so no locking is needed here.
+ *
+ * The cache is updated before each write, so if a write fails the change stays visible and is
+ * persisted by the next successful write instead of being lost.
  */
 class HistoryStore(private val file: HistoryFile, private val now: () -> Long = System::currentTimeMillis) {
     private var entries: List<HistoryEntry>? = null
 
-    /** Reads the file and applies [retention], rewriting it only when something was pruned. */
+    /** The entries as last changed, including any not yet persisted. */
+    val cached: List<HistoryEntry> get() = entries.orEmpty()
+
+    /**
+     * Reads the file and applies [retention]. It rewrites only when something was pruned, but
+     * always deletes the file when retention is Off or nothing in it could be read.
+     */
     fun load(retention: Retention): List<HistoryEntry> {
-        val loaded = file.read()?.let(HistoryCodec::decode).orEmpty()
-        val pruned = HistoryPolicy.prune(loaded, now(), retention)
-        if (pruned != loaded) save(pruned)
-        entries = pruned
-        return pruned
+        val stored = file.read()
+        val loaded = stored?.let(HistoryCodec::decode).orEmpty()
+        val unsaved = entries.orEmpty().filter { e -> loaded.none { it.id == e.id } }
+        val pruned = HistoryPolicy.prune(loaded + unsaved, now(), retention)
+        val mustRewrite = pruned != loaded || (stored != null && loaded.isEmpty())
+        return if (mustRewrite) save(pruned) else pruned.also { entries = it }
     }
 
     fun add(entry: HistoryEntry, retention: Retention): List<HistoryEntry> =
         save(HistoryPolicy.prune(listOf(entry) + current(retention), now(), retention))
 
+    /** Replaces an existing entry (for example after cleanup); does nothing if it has gone. */
+    fun replace(entry: HistoryEntry, retention: Retention): List<HistoryEntry> {
+        val current = current(retention)
+        if (current.none { it.id == entry.id }) return current
+        return save(HistoryPolicy.prune(current.map { if (it.id == entry.id) entry else it }, now(), retention))
+    }
+
     fun remove(id: String, retention: Retention): List<HistoryEntry> =
-        save(current(retention).filterNot { it.id == id })
+        save(HistoryPolicy.prune(current(retention).filterNot { it.id == id }, now(), retention))
 
     fun clear(): List<HistoryEntry> = save(emptyList())
 
     private fun current(retention: Retention) = entries ?: load(retention)
 
     private fun save(next: List<HistoryEntry>): List<HistoryEntry> {
-        if (next.isEmpty()) file.delete() else file.write(HistoryCodec.encode(next))
         entries = next
+        if (next.isEmpty()) file.delete() else file.write(HistoryCodec.encode(next))
         return next
     }
 }

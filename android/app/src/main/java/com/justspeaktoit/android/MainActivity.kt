@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
                     Screen.History -> HistoryScreen(
                         entries = state.history,
                         retention = state.retention,
+                        saveFailed = state.historyError,
                         actions = HistoryActions(
                             onBack = { screen = Screen.Dictation },
                             onRetention = viewModel::setRetention,
@@ -102,6 +103,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         if (hasMic()) permission.value = MicPermission.Granted
         viewModel.refreshAvailability()
+        viewModel.refreshHistory()
     }
 
     override fun onStop() {

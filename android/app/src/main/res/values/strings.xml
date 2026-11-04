@@ -91,6 +91,7 @@
     <string name="retention_forever">Always</string>
     <string name="history_note">Stored only on this phone, never backed up. Failed dictations are kept with any unfinished words so you can recover them.</string>
     <string name="history_failed">Failed: %1$s</string>
+    <string name="history_save_failed">History could not be saved to storage. Recent changes are kept while the app is open and saved with the next change.</string>
     <string name="history_cleaned">Cleaned up</string>
     <string name="action_delete">Delete</string>
     <string name="action_clear_history">Clear history</string>

@@ -65,6 +65,8 @@ data class DictationUiState(
     /** Newest first. */
     val history: List<HistoryEntry> = emptyList(),
     val retention: Retention = Retention.Month,
+    /** The last history change could not be written; it is retried with the next change. */
+    val historyError: Boolean = false,
 ) {
     /** The mode a new session would use. */
     val activeMode: RecognitionMode?
@@ -210,6 +212,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         val mode = current.activeMode ?: return
         if (!current.canStart) return
         _state.update { it.copy(cleanup = CleanupStatus.None, originalTranscript = null) }
+        sessionModelId = if (mode == RecognitionMode.Cloud) current.cloudModel.catalogId else null
         dispatch(DictationEvent.Start(mode))
         when (mode) {
             RecognitionMode.Cloud -> startCloud()
@@ -231,12 +234,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         engine.cancel()
         work?.cancel()
         discardRecording()
-        val skippedCleanup = _state.value.cleanup == CleanupStatus.Running
         _state.update {
-            it.copy(cleanup = if (skippedCleanup) CleanupStatus.None else it.cleanup)
+            it.copy(cleanup = if (it.cleanup == CleanupStatus.Running) CleanupStatus.None else it.cleanup)
         }
-        // Skipping cleanup keeps the transcript, so it is recorded as it stands.
-        if (skippedCleanup) (_state.value.dictation as? DictationState.Done)?.let(::record)
         dispatch(DictationEvent.Cancelled)
     }
 
@@ -253,44 +253,59 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearHistory() = updateHistory { history.clear() }
 
+    /** Re-reads and prunes history so the retention cutoff holds while the app stays open. */
+    fun refreshHistory() {
+        val retention = _state.value.retention
+        updateHistory { history.load(retention) }
+    }
+
     private fun updateHistory(change: () -> List<HistoryEntry>) {
         viewModelScope.launch {
-            val entries = try {
-                withContext(historyDispatcher) { change() }
-            } catch (e: IOException) {
-                return@launch
+            val (entries, failed) = withContext(historyDispatcher) {
+                try {
+                    change() to false
+                } catch (e: IOException) {
+                    history.cached to true
+                }
             }
-            _state.update { it.copy(history = entries) }
+            _state.update { it.copy(history = entries, historyError = failed) }
         }
     }
 
+    /** The latest session's history entry, so a later cleanup updates it rather than adding another. */
+    private var lastEntry: HistoryEntry? = null
+
+    // The model is fixed when the session starts, so later Settings changes cannot relabel it.
+    private var sessionModelId: String? = null
+
     private fun record(state: DictationState) {
-        val ui = _state.value
         val entry = when (state) {
-            is DictationState.Done -> entry(state.mode, ui, HistoryStatus.Completed, state.transcript, null)
-            is DictationState.Failed -> entry(state.mode, ui, HistoryStatus.Failed, state.unfinishedText, state.failure)
+            is DictationState.Done -> entry(state.mode, HistoryStatus.Completed, state.transcript, null)
+            is DictationState.Failed -> entry(state.mode, HistoryStatus.Failed, state.unfinishedText, state.failure)
             else -> return
         }
-        val retention = ui.retention
+        lastEntry = entry
+        val retention = _state.value.retention
         updateHistory { history.add(entry, retention) }
     }
 
-    private fun entry(
-        mode: RecognitionMode,
-        ui: DictationUiState,
-        status: HistoryStatus,
-        text: String,
-        failure: DictationFailure?,
-    ) = HistoryEntry(
-        id = UUID.randomUUID().toString(),
-        createdAtMs = System.currentTimeMillis(),
-        mode = mode.name,
-        model = if (mode == RecognitionMode.Cloud) ui.cloudModel.catalogId else null,
-        status = status,
-        text = text,
-        failure = failure?.name,
-        cleanedUp = status == HistoryStatus.Completed && ui.cleanup == CleanupStatus.Applied,
-    )
+    private fun recordCleanup(cleaned: String) {
+        val entry = lastEntry?.copy(text = cleaned, cleanedUp = true) ?: return
+        lastEntry = entry
+        val retention = _state.value.retention
+        updateHistory { history.replace(entry, retention) }
+    }
+
+    private fun entry(mode: RecognitionMode, status: HistoryStatus, text: String, failure: DictationFailure?) =
+        HistoryEntry(
+            id = UUID.randomUUID().toString(),
+            createdAtMs = System.currentTimeMillis(),
+            mode = mode.name,
+            model = if (mode == RecognitionMode.Cloud) sessionModelId else null,
+            status = status,
+            text = text,
+            failure = failure?.name,
+        )
 
     /**
      * Android does not let a foreground-only app keep the microphone once it leaves the screen, so
@@ -470,7 +485,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
             }
-            record(_state.value.dictation)
+            if (!cleaned.isNullOrBlank()) recordCleanup(cleaned)
         }
     }
 
@@ -484,10 +499,8 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         val after = _state.value.dictation
         if (!after.isActive) _level.value = 0f
         if (!before.isActive || after.isActive) return
-        // A session just ended. Failures are recorded now; a transcript waits for cleanup if it will run.
-        if (after is DictationState.Failed || (after is DictationState.Done && !_state.value.cleanupReady)) {
-            record(after)
-        }
+        // A session just ended: record it now, so it survives even if optional cleanup never finishes.
+        record(after)
     }
 
     override fun onCleared() {

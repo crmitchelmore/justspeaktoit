@@ -154,7 +154,11 @@ class WavRecorder(
         RandomAccessFile(file, "rw").use { it.write(WavFormat.header(written)) }
     }
 
-    /** Stops capture and returns the number of audio bytes recorded, or -1 if capture failed. */
+    /**
+     * Stops capture and returns the number of audio bytes recorded, or -1 if capture failed.
+     * Idempotent and serialised, so overlapping disposals cannot release the recorder twice.
+     */
+    @Synchronized
     fun stop(): Long {
         running = false
         record?.let {

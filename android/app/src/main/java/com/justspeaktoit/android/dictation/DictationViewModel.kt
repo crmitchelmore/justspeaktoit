@@ -52,6 +52,8 @@ data class DictationUiState(
     val originalTranscript: String? = null,
     /** Set when a key could not be saved or removed securely. */
     val keyStoreError: Boolean = false,
+    /** True until a discarded recording has released the microphone. */
+    val releasingMicrophone: Boolean = false,
 ) {
     /** The mode a new session would use. */
     val activeMode: RecognitionMode?
@@ -71,8 +73,8 @@ data class DictationUiState(
 
     /** Starting waits for a coherent availability result for the current language. */
     val canStart: Boolean
-        get() = !dictation.isActive && !checkingAvailability && cleanup != CleanupStatus.Running &&
-            options.firstOrNull { it.mode == activeMode }?.usable == true
+        get() = !dictation.isActive && !checkingAvailability && !releasingMicrophone &&
+            cleanup != CleanupStatus.Running && options.firstOrNull { it.mode == activeMode }?.usable == true
 
     /** Cleanup runs only when switched on and an OpenRouter key exists. */
     val cleanupReady: Boolean
@@ -314,12 +316,14 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     private fun discardRecording() {
         val rec = recorder ?: return
         val file = recording
+        _state.update { it.copy(releasingMicrophone = true) }
         viewModelScope.launch {
             withContext(NonCancellable + Dispatchers.IO) {
                 rec.stop()
                 file?.delete()
             }
             releaseOwnership(rec)
+            _state.update { it.copy(releasingMicrophone = false) }
         }
     }
 
@@ -404,8 +408,13 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
 
     override fun onCleared() {
         engine.close()
-        recorder?.stop()
-        recording?.delete()
+        val rec = recorder ?: return
+        val file = recording
+        // Stop before delete, off the main thread: joining the capture thread here could cause an ANR.
+        Thread({
+            rec.stop()
+            file?.delete()
+        }, "jsti-recorder-teardown").start()
     }
 
     private companion object {

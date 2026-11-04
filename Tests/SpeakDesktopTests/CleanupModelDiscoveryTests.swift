@@ -95,6 +95,12 @@ final class CleanupModelDiscoveryTests: XCTestCase {
                        ModelCatalog.defaultPostProcessingModel)
         XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel("unknown/model"),
                        ModelCatalog.defaultPostProcessingModel)
+        var local = DesktopPostProcessing.Options(mode: .local,
+            modelIdentifier: LocalPostProcessingModel.builtInRulesModelID)
+        local.lastRemoteModelIdentifier = selection
+        let choices = DesktopPostProcessing.nativeModels(selected: local.modelIdentifier, rememberedRemote: selection)
+        XCTAssertEqual(DesktopPostProcessing.remoteSelection(for: local), choices.firstIndex { $0.id == selection })
+        XCTAssertNotNil(DesktopPostProcessing.remoteSelection(for: local))
     }
 
     func testRequestEncoderUnwrapsOnlyValidatedExplicitDiscoveryForBothModes() throws {

@@ -123,8 +123,14 @@ public enum DesktopPostProcessing { // swiftlint:disable:this type_body_length
     public static var models: [ModelCatalog.Option] { remoteModels + localModels }
 
     public static func nativeModels(selected: String? = nil) -> [ModelCatalog.Option] {
-        CleanupModelDiscoveryStore.shared.options(selected: selected) + localModels
-            + DesktopLocalLLMModels.choices(selected: selected).filter {
+        nativeModels(selected: selected, rememberedRemote: nil)
+    }
+
+    public static func nativeModels(selected: String?, rememberedRemote: String?) -> [ModelCatalog.Option] {
+        var remote = CleanupModelDiscoveryStore.shared.options(selected: selected)
+        if let rememberedRemote, !remote.contains(where: { $0.id == rememberedRemote }),
+           let retained = CleanupModelSelection.retainedOption(rememberedRemote) { remote.append(retained) }
+        return remote + localModels + DesktopLocalLLMModels.choices(selected: selected).filter {
             LocalPostProcessingModel.isDownloadedModelID($0.id)
         }
     }
@@ -166,7 +172,8 @@ public enum DesktopPostProcessing { // swiftlint:disable:this type_body_length
         let identifier = mode(for: options.modelIdentifier) == .remote
             ? options.modelIdentifier : options.lastRemoteModelIdentifier
         guard let identifier, mode(for: identifier) == .remote else { return nil }
-        return nativeModels(selected: options.modelIdentifier).firstIndex { $0.id == identifier }
+        return nativeModels(selected: options.modelIdentifier, rememberedRemote: options.lastRemoteModelIdentifier)
+            .firstIndex { $0.id == identifier }
     }
 
     /// Applies the Apple settings' retired-model migration

@@ -10,7 +10,9 @@ extension WindowsNative {
     ) throws {
         let picker = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue().postProcessingPicker
         picker.publish([])
-        let models = DesktopPostProcessing.nativeModels(selected: options.modelIdentifier)
+        let models = DesktopPostProcessing.nativeModels(
+            selected: options.modelIdentifier, rememberedRemote: options.lastRemoteModelIdentifier
+        )
         guard let local = models.firstIndex(where: { $0.id == LocalPostProcessingModel.builtInRulesModelID }) else {
             throw DesktopPostProcessingError.unsupportedModel
         }

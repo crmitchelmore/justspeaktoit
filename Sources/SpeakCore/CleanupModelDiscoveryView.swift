@@ -3,11 +3,14 @@ import SwiftUI
 /// Shared native Mac/iOS opt-in control. Opening settings while disabled performs no network work.
 public struct CleanupModelDiscoveryView: View {
     @Binding private var selection: String
-    @AppStorage(CleanupModelSelection.preferenceKey) private var enabled = false
+    @Binding private var enabled: Bool
     @State private var state = CleanupModelDiscoveryStore.shared.snapshot
     @State private var refreshing = false
 
-    public init(selection: Binding<String>) { _selection = selection }
+    public init(selection: Binding<String>, enabled: Binding<Bool>) {
+        _selection = selection
+        _enabled = enabled
+    }
 
     private var discovered: [DiscoveredCleanupModel] {
         let bundled = Set(ModelCatalog.cloudPostProcessing.map(\.id))

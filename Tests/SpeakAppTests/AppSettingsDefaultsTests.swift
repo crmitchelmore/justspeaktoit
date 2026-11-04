@@ -32,6 +32,9 @@ final class AppSettingsDefaultsTests: XCTestCase {
         defaults.set(false, forKey: CleanupModelSelection.preferenceKey)
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.postProcessingModel, selection)
+        XCTAssertFalse(settings.cleanupModelDiscoveryEnabled)
+        settings.cleanupModelDiscoveryEnabled = true
+        XCTAssertTrue(defaults.bool(forKey: CleanupModelSelection.preferenceKey))
         settings.postProcessingModel = "openrouter/cleanup/openai/another-model"
         XCTAssertEqual(AppSettings(defaults: defaults).postProcessingModel, settings.postProcessingModel)
     }

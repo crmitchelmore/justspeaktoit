@@ -16,6 +16,9 @@ final class AppSettingsDefaultsKeyTests: XCTestCase {
         defaults.set(false, forKey: CleanupModelSelection.preferenceKey)
         let settings = AppSettings(defaults: defaults, loadsSecureStorage: false)
         XCTAssertEqual(settings.postProcessingModel, selection)
+        XCTAssertFalse(settings.cleanupModelDiscoveryEnabled)
+        settings.cleanupModelDiscoveryEnabled = true
+        XCTAssertTrue(defaults.bool(forKey: CleanupModelSelection.preferenceKey))
         XCTAssertEqual(defaults.string(forKey: "postProcessingModel"), selection)
     }
 

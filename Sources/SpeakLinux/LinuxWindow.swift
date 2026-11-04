@@ -177,7 +177,9 @@ enum LinuxWindow {
 
     static func postProcessing(_ options: DesktopPostProcessing.Options) {
         postProcessingPicker.publish([])
-        let models = DesktopPostProcessing.nativeModels(selected: options.modelIdentifier)
+        let models = DesktopPostProcessing.nativeModels(
+            selected: options.modelIdentifier, rememberedRemote: options.lastRemoteModelIdentifier
+        )
         guard let local = models.firstIndex(where: { $0.id == LocalPostProcessingModel.builtInRulesModelID }) else {
             _ = jsti_window_update("Built-in Local Cleanup is missing from the shared catalogue.", nil, -1)
             return

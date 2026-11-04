@@ -19,7 +19,8 @@ struct PostProcessingSettingsView: View {
     var body: some View {
         Form {
             Section("Model discovery") {
-                CleanupModelDiscoveryView(selection: $settings.postProcessingModel)
+                CleanupModelDiscoveryView(selection: $settings.postProcessingModel,
+                                          enabled: $settings.cleanupModelDiscoveryEnabled)
             }
             Section("Model") {
                 ForEach(Array(modelOptions.enumerated()), id: \.offset) { _, model in

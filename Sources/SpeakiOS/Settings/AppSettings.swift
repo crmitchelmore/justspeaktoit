@@ -547,6 +547,11 @@ public final class AppSettings: ObservableObject {
         }
     }
 
+    /// Device-local metadata discovery; intentionally outside automatic settings transfer.
+    @Published public var cleanupModelDiscoveryEnabled: Bool {
+        didSet { defaults.set(cleanupModelDiscoveryEnabled, forKey: CleanupModelSelection.preferenceKey) }
+    }
+
     @Published public var postProcessingModel: String {
         didSet {
             defaults.set(postProcessingModel, forKey: DefaultsKey.postProcessingModel.storageKey)
@@ -725,6 +730,7 @@ public final class AppSettings: ObservableObject {
                 ?? CaptureEndPointingPolicy.defaultSilenceWindowSeconds
         )
         self.postProcessingEnabled = postEnabled
+        self.cleanupModelDiscoveryEnabled = defaults.bool(forKey: CleanupModelSelection.preferenceKey)
         self.postProcessingModel = postModel
         self.autoPostProcess = autoPost
 

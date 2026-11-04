@@ -7,8 +7,8 @@ credits. It does not use Codex CLI or signed-in Codex usage.
 
 Automatic reviews run on non-draft PRs targeting main from owner/member/collaborator
 branches in this repository, including new commits. Maintainers can select
-**Actions → OpenAI API Review → Run workflow** and enter an open PR number for a
-manual review, including forks. Each head commit gets at most one completed bot
+**Actions → OpenAI API Review → Run workflow** from `main` and enter an open PR
+number for a manual review, including forks. Runs from other branches are skipped. Each head commit gets at most one completed bot
 review. Existing CI and other reviewers remain independent; this is not a merge
 approval or a required gate.
 
@@ -24,8 +24,10 @@ reasoning. No automatic paid-request retries. API failures appear in Actions log
 re-run the job to retry. A failed post or discarded stale response can still incur
 API usage. Job timeout: 10 minutes. Concurrent reviews for the same PR serialize.
 
-The restricted key needs Responses API write access. Store it as the repository
-Actions secret `OPENAI_REVIEW_API_KEY`; never place it in source. Manage its saved
+The restricted key needs Responses API write access. Store it as the
+`OPENAI_REVIEW_API_KEY` secret of the `openai-review` environment, whose deployment
+branch policy admits only `main`; only this job reads it. Never place it in source
+or add it as a repository secret. Manage its saved
 copy in the 1Password Agent vault using the existing service account. The API
 organization currently has auto-reload off. OpenAI consumes applicable promotional
 credits first, then other available API balance; this workflow does not enforce

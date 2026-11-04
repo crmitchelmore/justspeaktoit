@@ -2,6 +2,7 @@ package com.justspeaktoit.android.history
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -20,8 +21,10 @@ class HistoryTest {
 
     private class MemoryFile(var text: String? = null) : HistoryFile {
         var writes = 0
+        var failWrites = false
         override fun read() = text
         override fun write(text: String) {
+            if (failWrites) throw java.io.IOException("disk full")
             writes++
             this.text = text
         }
@@ -88,6 +91,41 @@ class HistoryTest {
         assertEquals(listOf("b"), store.remove("a", Retention.Month).map { it.id })
         assertTrue(store.clear().isEmpty())
         assertNull(file.text)
+    }
+
+    @Test
+    fun testStore_unreadableBytesAreDeleted() {
+        val file = MemoryFile("""{"entries":[{"text":"secret but unreadable"}]}""")
+        assertTrue(HistoryStore(file) { now }.load(Retention.Month).isEmpty())
+        assertNull(file.text)
+    }
+
+    @Test
+    fun testStore_failedWriteKeepsEntryForNextWrite() {
+        val file = MemoryFile()
+        val store = HistoryStore(file) { now }
+        file.failWrites = true
+        assertThrows(java.io.IOException::class.java) { store.add(entry("a", 0), Retention.Month) }
+        assertEquals(listOf("a"), store.cached.map { it.id })
+        file.failWrites = false
+        store.add(entry("b", 0).copy(createdAtMs = now + 1), Retention.Month)
+        assertEquals(listOf("b", "a"), HistoryCodec.decode(file.text!!).map { it.id })
+    }
+
+    @Test
+    fun testStore_removeAndReplaceApplyRetention() {
+        var clock = now
+        val file = MemoryFile()
+        val store = HistoryStore(file) { clock }
+        store.add(entry("a", 0), Retention.Week)
+        store.add(entry("b", 0).copy(createdAtMs = now + 1), Retention.Week)
+        clock = now + 8 * day
+        store.add(entry("c", 0).copy(createdAtMs = clock), Retention.Week)
+        assertEquals(listOf("c"), store.remove("missing", Retention.Week).map { it.id })
+        val updated = entry("c", 0).copy(createdAtMs = clock, text = "Clean.", cleanedUp = true)
+        val cleaned = store.replace(updated, Retention.Week)
+        assertEquals("Clean.", cleaned.single().text)
+        assertEquals(cleaned, store.replace(entry("gone", 0), Retention.Week))
     }
 
     @Test

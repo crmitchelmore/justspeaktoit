@@ -329,6 +329,11 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     fun showOriginal() {
         val original = _state.value.originalTranscript ?: return
         val done = _state.value.dictation as? DictationState.Done ?: return
+        lastEntry?.copy(text = original, cleanedUp = false)?.let { entry ->
+            lastEntry = entry
+            val retention = _state.value.retention
+            updateHistory { history.replace(entry, retention) }
+        }
         _state.update {
             it.copy(
                 dictation = done.copy(transcript = original),

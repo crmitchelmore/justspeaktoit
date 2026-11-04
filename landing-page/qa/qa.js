@@ -39,9 +39,13 @@ function results() {
 
 function render() {
   const answered = data.items.filter(item => answers[item.id]).length;
-  const remaining = data.items.filter(item => !answers[item.id]).reduce((sum, item) => sum + item.minutes, 0);
-  progress.textContent = `${answered} of ${data.items.length} answered · ~${remaining} min left`;
-  progressBar.value = answered;
+  const core = data.items.filter(item => item.core);
+  const coreAnswered = core.filter(item => answers[item.id]).length;
+  const remaining = core.filter(item => !answers[item.id]).reduce((sum, item) => sum + item.minutes, 0);
+  const optional = answered - coreAnswered;
+  progress.textContent = `${coreAnswered} of ${core.length} core answered · ~${remaining} min left`
+    + (optional ? ` · ${optional} optional` : '');
+  progressBar.value = coreAnswered;
   submit.disabled = answered === 0;
   copy.disabled = answered === 0;
   submit.textContent = answered ? `Submit ${answered} result${answered === 1 ? '' : 's'}` : 'Submit results';

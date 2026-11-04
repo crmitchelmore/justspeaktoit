@@ -127,13 +127,21 @@ function strings(value, path, min, max) {
   return value.map((entry, index) => text(entry, `${path}[${index}]`));
 }
 
+function issueList(value, path) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) fail(path, 'expected 1-8 issue numbers');
+  const issues = value.map((entry, index) => integer(entry, `${path}[${index}]`, 1, 1e7));
+  if (new Set(issues).size !== issues.length) fail(path, 'duplicate issue number');
+  return issues;
+}
+
 function identifier(value, path) {
   if (typeof value !== 'string' || !ID.test(value)) fail(path, 'expected a kebab-case id');
   return value;
 }
 
 function validateItem(item, path, device) {
-  const common = ['id', 'issue', 'title', 'minutes'];
+  const common = ['id', 'issues', 'title', 'minutes', 'core'];
+  if (typeof item?.core !== 'boolean') fail(`${path}.core`, 'expected a boolean');
   if (device === 'Decision') {
     expectKeys(item, path, [...common, 'question', 'context', 'options']);
     if (!Array.isArray(item.options) || item.options.length < 2 || item.options.length > 4) fail(`${path}.options`, 'expected 2-4 options');
@@ -151,7 +159,7 @@ function validateItem(item, path, device) {
     if (new Set(options.map(option => option.id)).size !== options.length) fail(`${path}.options`, 'duplicate option id');
     if (options.filter(option => option.recommended).length !== 1) fail(`${path}.options`, 'exactly one option must be recommended');
     return {
-      kind: 'decision', id: identifier(item.id, `${path}.id`), issue: integer(item.issue, `${path}.issue`, 1, 1e7),
+      kind: 'decision', id: identifier(item.id, `${path}.id`), issues: issueList(item.issues, `${path}.issues`), core: item.core,
       title: text(item.title, `${path}.title`, 90), minutes: integer(item.minutes, `${path}.minutes`, 1, 60),
       question: text(item.question, `${path}.question`, 300), context: text(item.context, `${path}.context`, 900), options,
     };
@@ -159,7 +167,7 @@ function validateItem(item, path, device) {
   expectKeys(item, path, [...common, 'build', 'steps', 'expected', 'final_gate'], ['prerequisites']);
   if (typeof item.final_gate !== 'boolean') fail(`${path}.final_gate`, 'expected a boolean');
   return {
-    kind: 'check', id: identifier(item.id, `${path}.id`), issue: integer(item.issue, `${path}.issue`, 1, 1e7),
+    kind: 'check', id: identifier(item.id, `${path}.id`), issues: issueList(item.issues, `${path}.issues`), core: item.core,
     title: text(item.title, `${path}.title`, 90), minutes: integer(item.minutes, `${path}.minutes`, 1, 60),
     build: text(item.build, `${path}.build`, 200),
     prerequisites: item.prerequisites === undefined ? [] : strings(item.prerequisites, `${path}.prerequisites`, 0, 8),
@@ -254,13 +262,16 @@ function quoteNote(note) {
 
 // Turn validated results into one comment per linked issue, the issues to
 // close and the summary for the results issue. An issue closes only when every
-// catalogue check for it passed in this submission and one is its final gate.
+// catalogue check marked final_gate for it passed in this submission and none
+// of its checks failed; other passes add evidence but never trigger closure.
 export function planActions(parsed, catalogue, resultsIssue) {
   const items = catalogueItems(catalogue);
   const byIssue = new Map();
   for (const entry of parsed.results) {
-    if (!byIssue.has(entry.item.issue)) byIssue.set(entry.item.issue, []);
-    byIssue.get(entry.item.issue).push(entry);
+    for (const issue of entry.item.issues) {
+      if (!byIssue.has(issue)) byIssue.set(issue, []);
+      byIssue.get(issue).push(entry);
+    }
   }
   const comments = [];
   const close = [];
@@ -277,11 +288,12 @@ export function planActions(parsed, catalogue, resultsIssue) {
       }
     }
     if (!lines.length) continue;
-    const checks = Object.values(items).filter(item => item.kind === 'check' && item.issue === issue);
+    const gates = Object.values(items).filter(item => item.kind === 'check' && item.finalGate && item.issues.includes(issue));
     const passed = new Set(entries.filter(entry => entry.result === 'pass').map(entry => entry.item.id));
-    const closes = checks.length > 0 && checks.some(item => item.finalGate) && checks.every(item => passed.has(item.id));
+    const failed = entries.some(entry => entry.result === 'fail');
+    const closes = !failed && gates.length > 0 && gates.every(item => passed.has(item.id));
     if (closes) close.push(issue);
-    const footer = closes ? 'All manual gates in the catalogue passed; closing as verified.' : 'Keeping this issue open.';
+    const footer = closes ? 'Every final manual gate in the catalogue passed; closing as verified.' : 'Keeping this issue open.';
     comments.push({ issue, body: [`Owner manual QA results from #${resultsIssue}:`, '', ...lines, '', footer].join('\n') });
   }
   const count = kind => parsed.results.filter(entry => entry.result === kind).length;

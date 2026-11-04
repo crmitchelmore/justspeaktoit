@@ -123,3 +123,13 @@ legend { font-weight: 600; margin-bottom: .5rem; }
 @media (forced-colors: active) {
   .qa-choice input:checked + span, .qa-option input:checked + .qa-option-text { border-width: 4px; }
 }
+
+.qa-totals { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .75rem 1rem; }
+.qa-totals h2 { margin: 0 0 .4rem; font-size: 1.05rem; }
+.qa-totals ul { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; margin: 0; padding: 0; list-style: none; font-size: 1.05rem; }
+.qa-totals p { margin: .5rem 0 0; color: var(--text-dim); font-size: .95rem; }
+.qa-optional { margin: 1rem 0; }
+.qa-optional > summary {
+  cursor: pointer; min-height: 3rem; display: flex; align-items: center;
+  padding: .5rem 1rem; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--text-dim); font-weight: 600;
+}

@@ -25,6 +25,12 @@ test('the build publishes a noindex checklist rendered from the catalogue', asyn
   execFileSync(process.execPath, [path.join(fixture, 'build.mjs')]);
   const html = await readFile(path.join(fixture, 'dist/qa/index.html'), 'utf8');
   assert.match(html, /<meta name="robots" content="noindex, nofollow">/);
+  assert.match(html, /Core time by device/);
+  const optionalBlocks = [...html.matchAll(/<details class="qa-optional">([\s\S]*?)<\/details>/g)].map(match => match[1]).join('');
+  for (const item of Object.values(catalogueItems(catalogue))) {
+    assert.equal(optionalBlocks.includes(`data-id="${item.id}"`), !item.core, `${item.id} is collapsed only when optional`);
+  }
+  assert.doesNotMatch(html, /<details class="qa-optional" open/);
   for (const item of Object.values(catalogueItems(catalogue))) assert.ok(html.includes(`data-id="${item.id}"`), item.id);
   const data = JSON.parse(html.match(/<script id="qa-data" type="application\/json">([^<]*)<\/script>/)[1]);
   assert.equal(data.catalogue, catalogue.hash);

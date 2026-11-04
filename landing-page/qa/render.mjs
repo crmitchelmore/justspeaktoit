@@ -8,6 +8,9 @@ const rich = value => String(value).split(/(https:\/\/[^\s<>"']*[^\s<>"'.,;:)])/
 
 const ISSUE_BASE = 'https://github.com/crmitchelmore/justspeaktoit/issues/';
 const minutesLabel = minutes => `~${minutes} min`;
+const issueLinks = item => item.issues
+  .map(issue => `<a href="${ISSUE_BASE}${issue}" target="_blank" rel="noopener">#${issue}</a>`).join(' ');
+const sum = items => items.reduce((total, item) => total + item.minutes, 0);
 
 function renderCheck(item) {
   const prerequisites = item.prerequisites.length
@@ -19,10 +22,10 @@ function renderCheck(item) {
             <span>${result[0].toUpperCase()}${result.slice(1)}</span>
           </label>`).join('');
   return `
-      <article class="qa-item" id="${escape(item.id)}" data-id="${escape(item.id)}" data-kind="check" data-minutes="${item.minutes}">
+      <article class="qa-item" id="${escape(item.id)}" data-id="${escape(item.id)}" data-kind="check" data-core="${item.core}" data-minutes="${item.minutes}">
         <header class="qa-item-header">
           <h3>${escape(item.title)}</h3>
-          <p class="qa-meta"><a href="${ISSUE_BASE}${item.issue}" target="_blank" rel="noopener">#${item.issue}</a> · ${minutesLabel(item.minutes)} · ${escape(item.build)}</p>
+          <p class="qa-meta">${issueLinks(item)} · ${minutesLabel(item.minutes)} · ${escape(item.build)}</p>
         </header>
         ${prerequisites}
         <ol class="qa-steps">${item.steps.map(step => `<li>${rich(step)}</li>`).join('')}</ol>
@@ -45,10 +48,10 @@ function renderDecision(item) {
               <span class="qa-consequence">${rich(option.consequence)}</span></span>
           </label>`).join('');
   return `
-      <article class="qa-item" id="${escape(item.id)}" data-id="${escape(item.id)}" data-kind="decision" data-minutes="${item.minutes}">
+      <article class="qa-item" id="${escape(item.id)}" data-id="${escape(item.id)}" data-kind="decision" data-core="${item.core}" data-minutes="${item.minutes}">
         <header class="qa-item-header">
           <h3>${escape(item.title)}</h3>
-          <p class="qa-meta"><a href="${ISSUE_BASE}${item.issue}" target="_blank" rel="noopener">#${item.issue}</a> · ${minutesLabel(item.minutes)}</p>
+          <p class="qa-meta">${issueLinks(item)} · ${minutesLabel(item.minutes)}</p>
         </header>
         <p>${rich(item.context)}</p>
         <fieldset class="qa-options">
@@ -57,15 +60,26 @@ function renderDecision(item) {
       </article>`;
 }
 
+const renderItem = item => (item.kind === 'decision' ? renderDecision(item) : renderCheck(item));
+
+// Core items close or unblock issues and stay visible; optional ones collapse.
 function renderSession(session) {
-  const minutes = session.items.reduce((total, item) => total + item.minutes, 0);
+  const core = session.items.filter(item => item.core);
+  const optional = session.items.filter(item => !item.core);
   const setup = session.setup.length
     ? `<div class="qa-setup"><p class="qa-label">Set up once</p><ul>${session.setup.map(entry => `<li>${rich(entry)}</li>`).join('')}</ul></div>`
     : '';
+  const extra = optional.length
+    ? `
+      <details class="qa-optional">
+        <summary>Optional: ${optional.length} more · ${minutesLabel(sum(optional))}</summary>
+        ${optional.map(renderItem).join('')}
+      </details>`
+    : '';
   return `
     <section class="qa-session" id="session-${escape(session.id)}" aria-labelledby="heading-${escape(session.id)}">
-      <h2 id="heading-${escape(session.id)}">${escape(session.title)} <span class="qa-session-meta">${session.items.length} · ${minutesLabel(minutes)}</span></h2>
-      ${setup}${session.items.map(item => (item.kind === 'decision' ? renderDecision(item) : renderCheck(item))).join('')}
+      <h2 id="heading-${escape(session.id)}">${escape(session.title)} <span class="qa-session-meta">${core.length} core · ${minutesLabel(sum(core))}</span></h2>
+      ${setup}${core.map(renderItem).join('')}${extra}
     </section>`;
 }
 
@@ -73,18 +87,23 @@ function renderSession(session) {
 // keeps catalogue text from closing the script element.
 function pageData(catalogue) {
   const items = catalogue.sessions.flatMap(session => session.items.map(item => ({
-    id: item.id, kind: item.kind, title: item.title, issue: item.issue, minutes: item.minutes,
+    id: item.id, kind: item.kind, title: item.title, issues: item.issues, minutes: item.minutes, core: item.core,
     ...(item.kind === 'decision' ? { options: item.options.map(({ id, label }) => ({ id, label })) } : {}),
   })));
   return JSON.stringify({ catalogue: catalogue.hash, items }).replace(/</g, '\\u003c');
 }
 
 export function renderQaPage(catalogue) {
-  const total = catalogue.sessions.reduce((sum, session) => sum + session.items.length, 0);
-  const minutes = catalogue.sessions.reduce((sum, session) => sum + session.items.reduce((inner, item) => inner + item.minutes, 0), 0);
+  const items = catalogue.sessions.flatMap(session => session.items);
+  const core = items.filter(item => item.core);
+  const devices = [...new Set(catalogue.sessions.map(session => session.device))];
+  const totals = devices.map(device => {
+    const coreItems = catalogue.sessions.filter(session => session.device === device).flatMap(session => session.items).filter(item => item.core);
+    return `<li><strong>${escape(device)}</strong> ${minutesLabel(sum(coreItems))}</li>`;
+  }).join('');
   const nav = catalogue.sessions.map(session => {
-    const sessionMinutes = session.items.reduce((sum, item) => sum + item.minutes, 0);
-    return `<li><a href="#session-${escape(session.id)}">${escape(session.device)}</a> <span>${session.items.length} · ${minutesLabel(sessionMinutes)}</span></li>`;
+    const sessionCore = session.items.filter(item => item.core);
+    return `<li><a href="#session-${escape(session.id)}">${escape(session.title)}</a> <span>${sessionCore.length} · ${minutesLabel(sum(sessionCore))}</span></li>`;
   }).join('');
   return `<!doctype html>
 <html lang="en-GB">
@@ -100,11 +119,16 @@ export function renderQaPage(catalogue) {
   <a class="visually-hidden" href="#main">Skip to checklist</a>
   <header class="qa-top">
     <h1>Manual QA</h1>
-    <p id="qa-progress" class="qa-progress" aria-live="polite">0 of ${total} answered · ${minutesLabel(minutes)} left</p>
-    <progress id="qa-progress-bar" max="${total}" value="0" aria-label="Answered checks"></progress>
+    <p id="qa-progress" class="qa-progress" aria-live="polite">0 of ${core.length} core answered · ${minutesLabel(sum(core))} left</p>
+    <progress id="qa-progress-bar" max="${core.length}" value="0" aria-label="Answered core items"></progress>
   </header>
   <main id="main">
     <p class="qa-intro">Answers save on this device as you go, so you can stop and come back. Mark each check Pass, Fail or Skip, then press Submit once: it opens a prefilled GitHub issue that you create with one click. Catalogue updated ${escape(catalogue.updated)}.</p>
+    <section class="qa-totals" aria-labelledby="qa-totals-heading">
+      <h2 id="qa-totals-heading">Core time by device</h2>
+      <ul>${totals}</ul>
+      <p>Core items close or unblock an issue. Optional items are collapsed; open them only if you have spare time.</p>
+    </section>
     <nav aria-label="Sessions"><ul class="qa-nav">${nav}</ul></nav>
     <noscript><p class="qa-warning">This checklist needs JavaScript to save answers and submit them.</p></noscript>
     ${catalogue.sessions.map(renderSession).join('')}

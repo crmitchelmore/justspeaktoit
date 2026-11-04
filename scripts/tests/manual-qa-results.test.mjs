@@ -18,9 +18,11 @@ sessions:
       - "Install the build."
     items:
       - id: "iphone-a"
-        issue: 10
+        issues:
+          - 10
         title: "First gate"
         minutes: 3
+        core: true
         build: "TestFlight"
         prerequisites:
           - "Key set"
@@ -31,9 +33,11 @@ sessions:
         expected: "It works."
         final_gate: true
       - id: "iphone-b"
-        issue: 10
+        issues:
+          - 10
         title: "Second gate"
         minutes: 2
+        core: false
         build: "TestFlight"
         steps:
           - "One."
@@ -42,24 +46,29 @@ sessions:
         expected: "Also works."
         final_gate: false
       - id: "iphone-c"
-        issue: 11
-        title: "Not final"
+        issues:
+          - 11
+          - 13
+        title: "Shared final gate"
         minutes: 2
+        core: true
         build: "TestFlight"
         steps:
           - "One."
           - "Two."
           - "Three."
         expected: "Fine."
-        final_gate: false
+        final_gate: true
   - id: "decisions"
     device: "Decision"
     title: "Decisions"
     items:
       - id: "decision-x"
-        issue: 12
+        issues:
+          - 12
         title: "Pick"
         minutes: 1
+        core: true
         question: "Which?"
         context: "Context."
         options:
@@ -101,6 +110,8 @@ test('catalogue validation enforces the schema', () => {
   const broken = edit => () => loadCatalogue(FIXTURE.replace(...edit));
   assert.throws(broken(['device: "iPhone"', 'device: "Phone"']), /expected one of/);
   assert.throws(broken(['        final_gate: true', '        final_gate: "yes"']), /final_gate/);
+  assert.throws(broken(['        core: true', '        core: 1']), /core/);
+  assert.throws(broken(['          - 13\n', '          - 11\n']), /duplicate issue/);
   assert.throws(broken(['id: "iphone-b"', 'id: "iphone-a"']), /duplicate id/);
   assert.throws(broken(['            recommended: true\n', '']), /exactly one option/);
   assert.throws(broken(['          - "Three: done."\n', '']), /3-7 strings/);
@@ -147,16 +158,19 @@ test('results parsing is strict', () => {
   ]) assert.throws(() => parseResults(text, catalogue), message, text);
 });
 
-test('an issue closes only when every catalogue check for it passed', () => {
+test('an issue closes when every final-gate check for it passed', () => {
   const plan = results => planActions(parseResults(body(results), catalogue), catalogue, 99);
-  const partial = plan([{ id: 'iphone-a', result: 'pass' }, { id: 'iphone-b', result: 'skip' }]);
-  assert.deepEqual(partial.close, []);
+  const partial = plan([{ id: 'iphone-a', result: 'skip' }, { id: 'iphone-b', result: 'pass' }]);
+  assert.deepEqual(partial.close, [], 'a non-final pass cannot close the issue');
   assert.match(partial.comments[0].body, /PASS/);
   assert.match(partial.comments[0].body, /Keeping this issue open/);
-  const complete = plan([{ id: 'iphone-a', result: 'pass' }, { id: 'iphone-b', result: 'pass' }, { id: 'iphone-c', result: 'pass' }]);
-  assert.deepEqual(complete.close, [10], 'issue 11 has no final gate');
+  const complete = plan([{ id: 'iphone-a', result: 'pass' }, { id: 'iphone-b', result: 'skip' }, { id: 'iphone-c', result: 'pass' }]);
+  assert.deepEqual(complete.close, [10, 11, 13], 'non-final checks never block; one check can close several issues');
+  assert.equal(complete.comments.length, 3);
   const failed = plan([{ id: 'iphone-b', result: 'fail', note: 'Ping @x and close #10' }, { id: 'decision-x', choice: 'yes' }]);
   assert.deepEqual(failed.close, []);
+  assert.deepEqual(plan([{ id: 'iphone-a', result: 'pass' }, { id: 'iphone-b', result: 'fail', note: 'x' }]).close, [],
+    'any failure for an issue keeps it open, even on a non-final check');
   assert.match(failed.comments[0].body, /@\u200bx/);
   assert.match(failed.comments[0].body, /#\u200b10/);
   assert.match(failed.comments[1].body, /Chosen: \*\*Yes\*\*/);

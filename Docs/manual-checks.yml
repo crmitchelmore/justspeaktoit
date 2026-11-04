@@ -6,29 +6,58 @@ updated: "2026-11-04"
 sessions:
   - id: "decisions"
     device: "Decision"
-    title: "Decisions (do these first; two unblock checks below)"
+    title: "Decisions"
     items:
-      - id: "decision-watch-provisioning"
-        issue: 657
-        title: "Apple Watch app: provision a dev build now or defer"
+      - id: "decision-provider-spend-cap"
+        issues:
+          - 1210
+          - 1051
+          - 1052
+          - 821
+          - 1104
+          - 1113
+          - 1114
+        title: "Spend cap for paid-provider live acceptance runs"
         minutes: 2
-        question: "Do you want to do the watch provisioning needed to test the watch app (#657, #659) now?"
-        context: "The watch app and complication are built and tested in CI but feature-flagged out of TestFlight until the watch bundle ids and App Group exist in the Apple Developer portal. #963 (Stop from the iPhone Live Activity in the Smart Stack) works without the watch app and is not affected by this choice."
+        core: true
+        question: "How much may be spent on short synthetic-speech runs against paid speech providers?"
+        context: "Seven issues are code-complete and only need real calls with a few seconds of synthetic speech per route: #1210 (Pulse Pro, Reson8, StepAudio, Alibaba, OpenRouter audio routes, AssemblyAI Universal-3.6 Pro live), #1104 (8 live providers), #1113 and #1114 (one OpenAI or Groq Mac batch run), #821 (OpenRouter playback), #1051 and #1052 (Azure Speech/MAI). Usage is likely under $10; minimum top-ups for new accounts are most of the cost. Runs need a person at a Mac with a microphone; receipts are posted to each issue without keys or billing details. Azure also needs you to create or name a Speech resource in a region that serves MAI models."
         options:
-          - id: "dev-build-now"
-            label: "Dev build now: portal steps 1 to 3, then an Xcode build"
-            consequence: "About 10 minutes in the portal plus a 10-minute Xcode build; then run the 6 watch-app checks in the same session. TestFlight stays watch-free."
+          - id: "cap-40"
+            label: "Up to $40 total, at most $10 per provider, no auto top-ups"
+            consequence: "Covers all seven issues; any provider needing a larger minimum top-up or a paid plan is skipped and noted. Alibaba uses the international (Singapore) workspace only."
             recommended: true
-          - id: "full-provisioning"
-            label: "Full provisioning: also App Store profiles and release workflow"
-            consequence: "You create two App Store profiles and secrets; an agent wires TUIST_WATCH_APP=1 into release-ios.yml, so the watch app ships in the next TestFlight build and checks run from TestFlight."
-          - id: "defer-watch"
-            label: "Defer the watch app"
-            consequence: "Run only the 3 #963 checks; #657 and #659 stay open with no further work."
+          - id: "cap-15-existing"
+            label: "Up to $15, existing accounts only"
+            consequence: "#1104, #1113, #1114 and #821 can close; #1210's new providers and Azure (#1051, #1052) stay open."
+          - id: "defer"
+            label: "Defer all paid runs"
+            consequence: "No spend; all seven issues stay open."
+      - id: "decision-windows-signing"
+        issues:
+          - 1157
+        title: "Windows signing route (gates #1157 signing scope)"
+        minutes: 2
+        core: true
+        question: "Which signing route should the Windows installer use? You are a UK individual."
+        context: "Nothing ships to Windows users until you pick and enrol in a route; Azure Artifact Signing is US/Canada-only for individuals. The first route fixes the package identity, so switching later means users reinstall. Owner steps and costs: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/windows-installer.md#routes-for-a-uk-individual-november-2026 (from PR #1336)."
+        options:
+          - id: "microsoft-store"
+            label: "Microsoft Store"
+            consequence: "Fewest owner steps: free individual account with ID check, the Store signs the app and shows your chosen publisher name, no SmartScreen download prompt; an agent then wires the Store identity and upload job."
+            recommended: true
+          - id: "sslcom-esigner"
+            label: "SSL.com IV certificate + eSigner (direct download)"
+            consequence: "About $129/yr certificate plus eSigner from $180/yr; shows your legal name; CI signs with a TOTP secret you add to the windows-signing environment; first release is a pilot and SmartScreen reputation builds over time."
+          - id: "signpath-foundation"
+            label: "SignPath Foundation (direct download)"
+            consequence: "Free for open source; publisher shown as \"SignPath Foundation\"; needs a code-signing policy page and an approval per release."
       - id: "decision-billing-rail"
-        issue: 648
+        issues:
+          - 648
         title: "Paid Access billing rail"
-        minutes: 3
+        minutes: 2
+        core: true
         question: "Which billing rail should Paid Access launch with?"
         context: "Paid Access (a monthly fee instead of your own API keys) is merged but switched off. The Mac App Store is retired, so Mac can only sell through Stripe; iOS would need StoreKit, and iOS does not yet route work through the paid proxy. Whichever rail you pick, you still need to choose a Mac sign-in method (native Sign in with Apple does not work in Developer ID builds) and sign off privacy and retention."
         options:
@@ -45,44 +74,12 @@ sessions:
           - id: "defer"
             label: "Defer Paid Access"
             consequence: "Stays off; #648 is parked and no external setup is needed."
-      - id: "decision-analytics-go"
-        issue: 776
-        title: "Opt-in analytics: continue the go/no-go or pause"
-        minutes: 3
-        question: "Should the opt-in PostHog analytics rollout (direct-download Mac only) continue through its remaining gates?"
-        context: "All client engineering is merged; nothing is sent unless a user opts in. Remaining gates need you: authorise a Release network capture and an ingestion-key rotation drill, confirm PostHog Production settings and EU residency, and decide what to do with 7 earlier test events that carry city/postcode GeoIP data (IP is discarded; new events disable GeoIP). #814 (detailed telemetry) stays blocked until this passes plus one clean inspection week."
-        options:
-          - id: "continue-delete-history"
-            label: "Continue, and delete the 7 GeoIP-tagged test events"
-            consequence: "An agent prepares the network capture and rotation drill for you to run; the historical location data is removed before the inspection week starts."
-            recommended: true
-          - id: "continue-keep-history"
-            label: "Continue, keep the old test events"
-            consequence: "Same gates, but the existing city/postcode data stays in PostHog and must be disclosed or aged out under retention."
-          - id: "pause"
-            label: "Pause analytics"
-            consequence: "Stays off for all users; #776 and #814 are parked."
-      - id: "decision-analytics-retention"
-        issue: 776
-        title: "How to enforce the 12-month analytics retention promise"
-        minutes: 2
-        question: "How should the published \"raw events kept no more than 12 months\" promise be enforced?"
-        context: "The privacy page promises raw events are kept no more than 12 months. PostHog's plan retention is a query window, not proven deletion, and the read-only project settings show no retention control, so the go/no-go needs a deletion mechanism or a changed promise. No events are near 12 months old yet."
-        options:
-          - id: "scheduled-purge"
-            label: "Scheduled purge job before rollout"
-            consequence: "An agent builds a monthly job that deletes or aggregates events over 12 months, using a write-scoped PostHog key you add as an environment secret."
-            recommended: true
-          - id: "manual-purge"
-            label: "Manual purge with a yearly reminder"
-            consequence: "No new secret or code; you run a documented deletion each year, and the gate relies on that runbook."
-          - id: "change-promise"
-            label: "Change the promise to PostHog's plan retention"
-            consequence: "An agent updates the privacy page and docs; weaker promise, no deletion work."
       - id: "decision-cloudkit-container"
-        issue: 1119
+        issues:
+          - 1119
         title: "Shared CloudKit container for Mac and iPhone sync"
-        minutes: 2
+        minutes: 1
+        core: true
         question: "Which iCloud container should both macOS and iOS use for history and key sync?"
         context: "Mac and iPhone currently write to different iCloud containers, so history and key sync between them cannot work. After the choice, an agent writes a one-time migration for the moving platform; you then update entitlements/profiles in the Apple Developer portal and run a two-device test. Alpha uses the matching .alpha container."
         options:
@@ -99,27 +96,71 @@ sessions:
           - id: "defer"
             label: "Defer"
             consequence: "Mac and iPhone keep syncing only within their own platform."
-      - id: "decision-provider-spend-cap"
-        issue: 1210
-        title: "Spend cap for paid-provider live acceptance runs"
-        minutes: 3
-        question: "How much may be spent on short synthetic-speech runs against paid speech providers?"
-        context: "Seven issues are code-complete and only need real calls with a few seconds of synthetic speech per route: #1210 (Pulse Pro, Reson8, StepAudio, Alibaba, OpenRouter audio routes, AssemblyAI Universal-3.6 Pro live), #1104 (8 live providers), #1113 and #1114 (one OpenAI or Groq Mac batch run), #821 (OpenRouter playback), #1051 and #1052 (Azure Speech/MAI). Usage is likely under $10; minimum top-ups for new accounts are most of the cost. Runs need a person at a Mac with a microphone; receipts are posted to each issue without keys or billing details. Azure also needs you to create or name a Speech resource in a region that serves MAI models."
+      - id: "decision-analytics-go"
+        issues:
+          - 776
+          - 814
+        title: "Opt-in analytics: continue the go/no-go or pause"
+        minutes: 2
+        core: true
+        question: "Should the opt-in PostHog analytics rollout (direct-download Mac only) continue through its remaining gates?"
+        context: "All client engineering is merged; nothing is sent unless a user opts in. Remaining gates need you: authorise a Release network capture and an ingestion-key rotation drill, confirm PostHog Production settings and EU residency, and decide what to do with 7 earlier test events that carry city/postcode GeoIP data (IP is discarded; new events disable GeoIP). #814 (detailed telemetry) stays blocked until this passes plus one clean inspection week."
         options:
-          - id: "cap-40"
-            label: "Up to $40 total, at most $10 per provider, no auto top-ups"
-            consequence: "Covers all seven issues; any provider needing a larger minimum top-up or a paid plan is skipped and noted. Alibaba uses the international (Singapore) workspace only."
+          - id: "continue-delete-history"
+            label: "Continue, and delete the 7 GeoIP-tagged test events"
+            consequence: "An agent prepares the network capture and rotation drill for you to run; the historical location data is removed before the inspection week starts."
             recommended: true
-          - id: "cap-15-existing"
-            label: "Up to $15, existing accounts only"
-            consequence: "#1104, #1113, #1114 and #821 can close; #1210's new providers and Azure (#1051, #1052) stay open."
-          - id: "defer"
-            label: "Defer all paid runs"
-            consequence: "No spend; all seven issues stay open."
+          - id: "continue-keep-history"
+            label: "Continue, keep the old test events"
+            consequence: "Same gates, but the existing city/postcode data stays in PostHog and must be disclosed or aged out under retention."
+          - id: "pause"
+            label: "Pause analytics"
+            consequence: "Stays off for all users; #776 and #814 are parked."
+      - id: "decision-watch-provisioning"
+        issues:
+          - 657
+          - 659
+        title: "Apple Watch app: provision a dev build now or defer"
+        minutes: 1
+        core: true
+        question: "Do you want to do the watch provisioning needed to test the watch app (#657, #659) now?"
+        context: "The watch app and complication are built and tested in CI but feature-flagged out of TestFlight until the watch bundle ids and App Group exist in the Apple Developer portal. #963 (Stop from the iPhone Live Activity in the Smart Stack) works without the watch app and is not affected by this choice."
+        options:
+          - id: "dev-build-now"
+            label: "Dev build now: portal steps 1 to 3, then an Xcode build"
+            consequence: "About 10 minutes in the portal plus a 10-minute Xcode build; then run the 2 optional watch-app checks. TestFlight stays watch-free."
+            recommended: true
+          - id: "full-provisioning"
+            label: "Full provisioning: also App Store profiles and release workflow"
+            consequence: "You create two App Store profiles and secrets; an agent wires TUIST_WATCH_APP=1 into release-ios.yml, so the watch app ships in the next TestFlight build and checks run from TestFlight."
+          - id: "defer-watch"
+            label: "Defer the watch app"
+            consequence: "Run only the #963 check; #657 and #659 stay open with no further work."
+      - id: "decision-analytics-retention"
+        issues:
+          - 776
+        title: "How to enforce the 12-month analytics retention promise"
+        minutes: 2
+        core: false
+        question: "How should the published \"raw events kept no more than 12 months\" promise be enforced?"
+        context: "The privacy page promises raw events are kept no more than 12 months. PostHog's plan retention is a query window, not proven deletion, and the read-only project settings show no retention control, so the go/no-go needs a deletion mechanism or a changed promise. No events are near 12 months old yet."
+        options:
+          - id: "scheduled-purge"
+            label: "Scheduled purge job before rollout"
+            consequence: "An agent builds a monthly job that deletes or aggregates events over 12 months, using a write-scoped PostHog key you add as an environment secret."
+            recommended: true
+          - id: "manual-purge"
+            label: "Manual purge with a yearly reminder"
+            consequence: "No new secret or code; you run a documented deletion each year, and the gate relies on that runbook."
+          - id: "change-promise"
+            label: "Change the promise to PostHog's plan retention"
+            consequence: "An agent updates the privacy page and docs; weaker promise, no deletion work."
       - id: "decision-azure-voice-ios"
-        issue: 1052
+        issues:
+          - 1052
         title: "Azure voice output on iOS or macOS only"
         minutes: 1
+        core: false
         question: "Should Azure neural and MAI-Voice speech output also be added to iOS?"
         context: "Azure voice output, including MAI-Voice-2.1 and Flash, exists on macOS only. iOS voice output supports Deepgram, Soniox and OpenRouter, and the docs say macOS-only without a test enforcing it."
         options:
@@ -130,750 +171,339 @@ sessions:
           - id: "add-ios"
             label: "Add Azure voice output to iOS"
             consequence: "New iOS provider case, router path and settings; adds an iPhone playback check before #1052 can close."
-      - id: "decision-windows-signing"
-        issue: 1157
-        title: "Windows signing route (gates #1157 signing scope)"
-        minutes: 3
-        question: "Which signing route should the Windows installer use? You are a UK individual."
-        context: "Nothing ships to Windows users until you pick and enrol in a route; Azure Artifact Signing is US/Canada-only for individuals. The first route fixes the package identity, so switching later means users reinstall. Owner steps and costs: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/windows-installer.md#routes-for-a-uk-individual-november-2026 (from PR #1336)."
-        options:
-          - id: "microsoft-store"
-            label: "Microsoft Store"
-            consequence: "Fewest owner steps: free individual account with ID check, the Store signs the app and shows your chosen publisher name, no SmartScreen download prompt; an agent then wires the Store identity and upload job."
-            recommended: true
-          - id: "sslcom-esigner"
-            label: "SSL.com IV certificate + eSigner (direct download)"
-            consequence: "About $129/yr certificate plus eSigner from $180/yr; shows your legal name; CI signs with a TOTP secret you add to the windows-signing environment; first release is a pilot and SmartScreen reputation builds over time."
-          - id: "signpath-foundation"
-            label: "SignPath Foundation (direct download)"
-            consequence: "Free for open source; publisher shown as \"SignPath Foundation\"; needs a code-signing policy page and an approval per release."
   - id: "mac"
     device: "Mac"
-    title: "Mac session: streaming insertion (#664)"
+    title: "Mac"
     setup:
-      - "Unlocked Mac, current Just Speak to It (mac-v3.2.0 or Alpha build 45 or later) with Accessibility granted."
-      - "Settings › General: Accessibility Insertion = Insert at Cursor; Stream text while dictating (experimental) = on; post-processing off."
-      - "Pick a Streaming model with a working key (Remote or Local Streaming). Use only made-up, non-sensitive sentences."
-      - "Note the app version, build and macOS version for the results."
+      - "Unlocked Mac with Just Speak to It (mac-v3.2.0 or Alpha build 45 or later) and Accessibility granted."
+      - "Settings \u203a General: Accessibility Insertion = Insert at Cursor; Stream text while dictating (experimental) = on; post-processing off."
+      - "A Streaming model with a working key is selected. Use made-up sentences only."
     items:
-      - id: "mac-notes-stream-append"
-        issue: 664
-        title: "Notes: words stream in and corrections replace, not append"
-        minutes: 4
-        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
-        prerequisites:
-          - "A new Notes note containing the line: café ☕ the quick fox, the quick fox"
-        steps:
-          - "Put the cursor on a new line under that text."
-          - "Start dictation and say slowly: \"Testing streaming in Notes, one two three, actually make that four.\""
-          - "Watch the note while you speak, then stop."
-          - "Open History in Just Speak to It and compare the latest entry with the new line in Notes."
-        expected: "Words appear in Notes while you speak; any word the model revises is replaced in place, not duplicated. The final new line matches the History text exactly, and the first line (café ☕ and both \"the quick fox\") is unchanged."
-        final_gate: true
-      - id: "mac-notes-selection-replace"
-        issue: 664
-        title: "Notes: dictating over a selection replaces only that selection"
-        minutes: 3
-        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
-        steps:
-          - "In the same note add a line: REPLACE_ME and REPLACE_ME again"
-          - "Double-click the first REPLACE_ME to select it."
-          - "Dictate: \"Selection replacement works.\" and stop."
-        expected: "Only the first REPLACE_ME becomes \"Selection replacement works.\" (matching History); the second REPLACE_ME and every other line are unchanged."
-        final_gate: true
-      - id: "mac-notes-edit-and-focus"
-        issue: 664
-        title: "Notes: edits during dictation and a focus change stay safe"
+      - id: "mac-notes-streaming"
+        issues:
+          - 664
+        title: "Notes: live text, corrections and selection replacement are exact"
         minutes: 5
+        core: true
         build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
         steps:
-          - "Put the cursor at the end of the note and start dictating a long sentence."
-          - "After the first words appear, click on the first line and type XX there, then keep talking and stop."
-          - "Start a second dictation at the end of the note; after the first words appear, click into a different, empty note."
-          - "Keep talking for a few seconds, then stop."
-          - "Check both notes and History."
-        expected: "Your typed XX is kept and nothing outside the dictated text is changed or duplicated (streaming may pause instead of finishing). In the focus test, the second note stays empty and the original note holds the dictated text with no duplicate paste."
+          - "In a new Notes note type: caf\u00e9 \u2615 the quick fox, the quick fox \u2014 then on the next line: REPLACE_ME and REPLACE_ME"
+          - "Put the cursor on a new third line, dictate slowly \"Testing Notes, one two three, actually four\" and stop."
+          - "Double-click the first REPLACE_ME, dictate \"Selection works\" and stop."
+          - "Open History in Just Speak to It and compare the two newest entries with the note."
+        expected: "Words appear while you speak and revised words are replaced, not duplicated. Line 3 matches History exactly; only the first REPLACE_ME became \"Selection works\"; caf\u00e9 \u2615 and both \"the quick fox\" are unchanged."
         final_gate: true
-      - id: "mac-setting-off-baseline"
-        issue: 664
-        title: "Setting off: Notes gets one paste at the end, no live text"
+      - id: "mac-notes-safety"
+        issues:
+          - 664
+        title: "Notes: typing elsewhere or switching notes mid-dictation is safe"
+        minutes: 4
+        core: true
+        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
+        steps:
+          - "At the end of the same note start dictating a long sentence."
+          - "After the first words appear, click the first line, type XX, keep talking, then stop."
+          - "Start dictating again at the end of the note; after the first words appear, click into a different, empty note, keep talking, then stop."
+          - "Check both notes."
+        expected: "XX is kept and nothing outside the dictated text changed or duplicated (streaming may pause). The second note stays empty; the first note has the dictated text once, with no extra paste."
+        final_gate: true
+      - id: "mac-one-shot-baselines"
+        issues:
+          - 664
+        title: "Setting off and a non-allowlisted app both get one paste at the end"
+        minutes: 4
+        core: true
+        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
+        steps:
+          - "Settings \u203a General: turn Stream text while dictating (experimental) off; in Notes dictate \"Baseline off\" and stop."
+          - "Turn the setting back on."
+          - "Open Stickies, click into a new sticky, dictate \"Stickies one paste\" and stop."
+          - "Compare both with History."
+        expected: "In both cases nothing appears while you speak and the text arrives exactly once after Stop, matching History."
+        final_gate: true
+      - id: "mac-notes-history-upgrade"
+        issues:
+          - 1118
+        title: "Mac: existing History intact after updating"
         minutes: 3
+        core: false
         build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
         steps:
-          - "Settings › General: turn Stream text while dictating (experimental) off."
-          - "In Notes, dictate: \"Baseline with streaming off.\" and stop."
-          - "Check the note and History, then turn the setting back on."
-        expected: "Nothing appears while you speak; the text arrives once after Stop, exactly once, matching History."
-        final_gate: true
-      - id: "mac-stickies-not-allowlisted"
-        issue: 664
-        title: "Stickies (not allowlisted): one paste at the end, no live text"
-        minutes: 3
-        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
-        prerequisites:
-          - "Stream text while dictating (experimental) back on"
-        steps:
-          - "Open Stickies and click into a new sticky note."
-          - "Dictate: \"Stickies gets one final paste.\" and stop."
-          - "Check the sticky and History."
-        expected: "Nothing appears while you speak; the text arrives once after Stop, exactly once, matching History."
-        final_gate: true
-  - id: "owner-actions"
-    device: "Mac"
-    title: "Owner-only actions at a computer"
-    items:
+          - "Before updating the Mac app, note the text of your newest two History items."
+          - "Update to the build under test and open History."
+          - "Make one short recording, quit and reopen the app, then open History."
+        expected: "Older items are unchanged and the new recording survives the relaunch."
+        final_gate: false
       - id: "owner-flathub-submission"
-        issue: 1219
+        issues:
+          - 1219
         title: "Submit Just Speak to It to Flathub yourself"
         minutes: 60
-        build: "Tagged main release; Flatpak manifest in packaging/linux as a reference only"
+        core: false
+        build: "Tagged main release; packaging/linux Flatpak manifest as a reference only"
         prerequisites:
           - "Flathub bars AI-written manifests, PRs and replies: do every step yourself, without an agent"
-          - "Steps: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/linux-packaging.md (Recommended next step: Flathub, from PR #1336)"
+          - "Steps: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/linux-packaging.md (Recommended next step: Flathub)"
         steps:
           - "Write your own Flathub manifest building from a tagged git source of this repository, with the same pinned SwiftPM sources."
           - "Add Linux screenshots at stable URLs and a release entry to the metainfo; run flatpak-builder-lint appstream and flatpak-builder-lint repo on a built repo."
           - "Signed in to GitHub as yourself (2FA on), open a pull request to flathub/flathub against the new-pr branch titled \"Add com.justspeaktoit.JustSpeakToIt\"."
           - "In the description, disclose which parts of the app were AI-generated and roughly how much, and justify each finish-args permission."
           - "Answer reviewers yourself, and accept the maintainer invitation within a week of approval."
-        expected: "Your submission pull request is open on flathub/flathub with the disclosure. After acceptance, an agent can publish the domain verification token and point the website at the Flathub listing."
+        expected: "Your submission pull request is open on flathub/flathub with the disclosure. After acceptance, an agent can publish the domain verification token and point the website at the listing."
         final_gate: false
   - id: "iphone"
     device: "iPhone"
-    title: "iPhone session"
+    title: "iPhone"
     setup:
-      - "Install TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later; if updating now, do the History upgrade check first."
-      - "iPhone with an Action Button on iOS 26 or later (iOS 27 for the notification automation). Note model and iOS version with every result."
-      - "Settings › API Keys › Manage Keys: OpenRouter (polish), OpenAI and Deepgram (streaming checks) saved."
-      - "Settings › Action Button & Shortcuts: Destination = Copy & Polish; Finish after a pause = off."
-      - "Settings › Transcription › Where transcription runs = Local (Apple SpeechTranscriber); Live Activities on."
-      - "Notes open on a blank scratch note; WhatsApp installed."
-      - "AirPods (or another Bluetooth headset) charged and in their case."
-      - "For the last two checks: a Mac on the same Apple ID with Handoff on, unlocked and nearby."
-      - "Afterwards: Live Activities on, Larger Text and VoiceOver restored, test Focus filter, shortcuts and automation deleted."
+      - "Install TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later on an iPhone with an Action Button (iOS 26+)."
+      - "In the app: API keys for OpenRouter (polish), OpenAI and Deepgram saved; Settings \u203a Action Button & Shortcuts: Destination = Copy & Polish."
+      - "Settings \u203a Transcription \u203a Where transcription runs = Local (Apple SpeechTranscriber)."
+      - "iOS Settings \u203a Action Button \u203a Controls: choose Transcribe Voice (Just Speak to It Alpha)."
+      - "Have Notes open on a scratch note, AirPods in their case, and your Mac (same Apple ID, Handoff on) nearby."
     items:
-      - id: "iphone-history-upgrade-preserved"
-        issue: 1118
-        title: "Existing History survives the TestFlight update"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "Ideally run while updating from the previous TestFlight build"
+      - id: "iphone-clipboard-e2e"
+        issues:
+          - 934
+          - 1117
+        title: "Cold Action Button start: raw paste now, your later copy kept"
+        minutes: 6
+        core: true
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
         steps:
-          - "Before updating (if not yet done), open History and note the Sessions count and the text of the newest two items."
-          - "Update to the build under test in TestFlight and open the app."
-          - "Open History and compare with your notes (if already updated: check items dated before 3 Nov 2026 are still listed)."
-          - "Make a short recording in the app saying \"history upgrade check\"."
-          - "Force-quit the app, reopen it and open History again."
-        expected: "Every pre-update item is still listed with the same text and the Sessions count only grew by the new recording. \"history upgrade check\" is at the top and survives the relaunch. The iCloud icon in History looks the same as before the update."
-        final_gate: false
-      - id: "iphone-control-center-transcribe-voice"
-        issue: 954
-        title: "Control Center: setup copy matches and Transcribe Voice works"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "iOS 18 or later"
-        steps:
-          - "In the app open Settings › Action Button & Shortcuts and read the \"Set Up Transcribe Voice\" section."
-          - "Follow its Control Center steps: open Control Center, tap + (top left), Add a Control, find Just Speak to It Alpha, choose Transcribe Voice."
-          - "Tap the new control, say \"control centre test\", then tap it again to stop."
-          - "Paste into Notes and open the app's History."
-        expected: "The written steps match the real picker names and order. The control reads \"Recording...\" while recording and \"Transcribe\" when idle. Notes receives \"control centre test\" and History has exactly one new item."
-        final_gate: false
-      - id: "iphone-action-button-hints"
-        issue: 954
-        title: "Action Button: Start/Stop dictation hints and press-and-hold"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "iPhone with an Action Button"
-        steps:
-          - "Follow the app's Action Button steps: iOS Settings › Action Button › Controls, tap the control picker, choose Transcribe Voice."
-          - "On the Home Screen, press the Action Button briefly (don't hold) and read the hint in the Dynamic Island."
-          - "Press and hold the Action Button to start and say \"action button test\"."
-          - "While recording, press the Action Button briefly and read the hint."
-          - "Press and hold again to stop, then paste into Notes."
-        expected: "Idle hint reads \"Start dictation\"; while recording it reads \"Stop dictation\". Press-and-hold starts and stops recording; Notes receives \"action button test\" and History has one new item. Note any unlock or open-app prompt."
-        final_gate: false
-      - id: "iphone-lock-screen-control"
-        issue: 954
-        title: "Lock Screen bottom control starts and stops dictation"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "Follow the app's Lock Screen Control steps: touch and hold the Lock Screen, Customise › Lock Screen, remove a bottom control, tap + in that slot, choose Transcribe Voice, Done."
-          - "Lock the iPhone, wake the screen without unlocking, tap Transcribe Voice and say \"lock screen test\"."
-          - "Tap the control again (or the Live Activity Stop) to stop."
-          - "Unlock, paste into Notes and open History."
-        expected: "The written steps match the real Customise flow and the control sits in a bottom slot, not as a widget under the clock. Recording starts, or iOS asks you to unlock first (note which). After stop, Notes pastes \"lock screen test\", History has one item and nothing still shows as recording."
-        final_gate: false
-      - id: "iphone-trigger-settings-accessibility"
-        issue: 954
-        title: "Action Button & Shortcuts screen at max text size and VoiceOver"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "Set iOS Settings › Accessibility › Display & Text Size › Larger Text to the largest size."
-          - "Open the app's Settings › Action Button & Shortcuts and scroll the whole screen."
-          - "Turn on VoiceOver and swipe through \"Set Up Transcribe Voice\" and \"Set Up a Shortcut\"."
-          - "Turn VoiceOver off and restore the text size."
-        expected: "No text is clipped or overlapping at the largest size. VoiceOver reads each step as one sensible element, in order. The copy does not promise clipboard-only results or recording without unlocking."
-        final_gate: false
-      - id: "iphone-shortcut-toggle-and-state"
-        issue: 954
-        title: "Toggle Recording shortcut still works; control state stays in sync"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "In Shortcuts create a shortcut with only Just Speak to It Alpha › Toggle Recording; name it \"JS Toggle\"."
-          - "Run it, say \"shortcut test\", run it again to stop, then paste into Notes."
-          - "Press and hold the Action Button to start, open the app and tap its Stop button."
-          - "Open Control Center and look at Transcribe Voice; then press the Action Button briefly to read its hint."
-        expected: "The shortcut starts and stops recording and Notes receives \"shortcut test\". After the in-app Stop, Transcribe Voice shows \"Transcribe\" and the Action Button hint reads \"Start dictation\" within a few seconds; no second recording starts."
-        final_gate: false
-      - id: "iphone-clipboard-raw-immediate"
-        issue: 934
-        title: "Copy & Polish: immediate and delayed paste both give raw text"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "Destination = Copy & Polish with a working OpenRouter key"
-        steps:
-          - "Press and hold the Action Button to start, say \"raw clipboard one, um, test\", press and hold again to stop."
-          - "Within 2 seconds, switch to Notes and paste."
-          - "Open Just Speak, then return to Notes."
-          - "Wait 20 seconds and paste again."
-          - "Open History and open the newest item."
-        expected: "Both pastes contain the raw words (fillers included); never \"Polishing… please wait\" or any placeholder. The History item shows the polished version."
+          - "Force-quit Just Speak to It in the App Switcher."
+          - "From the Home Screen, press and hold the Action Button, say \"raw clipboard, um, test\", then press and hold again to stop."
+          - "Within 2 seconds paste into Notes."
+          - "In Notes type MARKER, select it and tap Copy."
+          - "Wait 20 seconds, paste again, then open History."
+        expected: "First paste is the raw words (fillers included), never a placeholder. Second paste is MARKER (polish did not overwrite your copy). History has exactly one item, showing the polished text. Recording started from cold and no Live Activity lingers."
         final_gate: true
-      - id: "iphone-clipboard-intervening-copy"
-        issue: 934
-        title: "A copy made while polishing is not overwritten"
+      - id: "iphone-clipboard-locked"
+        issues:
+          - 934
+        title: "Stop while locked, then unlock and paste raw text"
         minutes: 3
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "Destination = Copy & Polish with a working OpenRouter key"
+        core: true
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
         steps:
-          - "Press and hold the Action Button to start, say \"raw clipboard two\", press and hold to stop."
-          - "Immediately in Notes, type MARKER2, select it and tap Copy."
-          - "Wait 20 seconds, then paste."
-          - "Open History."
-        expected: "Paste gives MARKER2. History shows the polished \"raw clipboard two\"."
+          - "Press and hold the Action Button, say \"locked stop\", then press the side button to lock."
+          - "While locked, stop with the Action Button or the Lock Screen Stop button."
+          - "Wait 20 seconds, unlock and paste into Notes."
+        expected: "Paste is the raw \"locked stop\"; History has one polished item. No placeholder. Add your iOS version and whether Stop needed an unlock to any Fail note."
         final_gate: true
-      - id: "iphone-clipboard-locked-stop"
-        issue: 934
-        title: "Stop while locked, then unlock and paste the raw transcript"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "Destination = Copy & Polish with a working OpenRouter key"
-        steps:
-          - "Press and hold the Action Button to start, say \"locked stop three\", then press the side button to lock."
-          - "While locked, stop with the Action Button (or the Live Activity Stop on the Lock Screen)."
-          - "Wait 20 seconds, unlock, open Notes and paste."
-          - "Open History."
-        expected: "Paste gives the raw \"locked stop three\" and History has one item with polished text. No placeholder. Note your iOS version and whether stopping needed an unlock."
-        final_gate: true
-      - id: "iphone-cold-launch-hardware-recording"
-        issue: 1117
-        title: "Cold launch Action Button recording with delayed polish"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "Destination = Copy & Polish with a working OpenRouter key"
-        steps:
-          - "Force-quit Just Speak in the App Switcher."
-          - "From the Home Screen, press and hold the Action Button to start, say \"cold launch check\", press and hold again to stop."
-          - "Paste into Notes within 5 seconds, then wait 20 seconds."
-          - "Check the Lock Screen and Dynamic Island, then open History."
-        expected: "Recording starts from cold (note any unlock or open-app prompt). Paste gives the raw text. History has exactly one \"cold launch check\" item with polished text. No Live Activity remains or reappears after stop."
-        final_gate: true
-      - id: "iphone-interruption-stop"
-        issue: 1117
-        title: "Siri interruption keeps the recording's text and recovers"
+      - id: "iphone-siri-interruption"
+        issues:
+          - 1117
+        title: "Siri interruption keeps the text and the next recording works"
         minutes: 3
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
+        core: true
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
         steps:
           - "Tap the mic in the app and say \"before interruption\"."
           - "Hold the side button to invoke Siri, then dismiss Siri."
-          - "If still recording, say \"after interruption\" and tap Stop; otherwise read the message shown."
-          - "Open History, then make and stop a new short recording."
-        expected: "The recording either continues or stops with a clear message. History has one item containing \"before interruption\" (no duplicate). The app never shows Recording while no words arrive, and the new recording works."
+          - "If still recording, tap Stop; then make and stop a new short recording."
+        expected: "The recording continued or stopped with a clear message; History has one item with \"before interruption\" (no duplicate) and the new recording works."
         final_gate: true
-      - id: "iphone-focus-history-only"
-        issue: 1014
-        title: "Focus filter forces History Only and shows it"
+      - id: "iphone-focus-filter"
+        issues:
+          - 1014
+        title: "Focus filter forces History Only, and only for runs it started"
+        minutes: 6
+        core: true
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        steps:
+          - "iOS Settings \u203a Focus \u203a Do Not Disturb \u203a Add Filter \u203a Just Speak to It Alpha \u203a Capture Overrides: Destination = History Only."
+          - "Turn Do Not Disturb on, copy MARKER2 in Notes, then press and hold the Action Button and open the app."
+          - "Check the line under the status, say \"focus one\", stop, and paste in Notes."
+          - "Start another recording with the Action Button, say \"focus two\", turn Do Not Disturb off in Control Center, stop, and paste."
+          - "Record \"focus three\" with the Action Button, stop, and paste."
+          - "Clean up: delete the filter and tap Reset Stored Override in the app's Settings \u203a Focus Capture Overrides."
+        expected: "The app shows \"Save to History Only \u00b7 Focus\". The first two pastes give MARKER2 (no clipboard write; History has \"focus one\" and \"focus two\"). The third paste gives \"focus three\"."
+        final_gate: true
+      - id: "iphone-bluetooth-local"
+        issues:
+          - 935
+        title: "AirPods route changes: on-device capture and hands-free stay truthful"
         minutes: 5
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "A Focus you can toggle (Do Not Disturb works)"
+        core: true
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
         steps:
-          - "In iOS Settings › Focus › Do Not Disturb › Add Filter, choose Just Speak to It Alpha › Capture Overrides, set Destination to History Only, tap Add."
-          - "Turn Do Not Disturb on in Control Center, then in Notes copy the word MARKER4."
-          - "Press and hold the Action Button to start, open the app and read the line under the status."
-          - "Say \"focus history only\", stop with the Action Button, then paste in Notes."
-          - "In the app open Settings › Focus Capture Overrides."
-        expected: "While recording the app shows \"Save to History Only · Focus\". Paste gives MARKER4 (no clipboard write). History has \"focus history only\" with no polish. Settings shows \"Last received: Save to History Only\"."
-        final_gate: true
-      - id: "iphone-focus-change-mid-recording"
-        issue: 1014
-        title: "Turning Focus off mid-recording doesn't redirect that run"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "With Do Not Disturb still on, copy MARKER5 in Notes."
-          - "Press and hold the Action Button to start and say \"focus switch one\"."
-          - "Turn Do Not Disturb off in Control Center, stop with the Action Button, then paste in Notes."
-          - "Record \"focus switch two\" with the Action Button, stop, and paste."
-          - "Clean up: delete the filter in iOS Settings › Focus › Do Not Disturb, then tap Reset Stored Override in the app."
-        expected: "First paste gives MARKER5 and History has \"focus switch one\" (the active run kept History Only). Second paste gives \"focus switch two\" (normal Copy & Polish once Focus is off)."
-        final_gate: true
-      - id: "iphone-bt-apple-live"
-        issue: 935
-        title: "Apple on-device capture: AirPods connect mid-recording"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "AirPods (or another Bluetooth headset) paired, in their case"
-        steps:
-          - "Set Settings › Transcription › Where transcription runs = Local (Apple SpeechTranscriber)."
-          - "Tap the mic, say \"alpha one two three\" and keep talking."
-          - "Take the AirPods out and put them in; once connected, say \"bravo four five six\"."
-          - "If still recording, tap Stop. Read any message, then open History."
-          - "Make and stop a new short recording."
-        expected: "Either recording carried on (both phrases in History) or it stopped with \"The microphone changed and recording stopped.\" and History still has \"alpha one two three\". The app never shows Recording while no words appear. The new recording works. Note which outcome."
-        final_gate: true
-      - id: "iphone-hands-free-onset"
-        issue: 614
-        title: "Hands-free: speech starts capture fast, silence ends it"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "iOS 26 or later"
-        steps:
-          - "In Settings › Behavior turn on Hands-Free Dictation (Local Apple SpeechTranscriber still selected)."
-          - "Tap the mic button (Arm hands-free dictation) and wait for the indicator to read Armed."
-          - "Say \"Go, quick start check\", then stay silent."
-          - "Watch the indicator until it finishes by itself, then open History."
-        expected: "Indicator goes Armed → Recording as you start speaking (well under half a second), then Finalising → Armed after you go quiet, without tapping Stop. History has one item starting with \"Go\" (first word not clipped)."
-        final_gate: false
-      - id: "iphone-hands-free-silence"
-        issue: 614
-        title: "Hands-free: nothing is captured while silent"
-        minutes: 3
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "iOS 26 or later"
-        steps:
-          - "Arm hands-free and leave the iPhone in a quiet room for 60 seconds without speaking."
-          - "Watch the indicator during that minute."
-          - "Tap the mic button to disarm and open History."
-        expected: "The indicator stays Armed for the whole minute and never shows Recording. No new History item is created."
-        final_gate: false
-      - id: "iphone-bt-hands-free"
-        issue: 935
-        title: "Hands-free survives a harmless route change; utterance kept"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "AirPods (or another Bluetooth headset) paired, in their case"
-          - "iOS 26 or later"
-        steps:
-          - "With AirPods in the case, arm hands-free and wait for Armed."
-          - "Put the AirPods in; once connected, say \"armed route check\" and wait for it to finish."
+          - "With AirPods in the case, tap the mic and say \"alpha one two three\"; put the AirPods in and, once connected, say \"bravo four five six\", then stop if still recording."
+          - "Settings \u203a Behavior: turn Hands-Free Dictation on, tap the mic to arm and wait for Armed."
           - "Say a long sentence starting \"utterance kept\" and, mid-sentence, put the AirPods back in the case."
-          - "Read the indicator and any message, then open History."
-        expected: "After connecting, the indicator either stays Armed and \"armed route check\" records normally, or it disarms with a clear message (never Armed but deaf). The interrupted utterance is saved as one History item containing \"utterance kept\", and the indicator shows Armed or Off truthfully."
+          - "Read the indicator and any message, disarm, then open History."
+        expected: "Each run either carried on or stopped with \"The microphone changed and recording stopped.\" Nothing shows Recording or Armed while deaf. History keeps \"alpha one two three\" and one item with \"utterance kept\". A new recording works afterwards."
         final_gate: true
-      - id: "iphone-bt-openai-realtime"
-        issue: 935
-        title: "OpenAI Realtime capture: AirPods disconnect mid-recording"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "AirPods (or another Bluetooth headset) paired, in their case"
-          - "OpenAI API key saved"
+      - id: "iphone-bluetooth-remote"
+        issues:
+          - 935
+        title: "AirPods route changes: OpenAI Realtime and Deepgram streaming"
+        minutes: 5
+        core: true
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
         steps:
           - "Set Where transcription runs = Remote, Remote Mode = Streaming, model = OpenAI GPT Live Transcribe (Streaming)."
-          - "With AirPods in your ears and connected, tap the mic and say \"charlie one two three\"."
-          - "Put the AirPods back in the case and say \"delta four five six\"."
-          - "If still recording, tap Stop. Read any message, open History, then make a new short recording."
-        expected: "Either recording carried on via the iPhone mic, or it stopped with \"The microphone changed and recording stopped.\" History keeps \"charlie one two three\", nothing shows Recording without new text, and the new recording works. Note which outcome."
-        final_gate: true
-      - id: "iphone-bt-shared-client"
-        issue: 935
-        title: "Shared streaming backend: AirPods connect mid-recording"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "AirPods (or another Bluetooth headset) paired, in their case"
-          - "Deepgram API key saved (any non-OpenAI streaming provider works)"
-        steps:
-          - "Set the Remote Streaming Model to Deepgram Nova-3 (Streaming)."
-          - "With AirPods in the case, tap the mic and say \"echo one two three\"."
-          - "Put the AirPods in; once connected, say \"foxtrot four five six\"."
-          - "If still recording, tap Stop. Read any message, open History, then make a new short recording."
-        expected: "Either recording carried on (both phrases in History) or it stopped with \"The microphone changed and recording stopped.\" and History keeps \"echo one two three\". Nothing shows Recording without new text; the new recording works. Note which outcome."
-        final_gate: true
-      - id: "iphone-openrouter-stt-picker"
-        issue: 821
-        title: "OpenRouter speech-to-text picker on iPhone"
-        minutes: 5
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "Spend cap decision approved (one short paid OpenRouter transcription from existing credit only)"
-          - "OpenRouter API key saved"
-        steps:
-          - "Set Remote Mode = Batch, then tap Browse OpenRouter Audio."
-          - "Wait for the list, type \"mai\" in Search models, then try the Provider filter."
-          - "Open MicrosoftAI: MAI-Transcribe 2 and tap Use for transcription."
-          - "On the main screen record \"the blue bicycle is parked beside the library\" and stop."
+          - "With AirPods connected, tap the mic, say \"charlie one two three\", put the AirPods in the case, say \"delta four\", then stop if still recording."
+          - "Switch the Remote Streaming Model to Deepgram Nova-3 (Streaming)."
+          - "With AirPods in the case, tap the mic, say \"echo one two three\", put the AirPods in, say \"foxtrot four\", then stop if still recording."
           - "Open History, then set Where transcription runs back to Local."
-        expected: "The catalogue loads with an \"Updated\" time; search and provider filter narrow the list. Remote Batch Model shows \"OpenRouter · microsoft/mai-transcribe-2\". The recording transcribes and History names that model; any error is readable."
-        final_gate: false
-      - id: "iphone-keyboard-setup-full-access"
-        issue: 661
-        title: "Keyboard setup, Full Access on/off and no extension mic prompt"
+        expected: "For both providers: recording carried on or stopped with \"The microphone changed and recording stopped.\"; History keeps the first phrase; nothing shows Recording without new text; the next recording works."
+        final_gate: true
+      - id: "iphone-shortcuts-last-transcript"
+        issues:
+          - 1016
+        title: "Shortcuts: Get Last Transcript works and needs unlock when locked"
         minutes: 5
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
+        core: true
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
         steps:
-          - "In the app open Settings › Set Up Keyboard and follow it: add Just Speak to It Alpha under iOS Settings › General › Keyboard › Keyboards, turn on Allow Full Access, then Enable Instant Dictation."
-          - "In Notes, hold the globe key, pick Just Speak and check the app's setup screen now reports Full Access on."
-          - "Turn Allow Full Access off in iOS Settings, return to Notes and open the keyboard."
-          - "Turn Allow Full Access back on and reopen the keyboard."
-        expected: "With Full Access off the keyboard explains it is blocked, cannot record and inserts nothing. With it on, it shows \"Instant Dictation ready. Tap the mic to speak.\" The keyboard never shows a microphone or Speech permission prompt."
-        final_gate: false
-      - id: "iphone-keyboard-handoff-notes-whatsapp"
-        issue: 661
-        title: "Keyboard dictation inserts once in Notes and WhatsApp"
+          - "In Shortcuts create \"JS Last\": Just Speak to It Alpha \u203a Get Last Transcript, then Show Result of its Raw Text and Polished Text."
+          - "Run it, force-quit Shortcuts, reopen and run it again."
+          - "Lock the iPhone and say \"Hey Siri, JS Last\"; unlock when asked."
+        expected: "Both runs show the newest recording's raw and polished text, matching History. When locked, nothing is shown or spoken until you authenticate."
+        final_gate: true
+      - id: "iphone-clipboard-privacy-mac"
+        issues:
+          - 994
+        title: "Clipboard: expires on iPhone, reaches the Mac only when opted in"
+        minutes: 7
+        core: true
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        steps:
+          - "App Settings \u203a Privacy Information \u203a Clipboard: Transcript expiry = 1 minute, Allow Universal Clipboard off."
+          - "On the Mac copy MACMARK; on the iPhone record \"local only\" with the Action Button and stop."
+          - "Within 30 seconds press Cmd+V on the Mac, then paste in iPhone Notes."
+          - "Wait 90 seconds and paste on the iPhone again."
+          - "Turn Allow Universal Clipboard on, record \"universal check\" and stop; within 30 seconds paste on the Mac."
+          - "Set Allow Universal Clipboard off and expiry back to 5 minutes."
+        expected: "Mac pastes MACMARK and the iPhone pastes \"local only\"; after 90 seconds the iPhone pastes nothing. With the opt-in, the Mac pastes \"universal check\". The settings text says Mac copies may not expire."
+        final_gate: true
+      - id: "iphone-controls-and-hints"
+        issues:
+          - 954
+        title: "Control Center, Action Button hints and Lock Screen control"
         minutes: 6
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
+        core: false
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
         steps:
-          - "In an empty note open the Just Speak keyboard, tap the mic, say \"first sentence\", tap Stop."
-          - "Tap the mic again, say \"second sentence\", tap Stop."
-          - "Type a 👍 at the end, then dictate \"after emoji\"."
-          - "Repeat the first two dictations in a WhatsApp chat field (don't send)."
-          - "Open the app's History."
-        expected: "Recording runs through Just Speak (e.g. \"Listening via Just Speak…\") with no keyboard permission prompt. Each dictation is inserted exactly once with one space between sentences; the second appends after the first; the emoji is intact. WhatsApp behaves the same. History has one item per dictation with the app's model."
+          - "Read the app's Settings \u203a Action Button & Shortcuts \u203a Set Up Transcribe Voice and follow it to add Transcribe Voice to Control Center."
+          - "Tap the control to record \"control test\", tap again to stop, and paste."
+          - "Press the Action Button briefly and read the hint; press and hold to start, press briefly and read the hint, press and hold to stop."
+          - "Add Transcribe Voice to a Lock Screen bottom slot, then start and stop from the Lock Screen."
+        expected: "Written steps match the real pickers. Hints read \"Start dictation\" when idle and \"Stop dictation\" while recording. Each route records once and pastes; note any unlock prompt. Needs iOS 18 and 26 evidence to close #954."
         final_gate: false
-      - id: "iphone-keyboard-cancel-reconnect"
-        issue: 661
-        title: "Keyboard cancel and reconnect after force-quit"
-        minutes: 5
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
+      - id: "iphone-transcript-alerts"
+        issues:
+          - 1017
+        title: "Transcript Ready alerts: delivery, privacy and denied state"
+        minutes: 6
+        core: false
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
         steps:
-          - "In Notes tap the mic, say a few words and tap Cancel before it finishes."
-          - "Force-quit Just Speak in the App Switcher, return to Notes, open the keyboard and tap the mic."
-          - "Follow the on-screen reconnect guidance (open Just Speak once or Reconnect Now) and return to Notes."
-          - "Dictate \"after reconnect\"."
-        expected: "Cancel shows \"Cancelled. Nothing was inserted.\" and the note is unchanged. After force-quit the keyboard shows reconnect guidance and changes nothing. After reconnecting, \"after reconnect\" is inserted once and no earlier words reappear."
+          - "Settings \u203a Behavior: Live Activities off; Settings \u203a Saved Results: Transcript Ready Alerts on, Allow."
+          - "Start a recording, say \"alert one\", go Home, stop with Transcribe Voice in Control Center, then tap the banner."
+          - "Start a recording, say \"alert two\", lock, stop with the Action Button, then use the alert's Open History."
+          - "Record once with the app in the foreground."
+          - "Turn Live Activities back on."
+        expected: "One banner with no transcript text each time; tapping opens the exact History item (unlock first when locked). No alert for the foreground recording."
         final_gate: false
-      - id: "iphone-keyboard-target-change"
-        issue: 661
-        title: "Keyboard result never lands in a changed field"
+      - id: "iphone-keyboard-v2"
+        issues:
+          - 661
+        title: "Keyboard: setup, insert once in Notes and WhatsApp, cancel"
+        minutes: 7
+        core: false
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        steps:
+          - "iOS Settings \u203a General \u203a Keyboard \u203a Keyboards \u203a Add: Just Speak; turn Allow Full Access on."
+          - "In Notes switch to the Just Speak keyboard, tap the mic, say \"keyboard notes\" and stop."
+          - "Do the same in a WhatsApp chat with \"keyboard whatsapp\"."
+          - "Start once more and tap Cancel."
+        expected: "Each dictation inserts exactly once with a leading space where needed; Cancel inserts nothing; no microphone prompt appears inside the keyboard. Still needs an iOS 17 iPhone and iPad to close #661."
+        final_gate: false
+      - id: "iphone-hands-free"
+        issues:
+          - 614
+        title: "Hands-free: fast start on speech, no capture in silence"
         minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
+        core: false
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
         steps:
-          - "In Notes tap the mic and start speaking."
-          - "While speaking, switch to a different note (or Messages field), then tap Stop if shown."
-          - "Check both fields."
-          - "Start another dictation, move the caret to the start of the text mid-request, then stop."
-        expected: "The new field gets nothing (e.g. \"The destination changed, so nothing was inserted.\") and the original note is unchanged. The caret-move run inserts once at a sensible place or inserts nothing; existing text is never overwritten or garbled."
+          - "Settings \u203a Behavior: Hands-Free Dictation on; arm with the mic button."
+          - "Say \"Go quick start\", then stay silent until it finishes."
+          - "Stay silent for 60 more seconds, then disarm and open History."
+        expected: "Armed \u2192 Recording as you start speaking, then back to Armed after silence without tapping Stop. History has one item starting \"Go\"; nothing is recorded during the silent minute."
         final_gate: false
-      - id: "iphone-keyboard-limits-accessibility"
-        issue: 661
-        title: "Keyboard: secure fields, landscape, VoiceOver, large text"
-        minutes: 5
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "Tap a password field (e.g. a Safari login) and a phone-number field; see which keyboard appears."
-          - "In Notes, rotate to landscape with Just Speak open; use globe, delete and return."
-          - "Turn on VoiceOver and swipe across the keys, then start and stop one dictation."
-          - "Turn VoiceOver off, set the largest Larger Text size, reopen the keyboard, then restore the size."
-        expected: "Password and phone-pad fields show the system keyboard, not Just Speak. Landscape fits with no clipped keys; globe, delete and return work. VoiceOver reads the mic as \"Start dictation\" (\"Stop dictation\" while recording) plus \"Delete backward\", \"Return\", \"Next keyboard\". Large text doesn't clip."
-        final_gate: false
-      - id: "iphone-keyboard-language-switch"
-        issue: 661
-        title: "Keyboard picks up the app's language and its quick-switch"
+      - id: "iphone-history-upgrade"
+        issues:
+          - 1118
+        title: "iPhone: existing History survives the update"
         minutes: 3
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
+        core: false
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
         steps:
-          - "In the app change Settings › Language › Spoken Language to another language you can speak."
-          - "Without reopening the app, open the Just Speak keyboard in Notes and check the language chip."
-          - "Tap the chip to switch, dictate a short phrase, then switch back."
-          - "Restore Spoken Language in the app."
-        expected: "The keyboard shows the new language without relaunching the app; the chip switches language; History shows the dictation with the chosen language and the app's model (no silent model substitution)."
+          - "Before updating, note the text of your newest two History items."
+          - "Update in TestFlight and open History."
+          - "Record once, force-quit, reopen and check History."
+        expected: "Older items are unchanged and the new recording survives the relaunch."
         final_gate: false
-      - id: "iphone-keyboard-insert-receipt"
-        issue: 1117
-        title: "Keyboard dictation: one insert, one History item, no stray activity"
-        minutes: 2
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "In Notes copy the word MARKER3."
-          - "Switch to the Just Speak keyboard, tap the mic, say \"keyboard receipt\", tap Stop."
-          - "Switch to the standard keyboard and paste."
-          - "Open the app's History and check the Lock Screen."
-        expected: "\"keyboard receipt\" is inserted once. Paste gives either MARKER3 or the raw transcript (both are fine), never placeholder text. History has exactly one matching item and no Live Activity lingers."
-        final_gate: true
-      - id: "iphone-shortcuts-get-last-transcript"
-        issue: 1016
-        title: "Shortcuts: Get Last Transcript returns its properties"
-        minutes: 5
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "Make sure History has a recent polished recording."
-          - "In Shortcuts create a shortcut; search Just Speak to It Alpha and add Get Last Transcript."
-          - "Add Show Result actions for its Raw Text, Polished Text, Created At and Duration in Seconds; name it \"JS Last\"."
-          - "Run it with the iPhone unlocked."
-          - "Force-quit Shortcuts, reopen and run the saved \"JS Last\" again."
-        expected: "Get Last Transcript is listed under the app's actions (next to the older Get Last Transcription). Both runs show the newest recording's raw text, polished text, creation time and duration, matching History."
-        final_gate: true
-      - id: "iphone-shortcuts-auth-locked"
-        issue: 1016
-        title: "Get Last Transcript needs unlock before showing text"
-        minutes: 2
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "Lock the iPhone."
-          - "Say \"Hey Siri, JS Last\"."
-          - "Unlock when asked."
-        expected: "No transcript text is spoken or shown until you authenticate; iOS asks for Face ID or passcode and shows the result only afterwards."
-        final_gate: true
-      - id: "iphone-transcript-alert-delivery"
-        issue: 1017
-        title: "Transcript Ready alert arrives and opens the exact History item"
-        minutes: 5
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "In Settings › Behavior turn Live Activities off."
-          - "In Settings › Saved Results turn on Transcript Ready Alerts and tap Allow."
-          - "Start a recording in the app, say \"alert check one\", go to the Home Screen, then stop with Transcribe Voice in Control Center."
-          - "Wait for the banner, then tap it."
-        expected: "One banner \"Transcript ready\" / \"Open History to view your saved transcription\" appears, with no transcript text. Tapping it opens Just Speak on the \"alert check one\" History item."
-        final_gate: false
-      - id: "iphone-transcript-alert-locked-suppressed"
-        issue: 1017
-        title: "Locked alert is private; no alert for foreground or empty runs"
-        minutes: 5
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "Start a recording in the app, say \"alert check two\", lock the iPhone, then stop with the Action Button."
-          - "On the Lock Screen long-press the alert and tap Open History; unlock when asked."
-          - "With the app open in the foreground, record and stop \"foreground check\"."
-          - "Start a recording in the app, say \"(nothing — stay silent)\", go to the Home Screen, then stop with Transcribe Voice in Control Center."
-        expected: "Locked: one alert with no transcript text; Open History asks to unlock, then opens \"alert check two\". No alert for the foreground recording or the silent one."
-        final_gate: false
-      - id: "iphone-transcript-alert-denied"
-        issue: 1017
-        title: "Denied notifications: clear state, no alert, History still saved"
-        minutes: 3
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "In iOS Settings › Notifications › Just Speak to It Alpha turn Allow Notifications off."
-          - "In the app turn Transcript Ready Alerts off, then on."
-          - "Start a recording in the app, say \"denied check\", go to the Home Screen, then stop with Transcribe Voice in Control Center."
-          - "Open History, then turn Allow Notifications back on."
-        expected: "The app shows \"Alerts are off. Allow notifications for Just Speak in iOS Settings, then enable this option.\" No alert arrives, and \"denied check\" is in History."
-        final_gate: false
-      - id: "iphone-transcript-alert-automation"
-        issue: 1017
-        title: "iOS 27 notification automation fires on Transcript Ready"
-        minutes: 5
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "iOS 27"
-        steps:
-          - "In Shortcuts › Automation tap +, choose the app-notification trigger, pick Just Speak to It Alpha, keyword \"Transcript ready\", Run Immediately."
-          - "Add actions: Get Last Transcript, then Append to Note (a test note) with its Raw Text."
-          - "Start a recording in the app, say \"automation check\", go to the Home Screen, then stop with Transcribe Voice in Control Center."
-          - "Open the test note, then turn Live Activities back on and delete the automation."
-        expected: "The automation runs once and the note gets \"automation check\". Note which trigger fields iOS offered and any authentication prompt."
-        final_gate: false
-      - id: "iphone-clipboard-expiry-settings"
-        issue: 994
-        title: "Clipboard notice/settings and 1-minute expiry on iPhone"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        steps:
-          - "If the main screen shows the \"Clipboard privacy updated\" card, read it and tap Got it."
-          - "Open Settings › Privacy Information › Clipboard: set Transcript expiry to 1 minute; leave Allow Universal Clipboard off."
-          - "Press and hold the Action Button to start, say \"expiry check\", stop, and paste into Notes immediately."
-          - "Wait 90 seconds and paste again."
-        expected: "The card and summary say copies expire after the chosen time and Universal Clipboard is off. First paste gives \"expiry check\"; after 90 seconds nothing pastes. History still has the item."
-        final_gate: true
-      - id: "iphone-clipboard-local-only-mac"
-        issue: 994
-        title: "Default: transcript does not reach the Mac clipboard"
-        minutes: 3
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "Mac on the same Apple ID, Handoff on, unlocked and nearby"
-        steps:
-          - "On the Mac copy the word MACMARK."
-          - "On the iPhone (Allow Universal Clipboard off), record \"local only check\" with the Action Button and stop."
-          - "Within 30 seconds press Cmd+V in a Mac text editor."
-          - "Paste on the iPhone in Notes."
-        expected: "The Mac pastes MACMARK (the transcript did not cross). The iPhone pastes \"local only check\"."
-        final_gate: true
-      - id: "iphone-clipboard-universal-optin-mac"
-        issue: 994
-        title: "Universal Clipboard opt-in reaches the Mac; iPhone copy expires"
-        minutes: 4
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later (alpha-build-45, main 9146079e, 3 Nov 2026)"
-        prerequisites:
-          - "Mac on the same Apple ID, Handoff on, unlocked and nearby"
-        steps:
-          - "On the iPhone turn on Allow Universal Clipboard (expiry still 1 minute) and read the summary text."
-          - "Record \"universal check\" with the Action Button and stop."
-          - "Within 30 seconds paste on the Mac."
-          - "Wait 2 minutes, then paste on the iPhone and on the Mac."
-          - "Turn Allow Universal Clipboard off and set Transcript expiry back to 5 minutes."
-        expected: "The summary says Universal Clipboard is on and expiry on another device is not guaranteed. The Mac pastes \"universal check\". After 2 minutes the iPhone pastes nothing; note whether the Mac still pastes it (allowed)."
-        final_gate: true
   - id: "watch"
     device: "Watch"
-    title: "Apple Watch + iPhone session"
+    title: "Apple Watch + iPhone"
     setup:
-      - "Hardware: Double Tap-capable Apple Watch (Series 9 or later, or Ultra 2) on watchOS 11+, paired with an iPhone on iOS 18+. Both unlocked, above 50% battery, Bluetooth and Wi-Fi on."
-      - "Part 1 (#963) uses the current iOS TestFlight app (Just Speak to It Alpha 3.2.0, build 1000.0.45 or later). No watch app is needed. Do Part 1 before installing anything from Xcode."
-      - "iPhone: Settings > Just Speak to It Alpha > Live Activities on. iPhone Watch app > Smart Stack > Live Activities on. Watch: Settings > Gestures > Double Tap on."
-      - "iPhone: open Control Center, tap +, Add a Control, search \"Just Speak\" and add \"Transcribe Voice\" (it shows as \"Transcribe\"). Make sure a transcription model with a working key is selected in the app."
-      - "Part 2 (#657, #659) needs the feature-flagged watch app, which is not in TestFlight. Only run it if the watch provisioning decision is \"Dev build now\". One-time, in developer.apple.com > Identifiers: register com.justspeaktoit.ios.watchkitapp and com.justspeaktoit.ios.watchkitapp.complication, register App Group group.com.justspeaktoit.watch, and enable App Groups with that group on both ids (Docs/watch-provisioning.md steps 1 to 3, about 10 minutes)."
-      - "Watch: Settings > Privacy & Security > Developer Mode on (restart when asked). iPhone Watch app > General > Automatic App Install on."
-      - "Mac, on current main: run TUIST_WATCH_APP=1 tuist generate, open \"Just Speak to It.xcworkspace\", pick the SpeakiOS scheme and your iPhone, then Run with automatic signing. If the watch app is not on the Watch after 3 minutes, run the JustSpeakWatchApp scheme with the Watch as the destination."
-      - "The Xcode build installs the Stable app \"Just Speak to It\", next to the Alpha app. Open it on the iPhone, allow the microphone and choose a transcription model with a working key. On the Watch, open Just Speak to It, tap Record, allow the microphone, then tap again to stop."
-      - "For the issue comments, write down the Watch model, watchOS version, iPhone build and the main SHA (git rev-parse --short HEAD)."
+      - "Double Tap-capable Watch (Series 9+, Ultra 2) on watchOS 11+, paired with the iPhone; Watch Settings \u203a Gestures \u203a Double Tap on."
+      - "iPhone Watch app \u203a Smart Stack \u203a Live Activities on; Transcribe Voice in iPhone Control Center."
+      - "Optional watch-app checks only: if you chose \"Dev build now\", register the watch ids and App Group (Docs/watch-provisioning.md steps 1-3), then build with TUIST_WATCH_APP=1 tuist generate and run the SpeakiOS scheme on your iPhone."
     items:
-      - id: "watch-liveactivity-tap-stop"
-        issue: 963
-        title: "Tap Stop on the Smart Stack Live Activity stops a locked iPhone"
-        minutes: 5
-        build: "Current iOS TestFlight build (Just Speak to It Alpha 3.2.0, build 1000.0.45 or later); no watch app"
-        prerequisites:
-          - "Live Activities on for the app and in the Watch app's Smart Stack settings"
-          - "\"Transcribe\" control added to iPhone Control Center"
+      - id: "watch-smart-stack-stop"
+        issues:
+          - 963
+        title: "Smart Stack card: tap and Double Tap stop a locked iPhone"
+        minutes: 7
+        core: true
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later; no watch app needed"
         steps:
-          - "On the iPhone, open Control Center and tap \"Transcribe\". Wait until the Lock Screen card shows Recording, then lock the iPhone and put it face down."
-          - "Raise the Watch and turn the Digital Crown up to open the Smart Stack. Find the small Just Speak to It card showing \"Recording\" with a red \"Stop\" button."
-          - "Say \"watch tap test one\", then tap \"Stop\" on the Watch card."
-          - "Unlock the iPhone and open History in Just Speak to It Alpha."
-        expected: "The Watch card leaves Recording within a few seconds (Finishing… or Processing…, then a completion message) and never shows Stop again. The iPhone's orange microphone indicator is gone. History has one new entry containing \"watch tap test one\", and the text also reached your configured destination (for example the clipboard)."
+          - "On the iPhone tap Transcribe Voice in Control Center, wait for Recording, then lock the iPhone."
+          - "Raise the Watch, open the Smart Stack, say \"watch tap\" and tap Stop on the small Just Speak to It card."
+          - "Start again the same way, say \"watch double tap\" and Double Tap (pinch twice) without touching the screen."
+          - "On the finished card, Double Tap again."
+          - "Start once more, wake the iPhone without unlocking and tap Stop on the full-size Lock Screen card."
+          - "Unlock and open History."
+        expected: "Both Watch stops end recording within a few seconds (iPhone mic indicator gone). The finished card has no Stop and Double Tap starts nothing. The Lock Screen card looks as before and its Stop works. History has exactly three new items."
         final_gate: true
-      - id: "watch-liveactivity-double-tap-stop"
-        issue: 963
-        title: "Double Tap stops a locked iPhone recording from the Smart Stack"
-        minutes: 4
-        build: "Current iOS TestFlight build (Just Speak to It Alpha 3.2.0, build 1000.0.45 or later); no watch app"
-        prerequisites:
-          - "Watch: Settings > Gestures > Double Tap on"
-        steps:
-          - "On the iPhone, tap \"Transcribe\" in Control Center, wait for Recording, then lock the iPhone."
-          - "Raise the Watch, open the Smart Stack and stop on the small card showing \"Recording\" and \"Stop\"."
-          - "Say \"watch double tap two\", then Double Tap (pinch index finger and thumb twice) without touching the screen."
-          - "Unlock the iPhone and open History."
-        expected: "The \"Stop\" button highlights, the card leaves Recording within a few seconds, the iPhone microphone indicator disappears, and History has exactly one new entry containing \"watch double tap two\"."
-        final_gate: true
-      - id: "watch-liveactivity-idle-no-start"
-        issue: 963
-        title: "Finished card cannot start recording; Lock Screen Stop still works"
-        minutes: 5
-        build: "Current iOS TestFlight build (Just Speak to It Alpha 3.2.0, build 1000.0.45 or later); no watch app"
-        prerequisites:
-          - "Run straight after the Double Tap check, while the finished card is still in the Smart Stack"
-        steps:
-          - "On the Watch Smart Stack, look at the finished Just Speak to It card and Double Tap twice, a few seconds apart."
-          - "Tap the card body once, then return to the watch face."
-          - "On the iPhone, check that no new recording started, then start one with \"Transcribe\" in Control Center and lock the phone."
-          - "Wake the iPhone (do not unlock), say \"lock screen three\" and tap \"Stop\" on the full-size Lock Screen Live Activity."
-        expected: "The finished Watch card has no Stop button and Double Tap does nothing: no recording starts and the iPhone shows no microphone indicator. The full-size iPhone Lock Screen card looks as before (timer and Stop button) and its Stop ends the recording; History has one entry containing \"lock screen three\"."
-        final_gate: true
-      - id: "watch-complication-start-stop"
-        issue: 657
-        title: "Complication and Smart Stack widget start, stop and show state"
+      - id: "watch-app-e2e"
+        issues:
+          - 657
+          - 659
+        title: "Watch app: complication start, 60 s wrist-down, delivered to iPhone"
         minutes: 8
-        build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (Stable app on iPhone and Watch)"
+        core: false
+        build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (see Watch setup)"
         prerequisites:
-          - "Watch provisioning done and both apps installed (see session setup)"
-          - "Watch microphone already allowed for Just Speak to It"
+          - "Decision: Dev build now, and watch provisioning done"
         steps:
-          - "Touch and hold the watch face, tap Edit, swipe to Complications. Put \"Record\" (under Just Speak to It) in one circular slot and one corner slot, then press the Digital Crown."
-          - "Open the Smart Stack, touch and hold, tap +, add the \"Just Speak to It\" widget, then tap Done."
-          - "Force-quit the watch app: press the side button, swipe left on Just Speak to It, tap X. Return to the face."
-          - "Tap the circular complication, say \"complication test four\" for about 5 seconds, then tap it again."
-          - "Open the Smart Stack and watch the Just Speak to It widget, then check iPhone History."
-        expected: "The first tap starts recording without opening the watch app's screen; the system microphone indicator shows and the glyph changes from mic to stop. The corner complication's curved label shows the short state. After the second tap the widget shows \"Sending to iPhone…\" then \"In history\" (glyph: arrow, then check). The widget sits near the top of the Smart Stack while sending. iPhone History has exactly one new entry containing \"complication test four\"."
+          - "Add the Just Speak to It \"Record\" complication to a watch face; note the Watch battery %."
+          - "Tap the complication, say \"marker alpha\" and lower your wrist so the screen sleeps."
+          - "Say \"marker bravo\" at about 30 s and \"marker charlie\" at about 60 s."
+          - "Raise the wrist and tap the complication to stop."
+          - "Watch the complication until it shows In history, then open iPhone History and note the battery % again."
+        expected: "Recording starts without opening the app screen and the timer reads about 1:05 when you raise the wrist. The complication goes Sending \u2192 In history. iPhone History has one entry with alpha, bravo and charlie. Add both battery readings to a Fail note or the issue."
         final_gate: true
-      - id: "watch-complication-rapid-taps"
-        issue: 657
-        title: "Rapid complication taps create exactly one capture"
-        minutes: 4
-        build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (Stable app on iPhone and Watch)"
+      - id: "watch-app-offline"
+        issues:
+          - 657
+          - 659
+        title: "Watch app: offline and force-quit captures still deliver once"
+        minutes: 7
+        core: false
+        build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (see Watch setup)"
         prerequisites:
-          - "Complication on the face from the previous check"
+          - "Decision: Dev build now, and watch provisioning done"
         steps:
-          - "Triple-tap the circular complication quickly. Wait 3 seconds and note whether it shows recording (stop glyph) or idle (mic glyph)."
-          - "If recording, say \"rapid five\" and tap once to stop. If idle, tap once, say \"rapid five\" and tap again to stop."
-          - "Open the watch app, tap Record, then tap the complication from the face to stop; say \"rapid six\" in between."
-          - "Wait for both captures to show \"In history\", then open iPhone History."
-        expected: "The complication never gets stuck or out of sync with the app. iPhone History has exactly one entry with \"rapid five\" and exactly one with \"rapid six\": no duplicates and no empty entries."
-        final_gate: true
-      - id: "watch-complication-phone-offline"
-        issue: 657
-        title: "Complication capture waits while the iPhone is offline, then delivers"
-        minutes: 5
-        build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (Stable app on iPhone and Watch)"
-        prerequisites:
-          - "Complication on the face"
-        steps:
-          - "On the iPhone, turn on Airplane Mode and make sure Bluetooth and Wi-Fi are off."
-          - "On the Watch, tap the complication, say \"offline seven\", tap again to stop."
-          - "Wait 1 minute and check the complication and the Smart Stack widget."
-          - "Turn Airplane Mode off on the iPhone (Bluetooth and Wi-Fi back on), wait up to 2 minutes, then open iPhone History."
-        expected: "While offline the widget stays on \"Sending to iPhone…\" (arrow glyph) and never shows Failed or Recording. After reconnecting it changes to \"In history\", and iPhone History has exactly one entry containing \"offline seven\"."
-        final_gate: true
-      - id: "watch-complication-force-quit-recovery"
-        issue: 657
-        title: "Force-quit mid-recording recovers a partial and no stuck Recording"
-        minutes: 8
-        build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (Stable app on iPhone and Watch)"
-        prerequisites:
-          - "iPhone online and nearby"
-        steps:
-          - "Tap the complication and say \"force quit eight\" for about 5 seconds."
-          - "While still recording, press the side button, swipe left on Just Speak to It and tap X."
-          - "Back on the face, watch the complication for up to 5 minutes without opening the app."
-          - "Open the watch app and look at the Captures list, then open iPhone History."
-        expected: "The complication does not stay on recording: it returns to idle (mic) within 5 minutes. After opening the app, the Captures list shows one capture of about 0:05 that moves to \"In history\" (not Failed). iPhone History has exactly one entry containing \"force quit eight\"."
-        final_gate: true
-      - id: "watch-wrist-down-60s"
-        issue: 659
-        title: "60-second wrist-down recording keeps all markers; note battery"
-        minutes: 5
-        build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (Stable app on iPhone and Watch)"
-        prerequisites:
-          - "Watch Low Power Mode off; same face and brightness throughout"
-        steps:
-          - "Open Watch Control Center and write down the battery percentage."
-          - "Open the watch app and tap Record. Say \"marker alpha\" straight away, then lower your wrist so the screen sleeps."
-          - "Keep the wrist down. Say \"marker bravo\" at about 30 seconds and \"marker charlie\" at about 60 seconds (use a phone or clock for timing)."
-          - "At about 65 seconds raise the wrist, tap Stop and note the elapsed time shown."
-          - "Wait for \"In history\", open iPhone History, then write down the Watch battery percentage again."
-        expected: "When you raise the wrist the timer is still running and reads about 1:05. iPhone History has one entry containing all three words: alpha, bravo and charlie. Add the before/after battery percentages to your result note (a 0 to 2% drop is expected)."
-        final_gate: true
-      - id: "watch-interrupted-offline-partial"
-        issue: 659
-        title: "Interrupted recording with iPhone offline gives one partial, no orphan"
-        minutes: 10
-        build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (Stable app on iPhone and Watch)"
-        prerequisites:
-          - "Mac with Xcode connected to the iPhone, with the Watch visible in Xcode > Window > Devices and Simulators"
-        steps:
-          - "Turn on iPhone Airplane Mode with Bluetooth and Wi-Fi off."
-          - "On the Watch, open the app, tap Record, say \"partial nine\" for about 10 seconds, then force-quit the app (side button, swipe left, X)."
-          - "Reopen the watch app and look at the Captures list."
-          - "Turn iPhone Airplane Mode off, wait up to 2 minutes, then check iPhone History."
-          - "In Xcode Devices and Simulators, select the Watch, select Just Speak to It under Installed Apps, choose Download Container from the … menu, then Show Package Contents and open AppData/Library/Application Support/Captures."
-        expected: "After reopening, the Captures list shows exactly one capture of about 0:10 with \"Waiting to send\" or \"Sending to iPhone…\" (not Failed). After reconnecting it shows \"In history\" and iPhone History has exactly one entry containing \"partial nine\". The Captures folder has no .m4a audio file left."
+          - "Turn on iPhone Airplane Mode (Bluetooth and Wi-Fi off)."
+          - "Tap the complication, say \"offline seven\", tap to stop."
+          - "Tap the complication, say \"force quit eight\" for 5 s, then force-quit the watch app (side button, swipe, X)."
+          - "Reopen the watch app, then turn Airplane Mode off and wait 2 minutes."
+          - "Open iPhone History."
+        expected: "While offline the captures wait (never Failed or stuck Recording). After reconnecting both show In history, and iPhone History has exactly one entry each for \"offline seven\" and \"force quit eight\"."
         final_gate: true

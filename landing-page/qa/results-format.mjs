@@ -28,7 +28,7 @@ export function formatResultsIssue({ catalogue, results, items, date, compact = 
   const lines = ['Submitted from https://justspeaktoit.com/qa. The results workflow comments on each linked issue.', ''];
   for (const entry of results) {
     const item = items[entry.id] || {};
-    const reference = item.issue ? ` (#${item.issue})` : '';
+    const reference = item.issues?.length ? ` (${item.issues.map(issue => `#${issue}`).join(', ')})` : '';
     if (entry.choice !== undefined) {
       const option = (item.options || []).find(candidate => candidate.id === entry.choice);
       lines.push(`- **Decision** ${item.title || entry.id}${reference}: ${option ? option.label : entry.choice}`);

@@ -34,19 +34,28 @@ For each linked issue it posts one comment:
 - **Skip:** no comment.
 - **Decision:** the question and the chosen option.
 
-A linked issue closes only when every catalogue check for that issue passed in
-the same submission and at least one of them has `final_gate: true`. The
+A linked issue closes only when every catalogue check with `final_gate: true`
+that lists it passed in the same submission and none of its checks failed.
+Other passes add evidence but never close an issue on their own. The
 workflow then posts a summary on the results issue and closes it. It skips a
 results issue it has already processed.
 
 ## Maintaining the catalogue
 
+- Every item must close or materially unblock an issue. Mark it `core: true`
+  when it should be done in the owner's next session, or `core: false` to
+  collapse it under Optional. Keep core time within about 40 minutes for the
+  iPhone, 15 each for the Watch and Mac, and 10 for decisions. The page shows
+  core minutes by device at the top.
+- Prefer one end-to-end scenario that verifies several issues (`issues:` takes
+  up to 8 numbers) over separate checks. Drop checks for behaviour already
+  covered by tests.
 - Group items by device session and order them to minimise setup changes. Give
   each check 3–7 imperative steps that use the app's exact labels, a single
   observable expected result, the build to use and a realistic `minutes`
   estimate.
-- Set `final_gate: true` only when passing every check for that issue leaves
-  nothing else to do before closing it.
+- Set `final_gate: true` only when passing it, together with the other final
+  gates for the same issues, leaves nothing else to do before closing them.
 - Decisions need 2–4 options, exactly one of them `recommended: true`, and a
   one-line consequence for each option.
 - After a submission closes an issue, remove that issue's checks. Keep IDs

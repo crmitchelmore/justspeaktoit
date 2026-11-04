@@ -74,6 +74,16 @@ public enum LinuxFiles {
     }
 }
 
+/// Flatpak runs the app in its own PID namespace, so another app's
+/// _NET_WM_PID cannot be resolved through /proc. Flatpak documents
+/// /.flatpak-info as the in-sandbox marker; unlike FLATPAK_ID it cannot be set
+/// from the environment.
+public enum LinuxSandbox {
+    public static let isFlatpak = FileManager.default.fileExists(atPath: "/.flatpak-info")
+    public static let profileNotice = "The Flatpak sandbox hides other apps' processes, "
+        + "so automatic app profiles cannot match. Normal app settings apply."
+}
+
 public enum LinuxX11 {
     public static var isAvailable: Bool { jsti_x11_available() == 1 }
 

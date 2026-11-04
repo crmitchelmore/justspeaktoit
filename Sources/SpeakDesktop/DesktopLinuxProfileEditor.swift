@@ -13,6 +13,7 @@ public enum DesktopLinuxProfileEditor {
     public static let notice = "Choose a profile manually for this app session, or use automatic matching. "
         + "On X11, automatic matching uses the captured target process's exact /proc/PID/exe path when available. "
         + "Wayland does not expose another app's identity here: choose a profile manually. "
+        + "Neither does X11 inside the Flatpak sandbox, which hides other apps' processes. "
         + "Window titles, WM_CLASS and browser URLs are never treated as executable identities."
 
     public static func escape(_ text: String) -> String {

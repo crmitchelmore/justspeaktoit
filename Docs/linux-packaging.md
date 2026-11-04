@@ -82,6 +82,17 @@ native synthetic checks from physical desktop acceptance. Interactive GNOME/KDE
 portal consent, physical microphone/output, Wayland shortcuts/insertion, login
 monitoring, Vulkan execution and ARM64 remain unqualified by this hosted check.
 
+### Sandbox limits on app awareness
+
+Flatpak gives the app its own PID namespace, so another X11 window's
+`_NET_WM_PID` cannot be resolved through `/proc`. In the installed Flatpak,
+automatic app profiles therefore never match, as on Wayland: the app reports
+that normal settings apply and the profile editor says so. Choose a profile
+manually. The installed check asserts that host processes stay hidden. The same
+missing identity means the X11 front-window guard can refuse automatic paste and
+leave the text on the clipboard; that guard is deliberately not loosened, and
+no host-process broker (`flatpak-spawn --host`) is added.
+
 ## Installing, updating and removing
 
 Each Alpha whose desktop qualification passed publishes the CI bundle as

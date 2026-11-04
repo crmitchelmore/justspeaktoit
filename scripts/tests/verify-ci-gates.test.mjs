@@ -139,20 +139,20 @@ function routingContext(event = 'pull_request', repository = 'crmitchelmore/just
   };
 }
 
-test('Apple CI routing keeps UI execution on hosted ARM and compilation on Intel', () => {
+test('Apple CI routing keeps every hosted macOS job on hosted ARM', () => {
   for (const id of ['build-ios', 'core-journey-fixture-ui']) {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
   for (const id of ['build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard']) {
-    assert.match(jobBodies[id], /^\s+runs-on: macos-26-intel$/m, id);
+    assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
-  assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
+  assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge|intel)/);
 });
 
 test('native pool still requires the exact reviewed source and trusted event', () => {
   for (const id of nativeEligibleJobs) {
     // Restore-only gates must share build-macos's hosted architecture to hit its cache.
-    const fallback = ['macos-26-intel'];
+    const fallback = ['macos-latest'];
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
       ['jsti-macos-build', 'macOS']);
     assert.deepEqual(route(id, routingContext(), {
@@ -178,7 +178,7 @@ test('native pool still requires the exact reviewed source and trusted event', (
 
 test('standalone iOS SwiftPM compilation stays hosted with no new native admission', () => {
   const body = jobBodies['build-ios-swiftpm'];
-  assert.match(body, /^\s+runs-on: macos-26-intel$/m);
+  assert.match(body, /^\s+runs-on: macos-latest$/m);
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
   assert.doesNotMatch(body, /if:|jsti-macos-build|bravo-mini-local/);
@@ -249,7 +249,7 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(body, /-testProductsPath "\$RUNNER_TEMP\/ios-test-products\/SpeakiOS.xctestproducts"/);
   assert.match(body, /name: Upload complete iOS XCTest log separately\n\s+if: always\(\)/);
   const products = jobBodies['build-ios-test-products'];
-  assert.match(products, /^\s+runs-on: macos-26-intel$/m);
+  assert.match(products, /^\s+runs-on: macos-latest$/m);
   assert.match(products, /^\s+timeout-minutes: 30$/m);
   assert.match(products, /TUIST_IOS_KEYBOARD=1 tuist generate/);
   assert.match(products, /xcodebuild build-for-testing/);

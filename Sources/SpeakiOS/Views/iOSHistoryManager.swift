@@ -128,6 +128,8 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         case .upsert(let item), .remote(let item):
             latestMutation[item.id] = revision
             latestInsertion[item.id] = revision
+        case .replaceIfUntouched(let item, _, _):
+            latestMutation[item.id] = revision
         case let .processed(id, _, _), let .error(id, _), .remove(let id), .remoteDelete(let id):
             latestMutation[id] = revision
         case .clear: latestClear = revision
@@ -220,6 +222,15 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         finishUpsert(await performAndWait(.upsert(item)), id: item.id)
     }
 
+    /// Offline transcript upgrade (issue #999). The untouched check runs on the
+    /// persistence worker, after every mutation admitted before it.
+    func replaceIfUntouchedAndWait(_ item: iOSHistoryItem, fingerprint: String, filedAt: Date) async -> Bool {
+        finishUpsert(
+            await performAndWait(.replaceIfUntouched(item, fingerprint: fingerprint, filedAt: filedAt)),
+            id: item.id
+        )
+    }
+
     private func finishUpsert(_ result: IOSHistoryPersistence.Result, id: UUID) -> Bool {
         if (latestMutation[id] ?? 0) <= result.revision { syncedIDs.remove(id); saveSyncedIDs() }
         guard result.durable else { return false }
@@ -289,6 +300,11 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
 
     private func finishRemoval(_ result: IOSHistoryPersistence.Result, clearingAll: Bool = false) {
         guard result.durable else { return }
+        if clearingAll {
+            OfflineTranscriptUpgradeStore.shared.removeAll()
+        } else {
+            OfflineTranscriptUpgradeStore.shared.remove(historyIDs: result.removedIDs)
+        }
         // A newer re-insertion owns its notifications and CloudKit row.
         let deleted = result.removedIDs.filter { ownsDeletion($0, result: result) }
         removeNotificationClaims(deleted)
@@ -460,6 +476,7 @@ extension iOSHistoryManager: HistorySyncDurabilityDelegate {
     public func didDeleteRemoteEntry(id: UUID) async {
         let result = await performAndWait(.remoteDelete(id))
         syncedIDs.remove(id)
+        OfflineTranscriptUpgradeStore.shared.remove(historyID: id)
         if result.durable { saveSyncedIDs() }
         if !result.durable { remoteRevision = max(remoteRevision, result.revision) }
         if ownsDeletion(id, result: result) {

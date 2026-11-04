@@ -193,9 +193,14 @@ public final class CaptureRecoveryCoordinator: ObservableObject {
 
     /// Re-transcribes a saved file with a named batch model. Offline upgrades
     /// (issue #999) use the model the capture was meant to run with.
-    static func transcribe(url: URL, model: String) async throws -> String {
+    /// `shouldProceed` is asked once credentials are ready, immediately before
+    /// the upload; declining throws `CancellationError` and sends nothing.
+    static func transcribe(
+        url: URL, model: String, shouldProceed: @MainActor () -> Bool = { true }
+    ) async throws -> String {
         let settings = AppSettings.shared
         await settings.ensureKeysLoaded()
+        guard shouldProceed() else { throw CancellationError() }
         // A failed Keychain load is not a missing key (issue #930): refuse
         // rather than submit the placeholder empty credential.
         try settings.requireAvailableCredentials(for: model, purpose: .batchTranscription)

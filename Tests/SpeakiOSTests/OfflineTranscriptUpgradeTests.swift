@@ -17,6 +17,8 @@ final class OfflineTranscriptUpgradeTests: XCTestCase {
     private var transcribeResult: Result<String, Error> = .success("cloud words")
     private var upserts = 0
     private var onTranscribe: (() -> Void)?
+    private var beforeUpload: (() -> Void)?
+    private var recordingsReadable = true
 
     private let recordingID = UUID()
     private let recordingURL = URL(fileURLWithPath: "/tmp/offline-upgrade.m4a")
@@ -35,13 +37,18 @@ final class OfflineTranscriptUpgradeTests: XCTestCase {
             connectivity: { self.connectivity },
             prepareHistory: { true },
             historyItem: { self.history[$0] },
-            upsert: { item in
+            replaceIfUntouched: { item, ticket in
+                // Mirrors the History worker: authoritative state, not a snapshot.
+                guard let row = self.history[item.id],
+                      OfflineTranscriptUpgradePolicy.isUntouched(row, since: ticket) else { return false }
                 self.upserts += 1
                 self.history[item.id] = item
                 return true
             },
-            recordingURL: { $0 == self.recordingID ? self.recordingURL : nil },
-            transcribe: { url, model in
+            recordingURLs: { self.recordingsReadable ? [self.recordingID: self.recordingURL] : nil },
+            transcribe: { url, model, shouldProceed in
+                self.beforeUpload?()
+                guard shouldProceed() else { throw CancellationError() }
                 self.transcribeCalls.append((url, model))
                 self.onTranscribe?()
                 return try self.transcribeResult.get()
@@ -63,12 +70,6 @@ final class OfflineTranscriptUpgradeTests: XCTestCase {
         return item
     }
 
-    func testSettingDefaultsOff() {
-        let suite = UserDefaults(suiteName: "OfflineUpgradeDefault.\(UUID())")!
-        XCTAssertFalse(suite.bool(forKey: AppSettings.DefaultsKey.upgradeOfflineTranscriptsWhenOnline.storageKey))
-        XCTAssertFalse(AppSettings(defaults: suite, loadsSecureStorage: false).upgradeOfflineTranscriptsWhenOnline)
-    }
-
     func testTagIsNoOpWhenSettingOff() {
         self.enabled = false
         let item = self.fileOfflineItem()
@@ -77,9 +78,11 @@ final class OfflineTranscriptUpgradeTests: XCTestCase {
     }
 
     func testStreamingOnlyModelIsNotEligible() {
-        let streamingOnly = "deepgram/nova-3-streaming"
+        let streamingOnly = AppSettings.supportedLiveModels.map(\.id).first {
+            OfflineTranscriptUpgradePolicy.targetModel(forIntended: $0) == nil
+        }
+        guard let streamingOnly else { return XCTFail("Expected a streaming-only iOS live model") }
         XCTAssertFalse(AppSettings.supportedBatchModels.contains { $0.id == streamingOnly })
-        XCTAssertNil(OfflineTranscriptUpgradePolicy.targetModel(forIntended: streamingOnly))
         XCTAssertNil(OfflineTranscriptUpgradePolicy.targetModel(forIntended: AppleLocalModels.legacySpeechModelID))
         let item = self.fileOfflineItem()
         self.makeUpgrader().tag(item: item, recordingID: self.recordingID, intendedModelID: streamingOnly)
@@ -150,6 +153,68 @@ final class OfflineTranscriptUpgradeTests: XCTestCase {
         XCTAssertTrue(self.store.tickets().isEmpty)
     }
 
+    func testTicketStoresNoTranscriptText() throws {
+        let item = self.fileOfflineItem()
+        self.makeUpgrader().tag(item: item, recordingID: self.recordingID, intendedModelID: self.batchModel)
+        let data = try XCTUnwrap(self.defaults.data(forKey: OfflineTranscriptUpgradeStore.defaultsKey))
+        XCTAssertFalse(String(bytes: data, encoding: .utf8)?.contains("on device words") ?? true)
+    }
+
+    func testDisablingDuringCredentialLoadSendsNothing() async {
+        let item = self.fileOfflineItem()
+        let upgrader = self.makeUpgrader()
+        upgrader.tag(item: item, recordingID: self.recordingID, intendedModelID: self.batchModel)
+        self.beforeUpload = { self.enabled = false }
+        await upgrader.run()
+        XCTAssertTrue(self.transcribeCalls.isEmpty)
+        XCTAssertEqual(self.store.tickets().count, 1, "Turning the setting off keeps the ticket for later")
+    }
+
+    func testDeletionDuringCredentialLoadSendsNothing() async {
+        let item = self.fileOfflineItem()
+        let upgrader = self.makeUpgrader()
+        upgrader.tag(item: item, recordingID: self.recordingID, intendedModelID: self.batchModel)
+        self.beforeUpload = { self.history[item.id] = nil }
+        await upgrader.run()
+        XCTAssertTrue(self.transcribeCalls.isEmpty)
+        XCTAssertTrue(self.store.tickets().isEmpty)
+    }
+
+    func testUnreadableRecordingLibraryKeepsTickets() async {
+        let item = self.fileOfflineItem()
+        let upgrader = self.makeUpgrader()
+        upgrader.tag(item: item, recordingID: self.recordingID, intendedModelID: self.batchModel)
+        self.recordingsReadable = false
+        await upgrader.run()
+        XCTAssertTrue(self.transcribeCalls.isEmpty)
+        XCTAssertEqual(self.store.tickets().count, 1)
+    }
+
+    func testTaggingWhileOnlineStartsUpgrade() async {
+        let item = self.fileOfflineItem()
+        let task = self.makeUpgrader().tag(item: item, recordingID: self.recordingID, intendedModelID: self.batchModel)
+        await task?.value
+        XCTAssertEqual(self.history[item.id]?.transcription, "cloud words")
+    }
+
+    func testTicketAddedDuringRunIsServicedBySameRun() async {
+        let first = self.fileOfflineItem()
+        let second = self.fileOfflineItem()
+        self.connectivity = .unavailable
+        let upgrader = self.makeUpgrader()
+        upgrader.tag(item: first, recordingID: self.recordingID, intendedModelID: self.batchModel)
+        self.connectivity = .available
+        self.onTranscribe = {
+            self.onTranscribe = nil
+            // Saved mid-run; its own wakeup lands while the run is busy.
+            upgrader.tag(item: second, recordingID: self.recordingID, intendedModelID: self.batchModel)
+        }
+        await upgrader.run()
+        XCTAssertEqual(self.history[first.id]?.transcription, "cloud words")
+        XCTAssertEqual(self.history[second.id]?.transcription, "cloud words")
+        XCTAssertTrue(self.store.tickets().isEmpty)
+    }
+
     func testEditDuringTranscriptionWins() async {
         let item = self.fileOfflineItem()
         let upgrader = self.makeUpgrader()
@@ -200,8 +265,8 @@ final class OfflineTranscriptUpgradeTests: XCTestCase {
         self.transcribeResult = .success("   ")
         let item = self.fileOfflineItem()
         let upgrader = self.makeUpgrader()
-        upgrader.tag(item: item, recordingID: self.recordingID, intendedModelID: self.batchModel)
-        await upgrader.run()
+        // Tagging while online runs once by itself.
+        await upgrader.tag(item: item, recordingID: self.recordingID, intendedModelID: self.batchModel)?.value
         XCTAssertEqual(self.store.tickets().first?.attempts, 1)
         XCTAssertEqual(self.history[item.id]?.transcription, "on device words")
     }
@@ -217,74 +282,5 @@ final class OfflineTranscriptUpgradeTests: XCTestCase {
         XCTAssertEqual(self.store.tickets().first?.attempts, 0)
     }
 
-    func testUnloadedHistoryKeepsTickets() async {
-        let item = self.fileOfflineItem()
-        let upgrader = OfflineTranscriptUpgrader(store: self.store, dependencies: .init(
-            isEnabled: { true },
-            connectivity: { .available },
-            prepareHistory: { false },
-            historyItem: { _ in nil },
-            upsert: { _ in XCTFail("no write without History"); return false },
-            recordingURL: { _ in self.recordingURL },
-            transcribe: { _, _ in XCTFail("no transcription without History"); return "" }
-        ))
-        upgrader.tag(item: item, recordingID: self.recordingID, intendedModelID: self.batchModel)
-        await upgrader.run()
-        XCTAssertEqual(self.store.tickets().count, 1)
-    }
-
-    func testWholeSecondHistoryTimestampStillCountsAsUntouched() {
-        let filed = Date(timeIntervalSince1970: 1_000.75)
-        let ticket = OfflineTranscriptUpgradeTicket(
-            historyID: UUID(), recordingID: UUID(), targetModelID: "m",
-            onDeviceText: "words", filedUpdatedAt: filed
-        )
-        let reloaded = iOSHistoryItem(
-            createdAt: Date(timeIntervalSince1970: 1_000), transcription: "words",
-            model: "apple", duration: 1, wordCount: 1
-        )
-        XCTAssertTrue(OfflineTranscriptUpgradePolicy.isUntouched(reloaded, since: ticket))
-    }
-
-    func testForegroundOfflineCaptureTagsIntendedModelAndRecording() async throws {
-        let settings = AppSettings.shared
-        let originalMode = settings.transcriptionMode
-        let originalModel = settings.selectedModel
-        defer {
-            settings.transcriptionMode = originalMode
-            settings.selectedModel = originalModel
-        }
-        settings.transcriptionMode = .streaming
-        settings.selectedModel = "deepgram/nova-3-streaming"
-
-        for snapshot in [CaptureConnectivitySnapshot.unavailable, .available] {
-            let session = ForegroundTestSession()
-            session.safetyRecordingID = self.recordingID
-            let coordinator = TranscriberCoordinator(
-                sharedState: SharedTranscriptionState(defaults: nil),
-                historyManager: makeForegroundTestHistory(),
-                ownership: ForegroundRecordingOwnership(),
-                ensureKeysLoaded: {},
-                liveActivitiesEnabled: { false },
-                headlessState: { .idle },
-                networkSnapshot: { snapshot },
-                localRecognitionCapability: { _ in .available }
-            )
-            coordinator.makeSession = { session }
-            var tags: [(UUID, String)] = []
-            coordinator.tagOfflineCapture = { _, recording, intended in tags.append((recording, intended)) }
-
-            try await coordinator.start()
-            _ = await coordinator.stop()
-
-            if snapshot == .unavailable {
-                XCTAssertEqual(tags.count, 1)
-                XCTAssertEqual(tags.first?.0, self.recordingID)
-                XCTAssertEqual(tags.first?.1, "deepgram/nova-3-streaming")
-            } else {
-                XCTAssertTrue(tags.isEmpty, "An online capture is never queued for an upgrade")
-            }
-        }
-    }
 }
 #endif

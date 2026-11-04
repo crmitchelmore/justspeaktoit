@@ -9,7 +9,7 @@ declarations in the build manifest; their presence does not prove that provision
 
 ## Module and build map
 
-The repository has four build graphs:
+The repository has four Swift build graphs and one Android Gradle build:
 
 - [Package.swift](../Package.swift) owns reusable modules, the macOS executable, CLI, demo and host tests.
   On Windows and Linux it declares the portable graph instead, with the desktop apps (see below).
@@ -21,6 +21,9 @@ The repository has four build graphs:
 - [Benchmarks/LocalTranscription/Package.swift](../Benchmarks/LocalTranscription/Package.swift) is the isolated local
   transcription benchmark package. It consumes `SpeakCore` from the root package by path and pins its own graph in
   `Benchmarks/LocalTranscription/Package.resolved` (issue #1120).
+- [android/](../android/) is a separate native Android app (Kotlin, Jetpack Compose, Gradle). It shares no Swift code;
+  provider contracts and catalogue identifiers are mirrored deliberately. See the
+  [Android parity matrix](android-parity-matrix.md) (epic #1328).
 
 The root package declares macOS 14, iOS 17 and watchOS 10 as its package platforms. That declaration does not mean every
 target is host-buildable for every platform: `SpeakApp` imports macOS frameworks, `SpeakiOSLib` contains iOS-guarded

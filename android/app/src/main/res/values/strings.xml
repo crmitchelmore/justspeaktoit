@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Just Speak to It</string>
+
+    <string name="mode_on_device">On-device</string>
+    <string name="mode_speech_service">Speech service</string>
+    <string name="mode_picker_label">Recognition</string>
+    <string name="privacy_on_device">Audio stays on this phone. Works offline once the language is installed.</string>
+    <string name="privacy_speech_service">Uses your phone\'s speech service, which may send audio to its provider and needs a connection.</string>
+    <string name="status_mode_requires_android12">On-device recognition needs Android 12 or newer.</string>
+    <string name="status_mode_not_provided_on_device">This phone\'s speech service does not offer on-device recognition.</string>
+    <string name="status_mode_not_provided_service">No speech recognition service is installed. Install or enable one, such as Speech Recognition &amp; Synthesis from Google.</string>
+    <string name="status_mode_needs_download">The on-device model for %1$s is not installed yet.</string>
+    <string name="status_mode_downloading">The on-device model for %1$s is downloading.</string>
+    <string name="status_mode_language_unsupported">On-device recognition does not support %1$s on this phone.</string>
+    <string name="action_download_model">Download language</string>
+    <string name="checking_availability">Checking speech recognition…</string>
+
+    <string name="state_ready">Ready</string>
+    <string name="state_starting">Starting…</string>
+    <string name="state_listening">Listening</string>
+    <string name="state_finishing">Finishing…</string>
+    <string name="state_done">Transcript ready</string>
+    <string name="transcript_placeholder">Tap the microphone and start speaking.</string>
+    <string name="unfinished_label">Unfinished text, not a final transcript</string>
+
+    <string name="action_start">Start dictation</string>
+    <string name="action_stop">Stop dictation</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_copy">Copy</string>
+    <string name="action_copy_unfinished">Copy unfinished text</string>
+    <string name="action_share">Share</string>
+    <string name="action_clear">Clear</string>
+    <string name="share_title">Share transcript</string>
+    <string name="copied">Copied</string>
+
+    <string name="permission_rationale">Just Speak to It needs the microphone to hear you. Audio is only captured while you dictate.</string>
+    <string name="permission_denied_settings">Microphone access is off. Turn it on in Settings to dictate.</string>
+    <string name="action_open_settings">Open Settings</string>
+
+    <string name="failure_no_speech">No speech was heard.</string>
+    <string name="failure_no_match">Speech was heard but not recognised.</string>
+    <string name="failure_network">The speech service could not be reached.</string>
+    <string name="failure_network_timeout">The speech service took too long to respond.</string>
+    <string name="failure_audio">The microphone could not be recorded.</string>
+    <string name="failure_permission">The speech service is not allowed to use the microphone.</string>
+    <string name="failure_busy">The speech service is busy. Try again in a moment.</string>
+    <string name="failure_server">The speech service reported an error.</string>
+    <string name="failure_client">The speech service stopped unexpectedly.</string>
+    <string name="failure_too_many_requests">The speech service is limiting requests. Try again later.</string>
+    <string name="failure_language_not_supported">This language is not supported by the selected recognition.</string>
+    <string name="failure_language_unavailable">This language is not installed for on-device recognition.</string>
+    <string name="failure_left_app">Dictation stopped because the app left the screen.</string>
+    <string name="failure_unavailable">The selected recognition is not available.</string>
+    <string name="failure_unknown">Dictation failed.</string>
+</resources>

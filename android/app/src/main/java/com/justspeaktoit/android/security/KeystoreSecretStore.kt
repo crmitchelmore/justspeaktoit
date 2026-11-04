@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import androidx.core.content.edit
 import java.security.KeyStore
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -46,11 +47,11 @@ object KeystoreSecretStore {
         override fun get(key: String): String? = prefs.getString(key, null)
 
         override fun put(key: String, value: String) {
-            prefs.edit().putString(key, value).apply()
+            prefs.edit { putString(key, value) }
         }
 
         override fun delete(key: String) {
-            prefs.edit().remove(key).apply()
+            prefs.edit { remove(key) }
         }
 
         override fun keys(): Set<String> = prefs.all.keys

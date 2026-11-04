@@ -36,7 +36,6 @@
 
     <string name="permission_rationale">Just Speak to It needs the microphone to hear you. Audio is only captured while you dictate.</string>
     <string name="permission_denied_settings">Microphone access is off. Turn it on in Settings to dictate.</string>
-    <string name="action_grant">Allow microphone</string>
     <string name="action_open_settings">Open Settings</string>
 
     <string name="failure_no_speech">No speech was heard.</string>

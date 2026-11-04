@@ -19,6 +19,7 @@ enum class ModeStatus {
     LanguageUnsupported,
     RequiresNewerAndroid,
     NotProvided,
+    NeedsKey,
 }
 
 data class ModeAvailability(val mode: RecognitionMode, val status: ModeStatus) {
@@ -29,7 +30,11 @@ object RecognizerAvailability {
     const val ON_DEVICE_MIN_SDK = 31
     const val SUPPORT_CHECK_MIN_SDK = 33
 
-    fun evaluate(caps: RecognizerCapabilities, onDeviceLanguage: LanguageSupport): List<ModeAvailability> {
+    fun evaluate(
+        caps: RecognizerCapabilities,
+        onDeviceLanguage: LanguageSupport,
+        cloudKeySaved: Boolean = false,
+    ): List<ModeAvailability> {
         val onDevice = when {
             caps.sdkInt < ON_DEVICE_MIN_SDK -> ModeStatus.RequiresNewerAndroid
             !caps.onDeviceAvailable -> ModeStatus.NotProvided
@@ -44,13 +49,17 @@ object RecognizerAvailability {
         return listOf(
             ModeAvailability(RecognitionMode.OnDevice, onDevice),
             ModeAvailability(RecognitionMode.SpeechService, service),
+            ModeAvailability(RecognitionMode.Cloud, if (cloudKeySaved) ModeStatus.Ready else ModeStatus.NeedsKey),
         )
     }
 
-    /** Prefers private, on-device recognition; returns null when nothing can recognise speech. */
+    /**
+     * Prefers private, on-device recognition, then the device speech service. Cloud is never a
+     * default: it is used only when the user chooses it. Returns null when nothing is usable.
+     */
     fun defaultMode(options: List<ModeAvailability>): RecognitionMode? =
         options.firstOrNull { it.mode == RecognitionMode.OnDevice && it.usable }?.mode
-            ?: options.firstOrNull { it.usable }?.mode
+            ?: options.firstOrNull { it.mode == RecognitionMode.SpeechService && it.usable }?.mode
 
     /**
      * Matches [languageTag] against the recogniser's lists and returns the tag to request. An exact

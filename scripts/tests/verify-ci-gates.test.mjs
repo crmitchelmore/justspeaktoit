@@ -139,20 +139,23 @@ function routingContext(event = 'pull_request', repository = 'crmitchelmore/just
   };
 }
 
-test('Apple CI routing keeps every hosted macOS job on hosted ARM', () => {
+test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
   for (const id of ['build-ios', 'core-journey-fixture-ui']) {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
   for (const id of ['build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard']) {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
-  assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge|intel)/);
+  assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
+  // Intel appears only as the hosted fallback of the native-eligible jobs.
+  assert.doesNotMatch(workflow, /runs-on: macos-26-intel/);
+  for (const id of nativeEligibleJobs) assert.match(jobBodies[id], /\|\| '\["macos-26-intel"\]'\) \}\}/, id);
 });
 
 test('native pool still requires the exact reviewed source and trusted event', () => {
   for (const id of nativeEligibleJobs) {
     // Restore-only gates must share build-macos's hosted architecture to hit its cache.
-    const fallback = ['macos-latest'];
+    const fallback = ['macos-26-intel'];
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
       ['jsti-macos-build', 'macOS']);
     assert.deepEqual(route(id, routingContext(), {

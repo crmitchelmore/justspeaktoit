@@ -259,7 +259,9 @@ extension CaptureIntentTerminalDiagnosticTests {
             if foregroundOwned {
                 XCTAssertTrue(ownership.claim(owner))
             } else {
+                harness.defaults.set("Running words", forKey: "simulatorValidationTranscript")
                 try await service.startRecording(requiresLiveActivity: false)
+                XCTAssertEqual(service.state, .recording)
             }
             let before = self.journal(harness)
             do {

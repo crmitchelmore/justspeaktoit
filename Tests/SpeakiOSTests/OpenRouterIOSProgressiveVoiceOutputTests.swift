@@ -178,6 +178,12 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
         })
     }
 
+    // Every wait below is event-driven; this bound only catches a hang. On hosted
+    // runners this fixture has stalled for several seconds before its explicit
+    // stop while the identical router variant completes in milliseconds, so a 2s
+    // bound reported runner stalls rather than transport behaviour (#1346).
+    private static let stallGuard: TimeInterval = 30
+
     private func assertCancelledQueuedStartPreservesPendingRequest(
         session: URLSession, stop: @escaping () -> Void, speak: @escaping () async throws -> Void
     ) async throws {
@@ -201,7 +207,7 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
             }
         }
         defer { prior.cancel(); stop() }
-        let startResult = await XCTWaiter.fulfillment(of: [started], timeout: 2)
+        let startResult = await XCTWaiter.fulfillment(of: [started], timeout: Self.stallGuard)
         observation.reportFailure(startResult, wait: .requestStart)
         XCTAssertEqual(startResult, .completed)
         let queued = Task { @MainActor in
@@ -211,14 +217,14 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
             }
         }
         queued.cancel()
-        let queuedResult = await XCTWaiter.fulfillment(of: [queuedReturned], timeout: 2)
+        let queuedResult = await XCTWaiter.fulfillment(of: [queuedReturned], timeout: Self.stallGuard)
         observation.reportFailure(queuedResult, wait: .queuedReturn)
         XCTAssertEqual(queuedResult, .completed)
         XCTAssertEqual(observation.stops, 0, "Refused caller must not stop the prior transport")
         XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
         observation.note(.explicitStopIssued)
         stop()
-        let stopResult = await XCTWaiter.fulfillment(of: [transportStopped, firstReturned], timeout: 2)
+        let stopResult = await XCTWaiter.fulfillment(of: [transportStopped, firstReturned], timeout: Self.stallGuard)
         observation.reportFailure(stopResult, wait: .explicitStop)
         XCTAssertEqual(stopResult, .completed)
         XCTAssertEqual(observation.stops, 1)

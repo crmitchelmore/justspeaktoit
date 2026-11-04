@@ -1,0 +1,125 @@
+/* Manual QA checklist — phone first, palette from /site.css. */
+:root {
+  color-scheme: dark;
+  --ground: #121417;
+  --surface: #191c21;
+  --surface-2: #212630;
+  --line: rgba(255, 255, 255, .14);
+  --text: #f5f3f0;
+  --text-dim: #adb4bd;
+  --accent: #ff6b3d;
+  --accent-link: #ff9166;
+  --pass: #2ed4bf;
+  --fail: #ff6b6b;
+  --skip: #adb4bd;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font: 17px/1.5 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  padding-bottom: 9rem;
+}
+
+a { color: var(--accent-link); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.visually-hidden:not(:focus) {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+
+.qa-top {
+  position: sticky; top: 0; z-index: 2;
+  background: rgba(18, 20, 23, .96);
+  border-bottom: 1px solid var(--line);
+  padding: .75rem 1rem;
+}
+.qa-top h1 { margin: 0; font-size: 1.25rem; }
+.qa-progress { margin: .1rem 0 .4rem; color: var(--text-dim); font-size: .95rem; }
+progress { width: 100%; height: .5rem; accent-color: var(--accent); }
+
+main { max-width: 44rem; margin: 0 auto; padding: 1rem; }
+.qa-intro { color: var(--text-dim); }
+.qa-warning { color: var(--fail); }
+
+.qa-nav { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0; list-style: none; }
+.qa-nav li { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: .4rem .9rem; }
+.qa-nav span { color: var(--text-dim); font-size: .9rem; }
+
+.qa-session h2 { margin: 2rem 0 .5rem; font-size: 1.4rem; scroll-margin-top: 6rem; }
+.qa-session-meta { color: var(--text-dim); font-size: .95rem; font-weight: 400; }
+.qa-setup, .qa-item {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin: .75rem 0;
+}
+.qa-setup ul, .qa-prereqs { margin: .25rem 0 0; padding-left: 1.2rem; }
+.qa-item { scroll-margin-top: 6rem; }
+.qa-item.is-answered { border-color: rgba(46, 212, 191, .45); }
+.qa-item h3 { margin: 0; font-size: 1.1rem; }
+.qa-meta { margin: .2rem 0 .5rem; color: var(--text-dim); font-size: .9rem; }
+.qa-label { margin: .5rem 0 0; font-weight: 600; }
+.qa-steps { padding-left: 1.4rem; }
+.qa-steps li { margin: .35rem 0; }
+.qa-expected { background: var(--surface-2); border-radius: 10px; padding: .6rem .8rem; }
+
+fieldset { border: 0; margin: .75rem 0 0; padding: 0; }
+legend { font-weight: 600; margin-bottom: .5rem; }
+.qa-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+
+.qa-choice, .qa-option { position: relative; display: block; cursor: pointer; }
+.qa-choice input, .qa-option input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.qa-choice span {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 3.25rem;
+  border: 2px solid var(--line); border-radius: 12px;
+  font-weight: 700; font-size: 1.05rem;
+}
+.qa-choice input:focus-visible + span, .qa-option input:focus-visible + .qa-option-text { outline: 3px solid var(--accent); outline-offset: 2px; }
+.qa-choice-pass input:checked + span { background: var(--pass); border-color: var(--pass); color: #06201c; }
+.qa-choice-fail input:checked + span { background: var(--fail); border-color: var(--fail); color: #2a0606; }
+.qa-choice-skip input:checked + span { background: var(--skip); border-color: var(--skip); color: #121417; }
+
+.qa-option { margin: .5rem 0; }
+.qa-option-text {
+  display: block; min-height: 3.25rem; padding: .7rem .9rem;
+  border: 2px solid var(--line); border-radius: 12px;
+}
+.qa-option input:checked + .qa-option-text { border-color: var(--accent); background: rgba(255, 107, 61, .12); }
+.qa-consequence { display: block; color: var(--text-dim); font-size: .95rem; margin-top: .2rem; }
+.qa-badge { font-size: .8rem; background: var(--accent); color: #1c0a04; border-radius: 999px; padding: .05rem .5rem; font-weight: 700; }
+
+.qa-note { margin-top: .75rem; }
+.qa-note label { display: block; font-weight: 600; margin-bottom: .3rem; }
+.qa-note textarea {
+  width: 100%; font: inherit; color: var(--text); background: var(--ground);
+  border: 2px solid var(--fail); border-radius: 10px; padding: .6rem;
+}
+
+.qa-submit {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
+  background: rgba(18, 20, 23, .97); border-top: 1px solid var(--line);
+  padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom));
+}
+.qa-status { max-width: 44rem; margin: 0 auto .5rem; color: var(--text-dim); font-size: .95rem; }
+.qa-status:empty { display: none; }
+.qa-actions { display: flex; gap: .5rem; max-width: 44rem; margin: 0 auto; }
+.qa-actions button {
+  min-height: 3.25rem; border-radius: 12px; font: inherit; font-weight: 700; cursor: pointer;
+  border: 2px solid var(--line); background: var(--surface-2); color: var(--text); padding: 0 1rem;
+}
+.qa-actions .qa-primary { flex: 1; background: var(--accent); border-color: var(--accent); color: #1c0a04; }
+.qa-actions button:disabled { opacity: .45; cursor: not-allowed; }
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+@media (forced-colors: active) {
+  .qa-choice input:checked + span, .qa-option input:checked + .qa-option-text { border-width: 4px; }
+}

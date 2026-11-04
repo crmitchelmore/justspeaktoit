@@ -96,4 +96,14 @@
     <string name="action_delete">Delete</string>
     <string name="action_clear_history">Clear history</string>
     <string name="clear_history_confirm">Delete all saved dictations?</string>
+    <string name="failure_missing_key">Add a cloud API key in Settings to transcribe audio files.</string>
+    <string name="failure_audio_too_large">The audio file is larger than the 25 MB the cloud providers accept.</string>
+    <string name="failure_unsupported_audio">This audio format is not supported. Share MP3, M4A, WAV, OGG, WebM or FLAC.</string>
+    <string name="shortcut_dictate_short">Dictate</string>
+    <string name="shortcut_dictate_long">Start dictation</string>
+    <string name="tile_label">Dictate</string>
+    <string name="share_audio_label">Transcribe audio</string>
+    <string name="shared_audio_title">Transcribe shared audio?</string>
+    <string name="shared_audio_body">The audio will be uploaded to %1$s and transcribed by %2$s using your API key.</string>
+    <string name="action_transcribe">Transcribe</string>
 </resources>

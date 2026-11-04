@@ -35,12 +35,19 @@ class CloudClient(
     private val connectTimeoutMs: Int = 15_000,
     private val readTimeoutMs: Int = 120_000,
 ) {
-    fun transcribe(model: CloudModel, apiKey: String, audio: File, languageTag: String?, call: CallHandle): String {
+    fun transcribe(
+        model: CloudModel,
+        apiKey: String,
+        audio: File,
+        languageTag: String?,
+        call: CallHandle,
+        format: SharedAudio.Format = SharedAudio.Format("wav", "audio/wav"),
+    ): String {
         val multipart = CloudWire.multipart(
             fields = CloudWire.transcriptionFields(model, languageTag),
             fileField = "file",
-            fileName = "dictation.wav",
-            mimeType = "audio/wav",
+            fileName = "dictation.${format.extension}",
+            mimeType = format.mimeType,
             boundary = "jsti-" + UUID.randomUUID(),
         )
         val url = "${model.provider.baseUrl}/audio/transcriptions"

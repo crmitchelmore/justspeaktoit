@@ -30,6 +30,9 @@ enum class DictationFailure {
     Unavailable,
     InvalidKey,
     KeyUnavailable,
+    MissingKey,
+    AudioTooLarge,
+    UnsupportedAudio,
     Unknown,
 }
 

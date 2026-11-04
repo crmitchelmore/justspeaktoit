@@ -130,6 +130,77 @@ sessions:
           - id: "add-ios"
             label: "Add Azure voice output to iOS"
             consequence: "New iOS provider case, router path and settings; adds an iPhone playback check before #1052 can close."
+  - id: "mac"
+    device: "Mac"
+    title: "Mac session: streaming insertion (#664)"
+    setup:
+      - "Unlocked Mac, current Just Speak to It (mac-v3.2.0 or Alpha build 45 or later) with Accessibility granted."
+      - "Settings › General: Accessibility Insertion = Insert at Cursor; Stream text while dictating (experimental) = on; post-processing off."
+      - "Pick a Streaming model with a working key (Remote or Local Streaming). Use only made-up, non-sensitive sentences."
+      - "Note the app version, build and macOS version for the results."
+    items:
+      - id: "mac-notes-stream-append"
+        issue: 664
+        title: "Notes: words stream in and corrections replace, not append"
+        minutes: 4
+        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
+        prerequisites:
+          - "A new Notes note containing the line: café ☕ the quick fox, the quick fox"
+        steps:
+          - "Put the cursor on a new line under that text."
+          - "Start dictation and say slowly: \"Testing streaming in Notes, one two three, actually make that four.\""
+          - "Watch the note while you speak, then stop."
+          - "Open History in Just Speak to It and compare the latest entry with the new line in Notes."
+        expected: "Words appear in Notes while you speak; any word the model revises is replaced in place, not duplicated. The final new line matches the History text exactly, and the first line (café ☕ and both \"the quick fox\") is unchanged."
+        final_gate: true
+      - id: "mac-notes-selection-replace"
+        issue: 664
+        title: "Notes: dictating over a selection replaces only that selection"
+        minutes: 3
+        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
+        steps:
+          - "In the same note add a line: REPLACE_ME and REPLACE_ME again"
+          - "Double-click the first REPLACE_ME to select it."
+          - "Dictate: \"Selection replacement works.\" and stop."
+        expected: "Only the first REPLACE_ME becomes \"Selection replacement works.\" (matching History); the second REPLACE_ME and every other line are unchanged."
+        final_gate: true
+      - id: "mac-notes-edit-and-focus"
+        issue: 664
+        title: "Notes: edits during dictation and a focus change stay safe"
+        minutes: 5
+        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
+        steps:
+          - "Put the cursor at the end of the note and start dictating a long sentence."
+          - "After the first words appear, click on the first line and type XX there, then keep talking and stop."
+          - "Start a second dictation at the end of the note; after the first words appear, click into a different, empty note."
+          - "Keep talking for a few seconds, then stop."
+          - "Check both notes and History."
+        expected: "Your typed XX is kept and nothing outside the dictated text is changed or duplicated (streaming may pause instead of finishing). In the focus test, the second note stays empty and the original note holds the dictated text with no duplicate paste."
+        final_gate: true
+      - id: "mac-setting-off-baseline"
+        issue: 664
+        title: "Setting off: Notes gets one paste at the end, no live text"
+        minutes: 3
+        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
+        steps:
+          - "Settings › General: turn Stream text while dictating (experimental) off."
+          - "In Notes, dictate: \"Baseline with streaming off.\" and stop."
+          - "Check the note and History, then turn the setting back on."
+        expected: "Nothing appears while you speak; the text arrives once after Stop, exactly once, matching History."
+        final_gate: true
+      - id: "mac-stickies-not-allowlisted"
+        issue: 664
+        title: "Stickies (not allowlisted): one paste at the end, no live text"
+        minutes: 3
+        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
+        prerequisites:
+          - "Stream text while dictating (experimental) back on"
+        steps:
+          - "Open Stickies and click into a new sticky note."
+          - "Dictate: \"Stickies gets one final paste.\" and stop."
+          - "Check the sticky and History."
+        expected: "Nothing appears while you speak; the text arrives once after Stop, exactly once, matching History."
+        final_gate: true
   - id: "iphone"
     device: "iPhone"
     title: "iPhone session"

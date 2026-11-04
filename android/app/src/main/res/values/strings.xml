@@ -81,4 +81,19 @@
     <string name="settings_cleanup_title">Clean up transcripts</string>
     <string name="settings_cleanup_note">Sends the final transcript to OpenRouter to fix punctuation and spelling. Needs an OpenRouter key. If cleanup fails, the original transcript is kept.</string>
     <string name="settings_cleanup_needs_key">Add an OpenRouter key to use cleanup.</string>
+    <string name="history_title">History</string>
+    <string name="history_empty">Finished dictations appear here.</string>
+    <string name="history_empty_off">History is off. Dictations are not saved.</string>
+    <string name="history_keep">Keep history</string>
+    <string name="retention_off">Off</string>
+    <string name="retention_week">7 days</string>
+    <string name="retention_month">30 days</string>
+    <string name="retention_forever">Always</string>
+    <string name="history_note">Stored only on this phone, never backed up. Failed dictations are kept with any unfinished words so you can recover them.</string>
+    <string name="history_failed">Failed: %1$s</string>
+    <string name="history_save_failed">History could not be saved to storage. Recent changes are kept while the app is open and saved with the next change.</string>
+    <string name="history_cleaned">Cleaned up</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_clear_history">Clear history</string>
+    <string name="clear_history_confirm">Delete all saved dictations?</string>
 </resources>

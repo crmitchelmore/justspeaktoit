@@ -81,6 +81,7 @@ data class DictationActions(
     val onOpenSettings: () -> Unit,
     val onShowSettings: () -> Unit,
     val onShowOriginal: () -> Unit,
+    val onShowHistory: () -> Unit = {},
 )
 
 @Composable
@@ -107,6 +108,12 @@ fun DictationScreen(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
+                IconButton(onClick = actions.onShowHistory, enabled = !state.dictation.isActive) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_history),
+                        contentDescription = stringResource(R.string.history_title),
+                    )
+                }
                 IconButton(onClick = actions.onShowSettings, enabled = !state.dictation.isActive) {
                     Icon(
                         painter = painterResource(R.drawable.ic_settings),
@@ -370,7 +377,7 @@ private fun ModeAvailability.explanation(languageName: String, state: DictationU
 }
 
 @StringRes
-private fun RecognitionMode.label(): Int = when (this) {
+internal fun RecognitionMode.label(): Int = when (this) {
     RecognitionMode.OnDevice -> R.string.mode_on_device
     RecognitionMode.SpeechService -> R.string.mode_speech_service
     RecognitionMode.Cloud -> R.string.mode_cloud
@@ -384,7 +391,7 @@ private fun RecognitionMode.privacyNote(): Int = when (this) {
 }
 
 @StringRes
-private fun DictationFailure.message(): Int = when (this) {
+internal fun DictationFailure.message(): Int = when (this) {
     DictationFailure.NoSpeech -> R.string.failure_no_speech
     DictationFailure.NoMatch -> R.string.failure_no_match
     DictationFailure.Network -> R.string.failure_network

@@ -108,7 +108,7 @@ def build_command(kind, directory):
 
 
 def ui_selection():
-    return [f"-only-testing:SpeakAppUITests/{suite}" for suite in UI["REQUIRED_SUITES"]]
+    return [f"-only-testing:SpeakAppUITests/{suite}" for suite in UI["selected_suites"]()]
 
 
 def test_command(kind, directory):
@@ -159,7 +159,7 @@ def execute(kind, directory):
     }
     if data != current:
         raise ValueError("Prepared products do not match the current source, toolchain or build options.")
-    suites = GATE["REQUIRED_SUITES"] if kind == "swift" else UI["REQUIRED_SUITES"]
+    suites = GATE["REQUIRED_SUITES"] if kind == "swift" else UI["selected_suites"]()
     code = GATE["run_gate"](
         test_command(kind, directory), directory / "runtime", RUNTIME_BUDGET[kind], suites
     )

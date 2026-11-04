@@ -461,3 +461,18 @@ test('permits API compatibility skip only on main push', () => {
   assert.deepEqual(assessCIGates(needs, 'push'), []);
   assert.ok(assessCIGates(needs, 'pull_request').length > 0);
 });
+
+test('launched-app UI shards in CI match every shard the verifier requires', () => {
+  const ui = jobBodies['core-journey-fixture-ui'];
+  const matrix = ui.match(/^\s+shard: \[([^\]]+)\]$/m);
+  assert.ok(matrix, 'the UI gate must declare its shard matrix');
+  const ciShards = matrix[1].split(',').map(value => value.trim()).sort();
+  const verifier = readFileSync(new URL('../verify-core-journey-ui.py', import.meta.url), 'utf8');
+  const block = verifier.match(/^SHARDS = \{\n([\s\S]*?)^\}/m);
+  assert.ok(block, 'the verifier must declare SHARDS');
+  const verifierShards = [...block[1].matchAll(/^    "([a-z0-9-]+)": \(/gm)].map(([, name]) => name).sort();
+  assert.deepEqual(ciShards, verifierShards);
+  assert.match(ui, /fail-fast: false/);
+  assert.match(ui, /CORE_JOURNEY_UI_SHARD: \$\{\{ matrix\.shard \}\}/);
+  assert.match(ui, /name: core-journey-fixture-ui-\$\{\{ matrix\.shard \}\}-\$\{\{ github\.run_attempt \}\}/);
+});

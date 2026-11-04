@@ -150,6 +150,7 @@ final class CoreJourneyLaunchProfile {
             settings.showHUDDuringSessions = true
             settings.shortenErrorDisplay = false
         }
+        self.configureScenarioSettings()
     }
 
     func startHotKeyProbe(manager: HotKeyManager, main: MainManager) {

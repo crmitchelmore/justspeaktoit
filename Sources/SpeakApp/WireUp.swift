@@ -628,8 +628,7 @@ enum WireUp {
     #if DEBUG
     let openRouter: OpenRouterAPIClient
     if let profile, profile.runsBatchJourney {
-      openRouter = profile.batchScenario.polishes
-        ? profile.polishFixture.makeClient() : CoreJourneyBatchFixture.makeClient()
+      openRouter = profile.makeFixtureClient()
     } else {
       openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
     }
@@ -660,7 +659,8 @@ enum WireUp {
       audioDeviceManager: audioDevices,
       batchClient: RemoteAudioTranscriber(client: routedClient),
       openRouter: openRouter,
-      secureStorage: secureStorage
+      secureStorage: secureStorage,
+      controllerOverride: liveControllerOverrideForLaunch()
     )
     let personalLexiconStore = PersonalLexiconStore(fileManager: fileManager)
     let personalLexicon = PersonalLexiconService(store: personalLexiconStore)
@@ -747,7 +747,18 @@ enum WireUp {
 
   private static func captureSourceForLaunch() -> (any RecordingCaptureSource)? {
     #if DEBUG
-    if CoreJourneyLaunchProfile.current?.runsBatchJourney == true { return CoreJourneyRecordingSource() }
+    if let profile = CoreJourneyLaunchProfile.current, profile.runsBatchJourney {
+      return profile.makeCaptureSource()
+    }
+    #endif
+    return nil
+  }
+
+  private static func liveControllerOverrideForLaunch() -> ((String) -> any LiveTranscriptionController)? {
+    #if DEBUG
+    if let profile = CoreJourneyLaunchProfile.current, profile.runsBatchJourney {
+      return profile.makeLiveControllerOverride()
+    }
     #endif
     return nil
   }

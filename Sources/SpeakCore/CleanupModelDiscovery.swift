@@ -4,7 +4,7 @@ import Foundation
 /// Turning discovery off never rewrites an already selected model.
 public enum CleanupModelSelection {
     public static let prefix = "openrouter/cleanup/"
-    public static let preferenceKey = "cleanupModelDiscoveryEnabled"
+    public static let preferenceKey = ApplicationPreferenceKey.cleanupModelDiscoveryEnabled.rawValue
     public static let settingTitle = "Discover OpenAI cleanup models via OpenRouter"
 
     public static func modelID(from selection: String) -> String? {

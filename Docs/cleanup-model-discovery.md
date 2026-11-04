@@ -8,6 +8,8 @@ updates the app, replaces bundled metadata, changes a default, or selects a mode
 
 Discovery defaults **off**. The first version admits OpenAI-authored models only,
 through the existing OpenRouter cleanup route.
+The preference is registered in the canonical application-key inventory but is
+excluded from the shared settings-transfer catalogue: each installation opts in.
 
 - **Mac/iOS:** in remote Post-processing settings, enable **Discover OpenAI cleanup
   models via OpenRouter**. Opening that setting while enabled refreshes metadata
@@ -90,3 +92,11 @@ free-space floor. CI must qualify Apple, iOS and portable graphs, and native UI
 interaction has not been exercised. No billable inference or account/credential
 changes were performed. Review the exact final PR head rather than the earlier
 static-catalogue-only CI run.
+
+Linux Desktop run `41808150530` built the app and passed all 11 shared discovery
+tests on head `daf8bbf3f2db6316c2218085390ec75cef83af98`. Its full suite ran 3,727
+tests (45 skipped), with one failure: the desktop preference-key subset invariant
+detected that the discovery key was absent from the canonical inventory. The
+follow-up registers that key, keeps it explicitly excluded from settings transfer,
+and updates inventory/transfer regression assertions. It requires fresh CI; the
+earlier run does not qualify the correction or the skipped native smoke tests.

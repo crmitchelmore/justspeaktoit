@@ -152,6 +152,9 @@ final class CleanupModelDiscoveryTests: XCTestCase {
     }
 
     func testNativePreferenceIsOffByDefaultAndRoundTripsWithoutChangingModel() throws {
+        XCTAssertEqual(CleanupModelSelection.preferenceKey,
+                       ApplicationPreferenceKey.cleanupModelDiscoveryEnabled.rawValue)
+        XCTAssertNil(DataMigrationPreferenceCatalog.definition(for: CleanupModelSelection.preferenceKey))
         let configuration = try DesktopConfiguration()
         var entries = configuration.entries
         let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex {

@@ -68,6 +68,6 @@ Write-JstiJson (Join-Path $output 'installer-bundle.json') ([ordered]@{
     bundle = Read-JstiJson $evidencePath
     sourceCommit = $ExpectedCommit
     makeAppx = $tools.Evidence
-    status = 'Unsigned bundle. Publication requires the Azure Artifact Signing signature.'
+    status = 'Unsigned bundle. Publication requires a publicly trusted, timestamped signature.'
 })
 Write-Host "Bundled x64 and ARM64 beta packages $Version into $bundle."

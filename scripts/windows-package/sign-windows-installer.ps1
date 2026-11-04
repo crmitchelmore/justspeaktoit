@@ -7,10 +7,13 @@ Two signers share one verification path:
 
 * -Metadata: Azure Artifact Signing through the pinned dlib (the published
   route; see sign-windows-package-artifact-signing.ps1 for the credential model);
-* -CertificateThumbprint: a certificate already in CurrentUser\My, used only by
-  the CI rehearsal with an ephemeral certificate it creates and deletes.
+* -CertificateThumbprint: a certificate already in CurrentUser\My. Alone, it is
+  the CI rehearsal's ephemeral certificate. With -PublicCertificate it is a
+  publicly trusted certificate whose key a provider exposes through the store
+  (SSL.com eSigner CKA; see load-sslcom-esigner.ps1), named by -Method.
 
-Every Artifact Signing signature is RFC 3161 timestamped. The signer subject
+Every Artifact Signing and -PublicCertificate signature is RFC 3161
+timestamped and verified against this machine's trust. The signer subject
 read back from AppxSignature.p7x must equal the bundle publisher, and the
 signed bundle must still hold exactly the bundled packages. SignTool signs the
 bundle; the packages inside are covered by its block map and are not signed
@@ -24,6 +27,8 @@ param(
     [Parameter(Mandatory = $true)] [string] $ToolCache,
     [Parameter(Mandatory = $true, ParameterSetName = 'ArtifactSigning')] [string] $Metadata,
     [Parameter(Mandatory = $true, ParameterSetName = 'Certificate')] [ValidatePattern('^[0-9A-Fa-f]{40}$')] [string] $CertificateThumbprint,
+    [Parameter(ParameterSetName = 'Certificate')] [switch] $PublicCertificate,
+    [Parameter(ParameterSetName = 'Certificate')] [string] $Method = 'CI rehearsal certificate',
     [string] $TimestampUrl = 'http://timestamp.acs.microsoft.com',
     [string] $Python = 'python'
 )
@@ -61,8 +66,13 @@ if ($PSCmdlet.ParameterSetName -eq 'ArtifactSigning') {
     $certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$CertificateThumbprint" -ErrorAction SilentlyContinue
     if (-not $certificate -or -not $certificate.HasPrivateKey) { throw "No usable certificate $CertificateThumbprint in CurrentUser\My." }
     $arguments += @('/sha1', $CertificateThumbprint, '/s', 'My')
-    $evidence.method = 'CI rehearsal certificate'
+    if ($PublicCertificate) {
+        $arguments += @('/tr', $TimestampUrl, '/td', 'SHA256')
+        $evidence.timestampUrl = $TimestampUrl
+    }
+    $evidence.method = $Method
 }
+$public = $PSCmdlet.ParameterSetName -eq 'ArtifactSigning' -or $PublicCertificate
 Copy-Item -LiteralPath $bundle -Destination $output
 $sign = Invoke-JstiTool -FilePath $tools.SignTool -LogPath $log -Arguments ($arguments + @($output))
 if ($sign.ExitCode -ne 0) {
@@ -70,12 +80,12 @@ if ($sign.ExitCode -ne 0) {
     throw "SignTool failed with exit code $($sign.ExitCode); see $log. 0x8007000B means the bundle publisher differs from the certificate subject."
 }
 if ((Get-JstiSha256 $bundle) -ne $unsignedDigest) { throw 'The unsigned input changed while signing.' }
-if ($PSCmdlet.ParameterSetName -eq 'ArtifactSigning') {
-    # Artifact Signing chains to a root Windows already trusts. The rehearsal's
+if ($public) {
+    # A public certificate chains to a root Windows already trusts. The rehearsal's
     # self-signed certificate is proved by the App Installer install instead.
     $verify = Invoke-JstiTool -FilePath $tools.SignTool -LogPath $log -Arguments @('verify', '/pa', '/v', $output)
     if ($verify.ExitCode -ne 0) { throw "SignTool could not verify the signed bundle against this machine's trust; see $log." }
-    if ($verify.StandardOutput -notmatch 'timestamped') { throw "The Artifact Signing signature is not timestamped; see $log." }
+    if ($verify.StandardOutput -notmatch 'timestamped') { throw "The $($evidence.method) signature is not timestamped; see $log." }
 }
 $signer = Get-JstiPackageSigner $output
 if ($signer.Subject -cne $identity.Publisher) {

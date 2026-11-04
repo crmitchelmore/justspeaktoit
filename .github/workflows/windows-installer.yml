@@ -5,7 +5,8 @@ name: Windows installer
 #
 # Every run rehearses the whole route with an ephemeral certificate on
 # disposable x64 and ARM64 runners. A manifest run (from alpha-release.yml or a
-# manual dispatch on main) also signs with Azure Artifact Signing, stages the
+# manual dispatch on main) also signs with the configured provider (Azure
+# Artifact Signing or SSL.com eSigner; WINDOWS_SIGNING_PROVIDER), stages the
 # bundle and .appinstaller on the manifest release, installs them on clean
 # runners with no imported trust, and only then advances the public installer
 # pointer. Without the signing configuration the manifest run stops after the
@@ -136,11 +137,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # Holds the OIDC token, so every action is pinned to a reviewed commit. The
-  # windows-signing environment admits only main; no key, certificate or
-  # client secret exists in the repository or on the runner.
+  # Holds the OIDC token or eSigner credentials, so every action is pinned to a
+  # reviewed commit. The windows-signing environment admits only main; no
+  # private key exists in the repository or on the runner (both providers keep
+  # it in a cloud HSM).
   sign:
-    name: Sign the installer bundle with Azure Artifact Signing
+    name: Sign the installer bundle with the configured provider
     needs: [sources, rehearse]
     if: ${{ needs.sources.outputs.mode == 'publish' && github.ref == 'refs/heads/main' }}
     runs-on: windows-2022
@@ -152,6 +154,7 @@ jobs:
     outputs:
       enabled: ${{ steps.config.outputs.enabled }}
       publisher: ${{ steps.config.outputs.publisher }}
+      provider: ${{ steps.config.outputs.provider }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -167,12 +170,17 @@ jobs:
           AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
           WINDOWS_MSIX_PUBLISHER: ${{ vars.WINDOWS_MSIX_PUBLISHER }}
+          WINDOWS_SIGNING_PROVIDER: ${{ vars.WINDOWS_SIGNING_PROVIDER }}
+          SSLCOM_ESIGNER_USERNAME: ${{ secrets.SSLCOM_ESIGNER_USERNAME }}
+          SSLCOM_ESIGNER_PASSWORD: ${{ secrets.SSLCOM_ESIGNER_PASSWORD }}
+          SSLCOM_ESIGNER_TOTP_SECRET: ${{ secrets.SSLCOM_ESIGNER_TOTP_SECRET }}
+          SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT: ${{ vars.SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT }}
         run: |
           python -B scripts/windows-package/signing_configuration.py --github-output $env:GITHUB_OUTPUT `
             --metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Sign in to Azure with GitHub OIDC
-        if: ${{ steps.config.outputs.enabled == 'true' }}
+        if: ${{ steps.config.outputs.enabled == 'true' && steps.config.outputs.provider == 'artifact-signing' }}
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
@@ -188,6 +196,12 @@ jobs:
         shell: powershell
         env:
           PUBLISHER: ${{ steps.config.outputs.publisher }}
+          PROVIDER: ${{ steps.config.outputs.provider }}
+          TIMESTAMP_URL: ${{ steps.config.outputs.timestamp-url }}
+          THUMBPRINT: ${{ steps.config.outputs.certificate-thumbprint }}
+          SSLCOM_ESIGNER_USERNAME: ${{ steps.config.outputs.provider == 'sslcom-esigner' && secrets.SSLCOM_ESIGNER_USERNAME || '' }}
+          SSLCOM_ESIGNER_PASSWORD: ${{ steps.config.outputs.provider == 'sslcom-esigner' && secrets.SSLCOM_ESIGNER_PASSWORD || '' }}
+          SSLCOM_ESIGNER_TOTP_SECRET: ${{ steps.config.outputs.provider == 'sslcom-esigner' && secrets.SSLCOM_ESIGNER_TOTP_SECRET || '' }}
           SOURCE: ${{ needs.sources.outputs.source }}
           VERSION: ${{ needs.sources.outputs.version }}
         run: |
@@ -196,13 +210,27 @@ jobs:
           ./scripts/windows-package/build-windows-installer-bundle.ps1 -X64Bundle sources/x64 -Arm64Bundle sources/arm64 `
             -ExpectedCommit $env:SOURCE -Version $env:VERSION -Publisher $env:PUBLISHER -Output $root -ToolCache $tools
           New-Item -ItemType Directory -Force -Path signed | Out-Null
-          ./scripts/windows-package/sign-windows-installer.ps1 `
-            -Bundle (Join-Path $root "JustSpeakToIt-windows_$($env:VERSION)_unsigned.msixbundle") `
-            -Output "signed/JustSpeakToIt-windows_$($env:VERSION).msixbundle" -Packages (Join-Path $root 'packages') `
-            -ToolCache $tools -Metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json')
+          $signing = @{
+            Bundle = (Join-Path $root "JustSpeakToIt-windows_$($env:VERSION)_unsigned.msixbundle")
+            Output = "signed/JustSpeakToIt-windows_$($env:VERSION).msixbundle"
+            Packages = (Join-Path $root 'packages'); ToolCache = $tools; TimestampUrl = $env:TIMESTAMP_URL
+          }
+          switch ($env:PROVIDER) {
+            'artifact-signing' {
+              ./scripts/windows-package/sign-windows-installer.ps1 @signing `
+                -Metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json')
+            }
+            'sslcom-esigner' {
+              ./scripts/windows-package/load-sslcom-esigner.ps1 -CertificateThumbprint $env:THUMBPRINT `
+                -ToolCache $tools -Evidence 'signed/sslcom-esigner-load.json'
+              ./scripts/windows-package/sign-windows-installer.ps1 @signing -CertificateThumbprint $env:THUMBPRINT `
+                -PublicCertificate -Method 'SSL.com eSigner'
+            }
+            default { throw "Unsupported signing provider '$($env:PROVIDER)'." }
+          }
       - name: Report the signing route
         if: ${{ steps.config.outputs.enabled != 'true' }}
-        run: echo 'Azure Artifact Signing is not configured; the rehearsal passed and nothing was published. See Docs/windows-installer.md.'
+        run: echo 'Windows signing is not configured; the rehearsal passed and nothing was published. See Docs/windows-installer.md.'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ steps.config.outputs.enabled == 'true' }}
         with:

@@ -12,7 +12,7 @@ test-windows-installer.ps1 installs, upgrades, refuses a downgrade and
 uninstalls. The certificate and its trust are removed before the script ends.
 
 This proves the bundle, signature shape, App Installer file and update
-lifecycle. It does not prove publisher trust: only the Artifact Signing route,
+lifecycle. It does not prove publisher trust: only a publicly trusted signing route,
 verified without importing any certificate, does that. Keep this file ASCII-only.
 #>
 [CmdletBinding()]

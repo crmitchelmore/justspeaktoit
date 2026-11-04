@@ -248,12 +248,17 @@ console program.
   installs only signed packages through Add-AppxPackage or App Installer. The
   Windows 11 unsigned-package route needs a special publisher OID that gives a
   different identity, so it is not used. Every CI run still produces it.
-- **Azure Artifact Signing in CI** (`windows-developer-msix-signed`). When the
-  secrets and variables below exist, the `sign` job signs a separately built
-  copy; see [Setting up Azure Artifact Signing](#setting-up-azure-artifact-signing).
-  Without them the job logs "Azure Artifact Signing is not configured ...
-  keeping the unsigned developer MSIX" and succeeds; a partial setup fails and
-  names the missing settings.
+- **Signing provider in CI.** `WINDOWS_SIGNING_PROVIDER` chooses
+  `artifact-signing` (the default when unset; see
+  [Setting up Azure Artifact Signing](#setting-up-azure-artifact-signing)) or
+  `sslcom-esigner` (see
+  [Owner steps: SSL.com IV + eSigner](#owner-steps-sslcom-iv--esigner-direct-download)).
+  The installer `sign` job supports both; the developer-package job
+  (`windows-developer-msix-signed`) signs with Artifact Signing only and skips
+  other providers. With no settings the jobs log "Windows signing is not
+  configured ... publishing nothing" and succeed; a partial setup, settings
+  for two providers without a choice, or a malformed value fails and names
+  the settings, never their values.
 - **Certificate in a Windows certificate store.** For an OV certificate on a
   token or cloud HSM, rebuild the layout with
   `--publisher "<certificate subject>"`, pack it, then run
@@ -368,11 +373,29 @@ Done by the owner only; each step creates an account or accepts terms.
 2. Complete identity validation (government ID and liveness check).
 3. Enrol the certificate in eSigner, choose a subscription tier, and set
    automated signing to get a TOTP secret.
-4. Store the username, password, credential ID and TOTP secret as secrets in
-   the `main`-only `windows-signing` environment. Tell the maintainers the
-   certificate subject, which becomes `WINDOWS_MSIX_PUBLISHER`. An agent then
-   adds an `sslcom` provider to `sign` and runs a rehearsal before any
-   release.
+4. On a Windows PC, install eSigner CKA once, load the certificate and copy
+   its SHA-1 thumbprint and exact subject from `certmgr.msc` (Personal >
+   Certificates). Neither is secret.
+5. In the `main`-only `windows-signing` environment set:
+
+    | Kind | Name | Value |
+    |---|---|---|
+    | Variable | `WINDOWS_SIGNING_PROVIDER` | `sslcom-esigner` |
+    | Secret | `SSLCOM_ESIGNER_USERNAME` | eSigner account username |
+    | Secret | `SSLCOM_ESIGNER_PASSWORD` | eSigner account password |
+    | Secret | `SSLCOM_ESIGNER_TOTP_SECRET` | Base32 automated-signing TOTP secret from step 3 |
+    | Variable | `SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT` | 40-hex SHA-1 thumbprint from step 4 |
+    | Variable | `WINDOWS_MSIX_PUBLISHER` | Certificate subject from step 4, character for character |
+
+6. Dispatch `Windows installer` on `main` with an existing Alpha manifest and
+   check the `sign` job before relying on it. That job installs SSL.com's
+   eSigner CKA (pinned by SHA-256 in `dependencies.json`), loads the
+   certificate by thumbprint through
+   `scripts/windows-package/load-sslcom-esigner.ps1`, signs the bundle with
+   `/tr http://ts.ssl.com`, verifies it against the runner's trust and the
+   timestamp, then the clean-runner install and promotion gates run as for
+   Artifact Signing. This path is unit-tested but has not signed a real
+   package yet: the first manifest run is the pilot.
 
 ### Setting up Azure Artifact Signing
 

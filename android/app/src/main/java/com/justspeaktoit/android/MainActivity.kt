@@ -21,10 +21,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justspeaktoit.android.dictation.DictationViewModel
 import com.justspeaktoit.android.ui.DictationActions
 import com.justspeaktoit.android.ui.DictationScreen
+import com.justspeaktoit.android.ui.HistoryActions
+import com.justspeaktoit.android.ui.HistoryScreen
 import com.justspeaktoit.android.ui.MicPermission
 import com.justspeaktoit.android.ui.SettingsActions
 import com.justspeaktoit.android.ui.SettingsScreen
 import com.justspeaktoit.android.ui.theme.JustSpeakTheme
+
+private enum class Screen { Dictation, Settings, History }
 
 class MainActivity : ComponentActivity() {
     private val viewModel: DictationViewModel by viewModels()
@@ -56,26 +60,38 @@ class MainActivity : ComponentActivity() {
         setContent {
             val state by viewModel.state.collectAsStateWithLifecycle()
             val mic by permission
-            var showSettings by rememberSaveable { mutableStateOf(false) }
+            var screen by rememberSaveable { mutableStateOf(Screen.Dictation) }
             JustSpeakTheme {
-                if (showSettings) {
-                    BackHandler { showSettings = false }
-                    SettingsScreen(
+                if (screen != Screen.Dictation) BackHandler { screen = Screen.Dictation }
+                when (screen) {
+                    Screen.Settings -> SettingsScreen(
                         state = state,
                         actions = SettingsActions(
-                            onBack = { showSettings = false },
+                            onBack = { screen = Screen.Dictation },
                             onSaveKey = viewModel::saveKey,
                             onRemoveKey = viewModel::removeKey,
                             onChooseModel = viewModel::chooseCloudModel,
                             onCleanupChanged = viewModel::setCleanupEnabled,
                         ),
                     )
-                } else {
-                    DictationScreen(
+                    Screen.History -> HistoryScreen(
+                        entries = state.history,
+                        retention = state.retention,
+                        actions = HistoryActions(
+                            onBack = { screen = Screen.Dictation },
+                            onRetention = viewModel::setRetention,
+                            onDelete = viewModel::deleteHistoryEntry,
+                            onClear = viewModel::clearHistory,
+                        ),
+                    )
+                    Screen.Dictation -> DictationScreen(
                         state = state,
                         level = viewModel.level,
                         permission = mic,
-                        actions = actions.copy(onShowSettings = { showSettings = true }),
+                        actions = actions.copy(
+                            onShowSettings = { screen = Screen.Settings },
+                            onShowHistory = { screen = Screen.History },
+                        ),
                     )
                 }
             }

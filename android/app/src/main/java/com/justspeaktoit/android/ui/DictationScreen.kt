@@ -119,7 +119,7 @@ private fun ModeSection(state: DictationUiState, actions: DictationActions) {
         }
         return
     }
-    val active = state.activeMode
+    val active = state.displayedMode
     Text(stringResource(R.string.mode_picker_label), style = MaterialTheme.typography.labelLarge)
     SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
         state.options.forEachIndexed { index, option ->

@@ -1,0 +1,105 @@
+package com.justspeaktoit.android.dictation
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import java.util.Locale
+
+data class DictationUiState(
+    val dictation: DictationState = DictationState.Idle,
+    val options: List<ModeAvailability> = emptyList(),
+    /** The user's explicit choice; null means "use the best available mode". */
+    val chosenMode: RecognitionMode? = null,
+    val languageTag: String = Locale.getDefault().toLanguageTag(),
+    val onDeviceLanguageTag: String = languageTag,
+    val checkingAvailability: Boolean = true,
+) {
+    val activeMode: RecognitionMode?
+        get() = chosenMode ?: RecognizerAvailability.defaultMode(options)
+
+    val activeAvailability: ModeAvailability?
+        get() = options.firstOrNull { it.mode == activeMode }
+
+    val canStart: Boolean
+        get() = !dictation.isActive && activeAvailability?.usable == true
+}
+
+class DictationViewModel(application: Application) : AndroidViewModel(application) {
+    private val engine = AndroidSpeechEngine(application)
+    private val _state = MutableStateFlow(DictationUiState())
+    val state: StateFlow<DictationUiState> = _state.asStateFlow()
+
+    // Kept separate so microphone level updates only recompose the level indicator.
+    private val _level = MutableStateFlow(0f)
+    val level: StateFlow<Float> = _level.asStateFlow()
+
+    /** Called whenever the screen starts, so newly installed models or services are noticed. */
+    fun refreshAvailability() {
+        if (_state.value.dictation.isActive) return
+        val caps = engine.capabilities()
+        val tag = Locale.getDefault().toLanguageTag()
+        _state.update { it.copy(languageTag = tag, checkingAvailability = true) }
+        engine.checkOnDeviceLanguage(tag) { resolution ->
+            _state.update {
+                it.copy(
+                    options = RecognizerAvailability.evaluate(caps, resolution.support),
+                    onDeviceLanguageTag = resolution.languageTag,
+                    checkingAvailability = false,
+                )
+            }
+        }
+    }
+
+    fun chooseMode(mode: RecognitionMode) {
+        if (_state.value.dictation.isActive) return
+        _state.update { it.copy(chosenMode = mode) }
+    }
+
+    fun downloadOnDeviceModel() {
+        engine.requestOnDeviceModel(_state.value.onDeviceLanguageTag)
+    }
+
+    fun start() {
+        val current = _state.value
+        val mode = current.activeMode ?: return
+        if (!current.canStart) return
+        dispatch(DictationEvent.Start(mode))
+        val tag = if (mode == RecognitionMode.OnDevice) current.onDeviceLanguageTag else current.languageTag
+        engine.start(mode, tag, onEvent = ::dispatch, onLevel = { _level.value = it })
+    }
+
+    fun stop() {
+        if (!_state.value.dictation.isActive) return
+        dispatch(DictationEvent.StopRequested)
+        engine.stop()
+    }
+
+    fun cancel() {
+        engine.cancel()
+        dispatch(DictationEvent.Cancelled)
+    }
+
+    /** Android does not let a foreground-only app keep the microphone once it leaves the screen. */
+    fun onLeftApp() {
+        if (!_state.value.dictation.isActive) return
+        engine.cancel()
+        dispatch(DictationEvent.Error(DictationFailure.LeftApp))
+    }
+
+    fun clearResult() {
+        if (_state.value.dictation.isActive) return
+        _state.update { it.copy(dictation = DictationState.Idle) }
+    }
+
+    private fun dispatch(event: DictationEvent) {
+        _state.update { it.copy(dictation = DictationReducer.reduce(it.dictation, event)) }
+        if (!_state.value.dictation.isActive) _level.value = 0f
+    }
+
+    override fun onCleared() {
+        engine.close()
+    }
+}

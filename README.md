@@ -89,6 +89,7 @@ Sources/
 ├── SpeakApp/       # macOS application
 └── SpeakiOS/       # iOS library (live transcription, views)
 SpeakiOSApp/        # iOS app entry point
+android/            # Native Android app (Kotlin, Compose) — see android/README.md
 Just Speak to It.xcodeproj/ # Generated via Tuist (iOS + macOS)
 ```
 

@@ -252,13 +252,15 @@ final class FocusRecordingServiceTests: XCTestCase {
         let finished = expectation(description: "stop settled")
         let stop = Task { _ = await service.stopRecording(); finished.fulfill() }
         defer { gate.release(); stop.cancel() }
-        guard await XCTWaiter.fulfillment(of: [gate.entered], timeout: 2) == .completed else {
+        // Both waits are event-driven; 30s only catches a hang, so a stalled
+        // hosted runner cannot masquerade as a redirected stop (#1346).
+        guard await XCTWaiter.fulfillment(of: [gate.entered], timeout: 30) == .completed else {
             return XCTFail("Drain was not entered")
         }
         harness.focus = .none
         harness.settings.hardwareTriggerDestination = .clipboardAndPostProcess
         gate.release()
-        guard await XCTWaiter.fulfillment(of: [finished], timeout: 2) == .completed else {
+        guard await XCTWaiter.fulfillment(of: [finished], timeout: 30) == .completed else {
             return XCTFail("Drain did not settle")
         }
         XCTAssertEqual(service.lastCompletedDestination?.origin, .focus)

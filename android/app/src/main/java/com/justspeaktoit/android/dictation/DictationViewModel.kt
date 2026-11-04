@@ -40,6 +40,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
+import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
 import java.security.GeneralSecurityException
 import java.security.ProviderException
@@ -185,7 +187,23 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
      */
     fun offerSharedAudio(uri: Uri, mimeType: String?) {
         if (_state.value.dictation.isActive) return
+        // Only content shared through a provider is accepted. A file:// URI or one of this app's own
+        // providers would be read with this app's privileges, which could upload its private data.
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT || isOwnProvider(uri)) {
+            sessionModelId = _state.value.cloudModel.catalogId
+            dispatch(DictationEvent.Start(RecognitionMode.Cloud))
+            dispatch(DictationEvent.Error(DictationFailure.UnsupportedAudio))
+            return
+        }
         _state.update { it.copy(sharedAudio = SharedAudioOffer(uri, mimeType)) }
+    }
+
+    private fun isOwnProvider(uri: Uri): Boolean {
+        val app = getApplication<Application>()
+        val authority = uri.authority ?: return true
+        @Suppress("DEPRECATION")
+        val provider = app.packageManager.resolveContentProvider(authority, 0)
+        return provider?.packageName == app.packageName
     }
 
     fun dismissSharedAudio() {
@@ -195,6 +213,11 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     fun confirmSharedAudio() {
         val offer = _state.value.sharedAudio ?: return
         _state.update { it.copy(sharedAudio = null) }
+        // Confirming takes priority over an optional cleanup; the transcript is already in History.
+        if (_state.value.cleanup == CleanupStatus.Running) {
+            work?.cancel()
+            _state.update { it.copy(cleanup = CleanupStatus.None) }
+        }
         transcribeSharedAudio(offer.uri, offer.mimeType)
     }
 
@@ -211,11 +234,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         work = viewModelScope.launch {
             val file = File(cacheDir, "shared-${System.nanoTime()}")
             val event = try {
-                val format = SharedAudio.format(mimeType ?: resolver.getType(uri))
-                    ?: throw CloudException(DictationFailure.UnsupportedAudio, "Unsupported audio")
                 val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
                     ?: throw CloudException(DictationFailure.MissingKey, "No key")
-                withContext(Dispatchers.IO) { copyLimited(resolver, uri, file) }
+                val format = importSharedAudio(resolver, uri, mimeType, file)
                 DictationEvent.Final(
                     cloudCall(TRANSCRIBE_DEADLINE_MS) { call ->
                         cloud.transcribe(model, key, file, language, call, format)
@@ -239,9 +260,30 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** Copies at most [SharedAudio.MAX_BYTES], failing early rather than uploading a file a provider rejects. */
-    private fun copyLimited(resolver: ContentResolver, uri: Uri, target: File) {
-        val input = resolver.openInputStream(uri) ?: throw IOException("Unreadable audio")
+    /**
+     * Resolves the format and copies at most [SharedAudio.MAX_BYTES] off the main thread, within a
+     * deadline. Cancelling closes the provider stream, so a stalled sender cannot hold a worker.
+     */
+    private suspend fun importSharedAudio(
+        resolver: ContentResolver,
+        uri: Uri,
+        declaredType: String?,
+        target: File,
+    ): SharedAudio.Format {
+        val stream = AtomicReference<InputStream?>(null)
+        return bounded(IMPORT_DEADLINE_MS, DictationFailure.Audio, abort = { runCatching { stream.get()?.close() } }) {
+            // Senders often declare a generic type such as audio/*; the provider's type is more precise.
+            val format = SharedAudio.format(declaredType) ?: SharedAudio.format(resolver.getType(uri))
+                ?: throw CloudException(DictationFailure.UnsupportedAudio, "Unsupported audio")
+            val input = resolver.openInputStream(uri) ?: throw IOException("Unreadable audio")
+            stream.set(input)
+            copyLimited(input, target)
+            format
+        }
+    }
+
+    /** Fails early rather than uploading a file the provider would reject. */
+    private fun copyLimited(input: InputStream, target: File) {
         input.use { source ->
             target.outputStream().use { out ->
                 val buffer = ByteArray(64 * 1024)
@@ -418,6 +460,8 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
      * capture ends as a failure. Work that no longer needs the microphone (an upload) continues.
      */
     fun onLeftApp() {
+        // A tile or shortcut start that has not happened yet must not start once the app is hidden.
+        autoStartPending = false
         val dictation = _state.value.dictation
         if (dictation !is DictationState.Starting && dictation !is DictationState.Listening) return
         engine.cancel()
@@ -543,26 +587,37 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
      */
     private suspend fun <T> cloudCall(deadlineMs: Long, block: (CallHandle) -> T): T {
         val call = CallHandle()
-        return try {
-            withTimeout(deadlineMs) {
-                coroutineScope {
-                    val watchdog = launch {
-                        try {
-                            awaitCancellation()
-                        } finally {
-                            call.cancel()
-                        }
-                    }
+        return bounded(deadlineMs, DictationFailure.NetworkTimeout, abort = call::cancel) { block(call) }
+    }
+
+    /**
+     * Runs blocking IO with an overall deadline. On cancellation or timeout [abort] runs from another
+     * coroutine (closing a socket or stream), so the blocked thread is released instead of leaking.
+     */
+    private suspend fun <T> bounded(
+        deadlineMs: Long,
+        timeoutFailure: DictationFailure,
+        abort: () -> Unit,
+        block: () -> T,
+    ): T = try {
+        withTimeout(deadlineMs) {
+            coroutineScope {
+                val watchdog = launch {
                     try {
-                        withContext(Dispatchers.IO) { block(call) }
+                        awaitCancellation()
                     } finally {
-                        watchdog.cancel()
+                        abort()
                     }
                 }
+                try {
+                    withContext(Dispatchers.IO) { block() }
+                } finally {
+                    watchdog.cancel()
+                }
             }
-        } catch (e: TimeoutCancellationException) {
-            throw CloudException(DictationFailure.NetworkTimeout, "Request deadline reached", e)
         }
+    } catch (e: TimeoutCancellationException) {
+        throw CloudException(timeoutFailure, "Deadline reached", e)
     }
 
     private fun onEngineEvent(event: DictationEvent) {
@@ -630,6 +685,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         const val MIN_AUDIO_BYTES = WavFormat.BYTES_PER_SECOND / 4
         const val TRANSCRIBE_DEADLINE_MS = 180_000L
         const val CLEANUP_DEADLINE_MS = 60_000L
+        const val IMPORT_DEADLINE_MS = 60_000L
         const val DOWNLOAD_CHECK_INTERVAL_MS = 5_000L
         const val DOWNLOAD_CHECKS = 60
     }

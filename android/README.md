@@ -31,15 +31,19 @@ report, and any other changed file, or a push to `main`, runs every Apple gate.
 
 ### Package feeds
 
-By default Gradle resolves from Google Maven, Maven Central and the Gradle Plugin Portal.
-On machines that must use a single proxy feed, point every repository at it:
+Package-feed policy forbids resolving directly from public registries, so Gradle has no
+public repositories. Every dependency and plugin comes from one approved feed, and without
+one the build stops with `blocked: no approved Maven feed configured`:
 
 ```bash
 ./gradlew -Pjsti.mavenMirror=https://<feed>/maven/v1 assembleDebug
 # or: export JSTI_MAVEN_MIRROR=https://<feed>/maven/v1
 ```
 
-The feed must proxy Google Maven, Maven Central and the Gradle Plugin Portal.
+The feed must proxy Maven Central and Google Maven; it serves both the libraries and the
+Gradle plugin markers. CI reads the feed URL from the repository variable `JSTI_MAVEN_MIRROR`
+and fails before Gradle runs if it is not set. No approved feed exists yet: the CFS proxy
+returns 404 for Maven paths, so Android builds are currently blocked.
 
 ## Layout
 

@@ -22,9 +22,9 @@ public enum NativePCM16WAVReader {
         at url: URL, maximumDuration: TimeInterval, maximumBytes: Int
     ) async throws -> PreparedAudio {
         #if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
-        return try convertWAV(at: url, maximumDuration: maximumDuration, maximumBytes: maximumBytes)
+        try convertWAV(at: url, maximumDuration: maximumDuration, maximumBytes: maximumBytes)
         #else
-        return try prepare(at: url, maximumDuration: maximumDuration, maximumBytes: maximumBytes)
+        try prepare(at: url, maximumDuration: maximumDuration, maximumBytes: maximumBytes)
         #endif
     }
 

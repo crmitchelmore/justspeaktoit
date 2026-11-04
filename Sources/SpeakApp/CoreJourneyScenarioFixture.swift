@@ -17,7 +17,7 @@ enum CoreJourneyScenarioFixture {
         "Streaming partials become one final"
     ]
     static let streamingFinal = "Streaming partials become one final transcript."
-    static let credentialFileName = "fixture-credential"
+    static let credentialAcknowledgementFileName = "fixture-credential.json"
     static let missingKeyMessage =
         "Batch transcription requires an OpenRouter API key. Add one in Settings › API Keys."
 
@@ -58,13 +58,8 @@ extension CoreJourneyLaunchProfile {
         case .batchSilentInput:
             return CoreJourneyBatchFixture.makeClient(protocolClass: CoreJourneySilentURLProtocol.self)
         case .batchMissingKeyThenRecovery:
-            // Stands in for the user's credential store: absent until the test
-            // writes the fixture key between recordings, then read per request.
-            let file = directory.appendingPathComponent(CoreJourneyScenarioFixture.credentialFileName)
-            return CoreJourneyBatchFixture.makeClient(apiKeyProvider: {
-                (try? String(contentsOf: file, encoding: .utf8))?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            })
+            let slot = credentialSlot
+            return CoreJourneyBatchFixture.makeClient(apiKeyProvider: { slot.key })
         case .batchOff, .streamingOff:
             return CoreJourneyBatchFixture.makeClient()
         }
@@ -167,7 +162,56 @@ final class CoreJourneyStreamingController: LiveTranscriptionController {
 }
 
 /// Accepts only the exact silent WAV, answering as a provider does for silence:
-/// with an empty transcript. Every other request is rejected and counted.
+/// with an empty transcript, which production rejects as an invalid response.
+/// Every other request is rejected and counted.
+/// Stands in for the user's credential store: empty until the test asks the app
+/// to save the fixture key between recordings, then read on every request. The
+/// sandboxed UI runner cannot write into the app's profile directory, so the
+/// request arrives as a UUID-scoped distributed notification without payload.
+final class CoreJourneyCredentialSlot: @unchecked Sendable {
+    static func notificationName(for identifier: UUID) -> Notification.Name {
+        Notification.Name("com.justspeaktoit.tests.core-journey.\(identifier.uuidString).provide-credential")
+    }
+
+    private let lock = NSLock()
+    private var stored: String?
+    private let acknowledgement: URL
+    private var observer: NSObjectProtocol?
+
+    init(identifier: UUID, directory: URL) {
+        acknowledgement = directory.appendingPathComponent(
+            CoreJourneyScenarioFixture.credentialAcknowledgementFileName
+        )
+        observer = DistributedNotificationCenter.default().addObserver(
+            forName: Self.notificationName(for: identifier), object: nil, queue: .main
+        ) { [weak self] _ in self?.provide() }
+    }
+
+    deinit {
+        if let observer { DistributedNotificationCenter.default().removeObserver(observer) }
+    }
+
+    var key: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+
+    func provide() {
+        lock.lock()
+        stored = CoreJourneyBatchFixture.fixtureKey
+        lock.unlock()
+        do {
+            try FileManager.default.createDirectory(
+                at: acknowledgement.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try Data(#"{"provided":true}"#.utf8).write(to: acknowledgement, options: .atomic)
+        } catch {
+            preconditionFailure("Cannot acknowledge fixture credential: \(error.localizedDescription)")
+        }
+    }
+}
+
 final class CoreJourneySilentURLProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var accepted = 0
@@ -178,8 +222,10 @@ final class CoreJourneySilentURLProtocol: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         var normalized = request
-        normalized.httpBody = CoreJourneyBatchURLProtocol.body(of: request)
+        let body = CoreJourneyBatchURLProtocol.body(of: request)
+        // Clearing the stream also clears httpBody, so it must come first.
         normalized.httpBodyStream = nil
+        normalized.httpBody = body
         let isAccepted = CoreJourneyBatchURLProtocol.accepts(
             normalized, audio: CoreJourneyScenarioFixture.silentAudioData
         )
@@ -204,10 +250,9 @@ final class CoreJourneySilentURLProtocol: URLProtocol, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if isAccepted { accepted += 1 } else { rejected += 1 }
+        // Unit tests drive the protocol without a launched profile to record into.
         guard let rawID = ProcessInfo.processInfo.environment[CoreJourneyLaunchProfile.environmentKey],
-              let identifier = UUID(uuidString: rawID) else {
-            preconditionFailure("Silent HTTP fixture requires an isolated launch profile")
-        }
+              let identifier = UUID(uuidString: rawID) else { return }
         let directory = CoreJourneyLaunchProfile.launchDirectory(for: identifier)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

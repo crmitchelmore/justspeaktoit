@@ -353,7 +353,7 @@ class NativeUICoverageTests(unittest.TestCase):
         verifier = MODULE_PATH.with_name("verify-core-journey-ui.py")
         names = ["testStreaming_partialsBecomeOneFinalTranscriptWithoutDuplication",
                  "testTargetChange_duringRecordingDeliversToCapturedAppNotNewFrontmostApp",
-                 "testSilentInput_writesNothingToClipboardFieldOrHistory",
+                 "testSilentInput_leavesClipboardAndFieldUntouchedAndStoresNoTranscript",
                  "testMissingTranscriptionKey_failsVisiblyThenNextRunSucceeds"]
         rows = [f"Test Case '-[SpeakAppUITests.CoreJourneyP0UITests {name}]' passed (1.0 seconds).\n" for name in names]
         passing = "".join(rows)

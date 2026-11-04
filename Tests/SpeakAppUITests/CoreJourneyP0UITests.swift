@@ -66,8 +66,9 @@ final class CoreJourneyP0UITests: XCTestCase {
         try journey.assertHTTP(accepted: 1)
         let row = try XCTUnwrap(journey.history(count: 1).first)
         try journey.assertSuccessRow(row, raw: transcript, usage: ["batch"], model: "core-journey/batch-fixture")
+        // Production may append the settings remedy after the note.
         let movedNote = "Delivery warning: Sent to the app where recording started."
-        XCTAssertTrue(row.events.contains { $0.description == movedNote },
+        XCTAssertTrue(row.events.contains { $0.kind == "outputDelivered" && $0.description.hasPrefix(movedNote) },
                       "History must record that focus moved and the captured app received the transcript")
         let carbon = snapshot.events.filter { $0.source == "carbon" }
         XCTAssertEqual(carbon.map(\.stage), ["doubleTap", "singleTap"])
@@ -75,22 +76,25 @@ final class CoreJourneyP0UITests: XCTestCase {
         XCTAssertEqual(snapshot.states, ["idle", "recording", "processing", "delivering", "completed"])
     }
 
+    /// Production treats an empty provider transcript as a failed transcription:
+    /// nothing reaches the clipboard or field, and History keeps only a failure
+    /// record with no transcript text (no placeholder, no delivery).
     @MainActor
-    func testSilentInput_writesNothingToClipboardFieldOrHistory() throws {
+    func testSilentInput_leavesClipboardAndFieldUntouchedAndStoresNoTranscript() throws {
         let journey = try P0Journey(self, scenario: "batchSilentInput")
-        let terminal = try journey.record(expecting: nil) { journey.assertUntouched() }
-        // Allow several History flush intervals before proving nothing was written.
+        try journey.record(expecting: "failed") { journey.assertUntouched() }
+        // Allow several History flush intervals before proving nothing was delivered.
         Thread.sleep(forTimeInterval: 2)
         journey.assertUntouched()
         try journey.assertHTTP(accepted: 1)
-        XCTAssertEqual(try journey.historyRows(), [], "Silence must not create a History entry")
+        let row = try XCTUnwrap(journey.history(count: 1).first)
+        XCTAssertNil(row.rawTranscription, "Silence must not store transcript or placeholder text")
+        XCTAssertNil(row.postProcessedTranscription)
+        XCTAssertEqual(row.trigger.outputMethod, "none")
+        XCTAssertEqual(row.errors.map(\.phase), ["transcription"])
+        XCTAssertFalse(row.events.contains { $0.kind == "outputDelivered" || $0.kind == "transcriptionReceived" })
         let snapshot = try CoreJourneyGestureDriver.snapshot(at: journey.diagnostics)
-        XCTAssertEqual(Array(snapshot.states.prefix(3)), ["idle", "recording", "processing"])
-        XCTAssertEqual(snapshot.states.last, terminal)
-        let note = XCTAttachment(string: "Silent recording terminal state: \(terminal)")
-        note.name = "Silent input outcome"
-        note.lifetime = .keepAlways
-        add(note)
+        XCTAssertEqual(snapshot.states, ["idle", "recording", "processing", "failed"])
     }
 
     @MainActor
@@ -134,6 +138,7 @@ private final class P0Journey {
     private let app = XCUIApplication(bundleIdentifier: "com.justspeaktoit.mac")
     private let fixture = XCUIApplication(bundleIdentifier: "com.justspeaktoit.core-journey-fixture")
     private let directory: URL
+    private let identifier: UUID
     private unowned let owner: XCTestCase
     private var process: NSRunningApplication?
     private var delivered: [String] = []
@@ -145,6 +150,7 @@ private final class P0Journey {
     init(_ owner: XCTestCase, scenario: String?) throws {
         self.owner = owner
         let identifier = UUID()
+        self.identifier = identifier
         let suite = "com.justspeaktoit.tests.core-journey.\(identifier.uuidString)"
         directory = URL(fileURLWithPath: "/tmp", isDirectory: true).appendingPathComponent(suite)
         diagnostics = directory.appendingPathComponent("hotkey-probe.json")
@@ -247,9 +253,17 @@ private final class P0Journey {
         owner.add(screenshot)
     }
 
+    /// The sandboxed runner cannot write into the app's directory; the app saves
+    /// the fixture key on this UUID-scoped notification and acknowledges it.
     func provideCredential() throws {
-        let url = directory.appendingPathComponent("fixture-credential")
-        try Data("core-journey-fixture-not-a-real-key".utf8).write(to: url, options: .atomic)
+        let name = "com.justspeaktoit.tests.core-journey.\(identifier.uuidString).provide-credential"
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name(name), object: nil, userInfo: nil, deliverImmediately: true
+        )
+        let acknowledgement = directory.appendingPathComponent("fixture-credential.json")
+        waitUntil("The running app must acknowledge the saved credential") {
+            FileManager.default.fileExists(atPath: acknowledgement.path)
+        }
     }
 
     func assertHTTP(accepted: Int) throws {

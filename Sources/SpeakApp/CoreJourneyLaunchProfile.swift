@@ -79,6 +79,7 @@ final class CoreJourneyLaunchProfile {
         identifier: identifier,
         directory: directory, scenario: batchScenario
     )
+    lazy var credentialSlot = CoreJourneyCredentialSlot(identifier: identifier, directory: directory)
     private var hotKeyProbe: CoreJourneyHotKeyProbe?
 
     init(

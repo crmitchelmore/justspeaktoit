@@ -49,17 +49,34 @@ final class CoreJourneyScenarioFixtureTests: XCTestCase {
         ))
     }
 
+    /// The fixture admits the real serialized silent upload and answers with no
+    /// text; production then reports the empty transcript as an invalid response.
+    func testSilentProfile_ProductionClientUploadsSilenceAndRejectsTheEmptyTranscript() async throws {
+        let profile = makeProfile(.batchSilentInput)
+        try FileManager.default.createDirectory(at: profile.directory, withIntermediateDirectories: true)
+        let file = profile.directory.appendingPathComponent("silent.wav")
+        try CoreJourneyScenarioFixture.silentAudioData.write(to: file)
+        do {
+            _ = try await profile.makeFixtureClient()
+                .transcribeFile(at: file, model: CoreJourneyBatchFixture.model, language: nil)
+            XCTFail("An empty provider transcript must not become deliverable text")
+        } catch OpenRouterClientError.invalidResponse {
+            // Reaching the decoder proves the protocol admitted the exact silent bytes.
+        }
+    }
+
     func testMissingKeyClient_ReadsTheCredentialSlotPerRequest() async throws {
         let profile = makeProfile(.batchMissingKeyThenRecovery)
         let client = profile.makeFixtureClient()
         let hasKeyBefore = await client.hasStoredAPIKey()
         XCTAssertFalse(hasKeyBefore)
-        try FileManager.default.createDirectory(at: profile.directory, withIntermediateDirectories: true)
-        try Data("\(CoreJourneyBatchFixture.fixtureKey)\n".utf8).write(
-            to: profile.directory.appendingPathComponent(CoreJourneyScenarioFixture.credentialFileName)
-        )
+        profile.credentialSlot.provide()
         let hasKeyAfter = await client.hasStoredAPIKey()
         XCTAssertTrue(hasKeyAfter)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: profile.directory
+            .appendingPathComponent(CoreJourneyScenarioFixture.credentialAcknowledgementFileName).path))
+        XCTAssertNotEqual(CoreJourneyCredentialSlot.notificationName(for: UUID()),
+                          CoreJourneyCredentialSlot.notificationName(for: profile.identifier))
     }
 
     func testStreamingController_EmitsReplacementPartialsThenOneFinal() async throws {

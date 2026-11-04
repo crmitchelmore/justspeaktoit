@@ -34,7 +34,7 @@ REQUIRED_CASES = {
     "CoreJourneyP0UITests": (
         "testStreaming_partialsBecomeOneFinalTranscriptWithoutDuplication",
         "testTargetChange_duringRecordingDeliversToCapturedAppNotNewFrontmostApp",
-        "testSilentInput_writesNothingToClipboardFieldOrHistory",
+        "testSilentInput_leavesClipboardAndFieldUntouchedAndStoresNoTranscript",
         "testMissingTranscriptionKey_failsVisiblyThenNextRunSucceeds",
     ),
 }

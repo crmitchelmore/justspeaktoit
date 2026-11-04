@@ -1,12 +1,17 @@
 const escape = value => String(value)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+// Link bare https URLs (never other schemes) and escape every part.
+const rich = value => String(value).split(/(https:\/\/[^\s<>"']*[^\s<>"'.,;:)])/)
+  .map((part, index) => (index % 2 ? `<a href="${escape(part)}" target="_blank" rel="noopener">${escape(part)}</a>` : escape(part)))
+  .join('');
+
 const ISSUE_BASE = 'https://github.com/crmitchelmore/justspeaktoit/issues/';
 const minutesLabel = minutes => `~${minutes} min`;
 
 function renderCheck(item) {
   const prerequisites = item.prerequisites.length
-    ? `<p class="qa-label">Before you start</p><ul class="qa-prereqs">${item.prerequisites.map(entry => `<li>${escape(entry)}</li>`).join('')}</ul>`
+    ? `<p class="qa-label">Before you start</p><ul class="qa-prereqs">${item.prerequisites.map(entry => `<li>${rich(entry)}</li>`).join('')}</ul>`
     : '';
   const choices = ['pass', 'fail', 'skip'].map(result => `
           <label class="qa-choice qa-choice-${result}">
@@ -20,8 +25,8 @@ function renderCheck(item) {
           <p class="qa-meta"><a href="${ISSUE_BASE}${item.issue}" target="_blank" rel="noopener">#${item.issue}</a> · ${minutesLabel(item.minutes)} · ${escape(item.build)}</p>
         </header>
         ${prerequisites}
-        <ol class="qa-steps">${item.steps.map(step => `<li>${escape(step)}</li>`).join('')}</ol>
-        <p class="qa-expected"><strong>Expected:</strong> ${escape(item.expected)}</p>
+        <ol class="qa-steps">${item.steps.map(step => `<li>${rich(step)}</li>`).join('')}</ol>
+        <p class="qa-expected"><strong>Expected:</strong> ${rich(item.expected)}</p>
         <fieldset class="qa-choices">
           <legend class="visually-hidden">Result for ${escape(item.title)}</legend>${choices}
         </fieldset>
@@ -37,7 +42,7 @@ function renderDecision(item) {
           <label class="qa-option">
             <input type="radio" name="result-${escape(item.id)}" value="${escape(option.id)}">
             <span class="qa-option-text"><strong>${escape(option.label)}</strong>${option.recommended ? ' <span class="qa-badge">Recommended</span>' : ''}
-              <span class="qa-consequence">${escape(option.consequence)}</span></span>
+              <span class="qa-consequence">${rich(option.consequence)}</span></span>
           </label>`).join('');
   return `
       <article class="qa-item" id="${escape(item.id)}" data-id="${escape(item.id)}" data-kind="decision" data-minutes="${item.minutes}">
@@ -45,7 +50,7 @@ function renderDecision(item) {
           <h3>${escape(item.title)}</h3>
           <p class="qa-meta"><a href="${ISSUE_BASE}${item.issue}" target="_blank" rel="noopener">#${item.issue}</a> · ${minutesLabel(item.minutes)}</p>
         </header>
-        <p>${escape(item.context)}</p>
+        <p>${rich(item.context)}</p>
         <fieldset class="qa-options">
           <legend>${escape(item.question)}</legend>${options}
         </fieldset>
@@ -55,7 +60,7 @@ function renderDecision(item) {
 function renderSession(session) {
   const minutes = session.items.reduce((total, item) => total + item.minutes, 0);
   const setup = session.setup.length
-    ? `<div class="qa-setup"><p class="qa-label">Set up once</p><ul>${session.setup.map(entry => `<li>${escape(entry)}</li>`).join('')}</ul></div>`
+    ? `<div class="qa-setup"><p class="qa-label">Set up once</p><ul>${session.setup.map(entry => `<li>${rich(entry)}</li>`).join('')}</ul></div>`
     : '';
   return `
     <section class="qa-session" id="session-${escape(session.id)}" aria-labelledby="heading-${escape(session.id)}">

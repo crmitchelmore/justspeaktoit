@@ -47,6 +47,10 @@ test('catalogue text is escaped in markup and embedded data', () => {
   const html = renderQaPage(hostile);
   assert.ok(!html.includes('<img src=x'));
   assert.equal((html.match(/<\/script>/g) || []).length, 2, 'Only the two real script elements close');
+  const linked = renderQaPage(loadCatalogue(catalogueSource.replace(/^( +expected: ).*$/m,
+    (_, prefix) => prefix + JSON.stringify('See https://example.com/a?b=1&c="x" onclick=y, then javascript:alert(1).'))));
+  assert.ok(linked.includes('<a href="https://example.com/a?b=1&amp;c=" target="_blank" rel="noopener">'));
+  assert.ok(!linked.includes('href="javascript:'));
 });
 
 test('a submitted page produces an issue the workflow accepts', () => {

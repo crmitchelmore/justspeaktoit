@@ -130,6 +130,23 @@ sessions:
           - id: "add-ios"
             label: "Add Azure voice output to iOS"
             consequence: "New iOS provider case, router path and settings; adds an iPhone playback check before #1052 can close."
+      - id: "decision-windows-signing"
+        issue: 1157
+        title: "Windows signing route (gates #1157 signing scope)"
+        minutes: 3
+        question: "Which signing route should the Windows installer use? You are a UK individual."
+        context: "Nothing ships to Windows users until you pick and enrol in a route; Azure Artifact Signing is US/Canada-only for individuals. The first route fixes the package identity, so switching later means users reinstall. Owner steps and costs: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/windows-installer.md#routes-for-a-uk-individual-november-2026 (from PR #1336)."
+        options:
+          - id: "microsoft-store"
+            label: "Microsoft Store"
+            consequence: "Fewest owner steps: free individual account with ID check, the Store signs the app and shows your chosen publisher name, no SmartScreen download prompt; an agent then wires the Store identity and upload job."
+            recommended: true
+          - id: "sslcom-esigner"
+            label: "SSL.com IV certificate + eSigner (direct download)"
+            consequence: "About $129/yr certificate plus eSigner from $180/yr; shows your legal name; CI signs with a TOTP secret you add to the windows-signing environment; first release is a pilot and SmartScreen reputation builds over time."
+          - id: "signpath-foundation"
+            label: "SignPath Foundation (direct download)"
+            consequence: "Free for open source; publisher shown as \"SignPath Foundation\"; needs a code-signing policy page and an approval per release."
   - id: "mac"
     device: "Mac"
     title: "Mac session: streaming insertion (#664)"
@@ -201,6 +218,26 @@ sessions:
           - "Check the sticky and History."
         expected: "Nothing appears while you speak; the text arrives once after Stop, exactly once, matching History."
         final_gate: true
+  - id: "owner-actions"
+    device: "Mac"
+    title: "Owner-only actions at a computer"
+    items:
+      - id: "owner-flathub-submission"
+        issue: 1219
+        title: "Submit Just Speak to It to Flathub yourself"
+        minutes: 60
+        build: "Tagged main release; Flatpak manifest in packaging/linux as a reference only"
+        prerequisites:
+          - "Flathub bars AI-written manifests, PRs and replies: do every step yourself, without an agent"
+          - "Steps: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/linux-packaging.md (Recommended next step: Flathub, from PR #1336)"
+        steps:
+          - "Write your own Flathub manifest building from a tagged git source of this repository, with the same pinned SwiftPM sources."
+          - "Add Linux screenshots at stable URLs and a release entry to the metainfo; run flatpak-builder-lint appstream and flatpak-builder-lint repo on a built repo."
+          - "Signed in to GitHub as yourself (2FA on), open a pull request to flathub/flathub against the new-pr branch titled \"Add com.justspeaktoit.JustSpeakToIt\"."
+          - "In the description, disclose which parts of the app were AI-generated and roughly how much, and justify each finish-args permission."
+          - "Answer reviewers yourself, and accept the maintainer invitation within a week of approval."
+        expected: "Your submission pull request is open on flathub/flathub with the disclosure. After acceptance, an agent can publish the domain verification token and point the website at the Flathub listing."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone session"

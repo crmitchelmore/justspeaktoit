@@ -1224,9 +1224,10 @@ int jsti_audio_playback_self_test(char *error, size_t error_capacity);
  * real credentials. */
 int jsti_native_self_test(char *error, size_t error_capacity);
 
-/* Binds missing stdout/stderr to the parent console for command-line runs of
- * the GUI-subsystem app. Returns 1 when it attached, 0 otherwise. */
-int32_t jsti_console_attach_parent(void);
+/* Gives the GUI-subsystem app a valid stdout/stderr: missing streams bind to
+ * the parent console when attach_parent is nonzero and one exists, otherwise
+ * to NUL. Returns 1 when it attached to the parent console, 0 otherwise. */
+int32_t jsti_console_prepare(int32_t attach_parent);
 int jsti_audio_devices_self_test(char *error, size_t error_capacity);
 /* Call on the UI thread from READY in smoke-test mode. Verifies native control
  * bounds, history updates/events, search/filter selection handling, transcript

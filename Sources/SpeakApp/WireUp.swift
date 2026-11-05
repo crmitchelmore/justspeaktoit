@@ -435,6 +435,7 @@ extension AppEnvironment {
   func prepareForTermination() async {
     historySyncAdapter?.flushPendingSyncedIDs()
     await main.prepareForTermination()
+    await AppSettings.SystemDependencies.drainLoginItemChanges()
   }
 
   fileprivate func switchToQuickVoice(_ index: Int) {

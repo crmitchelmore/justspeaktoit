@@ -1006,3 +1006,43 @@ The app ID is `com.justspeaktoit.JustSpeakToIt`, under the same
 the desktop file, the metainfo, the D-Bus name, the GlobalShortcuts binding and
 the Flatpak data path. Treat it as fixed: changing it moves user data and
 shortcut bindings.
+
+## HiDPI laptop qualification (2026-11-05)
+
+The dashboard uses one combined 900sp breakpoint for sidebar collapse, stacked
+hero actions and unequal-height dashboard columns. Libadwaita selects the last
+matching breakpoint; separate overlapping collapse/stack conditions do not
+compose. The window advertises a 640px minimum width so settings controls stay
+usable when resizing floating windows. Hidden settings pages must not determine the dashboard's minimum size.
+
+On Hyprland with GNOME Keyring installed, a missing Flatpak Secret portal can
+prevent credential storage even when the host Secret Service works. Preserve
+the existing portal preferences and add this override in
+`~/.config/xdg-desktop-portal/hyprland-portals.conf`:
+
+```ini
+[preferred]
+default=hyprland;gtk
+org.freedesktop.impl.portal.Secret=gnome-keyring
+```
+
+Restart the user `xdg-desktop-portal.service`, then verify the Secret interface
+and a disposable `--integration-test keyring` round trip. This requires the
+GNOME Keyring portal backend; it does not bypass the keyring's unlock policy.
+
+When running the Xvfb qualification scripts from a Wayland session, unset
+`WAYLAND_DISPLAY` and set `XDG_SESSION_TYPE=x11` as well as `GDK_BACKEND=x11`.
+HUD geometry assertions compare physical X11 pixels against scaled GDK workareas.
+
+On the MacBookPro11,3 Hyprland host, native Wayland window creation/shutdown,
+Flatpak keyring save/read/remove (including a large token), and CPU-only local
+Whisper transcription of the pinned JFK fixture passed. The Linux-filtered
+Swift suite passed with its explicit runtime/environment skips. Hands-free
+remains unavailable when lock/sleep monitoring cannot initialize; manual
+recording remains supported. Synthetic audio and private X11 fixtures do not
+qualify physical microphone intelligibility, cloud credentials, or consented
+Wayland insertion into another application.
+
+The final native integration script and 1x Xvfb screenshot tour passed. Live
+Hyprland resizing from 1100×760 to 640×760 and back verified sidebar collapse,
+stacking and restoration on the laptop at 2x scale.

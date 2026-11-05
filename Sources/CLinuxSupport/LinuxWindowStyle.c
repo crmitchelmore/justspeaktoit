@@ -6,8 +6,8 @@
 /*
  * The app's look. Colours are the Mac app's brand tokens (SpeakCore
  * BrandColors: accent #FF6B3D, warm #FF9C4A, deep #E3522E, lagoon #2ED4BF);
- * shapes follow its density tokens (cards radius 28, heroes 32, chips 20,
- * page padding 24). Everything else comes from libadwaita, so the window
+ * compact desktop shapes use cards radius 20, heroes 24 and chips 14,
+ * with page padding 24. Everything else comes from libadwaita, so the window
  * follows the desktop's light or dark style and its fonts.
  */
 
@@ -31,15 +31,15 @@ static const char *shared_css =
     ".jsti-tint-green { color: @jsti_green; }\n"
     ".jsti-tint-warm { color: #F08A2C; }\n"
     ".jsti-hero { background-image: linear-gradient(120deg, #E3522E, alpha(#FF9C4A, 0.92));"
-    " border-radius: 30px; padding: 28px; color: #ffffff;"
+    " border-radius: 24px; padding: 22px; color: #ffffff;"
     " box-shadow: 0 16px 28px -14px alpha(#E3522E, 0.55); }\n"
     ".jsti-hero.voice { background-image: linear-gradient(120deg, #1F9D55, alpha(#3CCF9E, 0.85));"
     " box-shadow: 0 16px 28px -14px alpha(#1F9D55, 0.5); }\n"
     ".jsti-hero.settings { background-image: linear-gradient(120deg, #F07A1A, alpha(#F7A64A, 0.8));"
     " box-shadow: 0 16px 28px -14px alpha(#F07A1A, 0.5); }\n"
-    ".jsti-hero-title { font-size: 28px; font-weight: 800; }\n"
+    ".jsti-hero-title { font-size: 26px; font-weight: 700; }\n"
     ".jsti-hero-subtitle { font-weight: 600; color: alpha(#ffffff, 0.88); }\n"
-    ".jsti-chip { background-color: alpha(#ffffff, 0.16); border-radius: 20px; padding: 12px 18px; }\n"
+    ".jsti-chip { background-color: alpha(#ffffff, 0.16); border-radius: 14px; padding: 10px 14px; }\n"
     ".jsti-chip-label { font-size: 11px; font-weight: 700; color: alpha(#ffffff, 0.82); }\n"
     ".jsti-chip-value { font-size: 20px; font-weight: 800; }\n"
     ".jsti-hero entry, .jsti-hero searchbar entry { background-color: alpha(#ffffff, 0.18); color: #ffffff;"
@@ -48,19 +48,19 @@ static const char *shared_css =
     ".jsti-hero-button { background-color: alpha(#ffffff, 0.2); color: #ffffff; border-radius: 12px;"
     " font-weight: 700; padding: 6px 14px; }\n"
     ".jsti-hero-button:hover { background-color: alpha(#ffffff, 0.3); }\n"
-    ".jsti-record-hero { background-image: linear-gradient(180deg, #2D8CFF, #0A6CFF); color: #ffffff;"
-    " border-radius: 999px; padding: 14px 30px; font-weight: 800; font-size: 15px;"
-    " box-shadow: 0 10px 20px -10px alpha(#0A6CFF, 0.8); }\n"
-    ".jsti-record-hero:hover { background-image: linear-gradient(180deg, #4A9DFF, #1F79FF); }\n"
-    ".jsti-record-hero.recording { background-image: linear-gradient(180deg, #FF5A5A, #D92A2A);"
+    ".jsti-record-hero { background-color: #ffffff; color: #A93217;"
+    " border-radius: 14px; padding: 12px 20px; font-weight: 700; font-size: 15px;"
+    " box-shadow: 0 4px 10px alpha(#6B2514, 0.12); }\n"
+    ".jsti-record-hero:hover { background-color: #FFF1EB; }\n"
+    ".jsti-record-hero.recording { background-color: #B71929; color: #ffffff;"
     " box-shadow: 0 10px 20px -10px alpha(#D92A2A, 0.8); }\n"
     ".jsti-record-hero:disabled { background-image: none; background-color: alpha(#ffffff, 0.25);"
     " color: alpha(#ffffff, 0.8); box-shadow: none; }\n"
     ".jsti-live-preview { background-color: alpha(#ffffff, 0.12); border-radius: 18px; padding: 12px 16px;"
     " font-family: monospace; }\n"
-    ".jsti-card { background-color: @card_bg_color; border-radius: 26px; padding: 22px;"
+    ".jsti-card { background-color: @card_bg_color; border-radius: 20px; padding: 18px;"
     " border: 1px solid alpha(@accent_bg_color, 0.14);"
-    " box-shadow: 0 12px 24px -18px alpha(@accent_bg_color, 0.45), 0 1px 2px alpha(#000000, 0.06); }\n"
+    " box-shadow: 0 2px 8px alpha(#000000, 0.04); }\n"
     ".jsti-card-icon { background-color: alpha(@accent_bg_color, 0.15); color: #E3522E; border-radius: 14px;"
     " min-width: 40px; min-height: 40px; }\n"
     ".jsti-card-title { font-size: 16px; font-weight: 700; }\n"
@@ -325,6 +325,7 @@ GtkWidget *jsti_hero_new(const char *variant, const char *title, const char *sub
     gtk_widget_add_css_class(hero, "jsti-hero");
     if (variant != NULL) gtk_widget_add_css_class(hero, variant);
     GtkWidget *top = density_box_new(GTK_ORIENTATION_HORIZONTAL, 18, DENSITY_INLINE);
+    gtk_widget_add_css_class(top, "jsti-hero-header");
     GtkWidget *text = density_box_new(GTK_ORIENTATION_VERTICAL, 6, DENSITY_INLINE);
     gtk_widget_set_hexpand(text, TRUE);
     gtk_box_append(GTK_BOX(text), label_with(title, "jsti-hero-title"));
@@ -338,7 +339,7 @@ GtkWidget *jsti_hero_new(const char *variant, const char *title, const char *sub
     gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(row), GTK_SELECTION_NONE);
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(row), 12);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(row), 12);
-    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(row), 2);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(row), 1);
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(row), 4);
     gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(row), TRUE);
     gtk_widget_set_can_target(row, TRUE);

@@ -80,6 +80,7 @@ jobs:
               "iteration": iteration, "cold": iteration == 1, "exit_code": code,
               "coverage_errors": errors, "seconds": test_seconds if test_seconds is not None else seconds,
               "wall_seconds": seconds, "sha": os.environ["GITHUB_SHA"],
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
           }, indent=2) + "\n")
           PY
             [ "$code" -eq 0 ] || failed=1
@@ -110,7 +111,10 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         timeout-minutes: 5
         with:
-          pattern: core-journey-qualification-*-${{ github.run_attempt }}
+          # Every attempt of this run: a job whose earlier attempt never reached
+          # its iterations (for example a setup download failure) may qualify
+          # from a rerun. The summariser rejects any job that ran tests twice.
+          pattern: core-journey-qualification-*
           path: receipts
       - name: Decide qualification
         run: |

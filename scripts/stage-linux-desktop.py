@@ -3,6 +3,8 @@
 import argparse
 import pathlib
 import shutil
+import re
+import subprocess
 import struct
 import sys
 
@@ -14,8 +16,9 @@ import local_llm_package
 
 def resource_bundles(directory):
     bundles = []
-    for bundle in sorted(pathlib.Path(directory).glob("*.resources")):
-        target = bundle.name.removesuffix(".resources")
+    for bundle in sorted(path for path in pathlib.Path(directory).iterdir()
+                         if path.suffix in (".resources", ".bundle")):
+        target = bundle.stem
         if target.endswith("Tests") or target == "SpeakTestSupport" or target.endswith("_SpeakTestSupport"):
             continue
         if bundle.is_symlink() or not bundle.is_dir():
@@ -27,7 +30,39 @@ def resource_bundles(directory):
     return bundles
 
 
-def stage(binary, output, prefix="/usr/local", local_llm_runtime=None, *, cli=None):
+def swift_runtime_closure(binaries, directory):
+    """Collect only DT_NEEDED Swift SDK libraries, including transitive needs.
+
+    System dependencies stay with the distribution/runtime. No executable is run
+    while inspecting dependencies, and SDK symlinks must resolve within the SDK.
+    """
+    directory = pathlib.Path(directory).resolve(strict=True)
+    pending, libraries = list(binaries), {}
+    while pending:
+        binary = pending.pop()
+        dynamic = subprocess.check_output(["readelf", "--dynamic", str(binary)], text=True)
+        for name in re.findall(r"\(NEEDED\).*?\[([^]\n]+)\]", dynamic):
+            if pathlib.Path(name).name != name:
+                raise ValueError("dependency names must not contain paths")
+            candidate = directory / name
+            if name in libraries:
+                continue
+            if not candidate.exists():
+                if name.startswith(("libswift", "libFoundation", "lib_Foundation", "libdispatch", "libBlocksRuntime")) or "swift" in name.lower():
+                    raise ValueError(f"missing Swift SDK dependency: {name}")
+                continue
+            resolved = candidate.resolve(strict=True)
+            if not resolved.is_relative_to(directory) or not resolved.is_file():
+                raise ValueError(f"Swift SDK dependency escapes its directory: {name}")
+            libraries[name] = resolved
+            pending.append(resolved)
+    if not libraries:
+        raise ValueError("no shared Swift dependencies found; use a dynamically linked release build")
+    return libraries
+
+
+def stage(binary, output, prefix="/usr/local", local_llm_runtime=None, *, cli=None,
+          swift_runtime=None, strip_symbols=False):
     binary, output = pathlib.Path(binary), pathlib.Path(output)
     if not binary.is_file() or binary.is_symlink():
         raise ValueError("the built SpeakLinux executable must be a regular file")
@@ -39,11 +74,18 @@ def stage(binary, output, prefix="/usr/local", local_llm_runtime=None, *, cli=No
         raise ValueError("the install prefix must be an absolute Linux path without controls")
     if any(value in prefix for value in ("%", "=")):
         raise ValueError("the install prefix cannot contain percent or equal signs in a desktop executable path")
-    theme = binary.parent / "SpeakApp_SpeakLinux.resources/hicolor"
-    core = binary.parent / "SpeakApp_SpeakCore.resources"
     bundles = resource_bundles(binary.parent)
-    if core not in bundles or theme.parent not in bundles or not theme.is_dir():
+    themes = [bundle / "hicolor" for bundle in bundles if bundle.stem == "SpeakApp_SpeakLinux"]
+    cores = [bundle for bundle in bundles if bundle.stem == "SpeakApp_SpeakCore"]
+    if len(themes) != 1 or len(cores) != 1 or not themes[0].is_dir():
         raise ValueError("the built executable's Linux icon and core resource bundles must be present")
+    theme = themes[0]
+    swift_libraries = swift_runtime_closure([binary] + ([cli] if cli else []), swift_runtime) if swift_runtime else {}
+    swift_license = None
+    if swift_libraries:
+        swift_license = pathlib.Path(swift_runtime).resolve().parents[2] / "share/swift/LICENSE.txt"
+        if not swift_license.is_file():
+            raise ValueError("the Swift SDK runtime license must be present in share/swift/LICENSE.txt")
     runtime = None
     if local_llm_runtime is not None:
         with binary.open("rb") as stream:
@@ -67,6 +109,23 @@ def stage(binary, output, prefix="/usr/local", local_llm_runtime=None, *, cli=No
         (destination / "speak").chmod(0o755)
     for bundle in bundles:
         shutil.copytree(bundle, destination / bundle.name)
+    for name, source in swift_libraries.items():
+        target = output / "lib/swift" / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    if swift_libraries:
+        license_target = output / "share/licenses/swift/LICENSE.txt"
+        license_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(swift_license, license_target)
+        for executable in [destination / "justspeaktoit"] + ([destination / "speak"] if cli else []):
+            subprocess.run(["patchelf", "--set-rpath", "$ORIGIN/../lib/swift", str(executable)], check=True)
+        for name in swift_libraries:
+            subprocess.run(["patchelf", "--set-rpath", "$ORIGIN", str(output / "lib/swift" / name)], check=True)
+    if strip_symbols:
+        # Never mutate build outputs or inference libraries with pinned receipts.
+        for target in [destination / "justspeaktoit"] + ([destination / "speak"] if cli else []) + [
+                output / "lib/swift" / name for name in swift_libraries]:
+            subprocess.run(["strip", "--strip-unneeded", str(target)], check=True)
     if runtime is not None:
         runtime_directory = destination / local_llm_package.DIRECTORY
         runtime_directory.mkdir()
@@ -97,8 +156,12 @@ def main():
     parser.add_argument("--local-llm-runtime", type=pathlib.Path,
                         help="pinned offline native cleanup build's LocalLLMRuntime directory; no acquisition")
     parser.add_argument("--cli", type=pathlib.Path, help="built speak executable to stage alongside the app")
+    parser.add_argument("--swift-runtime", type=pathlib.Path,
+                        help="Swift SDK shared-library directory; stage only the DT_NEEDED closure")
+    parser.add_argument("--strip-symbols", action="store_true", help="strip staged app/CLI/Swift copies only")
     args = parser.parse_args()
-    stage(args.binary, args.output, args.prefix, args.local_llm_runtime, cli=args.cli)
+    stage(args.binary, args.output, args.prefix, args.local_llm_runtime, cli=args.cli,
+          swift_runtime=args.swift_runtime, strip_symbols=args.strip_symbols)
 
 
 if __name__ == "__main__":

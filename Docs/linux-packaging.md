@@ -163,3 +163,25 @@ status notifier and `--device=dri` are common and documented above.
 A self-hosted OSTree repository with a `.flatpakref` would also give updates,
 but needs a GPG signing key, hosting and repository maintenance owned by the
 project, so it is not used.
+
+## Shared Swift runtime staging
+
+The application and `speak` CLI can share one SDK runtime rather than embedding
+Swift/Foundation in both executables. The stager's `--swift-runtime` accepts the
+building compiler's `paths.runtimeLibraryPaths[0]` from `swift -print-target-info`.
+It follows ELF `DT_NEEDED` entries recursively, copies only dependencies present
+in that SDK directory, refuses escaping SDK symlinks and missing Swift libraries,
+and sets executable-relative search paths with `patchelf`. System libraries
+remain supplied by GNOME/the distribution. The Swift runtime license accompanies
+the libraries. No models or extra sandbox permissions are added.
+
+Both SwiftPM `.resources` and Swift 6.4 `.bundle` resource layouts are supported;
+mixed duplicate resource sets are refused. `--strip-symbols` strips only staged
+copies for native packaging. Flatpak continues to use its normal separate-debug
+processing, preserving debug evidence outside the downloaded application.
+
+A native release payload comparison on Swift 6.4.2 (same resources and whisper
+runtime, normalized `tar`, `xz -6`) measured 223,545,421 → 165,200,564 bytes
+uncompressed, and 46,056,484 → 31,330,096 bytes compressed. These are native
+payload measurements, not a verified Flatpak bundle or shared GNOME runtime
+saving. The changed Flatpak manifest requires a fresh installed-bundle CI run.

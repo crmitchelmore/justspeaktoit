@@ -97,6 +97,12 @@ final class TranscriberCoordinator: ObservableObject {
         captureStopNotice == nil ? .microphoneChanged : .interrupted
     }
     var makeSession: (() throws -> any IOSRecordingSession)?
+    /// Queues an offline on-device capture for a cloud upgrade (issue #999).
+    var tagOfflineCapture: (iOSHistoryItem, UUID, String) -> Void = {
+        OfflineTranscriptUpgrader.shared.tag(item: $0, recordingID: $1, intendedModelID: $2)
+    }
+    /// The cloud model this run would have used had the network been up.
+    private var offlineIntendedModel: String?
     @Published private(set) var captureStopNotice: String?
     private var startTime: Date?
     /// Last time the App Group shared state was written for a partial result.
@@ -464,7 +470,9 @@ final class TranscriberCoordinator: ObservableObject {
         partialText = result.text
         wordCount = result.text.split(whereSeparator: \.isWhitespace).count
         updateActivityAfterStop(duration: duration, result: result, rearmHandsFree: rearmHandsFree)
-        return await finishStop(with: result, recordingWarning: session.recordingLossSummary)
+        return await finishStop(
+            with: result, recordingWarning: session.recordingLossSummary, recordingID: session.safetyRecordingID
+        )
     }
 
     private func updateActivityAfterStop(
@@ -491,7 +499,7 @@ final class TranscriberCoordinator: ObservableObject {
     }
 
     private func finishStop(
-        with result: TranscriptionResult, recordingWarning: String?
+        with result: TranscriptionResult, recordingWarning: String?, recordingID: UUID?
     ) async -> TranscriptionResult {
         // Live shared-state writes are throttled; commit the final transcript
         // once so the copy intents always see the complete text.
@@ -499,7 +507,7 @@ final class TranscriberCoordinator: ObservableObject {
         // Onboarding progress is only ever earned by a transcript that really
         // arrived; a blank one is ignored by the policy.
         CaptureOnboardingStore.shared.recordDictation(trigger: .inApp, transcript: result.text)
-        await historyManager.recordTranscriptionAndWait(
+        let item = await historyManager.recordTranscriptionAndWait(
             text: result.text,
             model: currentModel,
             duration: result.duration,
@@ -507,6 +515,9 @@ final class TranscriberCoordinator: ObservableObject {
                 [warning, error?.localizedDescription].compactMap { $0 }.joined(separator: " ")
             }
         )
+        if let item, let intended = offlineIntendedModel, let recordingID {
+            tagOfflineCapture(item, recordingID, intended)
+        }
         startTime = nil
         return result
     }
@@ -636,6 +647,7 @@ private extension TranscriberCoordinator {
         let strictOnDeviceRecognition: Bool
         switch offlineDecision {
         case .use(let route):
+            self.offlineIntendedModel = route.notice == nil ? nil : self.currentModel
             self.currentModel = route.modelID
             self.recordingWarning = route.notice
             strictOnDeviceRecognition = route.requiresStrictOnDeviceRecognition
@@ -1233,6 +1245,10 @@ public struct ContentView: View {
                 presentSessionError(backgroundService.sessionErrorToken)
                 offerCaptureRecoveryIfNeeded()
                 Task { await sharedImporter.drain() }
+                // Offline captures upgrade when the path returns, and on every
+                // foreground in case it returned while suspended (issue #999).
+                OfflineTranscriptUpgrader.shared.startObservingNetwork()
+                Task { await OfflineTranscriptUpgrader.shared.run() }
             }
             .onChange(of: scenePhase) { _, phase in
                 // Scene intent is recorded synchronously so an owned utterance
@@ -1241,6 +1257,7 @@ public struct ContentView: View {
                 if phase == .active {
                     refreshBackgroundState()
                     Task { await sharedImporter.drain() }
+                    Task { await OfflineTranscriptUpgrader.shared.run() }
                 }
             }
             .onChange(of: backgroundService.isRunning) { wasRunning, isRunning in

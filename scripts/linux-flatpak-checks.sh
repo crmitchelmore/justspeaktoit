@@ -68,6 +68,14 @@ timeout 15 flatpak run "$app" --version
 echo '== installed app self-test: resources, recording codecs and adapters'
 timeout 180 flatpak run "$app" --self-test
 
+echo '== sandbox PID namespace hides host processes (app profiles are default-only in the Flatpak)'
+# A host X11 window's _NET_WM_PID cannot be resolved through /proc inside the
+# sandbox, so the app must not attempt automatic profile matching here.
+flatpak run --command=sh "$app" -ec '
+  test -f /.flatpak-info
+  test ! -e "/proc/$1/exe"
+' sandbox-pid-check "$portal_pid"
+
 echo '== installed automation CLI'
 flatpak run --command=speak "$app" --help
 

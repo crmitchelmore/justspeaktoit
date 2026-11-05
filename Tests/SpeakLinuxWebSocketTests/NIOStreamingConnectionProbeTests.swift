@@ -50,10 +50,15 @@ final class NIOStreamingConnectionProbeTests: XCTestCase {
         let socket = probe.socket(path: "slow")
         defer { socket.cancel() }
         try await opened(socket)
+        // The probe combines a 16 KiB receive window with deliberately slow
+        // reads. On the HiDPI laptop a successful two-message run already took
+        // 31s; a 15s callback budget sits on the TCP backpressure boundary.
+        // This checks exact fidelity, not throughput. Keep a bounded allowance
+        // below the fixture server's 120s lifetime; production deadlines stay unchanged.
         for offset in 0..<2 {
             let data = Data((0..<(2 * 1_024 * 1_024)).map { UInt8(truncatingIfNeeded: $0 + offset) })
-            try await send(.binary(data), on: socket, timeout: 15)
-            let echo = try await received(socket, timeout: 15)
+            try await send(.binary(data), on: socket, timeout: 30)
+            let echo = try await received(socket, timeout: 30)
             guard case .binary(let bytes) = echo else { return XCTFail("Expected one complete binary message") }
             XCTAssertEqual(bytes.count, data.count)
             XCTAssertTrue(bytes == data, "The transport changed the binary payload")

@@ -5,6 +5,12 @@ Every shard must have exactly RUNS_PER_SHARD executions with no failure, skip,
 missing iteration or retry, and at least COLD_RUNS of them must be the first
 execution on a fresh hosted runner. Any failure fails qualification: there is no
 retry or best-of selection.
+
+Receipts from every attempt of the same run are considered. A job (shard and
+runner) may be supplied by a later attempt only when no earlier attempt of it
+produced any iteration receipt, i.e. it failed before testing (for example a
+setup download error). A job whose iterations ran in more than one attempt is a
+retry and disqualifies; an incomplete job leaves its shard short of the total.
 """
 
 import json
@@ -21,6 +27,9 @@ def load_receipts(root):
 
 def assess(receipts, shards):
     errors = []
+    shas = {r.get("sha") for r in receipts}
+    if len(shas) > 1:
+        errors.append(f"receipts span more than one source revision: {sorted(map(str, shas))}")
     summary = {}
     for shard in shards:
         rows = sorted((r for r in receipts if r.get("shard") == shard),
@@ -28,6 +37,13 @@ def assess(receipts, shards):
         keys = [(int(r["runner"]), int(r["iteration"])) for r in rows]
         if len(keys) != len(set(keys)):
             errors.append(f"{shard}: duplicate iteration receipts (a retry is not admissible)")
+        attempts = {}
+        for r in rows:
+            attempts.setdefault(int(r["runner"]), set()).add(int(r.get("run_attempt", 1)))
+        for runner, seen in sorted(attempts.items()):
+            if len(seen) > 1:
+                errors.append(f"{shard}: runner {runner} ran iterations in attempts {sorted(seen)} "
+                              "(a retry after testing is not admissible)")
         passed = [r for r in rows if r.get("exit_code") == 0 and not r.get("coverage_errors")]
         cold = [r for r in rows if r.get("cold")]
         durations = sorted(float(r.get("seconds", 0)) for r in rows)
@@ -55,9 +71,10 @@ def markdown(receipts, summary, errors):
     for shard, row in summary.items():
         lines.append(f"| {shard} | {row['runs']} | {row['passed']} | {row['cold_passed']}/{row['cold']} "
                      f"| {row['p95_seconds']} | {row['max_seconds']} |")
-    lines += ["", "| Shard | Runner | Iteration | Cold | Exit | Test s |", "| --- | --- | --- | --- | --- | --- |"]
+    lines += ["", "| Shard | Runner | Attempt | Iteration | Cold | Exit | Test s |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for r in sorted(receipts, key=lambda r: (r["shard"], int(r["runner"]), int(r["iteration"]))):
-        lines.append(f"| {r['shard']} | {r['runner']} | {r['iteration']} | {'yes' if r.get('cold') else 'no'} "
+        lines.append(f"| {r['shard']} | {r['runner']} | {r.get('run_attempt', 1)} | {r['iteration']} "
+                     f"| {'yes' if r.get('cold') else 'no'} "
                      f"| {r.get('exit_code')} | {r.get('seconds')} |")
     lines += ["", "**Result:** " + ("qualified" if not errors else "NOT qualified")]
     lines += [f"- {error}" for error in errors]

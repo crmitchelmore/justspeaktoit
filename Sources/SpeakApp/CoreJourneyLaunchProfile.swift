@@ -122,6 +122,14 @@ final class CoreJourneyLaunchProfile {
             settings.doubleTapWindow = 0.1
         }
         if self.runsBatchJourney { self.configureBatchSettings() }
+        if CoreJourneySiteMediaFixture.isRequested {
+            do {
+                try CoreJourneySiteMediaFixture.seedHistory(in: directory)
+            } catch {
+                preconditionFailure("Could not seed site media History: \(error)")
+            }
+            settings.showHUDDuringSessions = true
+        }
     }
 
     private func configureBatchSettings() {

@@ -8,6 +8,9 @@ import SpeakCore
 enum CoreJourneyBatchFixture {
     static let model = "core-journey/batch-fixture"
     static let transcript = "A complete batch journey, through the clipboard."
+    nonisolated static var responseTranscript: String {
+        CoreJourneySiteMediaFixture.isRequested ? CoreJourneySiteMediaFixture.transcript : transcript
+    }
     static let audioPrompt = "Transcribe this audio file. Return only the transcript text, with no commentary."
     static let duration: TimeInterval = 0.25
     static let audioData: Data = {
@@ -102,7 +105,10 @@ final class CoreJourneyBatchURLProtocol: URLProtocol, @unchecked Sendable {
         }
         let payload: [String: Any] = [
             "id": "core-journey-response", "model": CoreJourneyBatchFixture.model,
-            "choices": [["index": 0, "message": ["role": "assistant", "content": CoreJourneyBatchFixture.transcript]]]
+            "choices": [[
+                "index": 0,
+                "message": ["role": "assistant", "content": CoreJourneyBatchFixture.responseTranscript]
+            ]]
         ]
         do {
             let data = try JSONSerialization.data(withJSONObject: payload)

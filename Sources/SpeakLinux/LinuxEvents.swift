@@ -21,6 +21,8 @@ final class LinuxEventContext: @unchecked Sendable {
     private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let searches: DesktopEventDispatcher<String>
     private let copies: DesktopTranscriptCopyDispatcher
+    private let issueTaskLock = NSLock()
+    private var issueTasks: [UUID: [UUID: Task<Void, Never>]] = [:]
     private let settings = DesktopSettingsQueue()
     private let lock = NSLock()
     private var readyTask: Task<Void, Never>?
@@ -223,6 +225,28 @@ final class LinuxEventContext: @unchecked Sendable {
     func submitHistoryPlayback(_ event: DesktopHistoryEvent) { historyEvents.submit(event) }
 
     func search(_ query: String) { searches.submit(query) }
+
+    /// Register before a task can finish; completion removes only its operation.
+    func issueTask(ticket: UUID, operation: @escaping @Sendable () async -> Void) {
+        self.issueTaskLock.withLock {
+            let identifier = UUID()
+            let task = Task {
+                await operation()
+                self.issueTaskLock.withLock {
+                    self.issueTasks[ticket]?[identifier] = nil
+                    if self.issueTasks[ticket]?.isEmpty == true { self.issueTasks[ticket] = nil }
+                }
+            }
+            self.issueTasks[ticket, default: [:]][identifier] = task
+        }
+    }
+
+    /// Native Close invokes cancellation synchronously before actor retirement.
+    /// The shared export handler retires its lease before a later store admission.
+    func cancelIssueTasks(ticket: UUID) {
+        let tasks = self.issueTaskLock.withLock { self.issueTasks.removeValue(forKey: ticket) }
+        tasks?.values.forEach { $0.cancel() }
+    }
 }
 
 /// The GTK window's event callback, on the GTK main thread.
@@ -235,6 +259,7 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
     let value = text.map(String.init(cString:)) ?? ""
     let slot = Int(index)
     let event = Int(event)
+    if linuxIssueReportEvent(event, value: value, index: index, holder: holder) { return }
     if event == Int(JSTI_EVENT_PROFILES) {
         linuxProfilesEvent(value, holder: holder)
         return
@@ -484,4 +509,32 @@ private func linuxReady(_ holder: LinuxEventContext) { // swiftlint:disable:this
         try LinuxNative.call { jsti_window_self_test($0, $1) }
     } catch { holder.smokeTestFailure = error }
     jsti_window_request_close()
+}
+
+/// Copy the clicked identity before leaving GTK; never select a substitute row.
+private func linuxIssueReportEvent(
+    _ event: Int, value: String, index: Int32, holder: LinuxEventContext
+) -> Bool {
+    guard (150...155).contains(event) else { return false }
+    if event == 150 {
+        Task { _ = await holder.controller.beginIssueReport(value) }
+        return true
+    }
+    guard let ticket = UUID(uuidString: value) else { return true }
+    if event == 155 {
+        holder.cancelIssueTasks(ticket: ticket)
+        Task { await holder.controller.cancelIssueReport(ticket) }
+        return true
+    }
+    holder.issueTask(ticket: ticket) {
+        guard !Task.isCancelled else { return }
+        switch event {
+        case 151: await holder.controller.setIssueReportIncludesDiagnostics(index != 0, ticket: ticket)
+        case 152: await holder.controller.copyIssueReport(ticket)
+        case 153: _ = await holder.controller.exportIssueReport(ticket)
+        case 154: await holder.controller.openIssueReport(ticket)
+        default: break
+        }
+    }
+    return true
 }

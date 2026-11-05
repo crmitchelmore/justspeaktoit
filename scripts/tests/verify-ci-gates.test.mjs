@@ -17,6 +17,8 @@ const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+)
 const nativeEligibleJobs = [
   'build-macos', 'release-validation', 'api-compatibility', 'lint', 'core-journey-e2e',
 ];
+const armFallbackJobs = new Set(['lint', 'release-validation']);
+const hostedFallback = (id) => (armFallbackJobs.has(id) ? 'macos-latest' : 'macos-26-intel');
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
@@ -139,20 +141,27 @@ function routingContext(event = 'pull_request', repository = 'crmitchelmore/just
   };
 }
 
-test('Apple CI routing keeps UI execution on hosted ARM and compilation on Intel', () => {
+test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
   for (const id of ['build-ios', 'core-journey-fixture-ui']) {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
   for (const id of ['build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard']) {
-    assert.match(jobBodies[id], /^\s+runs-on: macos-26-intel$/m, id);
+    assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
   assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
+  // Intel appears only as the hosted fallback of the native-eligible jobs.
+  assert.doesNotMatch(workflow, /runs-on: macos-26-intel/);
+  // Lint and Release stay on hosted ARM: on Intel they exceeded their job budgets.
+  for (const id of nativeEligibleJobs) {
+    const hosted = hostedFallback(id);
+    assert.ok(jobBodies[id].includes(`|| '["${hosted}"]') }}`), id);
+  }
 });
 
 test('native pool still requires the exact reviewed source and trusted event', () => {
   for (const id of nativeEligibleJobs) {
     // Restore-only gates must share build-macos's hosted architecture to hit its cache.
-    const fallback = ['macos-26-intel'];
+    const fallback = [hostedFallback(id)];
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
       ['jsti-macos-build', 'macOS']);
     assert.deepEqual(route(id, routingContext(), {
@@ -178,7 +187,7 @@ test('native pool still requires the exact reviewed source and trusted event', (
 
 test('standalone iOS SwiftPM compilation stays hosted with no new native admission', () => {
   const body = jobBodies['build-ios-swiftpm'];
-  assert.match(body, /^\s+runs-on: macos-26-intel$/m);
+  assert.match(body, /^\s+runs-on: macos-latest$/m);
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
   assert.doesNotMatch(body, /if:|jsti-macos-build|bravo-mini-local/);
@@ -249,7 +258,7 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(body, /-testProductsPath "\$RUNNER_TEMP\/ios-test-products\/SpeakiOS.xctestproducts"/);
   assert.match(body, /name: Upload complete iOS XCTest log separately\n\s+if: always\(\)/);
   const products = jobBodies['build-ios-test-products'];
-  assert.match(products, /^\s+runs-on: macos-26-intel$/m);
+  assert.match(products, /^\s+runs-on: macos-latest$/m);
   assert.match(products, /^\s+timeout-minutes: 30$/m);
   assert.match(products, /TUIST_IOS_KEYBOARD=1 tuist generate/);
   assert.match(products, /xcodebuild build-for-testing/);

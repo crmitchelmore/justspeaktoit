@@ -16,6 +16,7 @@ test('deployed styles and motion get new URLs only when their content changes', 
     recursive: true,
     filter: filename => !['dist', 'node_modules'].includes(path.relative(source, filename).split(path.sep)[0]),
   });
+  await cp(path.join(source, '../Docs/manual-checks.yml'), path.join(directory, 'Docs/manual-checks.yml'));
   const build = async () => {
     execFileSync(process.execPath, [path.join(fixture, 'build.mjs')]);
     const html = await readFile(path.join(fixture, 'dist/index.html'), 'utf8');

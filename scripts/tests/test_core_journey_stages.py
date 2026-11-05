@@ -44,7 +44,33 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(command[4:], [
             "--enable-code-coverage", "--filter", "|".join(f"{s}/" for s in stages.GATE["REQUIRED_SUITES"]),
         ])
-        self.assertEqual(len(stages.GATE["REQUIRED_SUITES"]), 16)
+        self.assertEqual(len(stages.GATE["REQUIRED_SUITES"]), 17)
+
+    def test_ui_shards_partition_required_suites_and_select_only_their_own(self):
+        shards = stages.UI["SHARDS"]
+        flattened = [suite for suites in shards.values() for suite in suites]
+        self.assertEqual(sorted(flattened), sorted(set(flattened)), "a suite may belong to one shard only")
+        self.assertEqual(tuple(flattened), stages.UI["REQUIRED_SUITES"])
+        self.assertTrue(set(stages.UI["REQUIRED_CASES"]) <= set(flattened))
+        for name, suites in shards.items():
+            with mock.patch.dict(os.environ, {"CORE_JOURNEY_UI_SHARD": name}):
+                self.assertEqual(stages.ui_selection(), [f"-only-testing:SpeakAppUITests/{s}" for s in suites])
+                # A shard log is complete only for its own suites, including required cases.
+                output = "".join(
+                    f"Test Case '-[SpeakAppUITests.{suite} {case}]' passed (0.001 seconds).\n"
+                    for suite in suites for case in stages.UI["REQUIRED_CASES"].get(suite, ("testJourney",))
+                )
+                errors, _ = stages.UI["coverage_errors"](output)
+                self.assertEqual(errors, [], name)
+                missing_case = output.splitlines(keepends=True)[1:]
+                if any(suite in stages.UI["REQUIRED_CASES"] for suite in suites):
+                    errors, _ = stages.UI["coverage_errors"]("".join(missing_case))
+                    self.assertTrue(errors, f"{name}: a missing required case must fail")
+        with mock.patch.dict(os.environ, {"CORE_JOURNEY_UI_SHARD": "unknown"}):
+            with self.assertRaises(ValueError):
+                stages.ui_selection()
+        with mock.patch.dict(os.environ, {"CORE_JOURNEY_UI_SHARD": "all"}):
+            self.assertEqual(len(stages.ui_selection()), len(flattened))
 
     def test_ui_uses_same_built_manifest_destination_and_all_required_suites(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -68,7 +94,7 @@ class CommandTests(unittest.TestCase):
             self.assertNotIn("-scheme", runtime)
             self.assertIn("-disableAutomaticPackageResolution", runtime)
             self.assertIn("-skipPackageUpdates", runtime)
-            self.assertEqual(len(stages.ui_selection()), 6)
+            self.assertEqual(len(stages.ui_selection()), 7)
             self.assertIn("-only-testing:SpeakAppUITests/SettingsCredentialUITests", stages.ui_selection())
             for argument in stages.ui_selection() + [
                 "-skipPackagePluginValidation", "CODE_SIGN_IDENTITY=-",

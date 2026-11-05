@@ -5,6 +5,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import subprocess
@@ -341,11 +342,34 @@ class NativeUICoverageTests(unittest.TestCase):
             for output, expected in cases:
                 with self.subTest(expected=expected, output=output):
                     log.write_text(output)
-                    result = subprocess.run([sys.executable, str(verifier), str(log)], capture_output=True, text=True)
+                    result = subprocess.run([sys.executable, str(verifier), str(log)], capture_output=True, text=True,
+                                            env={**os.environ, "CORE_JOURNEY_UI_SHARD": "foundation"})
                     self.assertEqual(result.returncode, expected, result.stderr)
                     coverage = json.loads(log.with_name("coverage.json").read_text())
                     self.assertEqual(bool(coverage["errors"]), expected != 0)
                     self.assertEqual(coverage["required_suites"], suites)
+
+    def test_p0_shard_requires_each_named_journey_exactly_once(self):
+        verifier = MODULE_PATH.with_name("verify-core-journey-ui.py")
+        names = ["testStreaming_partialsBecomeOneFinalTranscriptWithoutDuplication",
+                 "testTargetChange_duringRecordingDeliversToCapturedAppNotNewFrontmostApp",
+                 "testSilentInput_leavesClipboardAndFieldUntouchedAndStoresNoTranscript",
+                 "testMissingTranscriptionKey_failsVisiblyThenNextRunSucceeds"]
+        rows = [f"Test Case '-[SpeakAppUITests.CoreJourneyP0UITests {name}]' passed (1.0 seconds).\n" for name in names]
+        passing = "".join(rows)
+        cases = [(passing, 0), (passing + rows[0], 1)]
+        cases += [(passing.replace(row, ""), 1) for row in rows]
+        cases += [(passing.replace(row, row.replace("passed", "skipped")), 1) for row in rows]
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "xcodebuild.log"
+            for output, expected in cases:
+                with self.subTest(expected=expected, output=output):
+                    log.write_text(output)
+                    result = subprocess.run([sys.executable, str(verifier), str(log)], capture_output=True, text=True,
+                                            env={**os.environ, "CORE_JOURNEY_UI_SHARD": "p0"})
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    coverage = json.loads(log.with_name("coverage.json").read_text())
+                    self.assertEqual(coverage["required_suites"], ["CoreJourneyP0UITests"])
 
 
 class RunnerTests(unittest.TestCase):

@@ -332,7 +332,9 @@ jobs:
           # this gate, after source/hash validation above has succeeded.
           $failures = [System.Collections.Generic.List[string]]::new()
           try {
-            Invoke-CrossBuilt 'SpeakAppPackageTests.exe' '' 'tests' 180
+            # Hosted windows-2022 needed 134-176s for 3,703-3,748 tests (main and
+            # #1307 evidence, Nov 2026), and the suite grows; 180s left no headroom.
+            Invoke-CrossBuilt 'SpeakAppPackageTests.exe' '' 'tests' 300
             if (-not (Select-String -Path app/windows-tests.log -Pattern 'Executed [1-9][0-9]* tests' -Quiet)) {
               throw 'No XCTest execution evidence found.'
             }

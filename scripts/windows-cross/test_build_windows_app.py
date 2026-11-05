@@ -369,7 +369,7 @@ $tested = 0
 foreach ($mode in @('success', 'natural-nonzero', 'joined', 'kill-race', 'kill-failure', 'not-exited',
         'wait-failure', 'wait-invalid', 'dispose-failure', 'receipt-write-failure', 'host-write-failure')) {
     foreach ($label in @('tests', 'native', 'ui')) {
-        $seconds = switch ($label) { 'tests' { 180 } 'native' { 90 } 'ui' { 30 } }
+        $seconds = switch ($label) { 'tests' { 300 } 'native' { 90 } 'ui' { 30 } }
         $script:fake = New-FakeProcess $mode; $script:messages.Clear()
         if ($mode -ceq 'natural-nonzero') { $script:fake.ExitCode = 9 }
         $receiptPath = 'app/windows-timeout-cleanup.log'

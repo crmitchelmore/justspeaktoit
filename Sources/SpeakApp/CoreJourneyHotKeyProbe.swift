@@ -23,6 +23,7 @@ final class CoreJourneyHotKeyProbe {
         let eventPostingAllowed: Bool
         let states: [String]
         let failureMessage: String?
+        let livePreviews: [String]
         let events: [Event]
     }
 
@@ -32,6 +33,8 @@ final class CoreJourneyHotKeyProbe {
     private var tokens: [HotKeyListenerToken] = []
     private var keyState: AnyCancellable?
     private var sessionState: AnyCancellable?
+    private var livePreview: AnyCancellable?
+    private var livePreviews: [String] = []
     private var states: [String] = []
     private var failureMessage: String?
 
@@ -58,6 +61,13 @@ final class CoreJourneyHotKeyProbe {
                 MainActor.assumeIsolated {
                     self?.states.append(Self.stage(for: state))
                     if case .failed(let message) = state { self?.failureMessage = message }
+                    self?.persist()
+                }
+            }
+            // Production's on-screen live transcript, in publication order.
+            livePreview = main.$livePreview.removeDuplicates().dropFirst().sink { [weak self] text in
+                MainActor.assumeIsolated {
+                    self?.livePreviews.append(text)
                     self?.persist()
                 }
             }
@@ -97,6 +107,7 @@ final class CoreJourneyHotKeyProbe {
             eventPostingAllowed: CGPreflightPostEventAccess(),
             states: states,
             failureMessage: failureMessage,
+            livePreviews: livePreviews,
             events: events
         )
         do {

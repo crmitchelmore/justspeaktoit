@@ -30,6 +30,7 @@ REQUIRED_SUITES = (
     "CaptureSessionOwnershipTests",
     "CoreJourneyRecordingSourceTests",
     "CoreJourneyPolishFixtureTests",
+    "CoreJourneyScenarioFixtureTests",
     "LiveTranscriptSessionIsolationTests",
     "HistoryPersistenceFailureTests",
 )
@@ -167,6 +168,41 @@ def coverage_errors(output, required_suites):
                 f"{suite}: {results['failed']} failed, {results['skipped']} skipped cases"
             )
     return errors, counts
+
+
+def wait_cancellably(process, budget):
+    # Python 3.15's kqueue-based Popen.wait catches OSError around kevent, which
+    # swallows the InterruptedError a cancellation handler raises. Relay each
+    # handler so a cancellation also kills the command group (letting the wait
+    # return) and is re-raised once the wait comes back.
+    cancellations = []
+    previous = {}
+
+    def relay(signum, frame):
+        try:
+            previous[signum](signum, frame)
+        except BaseException as error:
+            cancellations.append(error)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+    if threading.current_thread() is threading.main_thread():
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            handler = signal.getsignal(signum)
+            if callable(handler):
+                previous[signum] = handler
+                signal.signal(signum, relay)
+    try:
+        exit_code = process.wait(timeout=budget)
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+    if cancellations:
+        raise cancellations[0]
+    return exit_code
 
 
 def stop_process_group(process):
@@ -349,7 +385,7 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
                     command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
                 )
                 try:
-                    exit_code = process.wait(timeout=budget)
+                    exit_code = wait_cancellably(process, budget)
                     if exit_code != 0:
                         errors.append(f"{stage.capitalize()} command exited with status {exit_code}; see {log_path}.")
                 except subprocess.TimeoutExpired:

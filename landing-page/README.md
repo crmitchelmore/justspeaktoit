@@ -28,6 +28,7 @@ Cache policy lives in `_headers`, including explicit HTML/CSS/JS revalidation. P
 - `download-architecture.js`: existing architecture detection and safe universal fallback.
 - `voice-motion.js`: the one-shot hero animation; it is progressive enhancement only.
 - `images/`: actual Mac and iPhone app screenshots.
+- `qa/`: the owner's noindex manual QA checklist at `/qa`, rendered at build time from `Docs/manual-checks.yml`; see `Docs/manual-qa.md`.
 
 ## Claims and their sources
 

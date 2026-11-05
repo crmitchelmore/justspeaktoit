@@ -14,7 +14,7 @@ newly published release sizes.
 | Cached x64 Windows ZIP | 73,627,592 bytes | 53,770,367 bytes | Same ZIP writer; debug-only transform; 19,857,225 bytes (26.97%) saved |
 | Cached ARM64 Windows ZIP | 53,313,925 bytes | 33,477,632 bytes | Same ZIP writer; debug-only transform; 19,836,293 bytes (37.21%) saved |
 | Flatpak | Unmeasured | Unmeasured | Removes unconsumed Parakeet and redundant version filenames after dependency checks |
-| iOS | Unmeasured | Unmeasured | Obtain App Store Connect thinned installed/download sizes before claiming a reduction |
+| iOS | Unmeasured | Unmeasured | Needs App Store Connect thinned sizes; see [iOS thinned sizes](#ios-thinned-sizes) |
 
 The Mac experiment used an Alpha 42 CLI copy; its normalized ZIP baseline is
 different from the published 5,272,903-byte asset. Runtime sections, UUID,
@@ -86,16 +86,70 @@ are downloaded on demand from the catalogue in
 `Sources/SpeakCore/ModelCatalog+LocalModels.swift` (from about 44 MB to
 1,100 MB each), so they do not count towards these package sizes.
 
+### Alpha 45 (3 November 2026)
+
+Alpha 45 (`9146079e`) is the latest published build. Download sizes in bytes,
+read from the release assets:
+
+| Asset | Alpha 45 |
+| --- | ---: |
+| Mac arm64 DMG | 19,570,664 |
+| Mac universal DMG | 46,662,620 |
+| Mac CLI arm64 ZIP | 4,667,594 |
+| Mac CLI x86_64 ZIP | 4,923,856 |
+| Windows x64 ZIP | 53,867,448 |
+| Windows ARM64 ZIP | 33,576,619 |
+| Linux x86_64 Flatpak bundle | 46,848,088 |
+
+Every Mac release records each DMG's download, installed app, main executable
+and embedded CLI sizes in the `release-mac.yml` job summary. The Flatpak
+installed check (`scripts/linux-flatpak-checks.sh`) now logs the bundle size
+and the installed app deployment size, excluding the shared GNOME runtime, in
+`flatpak-installed-checks.log` in the `justspeaktoit-flatpak-x86_64` artifact.
+The first CI measurement (PR #1339, Linux Flatpak run 41813047402, from Alpha 45
+source plus this change) was a 46,465,824-byte bundle and a 223,107,509-byte
+installed app deployment.
+
+### Mac CLI symbols
+
+Both CLI builds (`build-speak-cli-standalone.sh` for the standalone ZIPs and
+`build-speak-cli.sh` for the CLI embedded in the universal app) call
+`prepare-mac-cli-symbols.sh` before signing. It generates and verifies a dSYM
+from the fresh build objects, checks its UUIDs match the executable, then runs
+`strip -S` and checks the UUIDs again. `release-mac.yml` passes the CLI dSYMs
+to the Sentry upload job with the app dSYMs, so stripping does not lose crash
+symbolication. The Alpha 44 table above shows the published saving.
+
+### iOS thinned sizes
+
+GitHub release assets cannot show iOS sizes: the App Store thins each build per
+device. Read them from App Store Connect for the build before and after a
+change, under the same device:
+
+1. In App Store Connect, open the app, then **TestFlight** and select the build
+   once its processing finishes.
+2. Open **Build Metadata** and choose **App File Sizes**. The table lists the
+   compressed download size and the uncompressed install size for each device
+   variant.
+3. Record both sizes for one current device, such as the newest iPhone, plus
+   the universal row, with the build number and source commit.
+
+To check before upload, export the archive for Ad Hoc distribution with **App
+Thinning: All compatible device variants**. Xcode then writes an
+`App Thinning Size Report.txt`. Use App Store Connect for published numbers.
+
 ### Remaining gates
 
 - iOS: App Store Connect thinned download and install sizes for a pre and post
-  build, which cannot be read from GitHub release assets.
-- Flatpak: installed size from `flatpak install` of both bundles on Linux.
+  build, using the steps above.
+- Flatpak: no earlier installed-size baseline exists. CI records each new
+  bundle's sizes from now on, starting with the figures above.
 - Mac universal: an owner decision on whether the legacy download should keep
   embedding the CLI. This is the single largest optional component.
-- Startup: end-to-end launch and first-recording latency on real devices for
-  each platform. The deferred model discovery and History changes have
-  unit-level coverage only.
+- Startup: end-to-end launch (process start to first usable window and menu
+  bar item) and first-recording latency on the Mac, and on real Windows, Linux
+  and iOS devices. On the Mac, only `WireUp.bootstrap` has been measured. The deferred model discovery and History changes
+  have unit-level coverage only.
 
 ## Responsiveness
 
@@ -103,6 +157,76 @@ Remote live transcription now defers local-model discovery until a local
 streaming mode actually needs it. Eight focused resolver tests cover the
 selection and availability behavior. This removes unnecessary discovery work;
 an end-to-end latency improvement has not yet been measured.
+
+### Mac launch path (4 November 2026)
+
+`WireUp.bootstrap` runs on the main thread before the first window replaces
+its loading view. Temporary timers around each step measured release builds
+on an M-series Mac mini, launching the binary directly with this user's
+settings and permissions already granted. The machine was also running other
+builds, so treat single runs as noisy and compare medians.
+
+| Step | Main-thread time |
+| --- | ---: |
+| `AppSettings.init` | 84-117 ms, of which `SMAppService.mainApp.status` is 80-115 ms |
+| `PermissionsManager.init` (four status checks) | 60-70 ms |
+| `AudioInputDeviceManager.init` (first Core Audio query) | 56-80 ms |
+| `MainManager.init` | 17-32 ms |
+| `HUDWindowPresenter.init` | 19-29 ms |
+| Everything else, including `configureServices` | under 15 ms in total |
+
+`AppSettings.init` reconciled the login item on every launch, even with
+**Launch at login** off, through a synchronous XPC round trip. It now runs on a
+serial utility queue. The queue keeps the order of the settings, so the latest
+toggle still wins, and failures are still logged. Injected test dependencies
+stay synchronous.
+
+Over 8 alternating launches of each release binary:
+
+| Measurement | Before (median) | After (median) |
+| --- | ---: | ---: |
+| `AppSettings.init` | 89 ms | 2.4 ms |
+| Whole `WireUp.bootstrap` | 310 ms (270-577) | 210 ms (203-230) |
+
+The other steps stay eager on purpose:
+
+- Permission statuses feed onboarding, the hot key and the menu immediately.
+  Deferring them would delay or misreport permissions.
+- The first Core Audio query loads the audio HAL. Recording and the
+  preferred-microphone switch need it, so deferring it moves the stall into the
+  first recording.
+- The HUD panel is built at launch so its first appearance at recording start
+  does not pay for window and hosting-view creation.
+
+### Start-to-capture path (#611)
+
+Real-Mac History data puts recognised hotkey to capture live at p50 109 ms and
+p95 193 ms; the target is under 100 ms. A temporary per-step timer in a
+release build, driven through the automation socket with a staged recorder,
+measured the steps between `startSession` and capture live:
+
+| Step | Time |
+| --- | ---: |
+| Profile, guards and API-key check | under 1 ms |
+| `TextOutputTarget.capture()` (focused element) | 0.5-38 ms |
+| HUD "Getting ready", including a microphone TCC query | about 14 ms |
+| `startRecording` microphone TCC query | about 13 ms |
+| `AVAudioRecorder.record()` on a staged recorder | 47-73 ms |
+
+A command-line benchmark found each `AVCaptureDevice.authorizationStatus(for:)`
+call costs 15-35 ms, with no caching between calls.
+`AVAudioApplication.recordPermission` costs 13-20 ms, so switching APIs does not
+help. The start path queried the status twice in a row. The HUD now uses the
+cached status, and `startRecording` keeps the single authoritative check
+before the microphone opens. That removes one query, about 13-20 ms, from every
+start. The HUD's health is still refreshed as soon as capture is live, and a
+missing permission still fails the start with its own error.
+
+`record()` dominates what remains. Removing it would mean writing the
+recording from the live engine's tap instead of a second `AVAudioRecorder`, a
+larger change outside this step. Real hotkey timings after the change need a
+new History sample on the owner's Mac. Automated UI or hotkey runs must not
+take over that Mac, so these figures come from ordinary use.
 
 Test-support migration fixtures are excluded at final Windows/Linux production
 staging, while producer artifacts keep the fixtures needed by tests. No runtime

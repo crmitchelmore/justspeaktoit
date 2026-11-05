@@ -2,13 +2,20 @@ name: Prepare Stable
 on:
   workflow_dispatch:
     inputs:
+      scope:
+        description: Surfaces to publish; frozen into the approval manifest
+        type: choice
+        default: all
+        options:
+          - all
+          - ios-only
       alpha:
         description: Tested immutable Alpha tag (alpha-build-N)
         required: true
         type: string
       mac_version:
-        description: Intended numeric macOS version, checked against published releases
-        required: true
+        description: Required for all scope; ignored for ios-only
+        required: false
         type: string
       ios_version:
         description: Intended numeric iOS version, checked against App Store Connect
@@ -37,9 +44,11 @@ jobs:
           ALPHA: ${{ inputs.alpha }}
           MAC_VERSION: ${{ inputs.mac_version }}
           IOS_VERSION: ${{ inputs.ios_version }}
-        run: node scripts/release-train.mjs prepare --alpha "$ALPHA" --mac-version "$MAC_VERSION" --ios-version "$IOS_VERSION"
+          PUBLICATION_SCOPE: ${{ inputs.scope || 'all' }}
+        run: node scripts/release-train.mjs prepare --alpha "$ALPHA" --mac-version "$MAC_VERSION" --ios-version "$IOS_VERSION" --scope "$PUBLICATION_SCOPE"
   mac-direct:
     needs: prepare
+    if: inputs.scope != 'ios-only'
     uses: ./.github/workflows/release-mac.yml
     with:
       manifest: ${{ needs.prepare.outputs.tag }}
@@ -52,7 +61,7 @@ jobs:
     secrets: inherit
   desktop-qualification:
     needs: prepare
-    if: needs.prepare.outputs.tag != ''
+    if: needs.prepare.outputs.tag != '' && inputs.scope != 'ios-only'
     uses: ./.github/workflows/qualify-desktop-release.yml
     with:
       manifest: ${{ needs.prepare.outputs.tag }}

@@ -6,15 +6,24 @@ export const digest = value => createHash('sha256').update(value).digest('hex');
 // Historical manifests may still carry a mac-store entry; it is never dispatched or receipted.
 export const surfaces = ['mac-direct', 'ios'];
 export const retiredSurfaces = ['mac-store'];
+// Scope is part of the frozen owner-approved manifest. Omitted scope preserves
+// historical combined candidates; an iOS-only candidate cannot publish Mac.
+export function publicationSurfaces(manifest) {
+    if (manifest.publicationScope === undefined) return surfaces;
+    if (manifest.train !== 'stable' || !['all', 'ios-only'].includes(manifest.publicationScope)) {
+        throw Error('Invalid Stable publication scope');
+    }
+    return manifest.publicationScope === 'ios-only' ? ['ios'] : surfaces;
+}
 // Stable workers run the selected Alpha's exact source, whose validator may still
 // require retired surfaces. Freeze a compatibility entry only for those sources.
 // Direct Mac Stable publication requires its own verified receipt; each Apple
 // surface is submitted only when its candidate receipt verified independently.
 export function stablePublicationSurfaces(manifest, receipts) {
     const publish = [];
-    for (const surface of surfaces) {
+    for (const surface of publicationSurfaces(manifest)) {
         const receipt = receipts[surface];
-        const required = surface === 'mac-direct';
+        const required = surface === 'mac-direct' || manifest.publicationScope === 'ios-only';
         if (!receipt && !required) continue;
         if (!receipt) throw Error(`Candidate not verified: ${surface}`);
         const matches = receipt.source === manifest.source && receipt.build === manifest.surfaces[surface].build
@@ -31,6 +40,8 @@ export function stablePublicationSurfaces(manifest, receipts) {
 export const frozenSurfaces = alpha => [...surfaces, ...retiredSurfaces.filter(s => alpha?.surfaces?.[s])];
 export function validateManifest(manifest) {
     if (manifest.schema !== 1 || !['alpha', 'stable'].includes(manifest.train)) throw Error('Invalid release manifest');
+    publicationSurfaces(manifest);
+    if (manifest.publicationScope === 'ios-only' && manifest.desktopQualification !== undefined) throw Error('iOS-only candidate must not require desktop qualification');
     if (manifest.desktopQualification !== undefined && manifest.desktopQualification !== 1) throw Error('Unsupported desktop qualification contract');
     if (!/^[a-f0-9]{40}$/.test(manifest.source)) throw Error('A full immutable source SHA is required');
     if (!/^(alpha-build|stable-candidate)-[1-9][0-9]*$/.test(manifest.tag)) throw Error('Invalid release tag');

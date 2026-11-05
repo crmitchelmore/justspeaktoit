@@ -73,10 +73,13 @@
         </div>
 
         <figure class="capture">
-          <a href="/images/mac-history-current.png" aria-label="Open the full-size Mac screenshot">
-            <img src="/images/mac-history-current.png" width="1920" height="971" alt="The Mac app showing Session History: a searchable list of past transcriptions with the trigger, model and raw transcript for the expanded session." fetchpriority="high" decoding="async">
+          <a href="/images/mac-history-sample.png" aria-label="Open the full-size Mac screenshot">
+            <picture>
+              <source srcset="/images/mac-history-sample.webp" type="image/webp">
+              <img src="/images/mac-history-sample.png" width="1080" height="720" alt="The Mac app showing Session History: search and filters, totals of five sessions and $0.01 spend, and past dictations with the model that transcribed each one." fetchpriority="high" decoding="async">
+            </picture>
           </a>
-          <figcaption><span>The Mac app. Sample history.</span><a href="/images/mac-history-current.png">View full size ↗</a></figcaption>
+          <figcaption><span>The Mac app. Fictional sample history.</span><a href="/images/mac-history-sample.png">View full size ↗</a></figcaption>
         </figure>
       </div>
     </section>
@@ -117,6 +120,15 @@
           <p class="step-demo"><span class="tick" aria-hidden="true">✓</span> <span>Back into the app you started from</span></p>
         </article>
       </div>
+      <figure class="capture demo">
+        <video controls muted playsinline preload="none" width="1280" height="720" poster="/images/demo/speak-demo-poster.webp" aria-describedby="demo-caption">
+          <source src="/images/demo/speak-demo.webm" type="video/webm">
+          <source src="/images/demo/speak-demo.mp4" type="video/mp4">
+          <track kind="captions" src="/images/demo/speak-demo.en.vtt" srclang="en" label="English" default>
+          <a href="/images/demo/speak-demo.mp4">Download the 36-second demo (MP4)</a>
+        </video>
+        <figcaption id="demo-caption"><span>36 seconds, no sound, captions on. Recorded from the real Mac app on a test machine: fictional history, a synthetic audio clip and a test fixture that returns fixed text, with waiting time cut. Clipboard mode is shown because the test machine cannot grant Accessibility.</span><a href="/images/demo/speak-demo.mp4">Download MP4 ↗</a></figcaption>
+      </figure>
       <p class="note">Automatic insertion belongs to the direct download, which uses macOS Accessibility. There is no Mac App Store build: a sandboxed one could only ever reach the clipboard, so the Mac app ships as a direct download only.</p>
     </section>
 
@@ -327,10 +339,13 @@
           </ul>
         </div>
         <figure class="capture">
-          <a href="/images/app-dashboard.png" aria-label="Open the full-size Mac dashboard screenshot">
-            <img src="/images/app-dashboard.png" width="2142" height="1416" alt="The Mac dashboard: a Start Recording button, session and recording-time totals, a permissions panel showing microphone, speech recognition, accessibility and input monitoring all granted, and an insights panel." loading="lazy" decoding="async">
+          <a href="/images/mac-dashboard-sample.png" aria-label="Open the full-size Mac dashboard screenshot">
+            <picture>
+              <source srcset="/images/mac-dashboard-sample.webp" type="image/webp">
+              <img src="/images/mac-dashboard-sample.png" width="1080" height="720" alt="The Mac dashboard: a Start Recording button, session, recording-time and spend totals, a permissions panel flagging microphone, speech recognition, accessibility and input monitoring as not yet granted, and an insights panel." loading="lazy" decoding="async">
+            </picture>
           </a>
-          <figcaption><span>The dashboard and the settings it fronts.</span><a href="/images/app-dashboard.png">View full size ↗</a></figcaption>
+          <figcaption><span>The dashboard and the settings it fronts, on a fresh test Mac before permissions are granted.</span><a href="/images/mac-dashboard-sample.png">View full size ↗</a></figcaption>
         </figure>
       </div>
     </section>
@@ -394,7 +409,7 @@
         <a href="/privacy">Privacy</a>
         <a href="https://mitchelmore.uk">Blog</a>
         <a href="https://pasta-app.com">Pasta</a>
-        <a href="mailto:hello@justspeaktoit.com">Say hello</a>
+        <a href="/support">Support</a>
       </nav>
     </div>
     <div class="footer-bottom">

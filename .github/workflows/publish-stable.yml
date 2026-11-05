@@ -28,7 +28,7 @@ jobs:
         with:
           fetch-depth: 0
       - id: publish
-        name: Approve frozen candidate and publish verified direct Mac artefacts
+        name: Approve frozen candidate and publish selected verified surfaces
         env:
           GH_TOKEN: ${{ github.token }}
           HOMEBREW_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

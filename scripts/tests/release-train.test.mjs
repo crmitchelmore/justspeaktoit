@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {digest, validateManifest, frozenSurfaces, stablePublicationSurfaces, nextAllocation, effectiveCommits, notesFor, canAdvance} from '../release-train-lib.mjs';
+import {digest, validateManifest, frozenSurfaces, publicationSurfaces, stablePublicationSurfaces, nextAllocation, effectiveCommits, notesFor, canAdvance} from '../release-train-lib.mjs';
 import {mergeEntries} from '../release-notes-catalogue-lib.mjs';
 const source='a'.repeat(40), prior='b'.repeat(40);
 test('manifest rejects changed frozen notes and moving source refs',()=>{
@@ -29,6 +29,24 @@ test('Stable direct Mac publishes independently of an unverified Apple candidate
  assert.throws(()=>stablePublicationSurfaces(m,{ios}),/mac-direct/);
  assert.throws(()=>stablePublicationSurfaces(m,{'mac-direct':{...mac,status:'invalid'},ios}),/mac-direct/);
  assert.throws(()=>stablePublicationSurfaces(m,{'mac-direct':mac,ios:{...ios,build:'3'}}),/does not match/);
+});
+test('iOS-only scope requires the matching iOS receipt and excludes even verified Mac receipts',()=>{
+ const m={train:'stable',publicationScope:'ios-only',source,surfaces:{'mac-direct':{build:'1',notesHash:'m'},ios:{build:'2',notesHash:'i'}}};
+ const ios={status:'verified',source,build:'2',notesHash:'i'};
+ assert.deepEqual(publicationSurfaces(m),['ios']);
+ assert.deepEqual(stablePublicationSurfaces(m,{ios,'mac-direct':{status:'verified',source,build:'1',notesHash:'m'}}),['ios']);
+ assert.throws(()=>stablePublicationSurfaces(m,{}),/Candidate not verified: ios/);
+ assert.throws(()=>stablePublicationSurfaces(m,{ios:{...ios,status:'processing'}}),/Candidate not verified: ios/);
+ assert.throws(()=>stablePublicationSurfaces(m,{ios:{...ios,source:prior}}),/does not match/);
+ assert.throws(()=>publicationSurfaces({...m,publicationScope:'mac-only'}),/scope/);
+ assert.throws(()=>publicationSurfaces({...m,train:'alpha'}),/scope/);
+});
+test('scope changes the approval hash and cannot carry desktop qualification into iOS-only',()=>{
+ const entry={version:'3.2.0',build:'1000.0.2',baseline:prior,notes:'Frozen',notesHash:digest('Frozen'),storeNotes:'Short',storeNotesHash:digest('Short')};
+ const m={schema:1,train:'stable',publicationScope:'ios-only',tag:'stable-candidate-2',source,ordinal:2,dependenciesHash:digest('lock'),build:'202609091400',surfaces:{'mac-direct':{...entry,build:'202609091400'},ios:{...entry}}};
+ assert.equal(validateManifest(m),m);
+ assert.notEqual(digest(JSON.stringify(m)),digest(JSON.stringify({...m,publicationScope:'all'})));
+ assert.throws(()=>validateManifest({...m,desktopQualification:1}),/desktop qualification/);
 });
 test('allocation advances despite same minute retries and never uses Alpha ordinal for Stable',()=>{
  const old={train:'alpha',ordinal:42,build:'202609091400'};

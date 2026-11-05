@@ -1,7 +1,8 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index.js';
 import { issueAccessToken } from '../src/auth/session.js';
+import { billingPeriod } from '../src/entitlement.js';
 import { Repository } from '../src/data/repository.js';
 import { QuotaClient } from '../src/quota.js';
 import { QuotaDurableObject } from '../src/do/quota.js';
@@ -61,7 +62,7 @@ async function operation(user: string, input: SettlementRequest): Promise<Settle
     return response.json<SettlementResponse>();
   });
 }
-async function reserve(userId: string, key = KEY, units = 100, period = '2026-10'): Promise<SettlementReceipt> {
+async function reserve(userId: string, key = KEY, units = 100, period = billingPeriod(now())): Promise<SettlementReceipt> {
   const result = await operation(userId, { kind: 'operation_reserve', userId, idempotencyKey: key,
     operation: 'post_processing', ownerId: crypto.randomUUID(), provider: 'openrouter', model: 'openai/gpt-5-mini',
     unitKind: 'tokens', period, units, correlationId: 'synthetic-correlation', nowSeconds: now(), limits: LIMITS });
@@ -80,8 +81,11 @@ async function measure(user: string, item: SettlementReceipt, units = 60): Promi
 async function ledger(user: string): Promise<Record<string, unknown>[]> {
   return (await env.DB.prepare('SELECT * FROM usage_ledger WHERE user_id=?1').bind(user).all()).results;
 }
-async function snapshot(user: string, period = '2026-10') {
-  return new QuotaClient(env.QUOTA, LIMITS).status(user, period, now());
+async function snapshot(user: string, period?: string) {
+  // Follow the operation's reserved month even if the test crosses a month boundary.
+  const reservedPeriod = period ?? (await receipt(user))?.billingPeriod;
+  expect(reservedPeriod).toBeDefined();
+  return new QuotaClient(env.QUOTA, LIMITS).status(user, reservedPeriod!, now());
 }
 async function rejectLedger(): Promise<void> {
   await env.DB.prepare(`CREATE TRIGGER settlement_fail_ledger BEFORE INSERT ON usage_ledger
@@ -124,12 +128,16 @@ async function observe(user: string, response: Response, count: number): Promise
 }
 
 describe('actual routed settlement faults', () => {
+  // Routes bill the period derived from the clock, so pin the clock for each test and read that same period.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(Date.now()); });
+  afterEach(() => { vi.useRealTimers(); });
+  const current = (): string => billingPeriod(now());
   it('retains measured quota/receipt when the actual D1 ledger rejects writes, then reconciles once', async () => {
     const a = await account(); const count = provider(); await rejectLedger();
     const first = await worker.fetch(request(a.token), env);
     expect(first.status).toBe(200); expect(await first.json()).toMatchObject({ text: 'Synthetic result.' });
     expect((await receipt(a.userId))?.phase).toBe('ledger_pending');
-    expect((await snapshot(a.userId)).tokensUsed).toBe(60); expect(await ledger(a.userId)).toHaveLength(0);
+    expect((await snapshot(a.userId, current())).tokensUsed).toBe(60); expect(await ledger(a.userId)).toHaveLength(0);
     await observe(a.userId, first, count.calls);
     await env.DB.prepare('DELETE FROM request_claims WHERE user_id=?1').bind(a.userId).run();
     const retry = await worker.fetch(request(a.token), env);
@@ -137,7 +145,7 @@ describe('actual routed settlement faults', () => {
     await env.DB.prepare('DROP TRIGGER settlement_fail_ledger').run(); await alarm(a.userId);
     expect((await receipt(a.userId))?.phase).toBe('settled');
     expect(await ledger(a.userId)).toHaveLength(1); expect((await ledger(a.userId))[0]?.units).toBe(60);
-    expect(count.calls).toBe(1); expect((await snapshot(a.userId)).tokensUsed).toBe(60);
+    expect(count.calls).toBe(1); expect((await snapshot(a.userId, current())).tokensUsed).toBe(60);
     await observe(a.userId, retry, count.calls);
   });
 
@@ -154,7 +162,7 @@ describe('actual routed settlement faults', () => {
     });
     const first = await worker.fetch(request(a.token), env); expect(first.status).toBe(200); expect(injected).toBe(true);
     const retry = await worker.fetch(request(a.token), env); expect(retry.status).toBe(409);
-    expect(count.calls).toBe(1); expect((await snapshot(a.userId)).tokensUsed).toBe(60);
+    expect(count.calls).toBe(1); expect((await snapshot(a.userId, current())).tokensUsed).toBe(60);
     expect(await ledger(a.userId)).toHaveLength(1); await observe(a.userId, retry, count.calls);
   });
 
@@ -179,7 +187,7 @@ describe('actual routed settlement faults', () => {
     await observe(a.userId, first, count.calls);
     const retry = await worker.fetch(request(a.token), env); expect(retry.status).toBe(409);
     await alarm(a.userId); expect((await receipt(a.userId))?.phase).toBe('settled');
-    expect(await ledger(a.userId)).toHaveLength(1); expect((await snapshot(a.userId)).tokensUsed).toBe(60);
+    expect(await ledger(a.userId)).toHaveLength(1); expect((await snapshot(a.userId, current())).tokensUsed).toBe(60);
     expect(count.calls).toBe(1); await observe(a.userId, retry, count.calls);
   });
 
@@ -204,7 +212,7 @@ describe('actual routed settlement faults', () => {
       const a = await account(); const count = provider(usage ?? null);
       const result = await worker.fetch(request(a.token), env);
       expect(await result.json()).toMatchObject({ error: { code: 'outcome_unknown' } });
-      const state = await snapshot(a.userId); expect(state.tokensMeasured).toBe(0);
+      const state = await snapshot(a.userId, current()); expect(state.tokensMeasured).toBe(0);
       expect(state.tokensHeld).toBeGreaterThan(0); expect(state.tokensUsed).toBe(state.tokensHeld);
       expect(await ledger(a.userId)).toHaveLength(0); expect(count.calls).toBe(1);
       expect((await worker.fetch(request(a.token), env)).status).toBe(409);
@@ -213,7 +221,7 @@ describe('actual routed settlement faults', () => {
   it('settles genuine explicit zero without charging the reserved estimate', async () => {
     const a = await account(); const count = provider({ prompt_tokens: 0, completion_tokens: 0 });
     expect((await worker.fetch(request(a.token), env)).status).toBe(200);
-    expect((await snapshot(a.userId)).tokensUsed).toBe(0); expect((await ledger(a.userId))[0]?.units).toBe(0);
+    expect((await snapshot(a.userId, current())).tokensUsed).toBe(0); expect((await ledger(a.userId))[0]?.units).toBe(0);
     expect(count.calls).toBe(1);
   });
 
@@ -293,11 +301,12 @@ describe('durable receipt ownership, periods and alarms', () => {
   });
 
   it('does not relabel inherited or legacy-expired committed estimates as verified usage', async () => {
-    const a = await account();
+    const a = await account(); const period = billingPeriod(now());
     await runInDurableObject(stub(a.userId), async (_instance, state) => {
-      await state.storage.put('period:2026-10', { period: '2026-10', audioSecondsCommitted: 0, tokensCommitted: 20 });
+      await state.storage.put(`period:${period}`, { period, audioSecondsCommitted: 0, tokensCommitted: 20 });
     });
-    const state = await snapshot(a.userId); expect(state.tokensUsed).toBe(20); expect(state.tokensMeasured).toBeUndefined();
+    const state = await snapshot(a.userId, period);
+    expect(state.tokensUsed).toBe(20); expect(state.tokensMeasured).toBeUndefined();
   });
 
   it('rejects different owners/measurements and isolates the same key across accounts', async () => {
@@ -316,7 +325,7 @@ describe('durable receipt ownership, periods and alarms', () => {
     await measure(a.userId, second, 20);
     await new Repository(env.DB).recordUsage({ userId: a.userId, idempotencyKey: KEY, operation: 'post_processing',
       provider: 'openrouter', model: 'openai/gpt-5-mini', unitKind: 'tokens', units: 99,
-      billingPeriod: '2026-10', correlationId: 'different', nowSeconds: now() });
+      billingPeriod: first.billingPeriod, correlationId: 'different', nowSeconds: now() });
     await alarm(a.userId);
     expect((await receipt(a.userId))?.lastFailure).toBe('ledger_conflict');
     expect((await receipt(a.userId, KEY + '-second'))?.phase).toBe('settled');
@@ -354,7 +363,7 @@ describe('durable receipt ownership, periods and alarms', () => {
     expect(next).not.toBeNull();
     expect(await runDurableObjectAlarm(stub(a.userId))).toBe(true);
     expect(await ledger(a.userId)).toHaveLength(27);
-    expect((await snapshot(a.userId)).tokensUsed).toBe(27);
+    expect((await snapshot(a.userId, billingPeriod(time))).tokensUsed).toBe(27);
   });
 
   it('generic release/finalise cannot bypass ownership of a tracked operation', async () => {
@@ -470,7 +479,7 @@ describe('installed alarm recovery and fairness', () => {
       expect(markers).toHaveLength(Number(priorPending) + Number(committed));
       if (committed) expect(afterReset.entries[pendingKey(restored)]).toBe(KEY);
       if (prior !== undefined) expect(afterReset.entries[pendingKey(prior)]).toBe(prior.idempotencyKey);
-      expect(afterReset.entries['period:2026-10']).toMatchObject({ tokensCommitted:
+      expect(afterReset.entries[`period:${item.billingPeriod}`]).toMatchObject({ tokensCommitted:
         (priorPending ? 30 : 0) + (committed ? 20 : 0) });
       expect(afterReset.entries['reservations']).toEqual(committed ? [] : beforeReset.entries['reservations']);
       expect((await snapshot(a.userId)).tokensHeld).toBe(held);

@@ -75,7 +75,7 @@ class MacReviewNotesTest < Minitest::Test
       return [{'id' => 'public-alpha', 'attributes' => {'name' => 'Public Alpha', 'isInternalGroup' => false}}] if path.include?('/betaGroups?')
       return [build] if path == '/v1/betaGroups/public-alpha/builds?limit=200'
       return [{'id' => 'store-locale', 'attributes' => {'locale' => 'en-GB'}}] if path.end_with?('/appStoreVersionLocalizations')
-      return [] if path.include?('/reviewSubmissions?') || path.end_with?('/items')
+      return [] if path.include?('/reviewSubmissions?') || path.end_with?('/items?include=appStoreVersion')
       raise "Unexpected list #{path}"
     end
 

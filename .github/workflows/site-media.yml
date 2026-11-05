@@ -1,0 +1,110 @@
+name: Site Media Capture
+
+# Manual capture of website screenshots and the demo video from the real Debug app.
+# Fictional History and the batch fixture only: no secrets, providers or signing.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/site-media.yml
+      - scripts/site-media/**
+      - Sources/SpeakApp/CoreJourneySiteMediaFixture.swift
+      - Tests/SpeakAppUITests/SiteMediaCaptureUITests.swift
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-media-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    name: Capture site media
+    # Hosted ARM has the UI automation entitlement used by the core journey suites.
+    runs-on: macos-latest
+    timeout-minutes: 50
+    env:
+      CAPTURE: ${{ github.workspace }}/.artifacts/site-media
+    steps:
+      - uses: actions/checkout@v7.0.1
+        timeout-minutes: 2
+        with:
+          persist-credentials: false
+
+      - name: Prepare Tuist and macOS project
+        timeout-minutes: 8
+        run: |
+          brew install tuist ffmpeg
+          tuist generate --no-open
+
+      - name: Build app, fixture and capture suite
+        timeout-minutes: 20
+        run: |
+          xcodebuild build-for-testing -workspace "Just Speak to It.xcworkspace" -scheme SpeakApp \
+            -configuration Debug -destination platform=macOS -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -only-testing:SpeakAppUITests/SiteMediaCaptureUITests -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual -quiet
+
+      - name: Select a HiDPI display mode
+        timeout-minutes: 3
+        run: |
+          mkdir -p "$CAPTURE"
+          swift scripts/site-media/select-display-mode.swift | tee "$CAPTURE/display-modes.txt"
+          defaults write com.apple.dock autohide -bool true
+          killall Dock || true
+          sleep 3
+          system_profiler SPDisplaysDataType | tee -a "$CAPTURE/display-modes.txt"
+
+      - name: Start screen recording
+        timeout-minutes: 1
+        run: |
+          python3 -c 'import time; print(time.time())' > "$CAPTURE/recording-start.txt"
+          screencapture -v -k "$CAPTURE/screen.mov" > "$CAPTURE/screencapture.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/screencapture.pid"
+          sleep 3
+          kill -0 "$(cat "$RUNNER_TEMP/screencapture.pid")"
+
+      - name: Run capture suite
+        timeout-minutes: 10
+        run: |
+          xctestrun=$(find "$RUNNER_TEMP/DerivedData/Build/Products" -name '*.xctestrun' | head -1)
+          TEST_RUNNER_SITE_MEDIA_CAPTURE=1 xcodebuild test-without-building -xctestrun "$xctestrun" \
+            -destination platform=macOS -only-testing:SpeakAppUITests/SiteMediaCaptureUITests \
+            -resultBundlePath "$CAPTURE/SiteMedia.xcresult"
+
+      - name: Stop screen recording
+        if: always()
+        timeout-minutes: 2
+        run: |
+          pid=$(cat "$RUNNER_TEMP/screencapture.pid" 2>/dev/null || true)
+          if [ -n "$pid" ]; then
+            kill -INT "$pid" || true
+            for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          fi
+          ls -la "$CAPTURE"
+
+      - name: Export captures from result bundle
+        if: always()
+        timeout-minutes: 3
+        run: |
+          xcrun xcresulttool export attachments --path "$CAPTURE/SiteMedia.xcresult" \
+            --output-path "$CAPTURE/attachments"
+          python3 scripts/site-media/collect-attachments.py "$CAPTURE/attachments" "$CAPTURE"
+          ls -la "$CAPTURE"
+
+      - name: Render demo video
+        timeout-minutes: 8
+        run: |
+          python3 scripts/site-media/render-demo.py "$CAPTURE"
+          ffprobe -v error -show_entries format=duration:stream=width,height,codec_name \
+            "$CAPTURE/demo/speak-demo.mp4"
+
+      - name: Upload site media
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site-media-${{ github.run_attempt }}
+          path: .artifacts/site-media
+          if-no-files-found: error

@@ -71,6 +71,10 @@ module AppleRelease
       raise 'Notes changed after approval' unless Digest::SHA256.hexdigest(@item.fetch('notes')) == @item.fetch('notesHash')
       raise 'Store notes changed after approval' unless Digest::SHA256.hexdigest(@item.fetch('storeNotes')) == @item.fetch('storeNotesHash')
       @train = manifest.fetch('train')
+      if manifest.key?('publicationScope')
+        raise 'Invalid Stable publication scope' unless @train == 'stable' && %w[all ios-only].include?(manifest['publicationScope'])
+        raise 'Apple surface is outside the approved publication scope' if manifest['publicationScope'] == 'ios-only' && surface != 'ios'
+      end
       @pipeline = JSON.parse(File.read('Config/ReleasePipeline.json'))
       @app = @pipeline.fetch('apple').fetch(@train).fetch(surface)
       raise "Alpha App Store Connect record not configured for #{surface}" unless @app
@@ -340,12 +344,29 @@ module AppleRelease
         @client.patch("/v1/appStoreVersionLocalizations/#{locale['id']}", data:{type:'appStoreVersionLocalizations',id:locale['id'],attributes:{whatsNew:@item['storeNotes']}})
       end
       submissions=@client.list("/v1/apps/#{@app}/reviewSubmissions?limit=200")
-      review=submissions.find { |r| r.dig('attributes','platform') == platform && r.dig('attributes','state') == 'READY_FOR_REVIEW' }
+      active=submissions.select do |r|
+        r.dig('attributes','platform') == platform &&
+          %w[READY_FOR_REVIEW UNRESOLVED_ISSUES].include?(r.dig('attributes','state'))
+      end
+      raise 'Multiple active review submissions require owner reconciliation' if active.length > 1
+      review=active.first
       review ||= @client.post('/v1/reviewSubmissions',data:{type:'reviewSubmissions',attributes:{platform:platform},relationships:{app:AppleRelease.relationship('apps',@app)}})['data']
-      items=@client.list("/v1/reviewSubmissions/#{review['id']}/items")
+      items=@client.list("/v1/reviewSubmissions/#{review['id']}/items?include=appStoreVersion")
       raise 'Existing review contains another submission item' if items.any? { |i| i.dig('relationships','appStoreVersion','data','id') != id }
+      raise 'Existing review contains duplicate version items' if items.length > 1
       if items.empty?
+        raise 'Unresolved review has no matching item to resubmit' if review.dig('attributes','state') == 'UNRESOLVED_ISSUES'
         @client.post('/v1/reviewSubmissionItems',data:{type:'reviewSubmissionItems',relationships:{reviewSubmission:AppleRelease.relationship('reviewSubmissions',review['id']),appStoreVersion:AppleRelease.relationship('appStoreVersions',id)}})
+      else
+        item=items.first
+        # Owner approval above covers the corrected candidate and review fixes.
+        # Reuse Apple's rejected item; never remove unrelated review content.
+        if item.dig('attributes','state') == 'REJECTED'
+          path="/v1/reviewSubmissionItems/#{item.fetch('id')}"
+          @client.patch(path,data:{type:'reviewSubmissionItems',id:item['id'],attributes:{resolved:true}})
+          item=@client.get(path).fetch('data')
+        end
+        raise 'Existing submission item is not ready for review' unless item.dig('attributes','state') == 'READY_FOR_REVIEW'
       end
       @client.patch("/v1/reviewSubmissions/#{review['id']}",data:{type:'reviewSubmissions',id:review['id'],attributes:{submitted:true}})
       observed=@client.get("/v1/reviewSubmissions/#{review['id']}").dig('data','attributes','state')

@@ -54,7 +54,9 @@ jobs:
         env:
           RUNNER_INDEX: ${{ matrix.runner }}
         run: |
-          set -uo pipefail
+          # GitHub runs steps with bash -e; a failing iteration must still be
+          # recorded and must not skip the iterations that follow it.
+          set +e -uo pipefail
           root=.artifacts/core-journey-fixture-ui
           failed=0
           for iteration in $(seq 1 "$ITERATIONS"); do

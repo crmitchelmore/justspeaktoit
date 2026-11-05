@@ -1026,17 +1026,36 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     var setActivationPolicy: @MainActor (NSApplication.ActivationPolicy) -> Void
     var registerLoginItem: @MainActor (_ enabled: Bool) throws -> Void
 
+    /// Serialises login-item changes so the most recent request is applied last.
+    private static let loginItemQueue = DispatchQueue(label: "com.justspeaktoit.login-item", qos: .utility)
+
+    /// Waits for queued login-item changes, so quitting cannot abandon the latest toggle.
+    static func drainLoginItemChanges() async {
+      await withCheckedContinuation { continuation in
+        loginItemQueue.async { continuation.resume() }
+      }
+    }
+
     static let live = SystemDependencies(
       fileManager: .default,
       setActivationPolicy: { NSApplication.shared.setActivationPolicy($0) },
+      // `SMAppService.status` is a synchronous XPC round trip (about 80-120 ms
+      // measured on launch), so reconcile off the main thread.
       registerLoginItem: { enabled in
-        let service = SMAppService.mainApp
-        if enabled {
-          if service.status != .enabled {
-            try service.register()
+        loginItemQueue.async {
+          do {
+            let service = SMAppService.mainApp
+            if enabled {
+              if service.status != .enabled {
+                try service.register()
+              }
+            } else if service.status == .enabled {
+              try service.unregister()
+            }
+          } catch {
+            SpeakLogger.logger(category: "AppSettings")
+              .error("Failed to update login item: \(error.localizedDescription, privacy: .public)")
           }
-        } else if service.status == .enabled {
-          try service.unregister()
         }
       }
     )

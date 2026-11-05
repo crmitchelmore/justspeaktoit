@@ -29,6 +29,8 @@ param(
     [string] $LocalModelDirectory
 )
 
+. (Join-Path $PSScriptRoot 'FailureDiagnostics.ps1')
+
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'BundleEnvironment.ps1')
 . (Join-Path $PSScriptRoot 'BundleCLI.ps1')
@@ -190,6 +192,19 @@ try {
         throw 'Native x64 CLI verification requires an x64 host, not an emulated x64 process.'
     }
 
+    # Optional preparation happens before original-run deadline capture. No
+    # diagnostic target/job/debugger starts on this path or on a passing run.
+    $diagnosticSetup = $null
+    if ($architecture -ceq 'arm64') {
+        try {
+            $currentHost = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+            $pythonHost = (Get-Command python -CommandType Application -ErrorAction Stop).Source
+            $hostIdentity = Get-JstiDiagnosticIdentity $currentHost @('pwsh.exe', 'powershell.exe')
+            $pythonIdentity = Get-JstiDiagnosticIdentity $pythonHost @('python.exe', 'python3.exe')
+            if (Initialize-JstiDiagnosticNative) { $diagnosticSetup = @{ Host = $hostIdentity; Python = $pythonIdentity } }
+        } catch { }
+    }
+
     # --- 3. Isolate the environment ----------------------------------------------
     $systemRoot = $env:SystemRoot
     $isolatedPath = "$systemRoot\System32;$systemRoot;$systemRoot\System32\Wbem;$systemRoot\System32\WindowsPowerShell\v1.0"
@@ -281,6 +296,10 @@ try {
         $probeRelease = Join-Path $evidenceDirectory ('module-probe-' + $label + '.ready')
         Remove-Item -LiteralPath $probeRelease -Force -ErrorAction SilentlyContinue
         $env:JSTI_BUNDLE_PROBE_RELEASE_PATH = $probeRelease
+        # Diagnostic-only QPC boundary; original stopwatch/timer stays unchanged.
+        $diagnosticFrequency = [System.Diagnostics.Stopwatch]::Frequency
+        $diagnosticDeadline = [System.Diagnostics.Stopwatch]::GetTimestamp() + ([long] $seconds * $diagnosticFrequency)
+        $diagnosticStartedUTC = [datetime]::UtcNow
         $process = Start-Process @parameters
         $loaded = @{}
         $processMachine = $null
@@ -346,6 +365,19 @@ try {
             staticallyImportedModulesNotObserved = $missing
         }
         $script:report.runs += $run
+        # At most one optional attempt after the frozen original natural failure.
+        # Timeout throws above and cannot reach this hook. Original verdict follows.
+        if ($architecture -ceq 'arm64' -and $label -ceq 'ui-smoke' -and $arguments -ceq '--ui-smoke-test' -and
+                ([long] $process.ExitCode -band 0xffffffffL) -in @(0xC0000005L, 0xC0000374L, 0xC0000409L)) {
+            try {
+                $image = @($report.productionImages | Where-Object { $_.name -ceq 'SpeakWindows.exe' })
+                if ($image.Count -eq 1) {
+                    $run.failureDiagnostic = Invoke-JstiStandaloneDiagnostic $diagnosticSetup $run $process `
+                        (Join-Path $bundle 'SpeakWindows.exe') $image[0].sha256 $diagnosticDeadline `
+                        $diagnosticFrequency $diagnosticStartedUTC ([datetime]::UtcNow)
+                }
+            } catch { $run.failureDiagnostic = @{ status = 'unavailable'; originalFailurePreserved = $true } }
+        }
         if ($process.ExitCode -ne 0) { throw "$label failed with exit code $($process.ExitCode)." }
         if ($fromBundle.Count -lt 2) { throw "$label module evidence was not captured." }
         if ($foreign.Count) { throw "$label loaded modules from outside the bundle and Windows: $($foreign -join '; ')" }

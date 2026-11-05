@@ -170,7 +170,7 @@ def coverage_errors(output, required_suites):
     return errors, counts
 
 
-def wait_cancellably(process, budget):
+def wait_cancellably(process, budget, started=None):
     # Python 3.15's kqueue-based Popen.wait catches OSError around kevent, which
     # swallows the InterruptedError a cancellation handler raises. Relay each
     # handler so a cancellation also kills the command group (letting the wait
@@ -196,7 +196,8 @@ def wait_cancellably(process, budget):
                 previous[signum] = handler
                 signal.signal(signum, relay)
     try:
-        exit_code = process.wait(timeout=budget)
+        exit_code = (process.wait(timeout=budget) if started is None
+                     else wait_with_deadline(process, budget, started))
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)
@@ -218,16 +219,22 @@ def stop_process_group(process):
     process.wait()
 
 
-def exited_within_budget(process, command_started, budget):
-    """Exit status when a reported timeout is contradicted by measurement.
+def wait_with_deadline(process, budget, started):
+    """Wait until the measured budget is spent, not merely until wait() says so.
 
-    A hosted run raised TimeoutExpired for a 600s budget after 327s, as the
-    command finished. Only a process that has exited, measured under budget,
-    is accepted; a genuine overrun still fails as a timeout.
+    CPython 3.15's kqueue-based Popen._wait subtracts elapsed time from an
+    already absolute deadline when the exit is reported before waitpid reaps
+    it: a hosted run raised TimeoutExpired for a 600s budget after 327s. An
+    early TimeoutExpired therefore only resumes waiting for the remainder.
     """
-    if time.monotonic() - command_started >= budget:
-        return None
-    return process.poll()
+    remaining = budget
+    while True:
+        try:
+            return process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            remaining = budget - (time.monotonic() - started)
+            if remaining <= 0:
+                raise
 
 
 class BuildProgressObserver:
@@ -370,7 +377,6 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
     counts = {}
     process = None
     observer = None
-    timing_anomaly = None
     log_path = artifacts_dir / "test.log"
 
     def record_error(message):
@@ -403,23 +409,13 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
                     command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
                 )
                 try:
-                    exit_code = wait_cancellably(process, budget)
+                    exit_code = wait_cancellably(process, budget, command_started)
                     if exit_code != 0:
                         errors.append(f"{stage.capitalize()} command exited with status {exit_code}; see {log_path}.")
                 except subprocess.TimeoutExpired:
-                    status = exited_within_budget(process, command_started, budget)
-                    if status is None:
-                        exit_code = 124
-                        errors.append(f"Core journey gate exceeded its {budget}s {stage} budget.")
-                        stop_process_group(process)
-                    else:
-                        exit_code = status
-                        timing_anomaly = "TimeoutExpired raised before the measured budget; the command had exited."
-                        print(f"::warning::{timing_anomaly}", file=sys.stderr)
-                        if exit_code != 0:
-                            errors.append(
-                                f"{stage.capitalize()} command exited with status {exit_code}; see {log_path}."
-                            )
+                    exit_code = 124
+                    errors.append(f"Core journey gate exceeded its {budget}s {stage} budget.")
+                    stop_process_group(process)
             finally:
                 # The budget covers the command, not log replay, coverage
                 # parsing, or writing diagnostics after the command finishes.
@@ -459,7 +455,6 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
                         "elapsed_seconds": elapsed,
                         "command_elapsed_seconds": command_elapsed,
                         "budget_seconds": budget,
-                        "timing_anomaly": timing_anomaly,
                         "required_suites": list(required_suites),
                         "executed_cases": counts,
                         "errors": errors,

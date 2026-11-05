@@ -6073,6 +6073,7 @@ static gboolean migration_restore_self_test(void) {
 
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_hands_free_guard_self_test(error, capacity) != 0) return -1;
+    if (jsti_desktop_palette_self_test(error, capacity) != 0) return -1;
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
     if (jsti_issue_report_self_test(error, capacity) != 0) return -1;
     const JSTIAboutLink invalid_about_link = {"Invalid", "file:///not-an-update"};

@@ -1046,3 +1046,20 @@ Wayland insertion into another application.
 The final native integration script and 1x Xvfb screenshot tour passed. Live
 Hyprland resizing from 1100×760 to 640×760 and back verified sidebar collapse,
 stacking and restoration on the laptop at 2x scale.
+
+### Omarchy appearance
+
+Linux uses restrained, theme-aware surfaces and native controls instead of a
+forced application-wide orange palette. On native Omarchy, the app reads only
+`$XDG_STATE_HOME/omarchy/current/theme/colors.toml` (normally under
+`~/.local/state`). It accepts bounded hex colours and a light/dark mode, checks
+text/accent contrast, and watches the palette and its parent for theme changes.
+No theme scripts run, no desktop settings change, and there is no polling loop.
+A mode mismatch, unreadable/malformed palette or high-contrast preference uses
+standard libadwaita appearance; high-contrast cards retain explicit outlines.
+The Flatpak has no additional filesystem permission and uses the standard
+portal appearance when the host palette is inaccessible.
+
+The style follows native font, focus and animation preferences. The app icon
+retains the brand, while record/error states keep their semantic distinction.
+See [the quality rubric](linux-quality-rubric.md) for the measurement contract.

@@ -210,7 +210,24 @@ def stop_process_group(process):
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        # macOS reports EPERM for a group whose leader is already a zombie.
+        # Only an exited leader is tolerated; anything else is a real failure.
+        if process.poll() is None:
+            raise
     process.wait()
+
+
+def exited_within_budget(process, command_started, budget):
+    """Exit status when a reported timeout is contradicted by measurement.
+
+    A hosted run raised TimeoutExpired for a 600s budget after 327s, as the
+    command finished. Only a process that has exited, measured under budget,
+    is accepted; a genuine overrun still fails as a timeout.
+    """
+    if time.monotonic() - command_started >= budget:
+        return None
+    return process.poll()
 
 
 class BuildProgressObserver:
@@ -353,6 +370,7 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
     counts = {}
     process = None
     observer = None
+    timing_anomaly = None
     log_path = artifacts_dir / "test.log"
 
     def record_error(message):
@@ -389,9 +407,19 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
                     if exit_code != 0:
                         errors.append(f"{stage.capitalize()} command exited with status {exit_code}; see {log_path}.")
                 except subprocess.TimeoutExpired:
-                    exit_code = 124
-                    errors.append(f"Core journey gate exceeded its {budget}s {stage} budget.")
-                    stop_process_group(process)
+                    status = exited_within_budget(process, command_started, budget)
+                    if status is None:
+                        exit_code = 124
+                        errors.append(f"Core journey gate exceeded its {budget}s {stage} budget.")
+                        stop_process_group(process)
+                    else:
+                        exit_code = status
+                        timing_anomaly = "TimeoutExpired raised before the measured budget; the command had exited."
+                        print(f"::warning::{timing_anomaly}", file=sys.stderr)
+                        if exit_code != 0:
+                            errors.append(
+                                f"{stage.capitalize()} command exited with status {exit_code}; see {log_path}."
+                            )
             finally:
                 # The budget covers the command, not log replay, coverage
                 # parsing, or writing diagnostics after the command finishes.
@@ -431,6 +459,7 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
                         "elapsed_seconds": elapsed,
                         "command_elapsed_seconds": command_elapsed,
                         "budget_seconds": budget,
+                        "timing_anomaly": timing_anomaly,
                         "required_suites": list(required_suites),
                         "executed_cases": counts,
                         "errors": errors,

@@ -478,6 +478,51 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result["elapsed_seconds"], 100)
         self.assertEqual(result["errors"], [])
 
+    def test_spurious_timeout_after_exit_within_budget_uses_real_status(self):
+        # Hosted evidence: TimeoutExpired for a 600s budget after 327s, as the
+        # command finished. Measured elapsed and the exited process win.
+        for status in (0, 17):
+            source = ('print("Test Case \'-[Module.Required testResult]\' passed (0.001 seconds).")'
+                      if status == 0 else f"raise SystemExit({status})")
+            real_wait = subprocess.Popen.wait
+
+            def spurious(process, timeout=None):
+                real_wait(process)
+                if timeout is not None:
+                    raise subprocess.TimeoutExpired(process.args, timeout)
+                return process.returncode
+
+            with self.subTest(status=status), mock.patch.object(subprocess.Popen, "wait", spurious):
+                code, result, _ = self.run_command(source, budget=60)
+            self.assertEqual(code, status)
+            self.assertIsNotNone(result["timing_anomaly"])
+            self.assertFalse(any("budget" in error for error in result["errors"]))
+
+    def test_genuine_overrun_remains_a_timeout_even_after_exit(self):
+        real_wait = subprocess.Popen.wait
+
+        def late(process, timeout=None):
+            real_wait(process)
+            if timeout is not None:
+                time.sleep(timeout + 0.05)
+                raise subprocess.TimeoutExpired(process.args, timeout)
+            return process.returncode
+
+        with mock.patch.object(subprocess.Popen, "wait", late):
+            code, result, _ = self.run_command("pass", budget=0.1)
+        self.assertEqual(code, 124)
+        self.assertIsNone(result["timing_anomaly"])
+
+    def test_zombie_group_permission_error_is_tolerated_only_after_exit(self):
+        process = mock.Mock(pid=4242)
+        process.poll.return_value = 0
+        with mock.patch.object(gate.os, "killpg", side_effect=PermissionError(1, "Operation not permitted")):
+            gate.stop_process_group(process)
+            process.wait.assert_called_once()
+            process.poll.return_value = None
+            with self.assertRaises(PermissionError):
+                gate.stop_process_group(process)
+
     def test_timeout_stops_descendants_too(self):
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "descendant-survived"

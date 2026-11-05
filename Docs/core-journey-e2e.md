@@ -225,7 +225,11 @@ the first on each runner (5) is cold. Every execution is recorded, nothing is
 retried or discarded, and `scripts/summarise-core-journey-qualification.py`
 fails unless all 20 pass with at least five cold passes. The job summary and the
 `core-journey-qualification-record-*` artifact hold the per-run table, p95 and
-maximum test-command time. Quarantine policy: a failing journey is fixed or the
+maximum test-command time. A reported timeout is honoured only when the measured command time reaches the
+budget. One hosted iteration raised `TimeoutExpired` for the 600 s budget after
+327 s, as xcodebuild exited; the gate now uses that exit status and records
+`timing_anomaly` in `result.json` instead of failing a run that finished in
+time. Quarantine policy: a failing journey is fixed or the
 regression reverted; a known-flaky case is never retried in place and may only
 be removed from `REQUIRED_CASES` in a reviewed change that links its issue.
 

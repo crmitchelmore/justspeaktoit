@@ -209,8 +209,9 @@ test('discards sustained producer output without growing temporary files', t => 
   const producer = `python3 - <<'PY'
 import os,time
 from pathlib import Path
-end=time.monotonic()+0.75
-while time.monotonic()<end:
+# A fixed 2 MiB, not a fixed duration: the >1 MiB assertions must not depend
+# on how fast a hosted runner drains the pipe (#1340 run 41958631680).
+for _ in range(64):
  os.write(1,b"x"*32768)
  if any(p.is_file() and p.stat().st_size>1024 for p in Path(os.environ["TMPDIR"]).iterdir()):
   raise SystemExit(99)

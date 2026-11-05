@@ -79,6 +79,7 @@ final class CoreJourneyLaunchProfile {
         identifier: identifier,
         directory: directory, scenario: batchScenario
     )
+    lazy var credentialSlot = CoreJourneyCredentialSlot(identifier: identifier, directory: directory)
     private var hotKeyProbe: CoreJourneyHotKeyProbe?
 
     init(
@@ -158,6 +159,7 @@ final class CoreJourneyLaunchProfile {
             settings.showHUDDuringSessions = true
             settings.shortenErrorDisplay = false
         }
+        self.configureScenarioSettings()
     }
 
     func startHotKeyProbe(manager: HotKeyManager, main: MainManager) {

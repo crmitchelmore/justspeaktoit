@@ -9,6 +9,7 @@ public enum ApplicationPreferenceKey: String, CaseIterable, Sendable {
     case localStreamingModelSource
     case postProcessingEnabled
     case postProcessingModel
+    case cleanupModelDiscoveryEnabled
     case postProcessingTemperature
     case postProcessingOutputLanguage
     case postProcessingIncludeLexiconDirectives

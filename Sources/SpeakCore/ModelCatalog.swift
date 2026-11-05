@@ -513,6 +513,36 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             tags: [.fast, .cheap, .privacy]
         ),
 
+        // GPT-6 IDs/rates verified against OpenAI docs and OpenRouter (2026-11); see
+        // Docs/cleanup-model-upgrades-2026-11.md for pricing tiers and evidence.
+        // No measured cleanup latency is available; retain Option's default tier.
+        Option(
+            id: "openai/gpt-6-luna",
+            displayName: "GPT-6 Luna",
+            description: "Cost-efficient GPT-6 option via OpenRouter. "
+                + "Base token pricing shown; long-context rates may be higher.",
+            tags: [.cheap],
+            pricing: Pricing(promptPerMTokens: 0.10, completionPerMTokens: 0.50),
+            contextLength: 1_050_000
+        ),
+        Option(
+            id: "openai/gpt-6.1-sol",
+            displayName: "GPT-6.1 Sol",
+            description: "OpenAI's middle GPT-6 tier via OpenRouter, priced below Astra. "
+                + "Base token pricing shown; long-context rates may be higher.",
+            pricing: Pricing(promptPerMTokens: 2.0, completionPerMTokens: 10.0),
+            contextLength: 1_050_000
+        ),
+        Option(
+            id: "openai/gpt-6-astra",
+            displayName: "GPT-6 Astra",
+            description: "OpenAI's flagship GPT-6 option via OpenRouter, at a higher token cost. "
+                + "Base token pricing shown; long-context rates may be higher.",
+            tags: [.leading],
+            pricing: Pricing(promptPerMTokens: 10.0, completionPerMTokens: 50.0),
+            contextLength: 1_050_000
+        ),
+
         // Fast / cheap cleanup
         Option(
             id: "openai/gpt-5.4-nano",
@@ -809,7 +839,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// and custom local cleanup models installed by the user.
     public static func normalizedPostProcessingModel(_ identifier: String?) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if trimmed.hasPrefix("local/post-processing/") { return trimmed }
+        if trimmed.hasPrefix("local/post-processing/") || CleanupModelSelection.modelID(from: trimmed) != nil {
+            return trimmed
+        }
         if postProcessing.contains(where: { $0.id == trimmed }) { return trimmed }
         return defaultPostProcessingModel
     }
@@ -829,6 +861,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "—" }
 
+        if let discovered = CleanupModelSelection.modelID(from: trimmed) { return discovered }
         if let exact = optionsByID[trimmed.lowercased()] {
             return exact.displayName
         }

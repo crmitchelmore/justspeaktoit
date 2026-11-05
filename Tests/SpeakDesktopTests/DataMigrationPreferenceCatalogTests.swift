@@ -15,7 +15,7 @@ final class DataMigrationPreferenceCatalogTests: XCTestCase {
 
     func testCanonicalKeys_PreserveInventoryOrderAndUniquePersistedNames() {
         let keys = ApplicationPreferenceKey.allCases.map(\.rawValue)
-        XCTAssertEqual(keys.count, 93)
+        XCTAssertEqual(keys.count, 94)
         XCTAssertEqual(Set(keys).count, keys.count)
         XCTAssertEqual(keys.first, "appearance")
         XCTAssertEqual(keys.last, "analyticsEnabled")
@@ -26,7 +26,9 @@ final class DataMigrationPreferenceCatalogTests: XCTestCase {
         let definitions = DataMigrationPreferenceCatalog.definitions
         XCTAssertEqual(definitions.count, 98)
         XCTAssertEqual(Set(definitions.map(\.key)).count, definitions.count)
-        let excluded: Set<ApplicationPreferenceKey> = [.trackedKeyIdentifiers, .transcriptionKeywordsLastReconciled]
+        let excluded: Set<ApplicationPreferenceKey> = [
+            .cleanupModelDiscoveryEnabled, .trackedKeyIdentifiers, .transcriptionKeywordsLastReconciled
+        ]
         for key in ApplicationPreferenceKey.allCases {
             XCTAssertEqual(DataMigrationPreferenceCatalog.definition(for: key.rawValue) == nil, excluded.contains(key))
         }
@@ -126,6 +128,7 @@ final class DataMigrationPreferenceCatalogTests: XCTestCase {
         XCTAssertThrowsError(try validate(record("runAtLogin", .bool(true), kind: "secret")))
         XCTAssertThrowsError(try validate(record("runAtLogin", .bool(true), kind: "jsonDefault")))
         XCTAssertThrowsError(try validate(record("speakDeviceId", .string("foreign device"))))
+        XCTAssertThrowsError(try validate(record(CleanupModelSelection.preferenceKey, .bool(true))))
     }
 
     func testJSONPreferences_RequirePlatformValidatorAndPropagateItsFailure() {

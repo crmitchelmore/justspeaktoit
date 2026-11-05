@@ -10,7 +10,9 @@ extension WindowsNative {
     ) throws {
         let picker = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue().postProcessingPicker
         picker.publish([])
-        let models = DesktopPostProcessing.nativeModels(selected: options.modelIdentifier)
+        let models = DesktopPostProcessing.nativeModels(
+            selected: options.modelIdentifier, rememberedRemote: options.lastRemoteModelIdentifier
+        )
         guard let local = models.firstIndex(where: { $0.id == LocalPostProcessingModel.builtInRulesModelID }) else {
             throw DesktopPostProcessingError.unsupportedModel
         }
@@ -35,7 +37,7 @@ extension WindowsNative {
             }
         }
         guard result == 0 else { throw WindowsNativeError(message: "Could not configure post-processing controls.") }
-        guard jsti_window_set_cleanup_sources(DesktopPostProcessing.remoteModels.count) == 0 else {
+        guard jsti_window_set_cleanup_sources(local) == 0 else {
             throw WindowsNativeError(message: "Could not configure local/remote cleanup sources.")
         }
         picker.publish(models)

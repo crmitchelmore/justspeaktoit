@@ -176,9 +176,9 @@ class BuildInvocationTests(unittest.TestCase):
         self.assertEqual(command[8:14], ["--scratch-path", str(self.root / "scratch"),
                                          "--configuration", "debug", "--jobs", "2"])
         self.assertEqual((command.count("--scratch-path"), command.count("--jobs")), (1, 1))
+        self.assertNotIn("-Osize", command)
 
-    def test_default_build_invocation_is_unchanged(self):
-        # Literal pre-option command: defaults must not alter the x64 build.
+    def test_release_build_invocation_optimizes_for_size(self):
         tool, sdk, microsoft = pathlib.Path("/t/usr"), pathlib.Path("/s/Developer/SDKs/Windows.sdk"), pathlib.Path("/m")
         args = self.arguments()
         scratch = BUILD.build_locations(args)[2]
@@ -188,6 +188,7 @@ class BuildInvocationTests(unittest.TestCase):
         expected = ["/t/usr/bin/swift", "build", "--package-path", str(HERE.parent.parent),
                     "--triple", "x86_64-unknown-windows-msvc", "--sdk", str(sdk),
                     "--scratch-path", str(self.cache / "app-build"), "--configuration", "release", "--jobs", "4",
+                    "-Xswiftc", "-Osize",
                     "-Xswiftc", "-resource-dir", "-Xswiftc", str(sdk) + "/usr/lib/swift",
                     "-Xswiftc", "-tools-directory", "-Xswiftc", "/t/usr/bin", "-Xswiftc", "-use-ld=lld"]
         for directory in [str(sdk) + "/usr/include", "/m/Microsoft.VC.14.44.17.14.CRT.Headers.base" + msvc + "include",
@@ -204,7 +205,8 @@ class BuildInvocationTests(unittest.TestCase):
                           "/m/microsoft.windows.sdk.cpp.x64.10.0.26100.1/c/um/x64",
                           modules.format("XCTest") + "/x86_64", modules.format("Testing") + "/x86_64"]:
             expected += ["-Xlinker", "/libpath:" + directory]
-        self.assertEqual([str(value) for value in command], expected)
+        self.assertEqual([str(value).replace("\\", "/") for value in command],
+                         [value.replace("\\", "/") for value in expected])
 
 
 class ProductionImageTests(unittest.TestCase):

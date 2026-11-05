@@ -12,6 +12,15 @@ those remain separate gates. This document describes the x64 bundle; the ARM64
 bundle, built from the native ARM64 build, is described in
 [Windows ARM64](windows-arm64.md).
 
+Windows release code uses Swift's `-Osize` optimizer in both the native and
+cross-build paths; the tests compile the same optimized modules. Production
+debug stripping still retains source-bound diagnostic originals separately.
+The dependency closure, CPU variants and Vulkan support remain intact, so a
+smaller executable is not achieved by removing a supported runtime or language.
+Compare the ZIP's byte count and sum of its uncompressed entries against the
+same source's qualified baseline before claiming a download or installed-size
+improvement.
+
 ## What the bundle contains
 
 | Path | Origin | Why it is included |

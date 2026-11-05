@@ -1,6 +1,10 @@
 #include "WindowsWindowChrome.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <map>
 #include <mutex>
 
@@ -17,15 +21,22 @@ namespace {
 
 std::mutex fontLock;
 std::map<std::pair<int, UINT>, HFONT> fonts;
-int chosenAppearance = 0;
+std::atomic<int> chosenAppearance{0};
+std::atomic<unsigned> appearanceQueries{0};
 ULONG_PTR gdiplusToken = 0;
 
 bool systemUsesDark() {
+    ++appearanceQueries;
     DWORD light = 1, size = sizeof(light);
     const LSTATUS status = RegGetValueW(HKEY_CURRENT_USER,
         L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme",
         RRF_RT_REG_DWORD, nullptr, &light, &size);
     return status == ERROR_SUCCESS && light == 0;
+}
+
+std::atomic<bool> &systemDark() {
+    static std::atomic<bool> value{systemUsesDark()};
+    return value;
 }
 
 const Palette lightPalette{
@@ -63,6 +74,29 @@ struct Canvas {
         graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
     }
 };
+
+std::pair<COLORREF, COLORREF> gradientStops(Gradient gradient) {
+    switch (gradient) {
+    case Gradient::voice: return {RGB(0x1F, 0x9D, 0x55), RGB(0x4B, 0xCF, 0xA0)};
+    case Gradient::settings: return {RGB(0xF0, 0x7A, 0x1A), RGB(0xF7, 0xAE, 0x5A)};
+    case Gradient::record: return {RGB(0x14, 0x64, 0xCF), RGB(0x0A, 0x50, 0xB5)};
+    case Gradient::recording: return {RGB(0xC9, 0x36, 0x36), red};
+    default: return {accentDeep, accentWarm};
+    }
+}
+
+double contrast(COLORREF first, COLORREF second) {
+    auto luminance = [](COLORREF value) {
+        auto linear = [](BYTE channel) {
+            const double value = channel / 255.0;
+            return value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * linear(GetRValue(value)) + 0.7152 * linear(GetGValue(value)) +
+            0.0722 * linear(GetBValue(value));
+    };
+    const double a = luminance(first), b = luminance(second);
+    return (std::max(a, b) + 0.05) / (std::min(a, b) + 0.05);
+}
 
 } // namespace
 
@@ -107,9 +141,55 @@ bool startup() {
 }
 
 void setAppearance(int value) { chosenAppearance = value >= 0 && value <= 2 ? value : 0; }
-int appearance() { return chosenAppearance; }
-bool dark() { return chosenAppearance == 2 || (chosenAppearance == 0 && systemUsesDark()); }
+int appearance() { return chosenAppearance.load(); }
+void refreshSystemAppearance() { systemDark().store(systemUsesDark()); }
+bool dark() {
+    const int choice = appearance();
+    return choice == 2 || (choice == 0 && systemDark().load());
+}
 const Palette &palette() { return dark() ? darkPalette : lightPalette; }
+
+bool appearanceSelfTest(std::string &error) {
+    const int original = appearance();
+    setAppearance(0);
+    const bool expected = dark();
+    const auto baselineStart = std::chrono::steady_clock::now();
+    for (int index = 0; index < 2000; ++index) systemUsesDark();
+    const auto baselineEnd = std::chrono::steady_clock::now();
+    const unsigned before = appearanceQueries.load();
+    bool stable = true;
+    for (int index = 0; index < 10000; ++index) {
+        stable = stable && dark() == expected && &palette() == (expected ? &darkPalette : &lightPalette);
+    }
+    const unsigned after = appearanceQueries.load();
+    const auto cachedEnd = std::chrono::steady_clock::now();
+    refreshSystemAppearance();
+    const bool refreshed = appearanceQueries.load() == after + 1;
+    setAppearance(1);
+    const bool light = !dark() && &palette() == &lightPalette;
+    setAppearance(2);
+    const bool forcedDark = dark() && &palette() == &darkPalette;
+    setAppearance(original);
+    double minimumContrast = contrast(onAccent, accentDeep);
+    for (Gradient gradient : {Gradient::brand, Gradient::voice, Gradient::settings, Gradient::record, Gradient::recording}) {
+        const auto stops = gradientStops(gradient);
+        const COLORREF foreground = gradient == Gradient::record || gradient == Gradient::recording
+            ? RGB(255, 255, 255) : onAccent;
+        minimumContrast = std::min({minimumContrast, contrast(foreground, stops.first),
+                                    contrast(foreground, stops.second)});
+    }
+    const auto micros = [](auto elapsed) {
+        return std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+    };
+    std::fprintf(stdout, "Windows appearance: 2000 uncached queries=%lld us; 20000 cached reads=%lld us, "
+        "%u registry queries; refresh=%s; minimum action/hero contrast=%.2f:1.\n",
+        static_cast<long long>(micros(baselineEnd - baselineStart)),
+        static_cast<long long>(micros(cachedEnd - baselineEnd)), after - before,
+        refreshed ? "passed" : "failed", minimumContrast);
+    if (stable && before == after && refreshed && light && forcedDark && minimumContrast >= 4.5) return true;
+    error = "Windows appearance caching, refresh, explicit selection or action contrast failed.";
+    return false;
+}
 
 COLORREF mix(COLORREF under, COLORREF over, int amount) {
     auto channel = [&](int a, int b) { return static_cast<BYTE>((a * (255 - amount) + b * amount) / 255); };
@@ -140,15 +220,8 @@ void strokeRound(HDC dc, const RECT &rect, int radius, COLORREF stroke, int alph
 
 void fillGradient(HDC dc, const RECT &rect, int radius, Gradient gradient) {
     if (rect.right <= rect.left || rect.bottom <= rect.top) return;
-    COLORREF from = accentDeep, to = accentWarm;
-    float angle = 25.0f;
-    switch (gradient) {
-    case Gradient::brand: break;
-    case Gradient::voice: from = RGB(0x1F, 0x9D, 0x55); to = RGB(0x4B, 0xCF, 0xA0); break;
-    case Gradient::settings: from = RGB(0xF0, 0x7A, 0x1A); to = RGB(0xF7, 0xAE, 0x5A); break;
-    case Gradient::record: from = RGB(0x2D, 0x8C, 0xFF); to = RGB(0x0A, 0x6C, 0xFF); angle = 90.0f; break;
-    case Gradient::recording: from = RGB(0xFF, 0x5A, 0x5A); to = red; angle = 90.0f; break;
-    }
+    const auto [from, to] = gradientStops(gradient);
+    const float angle = gradient == Gradient::record || gradient == Gradient::recording ? 90.0f : 25.0f;
     Canvas canvas(dc);
     Gdiplus::GraphicsPath path;
     roundedPath(path, rect, radius);

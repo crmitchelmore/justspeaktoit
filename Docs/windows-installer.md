@@ -25,6 +25,18 @@ runtime or SDK is involved, and Start, the execution aliases
 work as for any packaged app. Windows 10 2004 (10.0.19041) or later with App
 Installer is required.
 
+The website's Windows download action checks `installer.json` with a three-second
+budget and offers **Install Windows beta** only when qualified, canonical
+installer metadata is available. Otherwise it clearly offers the unsigned ZIP.
+On Windows, browser architecture hints select the native ARM64 or x64 ZIP.
+Browsers without those hints retain a labelled x64 fallback and explicit links
+for both architectures; **Settings > System > About > System type** is the
+manual authority. Installer-status failures leave the ZIP recovery path visible
+with an explicit notice. The setup disclosure explains extraction, keeping DLLs
+and resources together, separate model downloads, updates and data storage.
+No JavaScript, signing-account enrolment or security-warning bypass is required
+to follow the explicit ZIP instructions.
+
 **Identity.** `scripts/windows-package/package-identity-beta.json` declares
 package name `com.justspeaktoit.windows`, display name "Just Speak to It
 (Beta)" and no default publisher: the publisher is always the signing

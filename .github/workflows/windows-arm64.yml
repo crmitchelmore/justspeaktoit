@@ -160,9 +160,9 @@ jobs:
         run: |
           swift --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          swift build --configuration release --product SpeakWindows --jobs 4
+          swift build --configuration release --product SpeakWindows --jobs 4 -Xswiftc -Osize
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          swift build --configuration release --product speak --jobs 4
+          swift build --configuration release --product speak --jobs 4 -Xswiftc -Osize
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # The test build recompiles the same modules with testable imports, so the
@@ -191,7 +191,7 @@ jobs:
       - name: Test shared core, desktop workflow and native adapters
         id: native-tests
         run: |
-          swift test --configuration release --jobs 4 --xunit-output windows-arm64-tests.xml 2>&1 |
+          swift test --configuration release --jobs 4 -Xswiftc -Osize --xunit-output windows-arm64-tests.xml 2>&1 |
             Tee-Object -FilePath windows-arm64-native-tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

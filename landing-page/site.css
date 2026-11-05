@@ -429,6 +429,23 @@ em { font-style: italic; }
 
 /* ---------- Captures ---------- */
 
+.windows-setup {
+  max-width: 75ch;
+  margin-top: 1.5rem;
+  color: var(--text-dim);
+}
+
+.windows-setup summary {
+  padding: .75rem 0;
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.windows-setup li { margin: .75rem 0; }
+.windows-setup ol { padding-left: 1.5rem; }
+.windows-setup summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
 .capture {
   margin: 0;
   background: var(--surface);

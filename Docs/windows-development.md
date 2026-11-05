@@ -213,13 +213,38 @@ In PowerShell from the repository root:
 ```powershell
 swift --version
 python scripts/verify-portable-core-boundary.py
-swift build --configuration release --product SpeakWindows
-swift test --configuration release
+swift build --configuration release --product SpeakWindows -Xswiftc -Osize
+swift test --configuration release -Xswiftc -Osize
 $bin = swift build --configuration release --show-bin-path
 & (Join-Path $bin.Trim() 'SpeakWindows.exe') --self-test
 & (Join-Path $bin.Trim() 'SpeakWindows.exe') --ui-smoke-test
 & (Join-Path $bin.Trim() 'SpeakWindows.exe')
 ```
+
+### UI efficiency and shorter windows
+
+Dashboard and History shorten their decorative headers when the available
+content height is below 640 logical pixels. Dashboard also shortens its lower
+summary row, reclaiming 38 logical pixels for the transcript; History reclaims
+12. Larger layouts and native control sizes are unchanged. The native smoke
+test requires at least three transcript lines at the minimum window size.
+
+Unchanged control rectangles do not call `MoveWindow` again. Windows appearance
+is cached outside painting and refreshed on `ImmersiveColorSet` and
+`WM_THEMECHANGED`, while explicit Light/Dark choices remain authoritative.
+The native smoke test checks all twelve pages for redundant placement and
+reports timings for 2,000 uncached theme lookups versus 20,000 cached reads;
+this is a microbenchmark, not a claim about end-to-end dictation latency.
+Enabled action and hero foregrounds have a minimum 4.5:1 contrast against their
+gradient endpoints. High contrast, Narrator and physical mixed-DPI acceptance
+remain separate device checks.
+
+Windows release build and test commands use Swift's `-Osize` optimizer on x64
+and ARM64, including the Mac cross-builder. Debug and Apple/Linux builds are
+unchanged. Keep the same flag when rebuilding the release test graph. This
+changes code generation, not the runtime dependency closure: no CPU/GPU backend,
+language data, licence or diagnostic-original retention is removed. Actual
+bundle size and performance still require each source-bound qualification run.
 
 Recording feedback uses its own warmed WASAPI channel, independent of History
 and Voice playback. `--self-test` and the extracted developer bundle's

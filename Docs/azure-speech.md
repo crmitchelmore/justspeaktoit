@@ -12,7 +12,7 @@ by this integration. Access to a model depends on the resource's tier and region
 | MAI-Transcribe-2 / 1.5 recorded audio | Same API, with the explicit enhanced-mode model | macOS, iOS and Windows; resource access required |
 | Azure Speech / MAI live input | Voice Live, version `2026-04-10`, pre-deployed `gpt-4.1` session | macOS, iOS and Windows; resource endpoint required |
 | MAI-Transcribe-2-Streaming incremental input | Dedicated `/mai/v1/realtime?intent=transcription` API | macOS, iOS and Windows; deployment named `mai-transcribe-2-streaming` required |
-| Azure neural voices, MAI-Voice-2.1 and MAI-Voice-2.1-Flash | Regional synthesis and voices-list APIs | macOS TTS; shared transport and MAI catalogue in SpeakCore |
+| Azure neural voices, MAI-Voice-2.1 and MAI-Voice-2.1-Flash | Regional synthesis and voices-list APIs | macOS TTS only (not iOS); shared transport and MAI catalogue in SpeakCore |
 
 The legacy MAI live selection uses Azure's `mai-transcribe` alias, currently
 documented as MAI-Transcribe-2, and is labelled **Turn-based**. Its stable catalogue
@@ -94,6 +94,12 @@ silently reused for Azure.
    saved voice IDs are preserved; the original neural voice list remains an
    offline fallback.
 
+Azure voice output (neural and MAI voices) is macOS only for now. iOS voice
+output offers Deepgram, Soniox and OpenRouter: `VoiceOutputProvider` has no
+Azure case and `VoiceOutputRouter` has no Azure route, so an Azure credential
+on iOS serves transcription only. `VoiceOutputSettingsTests` pins this; adding
+Azure to iOS needs a new provider, router path, settings and a device check.
+
 ### MAI voices
 
 MAI-Voice-2.1 (highest fidelity) and MAI-Voice-2.1-Flash (low latency) were
@@ -106,7 +112,6 @@ neural voices; the model is the voice-name suffix, for example
 their published prices and eight curated English speakers (Harper, Olivia,
 Grant and Ethan in en-US; Emily and Harry in en-GB; Isla in en-AU; Priya in
 en-IN), each offered with both models. The macOS picker projects that catalogue.
-MAI voice generation is macOS-only on Apple platforms; iOS does not offer it (#1052).
 Microsoft documents both models as globally accessible, with requests routed to
 the regions that serve them, so the curated voices are offered even when a
 regional voice list omits them. The resource's own list still supplies every

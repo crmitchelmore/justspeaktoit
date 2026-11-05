@@ -256,6 +256,25 @@ class AppleReconciliationTest < Minitest::Test
   end
 
 
+  def test_owned_command_reader_tolerates_eperm_killing_an_exited_group
+    require 'rbconfig'
+    reader = AppleRelease::ReconciliationReader.new
+    original = Process.method(:kill)
+    killed = []
+    # Kill really happens (so waitpid returns), then reports EPERM as macOS does.
+    Process.define_singleton_method(:kill) { |signal, target| original.call(signal, target); killed << target; raise Errno::EPERM }
+    begin
+      assert_raises(AppleRelease::ReconciliationInputError) do
+        # A still-running command past its deadline takes the kill path.
+        reader.instance_variable_set(:@deadline, Process.clock_gettime(Process::CLOCK_MONOTONIC) + 0.3)
+        reader.send(:capture, [RbConfig.ruby, '-e', 'sleep 30'], 32)
+      end
+      assert_equal 1, killed.size, 'the overdue, still-running command must be killed'
+    ensure
+      Process.singleton_class.send(:define_method, :kill, original)
+    end
+  end
+
   def test_owned_command_reader_bounds_output_and_contains_private_stderr
     require 'rbconfig'
     reader = AppleRelease::ReconciliationReader.new

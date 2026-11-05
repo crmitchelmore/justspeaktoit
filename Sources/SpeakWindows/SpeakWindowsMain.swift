@@ -317,6 +317,10 @@ private func exportHistoryWindowEvent(_ value: String, holder: WindowsEventConte
 @main
 enum SpeakWindowsMain {
     static func main() async {
+        // A GUI-subsystem image has no console: diagnostic flags print to the launching
+        // terminal, and a Start menu launch writes to NUL rather than an invalid handle.
+        let commandLine = CommandLine.arguments.dropFirst().contains(where: { $0 != "--background" })
+        _ = jsti_console_prepare(commandLine ? 1 : 0)
         WindowsModels.configureForWindows()
         do {
             if try await WindowsCommandLineSelfTests.handle(CommandLine.arguments) { return }

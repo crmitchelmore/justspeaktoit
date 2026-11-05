@@ -48,6 +48,36 @@ class QualificationTests(unittest.TestCase):
         errors, _ = qualification.assess(rows, ["p0"])
         self.assertTrue(any("retry" in error for error in errors))
 
+    def test_jobs_that_never_tested_may_qualify_from_a_later_attempt(self):
+        # Runners 2 and 4 failed setup in attempt 1 (no receipts); a rerun supplies them.
+        rows = [dict(r, run_attempt=2 if r["runner"] in (2, 4) else 1, sha="abc") for r in receipts()]
+        errors, summary = qualification.assess(rows, ["p0"])
+        self.assertEqual(errors, [])
+        self.assertEqual((summary["p0"]["runs"], summary["p0"]["cold_passed"]), (20, 5))
+
+    def test_a_job_that_tested_in_two_attempts_is_a_retry(self):
+        # Runner 3 failed iteration 2 in attempt 1, then passed all four in attempt 2.
+        rows = [dict(r, run_attempt=1) for r in receipts() if r["runner"] != 3]
+        rows += [dict(r, run_attempt=1, exit_code=r["iteration"] - 1)
+                 for r in receipts() if r["runner"] == 3 and r["iteration"] <= 2]
+        rows += [dict(r, run_attempt=2) for r in receipts() if r["runner"] == 3]
+        errors, _ = qualification.assess(rows, ["p0"])
+        self.assertTrue(any("retry after testing" in error for error in errors))
+        self.assertTrue(any("iteration 2 failed" in error for error in errors))
+
+    def test_setup_failed_or_incomplete_jobs_never_count(self):
+        # Runner 5 failed setup and was not rerun; runner 1's rerun stopped after two iterations.
+        rows = [r for r in receipts() if r["runner"] != 5]
+        rows = [dict(r, run_attempt=2) if r["runner"] == 1 else r for r in rows if r["runner"] != 1 or r["iteration"] <= 2]
+        errors, summary = qualification.assess(rows, ["p0"])
+        self.assertEqual(summary["p0"]["runs"], 14)
+        self.assertTrue(any("expected 20 executions" in error for error in errors))
+        self.assertTrue(any("cold" in error for error in errors))
+
+    def test_receipts_from_different_revisions_disqualify(self):
+        rows = [dict(r, sha="new" if r["runner"] == 5 else "old") for r in receipts()]
+        self.assertTrue(any("source revision" in e for e in qualification.assess(rows, ["p0"])[0]))
+
     def test_main_writes_receipts_and_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "in"

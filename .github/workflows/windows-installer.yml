@@ -1,0 +1,356 @@
+name: Windows installer
+# Signed beta installer: one .msixbundle (x64 + ARM64) installed and updated
+# through a .appinstaller file served at
+# https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller.
+#
+# Every run rehearses the whole route with an ephemeral certificate on
+# disposable x64 and ARM64 runners. A manifest run (from alpha-release.yml or a
+# manual dispatch on main) also signs with the configured provider (Azure
+# Artifact Signing or SSL.com eSigner; WINDOWS_SIGNING_PROVIDER), stages the
+# bundle and .appinstaller on the manifest release, installs them on clean
+# runners with no imported trust, and only then advances the public installer
+# pointer. Without the signing configuration the manifest run stops after the
+# rehearsal and publishes nothing. See Docs/windows-installer.md.
+on:
+  workflow_call:
+    inputs:
+      manifest:
+        description: Immutable Alpha or Stable candidate manifest tag
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Manifest tag to sign and publish (blank rehearses the current Alpha)
+        type: string
+  push:
+    paths:
+      - scripts/windows-package/**
+      - scripts/windows-bundle/BundleCLI.ps1
+      - scripts/windows-installer-release.mjs
+      - .github/workflows/windows-installer.yml
+  pull_request:
+    paths:
+      - scripts/windows-package/**
+      - scripts/windows-bundle/BundleCLI.ps1
+      - scripts/windows-installer-release.mjs
+      - .github/workflows/windows-installer.yml
+permissions:
+  contents: read
+concurrency:
+  group: windows-installer-${{ inputs.manifest || github.ref }}
+  cancel-in-progress: false
+env:
+  APPINSTALLER_URI: https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller
+
+jobs:
+  sources:
+    name: Fetch the qualified x64 and ARM64 runtime bundles
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      mode: ${{ steps.resolve.outputs.mode }}
+      version: ${{ steps.resolve.outputs.version }}
+      source: ${{ steps.resolve.outputs.source }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Unit-test the release helper
+        run: node --test scripts/tests/windows-installer-release.test.mjs
+      - name: Resolve and verify the runtime bundles
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST: ${{ inputs.manifest }}
+        run: |
+          if [ -n "$MANIFEST" ]; then mode=publish; tag="$MANIFEST"; else mode=rehearse; tag=$(node scripts/windows-installer-release.mjs rehearsal-tag); fi
+          node scripts/windows-installer-release.mjs sources "$tag" sources > /dev/null
+          {
+            echo "tag=$tag"; echo "mode=$mode"
+            echo "version=$(jq -r .version sources/sources.json)"; echo "source=$(jq -r .source sources/sources.json)"
+          } >> "$GITHUB_OUTPUT"
+          jq . sources/sources.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-installer-sources
+          path: sources/
+          if-no-files-found: error
+          retention-days: 7
+
+  rehearse:
+    name: Rehearse install, upgrade and uninstall (${{ matrix.architecture }})
+    needs: sources
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            runner: windows-2022
+          - architecture: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-installer-sources
+          path: sources
+      - name: Test the packaging tools
+        shell: pwsh
+        run: |
+          python -B -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s scripts/windows-package -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # The ephemeral certificate is created, trusted and removed inside this
+      # step on a disposable runner; it is never exported or uploaded.
+      - name: Build, sign with a throwaway certificate and run the App Installer lifecycle
+        shell: powershell
+        env:
+          SOURCE: ${{ needs.sources.outputs.source }}
+          VERSION: ${{ needs.sources.outputs.version }}
+        run: |
+          $base = $env:VERSION
+          $upgrade = $base -replace '\.0$', '.1'
+          ./scripts/windows-package/rehearse-windows-installer.ps1 -X64Bundle sources/x64 -Arm64Bundle sources/arm64 `
+            -ExpectedCommit $env:SOURCE -BaseVersion $base -UpgradeVersion $upgrade `
+            -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools') -Workspace (Join-Path $env:RUNNER_TEMP 'rehearsal')
+      - name: Upload rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-installer-rehearsal-${{ matrix.architecture }}
+          path: |
+            ${{ runner.temp }}/rehearsal/lifecycle/evidence/
+            ${{ runner.temp }}/rehearsal/bundle-*/*.json
+            ${{ runner.temp }}/rehearsal/bundle-*/*.log
+            ${{ runner.temp }}/rehearsal/site/*.json
+            ${{ runner.temp }}/rehearsal/site/*.log
+            ${{ runner.temp }}/rehearsal/*.appinstaller
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Holds the OIDC token or eSigner credentials, so every action is pinned to a
+  # reviewed commit. The windows-signing environment admits only main; no
+  # private key exists in the repository or on the runner (both providers keep
+  # it in a cloud HSM).
+  sign:
+    name: Sign the installer bundle with the configured provider
+    needs: [sources, rehearse]
+    if: ${{ needs.sources.outputs.mode == 'publish' && github.ref == 'refs/heads/main' }}
+    runs-on: windows-2022
+    timeout-minutes: 45
+    environment: windows-signing
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      enabled: ${{ steps.config.outputs.enabled }}
+      publisher: ${{ steps.config.outputs.publisher }}
+      provider: ${{ steps.config.outputs.provider }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the signing configuration
+        id: config
+        shell: pwsh
+        env:
+          AZURE_ARTIFACT_SIGNING_CLIENT_ID: ${{ secrets.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
+          AZURE_ARTIFACT_SIGNING_TENANT_ID: ${{ secrets.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
+          AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID: ${{ secrets.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
+          AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          WINDOWS_MSIX_PUBLISHER: ${{ vars.WINDOWS_MSIX_PUBLISHER }}
+          WINDOWS_SIGNING_PROVIDER: ${{ vars.WINDOWS_SIGNING_PROVIDER }}
+          SSLCOM_ESIGNER_USERNAME: ${{ secrets.SSLCOM_ESIGNER_USERNAME }}
+          SSLCOM_ESIGNER_PASSWORD: ${{ secrets.SSLCOM_ESIGNER_PASSWORD }}
+          SSLCOM_ESIGNER_TOTP_SECRET: ${{ secrets.SSLCOM_ESIGNER_TOTP_SECRET }}
+          SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT: ${{ vars.SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT }}
+        run: |
+          python -B scripts/windows-package/signing_configuration.py --github-output $env:GITHUB_OUTPUT `
+            --metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Sign in to Azure with GitHub OIDC
+        if: ${{ steps.config.outputs.enabled == 'true' && steps.config.outputs.provider == 'artifact-signing' }}
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        with:
+          name: windows-installer-sources
+          path: sources
+      - name: Build and sign the bundle for the certificate subject
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        shell: powershell
+        env:
+          PUBLISHER: ${{ steps.config.outputs.publisher }}
+          PROVIDER: ${{ steps.config.outputs.provider }}
+          TIMESTAMP_URL: ${{ steps.config.outputs.timestamp-url }}
+          THUMBPRINT: ${{ steps.config.outputs.certificate-thumbprint }}
+          SSLCOM_ESIGNER_USERNAME: ${{ steps.config.outputs.provider == 'sslcom-esigner' && secrets.SSLCOM_ESIGNER_USERNAME || '' }}
+          SSLCOM_ESIGNER_PASSWORD: ${{ steps.config.outputs.provider == 'sslcom-esigner' && secrets.SSLCOM_ESIGNER_PASSWORD || '' }}
+          SSLCOM_ESIGNER_TOTP_SECRET: ${{ steps.config.outputs.provider == 'sslcom-esigner' && secrets.SSLCOM_ESIGNER_TOTP_SECRET || '' }}
+          SOURCE: ${{ needs.sources.outputs.source }}
+          VERSION: ${{ needs.sources.outputs.version }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'installer'
+          $tools = Join-Path $env:RUNNER_TEMP 'packaging-tools'
+          ./scripts/windows-package/build-windows-installer-bundle.ps1 -X64Bundle sources/x64 -Arm64Bundle sources/arm64 `
+            -ExpectedCommit $env:SOURCE -Version $env:VERSION -Publisher $env:PUBLISHER -Output $root -ToolCache $tools
+          New-Item -ItemType Directory -Force -Path signed | Out-Null
+          $signing = @{
+            Bundle = (Join-Path $root "JustSpeakToIt-windows_$($env:VERSION)_unsigned.msixbundle")
+            Output = "signed/JustSpeakToIt-windows_$($env:VERSION).msixbundle"
+            Packages = (Join-Path $root 'packages'); ToolCache = $tools; TimestampUrl = $env:TIMESTAMP_URL
+          }
+          switch ($env:PROVIDER) {
+            'artifact-signing' {
+              ./scripts/windows-package/sign-windows-installer.ps1 @signing `
+                -Metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json')
+            }
+            'sslcom-esigner' {
+              ./scripts/windows-package/load-sslcom-esigner.ps1 -CertificateThumbprint $env:THUMBPRINT `
+                -ToolCache $tools -Evidence 'signed/sslcom-esigner-load.json'
+              ./scripts/windows-package/sign-windows-installer.ps1 @signing -CertificateThumbprint $env:THUMBPRINT `
+                -PublicCertificate -Method 'SSL.com eSigner'
+            }
+            default { throw "Unsupported signing provider '$($env:PROVIDER)'." }
+          }
+      - name: Report the signing route
+        if: ${{ steps.config.outputs.enabled != 'true' }}
+        run: echo 'Windows signing is not configured; the rehearsal passed and nothing was published. See Docs/windows-installer.md.'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        with:
+          name: windows-installer-signed
+          path: signed/
+          if-no-files-found: error
+          retention-days: 30
+
+  stage:
+    name: Stage the signed bundle and .appinstaller on the manifest release
+    needs: [sources, sign]
+    if: ${{ needs.sign.outputs.enabled == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-installer-signed
+          path: signed
+      - name: Write the .appinstaller and upload both files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.sources.outputs.tag }}
+          VERSION: ${{ needs.sources.outputs.version }}
+          PUBLISHER: ${{ needs.sign.outputs.publisher }}
+        run: |
+          bundle="JustSpeakToIt-windows_${VERSION}.msixbundle"
+          test "$(sha256sum "signed/$bundle" | cut -d' ' -f1)" = "$(jq -r .signedBundle.sha256 "signed/JustSpeakToIt-windows_${VERSION}.sign.json")"
+          # Never replace the bytes behind the live installer pointer.
+          if gh release download alpha-latest --repo "$GITHUB_REPOSITORY" --pattern windows-installer-pointer.json --dir current 2>/dev/null &&
+             [ "$(jq -r .tag current/windows-installer-pointer.json)" = "$TAG" ]; then
+            echo "$TAG is already the published installer."; exit 1
+          fi
+          python3 -B scripts/windows-package/windows-installer.py appinstaller \
+            --bundle-uri "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$bundle" \
+            --publisher "$PUBLISHER" --version "$VERSION" --output signed/JustSpeakToIt.appinstaller
+          gh release upload "$TAG" "signed/$bundle" signed/JustSpeakToIt.appinstaller --repo "$GITHUB_REPOSITORY" --clobber
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-installer-appinstaller
+          path: signed/JustSpeakToIt.appinstaller
+          if-no-files-found: error
+          retention-days: 30
+
+  verify:
+    name: Install the published installer with default trust (${{ matrix.architecture }})
+    needs: [sources, sign, stage]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            runner: windows-2022
+          - architecture: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-installer-appinstaller
+          path: candidate
+      # The live update URI still serves the previous release until promotion, so this job proves a
+      # clean install of the candidate; the rehearsal proves updates through a published file.
+      - name: Install and uninstall without importing any certificate
+        shell: powershell
+        env:
+          VERSION: ${{ needs.sources.outputs.version }}
+          PUBLISHER: ${{ needs.sign.outputs.publisher }}
+        run: |
+          ./scripts/windows-package/test-windows-installer.ps1 -AppInstaller candidate/JustSpeakToIt.appinstaller `
+            -ExpectedVersion $env:VERSION -ExpectedPublisher $env:PUBLISHER -ExpectedUpdateUri $env:APPINSTALLER_URI `
+            -Workspace (Join-Path $env:RUNNER_TEMP 'verify')
+      - name: Upload clean-install evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-installer-clean-install-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/verify/evidence/
+          if-no-files-found: warn
+          retention-days: 90
+
+  promote:
+    name: Record the release and advance the public installer
+    needs: [sources, sign, stage, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: windows-installer-pointer
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-installer-signed
+          path: signed
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-installer-appinstaller
+          path: signed
+      - name: Upload the receipt and advance windows-installer-pointer.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.sources.outputs.tag }}
+          VERSION: ${{ needs.sources.outputs.version }}
+        run: |
+          node scripts/windows-installer-release.mjs receipt "$TAG" "signed/JustSpeakToIt-windows_${VERSION}.sign.json" \
+            signed/JustSpeakToIt.appinstaller "$GITHUB_RUN_ID" signed/windows-installer.json
+          gh release upload "$TAG" signed/windows-installer.json --repo "$GITHUB_REPOSITORY" --clobber
+          node scripts/windows-installer-release.mjs promote "$TAG" signed/windows-installer.json

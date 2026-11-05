@@ -343,6 +343,16 @@ public struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Toggle(isOn: $settings.upgradeOfflineTranscriptsWhenOnline) {
+                    Label("Upgrade offline transcripts when back online", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .accessibilityIdentifier("upgradeOfflineTranscriptsToggle")
+                Text(
+                    "Recordings made on-device without a connection are re-transcribed with your cloud model "
+                        + "once you are back online. Uses provider credit. Edited transcripts are never replaced."
+                )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             FocusCaptureSettingsSection()

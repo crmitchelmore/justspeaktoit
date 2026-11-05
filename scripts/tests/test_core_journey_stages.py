@@ -128,7 +128,8 @@ class CommandTests(unittest.TestCase):
         with mock.patch.dict(stages.GATE, {"run_gate": mock.Mock(return_value=17)}):
             self.assertEqual(stages.setup(Path("artifacts")), 17)
             stages.GATE["run_gate"].assert_called_once_with(
-                ["bash", "-c", "set -euo pipefail; brew install tuist; tuist generate --no-open"],
+                ["bash", "-c", f"set -euo pipefail; {stages.SETUP_RETRY}; "
+                 "retry brew install tuist; retry tuist generate --no-open"],
                 Path("artifacts/setup"), 300, (), stage="setup",
             )
 

@@ -81,3 +81,85 @@ packaging-branch success is not evidence for current main. The
 native synthetic checks from physical desktop acceptance. Interactive GNOME/KDE
 portal consent, physical microphone/output, Wayland shortcuts/insertion, login
 monitoring, Vulkan execution and ARM64 remain unqualified by this hosted check.
+
+### Sandbox limits on app awareness
+
+Flatpak gives the app its own PID namespace, so another X11 window's
+`_NET_WM_PID` cannot be resolved through `/proc`. In the installed Flatpak,
+automatic app profiles therefore never match, as on Wayland: the app reports
+that normal settings apply and the profile editor says so. Choose a profile
+manually. The installed check asserts that host processes stay hidden. The same
+missing identity means the X11 front-window guard can refuse automatic paste and
+leave the text on the clipboard; that guard is deliberately not loosened, and
+no host-process broker (`flatpak-spawn --host`) is added.
+
+## Installing, updating and removing
+
+Each Alpha whose desktop qualification passed publishes the CI bundle as
+`JustSpeakToIt-linux-x86_64.flatpak`, served at
+<https://justspeaktoit.com/alpha/download/linux-x86_64>. The bundle is built with
+`--runtime-repo` pointing at Flathub, so on any distribution with Flatpak
+installed:
+
+```sh
+flatpak install --user ./JustSpeakToIt-linux-x86_64.flatpak
+```
+
+or opening the file in GNOME Software or KDE Discover installs the app and
+pulls the GNOME 50 runtime from Flathub (adding the Flathub remote if needed).
+The menu entry, icon and the "Start or Stop Dictation" action come from the
+package's desktop file and AppStream metadata. `flatpak run
+com.justspeaktoit.JustSpeakToIt` starts it; `flatpak uninstall
+com.justspeaktoit.JustSpeakToIt` removes it (add `--delete-data` to remove its
+data too).
+
+**Updates are manual for now.** A single-file bundle has no update source, so
+`flatpak update` and the software centres do not see new builds; installing a
+newer bundle over the old one keeps the app's data. The bundle carries no
+signature of its own beyond the HTTPS download from GitHub Releases.
+
+**Recommended next step: Flathub.** Flathub is the established route for
+signed, automatically updated Flatpaks, and the software centres on most
+distributions already list it, so it gives the "open, install, update" path
+without a bespoke repository or signing key. The project already uses the
+Flathub runtime, SDK extension and `flatpak-builder-lint manifest`. Submission
+is free but needs the owner, because it creates a public listing and a
+maintainer account ([requirements](https://docs.flathub.org/docs/for-app-authors/requirements),
+[submission](https://docs.flathub.org/docs/for-app-authors/submission),
+[verification](https://docs.flathub.org/docs/for-app-authors/verification)):
+
+1. Write, by hand, a submission manifest that builds from a tagged `git`
+   source of this repository instead of the local `type: dir` source, with
+   the same pinned SwiftPM sources. Flathub's
+   [generative AI policy](https://docs.flathub.org/docs/for-app-authors/requirements#generative-ai-policy)
+   bars AI-generated or AI-assisted content in Flathub manifests, and bars
+   AI agents from opening or writing the submission pull request, its
+   description or replies. The manifest in this repository was produced with
+   agent help, so it is a technical reference only, not the submission.
+2. Add Linux screenshots (hosted at stable URLs) and a release entry per
+   version to the metainfo; run `flatpak-builder-lint appstream` and
+   `flatpak-builder-lint repo` on a built repo.
+3. Sign in to GitHub as the owner (2FA required) and open the submission
+   pull request to `flathub/flathub` against the `new-pr` branch, titled
+   "Add com.justspeaktoit.JustSpeakToIt" (this accepts Flathub's terms).
+   Disclose which parts of the app were AI-generated and roughly how much,
+   justify each `finish-args` permission, and answer reviewers personally.
+   Accept the maintainer invitation within a week of approval.
+4. After acceptance, verify the app id's domain by publishing the token
+   Flathub gives at `https://justspeaktoit.com/.well-known/org.flathub.VerifiedApps.txt`.
+5. Point the website CTA at `https://flathub.org/apps/com.justspeaktoit.JustSpeakToIt`.
+
+Eligibility does not depend on the owner's country and submission is free.
+The app id's domain (`justspeaktoit.com`) is owner-controlled and the
+project is MIT-licensed and upstream, so it meets the id, licence and
+conflicting-submission rules. Acceptance is at the volunteer reviewers'
+discretion, with no fixed timescale; they also weigh development history and
+the extent of AI-generated code.
+
+Flathub then builds, signs and serves updates. Network, audio, display and
+portal permissions in `finish-args` will be reviewed; `--talk-name` for the
+status notifier and `--device=dri` are common and documented above.
+
+A self-hosted OSTree repository with a `.flatpakref` would also give updates,
+but needs a GPG signing key, hosting and repository maintenance owned by the
+project, so it is not used.

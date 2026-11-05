@@ -110,6 +110,7 @@ public final class AppSettings: ObservableObject {
         case transcriptClipboardLifetimeSeconds
         case transcriptUniversalClipboard = "transcriptClipboardAllowsUniversalClipboard"
         case transcriptClipboardNoticeVersion
+        case upgradeOfflineTranscriptsWhenOnline
     }
 
     public static let shared = AppSettings()
@@ -396,6 +397,18 @@ public final class AppSettings: ObservableObject {
     func awaitPendingSecretWrites() async {
         for write in Array(secretWriteTails.values) {
             await write.value
+        }
+    }
+
+    /// Opt-in (issue #999): re-transcribe offline on-device captures with the
+    /// selected cloud batch model once the network returns. Off by default
+    /// because it spends provider credit without a fresh tap.
+    @Published public var upgradeOfflineTranscriptsWhenOnline: Bool {
+        didSet {
+            self.defaults.set(
+                self.upgradeOfflineTranscriptsWhenOnline,
+                forKey: DefaultsKey.upgradeOfflineTranscriptsWhenOnline.storageKey
+            )
         }
     }
 
@@ -688,6 +701,9 @@ public final class AppSettings: ObservableObject {
         self.transcriptionKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.storageKey) ?? ""
         self.transcriptReadyNotificationsEnabled = defaults.bool(
             forKey: DefaultsKey.transcriptReadyNotificationsEnabled.storageKey
+        )
+        self.upgradeOfflineTranscriptsWhenOnline = defaults.bool(
+            forKey: DefaultsKey.upgradeOfflineTranscriptsWhenOnline.storageKey
         )
         self.liveActivitiesEnabled = liveActivities
         self.transcriptClipboardLifetime = clipboardPolicy.lifetime

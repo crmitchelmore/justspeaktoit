@@ -433,6 +433,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
+  /// Device-local metadata discovery; intentionally outside automatic settings transfer.
+  @Published var cleanupModelDiscoveryEnabled: Bool {
+    didSet { defaults.set(cleanupModelDiscoveryEnabled, forKey: CleanupModelSelection.preferenceKey) }
+  }
+
   @Published var postProcessingModel: String {
     didSet {
       let normalized = Self.normalizedPostProcessingModel(postProcessingModel)
@@ -1123,6 +1128,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)
     postProcessingEnabled =
       defaults.object(forKey: DefaultsKey.postProcessingEnabled.rawValue) as? Bool ?? true
+    cleanupModelDiscoveryEnabled = defaults.bool(forKey: CleanupModelSelection.preferenceKey)
     postProcessingModel = Self.normalizedPostProcessingModel(
       defaults.string(forKey: DefaultsKey.postProcessingModel.rawValue)
     )
@@ -1420,6 +1426,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     self.preferredLocaleIdentifier = restored.preferredLocaleIdentifier
     self.preferredAudioInputUID = restored.preferredAudioInputUID
     self.postProcessingEnabled = restored.postProcessingEnabled
+    self.cleanupModelDiscoveryEnabled = restored.cleanupModelDiscoveryEnabled
     self.postProcessingModel = restored.postProcessingModel
     self.postProcessingTemperature = restored.postProcessingTemperature
     self.assemblyAIKeyterms = restored.assemblyAIKeyterms

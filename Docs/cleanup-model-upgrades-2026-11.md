@@ -1,6 +1,8 @@
 # Cleanup model refresh: November 2026
 
-Verified 4 November 2026 against the public [OpenRouter model API](https://openrouter.ai/api/v1/models).
+Routes verified 4 November 2026 against the public [OpenRouter model API](https://openrouter.ai/api/v1/models);
+IDs, standard short-context rates and context windows re-verified 5 November 2026 against
+OpenAI's [pricing page](https://developers.openai.com/api/docs/pricing) and model pages.
 These are optional entries in `SpeakCore.ModelCatalog.postProcessing`, shared by
 macOS, iOS and the portable desktop hosts. Existing entries, saved selections,
 `defaultPostProcessingModel` (GPT-5 Mini) and `defaultFastTextModel` remain unchanged.
@@ -14,8 +16,9 @@ macOS, iOS and the portable desktop hosts. Existing entries, saved selections,
 Model pages: [Luna](https://openrouter.ai/openai/gpt-6-luna),
 [Sol](https://openrouter.ai/openai/gpt-6.1-sol),
 [Astra](https://openrouter.ai/openai/gpt-6-astra).
-[OpenAI's Luna page](https://developers.openai.com/api/docs/models/gpt-6-luna)
-also confirms the model, context and standard token rates.
+OpenAI model pages: [Luna](https://developers.openai.com/api/docs/models/gpt-6-luna),
+[Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol),
+[Astra](https://developers.openai.com/api/docs/models/gpt-6-astra).
 The API records list text input/output and a maximum completion of 128,000 tokens
 for all three. The catalogue stores base `pricing.prompt` and `pricing.completion`
 multiplied by one million, not cached-input, Flex or Priority rates.
@@ -60,17 +63,3 @@ and normalization preserving both new and existing selections. Existing GPT-5.6
 metadata assertions in `ModelCatalogTests` remain intact. The exact cloud projection test continues to
 protect a single shared catalogue. No scheduler, release-notes generation model,
 transcription model or runtime audio-discovery catalogue is changed.
-
-## Initial bundled-change validation (4 November 2026)
-
-- Strict repository lint (`make lint`): 0 violations across 2,641 Swift files.
-- `python3 scripts/verify-portable-core-boundary.py`: passed.
-- `git diff --check`: passed.
-- Compared all three new entries against the fetched API JSON: exact IDs, base
-  rates and context matched. At the initial bundled-only commit, removing the single added catalogue block reproduced
-  the original file byte-for-byte.
-- `xcrun swift test --filter ModelCatalogTests`: blocked before compilation by
-  MacStorageGuard (internal free space below its 25 GiB minimum, exit 75). No
-  XCTest passed or failed. The new `ModelCatalogRefreshTests`, full `make test`,
-  Apple/iOS builds and portable compiled tests remain unrun locally. CI must
-  qualify them; no storage guard was bypassed.

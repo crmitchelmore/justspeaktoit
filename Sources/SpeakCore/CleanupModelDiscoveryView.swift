@@ -13,18 +13,12 @@ public struct CleanupModelDiscoveryView: View {
     }
 
     private var discovered: [DiscoveredCleanupModel] {
-        let bundled = Set(ModelCatalog.cloudPostProcessing.map(\.id))
-        guard let updated = state.lastUpdated,
-              Date().timeIntervalSince(updated) <= CleanupModelDiscoveryStore.maximumCacheAge else { return [] }
-        return state.models.filter { !bundled.contains($0.id) }
+        CleanupModelDiscoveryStore.shared.discoveredModels(state)
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle(CleanupModelSelection.settingTitle, isOn: Binding(
-                get: { enabled },
-                set: { enabled = $0; CleanupModelDiscoveryStore.shared.setEnabled($0) }
-            ))
+            Toggle(CleanupModelSelection.settingTitle, isOn: $enabled)
             Text("Downloads public model details only. No key or transcript is sent. Choose a model explicitly below.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Turning discovery off keeps your saved model. Bundled choices remain available offline.")

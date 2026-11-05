@@ -68,15 +68,20 @@ public final class CleanupModelDiscoveryStore: @unchecked Sendable {
         cancelled?.cancel()
     }
 
+    /// Fresh discovered models that do not collide with a bundled entry, regardless of the opt-in.
+    public func discoveredModels(_ state: CleanupModelDiscoveryState? = nil) -> [DiscoveredCleanupModel] {
+        let state = state ?? snapshot
+        guard let updated = state.lastUpdated,
+              clock().timeIntervalSince(updated) <= Self.maximumCacheAge else { return [] }
+        let bundled = Set(ModelCatalog.cloudPostProcessing.map(\.id))
+        return state.models.filter { !bundled.contains($0.id) }
+    }
+
     /// Bundled entries win metadata collisions; saved discoveries stay visible even offline or disabled.
     public func options(selected: String? = nil) -> [ModelCatalog.Option] {
         let state = snapshot
         var result = ModelCatalog.cloudPostProcessing
-        let bundled = Set(result.map(\.id))
-        if state.enabled, let updated = state.lastUpdated,
-           clock().timeIntervalSince(updated) <= Self.maximumCacheAge {
-            result += state.models.filter { !bundled.contains($0.id) }.map(\.option)
-        }
+        if state.enabled { result += discoveredModels(state).map(\.option) }
         if let selected, !result.contains(where: { $0.id == selected }),
            let retained = CleanupModelSelection.retainedOption(selected) { result.append(retained) }
         return result

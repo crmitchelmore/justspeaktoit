@@ -513,7 +513,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             tags: [.fast, .cheap, .privacy]
         ),
 
-        // GPT-6 routes verified against OpenRouter on 2026-11-04; see
+        // GPT-6 IDs/rates verified against OpenAI docs and OpenRouter (2026-11); see
         // Docs/cleanup-model-upgrades-2026-11.md for pricing tiers and evidence.
         // No measured cleanup latency is available; retain Option's default tier.
         Option(

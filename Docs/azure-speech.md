@@ -106,6 +106,7 @@ neural voices; the model is the voice-name suffix, for example
 their published prices and eight curated English speakers (Harper, Olivia,
 Grant and Ethan in en-US; Emily and Harry in en-GB; Isla in en-AU; Priya in
 en-IN), each offered with both models. The macOS picker projects that catalogue.
+MAI voice generation is macOS-only on Apple platforms; iOS does not offer it (#1052).
 Microsoft documents both models as globally accessible, with requests routed to
 the regions that serve them, so the curated voices are offered even when a
 regional voice list omits them. The resource's own list still supplies every

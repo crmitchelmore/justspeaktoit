@@ -25,7 +25,8 @@ class PrivateKeychainIntegrationTests(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory(prefix='jsti-scope-integration-')
         cls.root = Path(cls.temp.name).resolve()
         cls.probe = cls.root / 'scope-probe'
-        subprocess.run(['xcrun', 'swiftc', str(ROOT / 'Sources/SpeakCore/KeychainAccess.swift'),
+        subprocess.run(['xcrun', 'swiftc', '-DJSTI_TEST_KEYCHAIN_REDIRECT',
+                        str(ROOT / 'Sources/SpeakCore/KeychainAccess.swift'),
                         str(ROOT / 'scripts/tests/keychain-scope-probe.swift'), '-o', str(cls.probe)],
                        check=True, capture_output=True, text=True, timeout=120)
 
@@ -41,7 +42,8 @@ class PrivateKeychainIntegrationTests(unittest.TestCase):
         (self.keychain.parent / '.jsti-test-keychain').write_text(str(self.keychain))
         password = private.create(self.keychain)
         self.env = dict(os.environ, RUNNER_ENVIRONMENT='self-hosted', CI='true',
-                        JSTI_TEST_KEYCHAIN='1', JSTI_TEST_KEYCHAIN_PATH=str(self.keychain),
+                        JSTI_TEST_KEYCHAIN='1', JSTI_TEST_KEYCHAIN_REDIRECT='1',
+                        JSTI_TEST_KEYCHAIN_PATH=str(self.keychain),
                         JSTI_TEST_KEYCHAIN_PASSWORD=password)
         self.run_probe('seed')
         self.assertEqual(self.settings(), self.before)

@@ -25,6 +25,10 @@ jobs:
     # Every selected native runner must also admit this revision locally.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 45
+    # Compiles the native-CI Keychain redirect into these test builds only;
+    # distribution builds never set it (#1360).
+    env:
+      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -381,6 +385,10 @@ jobs:
     # This non-UI contract gate may use an explicitly approved native runner.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 40
+    # Compiles the native-CI Keychain redirect into these test builds only;
+    # distribution builds never set it (#1360).
+    env:
+      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
@@ -474,6 +482,10 @@ jobs:
     # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 45
+    # Compiles the native-CI Keychain redirect into these test builds only;
+    # distribution builds never set it (#1360).
+    env:
+      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     needs: release-paths
     if: needs.release-paths.outputs.package == 'true'
     steps:

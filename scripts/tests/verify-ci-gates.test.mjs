@@ -15,9 +15,9 @@ const aggregate = workflow.slice(workflow.indexOf('\n  required-macos:'));
 const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]+:\n|$(?![\s\S]))/gm)]
   .map(([, id, body]) => [id, body]));
 const nativeEligibleJobs = [
-  'build-macos', 'release-validation', 'api-compatibility', 'lint', 'core-journey-e2e',
+  'api-compatibility', 'lint', 'core-journey-e2e',
 ];
-const armFallbackJobs = new Set(['lint', 'release-validation']);
+const armFallbackJobs = new Set(['lint']);
 const hostedFallback = (id) => (armFallbackJobs.has(id) ? 'macos-latest' : 'macos-26-intel');
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
@@ -149,12 +149,20 @@ test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
   assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
-  // Intel appears only as the hosted fallback of the native-eligible jobs.
-  assert.doesNotMatch(workflow, /runs-on: macos-26-intel/);
+  assert.match(jobBodies['build-macos'], /^\s+runs-on: macos-26-intel$/m);
+  assert.match(jobBodies['release-validation'], /^\s+runs-on: macos-latest$/m);
   // Lint and Release stay on hosted ARM: on Intel they exceeded their job budgets.
   for (const id of nativeEligibleJobs) {
     const hosted = hostedFallback(id);
     assert.ok(jobBodies[id].includes(`|| '["${hosted}"]') }}`), id);
+  }
+});
+
+test('Keychain test gates cannot be routed to a shared desktop by repository variables', () => {
+  for (const id of ['build-macos', 'release-validation']) {
+    assert.match(jobBodies[id], /with-test-keychain.py/);
+    assert.doesNotMatch(jobBodies[id], /JSTI_NATIVE_APPROVED_SHA|JSTI_NATIVE_RUNNER_LABELS/);
+    assert.match(jobBodies[id], /^\s+runs-on: macos-(?:26-intel|latest)$/m);
   }
 });
 

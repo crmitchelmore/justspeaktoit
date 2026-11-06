@@ -97,6 +97,37 @@ class SwapPolicyTests(unittest.TestCase):
         self.assertFalse(keychain_script.swap_enabled({'JSTI_TEST_KEYCHAIN': 'enabled'}))
         self.assertFalse(keychain_script.swap_enabled({'CI': 'true', 'JSTI_TEST_KEYCHAIN': 'typo'}))
 
+    def test_ci_requires_disposable_host_even_with_swap_disabled_or_opted_in(self):
+        for runner in ('self-hosted', '', 'unknown'):
+            for setting in ('0', '1'):
+                with self.subTest(runner=runner, setting=setting):
+                    with self.assertRaises(keychain_script.UnsafeCI):
+                        keychain_script.require_disposable_ci({
+                            'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': runner,
+                            'JSTI_TEST_KEYCHAIN': setting,
+                        })
+        keychain_script.require_disposable_ci({
+            'CI': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted',
+        })
+        keychain_script.require_disposable_ci({})
+        with self.assertRaises(keychain_script.UnsafeCI):
+            keychain_script.require_disposable_ci({
+                'RUNNER_ENVIRONMENT': 'self-hosted', 'JSTI_TEST_KEYCHAIN': '1',
+            })
+
+    def test_refusal_does_not_touch_security_or_execute_the_command(self):
+        for setting in ('0', '1'):
+            with self.subTest(setting=setting), patch.dict(os.environ, {
+                'CI': 'true', 'RUNNER_ENVIRONMENT': 'self-hosted',
+                'JSTI_TEST_KEYCHAIN': setting,
+            }, clear=True), patch.object(keychain_script, 'security') as security_call, patch.object(
+                keychain_script, 'run_isolated'
+            ) as isolated, patch.object(keychain_script.os, 'execvp') as execute:
+                self.assertEqual(keychain_script.main(['must-not-run']), 78)
+                security_call.assert_not_called()
+                isolated.assert_not_called()
+                execute.assert_not_called()
+
     def test_security_calls_have_a_bounded_timeout(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(
             keychain_script.subprocess, 'check_output', return_value=''
@@ -137,6 +168,7 @@ class WithTestKeychainTests(unittest.TestCase):
             'JSTI_TEST_KEYCHAIN_STATE_DIR': str(self.state_dir),
             'FAKE_SECURITY_STATE': str(self.fake_state),
             'CI': 'true',
+            'RUNNER_ENVIRONMENT': 'github-hosted',
             'CHILD_PID_FILE': str(self.root / 'child-pids'),
             'CHILD_READY_FILE': str(self.root / 'child-ready'),
             'JSTI_TEST_KEYCHAIN_GRACE_SECONDS': '1',
@@ -146,6 +178,21 @@ class WithTestKeychainTests(unittest.TestCase):
         self.fake_state.write_text(json.dumps(
             {'default': default, 'search': search, 'created': [], 'calls': [], 'max_live': 0}
         ))
+
+    def test_self_hosted_process_refuses_before_security_or_child_with_or_without_swap(self):
+        for setting in ('0', '1'):
+            with self.subTest(setting=setting):
+                env = dict(self.env, RUNNER_ENVIRONMENT='self-hosted', JSTI_TEST_KEYCHAIN=setting)
+                before = self.fake_state.read_bytes()
+                result = subprocess.run(
+                    self.command(*self.child_command()), env=env, capture_output=True,
+                    text=True, timeout=5,
+                )
+                self.assertEqual(result.returncode, 78, result.stderr)
+                self.assertIn('disposable GitHub-hosted runner', result.stderr)
+                self.assertEqual(self.fake_state.read_bytes(), before)
+                self.assertFalse((self.root / 'child-pids').exists())
+                self.assertFalse(self.state_dir.exists())
 
     def state(self):
         return json.loads(self.fake_state.read_text())

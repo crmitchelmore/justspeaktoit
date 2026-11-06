@@ -10,6 +10,12 @@ The swap only happens in CI (``CI`` or ``GITHUB_ACTIONS`` set) or when
 disables it. Otherwise the command runs unchanged, so local runs never touch
 the developer's Keychain.
 
+CI swaps are permitted only on disposable GitHub-hosted runners. Self-hosted
+and unidentified CI runners are refused before any command or Keychain access,
+even when JSTI_TEST_KEYCHAIN=0. A process lock and recovery journal cannot
+isolate user-wide settings from desktop applications or guarantee cleanup after
+SIGKILL. Use hosted runners for these tests, not a shared desktop login.
+
 While swapping, the user default Keychain and search list point only at the
 temporary Keychain. Invariants that keep a developer machine safe:
 
@@ -54,6 +60,10 @@ class RestoreFailed(Exception):
     pass
 
 
+class UnsafeCI(Exception):
+    pass
+
+
 def security_binary():
     return os.environ.get('JSTI_TEST_KEYCHAIN_SECURITY', '/usr/bin/security')
 
@@ -87,6 +97,19 @@ def swap_enabled(environ=os.environ):
     if explicit is not None:
         return explicit.strip() == '1'
     return truthy(environ.get('CI')) or truthy(environ.get('GITHUB_ACTIONS'))
+
+
+def require_disposable_ci(environ=os.environ):
+    """Never replace a shared CI account's default or run tests against its login."""
+    runner = environ.get('RUNNER_ENVIRONMENT')
+    if runner == 'self-hosted' or (
+        (truthy(environ.get('CI')) or truthy(environ.get('GITHUB_ACTIONS')))
+        and runner != 'github-hosted'
+    ):
+        raise UnsafeCI(
+            'Keychain tests require a disposable GitHub-hosted runner; '
+            'refusing to change a self-hosted/shared user Keychain or run tests against it'
+        )
 
 
 def same_path(left, right):
@@ -421,6 +444,7 @@ def repair():
 
 
 def run_isolated(command):
+    require_disposable_ci()
     signals = SignalState()
     for signum in HANDLED_SIGNALS:
         signal.signal(signum, signals.handle)
@@ -484,11 +508,15 @@ def main(argv=None):
     try:
         if argv == ['--repair']:
             return repair()
+        require_disposable_ci()
         if not swap_enabled():
             os.execvp(argv[0], argv)
         return run_isolated(argv)
+    except UnsafeCI as error:
+        print(f'with-test-keychain: {error}', file=sys.stderr)
+        return 78
     except RestoreFailed as error:
-        print(f'with-test-keychain: failed to restore Keychain configuration: {error}', file=sys.stderr)
+        print(f'with-test-keychain: {error}', file=sys.stderr)
         print('with-test-keychain: run `python3 scripts/with-test-keychain.py --repair`', file=sys.stderr)
         return 70
 

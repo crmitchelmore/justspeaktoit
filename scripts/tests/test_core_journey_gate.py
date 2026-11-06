@@ -5,6 +5,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import subprocess
@@ -341,11 +342,34 @@ class NativeUICoverageTests(unittest.TestCase):
             for output, expected in cases:
                 with self.subTest(expected=expected, output=output):
                     log.write_text(output)
-                    result = subprocess.run([sys.executable, str(verifier), str(log)], capture_output=True, text=True)
+                    result = subprocess.run([sys.executable, str(verifier), str(log)], capture_output=True, text=True,
+                                            env={**os.environ, "CORE_JOURNEY_UI_SHARD": "foundation"})
                     self.assertEqual(result.returncode, expected, result.stderr)
                     coverage = json.loads(log.with_name("coverage.json").read_text())
                     self.assertEqual(bool(coverage["errors"]), expected != 0)
                     self.assertEqual(coverage["required_suites"], suites)
+
+    def test_p0_shard_requires_each_named_journey_exactly_once(self):
+        verifier = MODULE_PATH.with_name("verify-core-journey-ui.py")
+        names = ["testStreaming_partialsBecomeOneFinalTranscriptWithoutDuplication",
+                 "testTargetChange_duringRecordingDeliversToCapturedAppNotNewFrontmostApp",
+                 "testSilentInput_leavesClipboardAndFieldUntouchedAndStoresNoTranscript",
+                 "testMissingTranscriptionKey_failsVisiblyThenNextRunSucceeds"]
+        rows = [f"Test Case '-[SpeakAppUITests.CoreJourneyP0UITests {name}]' passed (1.0 seconds).\n" for name in names]
+        passing = "".join(rows)
+        cases = [(passing, 0), (passing + rows[0], 1)]
+        cases += [(passing.replace(row, ""), 1) for row in rows]
+        cases += [(passing.replace(row, row.replace("passed", "skipped")), 1) for row in rows]
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "xcodebuild.log"
+            for output, expected in cases:
+                with self.subTest(expected=expected, output=output):
+                    log.write_text(output)
+                    result = subprocess.run([sys.executable, str(verifier), str(log)], capture_output=True, text=True,
+                                            env={**os.environ, "CORE_JOURNEY_UI_SHARD": "p0"})
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    coverage = json.loads(log.with_name("coverage.json").read_text())
+                    self.assertEqual(coverage["required_suites"], ["CoreJourneyP0UITests"])
 
 
 class RunnerTests(unittest.TestCase):
@@ -453,6 +477,47 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result["command_elapsed_seconds"], 0.1)
         self.assertEqual(result["elapsed_seconds"], 100)
         self.assertEqual(result["errors"], [])
+
+    def test_early_wait_timeout_resumes_until_the_measured_budget(self):
+        # CPython 3.15 can raise TimeoutExpired from wait(timeout) long before
+        # the budget; the gate keeps waiting for the measured remainder.
+        real_wait = subprocess.Popen.wait
+        calls = []
+
+        def spurious_once(process, timeout=None):
+            calls.append(timeout)
+            if timeout is not None and len(calls) == 1:
+                raise subprocess.TimeoutExpired(process.args, timeout)
+            return real_wait(process, timeout)
+
+        for status in (0, 17):
+            calls.clear()
+            source = ('print("Test Case \'-[Module.Required testResult]\' passed (0.001 seconds).")'
+                      if status == 0 else f"raise SystemExit({status})")
+            with self.subTest(status=status), mock.patch.object(subprocess.Popen, "wait", spurious_once):
+                code, result, _ = self.run_command(source, budget=60)
+            self.assertEqual(code, status)
+            self.assertFalse(any("budget" in error for error in result["errors"]))
+            self.assertEqual(calls[0], 60)
+            self.assertTrue(0 < calls[1] <= 60, calls)
+
+    def test_measured_overrun_is_still_a_timeout(self):
+        process = mock.Mock()
+        process.wait.side_effect = subprocess.TimeoutExpired("fixture", 5)
+        with mock.patch.object(gate.time, "monotonic", return_value=105):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                gate.wait_with_deadline(process, 5, started=100)
+        process.wait.assert_called_once_with(timeout=5)
+
+    def test_zombie_group_permission_error_is_tolerated_only_after_exit(self):
+        process = mock.Mock(pid=4242)
+        process.poll.return_value = 0
+        with mock.patch.object(gate.os, "killpg", side_effect=PermissionError(1, "Operation not permitted")):
+            gate.stop_process_group(process)
+            process.wait.assert_called_once()
+            process.poll.return_value = None
+            with self.assertRaises(PermissionError):
+                gate.stop_process_group(process)
 
     def test_timeout_stops_descendants_too(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -646,7 +711,18 @@ class BuildObservationTests(unittest.TestCase):
         events = []
         process = mock.Mock(pid=123)
         process.poll.return_value = None if isinstance(outcome, BaseException) else outcome
-        process.wait.side_effect = outcome if isinstance(outcome, BaseException) else None
+        real_clock = time.monotonic
+        offset = [0.0]
+
+        def expire(timeout=None):
+            # A genuine timeout: the measured budget is spent when wait raises.
+            offset[0] += timeout
+            raise outcome
+
+        if isinstance(outcome, subprocess.TimeoutExpired):
+            process.wait.side_effect = expire
+        else:
+            process.wait.side_effect = outcome if isinstance(outcome, BaseException) else None
         process.wait.return_value = outcome
         observer = mock.Mock()
         observer.start.side_effect = observer_start_error
@@ -665,6 +741,7 @@ class BuildObservationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(gate.subprocess, "Popen", side_effect=launch), \
+                mock.patch.object(gate.time, "monotonic", side_effect=lambda: real_clock() + offset[0]), \
                 mock.patch.object(gate, "stop_process_group", side_effect=stop), \
                 mock.patch.object(gate.BuildProgressObserver, "start", side_effect=observer.start), \
                 mock.patch.object(gate.BuildProgressObserver, "finish", side_effect=observer.finish), \

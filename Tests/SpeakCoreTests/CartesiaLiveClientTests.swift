@@ -250,7 +250,12 @@ extension CartesiaLiveClientTests {
     func testNetworkFailureAfterCloseIsSurfaced() async {
         let failedSocket = TestLiveWebSocket()
         let failedFactory = TestSocketFactory([failedSocket])
-        let failedClient = makeClient(failedFactory)
+        // No deadline may fire: a real 50ms post-close timer could complete the
+        // finish on a stalled runner before the injected failure arrives.
+        let failedClient = CartesiaLiveClient(
+            apiKey: "test-key", model: "ink-2", sampleRate: 16_000, timing: .init(),
+            makeConnection: failedFactory.make, schedule: { _, _ in }
+        )
         let lock = NSLock()
         var errors: [Error] = []
         failedClient.start(

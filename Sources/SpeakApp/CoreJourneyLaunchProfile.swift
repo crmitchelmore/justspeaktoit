@@ -79,6 +79,7 @@ final class CoreJourneyLaunchProfile {
         identifier: identifier,
         directory: directory, scenario: batchScenario
     )
+    lazy var credentialSlot = CoreJourneyCredentialSlot(identifier: identifier, directory: directory)
     private var hotKeyProbe: CoreJourneyHotKeyProbe?
 
     init(
@@ -121,6 +122,14 @@ final class CoreJourneyLaunchProfile {
             settings.doubleTapWindow = 0.1
         }
         if self.runsBatchJourney { self.configureBatchSettings() }
+        if CoreJourneySiteMediaFixture.isRequested {
+            do {
+                try CoreJourneySiteMediaFixture.seedHistory(in: directory)
+            } catch {
+                preconditionFailure("Could not seed site media History: \(error)")
+            }
+            settings.showHUDDuringSessions = true
+        }
     }
 
     private func configureBatchSettings() {
@@ -150,6 +159,7 @@ final class CoreJourneyLaunchProfile {
             settings.showHUDDuringSessions = true
             settings.shortenErrorDisplay = false
         }
+        self.configureScenarioSettings()
     }
 
     func startHotKeyProbe(manager: HotKeyManager, main: MainManager) {

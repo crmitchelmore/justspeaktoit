@@ -90,6 +90,8 @@ struct RecordingServiceDependencies {
     let applicationState: () -> UIApplication.State
     var notifyTranscriptReady: (TranscriptReadyNotificationInput) -> Void = { _ in }
     var focusOverride: @MainActor (CaptureRunParameters) async throws -> FocusCaptureOverride = { _ in .none }
+    /// Queues an offline on-device capture for a cloud upgrade (issue #999).
+    var tagOfflineCapture: (iOSHistoryItem, UUID, String) -> Void = { _, _, _ in }
 
     static func live(settings: AppSettings = .shared) -> Self {
         Self(
@@ -100,7 +102,10 @@ struct RecordingServiceDependencies {
             markDelivered: { CaptureSafetyClaimStore.shared.markDelivered(recording: $0) },
             applicationState: { UIApplication.shared.applicationState },
             notifyTranscriptReady: { TranscriptReadyNotificationCoordinator.shared.submit($0) },
-            focusOverride: FocusCaptureReconciliation.live(explicit:)
+            focusOverride: FocusCaptureReconciliation.live(explicit:),
+            tagOfflineCapture: {
+                OfflineTranscriptUpgrader.shared.tag(item: $0, recordingID: $1, intendedModelID: $2)
+            }
         )
     }
 }

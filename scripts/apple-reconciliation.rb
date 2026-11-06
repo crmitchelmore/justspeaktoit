@@ -83,8 +83,10 @@ module AppleRelease
             unless reaped
               begin
                 Process.kill('KILL', -pid)
-              rescue Errno::ESRCH
-                # The owned process may have exited just before cancellation.
+              rescue Errno::ESRCH, Errno::EPERM
+                # The owned process may have exited just before cancellation. macOS
+                # reports EPERM, not ESRCH, for a group whose only member is an
+                # unreaped zombie (Lint run 42095084643); waitpid below reaps it.
               end
               Process.waitpid(pid)
             end

@@ -492,7 +492,7 @@ jobs:
 
   build-ios-swiftpm:
     name: Build iOS Library (SwiftPM)
-    runs-on: macos-latest
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -688,7 +688,7 @@ jobs:
     # that scheme at all — only the direct-capture one was — so the shape users
     # actually receive had the weaker check. Both are built here now.
     name: Build iOS Keyboard
-    runs-on: macos-latest
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1

@@ -1,6 +1,6 @@
 # Reviewed native runner pool
 
-The non-UI macOS CI jobs (Debug and Release tests, lint, the core-journey contract and API compatibility) can use the native pool. The pool is opt-in for one reviewed revision via the repository Actions variable `JSTI_NATIVE_APPROVED_SHA`. An unset or nonmatching value retains GitHub-hosted routing.
+The non-UI macOS CI jobs (Debug and Release tests, lint, the core-journey contract and API compatibility), the iOS SwiftPM library build, and unsigned iOS keyboard/watch builds can use the native pool. The pool is opt-in for one reviewed revision via the repository Actions variable `JSTI_NATIVE_APPROVED_SHA`. An unset or nonmatching value retains GitHub-hosted routing.
 
 The pool defaults to `["jsti-macos-build","macOS"]`. Set the repository variable `JSTI_NATIVE_RUNNER_LABELS` to a JSON label array (for example `["mac-mini-3-local","macOS"]`) to pin approved jobs to runners whose admission hooks accept the revision.
 
@@ -16,11 +16,13 @@ Before activating a revision:
 
 Build cache keys and restore prefixes, including the lint tooling cache, include `runner.arch`, a stable host identity (runner name for self-hosted machines, `hosted` for GitHub-hosted machines), and `github.workspace`. This keeps Intel/ARM object files separate and prevents absolute-path build state from crossing checkout locations.
 
-UI automation does not use the native pool. `Core Journey Fixture UI` and iOS simulator execution stay on hosted ARM because the registered native Macs are not configured for unattended UI automation, while hosted Intel UI execution has timed out or exhausted simulator disk. Neither hosted pool alone has enough capacity for every required gate, so Apple jobs are split across both. The iOS SwiftPM, test-product, keyboard and watch compilation jobs stay on hosted ARM (`macos-latest`) with the simulator and UI jobs. Debug tests, API compatibility and the core-journey contract fall back to hosted Intel (`macos-26-intel`). Lint and Release tests stay on hosted ARM: on Intel, Lint's tooling tests ran past its 30-minute budget and a cold Release build ran past its 45-minute budget. The core-journey contract has to share Debug's architecture to restore its cache. None of these jobs depends on the host architecture. The test-product job exports both simulator architectures with source/Xcode/SDK provenance; the simulator job verifies that provenance before executing the unchanged unit and UI selections with `test-without-building`. Ubuntu lanes always stay hosted.
+UI automation does not use the native pool. `Core Journey Fixture UI` and iOS simulator execution stay on hosted ARM because the registered Macs lack unattended UI automation setup. Portable iOS test products also stay hosted: the producer exports both simulator architectures with source/Xcode/SDK provenance, and the consumer verifies that exact provenance before the unchanged unit/UI selections run. Native Macs may have different Xcode versions and must not exchange those products.
+
+For an unapproved source, Debug, API compatibility and the core contract fall back to hosted Intel (`macos-26-intel`); lint, Release and iOS compilation fall back to hosted ARM (`macos-latest`). Native iOS keyboard/watch compilation requires matching installed SDKs and preinstalled Tuist. The toolchain action verifies native Tuist without installing Homebrew; hosted setup retains its Homebrew mechanism. Ubuntu lanes always stay hosted.
 
 The laptop uses one shared build slot across repositories, nine Swift build workers and reduced process priority. Its CI menu can pause both laptop runners; pausing may cancel active jobs. These controls do not provide a hard CPU/RAM quota or sandbox untrusted code.
 
-Initial Intel evidence: Xcode 26.3 / Apple Swift 6.2.4 built Alpha `a43520a51e4b0a9dbcfd40fa5b0222645b3101f6` locally in 229 seconds. The separate pinned GitHub verification is https://github.com/crmitchelmore/justspeaktoit/actions/runs/34463783833; inspect its final result before enabling the pool. PR #1038 has merged; this follow-up must pass its complete CI gate before merging.
+Initial Intel evidence: Xcode 26.3 / Apple Swift 6.2.4 built Alpha `a43520a51e4b0a9dbcfd40fa5b0222645b3101f6` locally in 229 seconds. The separate pinned GitHub verification is https://github.com/crmitchelmore/justspeaktoit/actions/runs/34463783833; inspect its final result before enabling the pool. PR #1038 has merged; historical commissioning evidence does not establish current runner readiness.
 
 ## Keychain isolation on native and hosted runners
 

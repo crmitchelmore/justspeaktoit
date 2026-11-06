@@ -573,8 +573,10 @@ jobs:
           AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
           WINDOWS_MSIX_PUBLISHER: ${{ vars.WINDOWS_MSIX_PUBLISHER }}
+          WINDOWS_SIGNING_PROVIDER: ${{ vars.WINDOWS_SIGNING_PROVIDER }}
+          SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT: ${{ vars.SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT }}
         run: |
-          python -B scripts/windows-package/signing_configuration.py --github-output $env:GITHUB_OUTPUT `
+          python -B scripts/windows-package/signing_configuration.py --supported artifact-signing --github-output $env:GITHUB_OUTPUT `
             --metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Sign in to Azure with GitHub OIDC

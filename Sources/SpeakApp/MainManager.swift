@@ -796,7 +796,9 @@ final class MainManager: ObservableObject {
       if showsHUD {
         // Up straight away as "Getting ready"; its clock starts only when the
         // microphone delivers real audio, never while words can't be heard.
-        permissionsManager.refresh(.microphone)
+        // Uses the cached microphone status: each TCC query costs 13-35 ms
+        // before capture (#611), and `startRecording` makes the authoritative
+        // check moments later; the HUD health is refreshed once capture is live.
         hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
         hudManager.beginRecording(profileName: profileApplier.activeProfileName, awaitingAudio: true)
       }

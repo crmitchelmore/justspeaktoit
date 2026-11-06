@@ -130,7 +130,7 @@ extension DesktopHostController {
         return try configuration.recordingPronunciationKeytermSelection(from: previous, modern: hints.pronunciationWords)
     }
 
-    private func persistConfiguration(
+    private func persistConfiguration( // swiftlint:disable:this function_body_length
         _ configuration: DesktopConfiguration, intent: DesktopConfigurationSaveIntent, status: String
     ) async throws {
         invalidateConnectionPreWarming(resetCapture: true)
@@ -184,6 +184,7 @@ extension DesktopHostController {
                 ? " Connection preparation intent retained; approve probes on this device for this session to enable it."
                 : ""
         update(status + approval + preparation + cleanup)
+        await configureCleanupDiscovery(refresh: intent == .apply)
     }
 
     func persistLegacyPronunciationDictionary(
@@ -264,6 +265,7 @@ extension DesktopHostController {
         let previousVoice = settings.voiceOutput
         try await persistAutomationAwareSettings(changed)
         connectionWarmApproved = false
+        await configureCleanupDiscovery(refresh: false)
         reconcileSonioxRegionChange(previousVoice)
         reconcileVoiceQualityChange(previousVoice)
         let cleanup = await disarmHandsFreeForConfiguration()

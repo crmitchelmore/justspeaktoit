@@ -1260,6 +1260,11 @@ int jsti_audio_playback_self_test(char *error, size_t error_capacity);
  * validation, invalid insertion targets. Does not use microphone, clipboard or
  * real credentials. */
 int jsti_native_self_test(char *error, size_t error_capacity);
+
+/* Gives the GUI-subsystem app a valid stdout/stderr: missing streams bind to
+ * the parent console when attach_parent is nonzero and one exists, otherwise
+ * to NUL. Returns 1 when it attached to the parent console, 0 otherwise. */
+int32_t jsti_console_prepare(int32_t attach_parent);
 int jsti_audio_devices_self_test(char *error, size_t error_capacity);
 /* Call on the UI thread from READY in smoke-test mode. Verifies native control
  * bounds, history updates/events, search/filter selection handling, transcript

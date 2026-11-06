@@ -173,7 +173,8 @@ class IdentityTests(unittest.TestCase):
         alias = windows_msix.load_identity()["cli"]["executionAlias"]
         native = (windows_msix.REPOSITORY / "Sources/CWindowsSupport/WindowsAutomationSettings.cpp").read_text(
             encoding="utf-8")
-        self.assertIn('L"\\\\Microsoft\\\\WindowsApps\\\\%s"' % alias, native)
+        self.assertIn('L"%s"' % alias, native)
+        self.assertIn('L"\\\\Microsoft\\\\WindowsApps\\\\"', native)
 
     def test_publisher_id_matches_windows_for_known_publishers(self):
         self.assertEqual(windows_msix.publisher_id(
@@ -1147,6 +1148,14 @@ SIGNING = {
     "AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE": "example-public",
     "WINDOWS_MSIX_PUBLISHER": "CN=Example Developer, O=Example Developer, L=Leeds, C=GB",
 }
+SSLCOM = {
+    "WINDOWS_SIGNING_PROVIDER": "sslcom-esigner",
+    "SSLCOM_ESIGNER_USERNAME": "signer@example.com",
+    "SSLCOM_ESIGNER_PASSWORD": "example password",
+    "SSLCOM_ESIGNER_TOTP_SECRET": "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+    "SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT": "0123456789abcdef0123456789abcdef01234567",
+    "WINDOWS_MSIX_PUBLISHER": SIGNING["WINDOWS_MSIX_PUBLISHER"],
+}
 
 
 class SigningConfigurationTests(unittest.TestCase):
@@ -1158,7 +1167,7 @@ class SigningConfigurationTests(unittest.TestCase):
     def test_no_settings_keeps_the_unsigned_developer_package(self):
         decision = signing_configuration.plan({"UNRELATED": "1", "AZURE_ARTIFACT_SIGNING_ACCOUNT": "  "})
         self.assertFalse(decision["enabled"])
-        self.assertIn("keeping the unsigned developer MSIX", decision["message"])
+        self.assertIn("keeping the unsigned package and publishing nothing", decision["message"])
         output = self.root / "output"
         with unittest.mock.patch.dict("os.environ", {}, clear=True):
             self.assertEqual(signing_configuration.main(["--github-output", str(output),
@@ -1180,7 +1189,8 @@ class SigningConfigurationTests(unittest.TestCase):
             self.assertEqual(signing_configuration.main(["--github-output", str(output),
                                                          "--metadata", str(metadata)]), 0)
         self.assertEqual(output.read_text(encoding="utf-8"),
-                         "enabled=true\npublisher=" + SIGNING["WINDOWS_MSIX_PUBLISHER"] + "\n")
+                         "enabled=true\nprovider=artifact-signing\npublisher=" + SIGNING["WINDOWS_MSIX_PUBLISHER"]
+                         + "\ntimestamp-url=http://timestamp.acs.microsoft.com\n")
         self.assertEqual(json.loads(metadata.read_text(encoding="utf-8")), decision["metadata"])
         for secret in signing_configuration.SECRETS:
             self.assertNotIn(SIGNING[secret], metadata.read_text(encoding="utf-8") + output.read_text(encoding="utf-8"))
@@ -1208,6 +1218,52 @@ class SigningConfigurationTests(unittest.TestCase):
             with self.subTest(name=name, value=value):
                 with self.assertRaisesRegex(signing_configuration.SigningConfigurationError, name):
                     signing_configuration.plan(dict(SIGNING, **{name: value}))
+
+    def test_sslcom_esigner_signs_from_the_certificate_store(self):
+        decision = signing_configuration.plan(SSLCOM)
+        self.assertEqual(decision["provider"], "sslcom-esigner")
+        self.assertEqual(decision["timestampUrl"], "http://ts.ssl.com")
+        self.assertEqual(decision["certificateThumbprint"], SSLCOM["SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT"].upper())
+        self.assertNotIn("metadata", decision)
+        output, metadata = self.root / "output", self.root / "metadata.json"
+        with unittest.mock.patch.dict("os.environ", SSLCOM, clear=True):
+            self.assertEqual(signing_configuration.main(["--github-output", str(output),
+                                                         "--metadata", str(metadata)]), 0)
+        text = output.read_text(encoding="utf-8")
+        self.assertIn("provider=sslcom-esigner\n", text)
+        self.assertIn("certificate-thumbprint=" + SSLCOM["SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT"].upper(), text)
+        self.assertFalse(metadata.exists())
+        for secret in ("SSLCOM_ESIGNER_USERNAME", "SSLCOM_ESIGNER_PASSWORD", "SSLCOM_ESIGNER_TOTP_SECRET"):
+            self.assertNotIn(SSLCOM[secret], text)
+
+    def test_provider_choice_is_explicit_when_not_artifact_signing(self):
+        implicit = dict(SSLCOM)
+        del implicit["WINDOWS_SIGNING_PROVIDER"]
+        with self.assertRaisesRegex(signing_configuration.SigningConfigurationError, "WINDOWS_SIGNING_PROVIDER"):
+            signing_configuration.plan(implicit)
+        with self.assertRaisesRegex(signing_configuration.SigningConfigurationError, "AZURE_ARTIFACT_SIGNING_ACCOUNT"):
+            signing_configuration.plan(dict(SSLCOM, AZURE_ARTIFACT_SIGNING_ACCOUNT="examplesigning"))
+        with self.assertRaisesRegex(signing_configuration.SigningConfigurationError, "must be one of"):
+            signing_configuration.plan(dict(SSLCOM, WINDOWS_SIGNING_PROVIDER="self-signed"))
+        explicit = dict(SIGNING, WINDOWS_SIGNING_PROVIDER="artifact-signing")
+        self.assertEqual(signing_configuration.plan(explicit)["provider"], "artifact-signing")
+
+    def test_partial_sslcom_settings_fail_and_unsupported_jobs_skip(self):
+        partial = dict(SSLCOM)
+        del partial["SSLCOM_ESIGNER_TOTP_SECRET"]
+        with self.assertRaises(signing_configuration.SigningConfigurationError) as caught:
+            signing_configuration.plan(partial)
+        self.assertIn("also set SSLCOM_ESIGNER_TOTP_SECRET", str(caught.exception))
+        self.assertNotIn(SSLCOM["SSLCOM_ESIGNER_PASSWORD"], str(caught.exception))
+        skipped = signing_configuration.plan(SSLCOM, supported=("artifact-signing",))
+        self.assertFalse(skipped["enabled"])
+        self.assertIn("this job signs only with artifact-signing", skipped["message"])
+        for name, value in [("SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT", "abc"),
+                            ("SSLCOM_ESIGNER_TOTP_SECRET", "not base32!"),
+                            ("SSLCOM_ESIGNER_USERNAME", "two words")]:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(signing_configuration.SigningConfigurationError, name):
+                    signing_configuration.plan(dict(SSLCOM, **{name: value}))
 
     def test_signed_and_unsigned_layouts_follow_the_plan(self):
         bundle = make_bundle(self.root / "bundle")

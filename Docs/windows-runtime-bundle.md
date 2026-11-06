@@ -46,6 +46,10 @@ are calculated **after** recompression. An explicit local build without
 `--zip-optimizer` retains standard-library zlib level 9 and records that choice;
 both production workflow invocations use the pinned optimizer.
 
+The downstream MSIX layout retains the source ZIP's own filename, size and
+SHA-256 separately from GUI/CLI member names. x64 and ARM64 fixtures cover this
+provenance handoff and acceptance of the optional compression receipt.
+
 On the qualified `d7c3248` x64 baseline, normal mode reduced **54,165,499 to
 51,421,937 bytes (5.07%)** in approximately 36 seconds, preserving all 55
 members and 159,467,419 expanded bytes. Extra mode saved only 19 further bytes

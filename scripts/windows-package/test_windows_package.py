@@ -669,6 +669,7 @@ class LayoutTests(unittest.TestCase):
                              "CN=Just Speak to It Developer"))
         self.assertFalse(package_manifest["package"]["signed"])
         self.assertEqual(package_manifest["bundle"]["sourceCommit"], COMMIT)
+        self.assertEqual(package_manifest["bundle"]["archive"]["name"], next(bundle.glob("*.zip")).name)
         self.assertEqual(package_manifest["bundle"]["runtimeModules"], ["swiftCore.dll"])
         self.assertEqual(package_manifest["executable"]["subsystem"], "windows")
         self.assertEqual(set(package_manifest["executables"]), set(BUILD.EXECUTABLES))
@@ -686,6 +687,7 @@ class LayoutTests(unittest.TestCase):
         self.assertIn("_0.0.9.1_arm64__", evidence["package"]["packageFullName"])
         package_manifest, _ = windows_msix.verify_layout(self.root / "out/layout")
         self.assertEqual(package_manifest["package"]["kind"], "unsigned Windows ARM64 developer MSIX payload")
+        self.assertEqual(package_manifest["bundle"]["archive"]["name"], next(bundle.glob("*.zip")).name)
         manifest = ET.fromstring((self.root / "out/layout/AppxManifest.xml").read_bytes())
         self.assertEqual(manifest.find("f:Identity", windows_msix.NAMESPACES).get("ProcessorArchitecture"), "arm64")
         self.assertEqual(package_manifest["package"]["cliApplicationId"], "JustSpeakToItCLI")
@@ -694,6 +696,24 @@ class LayoutTests(unittest.TestCase):
         x64 = self.build(make_bundle(self.root / "x64-bundle"), output="x64")
         self.assertEqual(x64["package"]["packageFamilyName"], evidence["package"]["packageFamilyName"])
         self.assertEqual(x64["package"]["architecture"], "x64")
+
+    def test_compression_receipt_preserves_archive_provenance(self):
+        import json
+        for architecture in ("x64", "arm64"):
+            with self.subTest(architecture=architecture):
+                directory = make_bundle(self.root / architecture, architecture=architecture)
+                path = directory / "bundle-evidence.json"
+                evidence = json.loads(path.read_text(encoding="utf-8"))
+                evidence["zip"]["compression"] = {
+                    "tool": "AdvanceCOMP", "version": "2.6", "mode": "shrink-normal (libdeflate)",
+                    "beforeBytes": evidence["zip"]["bytes"], "afterBytes": evidence["zip"]["bytes"],
+                    "savedBytes": 0,
+                }
+                path.write_text(json.dumps(evidence), encoding="utf-8")
+                verified = windows_msix.verify_bundle(directory, expected_commit=COMMIT)
+                self.assertEqual(verified["evidence"]["zip"]["compression"], evidence["zip"]["compression"])
+                self.assertEqual(verified["archive"],
+                                 {key: evidence["zip"][key] for key in ("name", "sha256", "bytes")})
 
     def test_images_foreign_to_the_bundle_architecture_are_refused(self):
         arm64 = windows_msix.windows_pe.IMAGE_FILE_MACHINE_ARM64

@@ -329,6 +329,9 @@ class StageTests(unittest.TestCase):
             self.assertTrue(coverage["errors"])
 
     def test_swift_product_receipt_includes_bundle_resources_and_libraries(self):
+        environment = mock.patch.dict(os.environ, {"STORAGE_GUARD_BUILD_DIR": ""})
+        environment.start()
+        self.addCleanup(environment.stop)
         original = Path.cwd()
         os.chdir(self.directory)
         self.addCleanup(os.chdir, original)
@@ -344,6 +347,26 @@ class StageTests(unittest.TestCase):
         receipt = stages.products("swift", self.artifacts, time.monotonic() + 60)
         (root / "libExample.dylib").chmod(0o755)
         self.assertNotEqual(receipt, stages.products("swift", self.artifacts, time.monotonic() + 60))
+
+    def test_guarded_swift_receipt_tracks_external_products_not_workspace_decoys(self):
+        original = Path.cwd()
+        os.chdir(self.directory)
+        self.addCleanup(os.chdir, original)
+        guarded = self.directory / "external-build"
+        binary = guarded / "swift/debug/Test.xctest/Contents/MacOS/Test"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("guarded product")
+        decoy = Path(".build/debug/Decoy.xctest/Contents/MacOS/Decoy")
+        decoy.parent.mkdir(parents=True)
+        decoy.write_text("stale workspace product")
+        with mock.patch.dict(os.environ, {"STORAGE_GUARD_BUILD_DIR": str(guarded)}):
+            receipt = stages.products("swift", self.artifacts, time.monotonic() + 60)
+            self.assertEqual(set(receipt), {str(binary.resolve())})
+            binary.write_text("changed external product")
+            self.assertNotEqual(receipt, stages.products("swift", self.artifacts, time.monotonic() + 60))
+            binary.unlink()
+            with self.assertRaisesRegex(ValueError, "products are empty"):
+                stages.products("swift", self.artifacts, time.monotonic() + 60)
 
     def test_mismatched_source_toolchain_or_options_cannot_start_tests(self):
         command = self.prepare()

@@ -145,6 +145,32 @@ final class WhisperKitLiveControllerLifecycleTests: XCTestCase {
         XCTAssertEqual(harness.delegate.finished.count, 1)
     }
 
+    func testLoopEndingBeforeMainActorWrapperResumes_rejectsQueuedFirstAudio() async throws {
+        let stream = GatedWhisperKitStream()
+        let harness = WhisperKitLiveHarness.make { _, onEvent in
+            stream.onEvent = onEvent
+            return stream
+        }
+        let startTask = Task { try await harness.controller.start() }
+        await stream.loop.waitUntilStarted()
+        await stream.loop.end()
+        await stream.wrapperReturn.waitUntilEntered()
+        XCTAssertFalse(stream.isStreaming, "Loop termination must precede wrapper resumption")
+
+        // A previously captured audio notification can arrive after the loop ended.
+        stream.onEvent?(.audioArrived)
+        let result = await startTask.result
+        await stream.wrapperReturn.open()
+        await harness.controller.stop()
+        guard case .failure = result else {
+            XCTFail("Queued first audio cannot start a session after its decode loop ended")
+            return
+        }
+        XCTAssertFalse(harness.controller.isRunning)
+        XCTAssertTrue(harness.delegate.finished.isEmpty)
+        XCTAssertTrue(harness.delegate.failures.isEmpty)
+    }
+
     // MARK: - Run isolation
 
     func testLateEventsFromRetiredRun_doNotAffectReplacement() async throws {

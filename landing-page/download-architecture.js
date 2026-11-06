@@ -1,5 +1,6 @@
 const ARM64_DOWNLOAD = "/download/mac";
 const UNIVERSAL_DOWNLOAD = "/download/mac-intel";
+const WINDOWS_ARCHITECTURE_BUDGET_MS = 500;
 
 export function classifyArchitecture(value) {
   const architecture = String(value || "").toLowerCase();
@@ -53,23 +54,47 @@ export async function detectWindowsArchitecture(navigatorObject) {
   const platform = `${navigatorObject?.userAgentData?.platform || ""} ${navigatorObject?.userAgent || ""} ${navigatorObject?.platform || ""}`;
   if (!/Windows|Win32|Win64/i.test(platform)) return "unknown";
   if (!navigatorObject?.userAgentData?.getHighEntropyValues) return "unknown";
+  let timeout;
   try {
-    const hints = await navigatorObject.userAgentData.getHighEntropyValues(["architecture", "bitness"]);
+    const hints = await Promise.race([
+      navigatorObject.userAgentData.getHighEntropyValues(["architecture", "bitness"]),
+      new Promise((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("Windows architecture lookup timed out")),
+          WINDOWS_ARCHITECTURE_BUDGET_MS);
+      }),
+    ]);
     return classifyArchitecture(hints.architecture);
   } catch {
     return "unknown";
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
 export async function enhanceWindowsDownloads(documentObject, navigatorObject, fetchObject = globalThis.fetch) {
   const links = documentObject.querySelectorAll("[data-auto-windows-download]");
   if (!links.length) return;
-  const architecture = await detectWindowsArchitecture(navigatorObject);
+  let architecture = "unknown";
+  let download = "/alpha/download/windows-x64";
+  let action = "Download Windows x64 ZIP (or choose ARM64 below)";
+  let note = "Unsigned developer preview. Extract all files before opening SpeakWindows.exe. No Swift installation or automatic updates.";
+  const render = () => {
+    links.forEach((link) => {
+      link.href = download;
+      link.textContent = action;
+      link.dataset.detectedArchitecture = architecture;
+    });
+    documentObject.querySelectorAll("[data-windows-download-note]").forEach((element) => {
+      element.textContent = note;
+    });
+  };
+  render();
+  architecture = await detectWindowsArchitecture(navigatorObject);
   const arch = architecture === "arm64" ? "arm64" : "x64";
   const label = architecture === "unknown" ? "x64 ZIP (or choose ARM64 below)" : `${arch === "arm64" ? "ARM64" : "x64"} ZIP`;
-  let download = `/alpha/download/windows-${arch}`;
-  let action = `Download Windows ${label}`;
-  let note = "Unsigned developer preview. Extract all files before opening SpeakWindows.exe. No Swift installation or automatic updates.";
+  download = `/alpha/download/windows-${arch}`;
+  action = `Download Windows ${label}`;
+  render();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3000);
   try {
@@ -93,14 +118,7 @@ export async function enhanceWindowsDownloads(documentObject, navigatorObject, f
   } finally {
     clearTimeout(timeout);
   }
-  links.forEach((link) => {
-    link.href = download;
-    link.textContent = action;
-    link.dataset.detectedArchitecture = architecture;
-  });
-  documentObject.querySelectorAll("[data-windows-download-note]").forEach((element) => {
-    element.textContent = note;
-  });
+  render();
   return { architecture, download };
 }
 

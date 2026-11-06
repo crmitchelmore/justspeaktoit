@@ -224,9 +224,11 @@ $bin = swift build --configuration release --show-bin-path
 ### UI efficiency and shorter windows
 
 Dashboard and History shorten their decorative headers when the available
-content height is below 640 logical pixels. Dashboard reclaims 24 logical pixels
-for the transcript; History reclaims 12. The Dashboard summary keeps enough
-height for separate metric labels and values and complete Setup detail lines.
+content height is below 640 logical pixels. The Dashboard hero shortens by 24
+logical pixels; History reclaims 12. The Dashboard summary sizes its rows from
+the actual caption and value font metrics, so the net transcript gain depends
+on the active Windows font and scaling. Metric labels and values use separate
+measured bounds, and Setup detail lines retain their full font height.
 Larger layouts and native control sizes are unchanged. The native smoke test
 requires at least three transcript lines at the minimum window size and checks
 summary text against the actual caption and value font heights.

@@ -952,7 +952,7 @@ Role roleOf(HWND window, int identifier) {
 
 // What WM_PAINT draws behind the controls, laid out with them.
 struct Card { RECT rect; wchar_t glyph; std::wstring title; };
-struct Chip { RECT rect; std::wstring label; };
+struct Chip { RECT rect; std::wstring label; RECT labelRect{}; };
 struct Paragraph { RECT rect; std::wstring text; jsti::chrome::Font font; bool secondary; };
 struct Frame {
     RECT sidebar{}, header{}, status{}, hero{}, speakHeading{}, settingsHeading{}, icon{};
@@ -1060,7 +1060,18 @@ void layoutDashboard(HWND window, const RECT &content) {
     place(window, recordID, box(frame.hero.right - scale(window, 26) - scale(window, 196), frame.hero.top + scale(window, 26),
                                 scale(window, 196), scale(window, 50)));
     layoutChips(window, {{chipSessionsID, L"Sessions"}, {chipTimeID, L"Recording Time"}, {chipSpendID, L"Spend"}});
-    const int rowHeight = scale(window, 190);
+    HDC metricsDC = GetDC(window);
+    const UINT dpi = GetDpiForWindow(window);
+    const int captionHeight = jsti::chrome::measure(metricsDC, L"Ag", scale(window, 100),
+        jsti::chrome::Font::caption, dpi);
+    const int valueHeight = jsti::chrome::measure(metricsDC, L"Ag", scale(window, 100),
+        jsti::chrome::Font::chipValue, dpi);
+    ReleaseDC(window, metricsDC);
+    const int statValueTop = scale(window, 4) + captionHeight + scale(window, 2);
+    const int minimumTileHeight = std::max(statValueTop + valueHeight + scale(window, 4),
+        scale(window, 28) + captionHeight + scale(window, 4));
+    const int rowHeight = std::max(scale(window, 190), cardHeaderHeight(window) +
+        densitySpace(window, 20, visualDensity.card_padding) + scale(window, 10) + 2 * minimumTileHeight);
     const RECT transcript{content.left, heroBottom + gap, content.right, content.bottom - rowHeight - gap};
     addCard(transcript, 0xE70F, L"Transcript");
     place(window, transcriptLabelID, RECT{transcript.left + widthOf(transcript) / 3, transcript.top + scale(window, 26),
@@ -1086,8 +1097,9 @@ void layoutDashboard(HWND window, const RECT &content) {
         {insightAverageID, L"Average Length"}, {insightSpendID, L"Spend"}};
     for (int index = 0; index < 4; ++index) {
         const RECT tile = grid(insights, index);
-        frame.stats.push_back({tile, stats[index].second});
-        place(window, stats[index].first, RECT{tile.left + scale(window, 14), tile.top + scale(window, 20),
+        frame.stats.push_back({tile, stats[index].second, RECT{tile.left + scale(window, 14),
+            tile.top + scale(window, 4), tile.right - scale(window, 8), tile.top + scale(window, 4) + captionHeight}});
+        place(window, stats[index].first, RECT{tile.left + scale(window, 14), tile.top + statValueTop,
                                                tile.right - scale(window, 10), tile.bottom - scale(window, 4)});
     }
     const std::tuple<int, wchar_t, const wchar_t *> tiles[] = {
@@ -1556,8 +1568,7 @@ void paintFrame(HWND window, HDC dc) {
     }
     for (const auto &stat : frame.stats) {
         chrome::fillRound(dc, stat.rect, s(16), chrome::accent, chrome::dark() ? 34 : 22);
-        chrome::text(dc, stat.label, RECT{stat.rect.left + s(14), stat.rect.top + s(4), stat.rect.right - s(8),
-                     stat.rect.top + s(20)}, chrome::Font::caption, dpi, palette.secondary,
+        chrome::text(dc, stat.label, stat.labelRect, chrome::Font::caption, dpi, palette.secondary,
                      DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
     }
     for (const auto &tile : frame.tiles) {
@@ -5535,7 +5546,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
                     for (int index = 0; index < 4; ++index) {
                         const RECT &value = placed.at(stats[index]);
                         summariesFit = summariesFit &&
-                            frame.stats[index].rect.top + scale(window, 4) + captionHeight <= value.top &&
+                            heightOf(frame.stats[index].labelRect) >= captionHeight &&
+                            frame.stats[index].labelRect.bottom + scale(window, 2) <= value.top &&
                             heightOf(value) >= valueHeight && heightOf(placed.at(details[index])) >= captionHeight;
                     }
                 }

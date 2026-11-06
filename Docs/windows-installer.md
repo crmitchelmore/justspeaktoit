@@ -28,7 +28,7 @@ Installer is required.
 The website's Windows download action checks `installer.json` with a three-second
 budget and offers **Install Windows beta** only when qualified, canonical
 installer metadata is available. Otherwise it clearly offers the unsigned ZIP.
-The ZIP fallback is usable before either lookup completes. On Windows, browser
+The ZIP fallback link is available before either lookup completes. On Windows, browser
 architecture hints have a 500ms budget and select the native ARM64 or x64 ZIP
 as soon as they resolve, without waiting for installer discovery. The two
 lookups start concurrently: qualified installer metadata can enable installation
@@ -42,6 +42,12 @@ with an explicit notice. The setup disclosure explains extraction, keeping DLLs
 and resources together, separate model downloads, updates and data storage.
 No JavaScript, signing-account enrolment or security-warning bypass is required
 to follow the explicit ZIP instructions.
+
+If the current Alpha has no published ZIP for the requested architecture, or
+availability cannot be verified, the download route retains HTTP 503 and shows
+a recovery page with the architecture, retry action, download choices and setup
+guide. The page is not cached or indexed, and never redirects to an unverified
+asset. This does not publish a build or bypass qualification.
 
 **Identity.** `scripts/windows-package/package-identity-beta.json` declares
 package name `com.justspeaktoit.windows`, display name "Just Speak to It

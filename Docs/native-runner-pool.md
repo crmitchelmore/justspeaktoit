@@ -1,8 +1,8 @@
 # Reviewed native runner pool
 
-The non-UI macOS CI jobs (Debug and Release tests, lint, the core-journey contract and API compatibility), the iOS SwiftPM library build, and unsigned iOS keyboard/watch builds can use the native pool. The pool is opt-in for one reviewed revision via the repository Actions variable `JSTI_NATIVE_APPROVED_SHA`. An unset or nonmatching value retains GitHub-hosted routing.
+The non-UI macOS CI jobs (Debug and Release tests, lint, the core-journey contract and API compatibility), the iOS SwiftPM library build, unsigned iOS keyboard/watch builds, Portable Swift on macOS and the local-transcription benchmark package can use the native pool. The pool is opt-in for one reviewed revision via the repository Actions variable `JSTI_NATIVE_APPROVED_SHA`. An unset or nonmatching value retains GitHub-hosted routing.
 
-The pool defaults to `["jsti-macos-build","macOS"]`. Set the repository variable `JSTI_NATIVE_RUNNER_LABELS` to a JSON label array (for example `["mac-mini-3-local","macOS"]`) to pin approved jobs to runners whose admission hooks accept the revision.
+The pool defaults to `["jsti-reviewed-local","macOS"]`, which selects only the reviewed bravo-mini (ARM64) and Intel MacBook (X64) runners. Never use `jsti-macos-build` as a pool label: the owner's active Mac also carries it. Set the repository variable `JSTI_NATIVE_RUNNER_LABELS` to a JSON label array (for example `["jsti-reviewed-local","macOS","X64"]`) to pin approved jobs to runners whose admission hooks accept the revision. Every native-routed job is architecture-neutral, so the pool spans both architectures; add `ARM64` or `X64` here only to restrict the whole pool.
 
 For a pull request, the source repository must be this repository and the variable must match its exact head SHA. Fork pull requests never match this route. For a push, only `refs/heads/main` with its exact commit SHA can match. Labels and this variable are scheduling controls, not a security boundary: each Mac must independently enforce its local admission policy before any job step runs.
 
@@ -18,7 +18,15 @@ Build cache keys and restore prefixes, including the lint tooling cache, include
 
 UI automation does not use the native pool. `Core Journey Fixture UI` and iOS simulator execution stay on hosted ARM because the registered Macs lack unattended UI automation setup. Portable iOS test products also stay hosted: the producer exports both simulator architectures with source/Xcode/SDK provenance, and the consumer verifies that exact provenance before the unchanged unit/UI selections run. Native Macs may have different Xcode versions and must not exchange those products.
 
-For an unapproved source, Debug, API compatibility and the core contract fall back to hosted Intel (`macos-26-intel`); lint, Release and iOS compilation fall back to hosted ARM (`macos-latest`). Native iOS keyboard/watch compilation requires matching installed SDKs and preinstalled Tuist. The toolchain action verifies native Tuist without installing Homebrew; hosted setup retains its Homebrew mechanism. Ubuntu lanes always stay hosted.
+For an unapproved source, Debug, API compatibility and the core contract fall back to hosted Intel (`macos-26-intel`); lint, Release and iOS compilation fall back to hosted ARM (`macos-latest`). Native iOS keyboard/watch compilation requires matching installed SDKs and preinstalled Tuist. The toolchain action verifies native Tuist without installing Homebrew; hosted setup retains its Homebrew mechanism. Ubuntu lanes use the separate Linux pool described below.
+
+## Self-hosted Linux pool (Omarchy)
+
+The same approval (`JSTI_NATIVE_APPROVED_SHA` matching a same-repository PR head or a `main` push) routes these Linux jobs to `vars.JSTI_LINUX_RUNNER_LABELS`, default `["self-hosted","Linux","X64","omarchy-local"]`, and otherwise to their original hosted image: Paid Access Worker; Dependabot policy checks; desktop icon invariants; Linux desktop (GTK 4); the pinned whisper.cpp runtime build; and Portable Swift on Linux. Fork PRs, `workflow_dispatch`, schedules and other events always stay hosted. Setting `JSTI_LINUX_RUNNER_LABELS` to a hosted label such as `["ubuntu-24.04"]` returns every Linux job to hosted runners without touching the Mac pool.
+
+The GTK, whisper runtime and portable Linux jobs run in their pinned Ubuntu containers, so the runner needs Docker access but no distribution packages. Those containers run as root against the runner's persistent `/__w` bind mount; each records the host owner first and restores it in a final `always()` step so later host jobs can clean the checkout. Host-level jobs need `git`, `python3` and outbound network; Node is installed by `actions/setup-node`.
+
+These stay hosted: CI and CodeQL change detection and the `Build & Test (macOS)` aggregate (Omarchy is one runner, so these short critical-path gates must not queue behind a long Linux job), the Flatpak build and retest (they require a privileged disposable container), CodeQL analysis (it selects Xcode globally), the Windows cross-compile/bundle jobs (secret-bearing on push, ARM-only LLVM), UI capture and simulator jobs, and every release, qualification and publication workflow. Self-hosted jobs receive no secrets.
 
 The laptop uses one shared build slot across repositories, nine Swift build workers and reduced process priority. Its CI menu can pause both laptop runners; pausing may cancel active jobs. These controls do not provide a hard CPU/RAM quota or sandbox untrusted code.
 

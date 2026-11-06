@@ -117,7 +117,15 @@ final class SettingsCredentialUITests: XCTestCase {
         func revealed() -> Bool { element.exists && element.isHittable && usable.contains(element.frame) }
         for _ in 0..<8 {
             if revealed() { return }
-            if element.exists && element.frame.minY < usable.minY { app.swipeDown() } else { app.swipeUp() }
+            guard element.exists, !element.frame.isEmpty else { app.swipeUp(); continue }
+            // A full swipe overshoots the band in both directions (run 42302311943
+            // attempt 2), so drag by the measured distance and hold to stop momentum.
+            let delta = max(-(usable.height - 40), min(usable.height - 40, usable.midY - element.frame.midY))
+            let startY = delta > 0 ? usable.minY + 20 : usable.maxY - 20
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: window.midX, dy: startY))
+            start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: delta)),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
         }
         guard revealed() else {
             XCTFail("The actual Settings control was not reachable")

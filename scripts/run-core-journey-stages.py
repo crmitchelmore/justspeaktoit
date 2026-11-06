@@ -58,9 +58,14 @@ def identity(kind, deadline):
     }
 
 
+def swift_products_root():
+    guarded = os.environ.get("STORAGE_GUARD_BUILD_DIR")
+    return (Path(guarded) / "swift/debug" if guarded else Path(".build/debug")).resolve()
+
+
 def products(kind, directory, deadline):
     if kind == "swift":
-        root = Path(".build/debug").resolve()
+        root = swift_products_root()
         bundles = sorted(root.glob("*.xctest"))
         if not bundles:
             raise FileNotFoundError("Swift build did not produce XCTest products.")

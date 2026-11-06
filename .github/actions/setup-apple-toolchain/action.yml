@@ -33,4 +33,7 @@ runs:
     - name: Install Tuist
       if: inputs.install-tuist == 'true'
       shell: bash
-      run: brew install tuist
+      # GitHub release downloads intermittently return 5xx; retry with backoff.
+      run: |
+        retry() { for delay in 5 15 0; do "$@" && return 0; [ "$delay" = 0 ] && return 1; echo "Retrying in ${delay}s: $*" >&2; sleep "$delay"; done; }
+        retry brew install tuist

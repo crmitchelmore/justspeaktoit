@@ -14,6 +14,7 @@ struct CoreJourneyProbeSnapshot: Decodable {
     let eventPostingAllowed: Bool
     let states: [String]
     let failureMessage: String?
+    let livePreviews: [String]?
     let events: [Event]
 }
 

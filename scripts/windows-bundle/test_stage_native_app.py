@@ -32,7 +32,7 @@ class StageTests(unittest.TestCase):
         root = pathlib.Path(self.directory.name)
         self.bin = root / ".build" / "aarch64-unknown-windows-msvc" / "release"
         self.bin.mkdir(parents=True)
-        self.executable = BUNDLE_TESTS.build_pe(["KERNEL32.dll", "swiftCore.dll"], machine=ARM64)
+        self.executable = BUNDLE_TESTS.build_pe(["KERNEL32.dll", "swiftCore.dll"], machine=ARM64, subsystem=2)
         (self.bin / "SpeakWindows.exe").write_bytes(self.executable)
         self.cli = BUNDLE_TESTS.build_pe(["KERNEL32.dll", "swiftCore.dll"], machine=ARM64)
         (self.bin / "speak.exe").write_bytes(self.cli)
@@ -78,6 +78,12 @@ class StageTests(unittest.TestCase):
                 self.stage()
             self.assertFalse(self.output.exists())
 
+    def test_console_application_is_refused(self):
+        (self.bin / "SpeakWindows.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], machine=ARM64))
+        with self.assertRaisesRegex(STAGE.StageError, "SpeakWindows.exe must use the windows subsystem"):
+            self.stage()
+        self.assertFalse(self.output.exists())
+
     def test_x64_native_staging_keeps_both_hashes_and_images(self):
         root = pathlib.Path(self.directory.name) / "x64" / "x86_64-unknown-windows-msvc" / "release"
         root.mkdir(parents=True)
@@ -98,10 +104,10 @@ class StageTests(unittest.TestCase):
         self.assertEqual((self.output / "SpeakApp_Future.resources/nested/payload.json").read_bytes(), b"{}")
 
     def test_foreign_test_enabled_or_misplaced_builds_are_refused(self):
-        (self.bin / "SpeakWindows.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"]))
+        (self.bin / "SpeakWindows.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], subsystem=2))
         with self.assertRaisesRegex(STAGE.StageError, "x64 image, not a native arm64 executable"):
             self.stage()
-        (self.bin / "SpeakWindows.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], ["XCTest.dll"], machine=ARM64))
+        (self.bin / "SpeakWindows.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], ["XCTest.dll"], machine=ARM64, subsystem=2))
         with self.assertRaisesRegex(STAGE.StageError, "imports XCTest.dll"):
             self.stage()
         with self.assertRaisesRegex(STAGE.StageError, "not a x86_64-unknown-windows-msvc release build"):
@@ -121,8 +127,11 @@ class StageTests(unittest.TestCase):
         symbols_tests = load("native_symbols_fixtures", "test_production_symbols.py")
         from unittest import mock
         original = symbols_tests.image(machine=ARM64)
+        windowed = bytearray(original)
+        pe = int.from_bytes(windowed[60:64], "little")
+        windowed[pe + 24 + 68:pe + 24 + 70] = (2).to_bytes(2, "little")
         for name in STAGE.EXECUTABLES:
-            (self.bin / name).write_bytes(original)
+            (self.bin / name).write_bytes(bytes(windowed) if name == STAGE.APPLICATION else original)
         tool = pathlib.Path(self.directory.name).resolve() / "llvm-objcopy"
         tool.write_bytes(b"fixture tool")
         def execute(command, **kwargs):
@@ -134,12 +143,13 @@ class StageTests(unittest.TestCase):
         with mock.patch.object(STAGE.production_symbols.subprocess, "run", side_effect=execute):
             metadata = STAGE.stage(self.bin, self.output, "arm64", "a" * 40, VERSIONS, strip_tool=tool)
         for name in STAGE.EXECUTABLES:
+            source = bytes(windowed) if name == STAGE.APPLICATION else original
             result = metadata["productionSymbols"][name]
             self.assertEqual(result["status"], "optimized")
-            self.assertNotEqual(metadata["executables"][name], hashlib.sha256(original).hexdigest())
+            self.assertNotEqual(metadata["executables"][name], hashlib.sha256(source).hexdigest())
             self.assertEqual(metadata["executables"][name], hashlib.sha256((self.output / name).read_bytes()).hexdigest())
-            self.assertEqual((self.output / result["retainedPath"]).read_bytes(), original)
-            self.assertEqual((self.bin / name).read_bytes(), original)
+            self.assertEqual((self.output / result["retainedPath"]).read_bytes(), source)
+            self.assertEqual((self.bin / name).read_bytes(), source)
 
     def test_no_tool_explicitly_records_unoptimized_original_baseline(self):
         metadata = self.stage()

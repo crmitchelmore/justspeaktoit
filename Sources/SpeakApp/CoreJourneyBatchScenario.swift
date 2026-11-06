@@ -6,8 +6,11 @@ enum CoreJourneyBatchScenario: String {
     case batchOff
     case batchPolishSuccess
     case batchPolishFailureThenSuccess
+    case streamingOff
+    case batchSilentInput
+    case batchMissingKeyThenRecovery
 
-    var polishes: Bool { self != .batchOff }
+    var polishes: Bool { self == .batchPolishSuccess || self == .batchPolishFailureThenSuccess }
 
     // Use a real catalogue selection so ordinary model validation/routing runs.
     // The synthetic key and intercept-everything session never reach a provider.

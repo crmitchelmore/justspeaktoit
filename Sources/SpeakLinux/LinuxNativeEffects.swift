@@ -62,7 +62,8 @@ struct LinuxNativeEffects: DesktopHostEffects {
     func writeSettings(_ data: Data, to url: URL) throws { try data.write(to: url, options: .atomic) }
 
     /// X11 reads the active window's process for the canonical Linux matchers
-    /// without probing its field; Wayland exposes no external app identity.
+    /// without probing its field; Wayland exposes no external app identity,
+    /// and neither does X11 inside the Flatpak sandbox's PID namespace.
     func captureUtteranceContext(
         requiresInsertionTarget: Bool
     ) async throws -> DesktopHostUtteranceContext<LinuxInsertionTarget> {
@@ -79,6 +80,12 @@ struct LinuxNativeEffects: DesktopHostEffects {
             if requiresInsertionTarget {
                 target = try LinuxX11.captureTargetChecked()
             } else { target = try? LinuxX11.captureTargetChecked() }
+            guard !LinuxSandbox.isFlatpak else {
+                return DesktopHostUtteranceContext(
+                    target: requiresInsertionTarget ? target : nil, executablePath: nil,
+                    profileNotice: LinuxSandbox.profileNotice
+                )
+            }
             return DesktopHostUtteranceContext(
                 target: requiresInsertionTarget ? target : nil, executablePath: target?.executablePath
             )

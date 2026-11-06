@@ -1143,7 +1143,7 @@ public final class AppSettings: ObservableObject {
         ]
 
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+        guard KeychainAccess.copyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data,
               let string = String(data: data, encoding: .utf8) else {
             return nil

@@ -47,7 +47,7 @@ final class ConfigTransferImportTests: XCTestCase { // swiftlint:disable:this ty
                 kSecAttrService as String: service,
                 kSecAttrAccount as String: account
             ]
-            SecItemDelete(query as CFDictionary)
+            KeychainAccess.delete(query as CFDictionary)
         }
         UserDefaults.standard.removePersistentDomain(forName: defaultsSuite)
         service = nil

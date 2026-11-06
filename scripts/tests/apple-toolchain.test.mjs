@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -99,10 +99,33 @@ test('actual validation rejects ambiguous or executable input before tool change
   writeFileSync(join(directory, 'brew'), '#!/bin/sh\nprintf "%s\\n" "$*" > "$BREW_CALL"\n', { mode: 0o755 });
   const install = composite.find(step => step.name === 'Install Tuist');
   const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', install.command], {
-    env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, BREW_CALL: log }, encoding: 'utf8',
+    env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, BREW_CALL: log, RUNNER_ENVIRONMENT: 'github-hosted' }, encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(log, 'utf8'), 'install tuist\n');
+});
+
+test('native setup requires preinstalled Tuist and never invokes Homebrew', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'apple-native-toolchain-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const log = join(directory, 'brew-call');
+  writeFileSync(join(directory, 'brew'), '#!/bin/sh\nprintf called > "$BREW_CALL"\nexit 99\n', { mode: 0o755 });
+  const binary = join(directory, 'tuist');
+  writeFileSync(binary, '#!/bin/sh\nprintf "4.207.0\\n"\n', { mode: 0o755 });
+  const install = composite.find(step => step.name === 'Install Tuist');
+  const run = () => spawnSync('bash', ['-e', '-o', 'pipefail', '-c', install.command], {
+    env: { ...process.env, PATH: `${directory}:/usr/bin:/bin`, BREW_CALL: log,
+      RUNNER_ENVIRONMENT: 'self-hosted' }, encoding: 'utf8',
+  });
+  const installed = run();
+  assert.equal(installed.status, 0, installed.stderr);
+  assert.match(installed.stdout, /4\.207\.0/);
+  assert.equal(existsSync(log), false);
+  rmSync(binary);
+  const missing = run();
+  assert.equal(missing.status, 1);
+  assert.match(missing.stdout, /Preinstall Tuist/);
+  assert.equal(existsSync(log), false);
 });
 
 test('CI preserves the selected Xcode and validates helper changes through both release path gates', () => {

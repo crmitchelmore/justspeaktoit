@@ -108,12 +108,18 @@ final class SettingsCredentialUITests: XCTestCase {
         if success { XCTAssertTrue(app.buttons["Clear Stored Key"].waitForExistence(timeout: 15)) }
     }
 
+    // `isHittable` only needs the element's centre on screen. A row half under
+    // the home indicator passed it, and its tap never navigated (run
+    // 42283665401), so require the whole control inside the usable band.
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) throws {
+        let window = app.windows.firstMatch.frame
+        let usable = CGRect(x: window.minX, y: window.minY + 120, width: window.width, height: window.height - 200)
+        func revealed() -> Bool { element.exists && element.isHittable && usable.contains(element.frame) }
         for _ in 0..<8 {
-            if element.exists && element.isHittable { return }
-            app.swipeUp()
+            if revealed() { return }
+            if element.exists && element.frame.minY < usable.minY { app.swipeDown() } else { app.swipeUp() }
         }
-        guard element.exists && element.isHittable else {
+        guard revealed() else {
             XCTFail("The actual Settings control was not reachable")
             throw SettingsTimeout()
         }

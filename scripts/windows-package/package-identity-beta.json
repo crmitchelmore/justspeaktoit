@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "channel": "beta",
+  "releaseTrain": null,
+  "notes": [
+    "Public Windows beta identity, installed through the signed .msixbundle and App Installer file that windows-installer.yml publishes from qualified Alpha builds (Docs/windows-installer.md). It is separate from the developer identity in package-identity.json, so both can be installed side by side; both use the same %LOCALAPPDATA%\\JustSpeakToIt data directory as the portable bundle.",
+    "The name deliberately carries no maturity label: when Windows leaves beta, only the display name changes and installed copies keep updating in place. A different publisher, however, is a different package family, so the first signed publisher is a lasting choice.",
+    "There is no default publisher. The layout builder requires the exact subject of the signing certificate (WINDOWS_MSIX_PUBLISHER).",
+    "The version is derived from the release manifest's 12-digit build number (windows_installer.package_version), so every published build is strictly newer than the last across Alpha and Stable candidates.",
+    "Settings in the developer notes about write virtualisation, the startup task, maxVersionTested and processor architectures apply unchanged."
+  ],
+  "identity": {
+    "name": "com.justspeaktoit.windows",
+    "processorArchitectures": [
+      "x64",
+      "arm64"
+    ]
+  },
+  "presentation": {
+    "displayName": "Just Speak to It (Beta)",
+    "publisherDisplayName": "Just Speak to It",
+    "description": "Dictate into any Windows app. Beta build of Just Speak to It for Windows.",
+    "language": "en-GB"
+  },
+  "application": {
+    "id": "JustSpeakToIt",
+    "executable": "SpeakWindows.exe",
+    "executionAlias": "JustSpeakToIt.exe",
+    "windowClass": "JustSpeakToItWindows",
+    "startupTask": {
+      "id": "JustSpeakToIt",
+      "parameters": "--background"
+    }
+  },
+  "cli": {
+    "id": "JustSpeakToItCLI",
+    "executable": "speak.exe",
+    "executionAlias": "JustSpeakToItCLI.exe"
+  },
+  "targetDeviceFamily": {
+    "name": "Windows.Desktop",
+    "minVersion": "10.0.19041.0",
+    "maxVersionTested": "10.0.20348.0"
+  },
+  "capabilities": {
+    "restricted": [
+      "runFullTrust",
+      "unvirtualizedResources"
+    ],
+    "device": [
+      "microphone"
+    ]
+  },
+  "fileSystem": {
+    "writeVirtualization": "disabled",
+    "dataDirectory": "%LOCALAPPDATA%\\JustSpeakToIt",
+    "dataDirectoryName": "JustSpeakToIt"
+  },
+  "assets": {
+    "source": "Resources/AppIcon.iconset/icon_512x512@2x.png",
+    "images": {
+      "Assets/StoreLogo.png": 50,
+      "Assets/StoreLogo.scale-200.png": 100,
+      "Assets/StoreLogo.scale-400.png": 200,
+      "Assets/Square44x44Logo.png": 44,
+      "Assets/Square44x44Logo.scale-125.png": 55,
+      "Assets/Square44x44Logo.scale-150.png": 66,
+      "Assets/Square44x44Logo.scale-200.png": 88,
+      "Assets/Square44x44Logo.scale-400.png": 176,
+      "Assets/Square44x44Logo.targetsize-16_altform-unplated.png": 16,
+      "Assets/Square44x44Logo.targetsize-24_altform-unplated.png": 24,
+      "Assets/Square44x44Logo.targetsize-32_altform-unplated.png": 32,
+      "Assets/Square44x44Logo.targetsize-48_altform-unplated.png": 48,
+      "Assets/Square44x44Logo.targetsize-256_altform-unplated.png": 256,
+      "Assets/Square44x44Logo.targetsize-16_altform-lightunplated.png": 16,
+      "Assets/Square44x44Logo.targetsize-24_altform-lightunplated.png": 24,
+      "Assets/Square44x44Logo.targetsize-32_altform-lightunplated.png": 32,
+      "Assets/Square44x44Logo.targetsize-48_altform-lightunplated.png": 48,
+      "Assets/Square44x44Logo.targetsize-256_altform-lightunplated.png": 256,
+      "Assets/Square150x150Logo.png": 150,
+      "Assets/Square150x150Logo.scale-125.png": 188,
+      "Assets/Square150x150Logo.scale-150.png": 225,
+      "Assets/Square150x150Logo.scale-200.png": 300,
+      "Assets/Square150x150Logo.scale-400.png": 600
+    }
+  }
+}

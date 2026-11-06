@@ -1703,9 +1703,7 @@ extension SettingsView {
   }
 
   var cloudPostProcessingOptions: [ModelCatalog.Option] {
-    ModelCatalog.postProcessing.filter {
-      !PostProcessingManager.isLocalPostProcessingModel($0.id)
-    }
+    CleanupModelDiscoveryStore.shared.options(selected: settings.postProcessingModel)
   }
 
   private var localStreamingModels: [LocalTranscriptionModel] {

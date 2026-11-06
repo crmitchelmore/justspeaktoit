@@ -55,6 +55,13 @@ When a user reports that a freshly shipped macOS release won't install or launch
 4. Verify launch locally (e.g. `open -n /Applications/JustSpeakToIt.app`) before asking the user to retry.
 5. If local install verification is requested, confirm `/Applications/JustSpeakToIt.app` exists, read `CFBundleShortVersionString`, and verify the process is running.
 
+## Owner Manual Checks
+
+When an issue is blocked only on an owner device check or decision, add it to
+`Docs/manual-checks.yml` (served at `justspeaktoit.com/qa`) instead of asking in
+the issue; results come back through the `manual-qa-results` workflow. See
+[Docs/manual-qa.md](Docs/manual-qa.md).
+
 ## Project Structure & Module Organization
 
 The canonical current target inventory, build graphs and runtime map live in

@@ -252,13 +252,15 @@ final class FocusRecordingServiceTests: XCTestCase {
         let finished = expectation(description: "stop settled")
         let stop = Task { _ = await service.stopRecording(); finished.fulfill() }
         defer { gate.release(); stop.cancel() }
-        guard await XCTWaiter.fulfillment(of: [gate.entered], timeout: 2) == .completed else {
+        // Both waits are event-driven; 30s only catches a hang, so a stalled
+        // hosted runner cannot masquerade as a redirected stop (#1346).
+        guard await XCTWaiter.fulfillment(of: [gate.entered], timeout: 30) == .completed else {
             return XCTFail("Drain was not entered")
         }
         harness.focus = .none
         harness.settings.hardwareTriggerDestination = .clipboardAndPostProcess
         gate.release()
-        guard await XCTWaiter.fulfillment(of: [finished], timeout: 2) == .completed else {
+        guard await XCTWaiter.fulfillment(of: [finished], timeout: 30) == .completed else {
             return XCTFail("Drain did not settle")
         }
         XCTAssertEqual(service.lastCompletedDestination?.origin, .focus)
@@ -281,6 +283,14 @@ final class FocusCaptureLegacyCompatibilityTests: XCTestCase {
         try await service.startRecording(requiresLiveActivity: false)
         let run = service.activeCaptureID
         _ = await service.stopRecording()
+        // Wait for the polish's own completion signal rather than racing its
+        // History write against the intent's wall-clock budget on a busy runner.
+        let settled = expectation(description: "Automatic polish settled")
+        let observation = service.$isPostProcessing.filter { !$0 }.prefix(1).sink { _ in settled.fulfill() }
+        defer { observation.cancel() }
+        guard await XCTWaiter.fulfillment(of: [settled], timeout: 30) == .completed else {
+            return XCTFail("Automatic polish never settled")
+        }
         let polished = await service.awaitPolishedTranscript(timeout: 2, forRun: run)
         XCTAssertEqual(polished, "Polished transcript")
         XCTAssertEqual(harness.pasteboard.writes, ["Legacy words"])

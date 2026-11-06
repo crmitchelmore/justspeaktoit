@@ -7,6 +7,21 @@ import XCTest
 
 @MainActor
 final class AppSettingsDefaultsKeyTests: XCTestCase {
+    func testDiscoveredCleanupSelectionSurvivesRelaunchWithoutDiscoveryCache() throws {
+        let suite = "CleanupDiscovery.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let selection = "openrouter/cleanup/openai/future-model"
+        defaults.set(selection, forKey: "postProcessingModel")
+        defaults.set(false, forKey: CleanupModelSelection.preferenceKey)
+        let settings = AppSettings(defaults: defaults, loadsSecureStorage: false)
+        XCTAssertEqual(settings.postProcessingModel, selection)
+        XCTAssertFalse(settings.cleanupModelDiscoveryEnabled)
+        settings.cleanupModelDiscoveryEnabled = true
+        XCTAssertTrue(defaults.bool(forKey: CleanupModelSelection.preferenceKey))
+        XCTAssertEqual(defaults.string(forKey: "postProcessingModel"), selection)
+    }
+
     func testSharedNames_LoadSavedValuesAndPersistEditsUnderExistingKeys() throws {
         let suite = "SharedSettingsNames.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

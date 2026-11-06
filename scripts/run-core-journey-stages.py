@@ -187,9 +187,15 @@ def execute(kind, directory):
     return code
 
 
+# Tuist and SwiftPM binary targets (Sentry.xcframework) download from GitHub
+# releases, which intermittently return 5xx (run 41984795106). Three tries with
+# 5s and 15s backoff stay inside the unchanged setup budget.
+SETUP_RETRY = 'retry() { for delay in 5 15 0; do \"$@\" && return 0; [ \"$delay\" = 0 ] && return 1; echo \"Retrying in ${delay}s: $*\" >&2; sleep \"$delay\"; done; }'
+
+
 def setup(directory):
     return GATE["run_gate"](
-        ["bash", "-c", "set -euo pipefail; brew install tuist; tuist generate --no-open"],
+        ["bash", "-c", f"set -euo pipefail; {SETUP_RETRY}; retry brew install tuist; retry tuist generate --no-open"],
         directory / "setup", SETUP_BUDGET, (), stage="setup",
     )
 

@@ -31,6 +31,17 @@ class LinuxAutomationStagingTests(unittest.TestCase):
             self.assertEqual((output / "bin/speak").read_bytes(), cli.read_bytes())
             self.assertTrue((output / "bin/speak").stat().st_mode & 0o111)
 
+    def test_duplicate_optional_bundle_is_rejected_before_writing(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            binary = self.fixture(root)
+            for suffix in (".bundle", ".resources"):
+                (root / ("SpeakApp_SpeakFeedbackResources" + suffix)).mkdir()
+            output = root / "layout"
+            with self.assertRaisesRegex(ValueError, "duplicate production resource bundle target"):
+                STAGE.stage(binary, output)
+            self.assertFalse(output.exists())
+
     def test_missing_cli_fails_before_output_is_created(self):
         with tempfile.TemporaryDirectory() as scratch:
             root = pathlib.Path(scratch)

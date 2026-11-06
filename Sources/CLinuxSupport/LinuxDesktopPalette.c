@@ -22,8 +22,23 @@ static double contrast(GdkRGBA a, GdkRGBA b) {
     return (MAX(x, y) + 0.05) / (MIN(x, y) + 0.05);
 }
 
+/* This palette subset accepts only unescaped double-quoted values. A comment
+ * may follow the closing quote; a '#' inside the value remains literal. */
+static char *read_value(GKeyFile *keys, const char *name) {
+    char *value = g_key_file_get_value(keys, "palette", name, NULL);
+    if (!value) return NULL;
+    g_strstrip(value);
+    char *end = value[0] == '"' ? strchr(value + 1, '"') : NULL;
+    if (!end) { g_free(value); return NULL; }
+    char *tail = end + 1;
+    while (g_ascii_isspace(*tail)) ++tail;
+    if (*tail && *tail != '#') { g_free(value); return NULL; }
+    end[1] = 0;
+    return value;
+}
+
 static gboolean read_color(GKeyFile *keys, const char *name, GdkRGBA *color) {
-    char *value = g_key_file_get_string(keys, "palette", name, NULL);
+    char *value = read_value(keys, name);
     gboolean valid = value != NULL;
     if (valid) {
         g_strstrip(value);
@@ -40,7 +55,7 @@ static gboolean parse_palette(const char *text, Palette *palette) {
     char *ini = g_strconcat("[palette]\n", text, NULL);
     gboolean okay = g_key_file_load_from_data(keys, ini, -1, G_KEY_FILE_NONE, NULL);
     g_free(ini);
-    char *mode = g_key_file_get_string(keys, "palette", "mode", NULL);
+    char *mode = read_value(keys, "mode");
     okay = okay && (g_strcmp0(mode, "\"dark\"") == 0 || g_strcmp0(mode, "\"light\"") == 0)
         && read_color(keys, "background", &palette->background)
         && read_color(keys, "foreground", &palette->foreground)
@@ -146,6 +161,18 @@ void jsti_desktop_palette_install(void) {
 int32_t jsti_desktop_palette_self_test(char *error, size_t capacity) {
     Palette palette = {0};
     const char *valid = "mode=\"dark\"\nbackground=\"#1a1b26\"\nforeground=\"#a9b1d6\"\naccent=\"#7aa2f7\"\n";
+    const char *comments = "mode=\"dark\" # mode\nbackground=\"#1a1b26\" # bg\n"
+        "foreground=\"#a9b1d6\" # fg\naccent=\"#7aa2f7\" # accent\n";
+    if (!parse_palette(comments, &palette)
+        || parse_palette("mode=\"dark\" garbage # comment\nbackground=\"#000000\"\n"
+                         "foreground=\"#ffffff\"\naccent=\"#ffffff\"", &palette)
+        || parse_palette("mode=\"dark\"\nbackground=\"#000000\" garbage # comment\n"
+                         "foreground=\"#ffffff\"\naccent=\"#ffffff\"", &palette)
+        || parse_palette("mode=\"dark\"\nbackground=\"#000000\"\n"
+                         "foreground=\"#ffffff\"\naccent=\"#ffffff # literal\"", &palette)) {
+        jsti_set_error(error, capacity, "Desktop palette inline-comment handling failed.");
+        return -1;
+    }
     if (!parse_palette(valid, &palette) || !palette.dark || contrast(palette.foreground, palette.background) < 4.5
         || parse_palette("mode=\"dark\"\nbackground=\"#111111\"\nforeground=\"#121212\"\naccent=\"#ffffff\"", &palette)
         || parse_palette("mode=\"dark\"\nbackground=\"#111111\"\nforeground=\"#ffffff\"\naccent=\"red; }\"", &palette)

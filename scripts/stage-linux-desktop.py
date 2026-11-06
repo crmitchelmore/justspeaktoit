@@ -16,11 +16,15 @@ import local_llm_package
 
 def resource_bundles(directory):
     bundles = []
+    targets = set()
     for bundle in sorted(path for path in pathlib.Path(directory).iterdir()
                          if path.suffix in (".resources", ".bundle")):
         target = bundle.stem
         if target.endswith("Tests") or target == "SpeakTestSupport" or target.endswith("_SpeakTestSupport"):
             continue
+        if target in targets:
+            raise ValueError(f"duplicate production resource bundle target: {target}")
+        targets.add(target)
         if bundle.is_symlink() or not bundle.is_dir():
             raise ValueError(f"the production resource bundle must be a regular directory: {bundle.name}")
         for entry in bundle.rglob("*"):

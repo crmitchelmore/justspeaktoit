@@ -10,11 +10,9 @@ The swap only happens in CI (``CI`` or ``GITHUB_ACTIONS`` set) or when
 disables it. Otherwise the command runs unchanged, so local runs never touch
 the developer's Keychain.
 
-CI swaps are permitted only on disposable GitHub-hosted runners. Self-hosted
-and unidentified CI runners are refused before any command or Keychain access,
-even when JSTI_TEST_KEYCHAIN=0. A process lock and recovery journal cannot
-isolate user-wide settings from desktop applications or guarantee cleanup after
-SIGKILL. Use hosted runners for these tests, not a shared desktop login.
+Hosted CI uses its disposable account-wide Keychain. Native CI and explicit
+local opt-in use a private file Keychain plus SpeakCore.KeychainAccess selectors,
+without writing desktop defaults/search lists. Native isolation cannot be disabled.
 
 While swapping, the user default Keychain and search list point only at the
 temporary Keychain. Invariants that keep a developer machine safe:
@@ -31,6 +29,7 @@ temporary Keychain. Invariants that keep a developer machine safe:
   identity still match; it never signals an unverified reused process-group ID.
 """
 import errno
+import importlib.util
 import fcntl
 import json
 import os
@@ -99,17 +98,14 @@ def swap_enabled(environ=os.environ):
     return truthy(environ.get('CI')) or truthy(environ.get('GITHUB_ACTIONS'))
 
 
-def require_disposable_ci(environ=os.environ):
-    """Never replace a shared CI account's default or run tests against its login."""
-    runner = environ.get('RUNNER_ENVIRONMENT')
-    if runner == 'self-hosted' or (
-        (truthy(environ.get('CI')) or truthy(environ.get('GITHUB_ACTIONS')))
-        and runner != 'github-hosted'
-    ):
-        raise UnsafeCI(
-            'Keychain tests require a disposable GitHub-hosted runner; '
-            'refusing to change a self-hosted/shared user Keychain or run tests against it'
-        )
+def use_private_keychain(environ=os.environ):
+    return environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'
+
+
+def require_enabled_native_ci(environ=os.environ):
+    if environ.get('RUNNER_ENVIRONMENT') == 'self-hosted' and not swap_enabled(environ):
+        raise UnsafeCI('Native CI requires process-scoped Keychain isolation; it cannot be disabled')
+
 
 
 def same_path(left, right):
@@ -392,7 +388,7 @@ def supervise(child, signals):
     return returncode
 
 
-def launch_gated(command, token):
+def launch_gated(command, token, extra_environment=None):
     """Launch a new process group that cannot exec the command before journalling."""
     read_fd, write_fd = os.pipe()
     gate = (
@@ -404,6 +400,7 @@ def launch_gated(command, token):
     try:
         environment = dict(os.environ)
         environment[RUN_TOKEN_ENV] = token
+        environment.update(extra_environment or {})
         child = subprocess.Popen(
             [sys.executable, '-c', gate, str(read_fd), *command],
             start_new_session=True,
@@ -443,8 +440,9 @@ def repair():
         lock.close()
 
 
-def run_isolated(command):
-    require_disposable_ci()
+def run_hosted_isolated(command):
+    if use_private_keychain():
+        raise UnsafeCI('Account-wide Keychain swapping is restricted to hosted CI')
     signals = SignalState()
     for signum in HANDLED_SIGNALS:
         signal.signal(signum, signals.handle)
@@ -501,6 +499,44 @@ def run_isolated(command):
             lock.close()
 
 
+def run_private_isolated(command):
+    """No default/search-list writes, even when the runner forcibly kills us."""
+    spec = importlib.util.spec_from_file_location(
+        'private_test_keychain', Path(__file__).with_name('private-test-keychain.py')
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    signals = SignalState()
+    for signum in HANDLED_SIGNALS:
+        signal.signal(signum, signals.handle)
+    # Different native jobs own different Keychains; no account-wide swap lock.
+    with tempfile.TemporaryDirectory(prefix=TEMP_PREFIX) as directory:
+        keychain = str(Path(directory).resolve() / 'tests.keychain-db')
+        (Path(directory) / OWNERSHIP_MARKER).write_text(keychain, encoding='utf-8')
+        child = None
+        gate_fd = None
+        try:
+            password = module.create(keychain)
+            signals.raise_on_signal = False
+            child, gate_fd = launch_gated(command, secrets.token_hex(32), {
+                'JSTI_TEST_KEYCHAIN_PATH': keychain,
+                'JSTI_TEST_KEYCHAIN_PASSWORD': password,
+            })
+            os.write(gate_fd, b'1')
+            os.close(gate_fd)
+            gate_fd = None
+            return exit_status(supervise(child, signals))
+        finally:
+            signals.raise_on_signal = False
+            if gate_fd is not None:
+                os.close(gate_fd)
+            if child is not None and child.poll() is None:
+                terminate_group(child.pid, signal.SIGTERM, leader=child)
+    # Interrupted native runs leave only owned temporary files, never changed
+    # account preferences. Storage Guard applies their normal retention.
+
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if not argv:
@@ -508,10 +544,14 @@ def main(argv=None):
     try:
         if argv == ['--repair']:
             return repair()
-        require_disposable_ci()
+        require_enabled_native_ci()
         if not swap_enabled():
             os.execvp(argv[0], argv)
-        return run_isolated(argv)
+        if use_private_keychain():
+            return run_private_isolated(argv)
+        return run_hosted_isolated(argv)
+    except Interrupted as error:
+        return 128 + error.args[0]
     except UnsafeCI as error:
         print(f'with-test-keychain: {error}', file=sys.stderr)
         return 78

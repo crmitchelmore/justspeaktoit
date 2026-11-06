@@ -21,11 +21,15 @@ jobs:
   build-macos:
     # The aggregate required-macos job owns the required branch-protection name.
     name: Build & Test (macOS Debug)
-    # Tests replace user-wide Keychain settings. Never run them in a desktop login.
-    runs-on: macos-26-intel
+    # Route only the explicitly reviewed revision to the native pool.
+    # Every selected native runner must also admit this revision locally.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7.0.1
+
+      - name: Verify process-scoped Keychain isolation
+        run: python3 -B -m unittest scripts.tests.test_private_test_keychain -v
 
       - name: Test installed sample contract collector
         continue-on-error: true
@@ -406,7 +410,7 @@ jobs:
 
       - name: Run prepared core journey gate
         timeout-minutes: 10
-        run: scripts/run-core-journey-e2e.sh --phase test
+        run: python3 scripts/with-test-keychain.py bash scripts/run-core-journey-e2e.sh --phase test
 
       - name: Upload stage diagnostics
         if: always()
@@ -467,8 +471,8 @@ jobs:
 
   release-validation:
     name: Build & Test (Release)
-    # Disposable hosted ARM: Keychain tests must never change a desktop login.
-    runs-on: macos-latest
+    # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 45
     needs: release-paths
     if: needs.release-paths.outputs.package == 'true'

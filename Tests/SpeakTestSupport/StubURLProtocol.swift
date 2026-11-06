@@ -136,6 +136,12 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     private var loadTask: Task<Void, Never>?
     private var startCallback: (@Sendable () -> Void)?
     private var stopCallback: (@Sendable () -> Void)?
+    #if !canImport(FoundationNetworking)
+    // Apple's loading system requires client calls on the thread and run loop
+    // that called `startLoading`, where it also calls `stopLoading`.
+    private var clientRunLoop: CFRunLoop?
+    private var clientModes: [CFString] = []
+    #endif
 
     override public static func canInit(with request: URLRequest) -> Bool { true }
 
@@ -157,6 +163,13 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
             }
             startCallback = configuration.1
             stopCallback = configuration.2
+            #if !canImport(FoundationNetworking)
+            let loop = CFRunLoopGetCurrent()
+            let mode = CFRunLoopCopyCurrentMode(loop)?.rawValue ?? CFRunLoopMode.defaultMode.rawValue
+            clientRunLoop = loop
+            clientModes = mode == CFRunLoopMode.defaultMode.rawValue
+                ? [mode] : [mode, CFRunLoopMode.defaultMode.rawValue]
+            #endif
 
             guard let handler = configuration.0 else {
                 deliver(.fail(Error.noHandler), for: sent)
@@ -178,13 +191,16 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
 
     override public func stopLoading() {
         // Cancelling matters: the deadline tests assert that tearing down an
-        // in-flight request actually cancels the work behind it.
-        stopLock.withLock {
-            guard !stopped else { return }
+        // in-flight request actually cancels the work behind it. The callback
+        // runs outside the lock: this method runs on the loading system's
+        // protocol thread, which must never wait on test code.
+        let callback: (@Sendable () -> Void)? = stopLock.withLock {
+            guard !stopped else { return nil }
             stopped = true
             loadTask?.cancel()
-            stopCallback?()
+            return stopCallback
         }
+        callback?()
     }
 
     // Direct lifecycle tests drain the owned task before asserting no late callbacks.
@@ -194,26 +210,52 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     private func deliver(_ outcome: Outcome, for request: URLRequest) {
+        // Handlers finish on Swift concurrency threads. Calling the client from
+        // there while holding the lock `stopLoading` needs on the protocol
+        // thread breaks URLProtocol's threading contract and is the only way
+        // test code could stall that thread; a cancelled request once saw
+        // neither `stopLoading` nor a completion for 30s on a hosted runner
+        // (#1332, run 42209438059). Delivery is serialised with `stopLoading`
+        // on the protocol's run loop instead.
+        #if !canImport(FoundationNetworking)
+        let target = stopLock.withLock { client == nil ? nil : clientRunLoop.map { ($0, clientModes) } }
+        if let (loop, modes) = target {
+            CFRunLoopPerformBlock(loop, modes as CFArray) { self.finishDelivery(outcome) }
+            CFRunLoopWakeUp(loop)
+            return
+        }
+        #endif
+        finishDelivery(outcome)
+    }
+
+    // Test callbacks (typically `XCTestExpectation.fulfill`) run after the lock
+    // is released so they can never hold up `stopLoading`.
+    private func finishDelivery(_ outcome: Outcome) {
+        let callback = deliverLocked(outcome)
+        callback?()
+    }
+
+    private func deliverLocked(_ outcome: Outcome) -> (@Sendable () -> Void)? {
         stopLock.withLock {
-            guard !stopped else { return }
+            guard !stopped else { return nil }
             switch outcome {
             case let .respond(response, data):
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                guard !stopped else { return }
+                guard !stopped else { return nil }
                 client?.urlProtocol(self, didLoad: data)
-                guard !stopped else { return }
+                guard !stopped else { return nil }
                 client?.urlProtocolDidFinishLoading(self)
             case let .respondWithoutFinishing(response, data):
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                guard !stopped else { return }
+                guard !stopped else { return nil }
                 client?.urlProtocol(self, didLoad: data)
             case let .fail(error):
                 client?.urlProtocol(self, didFailWithError: error)
             case .hang:
                 break
             }
-            guard !stopped else { return }
-            startCallback?()
+            guard !stopped else { return nil }
+            return startCallback
         }
     }
 }

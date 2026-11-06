@@ -121,6 +121,23 @@ modules:
         path: ../../scripts/linux-local-runtime/dependencies.json
         dest-filename: jsti-linux-runtime-policy.json
 
+  # The GNOME SDK does not include patchelf. It is needed only while staging
+  # the shared Swift runtime; remove the tool from the finished application.
+  - name: patchelf
+    buildsystem: simple
+    build-commands:
+      - ./bootstrap.sh
+      - ./configure --prefix=/app
+      - make -j "$FLATPAK_BUILDER_N_JOBS"
+      - make install
+    cleanup:
+      - "*"
+    sources:
+      - type: git
+        url: https://github.com/NixOS/patchelf.git
+        tag: 0.18.0
+        commit: 99c24238981b7b1084313aca8f5c493bb46f302c
+
   - name: justspeaktoit
     buildsystem: simple
     build-options:

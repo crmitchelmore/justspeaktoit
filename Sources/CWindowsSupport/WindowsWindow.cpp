@@ -1060,7 +1060,7 @@ void layoutDashboard(HWND window, const RECT &content) {
     place(window, recordID, box(frame.hero.right - scale(window, 26) - scale(window, 196), frame.hero.top + scale(window, 26),
                                 scale(window, 196), scale(window, 50)));
     layoutChips(window, {{chipSessionsID, L"Sessions"}, {chipTimeID, L"Recording Time"}, {chipSpendID, L"Spend"}});
-    const int rowHeight = scale(window, compact ? 176 : 190);
+    const int rowHeight = scale(window, 190);
     const RECT transcript{content.left, heroBottom + gap, content.right, content.bottom - rowHeight - gap};
     addCard(transcript, 0xE70F, L"Transcript");
     place(window, transcriptLabelID, RECT{transcript.left + widthOf(transcript) / 3, transcript.top + scale(window, 26),
@@ -1087,8 +1087,8 @@ void layoutDashboard(HWND window, const RECT &content) {
     for (int index = 0; index < 4; ++index) {
         const RECT tile = grid(insights, index);
         frame.stats.push_back({tile, stats[index].second});
-        place(window, stats[index].first, RECT{tile.left + scale(window, 14), tile.bottom - scale(window, 30),
-                                               tile.right - scale(window, 10), tile.bottom - scale(window, 6)});
+        place(window, stats[index].first, RECT{tile.left + scale(window, 14), tile.top + scale(window, 20),
+                                               tile.right - scale(window, 10), tile.bottom - scale(window, 4)});
     }
     const std::tuple<int, wchar_t, const wchar_t *> tiles[] = {
         {setupMicrophoneID, 0xE720, L"Microphone"}, {setupModelID, 0xE70F, L"Model"},
@@ -1556,8 +1556,8 @@ void paintFrame(HWND window, HDC dc) {
     }
     for (const auto &stat : frame.stats) {
         chrome::fillRound(dc, stat.rect, s(16), chrome::accent, chrome::dark() ? 34 : 22);
-        chrome::text(dc, stat.label, RECT{stat.rect.left + s(14), stat.rect.top + s(8), stat.rect.right - s(8),
-                     stat.rect.top + s(28)}, chrome::Font::caption, dpi, palette.secondary,
+        chrome::text(dc, stat.label, RECT{stat.rect.left + s(14), stat.rect.top + s(4), stat.rect.right - s(8),
+                     stat.rect.top + s(20)}, chrome::Font::caption, dpi, palette.secondary,
                      DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
     }
     for (const auto &tile : frame.tiles) {
@@ -5524,7 +5524,26 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
                 HDC dc = GetDC(window);
                 const int lineHeight = jsti::chrome::measure(dc, L"Ag", widthOf(placed.at(transcriptID)),
                     jsti::chrome::Font::mono, GetDpiForWindow(window));
+                bool summariesFit = true;
+                if (page == dashboardPage) {
+                    const int captionHeight = jsti::chrome::measure(dc, L"Ag", scale(window, 100),
+                        jsti::chrome::Font::caption, GetDpiForWindow(window));
+                    const int valueHeight = jsti::chrome::measure(dc, L"Ag", scale(window, 100),
+                        jsti::chrome::Font::chipValue, GetDpiForWindow(window));
+                    const int stats[] = {insightSessionsID, insightTimeID, insightAverageID, insightSpendID};
+                    const int details[] = {setupMicrophoneID, setupModelID, setupShortcutID, setupOutputID};
+                    for (int index = 0; index < 4; ++index) {
+                        const RECT &value = placed.at(stats[index]);
+                        summariesFit = summariesFit &&
+                            frame.stats[index].rect.top + scale(window, 4) + captionHeight <= value.top &&
+                            heightOf(value) >= valueHeight && heightOf(placed.at(details[index])) >= captionHeight;
+                    }
+                }
                 ReleaseDC(window, dc);
+                if (!summariesFit) {
+                    failure = "Dashboard summary labels, values or setup details overlap or clip.";
+                    return false;
+                }
                 if (heightOf(placed.at(transcriptID)) < 3 * lineHeight || !frame.heroSubtitle.empty()) {
                     failure = "Compact desktop layout lost its three-line transcript or collapsed hero.";
                     return false;
@@ -5538,7 +5557,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             }
         }
         std::fprintf(stdout, "Windows layout: %d minimum-size pages, zero redundant control moves; "
-            "Dashboard and History retain three transcript lines.\n", pageCount);
+            "Dashboard and History retain three transcript lines; Dashboard summary text fits.\n", pageCount);
         showPage(window, transcriptionPage);
         // A host initially exposing only batch can add its first live route
         // without restarting or changing the current batch preference.

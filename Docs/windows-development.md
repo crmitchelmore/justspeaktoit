@@ -224,10 +224,12 @@ $bin = swift build --configuration release --show-bin-path
 ### UI efficiency and shorter windows
 
 Dashboard and History shorten their decorative headers when the available
-content height is below 640 logical pixels. Dashboard also shortens its lower
-summary row, reclaiming 38 logical pixels for the transcript; History reclaims
-12. Larger layouts and native control sizes are unchanged. The native smoke
-test requires at least three transcript lines at the minimum window size.
+content height is below 640 logical pixels. Dashboard reclaims 24 logical pixels
+for the transcript; History reclaims 12. The Dashboard summary keeps enough
+height for separate metric labels and values and complete Setup detail lines.
+Larger layouts and native control sizes are unchanged. The native smoke test
+requires at least three transcript lines at the minimum window size and checks
+summary text against the actual caption and value font heights.
 
 Unchanged control rectangles do not call `MoveWindow` again. Windows appearance
 is cached outside painting and refreshed on `ImmersiveColorSet` and

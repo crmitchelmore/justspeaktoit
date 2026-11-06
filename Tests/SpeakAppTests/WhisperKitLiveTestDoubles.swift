@@ -82,6 +82,54 @@ final class MockWhisperKitStream: WhisperKitLiveStreaming {
     }
 }
 
+/// Models the dependency actor ending its loop before the main-actor stream
+/// wrapper resumes. The same lifetime boundary is used by the production stream.
+actor WhisperKitTestDecodeLoop {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var started = false
+    private var startedWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func start() async {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            started = true
+            for waiter in startedWaiters { waiter.resume() }
+            startedWaiters = []
+        }
+    }
+
+    func waitUntilStarted() async {
+        guard !started else { return }
+        await withCheckedContinuation { startedWaiters.append($0) }
+    }
+
+    func end() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+@MainActor
+final class GatedWhisperKitStream: WhisperKitLiveStreaming {
+    let loop = WhisperKitTestDecodeLoop()
+    let wrapperReturn = TestGate()
+    var onEvent: WhisperKitStreamEventHandler?
+    private let lifetime = WhisperKitStreamLifetime()
+    var isStreaming: Bool { lifetime.isStreaming }
+
+    func startStream() async throws {
+        await lifetime.run(on: loop) { loop in await loop.start() }
+        await wrapperReturn.wait()
+    }
+
+    func stopStream() async {
+        await loop.end()
+        await wrapperReturn.open()
+    }
+
+    func decodeTail(after confirmedEndSeconds: Float) async throws -> String { "" }
+}
+
 @MainActor
 final class WhisperKitStreamBox {
     private var stream: MockWhisperKitStream

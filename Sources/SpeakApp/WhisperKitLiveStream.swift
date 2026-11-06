@@ -129,11 +129,29 @@ enum WhisperKitTranscriptProjection {
     }
 }
 
+/// Publishes loop completion on its owning actor before a main-actor wrapper
+/// can resume. State is shared only through the lock.
+final class WhisperKitStreamLifetime: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = false
+
+    var isStreaming: Bool { lock.withLock { active } }
+
+    func run<Loop: Actor>(
+        on loop: isolated Loop, operation: (isolated Loop) async throws -> Void
+    ) async rethrows {
+        lock.withLock { active = true }
+        defer { lock.withLock { active = false } }
+        try await operation(loop)
+    }
+}
+
 /// Production stream: WhisperKit's `AudioStreamTranscriber` for capture and
 /// streaming decodes, and the owning pipeline for the stop-time tail decode.
 @MainActor
 final class WhisperKitLiveStream: WhisperKitLiveStreaming {
-    private(set) var isStreaming = false
+    private let lifetime = WhisperKitStreamLifetime()
+    var isStreaming: Bool { lifetime.isStreaming }
     private let pipeline: WhisperKit
     private let transcriber: AudioStreamTranscriber
     private let options: DecodingOptions
@@ -166,9 +184,9 @@ final class WhisperKitLiveStream: WhisperKitLiveStreaming {
     }
 
     func startStream() async throws {
-        isStreaming = true
-        defer { isStreaming = false }
-        try await transcriber.startStreamTranscription()
+        try await lifetime.run(on: transcriber) { transcriber in
+            try await transcriber.startStreamTranscription()
+        }
     }
 
     func stopStream() async {

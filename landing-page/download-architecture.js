@@ -75,6 +75,7 @@ export async function enhanceWindowsDownloads(documentObject, navigatorObject, f
   const links = documentObject.querySelectorAll("[data-auto-windows-download]");
   if (!links.length) return;
   let architecture = "unknown";
+  let hasQualifiedInstaller = false;
   let download = "/alpha/download/windows-x64";
   let action = "Download Windows x64 ZIP (or choose ARM64 below)";
   let note = "Unsigned developer preview. Extract all files before opening SpeakWindows.exe. No Swift installation or automatic updates.";
@@ -89,36 +90,44 @@ export async function enhanceWindowsDownloads(documentObject, navigatorObject, f
     });
   };
   render();
-  architecture = await detectWindowsArchitecture(navigatorObject);
-  const arch = architecture === "arm64" ? "arm64" : "x64";
-  const label = architecture === "unknown" ? "x64 ZIP (or choose ARM64 below)" : `${arch === "arm64" ? "ARM64" : "x64"} ZIP`;
-  download = `/alpha/download/windows-${arch}`;
-  action = `Download Windows ${label}`;
-  render();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
-  try {
-    const response = await fetchObject("/alpha/windows/installer.json", { signal: controller.signal });
-    if (!response.ok) throw new Error("Installer availability request failed");
-    const installer = await response.json();
-    if (installer?.available === true) {
-      if (installer.appInstaller !== "https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller"
-        || typeof installer.publisher !== "string" || !installer.publisher
-        || typeof installer.version !== "string" || !installer.version) {
-        throw new Error("Invalid installer metadata");
-      }
-      download = "/alpha/windows/JustSpeakToIt.appinstaller";
-      action = "Install Windows beta";
-      note = `Version ${installer.version}. Publisher: ${installer.publisher}. Open the downloaded App Installer file; Windows chooses your architecture and checks for updates.`;
-    } else if (installer?.available !== false) {
-      throw new Error("Invalid installer availability");
+  const architectureLookup = detectWindowsArchitecture(navigatorObject).then((detected) => {
+    architecture = detected;
+    if (!hasQualifiedInstaller) {
+      const arch = architecture === "arm64" ? "arm64" : "x64";
+      const label = architecture === "unknown" ? "x64 ZIP (or choose ARM64 below)" : `${arch === "arm64" ? "ARM64" : "x64"} ZIP`;
+      download = `/alpha/download/windows-${arch}`;
+      action = `Download Windows ${label}`;
     }
-  } catch {
-    note = "Installer status could not be checked. The unsigned ZIP links remain available; extract all files before opening SpeakWindows.exe. ZIP builds have no automatic updates.";
-  } finally {
-    clearTimeout(timeout);
-  }
-  render();
+    render();
+  });
+  const installerLookup = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    try {
+      const response = await fetchObject("/alpha/windows/installer.json", { signal: controller.signal });
+      if (!response.ok) throw new Error("Installer availability request failed");
+      const installer = await response.json();
+      if (installer?.available === true) {
+        if (installer.appInstaller !== "https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller"
+          || typeof installer.publisher !== "string" || !installer.publisher
+          || typeof installer.version !== "string" || !installer.version) {
+          throw new Error("Invalid installer metadata");
+        }
+        hasQualifiedInstaller = true;
+        download = "/alpha/windows/JustSpeakToIt.appinstaller";
+        action = "Install Windows beta";
+        note = `Version ${installer.version}. Publisher: ${installer.publisher}. Open the downloaded App Installer file; Windows chooses your architecture and checks for updates.`;
+      } else if (installer?.available !== false) {
+        throw new Error("Invalid installer availability");
+      }
+    } catch {
+      note = "Installer status could not be checked. The unsigned ZIP links remain available; extract all files before opening SpeakWindows.exe. ZIP builds have no automatic updates.";
+    } finally {
+      clearTimeout(timeout);
+    }
+    render();
+  })();
+  await Promise.all([architectureLookup, installerLookup]);
   return { architecture, download };
 }
 

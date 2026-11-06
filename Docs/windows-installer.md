@@ -30,8 +30,11 @@ budget and offers **Install Windows beta** only when qualified, canonical
 installer metadata is available. Otherwise it clearly offers the unsigned ZIP.
 The ZIP fallback is usable before either lookup completes. On Windows, browser
 architecture hints have a 500ms budget and select the native ARM64 or x64 ZIP
-as soon as they resolve, without waiting for installer discovery. Late hints
-cannot change a completed selection.
+as soon as they resolve, without waiting for installer discovery. The two
+lookups start concurrently: qualified installer metadata can enable installation
+before hints resolve, and the installer budget includes time spent detecting
+architecture. Later hints never replace a qualified installer with a ZIP, and
+timed-out hints cannot change a completed selection.
 Browsers without those hints retain a labelled x64 fallback and explicit links
 for both architectures; **Settings > System > About > System type** is the
 manual authority. Installer-status failures leave the ZIP recovery path visible

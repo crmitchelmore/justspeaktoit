@@ -111,6 +111,7 @@ test("Windows selects the native ZIP before installer lookup finishes", async ()
     return new Promise((resolve) => { resolveInstaller = resolve; });
   });
   await requested;
+  await new Promise(setImmediate);
   try {
     assert.equal(document.link.href, "/alpha/download/windows-arm64");
     assert.equal(document.link.textContent, "Download Windows ARM64 ZIP");
@@ -128,15 +129,19 @@ test("Windows architecture lookup has a 500ms budget and ignores late hints", as
   let resolveHints;
   const hints = new Promise((resolve) => { resolveHints = resolve; });
   let requests = 0;
+  let completed = false;
   const pending = enhanceWindowsDownloads(document, {
     userAgentData: { platform: "Windows", getHighEntropyValues: () => hints },
   }, async () => {
     requests += 1;
     return { ok: true, json: async () => ({ available: false }) };
+  }).then((result) => {
+    completed = true;
+    return result;
   });
   context.mock.timers.tick(499);
   await Promise.resolve();
-  assert.equal(requests, 0);
+  assert.equal(completed, false);
   context.mock.timers.tick(1);
   await pending;
   assert.equal(requests, 1);
@@ -147,15 +152,57 @@ test("Windows architecture lookup has a 500ms budget and ignores late hints", as
   assert.equal(document.link.dataset.detectedArchitecture, "unknown");
 });
 
+test("qualified installer discovery does not wait for architecture hints or get overwritten by them", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const document = windowsDocument();
+  let resolveHints;
+  const hints = new Promise((resolve) => { resolveHints = resolve; });
+  let requests = 0;
+  const pending = enhanceWindowsDownloads(document, {
+    userAgentData: { platform: "Windows", getHighEntropyValues: () => hints },
+  }, async () => {
+    requests += 1;
+    return {
+      ok: true,
+      json: async () => ({
+        available: true, publisher: "CN=Example", version: "2026.1105.1200.0",
+        appInstaller: "https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller",
+      }),
+    };
+  });
+  try {
+    assert.equal(requests, 1);
+    await new Promise(setImmediate);
+    assert.equal(document.link.textContent, "Install Windows beta");
+    assert.equal(document.link.href, "/alpha/windows/JustSpeakToIt.appinstaller");
+    assert.equal(document.link.dataset.detectedArchitecture, "unknown");
+  } finally {
+    resolveHints({ architecture: "arm", bitness: "64" });
+    await pending;
+  }
+  assert.equal(document.link.textContent, "Install Windows beta");
+  assert.equal(document.link.href, "/alpha/windows/JustSpeakToIt.appinstaller");
+  assert.equal(document.link.dataset.detectedArchitecture, "arm64");
+});
+
 test("only qualified canonical installer metadata changes the installation action", async () => {
   const document = windowsDocument();
-  await enhanceWindowsDownloads(document, windowsNavigator("arm"), async () => ({
-    ok: true,
-    json: async () => ({
-      available: true, publisher: "CN=Example", version: "2026.1105.1200.0",
-      appInstaller: "https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller",
-    }),
-  }));
+  let resolveInstaller;
+  const installer = new Promise((resolve) => { resolveInstaller = resolve; });
+  const pending = enhanceWindowsDownloads(document, windowsNavigator("arm"), () => installer);
+  await new Promise(setImmediate);
+  try {
+    assert.equal(document.link.href, "/alpha/download/windows-arm64");
+  } finally {
+    resolveInstaller({
+      ok: true,
+      json: async () => ({
+        available: true, publisher: "CN=Example", version: "2026.1105.1200.0",
+        appInstaller: "https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller",
+      }),
+    });
+    await pending;
+  }
   assert.equal(document.link.href, "/alpha/windows/JustSpeakToIt.appinstaller");
   assert.equal(document.link.textContent, "Install Windows beta");
   assert.match(document.note.textContent, /Publisher: CN=Example.*Windows chooses your architecture/);
@@ -176,11 +223,32 @@ test("network, HTTP and malformed metadata failures retain ZIP recovery with an 
   }
 });
 
-test("installer discovery is bounded and leaves a working download when aborted", async () => {
+test("installer discovery has a three-second budget including concurrent stalled architecture hints", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
   const document = windowsDocument();
-  await enhanceWindowsDownloads(document, windowsNavigator("x86"), async (_url, { signal }) => {
-    return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(Error("timeout")), { once: true }));
+  let resolveHints, aborted = false;
+  const hints = new Promise((resolve) => { resolveHints = resolve; });
+  const pending = enhanceWindowsDownloads(document, {
+    userAgentData: { platform: "Windows", getHighEntropyValues: () => hints },
+  }, async (_url, { signal }) => {
+    return new Promise((_resolve, reject) => signal.addEventListener("abort", () => {
+      aborted = true;
+      reject(Error("timeout"));
+    }, { once: true }));
   });
+  try {
+    context.mock.timers.tick(2999);
+    await new Promise(setImmediate);
+    assert.equal(aborted, false);
+    context.mock.timers.tick(1);
+    await new Promise(setImmediate);
+    assert.equal(aborted, true);
+    await pending;
+  } finally {
+    resolveHints({ architecture: "x86", bitness: "64" });
+    context.mock.timers.tick(3000);
+    await pending;
+  }
   assert.equal(document.link.href, "/alpha/download/windows-x64");
   assert.match(document.note.textContent, /could not be checked/);
 });

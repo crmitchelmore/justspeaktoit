@@ -72,6 +72,19 @@ class PrivateKeychainIntegrationTests(unittest.TestCase):
         env.pop('JSTI_TEST_KEYCHAIN_PATH')
         self.run_probe('unscoped-check', str(self.keychain), env=env)
 
+    def test_symlink_scope_is_rejected_even_with_a_matching_marker(self):
+        alias = self.root / 'jsti-ci-keychain-alias'
+        alias.symlink_to(self.keychain.parent, target_is_directory=True)
+        marker = self.keychain.parent / '.jsti-test-keychain'
+        aliased_path = str(alias / self.keychain.name)
+        try:
+            marker.write_text(aliased_path)
+            self.run_probe('invalid', env=dict(self.env, JSTI_TEST_KEYCHAIN_PATH=aliased_path))
+        finally:
+            marker.write_text(str(self.keychain))
+            alias.unlink()
+        self.run_probe('check')
+
     def test_invalid_scope_and_unwrapped_native_ci_fail_closed(self):
         self.run_probe('invalid', env=dict(self.env, JSTI_TEST_KEYCHAIN_PATH='/missing/tests.keychain-db'))
         env = dict(self.env)

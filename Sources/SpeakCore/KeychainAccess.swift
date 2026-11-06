@@ -1,6 +1,9 @@
 #if canImport(Security)
 import Foundation
 import Security
+#if os(macOS)
+import Darwin
+#endif
 
 /// One Security boundary for app code and credential fixtures. Native CI supplies
 /// a private file Keychain per process; ordinary app launches retain OS behaviour.
@@ -47,6 +50,14 @@ public enum KeychainAccess {
         return errSecSuccess
     }
 
+    #if os(macOS)
+    private static func canonicalFilePath(_ path: String) -> String? {
+        guard let resolved = realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+    #endif
+
     private static func perform(
         _ query: CFDictionary, adding: Bool = false, operation: (CFDictionary) -> OSStatus
     ) -> OSStatus {
@@ -63,7 +74,7 @@ public enum KeychainAccess {
         let directory = file.deletingLastPathComponent()
         guard path.hasPrefix("/"), file.lastPathComponent == "tests.keychain-db",
               directory.lastPathComponent.hasPrefix("jsti-ci-keychain-"),
-              file.resolvingSymlinksInPath().path == path,
+              canonicalFilePath(path) == path,
               (try? String(contentsOf: directory.appendingPathComponent(".jsti-test-keychain"),
                            encoding: .utf8)) == path else {
             return errSecParam

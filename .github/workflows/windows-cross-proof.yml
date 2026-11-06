@@ -332,7 +332,9 @@ jobs:
           # this gate, after source/hash validation above has succeeded.
           $failures = [System.Collections.Generic.List[string]]::new()
           try {
-            Invoke-CrossBuilt 'SpeakAppPackageTests.exe' '' 'tests' 180
+            # Hosted windows-2022 needed 134-176s for 3,703-3,748 tests (main and
+            # #1307 evidence, Nov 2026), and the suite grows; 180s left no headroom.
+            Invoke-CrossBuilt 'SpeakAppPackageTests.exe' '' 'tests' 300
             if (-not (Select-String -Path app/windows-tests.log -Pattern 'Executed [1-9][0-9]* tests' -Quiet)) {
               throw 'No XCTest execution evidence found.'
             }
@@ -571,8 +573,10 @@ jobs:
           AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
           WINDOWS_MSIX_PUBLISHER: ${{ vars.WINDOWS_MSIX_PUBLISHER }}
+          WINDOWS_SIGNING_PROVIDER: ${{ vars.WINDOWS_SIGNING_PROVIDER }}
+          SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT: ${{ vars.SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT }}
         run: |
-          python -B scripts/windows-package/signing_configuration.py --github-output $env:GITHUB_OUTPUT `
+          python -B scripts/windows-package/signing_configuration.py --supported artifact-signing --github-output $env:GITHUB_OUTPUT `
             --metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Sign in to Azure with GitHub OIDC

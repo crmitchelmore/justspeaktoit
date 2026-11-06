@@ -1,0 +1,41 @@
+name: Manual QA results
+
+# Applies results submitted from https://justspeaktoit.com/qa. Only the owner's
+# accounts can trigger processing; the issue body is parsed strictly as data.
+on:
+  issues:
+    types: [opened, edited, labeled]
+
+permissions: {}
+
+concurrency:
+  group: manual-qa-results-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.event.issue.state == 'open' &&
+      contains(github.event.issue.labels.*.name, 'manual-qa-results') &&
+      contains(fromJSON('["crmitchelmore","bravostation"]'), github.event.issue.user.login) &&
+      contains(fromJSON('["crmitchelmore","bravostation"]'), github.event.sender.login)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout catalogue and processor
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            Docs/manual-checks.yml
+            landing-page/qa
+          sparse-checkout-cone-mode: false
+
+      - name: Apply results
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/manual-qa-results.mjs

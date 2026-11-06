@@ -144,14 +144,16 @@ final class TransportLoopbackTests: XCTestCase {
         }
 
         let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
-        try await channel.start()
+        defer { channel.close() }
+        try await withHangGuard("start") { try await channel.start() }
         let chunk = TranscriptChunkMessage(
             sessionId: "session-1",
             sequenceNumber: 1,
             text: "text from an unpaired device",
             isFinal: true
         )
-        try await channel.send(.transcriptChunk(chunk))
+        // The Mac may hang up while this frame is in flight; either outcome is fine.
+        _ = try? await withHangGuard("send") { try await channel.send(.transcriptChunk(chunk)) }
 
         let didClose = await self.waitForClosure(of: channel)
         XCTAssertTrue(didClose, "The Mac must hang up on a session frame that arrives before authentication")
@@ -292,32 +294,81 @@ final class TransportLoopbackTests: XCTestCase {
     }
 
     /// Waits for the Mac to hang up, and reports whether it did.
+    ///
+    /// The receive runs unstructured: a Network.framework receive registered
+    /// against an already-cancelled connection may never complete, and a task
+    /// group would wait for it forever (Release run 42016436414 hung ~30 min).
     func waitForClosure(
         of channel: TransportChannel, timeout: TimeInterval = 5, ignoringPongs: Bool = false
     ) async -> Bool {
-        let result = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                do {
-                    while true {
-                        let message = try await channel.receive()
-                        if ignoringPongs, case .pong = message { continue }
-                        return false
-                    }
-                } catch {
-                    return true
+        let closed = try? await withHangGuard("closure", seconds: timeout) { () -> Bool in
+            do {
+                while true {
+                    let message = try await channel.receive()
+                    if ignoringPongs, case .pong = message { continue }
+                    return false
                 }
+            } catch {
+                return true
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return false
-            }
-            let first = await group.next() ?? false
-            // Unblocks whichever child is still waiting, so the group can finish.
-            channel.close()
-            group.cancelAll()
-            return first
         }
-        return result
+        channel.close()
+        return closed ?? false
+    }
+}
+
+struct TransportHangGuardTimeout: Error, CustomStringConvertible {
+    let stage: String
+    let seconds: TimeInterval
+    var description: String { "Loopback \(stage) did not complete within \(seconds)s" }
+}
+
+/// Runs `operation` but returns within `seconds` even if it never completes,
+/// so a stuck Network.framework callback fails the test instead of the job.
+/// A timed-out operation is cancelled and left to finish on its own.
+func withHangGuard<T: Sendable>(
+    _ stage: String, seconds: TimeInterval = 10, _ operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    let gate = HangGuardGate<T>()
+    return try await withCheckedThrowingContinuation { continuation in
+        gate.install(continuation)
+        let work = Task { gate.finish(await Result { try await operation() }) }
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            if gate.finish(.failure(TransportHangGuardTimeout(stage: stage, seconds: seconds))) { work.cancel() }
+        }
+    }
+}
+
+private final class HangGuardGate<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Error>?
+    private var pending: Result<T, Error>?
+
+    func install(_ continuation: CheckedContinuation<T, Error>) {
+        let early: Result<T, Error>? = lock.withLock {
+            if let pending { self.pending = nil; return pending }
+            self.continuation = continuation
+            return nil
+        }
+        if let early { continuation.resume(with: early) }
+    }
+
+    @discardableResult
+    func finish(_ result: Result<T, Error>) -> Bool {
+        let target: CheckedContinuation<T, Error>? = lock.withLock {
+            if let continuation { self.continuation = nil; return continuation }
+            if pending == nil { pending = result }
+            return nil
+        }
+        target?.resume(with: result)
+        return target != nil
+    }
+}
+
+private extension Result where Failure == Error {
+    init(catching body: () async throws -> Success) async {
+        do { self = .success(try await body()) } catch { self = .failure(error) }
     }
 }
 

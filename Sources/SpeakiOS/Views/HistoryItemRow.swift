@@ -15,6 +15,7 @@ struct HistoryItemRow: View {
     var onCopyPolished: () -> Void = {}
     var onReprocess: () -> Void = {}
     var onDelete: () -> Void = {}
+    var onReport: () -> Void = {}
     @State private var isExpanded = false
 
     var body: some View {
@@ -69,6 +70,11 @@ struct HistoryItemRow: View {
                 Label("Reprocess", systemImage: "wand.and.stars")
             }
             .disabled(isReprocessing)
+
+            Button(action: onReport) {
+                Label("Create Issue with Details…", systemImage: "ladybug")
+            }
+            .accessibilityIdentifier("historyCreateIssue")
 
             Divider()
 

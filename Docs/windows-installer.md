@@ -1,15 +1,100 @@
-# Windows developer MSIX package
+# Windows installer and developer MSIX package
 
-This is the first installer slice for Windows x64: an **unsigned developer
-MSIX package** built from the verified self-contained runtime bundle with
-Microsoft's MakeAppx, plus a lifecycle test that signs it with an ephemeral
-certificate on a disposable CI runner and installs, launches, upgrades and
-uninstalls it. It is not an Alpha or Stable release, not signed for
-distribution and not an updater. An ARM64 package of the same identity is
-built from the ARM64 bundle by `windows-arm64.yml`
-([Windows ARM64](windows-arm64.md)). No install receipt exists until the
-`package-lifecycle` job has passed for a revision (see
-[Evidence](#evidence-at-this-checkpoint)).
+This page covers two packages:
+
+- the **public beta installer**: one signed `.msixbundle` (x64 and ARM64)
+  opened through an App Installer file, with automatic updates; and
+- the **developer MSIX**, an unsigned per-architecture package used only for
+  CI lifecycle checks. The rest of this page, from
+  [Identity and version](#identity-and-version), describes it.
+
+## Public beta installer
+
+| URL | Purpose |
+|---|---|
+| <https://justspeaktoit.com/alpha/download/windows> | Website CTA. Redirects to the App Installer file once a signed installer is qualified; until then to the developer ZIP (`?arch=arm64` for ARM64, x64 otherwise) |
+| <https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller> | The App Installer file (`application/appinstaller`, served as a download). Windows' App Installer opens it, picks the package for the PC's architecture and rechecks the same URL for updates. 503 until a signed installer is qualified |
+| <https://justspeaktoit.com/alpha/windows/installer.json> | `{available, channel, tag, build, version, publisher, appInstaller}` for the qualified installer, or `{available: false}` |
+
+The file is a download rather than an `ms-appinstaller:` link because Microsoft
+[disabled that protocol by default](https://learn.microsoft.com/windows/msix/app-installer/installing-windows10-apps-web)
+in December 2023. Opening the downloaded `.appinstaller` shows the App
+Installer dialog with the publisher name, then installs; no ZIP, Swift
+runtime or SDK is involved, and Start, the execution aliases
+`JustSpeakToIt.exe` and `JustSpeakToItCLI.exe`, and Settings > Apps uninstall
+work as for any packaged app. Windows 10 2004 (10.0.19041) or later with App
+Installer is required.
+
+**Identity.** `scripts/windows-package/package-identity-beta.json` declares
+package name `com.justspeaktoit.windows`, display name "Just Speak to It
+(Beta)" and no default publisher: the publisher is always the signing
+certificate's exact subject (`WINDOWS_MSIX_PUBLISHER`). It is a separate
+package family from the developer MSIX and shares its data directory, so
+History and settings carry over. The publisher becomes part of the package
+family name, so **the first public publisher is permanent**: a later change
+means users uninstall and reinstall.
+
+**Version.** The release manifest's 12-digit build `YYYYMMDDhhmm` becomes
+`YYYY.MMDD.hhmm.0` (for example `202610301641` gives `2026.1030.1641.0`), so
+every later Alpha or Stable candidate is a newer package.
+
+**Updates.** The App Installer file asks Windows to check on launch every 12
+hours (with a prompt, not blocking launch) and in a background task. A newer
+signed bundle under the same identity installs over the old one; Windows
+refuses a lower version.
+
+**Pipeline** (`.github/workflows/windows-installer.yml`, called by
+`alpha-release.yml` for each Alpha after desktop qualification):
+
+1. `sources` takes the release manifest's qualified x64 and ARM64 runtime
+   bundles from `desktop-qualification.json`, checking each artifact still
+   matches the published bytes.
+2. `rehearse` (every change and every Alpha, on `windows-2022` and
+   `windows-11-arm`) builds both beta packages and the bundle, signs it with an
+   ephemeral non-exportable CI certificate trusted only for the job, and runs
+   `test-windows-installer.ps1`: install through `Add-AppxPackage
+   -AppInstallerFile`, exactly one registration at the expected version,
+   native architecture, publisher and update URI, both aliases, then the newer
+   file published at the update URI, Windows reporting that update for the
+   installed package (`CheckUpdateAvailabilityAsync`), applying it, a refused
+   downgrade, uninstall and removal of registration and aliases.
+3. `sign` (environment `windows-signing`, `main` only) builds the same bundle
+   with `WINDOWS_MSIX_PUBLISHER`, signs it with Azure Artifact Signing over
+   GitHub OIDC, timestamps it, checks `signtool verify /pa`, the signer subject
+   and the unchanged payload, and writes `<bundle>.sign.json`. Without the
+   signing settings it logs that and stops: nothing is published.
+4. `stage` uploads the signed bundle and the production `.appinstaller` to the
+   manifest's release.
+5. `verify` installs that published file on clean x64 and ARM64 runners with no
+   imported trust (the certificate must chain to a public root). The live
+   update URI still serves the previous release until promotion, so this job
+   proves a clean install; step 2 proves the update path.
+6. `promote` records `windows-installer.json` on the release and only then
+   advances `windows-installer-pointer.json` on `alpha-latest` to a newer
+   build. The website follows that pointer, which can lag the Alpha pointer.
+
+Manual run: Actions > Windows installer > Run workflow, with a manifest tag to
+publish (from `main`) or blank to rehearse the current Alpha.
+
+**What signing does and does not give.** Keep these separate:
+
+| Property | Provided by | Status |
+|---|---|---|
+| Windows will install the package at all | A signature chaining to a trusted root, publisher = manifest | Rehearsed in CI with a test certificate; public signature awaits the owner's choice of route |
+| Publisher name shown in App Installer | Identity validation of the signing account | Owner action ([routes](#routes-for-a-uk-individual-november-2026)) |
+| Signature valid after the certificate expires | RFC 3161 timestamp (`http://timestamp.acs.microsoft.com`) | Checked by the `sign` job |
+| No SmartScreen "unrecognised app" prompt | Reputation earned by the signing identity over time and downloads | Not guaranteed. A trusted signature replaces "Unknown publisher" with the validated name; SmartScreen may still warn on early downloads of a new identity until consecutive releases signed with it build reputation |
+| Store verification | Microsoft Store certification | Not used (direct download) |
+| Malware scanning | Microsoft Defender at download/install | Normal OS behaviour |
+| Clean-device install and update | `verify` on clean hosted runners | Per release, in CI; physical Windows 10/11 machines remain a manual check |
+
+**Owner actions to publish.** Nothing ships until the owner, not an agent,
+chooses and enrols in a signing route. The publisher is an individual in the
+UK, so Azure Artifact Signing (individuals: US and Canada only) is not
+available; see [Routes for a UK individual](#routes-for-a-uk-individual-november-2026)
+for the options, costs and enrolment steps. The pipeline below is wired for
+Artifact Signing and rehearsed with a job-only test certificate; it does not
+switch provider until a route is chosen.
 
 ## Identity and version
 
@@ -148,9 +233,14 @@ failed or cancelled deployment leaves the previous registration in place.
 The lifecycle test checks each case below rather than relying on that
 statement.
 
-The executable uses the console subsystem (as the portable bundle does), so a
-Start menu launch also opens a console window. Changing the linker subsystem
-is a production build change in `Package.swift`, outside this slice.
+`SpeakWindows.exe` links with the windows subsystem (`/SUBSYSTEM:WINDOWS`,
+entry `mainCRTStartup`, in `Package.swift`), so Start menu, startup and
+shortcut launches open no console window; `stage-native-app.py` refuses a
+console-subsystem build. Diagnostic flags such as `--self-test` write to
+redirected handles as before; run from a terminal without redirection, the app
+attaches to that terminal's console, but the shell does not wait, so use
+`Start-Process -Wait -NoNewWindow` or pipe the output. `speak.exe` stays a
+console program.
 
 ## Signing
 
@@ -158,12 +248,17 @@ is a production build change in `Package.swift`, outside this slice.
   installs only signed packages through Add-AppxPackage or App Installer. The
   Windows 11 unsigned-package route needs a special publisher OID that gives a
   different identity, so it is not used. Every CI run still produces it.
-- **Azure Artifact Signing in CI** (`windows-developer-msix-signed`). When the
-  secrets and variables below exist, the `sign` job signs a separately built
-  copy; see [Setting up Azure Artifact Signing](#setting-up-azure-artifact-signing).
-  Without them the job logs "Azure Artifact Signing is not configured ...
-  keeping the unsigned developer MSIX" and succeeds; a partial setup fails and
-  names the missing settings.
+- **Signing provider in CI.** `WINDOWS_SIGNING_PROVIDER` chooses
+  `artifact-signing` (the default when unset; see
+  [Setting up Azure Artifact Signing](#setting-up-azure-artifact-signing)) or
+  `sslcom-esigner` (see
+  [Owner steps: SSL.com IV + eSigner](#owner-steps-sslcom-iv--esigner-direct-download)).
+  The installer `sign` job supports both; the developer-package job
+  (`windows-developer-msix-signed`) signs with Artifact Signing only and skips
+  other providers. With no settings the jobs log "Windows signing is not
+  configured ... publishing nothing" and succeed; a partial setup, settings
+  for two providers without a choice, or a malformed value fails and names
+  the settings, never their values.
 - **Certificate in a Windows certificate store.** For an OV certificate on a
   token or cloud HSM, rebuild the layout with
   `--publisher "<certificate subject>"`, pack it, then run
@@ -190,28 +285,117 @@ migration).
 | Route | Price | Who can use it | Notes |
 |---|---|---|---|
 | [Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/overview) (formerly Trusted Signing) | Basic $9.99/month (5,000 signatures, one profile of each type); Premium $99.99/month (100,000, ten); $0.005 per extra signature ([pricing](https://azure.microsoft.com/pricing/details/artifact-signing/)) | Public Trust: organisations in the US, Canada, EU, UK, Australia, New Zealand, Japan, South Korea, Singapore, Switzerland, Norway and Israel; individual developers in the US and Canada only ([prerequisites](https://learn.microsoft.com/azure/artifact-signing/quickstart#prerequisites)). Needs a paid (not free or trial) Azure subscription | Keys in FIPS 140-3 Level 3 HSMs, short-lived certificates renewed automatically, no token, GitHub OIDC. Subject is the validated legal name; no custom CN or O. Not EV |
-| [Microsoft Store](https://learn.microsoft.com/windows/apps/package-and-deploy/code-signing-options) (Partner Center) | Free registration for individuals and companies | Worldwide | The Store re-signs the MSIX after certification. Store distribution only: it does not sign a package you host yourself |
-| OV certificate on a token or cloud HSM (for example [Certum](https://www.certum.eu/en/code-signing-certificates/) Open Source Code Signing, SSL.com eSigner, DigiCert KeyLocker) | Certum Open Source from about EUR 25 a year, plus about EUR 85 once for a card and reader if not using its cloud HSM; commercial OV about $150 to $300 a year | Worldwide; Certum's Open Source certificate is issued to individuals who maintain open-source projects | Private keys must live on hardware (CA/Browser Forum, June 2023). Signs through `sign-windows-package.ps1`; cloud HSMs that need interactive 2FA suit local signing better than CI |
-| EV certificate | $400+ a year | Worldwide | Since 2024 EV no longer bypasses SmartScreen reputation, so it offers nothing extra here |
-| [SignPath Foundation](https://signpath.org/) | Free for qualifying open-source projects | OSI-licensed, released, actively maintained projects | Signs through SignPath's pipeline with the Foundation's certificate, so the publisher is SignPath Foundation rather than the project owner |
+| [Microsoft Store](https://learn.microsoft.com/windows/apps/package-and-deploy/code-signing-options) (Partner Center) | Free for individual developers ([new flow](https://learn.microsoft.com/windows/apps/publish/whats-new-individual-developer), government ID and selfie) | Individuals in nearly 200 markets, including the UK | The Store re-signs the MSIX after certification. Store distribution only: it does not sign a package you host yourself |
+| Individual (IV) or OV certificate on a token or cloud HSM (for example [Certum](https://shop.certum.eu/open-source-code-signing-on-simplysign.html) Open Source Code Signing in the Cloud, [SSL.com IV](https://www.ssl.com/products/software-integrity/code-signing/iv/) with eSigner, DigiCert KeyLocker) | Certum Open Source in the Cloud EUR 49 a year; SSL.com IV $129 a year plus [eSigner](https://www.ssl.com/guide/esigner-pricing-for-code-signing/) from $20 a month (20 signings) or $180 a year (240) | Worldwide individuals. Certum's Open Source certificate is for open-source maintainers; GlobalSign no longer issues to individuals | Private keys must live on hardware (CA/Browser Forum, June 2023). Certum's SimplySign needs a phone-app code per session and has no vendor-supported CI flow; SSL.com documents headless GitHub Actions signing with a TOTP secret |
+| EV certificate | $400+ a year | Organisations only | Since 2024 EV no longer bypasses SmartScreen reputation, so it offers nothing extra here |
+| [SignPath Foundation](https://signpath.org/terms) | Free for qualifying open-source projects | OSI-licensed (MIT qualifies), released, actively maintained, no proprietary components; any country | Signs MSIX and MSIX bundles ([formats](https://docs.signpath.io/artifact-configuration/reference)) in SignPath's HSM with the Foundation's certificate, so the publisher is SignPath Foundation rather than the project owner. Needs a "Code signing policy" page, named approvers, MFA, and per-release approval |
 
-**Recommendation: Azure Artifact Signing, Basic tier.** For an open-source
-indie shipping an MSIX outside the Store it is the cheapest publicly trusted
-route (about $120 a year), keeps the key off every machine, works from
-GitHub Actions with no stored secret, and SmartScreen treats it like OV. It is
-available if the publisher is an organisation in one of the listed countries
-(a UK limited company qualifies) or an individual in the US or Canada. An
-individual elsewhere, for example a sole developer in the UK, cannot use it.
+**Artifact Signing** is the cheapest publicly trusted route for an
+organisation in one of the listed countries or an individual in the US or
+Canada (about $120 a year, no stored secret, GitHub OIDC). It is not
+available to this project's publisher, an individual in the UK.
 
-**Fallback: an OV code signing certificate in a cloud HSM or on a token**,
-for example Certum's Open Source Code Signing certificate for an individual
-maintainer, signed locally through `sign-windows-package.ps1`. If the project
-prefers not to hold any certificate, SignPath Foundation is the free OSS
-alternative, at the cost of its name as publisher. The Store is the right
-choice only if Windows builds are to be distributed through the Store.
+### Routes for a UK individual (November 2026)
 
-SmartScreen may still warn on the first downloads of any newly signed build;
-reputation builds as consecutive releases are signed with the same identity.
+Each route below is open to a UK individual without forming a company.
+Whichever route ships first fixes the package family: the MSIX `Publisher`
+must equal the signing subject, so moving later between a personal
+certificate, SignPath Foundation and the Store changes the identity and
+existing installs do not upgrade across it.
+
+| | Microsoft Store | SignPath Foundation | SSL.com IV + eSigner | Certum Open Source (cloud) |
+|---|---|---|---|---|
+| Cost | Free | Free | $129/yr certificate + eSigner $180/yr (240 signings) or more | EUR 49/yr |
+| Name users see | Publisher display name set in Partner Center | "SignPath Foundation" | Owner's verified legal name | "Open Source Developer" + owner's legal name |
+| Key custody | Microsoft re-signs; no key held | SignPath HSM; no key held | SSL.com cloud HSM; TOTP secret in a GitHub environment can sign | Certum cloud HSM; phone-app code per session |
+| Unattended CI | Yes (Partner Center submission API) | Yes (GitHub Actions connector), with a human approval per release | Yes, documented GitHub Action; MSIX through SignTool needs a pilot | No vendor-supported route |
+| Install and update | Store install, Store updates | Website `.appinstaller`, as built | Website `.appinstaller`, as built | Website `.appinstaller`, signed by hand on a Windows PC |
+| SmartScreen | Store installs are not download-gated | Shared Foundation identity | New identity; builds reputation | New identity; builds reputation |
+
+Every signing in each release counts: the pipeline signs each architecture's
+package and the bundle (three signatures), so an eSigner tier must cover
+every Alpha that is published, not only Stable.
+
+**Recommendation: the Microsoft Store.** It is the simplest route that is
+actually open to a UK individual: free, no certificate or key to custody, no
+legal name inside a certificate, installs without the "unknown publisher"
+and SmartScreen download prompts, and Windows updates it. The existing MSIX
+bundle is reused; only its identity changes to the values Partner Center
+reserves, and the Store, not `sign`, signs it. The website CTA would link to
+the Store listing; the description keeps the beta label.
+
+If the owner also wants a direct website download, add **SignPath
+Foundation** when showing "SignPath Foundation" as publisher is acceptable
+(free, no personal name), otherwise **SSL.com IV + eSigner** (own legal name,
+about $310 a year, after a one-off MSIX pilot). Certum is cheapest but would
+make every release depend on the owner signing by hand.
+
+SmartScreen may still warn on the first downloads of any newly signed direct
+build; reputation builds as consecutive releases are signed with the same
+identity.
+
+#### Owner steps: Microsoft Store
+
+Done by the owner only; each step creates an account or accepts terms.
+
+1. Go to <https://storedeveloper.microsoft.com>, choose **Get started for
+   free** > **Individual developer**, sign in with a Microsoft account with
+   MFA, and complete ID and selfie verification. Review the pre-filled
+   profile and choose the publisher display name users will see.
+2. In Partner Center > Apps and games, **reserve the name** "Just Speak to
+   It". From Product identity copy `Package/Identity/Name`,
+   `Package/Identity/Publisher` and `PublisherDisplayName`.
+3. Tell the maintainers those three values. They are not secrets. An agent
+   then builds the bundle with that identity and the `runFullTrust`
+   justification and adds an upload job.
+4. Provide a privacy policy URL and age rating, upload the first package by
+   hand, and submit for certification.
+5. Only if automated submission is wanted later: register an Entra ID app for
+   the Partner Center submission API and store its credentials in a
+   `main`-only environment.
+
+#### Owner steps: SignPath Foundation (direct download)
+
+1. Add a "Code signing policy" page to the website listing approvers and the
+   privacy statement required by [the terms](https://signpath.org/terms).
+2. Apply for the free OSS subscription at <https://signpath.org>, linking the
+   repository, and accept SignPath's terms. Enable MFA on SignPath and
+   GitHub.
+3. After approval, install the SignPath GitHub App on the repository and
+   share the organisation, project and signing policy slugs. An agent then
+   adds a `signpath` provider to `sign`; each release waits for an approver.
+
+#### Owner steps: SSL.com IV + eSigner (direct download)
+
+1. Order an IV code signing certificate at
+   <https://www.ssl.com/products/software-integrity/code-signing/iv/>,
+   choosing eSigner cloud delivery, and pay.
+2. Complete identity validation (government ID and liveness check).
+3. Enrol the certificate in eSigner, choose a subscription tier, and set
+   automated signing to get a TOTP secret.
+4. On a Windows PC, install eSigner CKA once, load the certificate and copy
+   its SHA-1 thumbprint and exact subject from `certmgr.msc` (Personal >
+   Certificates). Neither is secret.
+5. In the `main`-only `windows-signing` environment set:
+
+    | Kind | Name | Value |
+    |---|---|---|
+    | Variable | `WINDOWS_SIGNING_PROVIDER` | `sslcom-esigner` |
+    | Secret | `SSLCOM_ESIGNER_USERNAME` | eSigner account username |
+    | Secret | `SSLCOM_ESIGNER_PASSWORD` | eSigner account password |
+    | Secret | `SSLCOM_ESIGNER_TOTP_SECRET` | Base32 automated-signing TOTP secret from step 3 |
+    | Variable | `SSLCOM_ESIGNER_CERTIFICATE_THUMBPRINT` | 40-hex SHA-1 thumbprint from step 4 |
+    | Variable | `WINDOWS_MSIX_PUBLISHER` | Certificate subject from step 4, character for character |
+
+6. Dispatch `Windows installer` on `main` with an existing Alpha manifest and
+   check the `sign` job before relying on it. That job installs SSL.com's
+   eSigner CKA (pinned by SHA-256 in `dependencies.json`), loads the
+   certificate by thumbprint through
+   `scripts/windows-package/load-sslcom-esigner.ps1`, signs the bundle with
+   `/tr http://ts.ssl.com`, verifies it against the runner's trust and the
+   timestamp, then the clean-runner install and promotion gates run as for
+   Artifact Signing. This path is unit-tested but has not signed a real
+   package yet: the first manifest run is the pilot.
 
 ### Setting up Azure Artifact Signing
 
@@ -484,4 +668,5 @@ establish public trust, physical-machine acceptance, updates or a Stable release
   present on the Server runner); SmartScreen and reputation for a signed
   build; the microphone consent prompt under the package identity; saving,
   using and removing a real credential across upgrade and uninstall; high-DPI
-  logos with scale variants and a resource index; and the console window.
+  logos with scale variants and a resource index; and a visual check that a
+  Start menu launch opens no console window.

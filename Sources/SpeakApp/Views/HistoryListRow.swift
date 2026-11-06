@@ -11,6 +11,9 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   @State private var isExpanded: Bool = false
   @State private var showNetworkDetails: Bool = false
   @State private var showDeleteConfirmation: Bool = false
+  @State private var issueReport: IssueDiagnosticReport?
+  @State private var issueReportWithoutDetails: IssueDiagnosticReport?
+  @State private var showIssuePreview = false
   @FocusState private var isFocused: Bool
 
   var body: some View {
@@ -19,6 +22,11 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
       .focused($isFocused)
       .focusEffectDisabled()
       .contextMenu { contextMenuContent }
+      .sheet(isPresented: $showIssuePreview) {
+        if let issueReport, let issueReportWithoutDetails {
+          HistoryIssueReportPreview(report: issueReport, reportWithoutDetails: issueReportWithoutDetails)
+        }
+      }
       .onChange(of: isExpanded) { _, expanded in
         if !expanded {
           showNetworkDetails = false
@@ -242,13 +250,13 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
       Button {
         openGitHubIssue()
       } label: {
-        Label("Open GitHub Issue", systemImage: "ladybug")
+        Label("Review Issue Report…", systemImage: "ladybug")
       }
 
       Button {
         copyIssueReport()
       } label: {
-        Label("Copy Issue Report", systemImage: "doc.on.clipboard")
+        Label("Review Before Copying…", systemImage: "doc.on.clipboard")
       }
     }
 
@@ -744,16 +752,16 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
         Button {
           openGitHubIssue()
         } label: {
-          Label("Open GitHub Issue", systemImage: "ladybug")
+          Label("Review Issue Report…", systemImage: "ladybug")
         }
-        .speakTooltip("Open a prefilled public GitHub issue with safe diagnostics for this failed session.")
+        .speakTooltip("Review the exact public draft and JSON before opening GitHub.")
 
         Button {
           copyIssueReport()
         } label: {
-          Label("Copy Report", systemImage: "doc.on.clipboard")
+          Label("Review Before Copying…", systemImage: "doc.on.clipboard")
         }
-        .speakTooltip("Copy the same safe diagnostic report without opening GitHub.")
+        .speakTooltip("Review the exact public draft before choosing to copy it.")
       }
       .buttonStyle(.bordered)
       .controlSize(.small)
@@ -1014,17 +1022,17 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   }
 
   private func copyIssueReport() {
-    copyToPasteboard(HistoryIssueReporter.issueBody(for: item))
+    presentIssueReport()
   }
 
   private func openGitHubIssue() {
-    guard let url = HistoryIssueReporter.issueURL(for: item) else {
-      copyIssueReport()
-      return
-    }
-    if !NSWorkspace.shared.open(url) {
-      copyIssueReport()
-    }
+    presentIssueReport()
+  }
+
+  private func presentIssueReport() {
+    issueReport = HistoryIssueReporter.report(for: item)
+    issueReportWithoutDetails = HistoryIssueReporter.report(for: item, includeDiagnostics: false)
+    showIssuePreview = true
   }
 
   private func formatDuration(_ duration: TimeInterval) -> String {

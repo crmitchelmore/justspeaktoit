@@ -183,5 +183,16 @@ processing, preserving debug evidence outside the downloaded application.
 A native release payload comparison on Swift 6.4.2 (same resources and whisper
 runtime, normalized `tar`, `xz -6`) measured 223,545,421 → 165,200,564 bytes
 uncompressed, and 46,056,484 → 31,330,096 bytes compressed. These are native
-payload measurements, not a verified Flatpak bundle or shared GNOME runtime
-saving. The changed Flatpak manifest requires a fresh installed-bundle CI run.
+payload measurements, not a shared GNOME runtime saving. The final
+[Flatpak build/install run](https://github.com/crmitchelmore/justspeaktoit/actions/runs/42138678379)
+for `63b42e0e` produced a 33,194,016-byte bundle and a 167,433,463-byte installed
+application, excluding shared GNOME and optional models. Its authenticated
+artifact also passed the full local sandbox checks and compact/wide Wayland
+tours on Omarchy. See [the quality rubric](linux-quality-rubric.md) for exact
+provenance, measurements and limitations.
+
+PR builds explicitly check out the immutable PR head rather than a synthetic
+merge, whose base may differ from the event payload. Provenance accepts that
+exact authenticated event head while retaining repository, workflow, run,
+attempt, commit-parent and bundle-hash verification. The manifest builds pinned
+patchelf 0.18.0 only for staging and removes it during cleanup.

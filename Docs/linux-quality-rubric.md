@@ -65,9 +65,9 @@ zero work. RSS includes shared resident pages, so it is not unique physical use.
   per callback passed in 31.455s with exact-byte assertions intact. This changes
   no production timeout and is not a network-throughput benchmark.
 
-Final category scores remain pending repeat measurements and fresh Flatpak
-installed-bundle qualification. Do not interpret the native payload result as
-an already-published download improvement.
+The final scores below include repeat native measurements and successful
+Flatpak installed-bundle qualification. This is a qualified developer preview,
+not a published Stable release.
 
 ### Final native measurements
 
@@ -79,21 +79,65 @@ changed by +2.8%, within the 10% gate. These small increases do not support a
 speed-up claim; the app already met the responsiveness targets before this work.
 
 The final Linux-selected Swift run passed with its explicit runtime/environment
-skips; packaging tests passed (9 staging, 36 Flatpak source/qualification tests).
+skips; packaging tests passed (9 staging, 37 Flatpak source/qualification tests).
 Final native high-contrast smoke and installed adapter/resource/codec self-tests
 passed. High-contrast icons and primary buttons were inspected after correction.
-Host dependencies differ from the pinned Flatpak graph; that is why a fresh
-pinned build/install remains an acceptance gate.
+Host dependencies differ from the pinned Flatpak graph; both graphs were
+therefore tested separately. The final Flatpak qualification is recorded below.
 
-| Category | Provisional score | Evidence / remaining limit |
+| Category | Final score | Evidence / remaining limit |
 |---|---:|---|
 | Desktop fit | 9.0 | Palette, hierarchy, fallback and keyboard checks pass; fonts inherit natively but enlarged-font coverage is incomplete |
 | Layout and accessibility | 8.5 | Compact/wide and every-page tours pass; focus, exhaustive contrast and reduced-motion coverage have partial credit |
 | Responsiveness | 10.0 | All five explicitly scoped numerical gates pass on this laptop; not a universal performance rating |
-| Distribution efficiency | 8.0 | Native size/compression/debug/model gates pass; final pinned Flatpak installation criterion withheld |
-| Functional confidence | 8.0 | Native tests, UI, integration and transcription pass; final distributed-artifact criterion withheld |
+| Distribution efficiency | 10.0 | Matched native size/compression gates, debug separation, optional models, and final pinned Flatpak installation all pass |
+| Functional confidence | 10.0 | Native tests, UI, integration, transcription and final distributed-artifact launch/layout gates pass |
 
-The goal is **not complete** until every category reaches 8.5 and the fresh
-Flatpak artifact retains its installed runtime behaviour. Physical microphone
-quality, cloud sessions and consented Wayland insertion are still outside these
-automated fixture claims, as recorded in the Linux parity matrix.
+All five categories meet **8.5/10 or higher** against the defined criteria.
+Desktop fit awards 2/2/2/2/1 across its five criteria: font inheritance and an
+isolated Sans 14 check pass, but enlarged-font coverage across desktops remains
+partial. Layout awards 2/2/1.5/1.5/1.5: native focus/labels, contrast validation
+and inherited motion preferences are checked, but exhaustive assistive-technology,
+per-control contrast and animation coverage are not claimed. Responsiveness,
+distribution and functional confidence award 2 per verified criterion.
+These scoped 10s are not assertions of a flawless product or full platform parity.
+
+### Final distributed-artifact qualification — 6 November 2026
+
+Source `63b42e0eb337e5935604a5fa5257eda962ccbfcc` passed the
+[Flatpak build and installed runtime checks](https://github.com/crmitchelmore/justspeaktoit/actions/runs/42138678379)
+and [native Linux desktop checks](https://github.com/crmitchelmore/justspeaktoit/actions/runs/42138678462).
+The downloaded artifact's authenticated run identity, exact source checkout,
+commit parents and SHA-256 were verified before local installation:
+`e046ed8b6235de07d26db5ac5f40780800d0159cefc974a3a1bfc321cf02d2a7`.
+
+The bundle is **33,194,016 bytes (31.7 MiB)**; the installed application is
+**167,433,463 bytes (159.7 MiB)**, excluding the shared GNOME runtime and optional
+models. The earlier installed Flatpak has different provenance, so the controlled
+32.0% compressed improvement remains the matched native payload comparison.
+
+The exact bundle passed the complete installed-sandbox check locally: resource
+and codec loading, adapters, CLI, PID isolation, speech runtime, real transcription,
+live folding, silence/cancellation and GTK/icon startup. The 11-second JFK fixture
+took 3.00s locally (2.98s in CI). Swift runtime dependency closure and license were
+verified; the build-only patchelf tool is absent from the installed payload.
+Native Wayland screenshot tours of this same installed bundle completed at
+compositor-confirmed **640×480** and **1100×760**. Compact pages scroll and preserve
+the header/record control; wide layouts restore the sidebar and columns. Dialogs
+have their own sizes and are not claimed to fit a 640×480 desktop.
+
+Native builds can read the user's Omarchy palette. Flatpak uses native/portal
+appearance fallback because its existing sandbox does not expose the host palette;
+no new filesystem grants were added. Source files and Package.swift are unchanged
+between the measured final native build and this qualified package revision.
+
+Evidence is retained locally under `~/.local/state/jsti-omarchy-quality/`, with
+final artifact metadata in `flatpak-63b42e0/`, local checks in
+`flatpak-local-checks-63b42e0.log`, and screenshots in the app cache's
+`quality-final-640/` and `quality-final-1100/` directories.
+
+Physical microphone quality, cloud sessions and consented Wayland insertion are
+outside these automated fixture claims, as recorded in the Linux parity matrix.
+Apple CI and Swift CodeQL jobs were manually cancelled; the macOS aggregate is
+therefore red. This Linux qualification does not establish PR merge readiness,
+Apple validation or Stable publication.

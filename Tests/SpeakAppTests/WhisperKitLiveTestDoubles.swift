@@ -10,6 +10,7 @@ import XCTest
 /// stream events, stream termination and the stop-time tail decode directly.
 @MainActor
 final class MockWhisperKitStream: WhisperKitLiveStreaming {
+    private(set) var isStreaming = false
     var onEvent: WhisperKitStreamEventHandler?
     /// Thrown from `startStream()` before any audio, like a capture failure.
     var startError: (any Error)?
@@ -32,6 +33,8 @@ final class MockWhisperKitStream: WhisperKitLiveStreaming {
         if let startError {
             throw startError
         }
+        isStreaming = true
+        defer { isStreaming = false }
         try await withCheckedThrowingContinuation { continuation in
             streamContinuation = continuation
         }
@@ -67,11 +70,13 @@ final class MockWhisperKitStream: WhisperKitLiveStreaming {
     /// Ends `startStream()` the way WhisperKit's loop does after an internal
     /// decode error: by returning normally while still "recording".
     func endStream() {
+        isStreaming = false
         streamContinuation?.resume()
         streamContinuation = nil
     }
 
     func fail(_ error: any Error) {
+        isStreaming = false
         streamContinuation?.resume(throwing: error)
         streamContinuation = nil
     }

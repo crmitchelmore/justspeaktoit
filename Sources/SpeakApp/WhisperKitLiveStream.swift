@@ -46,6 +46,9 @@ struct WhisperKitStreamRequest: Equatable, Sendable {
 /// production conformance.
 @MainActor
 protocol WhisperKitLiveStreaming: AnyObject {
+    /// Whether the stream is still active, independently of when the controller
+    /// receives its task-completion callback.
+    var isStreaming: Bool { get }
     /// Starts microphone capture and runs the realtime decode loop. Returns
     /// only once `stopStream()` or a failure ends the loop.
     func startStream() async throws
@@ -130,6 +133,7 @@ enum WhisperKitTranscriptProjection {
 /// streaming decodes, and the owning pipeline for the stop-time tail decode.
 @MainActor
 final class WhisperKitLiveStream: WhisperKitLiveStreaming {
+    private(set) var isStreaming = false
     private let pipeline: WhisperKit
     private let transcriber: AudioStreamTranscriber
     private let options: DecodingOptions
@@ -162,6 +166,8 @@ final class WhisperKitLiveStream: WhisperKitLiveStreaming {
     }
 
     func startStream() async throws {
+        isStreaming = true
+        defer { isStreaming = false }
         try await transcriber.startStreamTranscription()
     }
 

@@ -430,11 +430,8 @@ class SignalState:
 def repair():
     lock = acquire_lock()
     try:
-        recover_from_journal()
-        before = current_configuration()
-        default, search = sanitise(*before)
-        apply_configuration(default, search)
-        print(f'with-test-keychain: default Keychain {default}; search list {search}')
+        if not recover_from_journal():
+            print('with-test-keychain: no recovery journal; Keychain settings unchanged')
         return 0
     finally:
         lock.close()

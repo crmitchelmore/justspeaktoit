@@ -305,6 +305,13 @@ class WithTestKeychainTests(unittest.TestCase):
         self.assert_restored()
         self.assert_children_gone()
 
+    def test_repair_without_journal_preserves_deliberately_custom_search_list(self):
+        self.write_state(self.extra, [self.extra])
+        before = self.state()
+        native = dict(self.env, RUNNER_ENVIRONMENT='self-hosted')
+        self.assertEqual(self.run_script('--repair', env=native), 0)
+        self.assertEqual(self.state(), before)
+
     def test_repair_recovers_after_sigkill(self):
         process = self.start_script(*self.child_command(sleep=30))
         self.wait_for_swap()

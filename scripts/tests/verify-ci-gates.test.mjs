@@ -16,8 +16,9 @@ const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+)
   .map(([, id, body]) => [id, body]));
 const nativeEligibleJobs = [
   'build-macos', 'release-validation', 'api-compatibility', 'lint', 'core-journey-e2e',
+  'build-ios-swiftpm', 'build-ios-keyboard',
 ];
-const armFallbackJobs = new Set(['lint', 'release-validation']);
+const armFallbackJobs = new Set(['lint', 'release-validation', 'build-ios-swiftpm', 'build-ios-keyboard']);
 const hostedFallback = (id) => (armFallbackJobs.has(id) ? 'macos-latest' : 'macos-26-intel');
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
@@ -56,7 +57,7 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   assert.match(swift, /^\s+timeout-minutes: 40$/m);
   assert.match(ui, /^\s+timeout-minutes: 42$/m);
   assert.match(swift, /timeout-minutes: 17\n\s+run: scripts\/run-core-journey-e2e.sh --phase build/);
-  assert.match(swift, /timeout-minutes: 10\n\s+run: scripts\/run-core-journey-e2e.sh --phase test/);
+  assert.match(swift, /timeout-minutes: 10\n\s+run: python3 scripts\/with-test-keychain.py bash scripts\/run-core-journey-e2e.sh --phase test/);
   assert.ok(swift.indexOf('--phase build') < swift.indexOf('--phase test'));
   for (const phase of ['setup', 'build', 'test']) {
     assert.match(ui, new RegExp(`run: python3 scripts/run-core-journey-stages.py ui --phase ${phase}`));
@@ -145,7 +146,7 @@ test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
   for (const id of ['build-ios', 'core-journey-fixture-ui']) {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
-  for (const id of ['build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard']) {
+  for (const id of ['build-ios-test-products']) {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
   assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
@@ -185,16 +186,17 @@ test('native pool still requires the exact reviewed source and trusted event', (
   }
 });
 
-test('standalone iOS SwiftPM compilation stays hosted with no new native admission', () => {
+test('iOS SwiftPM compilation keeps its command and bounded budget when native eligible', () => {
   const body = jobBodies['build-ios-swiftpm'];
-  assert.match(body, /^\s+runs-on: macos-latest$/m);
+  assert.deepEqual(route('build-ios-swiftpm', routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
+    ['jsti-macos-build', 'macOS']);
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
-  assert.doesNotMatch(body, /if:|jsti-macos-build|bravo-mini-local/);
+  assert.doesNotMatch(body, /if:|bravo-mini-local/);
 });
 
 test('UI jobs cannot be admitted to a native runner by repository variables', () => {
-  for (const id of ['build-ios', 'core-journey-fixture-ui']) {
+  for (const id of ['build-ios', 'core-journey-fixture-ui', 'build-ios-test-products']) {
     assert.doesNotMatch(jobBodies[id], /JSTI_NATIVE|jsti-macos-build|bravo-mini-local/, id);
   }
 });

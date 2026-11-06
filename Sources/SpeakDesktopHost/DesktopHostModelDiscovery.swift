@@ -4,6 +4,9 @@ import SpeakDesktop
 
 extension DesktopHostController {
     static func prepareModelCatalog(directory: URL, settings: inout Settings) throws -> OpenRouterAudioCatalogStore {
+        CleanupModelDiscoveryStore.shared.setEnabled(
+            settings.configuration?.enabled(CleanupModelSelection.preferenceKey) ?? false
+        )
         // Remote batch, live and on-device choices keep separate slots, so
         // switching Source restores each one's last model.
         let isLocalLive = DesktopHostModels.isLocalLive

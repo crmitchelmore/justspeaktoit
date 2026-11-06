@@ -30,12 +30,22 @@ final class PostProcessingManager: ObservableObject {
     self.personalLexicon = personalLexicon
   }
 
-  // swiftlint:disable:next function_body_length
   func process(
     rawText: String,
     context: PersonalLexiconContext,
     corrections: PersonalLexiconHistorySummary?,
     onStreamingUpdate: ((String) -> Void)? = nil
+  ) async -> Result<PostProcessingOutcome, Error> {
+    await process(rawText: rawText, context: context, corrections: corrections,
+                  onStreamingUpdate: onStreamingUpdate, onDiagnostic: nil)
+  }
+
+  func process(
+    rawText: String,
+    context: PersonalLexiconContext,
+    corrections: PersonalLexiconHistorySummary?,
+    onStreamingUpdate: ((String) -> Void)? = nil,
+    onDiagnostic: ((RequestDiagnosticContext.PostProcessingObservation) -> Void)?
   ) async -> Result<PostProcessingOutcome, Error> {
     if Self.isEffectivelyEmptyTranscript(rawText) {
       return .success(
@@ -80,16 +90,48 @@ final class PostProcessingManager: ObservableObject {
       userPrompt: userMessage
     )
 
+    return await Self.performRemoteProcess(
+      client: client, rawText: rawText, promptPayload: promptPayload,
+      settings: (streamingEnabled: { self.settings.postProcessingStreamingEnabled },
+                 temperature: { self.settings.postProcessingTemperature }),
+      delivery: .init(log: log, streamingUpdate: onStreamingUpdate, diagnostic: onDiagnostic)
+    )
+  }
+
+  struct RemoteDelivery {
+    let log: Logger
+    let streamingUpdate: ((String) -> Void)?
+    let diagnostic: ((RequestDiagnosticContext.PostProcessingObservation) -> Void)?
+  }
+
+  // swiftlint:disable:next function_body_length
+  static func performRemoteProcess(
+    client: ChatLLMClient, rawText: String, promptPayload: PostProcessingPromptPayload,
+    settings: (streamingEnabled: () -> Bool, temperature: () -> Double),
+    delivery: RemoteDelivery
+  ) async -> Result<PostProcessingOutcome, Error> {
+    // Actual remote delegate: lazy accessors preserve per-call reads without
+    // constructing settings, secrets, local model managers or persistent state.
+    let model = promptPayload.modelIdentifier
+    let systemPrompt = promptPayload.systemPrompt
+    let userMessage = promptPayload.userPrompt
+    let log = delivery.log
+    let onStreamingUpdate = delivery.streamingUpdate
+    let onDiagnostic = delivery.diagnostic
+    var fallbackObserved: Bool?
     // Try streaming if enabled and client supports it
-    if settings.postProcessingStreamingEnabled,
+    if settings.streamingEnabled(),
        let streamingClient = client as? StreamingChatLLMClient {
       do {
         var accumulated = ""
+        let messages = [ChatMessage(role: .user, content: userMessage)]
+        let requestedTemperature = settings.temperature()
+        onDiagnostic?(Self.observation(model: model, streaming: true))
         let stream = streamingClient.sendChatStreaming(
           systemPrompt: systemPrompt,
-          messages: [ChatMessage(role: .user, content: userMessage)],
+          messages: messages,
           model: model,
-          temperature: settings.postProcessingTemperature
+          temperature: requestedTemperature
         )
 
         for try await chunk in stream {
@@ -109,17 +151,21 @@ final class PostProcessingManager: ObservableObject {
         )
       } catch {
         log.warning("Streaming failed, falling back to non-streaming: \(error.localizedDescription, privacy: .public)")
+        fallbackObserved = true
         // Fall through to non-streaming
       }
     }
 
     // Non-streaming fallback
     do {
+      let messages = [ChatMessage(role: .user, content: userMessage)]
+      let requestedTemperature = settings.temperature()
+      onDiagnostic?(Self.observation(model: model, streaming: false, fallbackObserved: fallbackObserved))
       let response = try await client.sendChat(
         systemPrompt: systemPrompt,
-        messages: [ChatMessage(role: .user, content: userMessage)],
+        messages: messages,
         model: model,
-        temperature: settings.postProcessingTemperature
+        temperature: requestedTemperature
       )
 
       let cleaned =
@@ -136,8 +182,21 @@ final class PostProcessingManager: ObservableObject {
       )
     } catch {
       log.error("Post-processing failed: \(error.localizedDescription, privacy: .public)")
+      onDiagnostic?(Self.observation(
+        model: model, streaming: false, fallbackObserved: fallbackObserved,
+        failure: TranscriptionManager.batchFailure(error, stage: .postProcessing)
+      ))
       return .failure(error)
     }
+  }
+
+  private static func observation(
+    model: String, streaming: Bool, fallbackObserved: Bool? = nil,
+    failure: RequestDiagnosticContext.Failure? = nil
+  ) -> RequestDiagnosticContext.PostProcessingObservation {
+    .init(handoff: .init(provenance: .observedHandoff, postProcessingModel: .project(model),
+                         options: .init(streamingEnabled: streaming)),
+          finalFailure: failure, fallbackObserved: fallbackObserved)
   }
 
   private func processWithLocalModelIfNeeded(

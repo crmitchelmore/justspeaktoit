@@ -28,7 +28,15 @@ final class TranscriberCoordinator: ObservableObject {
     @Published private(set) var state: RecordingServiceState = .idle
     @Published private(set) var isRunning = false
     @Published private(set) var partialText = ""
-    @Published private(set) var error: Error?
+    @Published private(set) var error: Error? {
+        didSet { if error == nil { issueFailureSnapshot = IOSIssueReporter.failedRequest() } }
+    }
+    private(set) var issueFailureSnapshot = IOSIssueReporter.failedRequest()
+    private var requestDiagnostics = IOSRequestDiagnosticState()
+
+    func issueSnapshot(failedStart run: UUID?) -> IOSIssueReportSnapshot {
+        requestDiagnostics.failedStartSnapshot(for: run)
+    }
     @Published private(set) var recordingWarning: String?
     @Published private(set) var currentModel: String = AppleLocalModels.preferredSpeechModelID
     @Published private(set) var confidence: Double?
@@ -89,6 +97,12 @@ final class TranscriberCoordinator: ObservableObject {
         captureStopNotice == nil ? .microphoneChanged : .interrupted
     }
     var makeSession: (() throws -> any IOSRecordingSession)?
+    /// Queues an offline on-device capture for a cloud upgrade (issue #999).
+    var tagOfflineCapture: (iOSHistoryItem, UUID, String) -> Void = {
+        OfflineTranscriptUpgrader.shared.tag(item: $0, recordingID: $1, intendedModelID: $2)
+    }
+    /// The cloud model this run would have used had the network been up.
+    private var offlineIntendedModel: String?
     @Published private(set) var captureStopNotice: String?
     private var startTime: Date?
     /// Last time the App Group shared state was written for a partial result.
@@ -277,7 +291,10 @@ final class TranscriberCoordinator: ObservableObject {
     }
 
     private func releaseOwnership() {
-        if let ownedRunID { ownership.release(ownedRunID) }
+        if let ownedRunID {
+            requestDiagnostics.retire(ownedRunID)
+            ownership.release(ownedRunID)
+        }
         ownedRunID = nil
         let waiters = releaseWaiters
         releaseWaiters = []
@@ -453,7 +470,9 @@ final class TranscriberCoordinator: ObservableObject {
         partialText = result.text
         wordCount = result.text.split(whereSeparator: \.isWhitespace).count
         updateActivityAfterStop(duration: duration, result: result, rearmHandsFree: rearmHandsFree)
-        return await finishStop(with: result, recordingWarning: session.recordingLossSummary)
+        return await finishStop(
+            with: result, recordingWarning: session.recordingLossSummary, recordingID: session.safetyRecordingID
+        )
     }
 
     private func updateActivityAfterStop(
@@ -480,7 +499,7 @@ final class TranscriberCoordinator: ObservableObject {
     }
 
     private func finishStop(
-        with result: TranscriptionResult, recordingWarning: String?
+        with result: TranscriptionResult, recordingWarning: String?, recordingID: UUID?
     ) async -> TranscriptionResult {
         // Live shared-state writes are throttled; commit the final transcript
         // once so the copy intents always see the complete text.
@@ -488,7 +507,7 @@ final class TranscriberCoordinator: ObservableObject {
         // Onboarding progress is only ever earned by a transcript that really
         // arrived; a blank one is ignored by the policy.
         CaptureOnboardingStore.shared.recordDictation(trigger: .inApp, transcript: result.text)
-        await historyManager.recordTranscriptionAndWait(
+        let item = await historyManager.recordTranscriptionAndWait(
             text: result.text,
             model: currentModel,
             duration: result.duration,
@@ -496,6 +515,9 @@ final class TranscriberCoordinator: ObservableObject {
                 [warning, error?.localizedDescription].compactMap { $0 }.joined(separator: " ")
             }
         )
+        if let item, let intended = offlineIntendedModel, let recordingID {
+            tagOfflineCapture(item, recordingID, intended)
+        }
         startTime = nil
         return result
     }
@@ -596,6 +618,7 @@ private extension TranscriberCoordinator {
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
             : settings.selectedModel
+        requestDiagnostics.admit(IOSRequestDiagnosticProjection.foreground(modelID: currentModel), run: runID)
         try requireBatchCredentialsIfNeeded(runID: runID)
         partialText = ""
         confidence = nil
@@ -624,6 +647,7 @@ private extension TranscriberCoordinator {
         let strictOnDeviceRecognition: Bool
         switch offlineDecision {
         case .use(let route):
+            self.offlineIntendedModel = route.notice == nil ? nil : self.currentModel
             self.currentModel = route.modelID
             self.recordingWarning = route.notice
             strictOnDeviceRecognition = route.requiresStrictOnDeviceRecognition
@@ -686,6 +710,9 @@ private extension TranscriberCoordinator {
         guard lifecycle.installStartCancellation(for: runID, cancel: { session.cancel() }) else {
             throw CancellationError()
         }
+        requestDiagnostics.observe(
+            session.resolution, run: runID, defaultSession: makeSession == nil && sessionFactory == nil
+        )
         try await session.start(
             preRollBuffers: preRollBuffers,
             analyzerFallbackAllowed: analyzerFallbackAllowed
@@ -765,6 +792,8 @@ extension TranscriberCoordinator {
             captureStopNotice = error.localizedDescription
             return
         }
+        issueFailureSnapshot = requestDiagnostics.freezeFailure(.init(stage: .request), run: ownedRunID)
+            ?? IOSIssueReporter.failedRequest()
         self.error = error
         if liveActivitiesEnabled() {
             activityManager.reportError(error.localizedDescription)
@@ -801,6 +830,7 @@ private extension TranscriberCoordinator {
     /// gate and the startup measurement, so neither can attribute work to
     /// another run.
     func beginRun(_ runID: UUID, entry: StartupEntry?) {
+        requestDiagnostics.begin(runID)
         presentationRunID = runID
         presentation.begin(run: runID)
         diagnostics.begin(run: runID, entry: entry, localOrigin: .coordinator)
@@ -827,6 +857,12 @@ private extension TranscriberCoordinator {
     /// A start that stopped short still reports what it did reach; the stages
     /// it never crossed stay absent rather than becoming zeroes.
     func finishStartupDiagnostics(runID: UUID, error: Error) {
+        if error is CancellationError || Task.isCancelled {
+            requestDiagnostics.discardFailure(runID)
+        } else {
+            // Still owned; freeze before presentation/run teardown clears state.
+            requestDiagnostics.freezeFailure(.init(), run: runID)
+        }
         diagnostics.finish(
             (error is CancellationError || Task.isCancelled) ? .cancelled : .failed,
             run: runID
@@ -849,6 +885,8 @@ public struct ContentView: View {
     @StateObject private var handsFree: IOSHandsFreeDictationCoordinator
     @ObservedObject private var settings = AppSettings.shared
     @State private var showingError = false
+    @State private var issueReport: IOSIssueReportController?
+    @State private var issueErrorSnapshot = IOSIssueReporter.failedRequest()
     @State private var errorMessage = ""
     @State private var startFailureRecovery: CaptureStartFailureRecovery?
     @State private var recoveryDestination: CaptureStartFailureRecovery?
@@ -1121,6 +1159,10 @@ public struct ContentView: View {
                     Button(recovery.buttonTitle) { self.performStartFailureRecovery(recovery) }
                         .accessibilityIdentifier("captureStartRecoveryButton")
                 }
+                Button("Create Issue with Details…") {
+                    self.issueReport = IOSIssueReportController(snapshot: self.issueErrorSnapshot)
+                    self.startFailureRecovery = nil
+                }
                 Button("OK", role: .cancel) { self.startFailureRecovery = nil }
             } message: {
                 Text(errorMessage)
@@ -1147,6 +1189,7 @@ public struct ContentView: View {
             }
             .onChange(of: coordinator.error?.localizedDescription) { _, newError in
                 if let error = newError {
+                    self.issueErrorSnapshot = coordinator.issueFailureSnapshot
                     self.startFailureRecovery = nil
                     errorMessage = error
                     showingError = true
@@ -1162,6 +1205,7 @@ public struct ContentView: View {
             }
             .onChange(of: handsFree.failureMessage) { _, newError in
                 if let newError {
+                    self.issueErrorSnapshot = IOSIssueReporter.failedRequest()
                     self.startFailureRecovery = nil
                     errorMessage = newError
                     showingError = true
@@ -1171,6 +1215,7 @@ public struct ContentView: View {
             // never swallowed. Successes need no alert: they are in History.
             .onChange(of: sharedImporter.lastOutcome) { _, outcome in
                 guard case .failed = outcome, let outcome else { return }
+                self.issueErrorSnapshot = IOSIssueReporter.failedRequest()
                 self.startFailureRecovery = nil
                 errorMessage = outcome.message
                 showingError = true
@@ -1200,6 +1245,10 @@ public struct ContentView: View {
                 presentSessionError(backgroundService.sessionErrorToken)
                 offerCaptureRecoveryIfNeeded()
                 Task { await sharedImporter.drain() }
+                // Offline captures upgrade when the path returns, and on every
+                // foreground in case it returned while suspended (issue #999).
+                OfflineTranscriptUpgrader.shared.startObservingNetwork()
+                Task { await OfflineTranscriptUpgrader.shared.run() }
             }
             .onChange(of: scenePhase) { _, phase in
                 // Scene intent is recorded synchronously so an owned utterance
@@ -1208,6 +1257,7 @@ public struct ContentView: View {
                 if phase == .active {
                     refreshBackgroundState()
                     Task { await sharedImporter.drain() }
+                    Task { await OfflineTranscriptUpgrader.shared.run() }
                 }
             }
             .onChange(of: backgroundService.isRunning) { wasRunning, isRunning in
@@ -1220,6 +1270,7 @@ public struct ContentView: View {
                     displayText = processedResult
                 }
             }
+            .sheet(item: $issueReport) { IOSIssueReportPreview(controller: $0) }
             // Swiping the sheet away counts as finishing it, so first run is
             // offered exactly once and never nags. Auto-start is considered on
             // the way out, so enabling it before onboarding still takes effect
@@ -1459,12 +1510,13 @@ public struct ContentView: View {
         // microphone as much as a running one; auto-start stands down rather
         // than alerting over a quick action the user just pressed.
         guard backgroundService.state == .idle else { return }
+        let handle = ForegroundCaptureHandle()
         do {
-            try await coordinator.start()
+            try await coordinator.start(handle: handle)
         } catch is CancellationError {
             // A manual tap or view cancellation retired this auto-start.
         } catch {
-            self.presentStartFailure(error)
+            self.presentStartFailure(error, snapshot: coordinator.issueSnapshot(failedStart: handle.runID))
         }
     }
 
@@ -1490,6 +1542,7 @@ public struct ContentView: View {
         let description = error.localizedDescription
         guard !description.isEmpty else { return }
         self.presentedSessionError = token
+        self.issueErrorSnapshot = backgroundService.issueSnapshot(for: token)
         if let presentation = error as? CaptureStartFailurePresentation {
             self.errorMessage = presentation.message
             self.startFailureRecovery = presentation.recovery
@@ -1597,6 +1650,7 @@ public struct ContentView: View {
         // second, conflicting in-app recording. The user stops the background
         // one the same way they started it.
         guard !backgroundService.isRunning else {
+            self.issueErrorSnapshot = IOSIssueReporter.failedRequest()
             self.startFailureRecovery = nil
             errorMessage = "A background recording is already in progress. "
                 + "Use the Action Button to stop it."
@@ -1606,18 +1660,20 @@ public struct ContentView: View {
 
         // Clear previous text when starting new recording
         displayText = ""
+        let handle = ForegroundCaptureHandle()
         do {
             try await coordinator.start(
-                entry: StartupEntry(origin: .foreground, observedAt: pressedAt)
+                entry: StartupEntry(origin: .foreground, observedAt: pressedAt), handle: handle
             )
         } catch is CancellationError {
             // Intentional startup cancellation has no result or error alert.
         } catch {
-            self.presentStartFailure(error)
+            self.presentStartFailure(error, snapshot: coordinator.issueSnapshot(failedStart: handle.runID))
         }
     }
 
-    private func presentStartFailure(_ error: Error) {
+    private func presentStartFailure(_ error: Error, snapshot: IOSIssueReportSnapshot? = nil) {
+        self.issueErrorSnapshot = snapshot ?? IOSIssueReporter.failedRequest()
         let presentation = CaptureStartFailurePresentation.make(for: error)
         self.errorMessage = presentation.message
         self.startFailureRecovery = presentation.recovery

@@ -35,7 +35,10 @@ public final class TranscriptionRecordingService: ObservableObject {
             // repeats an earlier failure word for word — a presenter that
             // de-duplicated on the message would swallow the later one, with no
             // intervening `nil` to tell the two apart (#1084).
-            sessionErrorToken = lastSessionError == nil ? nil : UUID()
+            let token = lastSessionError == nil ? nil : UUID()
+            requestDiagnostics.publish(pendingIssueFailure, token: token)
+            pendingIssueFailure = nil
+            sessionErrorToken = token
             // One funnel for every capture failure, so the health screen can
             // report how the last real run ended rather than only what is
             // true this second (issue #997). The journal keeps a closed-set
@@ -157,6 +160,16 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Identity of the capture in flight, so a caller that started one can
     /// recognise its own result. `nil` once that capture has settled.
     private var currentRunID: UUID?
+    private var requestDiagnostics = IOSRequestDiagnosticState()
+    private var pendingIssueFailure: IOSIssueReportSnapshot?
+
+    func issueSnapshot(for token: UUID?) -> IOSIssueReportSnapshot { requestDiagnostics.snapshot(for: token) }
+
+    func publishRequestFailure(_ error: Error, failure: RequestDiagnosticContext.Failure) {
+        pendingIssueFailure = error is CancellationError ? nil
+            : requestDiagnostics.freezeFailure(failure, run: currentRunID)
+        lastSessionError = error
+    }
     /// The transcript the most recent capture committed, tagged with the
     /// capture it belongs to.
     ///
@@ -196,6 +209,9 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// recording can be discarded *after* its transcript has landed, never at
     /// the moment the provider replied.
     private var deliveringSession: (any IOSRecordingSession)?
+    /// The cloud model this run would have used had the network been up,
+    /// when offline routing substituted on-device recognition (issue #999).
+    private var offlineIntendedModel: String?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
@@ -371,6 +387,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // publishes an empty completion for *this* run rather than leaving a
         // waiter to read an older one.
         currentRunID = runID
+        requestDiagnostics.begin(runID)
         recordingWarningRunID = UUID()
         state = lifecycle.state
         defer { state = lifecycle.state }
@@ -381,6 +398,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             request: configurationRequest, run: runID
         )
         effectiveConfiguration = configuration
+        requestDiagnostics.admit(
+            IOSRequestDiagnosticProjection.admission(configuration, keyboardProfile: keyboardProfile != nil), run: runID
+        )
         effectiveDestination = CaptureDestinationSelection(
             configuration: configuration, keyboardProfile: keyboardProfile != nil
         )
@@ -403,6 +423,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         captureStopNotice = nil
         recordingWarning = nil
         providerFallbackNotice = nil
+        offlineIntendedModel = nil
         currentTrigger = keyboardProfile == nil ? trigger : .keyboard
         // A model the catalogue only lists for batch transcription cannot run in
         // streaming mode, so an explicit `model=` (from a capture link or a
@@ -545,6 +566,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             guard lifecycle.installStartCancellation(for: runID, cancel: { session.cancel() }) else {
                 throw CancellationError()
             }
+            requestDiagnostics.observe(
+                session.resolution, run: runID, defaultSession: makeSession == nil && sessionFactory == nil
+            )
             try await session.start()
             diagnostics.note(.stage(.sessionStarted), run: runID)
             // The session this run allocated is published only while the run
@@ -834,6 +858,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
         switch decision {
         case .use(let route):
+            if route.notice != nil { self.offlineIntendedModel = self.currentModel }
             self.currentModel = route.modelID
             if let notice = route.notice { self.providerFallbackNotice = notice }
             return route.requiresStrictOnDeviceRecognition
@@ -1026,6 +1051,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private func completeRun(with text: String) {
         guard let currentRunID else { return }
         lastRunCompletion = CaptureRunCompletion(runID: currentRunID, text: text)
+        requestDiagnostics.retire(currentRunID)
         self.currentRunID = nil
     }
 
@@ -1185,6 +1211,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         // capture's text — including when that text is empty. The identity is
         // kept for the polish that may follow.
         let completedRunID = currentRunID
+        let completedRequestContext = requestDiagnostics.admission(for: completedRunID)
+        let completedRequestFailure = requestDiagnostics.failure(for: completedRunID)
         completeRun(with: text)
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
@@ -1197,9 +1225,14 @@ public final class TranscriptionRecordingService: ObservableObject {
                 duration: result.duration,
                 errorMessage: endingSession?.recordingLossSummary.map { warning in
                     [warning, lastSessionError?.localizedDescription].compactMap { $0 }.joined(separator: " ")
-                }
+                },
+                requestContext: completedRequestContext, requestFailure: completedRequestFailure
             )
             : nil
+        if let historyItem, let intended = offlineIntendedModel,
+           let recording = deliveringSession?.safetyRecordingID {
+            dependencies.tagOfflineCapture(historyItem, recording, intended)
+        }
         // Cancellation can retire this completion while its admitted History write
         // finishes. Keep that durable receipt, but never deliver a retired run or
         // clear a replacement run's state. cancelRecording already owns teardown.
@@ -1617,7 +1650,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         if (error as? iOSTranscriptionError)?.isControlledInterruption == true {
             captureStopNotice = error.localizedDescription
         } else {
-            lastSessionError = error
+            publishRequestFailure(error, failure: .init(stage: .request))
             activityManager.reportClassifiedError(error)
         }
         guard lifecycle.state == .recording else { return }

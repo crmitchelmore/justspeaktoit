@@ -191,6 +191,15 @@ struct OpenRouterChatRequest: Encodable {
     let stream: Bool?
     let maxTokens: Int?
 
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(CleanupModelSelection.requestModel(model), forKey: .model)
+        try container.encode(temperature, forKey: .temperature)
+        try container.encode(messages, forKey: .messages)
+        try container.encodeIfPresent(stream, forKey: .stream)
+        try container.encodeIfPresent(maxTokens, forKey: .maxTokens)
+    }
+
     enum CodingKeys: String, CodingKey {
         case model
         case temperature

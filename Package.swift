@@ -30,6 +30,7 @@ let portableCoreBuild = true
 // explicitly classified here, so future domain work reaches every platform.
 let appleCoreSources: [String] = [
     "AlibabaSpeechConfigurationFields.swift",
+    "APIKeyGuideDisclosure.swift",
     "AppGroupAvailability.swift",
     "AppleSpeechAnalyzerLiveSession.swift",
     "AppleSpeechAnalyzerTranscriber.swift",

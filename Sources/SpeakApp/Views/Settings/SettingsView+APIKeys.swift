@@ -173,8 +173,9 @@ extension SettingsView {
         validateTooltip: "Make sure your saved key still works before you rely on it in a session.",
         removeButtonTitle: "Remove Key",
         removeTooltip: "Forget this key from Speak and your Keychain if you no longer need it.",
-        link: nil,
-        linkLabel: nil
+        link: OpenRouterService.apiKeysURL,
+        linkLabel: "Get API Key",
+        guideUses: [.transcription, .postProcessing, .voiceOutput]
       )
     case .transcription(let provider):
       providerAPIKeyCard(for: provider)
@@ -223,8 +224,10 @@ extension SettingsView {
       validateTooltip: "Confirm that your \(provider.displayName) key is still valid before a big session.",
       removeButtonTitle: "Remove Key",
       removeTooltip: "Forget this service key from Speak and your Keychain when you no longer use it.",
-      link: provider.website.isEmpty ? nil : URL(string: provider.website),
-      linkLabel: provider.website.isEmpty ? nil : "Get API Key"
+      link: APIKeyCatalog.keyPageURL(for: provider.apiKeyIdentifier)
+        ?? (provider.website.isEmpty ? nil : URL(string: provider.website)),
+      linkLabel: "Get API Key",
+      guideUses: .transcription
     )
   }
 
@@ -359,8 +362,9 @@ extension SettingsView {
         removeButtonTitle: "Remove Key",
         removeTooltip: "Forget this key from Speak and your Keychain. Disables both ElevenLabs "
           + "TTS and Scribe transcription.",
-        link: URL(string: website),
-        linkLabel: "Get API Key"
+        link: APIKeyCatalog.keyPageURL(for: provider.apiKeyIdentifier) ?? URL(string: website),
+        linkLabel: "Get API Key",
+        guideUses: [.transcription, .voiceOutput]
       )
     }
 
@@ -403,8 +407,10 @@ extension SettingsView {
       validateTooltip: "Confirm that your \(provider.displayName) key is still valid.",
       removeButtonTitle: "Remove Key",
       removeTooltip: "Forget this key from Speak and your Keychain.",
-      link: website.isEmpty ? nil : URL(string: website),
-      linkLabel: website.isEmpty ? nil : "Get API Key"
+      link: APIKeyCatalog.keyPageURL(for: provider.apiKeyIdentifier)
+        ?? (website.isEmpty ? nil : URL(string: website)),
+      linkLabel: "Get API Key",
+      guideUses: provider.sharesTranscriptionCredential ? [.transcription, .voiceOutput] : .voiceOutput
     )
   }
 
@@ -438,7 +444,8 @@ extension SettingsView {
     removeTooltip: String,
     link: URL?,
     linkLabel: String?,
-    statusLabel: String = "Status"
+    statusLabel: String = "Status",
+    guideUses: APIKeyUses
   ) -> some View {
     let configuration = APIKeyCardConfiguration(
       title: title,
@@ -466,7 +473,8 @@ extension SettingsView {
       removeTooltip: removeTooltip,
       link: link,
       linkLabel: linkLabel,
-      statusLabel: statusLabel
+      statusLabel: statusLabel,
+      guideUses: guideUses
     )
 
     return SettingsCard(title: title, systemImage: systemImage, tint: tint) {
@@ -500,6 +508,8 @@ extension SettingsView {
         .foregroundStyle(.secondary)
         .lineLimit(2)
         .speakTooltip(configuration.descriptionText)
+
+      APIKeyGuideDisclosure(identifier: configuration.credentialIdentifier, uses: configuration.guideUses)
 
       providerBalanceView(configuration)
 
@@ -628,6 +638,8 @@ extension SettingsView {
       Text(configuration.descriptionText)
         .font(.caption)
         .foregroundStyle(.secondary)
+
+      APIKeyGuideDisclosure(identifier: configuration.credentialIdentifier, uses: configuration.guideUses)
 
       HStack(spacing: 12) {
         regularAPIKeySaveButton(configuration)

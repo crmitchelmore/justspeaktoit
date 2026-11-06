@@ -442,10 +442,16 @@ jobs:
           if [ -f scripts/windows-bundle/swift-runtime-lock-arm64.json ]; then
             lock=scripts/windows-bundle/swift-runtime-lock-arm64.json
           fi
+          python3 -B scripts/windows-bundle/prepare-zip-optimizer.py \
+            --downloads "$RUNNER_TEMP/archive-optimizer-downloads" \
+            --output "$RUNNER_TEMP/archive-optimizer"
+          JSTI_ADVZIP="$RUNNER_TEMP/archive-optimizer/advzip" \
+            python3 -B -m unittest discover -s scripts/windows-bundle -p test_zip_optimization.py
           python3 scripts/windows-bundle/build-windows-bundle.py --architecture arm64 \
             --app "$RUNNER_TEMP/windows-arm64-app" \
             --swift-runtime "$RUNNER_TEMP/swift-runtime-arm64" --swift-runtime-lock "$lock" \
             --downloads "$RUNNER_TEMP/bundle-downloads" --output "$output" \
+            --zip-optimizer "$RUNNER_TEMP/archive-optimizer/advzip" \
             --local-runtime "$RUNNER_TEMP/windows-local-runtime-arm64" 2>&1 |
             tee "$output/bootstrap.log"
       - name: Upload the self-contained ARM64 runtime bundle

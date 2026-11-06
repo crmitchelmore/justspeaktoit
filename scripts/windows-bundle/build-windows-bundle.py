@@ -38,6 +38,7 @@ if str(HERE) not in sys.path:
 import redistributables  # noqa: E402
 import windows_pe  # noqa: E402
 import windows_targets  # noqa: E402
+import zip_optimization  # noqa: E402
 sys.path.insert(0, str(HERE.parent / "local-llm-runtime"))
 import local_llm_package  # noqa: E402
 
@@ -948,6 +949,8 @@ def main():
                         help="whisper.cpp runtime build (build-whisper-runtime.py output) to bundle for on-device transcription")
     parser.add_argument("--local-llm-runtime", type=pathlib.Path,
                         help="pinned offline native cleanup build's LocalLLMRuntime directory; no acquisition")
+    parser.add_argument("--zip-optimizer", type=pathlib.Path,
+                        help="absolute pinned advzip path from prepare-zip-optimizer.py; otherwise zlib level 9")
     args = parser.parse_args()
     architecture = args.architecture
     runtime_directory, lock_path = swift_runtime_inputs(args, architecture)
@@ -994,12 +997,16 @@ def main():
     name = "justspeaktoit-windows-%s-developer-%s.zip" % (architecture, commit[:7] if commit else "local")
     archive = output / name
     names = write_deterministic_zip(archive, entries)
+    optimization = (zip_optimization.optimize_archive(archive, args.zip_optimizer)
+                    if args.zip_optimizer else {"tool": "zlib", "version": zlib.ZLIB_RUNTIME_VERSION, "level": 9})
+    log("ZIP compression: " + json.dumps(optimization, sort_keys=True))
     archive_digest = digest_file(archive)
     (output / "bundle-manifest.json").write_bytes(manifest_bytes)
     evidence = {
         "schemaVersion": 1,
         "architecture": architecture,
-        "zip": {"name": name, "sha256": archive_digest, "bytes": archive.stat().st_size, "entries": len(names)},
+        "zip": {"name": name, "sha256": archive_digest, "bytes": archive.stat().st_size, "entries": len(names),
+                "compression": optimization},
         "manifest": {"name": "bundle-manifest.json", "sha256": sha256(manifest_bytes)},
         "application": {"sourceCommit": commit, "executableSHA256": manifest["application"]["executableSHA256"],
                         "executables": manifest["application"]["executables"]},

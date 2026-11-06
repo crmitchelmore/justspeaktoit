@@ -164,11 +164,11 @@ test('native pool still requires the exact reviewed source and trusted event', (
     // Restore-only gates must share build-macos's hosted architecture to hit its cache.
     const fallback = [hostedFallback(id)];
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
-      ['jsti-macos-build', 'macOS']);
+      ['jsti-reviewed-local', 'macOS']);
     assert.deepEqual(route(id, routingContext(), {
       JSTI_NATIVE_APPROVED_SHA: 'head-sha',
-      JSTI_NATIVE_RUNNER_LABELS: '["mac-mini-3-local","macOS"]',
-    }), ['mac-mini-3-local', 'macOS']);
+      JSTI_NATIVE_RUNNER_LABELS: '["jsti-reviewed-local","macOS","X64"]',
+    }), ['jsti-reviewed-local', 'macOS', 'X64']);
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
       fallback, 'PR approval must match the source head, not merge SHA');
     assert.deepEqual(route(id, routingContext()), fallback, 'unset approval must stay hosted');
@@ -176,7 +176,7 @@ test('native pool still requires the exact reviewed source and trusted event', (
     assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo'), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
       fallback, 'forks cannot enter the native pool');
     assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
-      ['jsti-macos-build', 'macOS']);
+      ['jsti-reviewed-local', 'macOS']);
     assert.deepEqual(route(id, routingContext('push')), fallback);
     assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }), fallback);
     assert.deepEqual(route(id, { ...routingContext('push'), ref: 'refs/heads/feature' },
@@ -189,7 +189,7 @@ test('native pool still requires the exact reviewed source and trusted event', (
 test('iOS SwiftPM compilation keeps its command and bounded budget when native eligible', () => {
   const body = jobBodies['build-ios-swiftpm'];
   assert.deepEqual(route('build-ios-swiftpm', routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
-    ['jsti-macos-build', 'macOS']);
+    ['jsti-reviewed-local', 'macOS']);
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
   assert.doesNotMatch(body, /if:|bravo-mini-local/);
@@ -197,7 +197,7 @@ test('iOS SwiftPM compilation keeps its command and bounded budget when native e
 
 test('UI jobs cannot be admitted to a native runner by repository variables', () => {
   for (const id of ['build-ios', 'core-journey-fixture-ui', 'build-ios-test-products']) {
-    assert.doesNotMatch(jobBodies[id], /JSTI_NATIVE|jsti-macos-build|bravo-mini-local/, id);
+    assert.doesNotMatch(jobBodies[id], /JSTI_NATIVE|jsti-macos-build|jsti-reviewed-local|bravo-mini-local/, id);
   }
 });
 

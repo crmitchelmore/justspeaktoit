@@ -10,6 +10,7 @@ final class SiteMediaCaptureUITests: XCTestCase {
     private let fixtureBundleID = "com.justspeaktoit.core-journey-fixture"
     private let transcript = "Remind me to send the revised launch notes to the team before Friday."
     private var marks: [[String: Any]] = []
+    private var layout: [String: [Double]] = [:]
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -46,8 +47,18 @@ final class SiteMediaCaptureUITests: XCTestCase {
             $0.registered && $0.states == ["idle"]
         }
         mark("launched")
+        record(layoutOf: app.windows.firstMatch, as: "app")
         try capturePage(app, sidebar: "sidebarDashboard", name: "mac-dashboard")
         try capturePage(app, sidebar: "sidebarHistory", name: "mac-history")
+        // Feature clips: optional so a renamed page cannot block the core demo.
+        for (sidebar, name) in [
+            ("sidebarCorrections", "mac-corrections"),
+            ("sidebarSettings-transcription", "mac-transcription"),
+            ("sidebarSettings-postProcessing", "mac-post-processing"),
+            ("sidebarSettings-shortcuts", "mac-shortcuts")
+        ] {
+            captureOptionalPage(app, sidebar: sidebar, name: name)
+        }
         mark("tour-finished")
 
         try dictate(app: app, fixture: fixture, diagnosticsURL: diagnosticsURL)
@@ -60,6 +71,7 @@ final class SiteMediaCaptureUITests: XCTestCase {
         let target = fixture.textViews["coreJourneyTargetField"]
         XCTAssertTrue(target.waitForExistence(timeout: 10))
         target.click()
+        record(layoutOf: fixture.windows.firstMatch, as: "fixture")
         mark("editor-ready")
         target.typeText("Note to self: ")
         pause(1)
@@ -104,6 +116,22 @@ final class SiteMediaCaptureUITests: XCTestCase {
         pause(2.5)
         save(app.windows.firstMatch.screenshot(), name: name)
         pause(1.5)
+        mark("shown-\(name)")
+    }
+
+    @MainActor
+    private func captureOptionalPage(_ app: XCUIApplication, sidebar: String, name: String) {
+        let item = app.descendants(matching: .any)[sidebar].firstMatch
+        guard item.waitForExistence(timeout: 5), item.isHittable else {
+            mark("missing-\(name)")
+            return
+        }
+        item.click()
+        mark("show-\(name)")
+        pause(3.5)
+        save(app.windows.firstMatch.screenshot(), name: name)
+        pause(2.5)
+        mark("shown-\(name)")
     }
 
     private func save(_ screenshot: XCUIScreenshot, name: String) {
@@ -121,7 +149,22 @@ final class SiteMediaCaptureUITests: XCTestCase {
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "hold frame")], timeout: seconds)
     }
 
+    /// Window frames in screen points (top-left origin) so the renderer can crop
+    /// the full-screen recording to the window at 1:1 instead of enlarging it.
+    private func record(layoutOf window: XCUIElement, as name: String) {
+        let frame = window.frame
+        layout[name] = [frame.minX, frame.minY, frame.width, frame.height]
+        if let screen = NSScreen.main?.frame {
+            layout["screen"] = [0, 0, screen.width, screen.height]
+        }
+    }
+
     private func attachMarks() throws {
+        let layoutData = try JSONSerialization.data(withJSONObject: layout, options: [.prettyPrinted])
+        let layoutAttachment = XCTAttachment(data: layoutData, uniformTypeIdentifier: "public.json")
+        layoutAttachment.name = "layout.json"
+        layoutAttachment.lifetime = .keepAlways
+        add(layoutAttachment)
         let data = try JSONSerialization.data(withJSONObject: marks, options: [.prettyPrinted])
         let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
         attachment.name = "marks.json"

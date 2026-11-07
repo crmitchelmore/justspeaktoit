@@ -125,6 +125,7 @@ final class CoreJourneyLaunchProfile {
         if CoreJourneySiteMediaFixture.isRequested {
             do {
                 try CoreJourneySiteMediaFixture.seedHistory(in: directory)
+                try CoreJourneySiteMediaFixture.seedCorrections(in: directory)
             } catch {
                 preconditionFailure("Could not seed site media History: \(error)")
             }

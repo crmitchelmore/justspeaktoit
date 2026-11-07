@@ -79,6 +79,7 @@ test('live run submits one idempotent request with the retention query', async (
   const {code, out} = await runWith({env: env({DRY_RUN: 'false'}), fetch});
   assert.equal(code, 0);
   assert.match(out, /submitted; status: pending/);
+  assert.match(out, /::warning::Deletion request is awaiting PostHog approval.*eu\.posthog\.com\/#panel=support/);
   const create = calls.at(-1);
   assert.equal(create.method, 'POST');
   assert.match(create.url, /\/api\/projects\/12345\/data_deletion_requests\/$/);
@@ -86,6 +87,35 @@ test('live run submits one idempotent request with the retention query', async (
   assert.match(body.query, /timestamp < toDateTime\('2025-11-07T00:00:00Z'\)/);
   assert.equal(body.submission_id, submissionId('12345', body.query));
   assert.match(body.submission_id, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});
+
+test('pending requests already in PostHog are reported with an approval warning', async () => {
+  const pages = [json(200, {count: 3, next: null, results: [{status: 'pending'}, {status: 'pending'}, {status: 'completed'}]})];
+  const {fetch} = fakeFetch({pages, previewCount: 0});
+  const {code, out} = await runWith({env: env(), fetch});
+  assert.equal(code, 0);
+  assert.match(out, /completed=1, pending=2/);
+  assert.match(out, /::warning::2 deletion request\(s\) awaiting PostHog approval/);
+});
+
+test('a failed create status fails the run and a new attempt salts the submission id', async () => {
+  const failed = fakeFetch({create: json(200, {id: 'r1', status: 'failed'})});
+  const {code, out} = await runWith({env: env({DRY_RUN: 'false'}), fetch: failed.fetch});
+  assert.equal(code, 1);
+  assert.match(out, /failed in PostHog; rerun with PURGE_ATTEMPT=2/);
+  const first = JSON.parse(failed.calls.at(-1).body).submission_id;
+
+  const retry = fakeFetch({create: json(201, {id: 'r2', status: 'approved'})});
+  const again = await runWith({env: env({DRY_RUN: 'false', PURGE_ATTEMPT: '2'}), fetch: retry.fetch});
+  assert.equal(again.code, 0);
+  assert.doesNotMatch(again.out, /::warning::/);
+  const second = JSON.parse(retry.calls.at(-1).body).submission_id;
+  assert.notEqual(second, first);
+  assert.equal(submissionId('12345', 'q', 1), submissionId('12345', 'q'));
+
+  const bad = fakeFetch();
+  assert.equal((await runWith({env: env({PURGE_ATTEMPT: '0'}), fetch: bad.fetch})).code, 1);
+  assert.equal(bad.calls.length, 0);
 });
 
 test('zero matches submits nothing even when live', async () => {
@@ -131,7 +161,9 @@ test('unexpected responses fail closed before any submission', async () => {
   const badCreate = fakeFetch({create: json(400, {detail: 'bad'})});
   assert.equal((await runWith({env: env({DRY_RUN: 'false'}), fetch: badCreate.fetch})).code, 1);
   const conflict = fakeFetch({create: json(409, {detail: 'busy'})});
-  assert.equal((await runWith({env: env({DRY_RUN: 'false'}), fetch: conflict.fetch})).code, 0);
+  const deferred = await runWith({env: env({DRY_RUN: 'false'}), fetch: conflict.fetch});
+  assert.equal(deferred.code, 0);
+  assert.match(deferred.out, /::warning::PostHog deferred/);
   const invalid = fakeFetch();
   assert.equal((await runWith({env: env({DRY_RUN: 'maybe'}), fetch: invalid.fetch})).code, 1);
   assert.equal(invalid.calls.length, 0);

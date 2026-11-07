@@ -19,6 +19,10 @@ on:
         options:
           - retention
           - geoip-test-events
+      attempt:
+        description: Raise only to resubmit after PostHog marked the previous request failed
+        type: number
+        default: 1
 
 permissions: {}
 
@@ -48,4 +52,5 @@ jobs:
           RETENTION_DAYS: ${{ vars.POSTHOG_RETENTION_DAYS || '365' }}
           PURGE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'retention' }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+          PURGE_ATTEMPT: ${{ github.event_name == 'workflow_dispatch' && inputs.attempt || '1' }}
         run: node .github/scripts/posthog-retention-purge.mjs

@@ -45,12 +45,28 @@ it previews a HogQL query selecting the UUIDs of events whose `timestamp` is
 before midnight UTC 365 days ago, then submits one idempotent deletion request.
 It prints counts and request statuses only, and is a no-op until configured.
 
-What it does not guarantee: PostHog processes requests asynchronously, so a
-successful run means "submitted", not "erased"; check later runs' status
-counts. With a monthly cadence an event can be up to about a month older than
-the window before the next run catches it. Set the environment variable
-`POSTHOG_RETENTION_DAYS` (for example `330`) if a strict 12-month ceiling is
-needed. PostHog's plan-level [events retention](https://posthog.com/docs/data/events-retention)
+Approval: PostHog creates every API-submitted HogQL deletion request as
+`pending` with `requires_approval=True`, and its auto-approval sweep skips
+those requests ([`data_deletion.py`](https://github.com/PostHog/posthog/blob/master/posthog/data_deletion.py)).
+Neither the public API nor the customer app offers an approve action; only
+PostHog staff can approve, from PostHog's internal admin console
+([`deletion_request_panels.py`](https://github.com/PostHog/posthog/blob/master/posthog/admin/console/deletion_request_panels.py)). Each run lists requests by status and emits a `::warning::` while one
+is `pending`; ask PostHog support
+([eu.posthog.com/#panel=support](https://eu.posthog.com/#panel=support)) to
+approve it. PostHog allows at most five active requests per project.
+
+What it does not guarantee: a green run means one of "nothing to delete",
+"submitted", "awaiting PostHog approval" (warning) or "deferred" (HTTP 409
+warning, for example at the active-request limit); it never means "erased".
+Erasure happens only after approval and PostHog's asynchronous deletion, so
+check the status counts in later runs. A run fails if PostHog reports the
+request as `failed`; rerun manually with the next `attempt` number to submit a
+fresh request (the same attempt reuses the failed submission). With a monthly
+cadence an event can also be up to about a month past the window before the
+next run catches it. Setting the environment variable `POSTHOG_RETENTION_DAYS`
+(for example `330`) submits deletions earlier, but cannot guarantee erasure
+within 12 months while approval and processing times are outside our control.
+PostHog's plan-level [events retention](https://posthog.com/docs/data/events-retention)
 is a backstop only: it deletes expired events "at any point". Person profiles
 are not events and are not removed by this job.
 
@@ -65,10 +81,14 @@ Owner setup:
    `POSTHOG_PROJECT_ID` (the numeric Production project ID).
 4. Run **PostHog retention purge** with `dry_run` true and check the count,
    then once with `dry_run` false. The schedule then runs live.
+5. When a run warns that a request is awaiting approval, open a PostHog support
+   request for the Production project asking staff to approve the pending
+   self-service event deletion request; re-run with `dry_run` true later to
+   confirm its status moved on.
 
 GeoIP one-off: the seven historical test events carrying GeoIP city/postcode
 data are deleted with the same API. Run the workflow with mode
 `geoip-test-events`, first with `dry_run` true (expect `Matching events: 7`),
-then false. The script selects events whose properties contain
-`$geoip_city_name` or `$geoip_postal_code` and refuses if more than seven
-match.
+then false, and request approval as in step 5. The script selects events
+whose properties contain `$geoip_city_name` or `$geoip_postal_code` and
+refuses if more than seven match.

@@ -6,9 +6,9 @@
 //   POST /api/projects/{project_id}/data_deletion_requests/preview/  -> {count}
 //   POST /api/projects/{project_id}/data_deletion_requests/          -> request (idempotent submission_id)
 //   GET  /api/projects/{project_id}/data_deletion_requests/           -> paginated status list
-// Each takes a one-column HogQL query selecting event UUIDs. PostHog processes
-// accepted requests asynchronously, so a successful run means "submitted", not
-// "already erased". Output is limited to counts and statuses: never keys,
+// Each takes a one-column HogQL query selecting event UUIDs. PostHog holds new
+// requests for staff approval and then deletes asynchronously, so a successful
+// run means "submitted" (or deferred/awaiting approval), not "already erased". Output is limited to counts and statuses: never keys,
 // distinct IDs, person properties, queries' results or event contents.
 import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
@@ -23,6 +23,10 @@ export const REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_GEOIP_MAX_EVENTS = 7;
 const STATUSES = new Set(['draft', 'pending', 'approved', 'in_progress', 'queued', 'completed', 'failed']);
 const DAY_MS = 86_400_000;
+// PostHog creates HogQL event-deletion requests as pending with requires_approval=True, and
+// its auto-approval sweep skips them; only PostHog staff can approve (internal admin console).
+// https://github.com/PostHog/posthog/blob/master/posthog/data_deletion.py
+const approvalHint = (origin) => `Only PostHog staff can approve it: ask via ${origin}/#panel=support.`;
 
 export class PurgeError extends Error {}
 
@@ -76,8 +80,11 @@ export function buildQuery(mode, cutoff) {
 }
 
 // Deterministic UUID so a rerun with the same inputs maps to the same PostHog submission.
-export function submissionId(projectId, query) {
-  const h = createHash('sha256').update(`justspeaktoit-posthog-purge\n${projectId}\n${query}`).digest('hex');
+// PostHog returns the existing request for a reused submission_id, so after a terminal
+// failure a new attempt number is needed to submit a fresh request.
+export function submissionId(projectId, query, attempt = 1) {
+  const salt = attempt === 1 ? '' : `\nattempt ${attempt}`;
+  const h = createHash('sha256').update(`justspeaktoit-posthog-purge\n${projectId}\n${query}${salt}`).digest('hex');
   const variant = ((parseInt(h[16], 16) & 0x3) | 0x8).toString(16);
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
@@ -150,6 +157,9 @@ export async function run({env = process.env, fetch: fetchImpl = globalThis.fetc
     const retentionDays = parseRetentionDays(env.RETENTION_DAYS);
     const geoipMax = env.GEOIP_MAX_EVENTS ? Number(env.GEOIP_MAX_EVENTS) : DEFAULT_GEOIP_MAX_EVENTS;
     if (!isCount(geoipMax)) throw new PurgeError('GEOIP_MAX_EVENTS must be a whole number');
+    const attemptText = (env.PURGE_ATTEMPT ?? '').trim() || '1';
+    if (!/^[1-9]\d{0,2}$/.test(attemptText)) throw new PurgeError('PURGE_ATTEMPT must be a whole number from 1 to 999');
+    const attempt = Number(attemptText);
 
     const cutoff = computeCutoff(now, retentionDays);
     const query = buildQuery(mode, cutoff);
@@ -160,6 +170,8 @@ export async function run({env = process.env, fetch: fetchImpl = globalThis.fetc
     const existing = await listStatuses(fetchImpl, origin, projectId, key);
     const summary = Object.keys(existing).sort().map((s) => `${s}=${existing[s]}`).join(', ');
     log(`Existing deletion requests by status: ${summary || 'none'}`);
+    if (existing.pending) log(`::warning::${existing.pending} deletion request(s) awaiting PostHog approval. ${approvalHint(origin)}`);
+    if (existing.failed) log(`::warning::${existing.failed} earlier deletion request(s) failed in PostHog.`);
 
     const preview = await call(fetchImpl, `${base}preview/`, {method: 'POST', key, body: {query}});
     if (preview.status !== 200 || !preview.json || !isCount(preview.json.count)) {
@@ -182,17 +194,22 @@ export async function run({env = process.env, fetch: fetchImpl = globalThis.fetc
     const created = await call(fetchImpl, base, {
       method: 'POST',
       key,
-      body: {query, submission_id: submissionId(projectId, query)},
+      body: {query, submission_id: submissionId(projectId, query, attempt)},
     });
     if (created.status === 409) {
-      log('::warning::PostHog declined a new deletion request in the current state (HTTP 409); will retry next run.');
+      log('::warning::PostHog deferred the deletion request (HTTP 409: active-request limit or submission conflict); will retry next run.');
       return 0;
     }
     if ((created.status !== 200 && created.status !== 201) || !created.json
       || typeof created.json.id !== 'string' || !STATUSES.has(created.json.status)) {
       throw new PurgeError(`unexpected create response (HTTP ${created.status})`);
     }
-    log(`Deletion request ${created.status === 201 ? 'submitted' : 'already submitted'}; status: ${created.json.status}`);
+    const state = created.json.status;
+    log(`Deletion request ${created.status === 201 ? 'submitted' : 'already submitted'}; status: ${state}`);
+    if (state === 'failed') {
+      throw new PurgeError(`deletion request failed in PostHog; rerun with PURGE_ATTEMPT=${attempt + 1} to submit a new one`);
+    }
+    if (state === 'pending') log(`::warning::Deletion request is awaiting PostHog approval. ${approvalHint(origin)}`);
     return 0;
   } catch (error) {
     const message = error instanceof PurgeError ? error.message : 'unexpected error';

@@ -29,11 +29,9 @@ final class SyncContainerTransitionTests: XCTestCase {
         XCTAssertEqual(SyncConfiguration.resolveFamily(legacy: .iOS, sharedContainerEnabled: true), .macOS)
         XCTAssertEqual(SyncConfiguration.resolveFamily(legacy: .iOS, sharedContainerEnabled: false), .iOS)
         XCTAssertEqual(SyncConfiguration.resolveFamily(legacy: .macOS, sharedContainerEnabled: false), .macOS)
+        let shared = SyncConfiguration.resolveFamily(legacy: .iOS, sharedContainerEnabled: true)
         for train in ReleaseTrain.allCases {
-            XCTAssertEqual(
-                SyncConfiguration.resolveFamily(legacy: .iOS, sharedContainerEnabled: true).containerIdentifier(in: train),
-                SyncContainerFamily.macOS.containerIdentifier(in: train)
-            )
+            XCTAssertEqual(shared.containerIdentifier(in: train), train.macCloudContainer)
         }
     }
 

@@ -13,6 +13,8 @@ the developer's Keychain.
 Hosted CI uses its disposable account-wide Keychain. Native CI and explicit
 local opt-in use a private file Keychain plus SpeakCore.KeychainAccess selectors,
 without writing desktop defaults/search lists. Native isolation cannot be disabled.
+Those selectors compile only into builds made with ``JSTI_TEST_KEYCHAIN_REDIRECT=1``
+(never distribution builds), so the private flow refuses to run without it.
 
 While swapping, the user default Keychain and search list point only at the
 temporary Keychain. Invariants that keep a developer machine safe:
@@ -106,6 +108,13 @@ def require_enabled_native_ci(environ=os.environ):
     if environ.get('RUNNER_ENVIRONMENT') == 'self-hosted' and not swap_enabled(environ):
         raise UnsafeCI('Native CI requires process-scoped Keychain isolation; it cannot be disabled')
 
+
+
+def require_test_redirect(environ=os.environ):
+    # Without the compile-time redirect, test products would ignore the private
+    # Keychain and reach the desktop vault (#1360).
+    if environ.get('JSTI_TEST_KEYCHAIN_REDIRECT') != '1':
+        raise UnsafeCI('Private Keychain isolation requires JSTI_TEST_KEYCHAIN_REDIRECT=1 for the build and test')
 
 
 def same_path(left, right):
@@ -545,6 +554,7 @@ def main(argv=None):
         if not swap_enabled():
             os.execvp(argv[0], argv)
         if use_private_keychain():
+            require_test_redirect()
             return run_private_isolated(argv)
         return run_hosted_isolated(argv)
     except Interrupted as error:

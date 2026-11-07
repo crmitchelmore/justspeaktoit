@@ -1,13 +1,23 @@
 #if canImport(Security)
 import Foundation
 import Security
-#if os(macOS)
+#if os(macOS) && JSTI_TEST_KEYCHAIN_REDIRECT
 import Darwin
 #endif
 
 /// One Security boundary for app code and credential fixtures. Native CI supplies
 /// a private file Keychain per process; ordinary app launches retain OS behaviour.
+///
+/// The environment redirect compiles only into test builds that define
+/// `JSTI_TEST_KEYCHAIN_REDIRECT` (set by CI test commands, never by distribution
+/// builds), so shipped binaries cannot be redirected or disabled (#1360).
 public enum KeychainAccess {
+    #if os(macOS) && JSTI_TEST_KEYCHAIN_REDIRECT
+    static let isTestRedirectCompiled = true
+    #else
+    static let isTestRedirectCompiled = false
+    #endif
+
     public static func add(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus {
         perform(query, adding: true) { SecItemAdd($0, result) }
     }
@@ -19,7 +29,7 @@ public enum KeychainAccess {
     }
 
     public static func update(_ query: CFDictionary, _ attributes: CFDictionary) -> OSStatus {
-        #if os(macOS)
+        #if os(macOS) && JSTI_TEST_KEYCHAIN_REDIRECT
         if ProcessInfo.processInfo.environment["JSTI_TEST_KEYCHAIN_PATH"] != nil {
             guard let values = attributes as? [String: Any] else { return errSecParam }
             let status = privateQueryStatus(values)
@@ -36,6 +46,7 @@ public enum KeychainAccess {
         perform(query) { SecItemDelete($0) }
     }
 
+    #if os(macOS) && JSTI_TEST_KEYCHAIN_REDIRECT
     private static func privateQueryStatus(_ query: [String: Any]) -> OSStatus {
         // These routes cannot target a private file Keychain; never fall through
         // to desktop/iCloud items or an existing item reference.
@@ -50,7 +61,6 @@ public enum KeychainAccess {
         return errSecSuccess
     }
 
-    #if os(macOS)
     private static func canonicalFilePath(_ path: String) -> String? {
         guard let resolved = realpath(path, nil) else { return nil }
         defer { free(resolved) }
@@ -61,7 +71,7 @@ public enum KeychainAccess {
     private static func perform(
         _ query: CFDictionary, adding: Bool = false, operation: (CFDictionary) -> OSStatus
     ) -> OSStatus {
-        #if os(macOS)
+        #if os(macOS) && JSTI_TEST_KEYCHAIN_REDIRECT
         let environment = ProcessInfo.processInfo.environment
         guard let path = environment["JSTI_TEST_KEYCHAIN_PATH"] else {
             // An unwrapped native CI test must fail rather than use the desktop vault.

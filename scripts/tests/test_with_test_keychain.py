@@ -108,7 +108,8 @@ class SwapPolicyTests(unittest.TestCase):
             })
 
     def test_native_ci_dispatches_private_isolation_without_global_security_calls(self):
-        with patch.dict(os.environ, {'CI': 'true', 'RUNNER_ENVIRONMENT': 'self-hosted'}, clear=True), \
+        with patch.dict(os.environ, {'CI': 'true', 'RUNNER_ENVIRONMENT': 'self-hosted',
+                                     'JSTI_TEST_KEYCHAIN_REDIRECT': '1'}, clear=True), \
                 patch.object(keychain_script, 'security') as security_call, \
                 patch.object(keychain_script, 'run_private_isolated', return_value=17) as private_run, \
                 patch.object(keychain_script, 'run_hosted_isolated') as hosted_run:
@@ -116,6 +117,17 @@ class SwapPolicyTests(unittest.TestCase):
             private_run.assert_called_once_with(['synthetic-command'])
             hosted_run.assert_not_called()
             security_call.assert_not_called()
+
+    def test_private_isolation_refuses_builds_without_the_test_redirect(self):
+        for value in (None, '0', 'true'):
+            environ = {'CI': 'true', 'RUNNER_ENVIRONMENT': 'self-hosted'}
+            if value is not None:
+                environ['JSTI_TEST_KEYCHAIN_REDIRECT'] = value
+            with self.subTest(value=value), patch.dict(os.environ, environ, clear=True), \
+                    patch.object(keychain_script, 'run_private_isolated') as private_run, \
+                    patch('sys.stderr'):
+                self.assertEqual(keychain_script.main(['synthetic-command']), 78)
+                private_run.assert_not_called()
 
     def test_security_calls_have_a_bounded_timeout(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(

@@ -8,7 +8,7 @@ This is a developer build: it is not published to Google Play.
 ## Requirements
 
 - JDK 17
-- Android SDK with platform 36 (Android Studio installs it, or set `ANDROID_HOME`)
+- Android SDK with platform 37 (Android Studio installs it, or set `ANDROID_HOME`)
 - A phone or emulator running Android 10 (API 29) or newer. On-device recognition needs
   Android 12+ and a speech service that provides it.
 

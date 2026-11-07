@@ -54,9 +54,9 @@ public struct LocalModelDigestProvider: Sendable {
     /// The platform's audited provider, when this package can reach one.
     public static var platformDefault: LocalModelDigestProvider? {
         #if canImport(CryptoKit)
-        return LocalModelDigestProvider(name: "CryptoKit SHA-256") { CryptoKitSHA256Hasher() }
+        LocalModelDigestProvider(name: "CryptoKit SHA-256") { CryptoKitSHA256Hasher() }
         #else
-        return nil
+        nil
         #endif
     }
 }

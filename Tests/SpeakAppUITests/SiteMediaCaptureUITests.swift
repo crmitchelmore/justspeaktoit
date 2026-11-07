@@ -132,9 +132,11 @@ final class SiteMediaCaptureUITests: XCTestCase {
         mark("show-\(name)")
         pause(3.5)
         save(app.windows.firstMatch.screenshot(), name: name)
-        if scrollsToList, let page = app.scrollViews.allElementsBoundByIndex.last {
-            // Bring the saved list below the page header into view.
-            page.scroll(byDeltaX: 0, deltaY: -600)
+        if scrollsToList {
+            // Bring the saved list below the page header into view; a coordinate in the
+            // detail pane needs no hit point on a particular scroll view.
+            app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.6))
+                .scroll(byDeltaX: 0, deltaY: -600)
             mark("scrolled-\(name)")
             pause(3.5)
             save(app.windows.firstMatch.screenshot(), name: "\(name)-list")

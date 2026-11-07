@@ -1,30 +1,42 @@
-// Dependency sources. Package-feed policy forbids resolving directly from public registries
-// (Google Maven, Maven Central, Gradle Plugin Portal), so every dependency and plugin resolves
-// through exactly one approved feed, set with the Gradle property `jsti.mavenMirror` or the
-// JSTI_MAVEN_MIRROR environment variable. That feed must proxy Maven Central and Google Maven.
-// Without it the build stops rather than falling back to a public registry.
-// pluginManagement is evaluated before the rest of this file, so it resolves the feed itself.
+// Dependency sources (see "Android dependency sources" in android/README.md):
+// - JSTI_MAVEN_MIRROR (or -Pjsti.mavenMirror) set: resolve only through that one feed.
+// - Otherwise, on GitHub-hosted runners only: Google Maven and Maven Central.
+// - Anywhere else (developer machines, self-hosted runners): stop, so a machine governed by a
+//   package-feed policy never fetches from public registries by accident.
+// Each block is evaluated in isolation by Gradle, so the selection is repeated in both.
 pluginManagement {
     val mirror = providers.gradleProperty("jsti.mavenMirror")
-        .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR")).orNull
-        ?.takeIf { it.isNotBlank() }
-        ?: throw GradleException(
-            "blocked: no approved Maven feed configured. Set -Pjsti.mavenMirror=<feed URL> or " +
-                "JSTI_MAVEN_MIRROR to an approved feed that proxies Maven Central and Google Maven " +
-                "(see android/README.md). Public registries are not used directly.",
-        )
+        .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR")).orNull?.takeIf { it.isNotBlank() }
+    val githubHosted = providers.environmentVariable("GITHUB_ACTIONS").orNull == "true" &&
+        providers.environmentVariable("RUNNER_ENVIRONMENT").orNull == "github-hosted"
     repositories {
-        maven(mirror)
+        when {
+            mirror != null -> maven(mirror)
+            githubHosted -> {
+                google()
+                mavenCentral()
+            }
+            else -> throw GradleException(
+                "No Maven feed configured. Set JSTI_MAVEN_MIRROR (or -Pjsti.mavenMirror) to an approved feed " +
+                    "that proxies Maven Central and Google Maven. Public registries are used only on " +
+                    "GitHub-hosted runners. See android/README.md, \"Android dependency sources\".",
+            )
+        }
     }
 }
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    val mirror = providers.gradleProperty("jsti.mavenMirror")
+        .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR")).orNull?.takeIf { it.isNotBlank() }
     repositories {
-        maven(
-            providers.gradleProperty("jsti.mavenMirror")
-                .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR")).get(),
-        )
+        // pluginManagement has already rejected unsupported environments.
+        if (mirror != null) {
+            maven(mirror)
+        } else {
+            google()
+            mavenCentral()
+        }
     }
 }
 

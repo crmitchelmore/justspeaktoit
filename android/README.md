@@ -29,21 +29,34 @@ Pull requests that change only `android/**`, `.github/workflows/android.yml` or
 `Docs/android-*.md` skip the macOS and iOS jobs in `ci.yml`. The required checks still
 report, and any other changed file, or a push to `main`, runs every Apple gate.
 
-### Package feeds
+### Android dependency sources
 
-Package-feed policy forbids resolving directly from public registries, so Gradle has no
-public repositories. Every dependency and plugin comes from one approved feed, and without
-one the build stops with `blocked: no approved Maven feed configured`:
+`settings.gradle.kts` picks one source for every library and Gradle plugin:
+
+| Where Gradle runs | Source |
+| --- | --- |
+| `JSTI_MAVEN_MIRROR` (or `-Pjsti.mavenMirror`) set | Only that feed |
+| GitHub-hosted runner (`GITHUB_ACTIONS=true`, `RUNNER_ENVIRONMENT=github-hosted`) | Google Maven and Maven Central |
+| Anywhere else (developer machines, self-hosted runners) | None: the build stops and names `JSTI_MAVEN_MIRROR` |
+
+Machines governed by a package-feed policy (for example Microsoft CFS) must never fetch from
+public registries, so local builds need a feed. Gradle itself comes from the wrapper, pinned by
+`distributionSha256Sum`, and CI validates the wrapper jar. The Android workflow stays on
+GitHub-hosted runners and reads an optional feed from the repository variable `JSTI_MAVEN_MIRROR`.
 
 ```bash
-./gradlew -Pjsti.mavenMirror=https://<feed>/maven/v1 assembleDebug
-# or: export JSTI_MAVEN_MIRROR=https://<feed>/maven/v1
+export JSTI_MAVEN_MIRROR=https://pkgs.dev.azure.com/<org>/<project>/_packaging/<feed>/maven/v1
+./gradlew assembleDebug
 ```
 
-The feed must proxy Maven Central and Google Maven; it serves both the libraries and the
-Gradle plugin markers. CI reads the feed URL from the repository variable `JSTI_MAVEN_MIRROR`
-and fails before Gradle runs if it is not set. No approved feed exists yet: the CFS proxy
-returns 404 for Maven paths, so Android builds are currently blocked.
+Optional personal feed (owner steps; the CFS proxy does not serve Maven today):
+
+1. In a personal Azure DevOps organisation, create an Artifacts feed and add the upstream
+   sources Maven Central and Google Maven (`https://dl.google.com/android/maven2/`).
+2. Copy the feed's Maven URL from "Connect to feed" > Gradle. For local builds, add a personal
+   access token with Packaging (Read) to `~/.gradle/gradle.properties` if the feed is private.
+3. To use it in CI too, make the feed public, or add credentials to the workflow, and set the
+   repository variable `JSTI_MAVEN_MIRROR`.
 
 ## Layout
 

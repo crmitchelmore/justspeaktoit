@@ -21,6 +21,7 @@ concurrency:
 jobs:
   build:
     name: Build & Test (Android)
+    # Must stay GitHub-hosted: settings.gradle.kts allows public registries only on hosted runners.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -30,17 +31,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      # Package-feed policy forbids direct public-registry fetches. Until the owner provides an
-      # approved feed (repository variable JSTI_MAVEN_MIRROR), this job fails here on purpose.
-      - name: Require an approved Maven feed
-        env:
-          JSTI_MAVEN_MIRROR: ${{ vars.JSTI_MAVEN_MIRROR }}
-        run: |
-          if [ -z "$JSTI_MAVEN_MIRROR" ]; then
-            echo "::error::blocked: no approved Maven feed configured. Set the repository variable JSTI_MAVEN_MIRROR to an approved feed that proxies Maven Central and Google Maven."
-            exit 1
-          fi
 
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:

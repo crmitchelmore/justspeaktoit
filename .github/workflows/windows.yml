@@ -1716,7 +1716,7 @@ jobs:
 
   portable-macos:
     name: Portable Swift on macOS
-    runs-on: macos-15
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-15"]') }}
     timeout-minutes: 15
     env:
       SPEAK_PORTABLE_CORE: '1'
@@ -1795,11 +1795,16 @@ jobs:
 
   portable-linux:
     name: Portable Swift on Linux (Swift 6.2.3)
-    runs-on: ubuntu-22.04
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-22.04"]') }}
     container:
       image: swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6
     timeout-minutes: 10
     steps:
+      # Self-hosted Linux runs this root container against the runner's
+      # persistent /__w bind mount; record its owner so it can be restored.
+      - name: Record host work-tree owner
+        if: runner.environment == 'self-hosted'
+        run: stat -c '%u:%g' /__w > "$RUNNER_TEMP/jsti-host-owner"
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
@@ -1827,3 +1832,12 @@ jobs:
         run: |
           swift --version
           swift test --configuration release --jobs 4
+
+      # Return the persistent work tree to the runner user so later host jobs
+      # (checkout, cache) can clean it; hosted runners are discarded instead.
+      - name: Restore host work-tree ownership
+        if: always() && runner.environment == 'self-hosted'
+        run: |
+          owner="$(cat "$RUNNER_TEMP/jsti-host-owner")"
+          case "$owner" in [0-9]*:[0-9]*) ;; *) echo "::error::Unknown host owner"; exit 1 ;; esac
+          chown -R "$owner" /__w

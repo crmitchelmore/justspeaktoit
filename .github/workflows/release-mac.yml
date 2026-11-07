@@ -69,6 +69,10 @@ jobs:
       # reached the alpha-latest pointer that the Sparkle Alpha feed resolves.
       - name: Run Tests (Release Config)
         if: steps.receipt.outputs.status != 'verified'
+        # Step-scoped: the packaging and CLI builds below must not compile the
+        # native-CI Keychain redirect (#1360); release verification rejects it.
+        env:
+          JSTI_TEST_KEYCHAIN_REDIRECT: "1"
         run: |
           # Defence in depth: the pre-merge gate is the release-validation job
           # in ci.yml; this re-run protects tags cut from any unvalidated state.

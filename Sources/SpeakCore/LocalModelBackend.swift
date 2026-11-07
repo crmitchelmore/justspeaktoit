@@ -139,9 +139,9 @@ public struct LocalModelHostSupport: Equatable, Sendable {
     /// time through `APP_STORE`.
     public static func macOS(channel: DistributionChannel) -> LocalModelHostSupport {
         #if os(macOS) && arch(arm64)
-        return macOS(channel: channel, isAppleSilicon: true)
+        macOS(channel: channel, isAppleSilicon: true)
         #else
-        return macOS(channel: channel, isAppleSilicon: false)
+        macOS(channel: channel, isAppleSilicon: false)
         #endif
     }
 

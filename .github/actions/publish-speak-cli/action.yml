@@ -132,6 +132,10 @@ runs:
         chmod +x scripts/verify-speak-cli.sh
         ./scripts/verify-speak-cli.sh "${{ steps.paths.outputs.arm64-zip }}" arm64 "${{ inputs.version }}" --notarised
         ./scripts/verify-speak-cli.sh "${{ steps.paths.outputs.x86_64-zip }}" x86_64 "${{ inputs.version }}" --notarised
+        # Shipped binaries must not honour the native-CI Keychain redirect (#1360).
+        chmod +x scripts/verify-no-test-keychain-redirect.sh
+        ./scripts/verify-no-test-keychain-redirect.sh \
+          "${{ steps.paths.outputs.arm64-zip }}" "${{ steps.paths.outputs.x86_64-zip }}"
 
     - name: Generate and sign CLI manifest
       id: manifest

@@ -84,7 +84,7 @@ final class CredentialLoadingTests: XCTestCase {
             "speak-app-secrets.v2": "v2:;openrouter.apiKey=synthetic%3Bpolish"
         ]
         for (account, payload) in payloads {
-            XCTAssertEqual(SecItemAdd([
+            XCTAssertEqual(KeychainAccess.add([
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: fixture.service,
                 kSecAttrAccount as String: account,
@@ -101,7 +101,7 @@ final class CredentialLoadingTests: XCTestCase {
             XCTAssertEqual(settings.openRouterAPIKey, "synthetic;polish")
             for (account, payload) in payloads {
                 var result: CFTypeRef?
-                XCTAssertEqual(SecItemCopyMatching([
+                XCTAssertEqual(KeychainAccess.copyMatching([
                     kSecClass as String: kSecClassGenericPassword,
                     kSecAttrService as String: fixture.service,
                     kSecAttrAccount as String: account,
@@ -294,7 +294,7 @@ private struct Fixture {
 
     func cleanUp() {
         defaults.removePersistentDomain(forName: suite)
-        SecItemDelete([
+        KeychainAccess.delete([
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service
         ] as CFDictionary)

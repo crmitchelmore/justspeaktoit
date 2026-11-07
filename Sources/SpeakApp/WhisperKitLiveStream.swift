@@ -46,6 +46,9 @@ struct WhisperKitStreamRequest: Equatable, Sendable {
 /// production conformance.
 @MainActor
 protocol WhisperKitLiveStreaming: AnyObject {
+    /// Whether the stream is still active, independently of when the controller
+    /// receives its task-completion callback.
+    var isStreaming: Bool { get }
     /// Starts microphone capture and runs the realtime decode loop. Returns
     /// only once `stopStream()` or a failure ends the loop.
     func startStream() async throws
@@ -126,10 +129,29 @@ enum WhisperKitTranscriptProjection {
     }
 }
 
+/// Publishes loop completion on its owning actor before a main-actor wrapper
+/// can resume. State is shared only through the lock.
+final class WhisperKitStreamLifetime: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = false
+
+    var isStreaming: Bool { lock.withLock { active } }
+
+    func run<Loop: Actor>(
+        on loop: isolated Loop, operation: (isolated Loop) async throws -> Void
+    ) async rethrows {
+        lock.withLock { active = true }
+        defer { lock.withLock { active = false } }
+        try await operation(loop)
+    }
+}
+
 /// Production stream: WhisperKit's `AudioStreamTranscriber` for capture and
 /// streaming decodes, and the owning pipeline for the stop-time tail decode.
 @MainActor
 final class WhisperKitLiveStream: WhisperKitLiveStreaming {
+    private let lifetime = WhisperKitStreamLifetime()
+    var isStreaming: Bool { lifetime.isStreaming }
     private let pipeline: WhisperKit
     private let transcriber: AudioStreamTranscriber
     private let options: DecodingOptions
@@ -162,7 +184,9 @@ final class WhisperKitLiveStream: WhisperKitLiveStreaming {
     }
 
     func startStream() async throws {
-        try await transcriber.startStreamTranscription()
+        try await lifetime.run(on: transcriber) { transcriber in
+            try await transcriber.startStreamTranscription()
+        }
     }
 
     func stopStream() async {

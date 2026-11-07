@@ -225,7 +225,10 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
         observation.note(.explicitStopIssued)
         stop()
         let stopResult = await XCTWaiter.fulfillment(of: [transportStopped, firstReturned], timeout: Self.stallGuard)
-        observation.reportFailure(stopResult, wait: .explicitStop)
+        // Task states separate a cancel that never reached URLSession (running)
+        // from a loading system that never stopped the protocol (canceling).
+        let taskStates = stopResult == .completed ? [] : await session.allTasks.map { $0.state.rawValue }
+        observation.reportFailure(stopResult, wait: .explicitStop, taskStates: taskStates)
         XCTAssertEqual(stopResult, .completed)
         XCTAssertEqual(observation.stops, 1)
     }
@@ -263,7 +266,7 @@ private final class ProgressiveTransportObservation: @unchecked Sendable {
     }
 
     // Snapshot after the failed wait returns; not a deadline-time or event-order proof.
-    func reportFailure(_ result: XCTWaiter.Result, wait: Wait) {
+    func reportFailure(_ result: XCTWaiter.Result, wait: Wait, taskStates: [Int] = []) {
         guard result != .completed else { return }
         let (facts, offsets) = lock.withLock { () -> ([String: Bool], [String: Int]) in
             (["priorTaskEntered": phases.contains(.priorTaskEntered),
@@ -275,7 +278,8 @@ private final class ProgressiveTransportObservation: @unchecked Sendable {
         }
         let waited = ContinuousClock.now - origin
         let payload: [String: Any] = [
-            "schema": 2, "fixture": "queuedVoiceStart", "wait": wait.rawValue, "facts": facts,
+            "schema": 3, "fixture": "queuedVoiceStart", "wait": wait.rawValue, "facts": facts,
+            "taskStates": taskStates,
             "elapsedMs": offsets, "reportedAtMs": Int(waited.components.seconds * 1000)
                 + Int(waited.components.attoseconds / 1_000_000_000_000_000)
         ]

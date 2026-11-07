@@ -149,7 +149,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     ] + AzureTranscriptionModels.liveOptions + AlibabaSpeechModels.liveOptions
         + [FileSpeechProvider.reson8LiveOption]
 
-    private static let scheduledBatchTranscription: [Option] =
+    /// Every batch entry including shut-down ones, for routing a saved selection
+    /// to the client that reports `ModelRetiredError`. Pickers use `batchTranscription`.
+    static let scheduledBatchTranscription: [Option] =
         appleBatchTranscriptionOptions + AlibabaSpeechModels.batchOptions + [
         Option(
             id: BatchTranscriptionModelIdentifiers.cartesiaInkWhisper, displayName: "Cartesia Ink Whisper (Batch)",

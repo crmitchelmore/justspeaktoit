@@ -90,6 +90,9 @@ jobs:
       - name: Verify brand asset sizes and appearance variants
         run: node --test scripts/tests/brand-assets.test.mjs
 
+      - name: Test PostHog retention purge script
+        run: node --test .github/scripts/posthog-retention-purge.test.mjs
+
       - name: Check Package.resolved drift
         # Resolving the app/test graph must reproduce the checked-in pins;
         # tooling pins live separately in Tooling/Package.resolved (issue #677).

@@ -1,0 +1,51 @@
+name: PostHog retention purge
+
+# Enforces the published 12-month raw-event retention for PostHog Production
+# (#776). See Docs/posthog-maintenance.md. The job is a no-op until the
+# posthog-purge environment holds POSTHOG_PURGE_API_KEY and POSTHOG_PROJECT_ID.
+on:
+  schedule:
+    - cron: '17 4 1 * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only report matching event counts; submit no deletion request
+        type: boolean
+        default: true
+      mode:
+        description: retention = events older than the retention window; geoip-test-events = one-off GeoIP-tagged test events
+        type: choice
+        default: retention
+        options:
+          - retention
+          - geoip-test-events
+
+permissions: {}
+
+concurrency:
+  group: posthog-retention-purge
+  cancel-in-progress: false
+
+jobs:
+  purge:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: posthog-purge
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test purge script
+        run: node --test .github/scripts/posthog-retention-purge.test.mjs
+      - name: Purge expired PostHog events
+        env:
+          POSTHOG_PURGE_API_KEY: ${{ secrets.POSTHOG_PURGE_API_KEY }}
+          POSTHOG_PROJECT_ID: ${{ vars.POSTHOG_PROJECT_ID }}
+          POSTHOG_HOST: ${{ vars.POSTHOG_HOST || 'https://eu.posthog.com' }}
+          RETENTION_DAYS: ${{ vars.POSTHOG_RETENTION_DAYS || '365' }}
+          PURGE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'retention' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: node .github/scripts/posthog-retention-purge.mjs

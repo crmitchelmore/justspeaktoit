@@ -2,6 +2,7 @@ import importlib.util
 import pathlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("linux_stage", ROOT / "scripts/stage-linux-desktop.py")
@@ -30,6 +31,17 @@ class LinuxAutomationStagingTests(unittest.TestCase):
             self.assertEqual((output / "bin/speak").read_bytes(), cli.read_bytes())
             self.assertTrue((output / "bin/speak").stat().st_mode & 0o111)
 
+    def test_duplicate_optional_bundle_is_rejected_before_writing(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            binary = self.fixture(root)
+            for suffix in (".bundle", ".resources"):
+                (root / ("SpeakApp_SpeakFeedbackResources" + suffix)).mkdir()
+            output = root / "layout"
+            with self.assertRaisesRegex(ValueError, "duplicate production resource bundle target"):
+                STAGE.stage(binary, output)
+            self.assertFalse(output.exists())
+
     def test_missing_cli_fails_before_output_is_created(self):
         with tempfile.TemporaryDirectory() as scratch:
             root = pathlib.Path(scratch)
@@ -55,9 +67,56 @@ class LinuxAutomationStagingTests(unittest.TestCase):
             self.assertEqual((output / "bin/SpeakApp_SpeakTestSupportTools.resources/fixture.json").read_bytes(),
                              b"fixture bytes")
 
+    def test_swift64_bundle_resources_are_preserved(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            binary = self.fixture(root)
+            for directory in root.glob("*.resources"):
+                directory.rename(directory.with_suffix(".bundle"))
+            test_bundle = root / "SpeakApp_SpeakCoreTests.bundle"
+            test_bundle.mkdir()
+            output = root / "layout"
+            STAGE.stage(binary, output)
+            self.assertTrue((output / "bin/SpeakApp_SpeakCore.bundle").is_dir())
+            self.assertTrue((output / "bin/SpeakApp_SpeakLinux.bundle/hicolor/index.theme").is_file())
+            self.assertFalse((output / "bin" / test_bundle.name).exists())
+
+    def test_shared_runtime_closure_deduplicates_transitive_dependencies(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            for name in ("app", "cli", "libswiftCore.so", "libFoundation.so", "unused.so"):
+                (root / name).write_bytes(b"fixture")
+            dependencies = {
+                "app": ["libFoundation.so", "libc.so.6"], "cli": ["libswiftCore.so"],
+                "libFoundation.so": ["libswiftCore.so"], "libswiftCore.so": ["libc.so.6"],
+            }
+            def readelf(command, **kwargs):
+                return "\n".join("(NEEDED) Shared library: [" + name + "]"
+                                 for name in dependencies[pathlib.Path(command[-1]).name])
+            with patch.object(STAGE.subprocess, "check_output", side_effect=readelf):
+                result = STAGE.swift_runtime_closure([root / "app", root / "cli"], root)
+            self.assertEqual(set(result), {"libFoundation.so", "libswiftCore.so"})
+
+    def test_runtime_refuses_missing_swift_libraries_and_escaping_symlinks(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = pathlib.Path(scratch)
+            sdk = root / "sdk"
+            sdk.mkdir()
+            with patch.object(STAGE.subprocess, "check_output",
+                              return_value="(NEEDED) Shared library: [libswiftCore.so]"):
+                with self.assertRaisesRegex(ValueError, "missing Swift SDK"):
+                    STAGE.swift_runtime_closure([root / "app"], sdk)
+                outside = root / "external.so"
+                outside.write_bytes(b"fixture")
+                (sdk / "libswiftCore.so").symlink_to(outside)
+                with self.assertRaisesRegex(ValueError, "escapes"):
+                    STAGE.swift_runtime_closure([root / "app"], sdk)
+
     def test_flatpak_explicitly_builds_and_stages_the_cli(self):
         manifest = (ROOT / "packaging/linux/com.justspeaktoit.JustSpeakToIt.yml").read_text()
-        self.assertIn("--product speak --static-swift-stdlib", manifest)
+        self.assertIn("--product speak --disable-sandbox", manifest)
+        self.assertNotIn("--static-swift-stdlib", manifest)
+        self.assertIn("--swift-runtime", manifest)
         self.assertIn("--cli .build/release/speak", manifest)
 
     def test_linux_workflow_triggers_for_each_automation_surface_on_both_events(self):

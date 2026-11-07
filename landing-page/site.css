@@ -450,13 +450,39 @@ em { font-style: italic; }
 
 .demo { margin-top: 2.5rem; }
 
-.demo video {
+.clip video {
   display: block;
   width: 100%;
   height: auto;
   aspect-ratio: 16 / 9;
   border-radius: calc(var(--radius-lg) - 8px);
-  background: #000;
+  background: #121417;
+}
+
+.clip-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+@media (max-width: 760px) {
+  .clip-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.clip--wide { margin-top: 1.5rem; }
+
+#desktop .clip-grid { margin-bottom: 1.5rem; }
+
+.mobile-clip video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 2;
+  border-radius: 30px;
+  border: 1px solid var(--line);
+  background: #121417;
+  box-shadow: 0 40px 80px -50px rgba(0, 0, 0, .95);
 }
 
 .capture figcaption {

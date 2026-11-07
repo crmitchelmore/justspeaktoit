@@ -13,17 +13,51 @@ The PNG screenshot files below show native app UI, not HTML reproductions or gen
   History entries, no credentials, no network providers. The runner grants no
   privacy permissions, so the dashboard honestly shows them as not granted.
   The WebP copies are `cwebp -q 90` encodes of the PNGs.
-- demo/speak-demo.mp4, .webm, .en.vtt and speak-demo-poster.webp: a 36-second
-  silent cut of the same run's full-screen recording (`screencapture -v`),
-  rendered by `scripts/site-media/render-demo.py` from the UI test's scene
-  marks. Only waiting time is removed; kept frames are unedited. The audio is a
-  synthetic clip, the transcription is a test fixture returning fixed text, the
-  shortcut double-tap is sent by the test driver, and Clipboard output mode is
-  used because the runner cannot grant Accessibility. The captions say so.
 - ios-history-current.png: 1320 × 2868 PNG exported directly by Simulator on
   9 September 2026. Current branch, iPhone 17 Pro Max, iOS 26.2, ad-hoc signed
   Debug app. History was seeded with five fictional entries in an isolated
   simulator; these are sample copy, not customer transcripts or usage claims.
+
+## Marketing clips (`clips/`)
+
+Seven silent, captioned clips: `hero` (Mac), `corrections`, `history`,
+`models`, `iphone`, `windows` (beta) and `linux` (beta). Each has an H.264
+`.mp4`, an AV1 `.webm`, a WebVTT `.en.vtt` caption track and a WebP poster.
+`manifest.json` lists durations, sizes and alt text; `desktop-source.json`
+names the exact Windows and Linux runs used.
+
+They are rendered by `scripts/site-media/render-clips.py` in the `render` job
+of `.github/workflows/site-media.yml`, only from footage captured on
+GitHub-hosted runners, never the owner's machine:
+
+- Mac: the full-screen recording of the real Debug app driven by
+  `Tests/SpeakAppUITests/SiteMediaCaptureUITests.swift` with the same fixture:
+  the shortcut double-tap is sent by the test driver, the audio is a synthetic
+  clip, a test fixture returns fixed text, and Clipboard output mode is used
+  because the runner cannot grant Accessibility. It also tours Corrections
+  (three fictional rules), Transcription and Post-processing. Scenes are cut at the test's marks and cropped 1:1 to the
+  window frames it records; frames are never enlarged or retouched.
+- iPhone: `xcrun simctl io recordVideo` of the Debug app in an owned
+  Simulator, driven by `Tests/SpeakiOSUITests/SiteMediaCaptureUITests.swift`.
+  The Simulator transcript hook returns fixed fictional text instead of a
+  microphone and transcriber, and the captions say so.
+- Windows and Linux: unretouched page screenshots from the native apps'
+  `--ui-screenshots` tours in `windows.yml` and `linux.yml` (sample History),
+  fetched from the newest successful `main` run whose job ran on a hosted
+  runner by `scripts/site-media/fetch-desktop-tours.py`. Light-theme Windows
+  pages are skipped because the off-screen capture renders them washed out.
+
+Title cards and the platform badge are the only additions; there is no audio,
+voiceover or music. Physical iPhone Action Button, Live Activity and Apple
+Watch shots need the owner and are tracked in the /qa checklist (#1368).
+
+To regenerate for a release: run the Site Media Capture workflow, download its
+`site-clips-*` artifact and copy the files into `clips/`. Locally,
+`python3 scripts/site-media/render-clips.py <captures> <output>` re-renders
+from downloaded capture artifacts (needs ffmpeg and Pillow).
+
+The page loads no clip data until someone presses play (`preload="none"`), and
+`clips.js` defers below-the-fold posters until they near the viewport.
 
 Earlier captures that showed the developer's own usage and dictation
 (app-dashboard.png, app-history.png) and superseded captures were removed.

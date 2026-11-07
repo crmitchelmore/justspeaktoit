@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-04"
+updated: "2026-11-07"
 sessions:
   - id: "decisions"
     device: "Decision"
@@ -457,6 +457,23 @@ sessions:
           - "Record once, force-quit, reopen and check History."
         expected: "Older items are unchanged and the new recording survives the relaunch."
         final_gate: false
+      - id: "iphone-marketing-footage"
+        issues:
+          - 1368
+        title: "Website footage: Action Button start, Live Activity and Control Centre stop"
+        minutes: 8
+        core: false
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        prerequisites:
+          - "Turn on Do Not Disturb, set the time to 9:41 if you can, and use only fictional words; nothing personal may appear on screen."
+        steps:
+          - "Start a screen recording from Control Centre, then go to the Home Screen."
+          - "Press and hold the Action Button and say \"Pick up oat milk and lemons on the way home\"."
+          - "While talking, show the Dynamic Island, then tap Stop in the Live Activity."
+          - "Start again from the Transcribe control in Control Centre, say \"Move the team lunch to Thursday\", and stop it the same way."
+          - "Stop the screen recording and attach it to #1368 (or share it with the agent)."
+        expected: "A recording under one minute showing both starts and stops, the Live Activity with the fictional words, and no notifications, names or personal data on screen."
+        final_gate: false
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"
@@ -517,3 +534,20 @@ sessions:
           - "Open iPhone History."
         expected: "While offline the captures wait (never Failed or stuck Recording). After reconnecting both show In history, and iPhone History has exactly one entry each for \"offline seven\" and \"force quit eight\"."
         final_gate: true
+      - id: "watch-marketing-footage"
+        issues:
+          - 1368
+        title: "Website footage: stop a locked iPhone from the Watch Smart Stack"
+        minutes: 6
+        core: false
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later; no watch app needed"
+        prerequisites:
+          - "Do Not Disturb on both devices; a second phone or camera to film the Watch and iPhone together; fictional words only."
+        steps:
+          - "Start filming the Watch and the iPhone together."
+          - "On the iPhone tap Transcribe Voice in Control Center, say \"Book the team lunch for Thursday\" and lock the iPhone."
+          - "Raise the Watch, open the Smart Stack and tap Stop on the Just Speak to It card."
+          - "Unlock the iPhone and open History so the new item is visible, then stop filming."
+          - "Attach the video to #1368 (or share it with the agent)."
+        expected: "A clip under 30 seconds showing the Watch stop ending the iPhone recording and the new item in History, with no notifications or personal data visible."
+        final_gate: false

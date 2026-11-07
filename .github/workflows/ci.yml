@@ -23,10 +23,17 @@ jobs:
     name: Build & Test (macOS Debug)
     # Route only the explicitly reviewed revision to the native pool.
     # Every selected native runner must also admit this revision locally.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 45
+    # Compiles the native-CI Keychain redirect into these test builds only;
+    # distribution builds never set it (#1360).
+    env:
+      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     steps:
       - uses: actions/checkout@v7.0.1
+
+      - name: Verify process-scoped Keychain isolation
+        run: python3 -B -m unittest scripts.tests.test_private_test_keychain -v
 
       - name: Test installed sample contract collector
         continue-on-error: true
@@ -376,8 +383,12 @@ jobs:
   core-journey-e2e:
     name: Core Dictation Journey (≤8m tests)
     # This non-UI contract gate may use an explicitly approved native runner.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 40
+    # Compiles the native-CI Keychain redirect into these test builds only;
+    # distribution builds never set it (#1360).
+    env:
+      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
@@ -407,7 +418,7 @@ jobs:
 
       - name: Run prepared core journey gate
         timeout-minutes: 10
-        run: scripts/run-core-journey-e2e.sh --phase test
+        run: python3 scripts/with-test-keychain.py bash scripts/run-core-journey-e2e.sh --phase test
 
       - name: Upload stage diagnostics
         if: always()
@@ -419,9 +430,18 @@ jobs:
           if-no-files-found: error
 
   core-journey-fixture-ui:
-    name: Core Journey Fixture UI
+    name: Core Journey Fixture UI (${{ matrix.shard }})
     # Hosted ARM has the UI automation entitlement; the native pool does not.
     runs-on: macos-latest
+    # Each hotkey journey spends ~60s in real gesture windows. Parallel shards
+    # keep every shard inside the unchanged 600s UI runtime budget; the shard
+    # list in scripts/verify-core-journey-ui.py assigns every suite exactly once.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [foundation, p0]
+    env:
+      CORE_JOURNEY_UI_SHARD: ${{ matrix.shard }}
     # 2m checkout + 6m setup + 17m build/receipts + 12m UI/receipts + 3m upload.
     # The former 600s job spent ~505s preparing before UI tests. Setup now has a
     # separate 300s command budget; build has 900s; actual UI tests keep 600s.
@@ -450,7 +470,7 @@ jobs:
         timeout-minutes: 3
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: core-journey-fixture-ui-${{ github.run_attempt }}
+          name: core-journey-fixture-ui-${{ matrix.shard }}-${{ github.run_attempt }}
           path: |
             .artifacts/core-journey-fixture-ui
             !.artifacts/core-journey-fixture-ui/DerivedData
@@ -459,8 +479,13 @@ jobs:
 
   release-validation:
     name: Build & Test (Release)
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
+    # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 45
+    # Compiles the native-CI Keychain redirect into these test builds only;
+    # distribution builds never set it (#1360).
+    env:
+      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     needs: release-paths
     if: needs.release-paths.outputs.package == 'true'
     steps:
@@ -479,7 +504,7 @@ jobs:
 
   build-ios-swiftpm:
     name: Build iOS Library (SwiftPM)
-    runs-on: macos-26-intel
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -490,7 +515,7 @@ jobs:
 
   build-ios-test-products:
     name: Build iOS XCTest Products
-    runs-on: macos-26-intel
+    runs-on: macos-latest
     timeout-minutes: 30
     outputs:
       artifact-id: ${{ steps.products.outputs.artifact-id }}
@@ -675,7 +700,7 @@ jobs:
     # that scheme at all — only the direct-capture one was — so the shape users
     # actually receive had the weaker check. Both are built here now.
     name: Build iOS Keyboard
-    runs-on: macos-26-intel
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -752,7 +777,8 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
+    # Hosted ARM: on Intel the tooling tests exceeded the 30-minute budget.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -776,7 +802,7 @@ jobs:
 
   paid-access-worker:
     name: Paid Access Worker
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-latest"]') }}
     timeout-minutes: 15
     defaults:
       run:
@@ -808,7 +834,7 @@ jobs:
     name: Public API compatibility
     # Route only the explicitly reviewed revision to the native pool.
     # Every selected native runner must also admit this revision locally.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-macos-build","macOS"]') || '["macos-26-intel"]') }}
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 30
     if: github.event_name == 'pull_request'
     steps:

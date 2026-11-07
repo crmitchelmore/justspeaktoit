@@ -80,7 +80,7 @@ private func deleteKeychainItem(service: String, account: String) {
         kSecAttrService as String: service,
         kSecAttrAccount as String: account
     ]
-    SecItemDelete(query as CFDictionary)
+    KeychainAccess.delete(query as CFDictionary)
 }
 
 private actor DelayedKeychainPermissions: KeychainPermissionsChecking {

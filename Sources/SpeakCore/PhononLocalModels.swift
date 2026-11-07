@@ -21,9 +21,9 @@ public enum PhononLocalModels {
 
     public static var isSupportedOnCurrentPlatform: Bool {
         #if os(macOS) && arch(arm64) && !APP_STORE
-        return isSupported(channel: .current, isAppleSilicon: true)
+        isSupported(channel: .current, isAppleSilicon: true)
         #else
-        return false
+        false
         #endif
     }
 }

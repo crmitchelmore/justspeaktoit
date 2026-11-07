@@ -233,22 +233,31 @@ extension DesktopHostVoicePronunciationTests {
             let task = await controller.readAloudState.task
             return try XCTUnwrap(task)
         }
+        return try await Self.startIPAFreshOperation(
+            action, source: source, destination: destination, controller: controller)
+    }
+
+    // Capture the owned task before a fast refusal can clear its actor slot.
+    private static func startIPAFreshOperation(
+        _ action: Int, source: VoiceOutputSourceSnapshot, destination: URL,
+        controller: isolated DesktopHostController<PronunciationVoicePlatform>
+    ) throws -> Task<Void, Never> {
         if action == 1 {
-            await controller.generateVoiceSource(
+            controller.generateVoiceSource(
                 source,
                 options: .init(autoPlay: false, saveToRecordings: false)
             ) { input, selection, credential in
                 try await PronunciationVoicePlatform.synthesizeVoiceOutput(
                     input, selection: selection, credential: credential)
             }
-            let task = await controller.voiceGenerationTask
+            let task = controller.voiceGenerationTask
             return try XCTUnwrap(task)
         }
-        await controller.exportVoiceSource(source, path: destination.path) { input, selection, credential in
+        controller.exportVoiceSource(source, path: destination.path) { input, selection, credential in
             try await PronunciationVoicePlatform.synthesizeVoiceOutput(
                 input, selection: selection, credential: credential)
         }
-        let task = await controller.readAloudState.exportTask
+        let task = controller.readAloudState.exportTask
         return try XCTUnwrap(task)
     }
 }

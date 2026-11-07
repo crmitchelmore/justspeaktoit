@@ -296,12 +296,12 @@ extension SettingsView {
             Text(
               {
                 #if APP_STORE
-                return """
+                """
                 Downloaded transcription is separate from Apple Speech and cloud providers. \
                 WhisperKit/Core ML model data runs in-process and is supported in this App Store build.
                 """
                 #else
-                return """
+                """
                 Downloaded transcription is separate from Apple Speech and cloud providers. \
                 Local Batch uses in-process WhisperKit/Core ML model data. Local Streaming can use \
                 in-process FluidAudio/Core ML or an optional external sherpa-onnx runtime.
@@ -1703,9 +1703,7 @@ extension SettingsView {
   }
 
   var cloudPostProcessingOptions: [ModelCatalog.Option] {
-    ModelCatalog.postProcessing.filter {
-      !PostProcessingManager.isLocalPostProcessingModel($0.id)
-    }
+    CleanupModelDiscoveryStore.shared.options(selected: settings.postProcessingModel)
   }
 
   private var localStreamingModels: [LocalTranscriptionModel] {

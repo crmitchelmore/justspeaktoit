@@ -7,8 +7,8 @@ enum KeychainAccessibilityMigration {
     static func migrate(
         query: [String: Any],
         expectedData: Data,
-        copy: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = SecItemCopyMatching,
-        update: (CFDictionary, CFDictionary) -> OSStatus = SecItemUpdate
+        copy: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = KeychainAccess.copyMatching,
+        update: (CFDictionary, CFDictionary) -> OSStatus = KeychainAccess.update
     ) throws {
         var readQuery = query
         readQuery[kSecReturnAttributes as String] = true

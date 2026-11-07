@@ -16,7 +16,7 @@ final class FileSpeechIntegrationTests: XCTestCase {
         )
         defer {
             defaults.removePersistentDomain(forName: suite)
-            SecItemDelete([kSecClass as String: kSecClassGenericPassword,
+            KeychainAccess.delete([kSecClass as String: kSecClassGenericPassword,
                            kSecAttrService as String: service] as CFDictionary)
         }
         let settings = AppSettings(defaults: defaults, loadsSecureStorage: false, credentialStorage: storage)

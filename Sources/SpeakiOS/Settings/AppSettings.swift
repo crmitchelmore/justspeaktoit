@@ -110,6 +110,7 @@ public final class AppSettings: ObservableObject {
         case transcriptClipboardLifetimeSeconds
         case transcriptUniversalClipboard = "transcriptClipboardAllowsUniversalClipboard"
         case transcriptClipboardNoticeVersion
+        case upgradeOfflineTranscriptsWhenOnline
     }
 
     public static let shared = AppSettings()
@@ -399,6 +400,18 @@ public final class AppSettings: ObservableObject {
         }
     }
 
+    /// Opt-in (issue #999): re-transcribe offline on-device captures with the
+    /// selected cloud batch model once the network returns. Off by default
+    /// because it spends provider credit without a fresh tap.
+    @Published public var upgradeOfflineTranscriptsWhenOnline: Bool {
+        didSet {
+            self.defaults.set(
+                self.upgradeOfflineTranscriptsWhenOnline,
+                forKey: DefaultsKey.upgradeOfflineTranscriptsWhenOnline.storageKey
+            )
+        }
+    }
+
     @Published public var liveActivitiesEnabled: Bool {
         didSet { defaults.set(liveActivitiesEnabled, forKey: DefaultsKey.liveActivitiesEnabled.rawValue) }
     }
@@ -534,6 +547,11 @@ public final class AppSettings: ObservableObject {
         }
     }
 
+    /// Device-local metadata discovery; intentionally outside automatic settings transfer.
+    @Published public var cleanupModelDiscoveryEnabled: Bool {
+        didSet { defaults.set(cleanupModelDiscoveryEnabled, forKey: CleanupModelSelection.preferenceKey) }
+    }
+
     @Published public var postProcessingModel: String {
         didSet {
             defaults.set(postProcessingModel, forKey: DefaultsKey.postProcessingModel.storageKey)
@@ -643,7 +661,8 @@ public final class AppSettings: ObservableObject {
         let postEnabled = defaults.bool(forKey: DefaultsKey.postProcessingEnabled.storageKey)
         let storedPostModel = defaults.string(forKey: DefaultsKey.postProcessingModel.storageKey)
         let normalizedPostModel = ModelCatalog.normalizedPostProcessingModel(storedPostModel)
-        let postModel = Self.postProcessingModels.contains { $0.id == normalizedPostModel }
+        let postModel = (Self.postProcessingModels.contains { $0.id == normalizedPostModel }
+            || CleanupModelSelection.modelID(from: normalizedPostModel) != nil)
             ? normalizedPostModel
             : ModelCatalog.defaultPostProcessingModel
         let autoPost = defaults.bool(forKey: DefaultsKey.autoPostProcess.rawValue)
@@ -689,6 +708,9 @@ public final class AppSettings: ObservableObject {
         self.transcriptReadyNotificationsEnabled = defaults.bool(
             forKey: DefaultsKey.transcriptReadyNotificationsEnabled.storageKey
         )
+        self.upgradeOfflineTranscriptsWhenOnline = defaults.bool(
+            forKey: DefaultsKey.upgradeOfflineTranscriptsWhenOnline.storageKey
+        )
         self.liveActivitiesEnabled = liveActivities
         self.transcriptClipboardLifetime = clipboardPolicy.lifetime
         self.transcriptAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard
@@ -708,6 +730,7 @@ public final class AppSettings: ObservableObject {
                 ?? CaptureEndPointingPolicy.defaultSilenceWindowSeconds
         )
         self.postProcessingEnabled = postEnabled
+        self.cleanupModelDiscoveryEnabled = defaults.bool(forKey: CleanupModelSelection.preferenceKey)
         self.postProcessingModel = postModel
         self.autoPostProcess = autoPost
 
@@ -1120,7 +1143,7 @@ public final class AppSettings: ObservableObject {
         ]
 
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+        guard KeychainAccess.copyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data,
               let string = String(data: data, encoding: .utf8) else {
             return nil

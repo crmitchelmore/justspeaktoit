@@ -19,9 +19,13 @@ final class CaptureNetworkSnapshotState {
         self.snapshot = .unknown
     }
 
-    func receive(_ snapshot: CaptureConnectivitySnapshot, generation: UInt) {
-        guard generation == self.generation else { return }
+    /// - Returns: whether this delivery is the path becoming available.
+    @discardableResult
+    func receive(_ snapshot: CaptureConnectivitySnapshot, generation: UInt) -> Bool {
+        guard generation == self.generation else { return false }
+        let becameAvailable = snapshot == .available && self.snapshot != .available
         self.snapshot = snapshot
+        return becameAvailable
     }
 }
 
@@ -36,6 +40,8 @@ final class CaptureNetworkPathMonitor {
     private let state = CaptureNetworkSnapshotState()
     private let callbackQueue = DispatchQueue(label: "com.justspeaktoit.capture-network-path")
     private var monitor: NWPathMonitor?
+    /// Called on the main actor each time the path becomes available.
+    var onBecameAvailable: (@MainActor () -> Void)?
 
     private init() {
         self.restart()
@@ -56,7 +62,8 @@ final class CaptureNetworkPathMonitor {
         monitor.pathUpdateHandler = { [weak self] path in
             let snapshot = Self.snapshot(for: path.status)
             Task { @MainActor [weak self] in
-                self?.state.receive(snapshot, generation: generation)
+                guard let self, self.state.receive(snapshot, generation: generation) else { return }
+                self.onBecameAvailable?()
             }
         }
         monitor.start(queue: self.callbackQueue)

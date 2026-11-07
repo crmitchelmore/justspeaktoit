@@ -56,7 +56,7 @@ public enum KeychainSyncAvailability {
             addQuery[kSecAttrAccessGroup as String] = accessGroup
         }
 
-        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        let addStatus = KeychainAccess.add(addQuery as CFDictionary, nil)
         guard addStatus == errSecSuccess else { return false }
 
         var deleteQuery: [String: Any] = [
@@ -68,7 +68,7 @@ public enum KeychainSyncAvailability {
         if let accessGroup {
             deleteQuery[kSecAttrAccessGroup as String] = accessGroup
         }
-        SecItemDelete(deleteQuery as CFDictionary)
+        KeychainAccess.delete(deleteQuery as CFDictionary)
         return true
     }
 }

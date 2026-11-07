@@ -41,8 +41,9 @@ public struct OpenRouterInlineAudioTranscriptionClient: Sendable {
     /// canonical credential is the OpenRouter key. The `google/` and `openai/` prefixes are
     /// shared with direct Gemini and OpenAI routes, so ownership comes from the shared
     /// credential rule rather than from the identifier or a second platform list.
+    /// Shut-down entries stay routed so a saved selection fails with `ModelRetiredError`.
     public static let batchCatalogIDs: Set<String> = Set(
-        ModelCatalog.batchTranscription.map(\.id).filter {
+        ModelCatalog.scheduledBatchTranscription.map(\.id).filter {
             ModelCredentialResolver.requirement(for: $0, purpose: .batchTranscription)
                 == ModelCredentialResolver.openRouterRequirement
         }
@@ -54,6 +55,25 @@ public struct OpenRouterInlineAudioTranscriptionClient: Sendable {
     private let branding: OpenRouterBranding
     private let durationResolver: DurationResolver
     private let formatPolicy: FormatPolicy
+    private let now: @Sendable () -> Date
+
+    public init(
+        apiKey: String,
+        session: URLSession = .shared,
+        maximumInlineAudioBytes: Int64 = OpenRouterInlineAudioTranscriptionClient.defaultMaximumInlineAudioBytes,
+        branding: OpenRouterBranding = .platformDefault,
+        formatPolicy: FormatPolicy = .legacyM4AFallback,
+        durationResolver: @escaping DurationResolver = { _ in 0 },
+        now: @escaping @Sendable () -> Date
+    ) {
+        self.apiKey = apiKey
+        self.session = session
+        self.maximumInlineAudioBytes = maximumInlineAudioBytes
+        self.branding = branding
+        self.formatPolicy = formatPolicy
+        self.durationResolver = durationResolver
+        self.now = now
+    }
 
     public init(
         apiKey: String,
@@ -63,12 +83,10 @@ public struct OpenRouterInlineAudioTranscriptionClient: Sendable {
         formatPolicy: FormatPolicy = .legacyM4AFallback,
         durationResolver: @escaping DurationResolver = { _ in 0 }
     ) {
-        self.apiKey = apiKey
-        self.session = session
-        self.maximumInlineAudioBytes = maximumInlineAudioBytes
-        self.branding = branding
-        self.formatPolicy = formatPolicy
-        self.durationResolver = durationResolver
+        self.init(
+            apiKey: apiKey, session: session, maximumInlineAudioBytes: maximumInlineAudioBytes,
+            branding: branding, formatPolicy: formatPolicy, durationResolver: durationResolver, now: { Date() }
+        )
     }
 
     public func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
@@ -76,6 +94,7 @@ public struct OpenRouterInlineAudioTranscriptionClient: Sendable {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw OpenRouterClientError.apiKeyMissing }
         let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        try ModelRetirements.ensureAvailable(identifier, at: now())
         let request = try await makeRequest(apiKey: key, audioURL: url, model: identifier, language: language)
         try Task.checkCancellation()
 

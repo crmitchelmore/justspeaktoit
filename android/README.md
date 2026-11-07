@@ -69,6 +69,7 @@ app/src/main/java/com/justspeaktoit/android/
 │   ├── AndroidSpeechEngine.kt     # SpeechRecognizer adapter (main thread)
 │   └── DictationViewModel.kt
 ├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
+├── history/                 # transcript history, retention and atomic storage
 ├── settings/                # non-secret preferences
 ├── security/                # Keystore-backed AES-GCM secret store for BYOK keys
 ├── output/                  # copy and share
@@ -87,6 +88,7 @@ credential IDs and the cleanup prompt identical to the Mac app.
 - **Cloud** mode uploads audio to the provider chosen in Settings with your key. The
   recording is a temporary file that is deleted after the request, whether it succeeds or fails.
 - Optional cleanup sends the final transcript text (not audio) to OpenRouter.
-- Transcripts stay in memory until cleared.
+- History is stored only in app-private storage (excluded from backup) and follows the
+  retention chosen in History; Off saves nothing and deletes existing entries.
 - Secrets are encrypted with a non-exportable Android Keystore key. App data is excluded
   from cloud backup and device transfer.

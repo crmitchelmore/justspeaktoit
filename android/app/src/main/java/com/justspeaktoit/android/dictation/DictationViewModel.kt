@@ -11,10 +11,16 @@ import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.WavFormat
 import com.justspeaktoit.android.cloud.WavRecorder
+import com.justspeaktoit.android.history.AtomicHistoryFile
+import com.justspeaktoit.android.history.HistoryEntry
+import com.justspeaktoit.android.history.HistoryStatus
+import com.justspeaktoit.android.history.HistoryStore
+import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.AppPreferences
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
@@ -30,6 +36,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.io.IOException
+import java.util.UUID
 import java.security.GeneralSecurityException
 import java.security.ProviderException
 import java.util.Locale
@@ -54,6 +62,11 @@ data class DictationUiState(
     val keyStoreError: Boolean = false,
     /** True until a discarded recording has released the microphone. */
     val releasingMicrophone: Boolean = false,
+    /** Newest first. */
+    val history: List<HistoryEntry> = emptyList(),
+    val retention: Retention = Retention.Month,
+    /** The last history change could not be written; it is retried with the next change. */
+    val historyError: Boolean = false,
 ) {
     /** The mode a new session would use. */
     val activeMode: RecognitionMode?
@@ -87,14 +100,25 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     private val prefs = AppPreferences(application)
     private val cloud = CloudClient()
     private val cacheDir = application.cacheDir
+    private val history = HistoryStore(AtomicHistoryFile(File(application.filesDir, "history.json")))
+
+    // One thread owns the history file, so writes are ordered without locks.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val historyDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     private val _state = MutableStateFlow(
         DictationUiState(
             chosenMode = prefs.chosenMode,
             cloudModel = CloudCatalog.transcriptionModel(prefs.cloudModelId),
             cleanupEnabled = prefs.cleanupEnabled,
+            retention = prefs.retention,
         ),
     )
+
+    init {
+        val retention = prefs.retention
+        updateHistory { history.load(retention) }
+    }
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
 
     // Kept separate so microphone level updates only recompose the level indicator.
@@ -188,6 +212,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         val mode = current.activeMode ?: return
         if (!current.canStart) return
         _state.update { it.copy(cleanup = CleanupStatus.None, originalTranscript = null) }
+        sessionModelId = if (mode == RecognitionMode.Cloud) current.cloudModel.catalogId else null
         dispatch(DictationEvent.Start(mode))
         when (mode) {
             RecognitionMode.Cloud -> startCloud()
@@ -215,6 +240,73 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         dispatch(DictationEvent.Cancelled)
     }
 
+    fun setRetention(retention: Retention) {
+        prefs.retention = retention
+        _state.update { it.copy(retention = retention) }
+        updateHistory { history.load(retention) }
+    }
+
+    fun deleteHistoryEntry(id: String) {
+        val retention = _state.value.retention
+        updateHistory { history.remove(id, retention) }
+    }
+
+    fun clearHistory() = updateHistory { history.clear() }
+
+    /** Re-reads and prunes history so the retention cutoff holds while the app stays open. */
+    fun refreshHistory() {
+        val retention = _state.value.retention
+        updateHistory { history.load(retention) }
+    }
+
+    private fun updateHistory(change: () -> List<HistoryEntry>) {
+        viewModelScope.launch {
+            val (entries, failed) = withContext(historyDispatcher) {
+                try {
+                    change() to false
+                } catch (e: IOException) {
+                    history.cached to true
+                }
+            }
+            _state.update { it.copy(history = entries, historyError = failed) }
+        }
+    }
+
+    /** The latest session's history entry, so a later cleanup updates it rather than adding another. */
+    private var lastEntry: HistoryEntry? = null
+
+    // The model is fixed when the session starts, so later Settings changes cannot relabel it.
+    private var sessionModelId: String? = null
+
+    private fun record(state: DictationState) {
+        val entry = when (state) {
+            is DictationState.Done -> entry(state.mode, HistoryStatus.Completed, state.transcript, null)
+            is DictationState.Failed -> entry(state.mode, HistoryStatus.Failed, state.unfinishedText, state.failure)
+            else -> return
+        }
+        lastEntry = entry
+        val retention = _state.value.retention
+        updateHistory { history.add(entry, retention) }
+    }
+
+    private fun recordCleanup(cleaned: String) {
+        val entry = lastEntry?.copy(text = cleaned, cleanedUp = true) ?: return
+        lastEntry = entry
+        val retention = _state.value.retention
+        updateHistory { history.replace(entry, retention) }
+    }
+
+    private fun entry(mode: RecognitionMode, status: HistoryStatus, text: String, failure: DictationFailure?) =
+        HistoryEntry(
+            id = UUID.randomUUID().toString(),
+            createdAtMs = System.currentTimeMillis(),
+            mode = mode.name,
+            model = if (mode == RecognitionMode.Cloud) sessionModelId else null,
+            status = status,
+            text = text,
+            failure = failure?.name,
+        )
+
     /**
      * Android does not let a foreground-only app keep the microphone once it leaves the screen, so
      * capture ends as a failure. Work that no longer needs the microphone (an upload) continues.
@@ -237,6 +329,11 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     fun showOriginal() {
         val original = _state.value.originalTranscript ?: return
         val done = _state.value.dictation as? DictationState.Done ?: return
+        lastEntry?.copy(text = original, cleanedUp = false)?.let { entry ->
+            lastEntry = entry
+            val retention = _state.value.retention
+            updateHistory { history.replace(entry, retention) }
+        }
         _state.update {
             it.copy(
                 dictation = done.copy(transcript = original),
@@ -381,10 +478,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             } catch (e: ProviderException) {
                 null
             }
+            if (_state.value.dictation != done) return@launch
             _state.update {
-                if (it.dictation != done) {
-                    it
-                } else if (cleaned.isNullOrBlank()) {
+                if (cleaned.isNullOrBlank()) {
                     it.copy(cleanup = CleanupStatus.Failed)
                 } else {
                     it.copy(
@@ -394,6 +490,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
             }
+            if (!cleaned.isNullOrBlank()) recordCleanup(cleaned)
         }
     }
 
@@ -402,8 +499,13 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun dispatch(event: DictationEvent) {
+        val before = _state.value.dictation
         _state.update { it.copy(dictation = DictationReducer.reduce(it.dictation, event)) }
-        if (!_state.value.dictation.isActive) _level.value = 0f
+        val after = _state.value.dictation
+        if (!after.isActive) _level.value = 0f
+        if (!before.isActive || after.isActive) return
+        // A session just ended: record it now, so it survives even if optional cleanup never finishes.
+        record(after)
     }
 
     override fun onCleared() {

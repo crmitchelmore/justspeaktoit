@@ -53,7 +53,7 @@ API keys) come across.
 |---|---|---|
 | `iCloud.com.justspeaktoit` | Mac App Store build (Stable) | Joined: History, API keys |
 | `iCloud.com.justspeaktoit.alpha` | Mac App Store Alpha | Not used: Windows builds have no Alpha identity yet and resolve the Stable train |
-| `iCloud.com.justspeaktoit.ios` (`.alpha`) | iPhone builds without the shared-container flag | Not joined; iPhone builds with `IOS_SHARED_CLOUD_CONTAINER` write `iCloud.com.justspeaktoit` instead ([cloudkit-shared-container.md](cloudkit-shared-container.md)) |
+| `iCloud.com.justspeaktoit.ios` (`.alpha`) | iPhone builds without the shared-container flag | Not joined. With `IOS_SHARED_CLOUD_CONTAINER`, Stable iPhones write `iCloud.com.justspeaktoit` (joined) and Alpha iPhones write `iCloud.com.justspeaktoit.alpha` (not used by Windows) ([cloudkit-shared-container.md](cloudkit-shared-container.md)) |
 
 The direct (Developer ID) Mac build ships without CloudKit entitlements, so its
 History is not in iCloud. Windows chooses the container from

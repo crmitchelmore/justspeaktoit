@@ -33,8 +33,10 @@ profile that carries them.
    as well as `iCloud.com.justspeaktoit.ios`, then Save. Do the same for
    `com.justspeaktoit.ios.alpha` with `iCloud.com.justspeaktoit.alpha`.
 2. **Profiles.** Edit and save (regenerate) the iOS App Store profiles for both
-   App IDs, which the capability change invalidates. If a profile is stored in
-   the `IOS_APPSTORE_PROFILE` secret, replace it with the regenerated one.
+   App IDs, which the capability change invalidates. Replace any stored copies:
+   `IOS_APPSTORE_PROFILE` for Stable and `ALPHA_IOS_APPSTORE_PROFILE` for Alpha.
+   The release preflight accepts a profile with or without the shared
+   container until the flag is on, then requires it.
 3. **Schema.** In CloudKit Console, check that the Production schema of
    `iCloud.com.justspeaktoit` (and `.alpha`) has every record type that the
    `iCloud.com.justspeaktoit.ios` Production schema has. If one is missing,

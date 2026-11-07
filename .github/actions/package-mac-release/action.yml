@@ -196,6 +196,13 @@ runs:
         fi
         ./scripts/verify-architecture.sh "${{ steps.paths.outputs.app-path }}" "${{ inputs.variant }}" "$CLI_MODE"
 
+    # Shipped binaries must not honour the native-CI Keychain redirect (#1360).
+    - name: Verify no test Keychain redirect (${{ inputs.variant }})
+      shell: bash
+      run: |
+        chmod +x scripts/verify-no-test-keychain-redirect.sh
+        ./scripts/verify-no-test-keychain-redirect.sh "${{ steps.paths.outputs.app-path }}"
+
     - name: Verify App Launches (${{ inputs.variant }}, Pre-Notarisation)
       shell: bash
       env:

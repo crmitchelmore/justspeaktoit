@@ -83,7 +83,7 @@ private struct OrderingFixture {
 
     func cleanUp() {
         UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
-        SecItemDelete([
+        KeychainAccess.delete([
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service
         ] as CFDictionary)

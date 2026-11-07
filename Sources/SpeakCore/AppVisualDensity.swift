@@ -57,9 +57,9 @@ public enum AppVisualDensity: String, CaseIterable, Identifiable, Sendable {
         #if os(iOS)
         // Compact iOS rows remove internal whitespace but retain Apple's
         // minimum comfortable touch target.
-        return 44
+        44
         #else
-        return isCompact ? 30 : 44
+        isCompact ? 30 : 44
         #endif
     }
 

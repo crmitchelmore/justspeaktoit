@@ -6,6 +6,14 @@ on:
       - main
     paths:
       - 'landing-page/**'
+      - 'Docs/manual-checks.yml'
+      - '.github/workflows/deploy-landing-page.yml'
+  # Pull requests only test and build; publication stays on main.
+  pull_request:
+    paths:
+      - 'landing-page/**'
+      - 'Docs/manual-checks.yml'
+      - '.github/scripts/manual-qa-results.mjs'
       - '.github/workflows/deploy-landing-page.yml'
   workflow_dispatch:
 
@@ -40,6 +48,7 @@ jobs:
           npm run build
 
       - name: Deploy to Cloudflare Pages
+        if: github.event_name != 'pull_request'
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

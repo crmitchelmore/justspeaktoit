@@ -218,6 +218,19 @@ class BuildRecordLifecycleTests(unittest.TestCase):
         self.assertEqual(record, self.record())
         self.assertNotEqual(record['sourceSHA'], record['builtRevision'])
 
+    def test_producer_accepts_exact_pr_head_without_relying_on_synthetic_merge_base(self):
+        event = self.event()
+        event['pull_request']['base']['sha'] = '8' * 40
+        record = QUALIFICATION['build_record'](self.environment(), event, self.source,
+                                                [self.base], self.digest)
+        self.assertEqual(record['sourceSHA'], self.source)
+        self.assertEqual(record['builtRevision'], self.source)
+        self.verify(self.source, [self.base], self.metadata(), record, self.digest)
+        # An arbitrary checkout still cannot borrow the authenticated PR head.
+        with self.assertRaises(ValueError):
+            QUALIFICATION['build_record'](self.environment(), event, '9' * 40,
+                                           [self.base], self.digest)
+
     def test_association_removal_or_later_head_and_base_changes_do_not_rewrite_artifact_proof(self):
         for associations in ([], [{'head': {'sha': '9' * 40}, 'base': {'sha': '8' * 40}}]):
             run = QualificationPreconditionsTests().source()

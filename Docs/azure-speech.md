@@ -12,7 +12,7 @@ by this integration. Access to a model depends on the resource's tier and region
 | MAI-Transcribe-2 / 1.5 recorded audio | Same API, with the explicit enhanced-mode model | macOS, iOS and Windows; resource access required |
 | Azure Speech / MAI live input | Voice Live, version `2026-04-10`, pre-deployed `gpt-4.1` session | macOS, iOS and Windows; resource endpoint required |
 | MAI-Transcribe-2-Streaming incremental input | Dedicated `/mai/v1/realtime?intent=transcription` API | macOS, iOS and Windows; deployment named `mai-transcribe-2-streaming` required |
-| Azure neural voices, MAI-Voice-2.1 and MAI-Voice-2.1-Flash | Regional synthesis and voices-list APIs | macOS TTS; shared transport and MAI catalogue in SpeakCore |
+| Azure neural voices, MAI-Voice-2.1 and MAI-Voice-2.1-Flash | Regional synthesis and voices-list APIs | macOS TTS only (not iOS); shared transport and MAI catalogue in SpeakCore |
 
 The legacy MAI live selection uses Azure's `mai-transcribe` alias, currently
 documented as MAI-Transcribe-2, and is labelled **Turn-based**. Its stable catalogue
@@ -93,6 +93,12 @@ silently reused for Azure.
 5. On macOS, voice output loads the resource's regional voice list. Conventional
    saved voice IDs are preserved; the original neural voice list remains an
    offline fallback.
+
+Azure voice output (neural and MAI voices) is macOS only for now. iOS voice
+output offers Deepgram, Soniox and OpenRouter: `VoiceOutputProvider` has no
+Azure case and `VoiceOutputRouter` has no Azure route, so an Azure credential
+on iOS serves transcription only. `VoiceOutputSettingsTests` pins this; adding
+Azure to iOS needs a new provider, router path, settings and a device check.
 
 ### MAI voices
 

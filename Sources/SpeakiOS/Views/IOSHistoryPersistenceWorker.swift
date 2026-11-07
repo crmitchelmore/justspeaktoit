@@ -18,6 +18,8 @@ actor IOSHistoryPersistence {
     enum Operation: Sendable {
         case load, retry, commit
         case upsert(iOSHistoryItem)
+        /// Offline upgrade (issue #999): replaces only a row still exactly as filed.
+        case replaceIfUntouched(iOSHistoryItem, fingerprint: String, filedAt: Date)
         case processed(UUID, String, String?)
         case error(UUID, String)
         case remove(UUID), clear
@@ -159,6 +161,12 @@ private final class IOSHistoryPersistenceWorker: @unchecked Sendable {
         case .load, .retry, .commit:
             return maintenance(operation, hadAttemptedLoad: hadAttemptedLoad)
         case .upsert(let item):
+            upsert(item)
+            return saveSnapshot()
+        case let .replaceIfUntouched(item, fingerprint, filedAt):
+            guard let row = rows.first(where: { $0.id == item.id }),
+                  OfflineTranscriptUpgradePolicy.isUntouched(row, fingerprint: fingerprint, filedAt: filedAt)
+            else { return Effects(durable: false) }
             upsert(item)
             return saveSnapshot()
         case .processed, .error:

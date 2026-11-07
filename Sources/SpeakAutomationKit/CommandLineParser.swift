@@ -105,9 +105,9 @@ public enum CommandLineParser {
     /// How `speak` reaches the app on this platform, named in the usage text.
     static var localTransport: String {
         #if os(Windows)
-        return "local named pipe"
+        "local named pipe"
         #else
-        return "local socket"
+        "local socket"
         #endif
     }
 

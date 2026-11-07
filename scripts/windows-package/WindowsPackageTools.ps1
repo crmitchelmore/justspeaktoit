@@ -1,4 +1,4 @@
-# Shared helpers for the Windows developer MSIX scripts. Dot-source this file.
+# Shared helpers for the Windows MSIX package and installer scripts. Dot-source this file.
 # Compatible with Windows PowerShell 5.1 (the Appx and WinRT deployment APIs
 # used by the lifecycle test) and PowerShell 7. Keep this file ASCII-only.
 
@@ -229,4 +229,43 @@ function Get-JstiArtifactSigningClient {
                                fileVersion = (Get-Item -LiteralPath $dlib).VersionInfo.FileVersion; signer = $signer }
         }
     }
+}
+
+function Read-JstiBundleIdentity([string] $Bundle) {
+    # Reads the Identity element of AppxMetadata/AppxBundleManifest.xml inside an .msixbundle.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($Bundle)
+    try {
+        $entry = $zip.GetEntry('AppxMetadata/AppxBundleManifest.xml')
+        if (-not $entry) { throw "$Bundle has no AppxMetadata/AppxBundleManifest.xml." }
+        $reader = New-Object System.IO.StreamReader($entry.Open(), [System.Text.Encoding]::UTF8)
+        try { [xml] $manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $zip.Dispose() }
+    $identity = $manifest.DocumentElement.GetElementsByTagName('Identity') | Select-Object -First 1
+    if (-not $identity) { throw "$Bundle has no bundle identity." }
+    return [pscustomobject]@{
+        Name = $identity.GetAttribute('Name'); Publisher = $identity.GetAttribute('Publisher')
+        Version = $identity.GetAttribute('Version')
+    }
+}
+
+function Get-JstiPackageSigner([string] $Path) {
+    # AppxSignature.p7x in a package or bundle is 'PKCX' followed by a PKCS #7 SignedData blob.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Add-Type -AssemblyName System.Security
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        $entry = $zip.GetEntry('AppxSignature.p7x')
+        if (-not $entry) { throw "$Path has no AppxSignature.p7x." }
+        $stream = New-Object System.IO.MemoryStream
+        $source = $entry.Open()
+        try { $source.CopyTo($stream) } finally { $source.Dispose() }
+        $bytes = $stream.ToArray()
+    } finally { $zip.Dispose() }
+    if ($bytes.Length -lt 5 -or [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ne 'PKCX') {
+        throw 'AppxSignature.p7x does not start with PKCX.'
+    }
+    $cms = New-Object System.Security.Cryptography.Pkcs.SignedCms
+    $cms.Decode($bytes[4..($bytes.Length - 1)])
+    return $cms.SignerInfos[0].Certificate
 }

@@ -36,6 +36,7 @@ status; they fail an otherwise successful gate.
 | Batch provider | `OpenAITranscriptionProviderTests`, `OpenAITranscriptionProviderErrorTests`, `MissingLiveAPIKeyAlertTests` | Real request construction and response decoding with HTTP fixtures; routing and missing/rejected-key descriptions. |
 | Streaming provider | `StreamingClientContractTests` | Provider event parsing and complete transcript finalisation with injected stream events. |
 | Processing | `PostProcessingManagerTests`, `CoreJourneyPolishFixtureTests` | Empty input, local rules, cloud client stub, prompt payload; does not exercise MainManager's enabled/disabled routing. |
+| Launched-app scenario fixtures | `CoreJourneyScenarioFixtureTests` | Streaming stub partial/final order, silent WAV admission, per-request credential slot and scenario routing used by the P0 UI journeys. |
 | Streaming delivery | `LiveTextInserterStreamingTests` | Actual inserter with an in-memory AX field contract; partial replacement, duplication and fallback decisions. |
 | Clipboard and target policy | `TextOutputTests`, `ClipboardFieldIdentityPolicyTests` | Isolated pasteboard, empty text preservation, target identity and changed-field warnings; no assertion of native editor delivery. |
 | Automation transport | `AutomationServerTests`, `AutomationDeadlineTests` | Real listener, framing, shipped client, owner permissions, idempotent retries, deadlines, failure followed by recovery; command execution is stubbed. |
@@ -154,8 +155,8 @@ attached to `xcresult`. This is a full batch **clipboard-route** journey; it doe
 not claim a physical microphone, permission-denial regression, direct AX
 insertion, or native editor delivery on a runner without posting permission.
 
-The native CI job selects all five UI suites within its existing 42-minute
-job limit. The staged command budgets are 300 seconds for setup, 900 seconds for
+The native CI job runs the UI suites as parallel `foundation` and `p0` shards
+(see below), each within the existing 42-minute job limit. The staged command budgets are 300 seconds for setup, 900 seconds for
 build, and 600 seconds for tests, with separately bounded source/product receipts.
 `scripts/verify-core-journey-ui.py` and the active staged runner share the exact
 suite and named-case checks. Missing, skipped, failed, zero-test, or duplicated
@@ -186,24 +187,63 @@ gestures and genuine event-posting permission branch as the original off case.
 This increment does not establish physical microphone, Fn, streaming, direct AX,
 permission bootstrap or the full #802 flake target.
 
-The native P0 matrix is not complete. Before promoting the launched-app layer
-as capture-to-delivery protection, #802 needs the following concrete evidence:
+### Remaining P0 journeys
+
+`CoreJourneyP0UITests` adds four launched-app journeys. Each uses the same UUID
+profile, real Carbon double-tap/single-tap gestures, production MainManager
+orchestration, isolated History and the genuine event-posting branch as the
+batch journey. New Debug-only scenarios enter at existing dependency seams:
+
+| Journey | Scenario and seam | Assertions |
+| --- | --- | --- |
+| Streaming partials → final | `streamingOff`: `TranscriptionManager`'s live `controllerOverride` returns one stub controller for the `core-journey/streaming-fixture` model. | Four replacement partials (one revises a word) reach MainManager's live transcript while still recording; nothing is delivered early; one final is delivered exactly once to the clipboard; History stores only the final with one `live` usage; no batch HTTP request. |
+| Target change while transcribing | Default batch fixture; the test activates Finder during recording and stops from there. | With the default *Insert into the app where you started* policy, the transcript reaches the clipboard and only the captured fixture (when posting is permitted); Finder stays frontmost; History names the captured app and records the "Sent to the app where recording started" warning. |
+| Silent input | `batchSilentInput`: the capture source writes a digital-silence WAV; the HTTP fixture accepts only those bytes and returns an empty transcript. | Production rejects the empty transcript as an invalid response: the session fails, clipboard and field keep their prior contents, nothing is pasted, and History keeps one failure row with no transcript or placeholder text, no delivery and output method `none`. This is the accepted contract: a visible, text-free failure entry aids diagnosis. |
+| Missing transcription key, then recovery | `batchMissingKeyThenRecovery`: the OpenRouter key provider reads an in-memory per-profile credential slot that starts empty. | No provider request; the HUD shows the actionable OpenRouter key error; clipboard/field untouched; a failure row records the transcription error. The test then posts a UUID-scoped distributed notification (the sandboxed runner cannot write into the app's directory); the app saves the fixture key and acknowledges it, and the same Speak PID completes a fresh recording with one accepted request, exact clipboard output and an unchanged failure row. |
+
+The credential slot stands in for saving a key in Keychain; Settings key entry itself is
+covered by `SettingsCredentialUITests`. The streaming stub never sees audio and
+does not exercise provider WebSocket protocol code, which stays in the
+`StreamingClientContractTests` component suite.
+
+### Shards and flake qualification
+
+A hotkey journey spends about a minute in real gesture windows, so the six
+existing suites already used ~485 s of the 600 s UI runtime budget. The
+`Core Journey Fixture UI` job is therefore a matrix: `foundation` runs the
+original six suites and `p0` runs `CoreJourneyP0UITests`. `SHARDS` in
+`scripts/verify-core-journey-ui.py` assigns every required suite to exactly one
+shard; `CORE_JOURNEY_UI_SHARD` selects it (default: all, for local runs). Each
+shard keeps the unchanged setup/build/test budgets, and a CI test keeps the
+matrix and the verifier's shard list identical.
+
+`.github/workflows/core-journey-qualification.yml` is the #802 flake gate. Add
+the `core-journey-qualification` label to a same-repository pull request, or
+dispatch it on `main`. For each shard it starts five fresh hosted runners, builds
+once, then runs the shard four times in a row: 20 executions per shard, of which
+the first on each runner (5) is cold. Every execution is recorded, nothing is
+retried or discarded, and `scripts/summarise-core-journey-qualification.py`
+fails unless all 20 pass with at least five cold passes. The job summary and the
+`core-journey-qualification-record-*` artifact hold the per-run table, p95 and
+maximum test-command time. A `TimeoutExpired` counts only once the measured command time reaches the
+budget; an earlier one resumes waiting for the remainder. CPython 3.15's kqueue
+`Popen.wait` miscomputes its deadline when an exit is reported before reaping,
+and raised `TimeoutExpired` for the 600 s budget after a 327 s hosted run. Quarantine policy: a failing journey is fixed or the
+regression reverted; a known-flaky case is never retried in place and may only
+be removed from `REQUIRED_CASES` in a reviewed change that links its issue.
+
+### Remaining work outside the hosted gate
 
 | Scenario | Required assertion |
 | --- | --- |
-| Cold runner bootstrap | Launch the signed Speak app with isolated settings/history/keychain; establish AX/Input Monitoring permission readiness without skipping or reusing warm-host state. |
-| Batch direct insertion | The clipboard-route journey above covers orchestration; direct AX insertion still requires genuine permission bootstrap and exact captured-field delivery on cold runners. |
-| Streaming recording | Deliver changing partials and a final; assert replacement in the captured field, no duplicate final, and the final History text. |
-| Processing off/on | The native off and enabled fixtures cover MainManager clipboard delivery and raw/processed History; exact target insertion remains conditional on genuine posting permission. |
-| Provider failure and recovery | The controlled post-processing HTTP 400 fixture checks visible failure, raw delivery, retained error History and fresh same-process recovery; other provider failures remain separate. |
-| Target change and empty input | Switch focus during recording and verify the intended delivery/fallback policy; silence must preserve editor and clipboard contents. |
+| Cold runner permission bootstrap | Establish AX/Input Monitoring readiness on cold hosted runners without reusing warm-host state; until then direct insertion is asserted only when the launched process genuinely has posting permission. |
+| Batch direct insertion | Direct AX insertion and exact captured-field delivery on cold runners. |
 | Physical host release smoke | Exercise Fn with Secure Keyboard Entry, microphone/device interruption, and permission denial using the actual signed release artifact. |
 
 Provider/audio fixtures must enter at production dependency boundaries and the
 tests must drive production session orchestration. A test that manually chains
-provider, processor, and output calls cannot establish that wiring. Keep native
-coverage advisory until permission bootstrap passes on repeated cold hosted
-runners, then integrate it into the same required gate and budget.
+provider, processor, and output calls cannot establish that wiring. The macOS
+App Store/TestFlight flavour is retired; only direct distribution is covered.
 
 ## Updating the gate
 

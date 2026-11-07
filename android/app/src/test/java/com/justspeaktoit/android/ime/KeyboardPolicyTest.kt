@@ -49,6 +49,15 @@ class KeyboardPolicyTest {
     }
 
     @Test
+    fun testSpeechService_isDisclosedUnlessExplicitlyChosen() {
+        assertTrue(KeyboardPolicy.needsDisclosure(RecognitionMode.SpeechService, null))
+        assertTrue(KeyboardPolicy.needsDisclosure(RecognitionMode.SpeechService, RecognitionMode.Cloud))
+        assertTrue(KeyboardPolicy.needsDisclosure(RecognitionMode.SpeechService, RecognitionMode.OnDevice))
+        assertFalse(KeyboardPolicy.needsDisclosure(RecognitionMode.SpeechService, RecognitionMode.SpeechService))
+        assertFalse(KeyboardPolicy.needsDisclosure(RecognitionMode.OnDevice, null))
+    }
+
+    @Test
     fun testTextToCommit_addsSpaceOnlyAfterAWord() {
         assertEquals("Hello", KeyboardPolicy.textToCommit(" Hello ", null))
         assertEquals("Hello", KeyboardPolicy.textToCommit("Hello", ""))

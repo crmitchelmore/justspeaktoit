@@ -33,8 +33,9 @@ import java.util.Locale
 /**
  * A minimal dictation keyboard: the Android equivalent of the Mac's insert-at-cursor. Live partial
  * text is shown as composing text; only a final transcript is committed. A failed or cancelled
- * session removes its composing text, so it never looks like typed input. Audio never leaves the
- * device through the keyboard except via the phone's own speech service when that mode is used.
+ * session restores whatever it replaced, so it never looks like typed input or loses text. The
+ * keyboard never uses the app's Cloud (BYOK) providers; the phone's speech service, which may send
+ * audio to its provider, is used only after the user has been told so.
  */
 class DictationKeyboardService : InputMethodService() {
     private lateinit var engine: AndroidSpeechEngine
@@ -45,6 +46,17 @@ class DictationKeyboardService : InputMethodService() {
 
     /** No on-device or speech-service recognition is usable; the keyboard never falls back to the cloud. */
     private var unavailable = false
+
+    /** Bumped whenever the editor changes, so a pending start cannot reach a different field. */
+    private var inputGeneration = 0L
+
+    /** Whether this session has written composing text, and the selection it replaced. */
+    private var ownsComposing = false
+    private var replacedSelection: CharSequence = ""
+
+    /** Set after the speech-service disclosure has been shown; the next tap starts capture. */
+    private var speechServiceDisclosed = false
+    private var disclosing = false
 
     private var status: TextView? = null
     private var mic: ImageButton? = null
@@ -106,6 +118,8 @@ class DictationKeyboardService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        // A new or restarted editor (for example one that became a password field) ends any session.
+        abandonForNewInput()
         editorAllowsDictation = KeyboardPolicy.allowsDictation(info.inputType)
         inputVisible = true
         render()
@@ -114,13 +128,21 @@ class DictationKeyboardService : InputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) {
         // The field or the keyboard went away: abandon the session rather than typing into the next field.
         inputVisible = false
-        checking = false
-        if (state.isActive) cancelSession()
+        abandonForNewInput()
         super.onFinishInputView(finishingInput)
+    }
+
+    private fun abandonForNewInput() {
+        inputGeneration++
+        checking = false
+        disclosing = false
+        if (state.isActive) cancelSession()
     }
 
     private fun onMicTapped() {
         when {
+            // Finishing is bounded by the engine's deadline; further taps must not extend it.
+            state is DictationState.Finishing -> Unit
             state.isActive -> stopSession()
             !editorAllowsDictation -> Unit
             !hasMicPermission() -> openApp()
@@ -134,18 +156,30 @@ class DictationKeyboardService : InputMethodService() {
         render()
         val caps = engine.capabilities()
         val tag = Locale.getDefault().toLanguageTag()
+        val generation = inputGeneration
         engine.checkOnDeviceLanguage(tag) { resolution ->
+            // Only the editor that was tapped, if still eligible, may start capture.
+            if (generation != inputGeneration || !inputVisible || !editorAllowsDictation) return@checkOnDeviceLanguage
             checking = false
             val options = RecognizerAvailability.evaluate(caps, resolution.support)
-            val mode = KeyboardPolicy.mode(AppPreferences(this).chosenMode, options)
-            // The field may have closed while availability was being checked.
-            if (!inputVisible) return@checkOnDeviceLanguage
+            val chosen = AppPreferences(this).chosenMode
+            val mode = KeyboardPolicy.mode(chosen, options)
             if (mode == null) {
                 unavailable = true
                 render()
                 return@checkOnDeviceLanguage
             }
             unavailable = false
+            if (KeyboardPolicy.needsDisclosure(mode, chosen) && !speechServiceDisclosed) {
+                // Say where audio goes before any capture; the next tap confirms.
+                speechServiceDisclosed = true
+                disclosing = true
+                render()
+                return@checkOnDeviceLanguage
+            }
+            disclosing = false
+            ownsComposing = false
+            replacedSelection = currentInputConnection?.getSelectedText(0) ?: ""
             dispatch(DictationEvent.Start(mode))
             val language = if (mode == RecognitionMode.OnDevice) resolution.languageTag else tag
             engine.start(mode, language, onEvent = ::dispatch, onLevel = {})
@@ -159,25 +193,43 @@ class DictationKeyboardService : InputMethodService() {
 
     private fun cancelSession() {
         engine.cancel()
-        currentInputConnection?.setComposingText("", 1)
+        restoreReplacedText()
         dispatch(DictationEvent.Cancelled)
+    }
+
+    /** Puts back the selection the session's composing text replaced; untouched text is left alone. */
+    private fun restoreReplacedText() {
+        if (!ownsComposing) return
+        currentInputConnection?.let {
+            it.setComposingText(replacedSelection, 1)
+            it.finishComposingText()
+        }
+        ownsComposing = false
+    }
+
+    private fun showPartial(partial: String) {
+        // Nothing is written until there are words, so an empty start cannot erase a selection.
+        if (partial.isEmpty() && !ownsComposing) return
+        currentInputConnection?.setComposingText(partial, 1)
+        ownsComposing = true
     }
 
     private fun dispatch(event: DictationEvent) {
         state = DictationReducer.reduce(state, event)
         val ic = currentInputConnection
         when (val s = state) {
-            is DictationState.Listening -> ic?.setComposingText(s.partial, 1)
-            is DictationState.Finishing -> ic?.setComposingText(s.partial, 1)
+            is DictationState.Listening -> showPartial(s.partial)
+            is DictationState.Finishing -> showPartial(s.partial)
             is DictationState.Done -> {
                 if (ic != null) {
                     // Remove the provisional text first, so the spacing check sees the real preceding character.
-                    ic.setComposingText("", 1)
+                    if (ownsComposing) ic.setComposingText("", 1)
                     ic.commitText(KeyboardPolicy.textToCommit(s.transcript, ic.getTextBeforeCursor(1, 0)), 1)
                 }
+                ownsComposing = false
                 state = DictationState.Idle
             }
-            is DictationState.Failed -> ic?.setComposingText("", 1)
+            is DictationState.Failed -> restoreReplacedText()
             else -> Unit
         }
         render()
@@ -189,6 +241,7 @@ class DictationKeyboardService : InputMethodService() {
             !editorAllowsDictation -> getString(R.string.keyboard_password_field)
             !hasMicPermission() -> getString(R.string.keyboard_needs_permission)
             checking -> getString(R.string.state_starting)
+            disclosing -> getString(R.string.keyboard_speech_service_disclosure)
             unavailable && !state.isActive -> getString(R.string.keyboard_unavailable)
             else -> when (val s = state) {
                 DictationState.Idle, is DictationState.Done -> getString(R.string.keyboard_ready)

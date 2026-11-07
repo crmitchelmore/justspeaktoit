@@ -66,7 +66,7 @@ class AndroidSpeechEngine(context: Context) {
             return
         }
         supportProbe = probe
-        handler.postDelayed({ deliver(unknown) }, SUPPORT_TIMEOUT_MS)
+        handler.postDelayed({ deliver(unknown) }, PROBE_TOKEN, SUPPORT_TIMEOUT_MS)
         probe.checkRecognitionSupport(
             recognitionIntent(languageTag, RecognitionMode.OnDevice),
             context.mainExecutor,
@@ -87,7 +87,7 @@ class AndroidSpeechEngine(context: Context) {
 
     private fun releaseProbe() {
         probeGeneration++
-        handler.removeCallbacksAndMessages(null)
+        handler.removeCallbacksAndMessages(PROBE_TOKEN)
         supportProbe?.destroy()
         supportProbe = null
     }
@@ -129,13 +129,23 @@ class AndroidSpeechEngine(context: Context) {
             return
         }
         recognizer = created
-        created.setRecognitionListener(Listener(id, onEvent, onLevel))
+        val listener = Listener(id, onEvent, onLevel)
+        activeListener = listener
+        created.setRecognitionListener(listener)
         created.startListening(recognitionIntent(languageTag, mode))
+        // A service that never becomes ready must not leave the session stuck in Starting.
+        listener.arm(DictationFailure.RecognizerBusy, START_TIMEOUT_MS)
     }
+
+    private var activeListener: Listener? = null
 
     /** Stops capturing audio; the recogniser then delivers its final result or an error. */
     fun stop() {
-        recognizer?.stopListening()
+        val recognizer = recognizer ?: return
+        recognizer.stopListening()
+        // A service that never delivers a result ends the session as a failure; partial words are
+        // kept as unfinished text by the reducer, and later callbacks are ignored.
+        activeListener?.arm(DictationFailure.NetworkTimeout, FINALIZE_TIMEOUT_MS)
     }
 
     /** Abandons the session; no further events are delivered for it. */
@@ -152,6 +162,8 @@ class AndroidSpeechEngine(context: Context) {
     }
 
     private fun release() {
+        handler.removeCallbacksAndMessages(SESSION_TOKEN)
+        activeListener = null
         recognizer?.let {
             it.cancel()
             it.destroy()
@@ -173,6 +185,10 @@ class AndroidSpeechEngine(context: Context) {
 
     private companion object {
         const val SUPPORT_TIMEOUT_MS = 3_000L
+        const val START_TIMEOUT_MS = 10_000L
+        const val FINALIZE_TIMEOUT_MS = 10_000L
+        val PROBE_TOKEN = Any()
+        val SESSION_TOKEN = Any()
     }
 
     private inner class Listener(
@@ -188,11 +204,22 @@ class AndroidSpeechEngine(context: Context) {
 
         private fun finish(event: DictationEvent) {
             if (!current) return
+            session++
             release()
             onEvent(event)
         }
 
-        override fun onReadyForSpeech(params: Bundle?) = emit(DictationEvent.Ready)
+        /** Fails the session with [failure] unless it progresses within [delayMs]. */
+        fun arm(failure: DictationFailure, delayMs: Long) {
+            handler.removeCallbacksAndMessages(SESSION_TOKEN)
+            handler.postDelayed({ finish(DictationEvent.Error(failure)) }, SESSION_TOKEN, delayMs)
+        }
+
+        override fun onReadyForSpeech(params: Bundle?) {
+            if (!current) return
+            handler.removeCallbacksAndMessages(SESSION_TOKEN)
+            onEvent(DictationEvent.Ready)
+        }
 
         override fun onBeginningOfSpeech() = Unit
 

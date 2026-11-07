@@ -20,9 +20,9 @@ object KeyboardPolicy {
     }
 
     /**
-     * The keyboard never uploads audio: Cloud is excluded until its privacy UX is reviewed (see
-     * Docs/android-input-surfaces.md). An explicit on-device or speech-service choice from the app is
-     * honoured, and is never silently replaced if unusable.
+     * The keyboard never uses the app's Cloud (BYOK) providers until their privacy UX is reviewed
+     * (see Docs/android-input-surfaces.md); a saved Cloud choice is treated as no choice. An explicit
+     * on-device or speech-service choice is honoured and never silently replaced if unusable.
      */
     fun mode(chosen: RecognitionMode?, options: List<ModeAvailability>): RecognitionMode? {
         val local = options.filter { it.mode != RecognitionMode.Cloud }
@@ -32,6 +32,13 @@ object KeyboardPolicy {
             RecognizerAvailability.defaultMode(local)
         }
     }
+
+    /**
+     * The speech service may send audio to its provider, so it is disclosed before capture unless
+     * the user explicitly chose it in the app.
+     */
+    fun needsDisclosure(mode: RecognitionMode, chosen: RecognitionMode?): Boolean =
+        mode == RecognitionMode.SpeechService && chosen != RecognitionMode.SpeechService
 
     /** Text to commit: a separating space is added when the cursor follows a word. */
     fun textToCommit(transcript: String, before: CharSequence?): String {

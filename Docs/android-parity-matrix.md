@@ -37,8 +37,8 @@ Status key:
 | No silent cloud fallback | **Launch, done** | A running session keeps its mode and privacy label even if availability changes. An explicit choice is kept for the app's lifetime (persisted in milestone 2); without one, the app picks on-device, then the speech service, and labels which. An unusable choice disables Start with the reason. |
 | Copy | **Launch, done** | Clipboard; Android 13+ shows the system confirmation. |
 | Share | **Launch, done** | Standard share sheet (`ACTION_SEND`). |
-| Auto-paste / insert at cursor | **Android equivalent, planned** | Android does not allow unrestricted cross-app insertion. The equivalent is an input method (IME) that commits text into the focused field (milestone 4). Accessibility-service insertion is rejected: Play policy and privacy cost are too high. |
-| Global hotkey | **Android equivalent, planned** | Quick Settings tile and app shortcut to start dictation (milestone 4). Background hotkeys are not possible on Android. |
+| Auto-paste / insert at cursor | **Android equivalent, planned** | Android does not allow unrestricted cross-app insertion. The equivalent is an input method (IME) that commits text into the focused field (next milestone). Accessibility-service insertion is rejected: Play policy and privacy cost are too high. See [entry and output surfaces](android-input-surfaces.md). |
+| Global hotkey | **Android equivalent, done** | A Quick Settings tile and a launcher shortcut open the app and start dictation through a non-exported entry. Background hotkeys are not possible on Android. |
 | Menu bar / HUD | **Android equivalent, planned** | Foreground-service notification with Stop while a session runs, if longer sessions are added; otherwise the in-app screen. |
 | Microphone permission onboarding | **Launch, done** | Runtime request on first use, rationale after a denial, and a Settings link after a permanent denial. |
 | Background recording | **Launch, done (honest stop)** | Leaving the app cancels the session and reports "Dictation stopped because the app left the screen". A foreground service for longer sessions is assessed with the IME/tile milestone. |
@@ -51,13 +51,13 @@ Status key:
 | Personal corrections and vocabulary | **Planned (milestone 3)** | Applied after recognition; keyterms passed to providers that support them. |
 | Language selection | **Planned (milestone 3)** | Launch uses the device language, resolved against the on-device model list. |
 | Profiles | **Planned (later)** | After providers and history exist. |
-| Audio / file transcription | **Planned (later)** | Share target for audio files into a batch provider. |
+| Audio / file transcription | **Android equivalent, done** | Share audio (MP3, M4A, WAV, OGG/Opus, WebM, FLAC; at most 25 MB) into the app; it is uploaded to the chosen cloud model after confirmation and recorded in History. |
 | Usage insights | **Planned (later)** | Local-only statistics derived from history. |
 | Voice output (TTS) | **Planned (later)** | Android `TextToSpeech` first, cloud voices later. |
 | Downloaded local models (Parakeet, WhisperKit, etc.) | **Planned (assess)** | Assess ML Kit GenAI speech recognition and on-device Whisper runtimes against size and battery; the platform recogniser covers launch. |
-| Keyboard extension (iOS) | **Android equivalent, planned** | IME, milestone 4. |
-| Share extension | **Android equivalent, planned** | Share target for text and audio, milestone 4. |
-| Widgets / Live Activity | **Planned (assess)** | Quick Settings tile first; a home-screen widget only if it adds value. |
+| Keyboard extension (iOS) | **Android equivalent, planned** | IME, next milestone. |
+| Share extension | **Android equivalent, done (audio)** | Share target for audio. Text in is not needed, as cleanup runs on dictated text. |
+| Widgets / Live Activity | **Deferred** | The Quick Settings tile and shortcut cover quick start; a home-screen widget only if it adds value. |
 | Watch app | **Not applicable (for now)** | Wear OS is out of scope for the first release. |
 | iCloud / CloudKit sync | **Not applicable** | Apple-only; cross-device sync would need a separate design. |
 | Sparkle updates, DMG, Homebrew | **Not applicable** | Distribution is through Google Play or sideloaded APKs. |
@@ -78,3 +78,5 @@ Unit tests and CI cannot prove these; they gate closing the epic:
 6. Speech-service and Cloud modes with no network either return a genuine transcript (speech service with an installed offline model) or fail visibly; they never show a false success.
 7. Battery and latency notes for a five-minute dictation series.
 8. Cloud mode with a real OpenAI and Groq key, an invalid key ("rejected the API key"), and cleanup with an OpenRouter key; owner-only, as these calls are paid.
+9. Quick Settings tile and shortcut on a locked and an unlocked device; sharing a WhatsApp voice note (OGG/Opus) and an M4A recording.
+

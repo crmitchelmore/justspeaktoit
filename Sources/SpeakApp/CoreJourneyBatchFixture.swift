@@ -8,6 +8,9 @@ import SpeakCore
 enum CoreJourneyBatchFixture {
     static let model = "core-journey/batch-fixture"
     static let transcript = "A complete batch journey, through the clipboard."
+    nonisolated static var responseTranscript: String {
+        CoreJourneySiteMediaFixture.isRequested ? CoreJourneySiteMediaFixture.transcript : transcript
+    }
     static let audioPrompt = "Transcribe this audio file. Return only the transcript text, with no commentary."
     static let duration: TimeInterval = 0.25
     static let audioData: Data = {
@@ -35,12 +38,17 @@ enum CoreJourneyBatchFixture {
         withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
     }
 
-    static func makeClient() -> OpenRouterAPIClient {
+    static let fixtureKey = "core-journey-fixture-not-a-real-key"
+
+    static func makeClient(
+        apiKeyProvider: @escaping OpenRouterAPIClient.APIKeyProvider = { CoreJourneyBatchFixture.fixtureKey },
+        protocolClass: AnyClass = CoreJourneyBatchURLProtocol.self
+    ) -> OpenRouterAPIClient {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [CoreJourneyBatchURLProtocol.self]
+        configuration.protocolClasses = [protocolClass]
         configuration.urlCache = nil
         return OpenRouterAPIClient(
-            apiKeyProvider: { "core-journey-fixture-not-a-real-key" },
+            apiKeyProvider: apiKeyProvider,
             session: URLSession(configuration: configuration)
         )
     }
@@ -48,16 +56,21 @@ enum CoreJourneyBatchFixture {
 
 actor CoreJourneyRecordingSource: RecordingCaptureSource {
     private var recording: RecordingSummary?
+    private let audio: Data
+
+    init(audio: Data = CoreJourneyBatchFixture.audioData) {
+        self.audio = audio
+    }
 
     func start(in directory: URL) throws -> RecordingStart {
         guard recording == nil else { throw AudioFileManagerError.alreadyRecording }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let identifier = UUID()
         let url = directory.appendingPathComponent("Recording-\(identifier.uuidString).wav")
-        try CoreJourneyBatchFixture.audioData.write(to: url, options: .atomic)
+        try audio.write(to: url, options: .atomic)
         recording = RecordingSummary(
             id: identifier, url: url, startedAt: Date(), duration: CoreJourneyBatchFixture.duration,
-            fileSize: Int64(CoreJourneyBatchFixture.audioData.count)
+            fileSize: Int64(audio.count)
         )
         return RecordingStart(url: url, usedWarmRecorder: false)
     }
@@ -92,7 +105,10 @@ final class CoreJourneyBatchURLProtocol: URLProtocol, @unchecked Sendable {
         }
         let payload: [String: Any] = [
             "id": "core-journey-response", "model": CoreJourneyBatchFixture.model,
-            "choices": [["index": 0, "message": ["role": "assistant", "content": CoreJourneyBatchFixture.transcript]]]
+            "choices": [[
+                "index": 0,
+                "message": ["role": "assistant", "content": CoreJourneyBatchFixture.responseTranscript]
+            ]]
         ]
         do {
             let data = try JSONSerialization.data(withJSONObject: payload)
@@ -106,7 +122,7 @@ final class CoreJourneyBatchURLProtocol: URLProtocol, @unchecked Sendable {
 
     override func stopLoading() {}
 
-    static func accepts(_ request: URLRequest) -> Bool {
+    static func accepts(_ request: URLRequest, audio: Data = CoreJourneyBatchFixture.audioData) -> Bool {
         guard request.url?.absoluteString == "https://openrouter.ai/api/v1/chat/completions",
               request.httpMethod == "POST",
               request.value(forHTTPHeaderField: "Content-Type") == "application/json",
@@ -130,7 +146,7 @@ final class CoreJourneyBatchURLProtocol: URLProtocol, @unchecked Sendable {
         guard let input = content[1]["input_audio"] as? [String: String],
               Set(input.keys) == Set(["format", "data"]),
               input["format"] == "wav", let encoded = input["data"] else { return false }
-        return Data(base64Encoded: encoded) == CoreJourneyBatchFixture.audioData
+        return Data(base64Encoded: encoded) == audio
     }
 
     static func body(of request: URLRequest) -> Data? {

@@ -1006,3 +1006,60 @@ The app ID is `com.justspeaktoit.JustSpeakToIt`, under the same
 the desktop file, the metainfo, the D-Bus name, the GlobalShortcuts binding and
 the Flatpak data path. Treat it as fixed: changing it moves user data and
 shortcut bindings.
+
+## HiDPI laptop qualification (2026-11-05)
+
+The dashboard uses one combined 900sp breakpoint for sidebar collapse, stacked
+hero actions and unequal-height dashboard columns. Libadwaita selects the last
+matching breakpoint; separate overlapping collapse/stack conditions do not
+compose. The window advertises a 640px minimum width so settings controls stay
+usable when resizing floating windows. Hidden settings pages must not determine the dashboard's minimum size.
+
+On Hyprland with GNOME Keyring installed, a missing Flatpak Secret portal can
+prevent credential storage even when the host Secret Service works. Preserve
+the existing portal preferences and add this override in
+`~/.config/xdg-desktop-portal/hyprland-portals.conf`:
+
+```ini
+[preferred]
+default=hyprland;gtk
+org.freedesktop.impl.portal.Secret=gnome-keyring
+```
+
+Restart the user `xdg-desktop-portal.service`, then verify the Secret interface
+and a disposable `--integration-test keyring` round trip. This requires the
+GNOME Keyring portal backend; it does not bypass the keyring's unlock policy.
+
+When running the Xvfb qualification scripts from a Wayland session, unset
+`WAYLAND_DISPLAY` and set `XDG_SESSION_TYPE=x11` as well as `GDK_BACKEND=x11`.
+HUD geometry assertions compare physical X11 pixels against scaled GDK workareas.
+
+On the MacBookPro11,3 Hyprland host, native Wayland window creation/shutdown,
+Flatpak keyring save/read/remove (including a large token), and CPU-only local
+Whisper transcription of the pinned JFK fixture passed. The Linux-filtered
+Swift suite passed with its explicit runtime/environment skips. Hands-free
+remains unavailable when lock/sleep monitoring cannot initialize; manual
+recording remains supported. Synthetic audio and private X11 fixtures do not
+qualify physical microphone intelligibility, cloud credentials, or consented
+Wayland insertion into another application.
+
+The final native integration script and 1x Xvfb screenshot tour passed. Live
+Hyprland resizing from 1100×760 to 640×760 and back verified sidebar collapse,
+stacking and restoration on the laptop at 2x scale.
+
+### Omarchy appearance
+
+Linux uses restrained, theme-aware surfaces and native controls instead of a
+forced application-wide orange palette. On native Omarchy, the app reads only
+`$XDG_STATE_HOME/omarchy/current/theme/colors.toml` (normally under
+`~/.local/state`). It accepts bounded hex colours and a light/dark mode, checks
+text/accent contrast, and watches the palette and its parent for theme changes.
+No theme scripts run, no desktop settings change, and there is no polling loop.
+A mode mismatch, unreadable/malformed palette or high-contrast preference uses
+standard libadwaita appearance; high-contrast cards retain explicit outlines.
+The Flatpak has no additional filesystem permission and uses the standard
+portal appearance when the host palette is inaccessible.
+
+The style follows native font, focus and animation preferences. The app icon
+retains the brand, while record/error states keep their semantic distinction.
+See [the quality rubric](linux-quality-rubric.md) for the measurement contract.

@@ -15,20 +15,20 @@ public struct NativeLocalLLMProvisioning: Codable, Equatable, Sendable {
 
     public static var hostPlatform: String {
         #if os(Windows)
-        return "windows"
+        "windows"
         #elseif os(Linux)
-        return "linux"
+        "linux"
         #else
-        return "unsupported"
+        "unsupported"
         #endif
     }
     public static var hostArchitecture: String {
         #if arch(arm64)
-        return "arm64"
+        "arm64"
         #elseif arch(x86_64)
-        return "x86_64"
+        "x86_64"
         #else
-        return "unsupported"
+        "unsupported"
         #endif
     }
     public static var libraryName: String { hostPlatform == "windows" ? "llama.dll" : "libllama.so" }

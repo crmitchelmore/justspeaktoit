@@ -319,7 +319,7 @@ public actor SecureStorage {
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+        guard KeychainAccess.copyMatching(query as CFDictionary, &item) == errSecSuccess,
               let attributes = item as? [String: Any],
               let accessible = attributes[kSecAttrAccessible as String] as? String
         else { return nil }
@@ -452,7 +452,7 @@ public actor SecureStorage {
             query[kSecReturnData as String] = true
 
             var item: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &item)
+            let status = KeychainAccess.copyMatching(query as CFDictionary, &item)
 
             if status == errSecItemNotFound {
                 continue
@@ -511,7 +511,7 @@ public actor SecureStorage {
         query[kSecReturnData as String] = true
 
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let status = KeychainAccess.copyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = item as? Data,
               let payload = String(data: data, encoding: .utf8)
@@ -559,7 +559,7 @@ public actor SecureStorage {
             }
 
             var item: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &item)
+            let status = KeychainAccess.copyMatching(query as CFDictionary, &item)
 
             if status == errSecItemNotFound {
                 continue
@@ -595,7 +595,7 @@ public actor SecureStorage {
         }
 
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = KeychainAccess.copyMatching(query as CFDictionary, &result)
 
         if status == errSecItemNotFound {
             return []
@@ -620,7 +620,7 @@ public actor SecureStorage {
             query[kSecAttrAccessGroup as String] = accessGroup
         }
 
-        SecItemDelete(query as CFDictionary)
+        KeychainAccess.delete(query as CFDictionary)
     }
 
     /// Persists the cache under the documented mixed-version contract
@@ -648,7 +648,7 @@ public actor SecureStorage {
         let query = baseQuery(account: account)
 
         if payload.isEmpty {
-            let deleteStatus = SecItemDelete(query as CFDictionary)
+            let deleteStatus = KeychainAccess.delete(query as CFDictionary)
             guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
                 throw SecureStorageError.unexpectedStatus(deleteStatus)
             }
@@ -668,7 +668,7 @@ public actor SecureStorage {
             attributesToUpdate[kSecAttrSynchronizable as String] = kCFBooleanTrue
         }
 
-        let status = SecItemUpdate(query as CFDictionary, attributesToUpdate as CFDictionary)
+        let status = KeychainAccess.update(query as CFDictionary, attributesToUpdate as CFDictionary)
 
         if status == errSecItemNotFound {
             var addQuery = query
@@ -682,7 +682,7 @@ public actor SecureStorage {
                 addQuery[kSecAttrSynchronizable as String] = kCFBooleanTrue
             }
 
-            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            let addStatus = KeychainAccess.add(addQuery as CFDictionary, nil)
             guard addStatus == errSecSuccess else {
                 Self.logger.debug("ERROR: SecItemAdd failed with \(addStatus, privacy: .private)")
                 throw SecureStorageError.unexpectedStatus(addStatus)

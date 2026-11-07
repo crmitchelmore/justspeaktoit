@@ -433,6 +433,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
+  /// Device-local metadata discovery; intentionally outside automatic settings transfer.
+  @Published var cleanupModelDiscoveryEnabled: Bool {
+    didSet { defaults.set(cleanupModelDiscoveryEnabled, forKey: CleanupModelSelection.preferenceKey) }
+  }
+
   @Published var postProcessingModel: String {
     didSet {
       let normalized = Self.normalizedPostProcessingModel(postProcessingModel)
@@ -1026,17 +1031,36 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     var setActivationPolicy: @MainActor (NSApplication.ActivationPolicy) -> Void
     var registerLoginItem: @MainActor (_ enabled: Bool) throws -> Void
 
+    /// Serialises login-item changes so the most recent request is applied last.
+    private static let loginItemQueue = DispatchQueue(label: "com.justspeaktoit.login-item", qos: .utility)
+
+    /// Waits for queued login-item changes, so quitting cannot abandon the latest toggle.
+    static func drainLoginItemChanges() async {
+      await withCheckedContinuation { continuation in
+        loginItemQueue.async { continuation.resume() }
+      }
+    }
+
     static let live = SystemDependencies(
       fileManager: .default,
       setActivationPolicy: { NSApplication.shared.setActivationPolicy($0) },
+      // `SMAppService.status` is a synchronous XPC round trip (about 80-120 ms
+      // measured on launch), so reconcile off the main thread.
       registerLoginItem: { enabled in
-        let service = SMAppService.mainApp
-        if enabled {
-          if service.status != .enabled {
-            try service.register()
+        loginItemQueue.async {
+          do {
+            let service = SMAppService.mainApp
+            if enabled {
+              if service.status != .enabled {
+                try service.register()
+              }
+            } else if service.status == .enabled {
+              try service.unregister()
+            }
+          } catch {
+            SpeakLogger.logger(category: "AppSettings")
+              .error("Failed to update login item: \(error.localizedDescription, privacy: .public)")
           }
-        } else if service.status == .enabled {
-          try service.unregister()
         }
       }
     )
@@ -1104,6 +1128,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)
     postProcessingEnabled =
       defaults.object(forKey: DefaultsKey.postProcessingEnabled.rawValue) as? Bool ?? true
+    cleanupModelDiscoveryEnabled = defaults.bool(forKey: CleanupModelSelection.preferenceKey)
     postProcessingModel = Self.normalizedPostProcessingModel(
       defaults.string(forKey: DefaultsKey.postProcessingModel.rawValue)
     )
@@ -1401,6 +1426,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     self.preferredLocaleIdentifier = restored.preferredLocaleIdentifier
     self.preferredAudioInputUID = restored.preferredAudioInputUID
     self.postProcessingEnabled = restored.postProcessingEnabled
+    self.cleanupModelDiscoveryEnabled = restored.cleanupModelDiscoveryEnabled
     self.postProcessingModel = restored.postProcessingModel
     self.postProcessingTemperature = restored.postProcessingTemperature
     self.assemblyAIKeyterms = restored.assemblyAIKeyterms

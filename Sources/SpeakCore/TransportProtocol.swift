@@ -385,9 +385,9 @@ public struct DeviceIdentity {
 
     public static var deviceName: String {
         #if os(iOS)
-        return UIDevice.current.name
+        UIDevice.current.name
         #else
-        return Host.current().localizedName ?? "Mac"
+        Host.current().localizedName ?? "Mac"
         #endif
     }
 }

@@ -178,6 +178,12 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
         })
     }
 
+    // Every wait below is event-driven; this bound only catches a hang. On hosted
+    // runners this fixture has stalled for several seconds before its explicit
+    // stop while the identical router variant completes in milliseconds, so a 2s
+    // bound reported runner stalls rather than transport behaviour (#1346).
+    private static let stallGuard: TimeInterval = 30
+
     private func assertCancelledQueuedStartPreservesPendingRequest(
         session: URLSession, stop: @escaping () -> Void, speak: @escaping () async throws -> Void
     ) async throws {
@@ -201,7 +207,7 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
             }
         }
         defer { prior.cancel(); stop() }
-        let startResult = await XCTWaiter.fulfillment(of: [started], timeout: 2)
+        let startResult = await XCTWaiter.fulfillment(of: [started], timeout: Self.stallGuard)
         observation.reportFailure(startResult, wait: .requestStart)
         XCTAssertEqual(startResult, .completed)
         let queued = Task { @MainActor in
@@ -211,15 +217,18 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
             }
         }
         queued.cancel()
-        let queuedResult = await XCTWaiter.fulfillment(of: [queuedReturned], timeout: 2)
+        let queuedResult = await XCTWaiter.fulfillment(of: [queuedReturned], timeout: Self.stallGuard)
         observation.reportFailure(queuedResult, wait: .queuedReturn)
         XCTAssertEqual(queuedResult, .completed)
         XCTAssertEqual(observation.stops, 0, "Refused caller must not stop the prior transport")
         XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
         observation.note(.explicitStopIssued)
         stop()
-        let stopResult = await XCTWaiter.fulfillment(of: [transportStopped, firstReturned], timeout: 2)
-        observation.reportFailure(stopResult, wait: .explicitStop)
+        let stopResult = await XCTWaiter.fulfillment(of: [transportStopped, firstReturned], timeout: Self.stallGuard)
+        // Task states separate a cancel that never reached URLSession (running)
+        // from a loading system that never stopped the protocol (canceling).
+        let taskStates = stopResult == .completed ? [] : await session.allTasks.map { $0.state.rawValue }
+        observation.reportFailure(stopResult, wait: .explicitStop, taskStates: taskStates)
         XCTAssertEqual(stopResult, .completed)
         XCTAssertEqual(observation.stops, 1)
     }
@@ -240,24 +249,40 @@ private final class ProgressiveTransportObservation: @unchecked Sendable {
         case explicitStopIssued, transportStopped
     }
     enum Wait: String { case requestStart, queuedReturn, explicitStop }
+    private let origin = ContinuousClock.now
     private var count = 0
     private var phases: Set<Phase> = []
+    // First-seen offsets locate where a hosted-runner stall happened (#1345).
+    private var elapsed: [String: Int] = [:]
     var stops: Int { lock.withLock { count } }
-    func stop() { lock.withLock { count += 1; _ = phases.insert(.transportStopped) } }
-    func note(_ phase: Phase) { lock.withLock { _ = phases.insert(phase) } }
+    func stop() { lock.withLock { count += 1; record(.transportStopped) } }
+    func note(_ phase: Phase) { lock.withLock { record(phase) } }
+
+    private func record(_ phase: Phase) {
+        guard phases.insert(phase).inserted else { return }
+        let offset = ContinuousClock.now - origin
+        elapsed[String(describing: phase)] = Int(offset.components.seconds * 1000)
+            + Int(offset.components.attoseconds / 1_000_000_000_000_000)
+    }
 
     // Snapshot after the failed wait returns; not a deadline-time or event-order proof.
-    func reportFailure(_ result: XCTWaiter.Result, wait: Wait) {
+    func reportFailure(_ result: XCTWaiter.Result, wait: Wait, taskStates: [Int] = []) {
         guard result != .completed else { return }
-        let facts = lock.withLock {
-            ["priorTaskEntered": phases.contains(.priorTaskEntered),
+        let (facts, offsets) = lock.withLock { () -> ([String: Bool], [String: Int]) in
+            (["priorTaskEntered": phases.contains(.priorTaskEntered),
              "stubHandlerEntered": phases.contains(.stubHandlerEntered),
              "requestStarted": phases.contains(.requestStarted), "priorReturned": phases.contains(.priorReturned),
              "queuedReturned": phases.contains(.queuedReturned),
              "explicitStopIssued": phases.contains(.explicitStopIssued),
-             "transportStopped": phases.contains(.transportStopped)]
+             "transportStopped": phases.contains(.transportStopped)], elapsed)
         }
-        let payload: [String: Any] = ["schema": 1, "fixture": "queuedVoiceStart", "wait": wait.rawValue, "facts": facts]
+        let waited = ContinuousClock.now - origin
+        let payload: [String: Any] = [
+            "schema": 3, "fixture": "queuedVoiceStart", "wait": wait.rawValue, "facts": facts,
+            "taskStates": taskStates,
+            "elapsedMs": offsets, "reportedAtMs": Int(waited.components.seconds * 1000)
+                + Int(waited.components.attoseconds / 1_000_000_000_000_000)
+        ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
               data.count <= 1024 else { return }
         try? FileHandle.standardError.write(contentsOf: data + Data([10]))

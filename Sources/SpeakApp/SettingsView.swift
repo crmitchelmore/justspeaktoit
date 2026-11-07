@@ -150,6 +150,8 @@ struct SettingsView: View {
     let link: URL?
     let linkLabel: String?
     let statusLabel: String
+    /// The uses this card covers, for its least-privilege key guide.
+    let guideUses: APIKeyUses
   }
 
   var isOpenRouterKeyStored: Bool {
@@ -753,7 +755,7 @@ struct SettingsView: View {
         sidebarSelection = .settings(.apiKeys)
         missingTranscriptionAPIKeyAlert = nil
       }
-      if let url = alert.provider.apiKeyURL {
+      if let url = alert.keyPageURL {
         Button("Get API Key") {
           NSWorkspace.shared.open(url)
           missingTranscriptionAPIKeyAlert = nil

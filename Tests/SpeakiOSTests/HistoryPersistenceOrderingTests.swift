@@ -326,7 +326,10 @@ extension HistoryPersistenceOrderingTests {
     func completed(
         _ expectations: XCTestExpectation..., file: StaticString = #filePath, line: UInt = #line
     ) async -> Bool {
-        let result = await XCTWaiter.fulfillment(of: expectations, timeout: 2)
+        // Every caller waits on an event; the bound only catches a hang. Hosted
+        // simulators have stalled these fixtures for several seconds (6.7s in
+        // run 41945673301), so a 2s bound reported runner stalls, not ordering.
+        let result = await XCTWaiter.fulfillment(of: expectations, timeout: 30)
         if result != .completed { XCTFail("Ordered History operation did not settle", file: file, line: line) }
         return result == .completed
     }

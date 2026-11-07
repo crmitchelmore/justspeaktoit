@@ -20,6 +20,16 @@ static const SecretSchema *credential_schema(void) {
 }
 
 static int32_t report(GError *failure, const char *action, char *error, size_t capacity) {
+    if (g_error_matches(failure, G_DBUS_ERROR, G_DBUS_ERROR_SERVICE_UNKNOWN)) {
+        jsti_set_error(error, capacity,
+            "Could not %s the API key: secure storage is unavailable. %s", action,
+            g_file_test("/.flatpak-info", G_FILE_TEST_EXISTS)
+                ? "Enable your desktop's Secret portal, then reopen Just Speak to It. "
+                  "On Hyprland with GNOME Keyring, select gnome-keyring for the Secret portal."
+                : "Start and unlock your desktop keyring, then try again.");
+        g_clear_error(&failure);
+        return -1;
+    }
     jsti_set_error(
         error, capacity, "Could not %s the API key in the Secret Service keyring: %s", action,
         failure != NULL ? failure->message : "unknown error");

@@ -571,7 +571,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         guard profile.polishes, let postProcessingModel = profile.postProcessingModelIdentifier else { return true }
         guard AppSettings.postProcessingModels.contains(where: {
             $0.id == postProcessingModel
-        }) else {
+        }) || CleanupModelSelection.modelID(from: postProcessingModel) != nil else {
             return false
         }
         if postProcessingModel == AppleLocalModels.foundationModelID {

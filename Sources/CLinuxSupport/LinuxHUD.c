@@ -497,12 +497,19 @@ int32_t jsti_hud_self_test(char *error, size_t capacity) {
         XTranslateCoordinates(x, xid, DefaultRootWindow(x), 0, 0, &left, &top, &child);
         GdkMonitor *monitor = active_monitor(gdk_surface_get_display(surface));
         GdkRectangle work = { 0 };
-        if (monitor != NULL) { gdk_x11_monitor_get_workarea(monitor, &work); g_object_unref(monitor); }
-        const int centre = left + attributes.width / 2, work_centre = work.x + work.width / 2;
+        int scale = 1;
+        if (monitor != NULL) {
+            gdk_x11_monitor_get_workarea(monitor, &work);
+            scale = gdk_monitor_get_scale_factor(monitor);
+            g_object_unref(monitor);
+        }
+        /* Xlib coordinates are device pixels; GDK work areas are logical pixels. */
+        const int centre = left + attributes.width / 2, work_centre = (work.x + work.width / 2) * scale;
+        const int work_bottom = (work.y + work.height) * scale;
         if (!refuses) problem = "the HUD accepts keyboard focus.";
         else if (type != XInternAtom(x, "_NET_WM_WINDOW_TYPE_NOTIFICATION", False)) problem = "the HUD is not a notification.";
-        else if (abs(centre - work_centre) > 2 || top + attributes.height > work.y + work.height ||
-                 work.y + work.height - (top + attributes.height) > 8) {
+        else if (abs(centre - work_centre) > 2 * scale || top + attributes.height > work_bottom ||
+                 work_bottom - (top + attributes.height) > 8 * scale) {
             problem = "the HUD is not at the bottom centre of the work area.";
         }
     }

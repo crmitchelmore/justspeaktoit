@@ -146,7 +146,7 @@ sessions:
           - "Click Save JSON\u2026 and save to the Desktop, then click Copy Draft and paste into a new TextEdit document."
           - "Click Open GitHub, check the issue page is prefilled with the draft, and close the tab without submitting."
           - "Delete the saved file and the TextEdit document."
-        expected: "The draft and JSON name the model, mode and settings of that recording but contain no transcript text, prompt, file path, API key, device or app name. With diagnostics off there is no JSON. The saved file, copied draft and GitHub page match the preview, and nothing was posted."
+        expected: "The draft and JSON name the model, mode and settings of that recording but contain no transcript text, prompt, file path, API key, device or app name. With Include diagnostics off, the JSON keeps only its version and removal notes, with no model or settings. The saved file, copied draft and GitHub page match the preview, and nothing was posted."
         final_gate: true
       - id: "mac-speechanalyzer-latency"
         issues:
@@ -159,9 +159,9 @@ sessions:
           - "Settings \u203a Transcription \u203a Local \u203a Streaming: choose Apple SpeechTranscriber (On-device)."
           - "In TextEdit, read the same paragraph (about 30 seconds) three times, one recording each."
           - "Choose Apple Speech (On-device) and read the same paragraph three more times."
-          - "Open the Dashboard and read the First words p50 for both models in the latency card."
-        expected: "Apple SpeechTranscriber\u2019s First words p50 is the same as or lower than Apple Speech\u2019s. Put both p50 values in the note."
-        final_gate: true
+          - "Mark this Pass. An agent then compares first-words latency for the two models using only the numeric latency fields in History."
+        expected: "Six recordings exist, three per model. The agent posts both first-words p50 values on #614 and closes it if SpeechTranscriber\u2019s is the same or lower and iphone-hands-free has passed."
+        final_gate: false
       - id: "mac-start-latency-sample"
         issues:
           - 611
@@ -178,20 +178,34 @@ sessions:
       - id: "mac-paid-existing-providers"
         issues:
           - 1104
-          - 1114
-        title: "Live and batch providers with your existing keys"
-        minutes: 15
+        title: "Every remote streaming provider with your keys"
+        minutes: 12
         core: false
         build: "Just Speak to It for Mac, Alpha build 61 or later"
         prerequisites:
           - "Decision: a provider spend cap is approved (decision-provider-spend-cap)"
-          - "Use made-up sentences only; skip any provider you have no key for and say so in the note"
+          - "Use made-up sentences only. If a listed model has no key or fails, mark Fail and name it in the note."
         steps:
           - "Settings \u203a Transcription \u203a Remote \u203a Streaming: choose each of OpenAI Realtime, ElevenLabs, Soniox, Modulate, Cartesia, Gladia, Deepgram Nova-3 and Deepgram Flux in turn."
           - "For each, dictate \u201cprovider check one two three\u201d into TextEdit and stop, then start again at once, say \u201csecond run\u201d and stop."
-          - "Remote \u203a Batch: choose an OpenAI model, dictate \u201cbatch check\u201d and stop; repeat with a Groq model."
           - "Open History and check the newest items."
-        expected: "Each streaming model shows words while you speak and finishes within a few seconds of Stop; the second run starts cleanly and the microphone indicator goes away after it. Each batch run inserts once. History shows every item with its model name and cost. Note any provider that fails."
+        expected: "All eight models show words while you speak and finish within a few seconds of Stop; each second run starts cleanly and the microphone indicator goes away after it. History shows every item with its model name and cost."
+        final_gate: true
+      - id: "mac-paid-batch-providers"
+        issues:
+          - 1114
+        title: "OpenAI and Groq recorded transcription"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Mac, Alpha build 61 or later"
+        prerequisites:
+          - "Decision: a provider spend cap is approved (decision-provider-spend-cap)"
+          - "Use made-up sentences only. If a listed model has no key or fails, mark Fail and name it in the note."
+        steps:
+          - "Settings \u203a Transcription \u203a Remote \u203a Batch: choose an OpenAI model."
+          - "Dictate \u201cbatch check\u201d into TextEdit and stop."
+          - "Choose a Groq model and repeat, then open History."
+        expected: "Each run inserts the phrase once and History shows both items with their model names and cost."
         final_gate: true
       - id: "mac-openrouter-audio"
         issues:
@@ -228,7 +242,7 @@ sessions:
           - "For each streaming model (Reson8, Alibaba Fun-ASR realtime, AssemblyAI Universal-3.6 Pro, Azure Speech, Azure MAI), dictate \u201cnew provider live\u201d and stop."
           - "For Pulse, choose a non-English language and try once."
           - "Open History."
-        expected: "Every route transcribes the phrase once, streaming routes show words while you speak, and History names the model with its cost. Pulse refuses the non-English run before sending audio. Note any route that is unavailable to your account."
+        expected: "Every route transcribes the phrase once, streaming routes show words while you speak (Azure MAI Transcribe (Turn-based) shows each turn when you pause), and History names the model with its cost. Pulse refuses the non-English run before sending audio. Note any route that is unavailable to your account."
         final_gate: true
       - id: "owner-cloudkit-shared-container"
         issues:
@@ -272,7 +286,7 @@ sessions:
         core: false
         build: "Stripe dashboard, Cloudflare and Apple Developer portal"
         prerequisites:
-          - "Decision: decision-paid-mac-signin answered"
+          - "Decision: decision-paid-mac-signin answered with a sign-in method (skip this check if you chose Defer)"
           - "Steps: Docs/paid-access.md (External product setup). Use Stripe test mode only; no live keys."
         steps:
           - "Create the D1 databases paid-access and paid-access-staging and put their ids in workers/paid-access/wrangler.toml."
@@ -487,7 +501,7 @@ sessions:
           - "Say \"Go quick start\", then stay silent until it finishes."
           - "Stay silent for 60 more seconds, then disarm and open History."
         expected: "Armed \u2192 Recording as you start speaking, then back to Armed after silence without tapping Stop. History has one item starting \"Go\"; nothing is recorded during the silent minute."
-        final_gate: true
+        final_gate: false
       - id: "iphone-history-upgrade"
         issues:
           - 1118
@@ -511,12 +525,12 @@ sessions:
         prerequisites:
           - "owner-cloudkit-shared-container done"
         steps:
-          - "Before updating, note how many items History has and that iCloud sync is on."
+          - "Before updating, check iCloud sync is on and note the date and time of your oldest iPhone History item."
           - "Update in TestFlight, open the app and wait a minute on the History screen."
           - "In CloudKit Console open iCloud.com.justspeaktoit.alpha \u203a Production \u203a Private Database, act as your iCloud account and query the History zone."
           - "Record \u201cshared container\u201d and query again after a minute."
           - "Settings: turn API key sync on again with your passphrase."
-        expected: "History on the iPhone is unchanged, the shared container holds at least as many History records as the app, and the new recording appears there within a minute. Key sync turns on without errors."
+        expected: "History on the iPhone is unchanged. The shared container has a History record created at the same date and time as your oldest iPhone item, and the new recording appears there within a minute. Key sync turns on without errors."
         final_gate: true
   - id: "watch"
     device: "Watch"

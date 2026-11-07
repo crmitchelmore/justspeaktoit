@@ -131,8 +131,12 @@ final class OpenAIOverflowOwnerTests: XCTestCase {
         XCTAssertEqual(fixture.history.items.count, 1)
     }
 
+    // Polls an observable state; the bound only reports a hang. 300 x 10ms
+    // sleeps lasted under 3s, which a loaded hosted simulator exceeded
+    // (run 42339052622), so use a 30s wall-clock deadline as in #1346.
     private func settle(_ predicate: () -> Bool) async {
-        for _ in 0..<300 {
+        let deadline = ContinuousClock.now + .seconds(30)
+        while ContinuousClock.now < deadline {
             if predicate() { return }
             try? await Task.sleep(for: .milliseconds(10))
         }

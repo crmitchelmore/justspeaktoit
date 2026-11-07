@@ -192,7 +192,9 @@ test('iOS SwiftPM compilation keeps its command and bounded budget when native e
     ['jsti-reviewed-local', 'macOS']);
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
-  assert.doesNotMatch(body, /if:|bravo-mini-local/);
+  // The only permitted condition is the shared Android-only skip.
+  const ungated = body.replace("    if: needs.release-paths.outputs.apple == 'true'\n", '');
+  assert.doesNotMatch(ungated, /if:|bravo-mini-local/);
 });
 
 test('UI jobs cannot be admitted to a native runner by repository variables', () => {
@@ -254,7 +256,7 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.doesNotMatch(iosPreparation, /"tuist"/);
   assert.match(iosPreparation, /boot.wait\(timeout=600\)/);
   assert.match(body, /xcodebuild test-without-building/);
-  assert.match(body, /needs: build-ios-test-products/);
+  assert.match(body, /needs: \[release-paths, build-ios-test-products\]/);
   assert.match(body, /artifact-ids: \$\{\{ needs.build-ios-test-products.outputs.artifact-id \}\}/);
   assert.match(body, /scripts\/ios-test-products.py unpack/);
   assert.match(body, /-testProductsPath "\$RUNNER_TEMP\/ios-test-products\/SpeakiOS.xctestproducts"/);
@@ -431,7 +433,7 @@ function passing() {
     'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
     'release-paths', 'release-validation', 'core-journey-e2e',
     'core-journey-fixture-ui', 'api-compatibility',
-  ].map(id => [id, { result: 'success', outputs: { package: 'true', 'core-journey': 'true' } }]));
+  ].map(id => [id, { result: 'success', outputs: { package: 'true', 'core-journey': 'true', apple: 'true' } }]));
 }
 
 test('accepts all successful pull-request gates', () => {
@@ -450,7 +452,7 @@ for (const id of Object.keys(passing())) {
 
 test('permits only path-excluded PR gates to skip', () => {
   const needs = passing();
-  needs['release-paths'].outputs = { package: 'false', 'core-journey': 'false' };
+  needs['release-paths'].outputs = { package: 'false', 'core-journey': 'false', apple: 'true' };
   for (const id of ['release-validation', 'core-journey-e2e', 'core-journey-fixture-ui']) {
     needs[id].result = 'skipped';
   }
@@ -458,6 +460,56 @@ test('permits only path-excluded PR gates to skip', () => {
   assert.ok(assessCIGates(needs, 'push').length > 0, 'main cannot skip gates');
   needs['core-journey-e2e'].result = 'failure';
   assert.ok(assessCIGates(needs, 'pull_request').length > 0);
+});
+
+const appleJobs = [
+  'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
+  'api-compatibility',
+];
+
+function androidOnly() {
+  const needs = passing();
+  needs['release-paths'].outputs = { package: 'false', 'core-journey': 'false', apple: 'false' };
+  for (const id of [...appleJobs, 'release-validation', 'core-journey-e2e', 'core-journey-fixture-ui']) {
+    needs[id].result = 'skipped';
+  }
+  return needs;
+}
+
+test('Android-only pull requests may skip every Apple gate', () => {
+  assert.deepEqual(assessCIGates(androidOnly(), 'pull_request'), []);
+});
+
+test('Apple gates still run, and must pass, whenever anything outside the Android app changes', () => {
+  for (const id of appleJobs) {
+    const needs = androidOnly();
+    needs['release-paths'].outputs.apple = 'true';
+    for (const other of appleJobs) needs[other].result = 'success';
+    needs[id].result = 'skipped';
+    assert.ok(assessCIGates(needs, 'pull_request').length > 0, `${id} cannot skip for Apple changes`);
+  }
+});
+
+test('Android-only skips never apply to main or to failed Apple jobs', () => {
+  assert.ok(assessCIGates(androidOnly(), 'push').length > 0, 'main runs every Apple gate');
+  const needs = androidOnly();
+  needs['build-macos'].result = 'failure';
+  assert.ok(assessCIGates(needs, 'pull_request').length > 0, 'a job that ran must succeed');
+});
+
+test('Apple path detection excludes only the Android app and its own workflow and docs', () => {
+  const body = jobBodies['release-paths'];
+  const filter = body.match(
+    /id: apple\n\s+with:\n\s+predicate-quantifier: every\n\s+filters: \|\n\s+apple:\n((?:\s+- '[^']+'\n)+)/);
+  assert.ok(filter, 'apple filter must use the every-pattern quantifier');
+  assert.deepEqual(filter[1].trim().split('\n').map(line => line.trim()), [
+    "- '**'", "- '!android/**'", "- '!.github/workflows/android.yml'", "- '!Docs/android-*.md'",
+  ]);
+  assert.match(body, /# Push to main: no changed-file filtering, run every gate\.\n\s+\{\n(?:\s+echo "[a-z-]+=true"\n)*\s+echo "apple=true"\n/,
+    'pushes must force Apple gates on');
+  for (const id of appleJobs) {
+    assert.match(jobBodies[id], /if: .*needs\.release-paths\.outputs\.apple == 'true'/, `${id} must honour the gate`);
+  }
 });
 
 test('blocks missing path detection outputs', () => {

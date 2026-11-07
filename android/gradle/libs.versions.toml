@@ -1,8 +1,8 @@
 [versions]
-agp = "8.13.2"
-kotlin = "2.2.21"
-composeBom = "2025.10.01"
-coreKtx = "1.17.0"
+agp = "9.5.1"
+kotlin = "2.4.21"
+composeBom = "2026.09.00"
+coreKtx = "1.19.1"
 activityCompose = "1.11.0"
 lifecycle = "2.9.4"
 junit = "4.13.2"
@@ -24,5 +24,4 @@ org-json = { module = "org.json:json", version.ref = "orgJson" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

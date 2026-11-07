@@ -1,14 +1,13 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
+    // AGP 9 compiles Kotlin itself, so the separate Kotlin Android plugin is no longer applied.
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
 android {
     namespace = "com.justspeaktoit.android"
-    compileSdk = 36
+    // AndroidX 1.19 core and Compose 1.12 require compiling against API 37.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.justspeaktoit.android"
@@ -44,12 +43,6 @@ android {
         checkDependencies = true
     }
 
-}
-
-kotlin {
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
-    }
 }
 
 dependencies {

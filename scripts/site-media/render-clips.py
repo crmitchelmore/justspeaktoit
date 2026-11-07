@@ -368,13 +368,13 @@ def render_clip(name, spec, captures, output, work):
             badge_png = work / f"{name}-badge.png"
             overlay(size, badge, badge_png)
             crop = crop_filter(scene.get("crop"), folder, screen, size)
-            graph = (f"[0:v]trim=start={begin:.3f}:end={end:.3f},setpts=PTS-STARTPTS,{crop}"
+            graph = (f"[0:v]setpts=PTS-STARTPTS,{crop}"
                      f"{segment_filter(size, False, length)}[v];[1:v]format=rgba[b];"
-                     f"[v][b]overlay=0:0,fade=t=in:st=0:d=0.2,fade=t=out:st={length - 0.2:.3f}:d=0.2,"
-                     "format=yuv420p[out]")
-            run("ffmpeg", "-y", "-loglevel", "error", "-i", str(screen), "-loop", "1", "-i", str(badge_png),
-                "-filter_complex", graph, "-map", "[out]", "-t", f"{length:.3f}", "-an",
-                "-c:v", "libx264", "-crf", "12", str(part))
+                     f"[v][b]overlay=0:0:eof_action=repeat,fade=t=in:st=0:d=0.2,"
+                     f"fade=t=out:st={length - 0.2:.3f}:d=0.2,format=yuv420p[out]")
+            run("ffmpeg", "-y", "-loglevel", "error", "-ss", f"{begin:.3f}", "-t", f"{length:.3f}",
+                "-i", str(screen), "-i", str(badge_png), "-filter_complex", graph, "-map", "[out]",
+                "-an", "-c:v", "libx264", "-crf", "12", str(part))
         parts.append(part)
         cues.append((cursor, cursor + length, scene["caption"]))
         cursor += length

@@ -51,13 +51,13 @@ final class SiteMediaCaptureUITests: XCTestCase {
         try capturePage(app, sidebar: "sidebarDashboard", name: "mac-dashboard")
         try capturePage(app, sidebar: "sidebarHistory", name: "mac-history")
         // Feature clips: optional so a renamed page cannot block the core demo.
-        for (sidebar, name) in [
-            ("sidebarCorrections", "mac-corrections"),
-            ("sidebarSettings-transcription", "mac-transcription"),
-            ("sidebarSettings-postProcessing", "mac-post-processing"),
-            ("sidebarSettings-shortcuts", "mac-shortcuts")
+        for (sidebar, name, scrolls) in [
+            ("sidebarCorrections", "mac-corrections", true),
+            ("sidebarSettings-transcription", "mac-transcription", false),
+            ("sidebarSettings-postProcessing", "mac-post-processing", false),
+            ("sidebarSettings-shortcuts", "mac-shortcuts", false)
         ] {
-            captureOptionalPage(app, sidebar: sidebar, name: name)
+            captureOptionalPage(app, sidebar: sidebar, name: name, scrollsToList: scrolls)
         }
         mark("tour-finished")
 
@@ -120,7 +120,9 @@ final class SiteMediaCaptureUITests: XCTestCase {
     }
 
     @MainActor
-    private func captureOptionalPage(_ app: XCUIApplication, sidebar: String, name: String) {
+    private func captureOptionalPage(
+        _ app: XCUIApplication, sidebar: String, name: String, scrollsToList: Bool
+    ) {
         let item = app.descendants(matching: .any)[sidebar].firstMatch
         guard item.waitForExistence(timeout: 5), item.isHittable else {
             mark("missing-\(name)")
@@ -130,6 +132,13 @@ final class SiteMediaCaptureUITests: XCTestCase {
         mark("show-\(name)")
         pause(3.5)
         save(app.windows.firstMatch.screenshot(), name: name)
+        if scrollsToList, let page = app.scrollViews.allElementsBoundByIndex.last {
+            // Bring the saved list below the page header into view.
+            page.scroll(byDeltaX: 0, deltaY: -600)
+            mark("scrolled-\(name)")
+            pause(3.5)
+            save(app.windows.firstMatch.screenshot(), name: "\(name)-list")
+        }
         pause(2.5)
         mark("shown-\(name)")
     }

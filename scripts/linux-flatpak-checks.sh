@@ -32,7 +32,7 @@ cleanup_portal() {
   rm -f "$portal_log"
 }
 trap cleanup_portal EXIT
-for portal in /app/libexec/flatpak-portal /usr/libexec/flatpak-portal /usr/lib/flatpak/flatpak-portal; do
+for portal in /app/libexec/flatpak-portal /usr/libexec/flatpak-portal /usr/lib/flatpak-portal /usr/lib/flatpak/flatpak-portal; do
   if [ -x "$portal" ]; then
     "$portal" --no-idle-exit >"$portal_log" 2>&1 &
     portal_pid=$!
@@ -46,6 +46,19 @@ command -v xvfb-run >/dev/null
 command -v readelf >/dev/null || { echo 'readelf from binutils is required.' >&2; exit 1; }
 flatpak install --user -y --noninteractive --reinstall --bundle "$bundle"
 
+# Size baseline (#1295): the bundle file, then the installed app deployment
+# without the shared runtime, which the user may already have.
+# Assignments, not echo arguments, so a failed measurement stops the checks.
+bundle_bytes=$(stat -c %s "$bundle")
+installed_location=$(flatpak info --user --show-location "$app")
+installed_bytes=$(du -sb "$installed_location" | cut -f1)
+for value in "$bundle_bytes" "$installed_bytes"; do
+  [[ "$value" =~ ^[0-9]+$ ]] || { echo "Invalid package size measurement: '$value'" >&2; exit 1; }
+done
+echo '== package size (bytes)'
+echo "bundle $bundle_bytes"
+echo "installed-app $installed_bytes"
+
 echo '== Flatpak Spawn portal (required by the sandboxed PNG loader)'
 timeout 60 flatpak run --command=flatpak-spawn "$app" --sandbox --watch-bus /usr/bin/true
 
@@ -54,6 +67,14 @@ timeout 15 flatpak run "$app" --version
 
 echo '== installed app self-test: resources, recording codecs and adapters'
 timeout 180 flatpak run "$app" --self-test
+
+echo '== sandbox PID namespace hides host processes (app profiles are default-only in the Flatpak)'
+# A host X11 window's _NET_WM_PID cannot be resolved through /proc inside the
+# sandbox, so the app must not attempt automatic profile matching here.
+flatpak run --command=sh "$app" -ec '
+  test -f /.flatpak-info
+  test ! -e "/proc/$1/exe"
+' sandbox-pid-check "$portal_pid"
 
 echo '== installed automation CLI'
 flatpak run --command=speak "$app" --help

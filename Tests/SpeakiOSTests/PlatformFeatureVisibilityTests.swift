@@ -134,7 +134,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer {
             defaults.removePersistentDomain(forName: suite)
-            SecItemDelete([
+            KeychainAccess.delete([
                 kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service
             ] as CFDictionary)
         }

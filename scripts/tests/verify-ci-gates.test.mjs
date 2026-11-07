@@ -16,7 +16,10 @@ const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+)
   .map(([, id, body]) => [id, body]));
 const nativeEligibleJobs = [
   'build-macos', 'release-validation', 'api-compatibility', 'lint', 'core-journey-e2e',
+  'build-ios-swiftpm', 'build-ios-keyboard',
 ];
+const armFallbackJobs = new Set(['lint', 'release-validation', 'build-ios-swiftpm', 'build-ios-keyboard']);
+const hostedFallback = (id) => (armFallbackJobs.has(id) ? 'macos-latest' : 'macos-26-intel');
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
@@ -54,7 +57,7 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   assert.match(swift, /^\s+timeout-minutes: 40$/m);
   assert.match(ui, /^\s+timeout-minutes: 42$/m);
   assert.match(swift, /timeout-minutes: 17\n\s+run: scripts\/run-core-journey-e2e.sh --phase build/);
-  assert.match(swift, /timeout-minutes: 10\n\s+run: scripts\/run-core-journey-e2e.sh --phase test/);
+  assert.match(swift, /timeout-minutes: 10\n\s+run: python3 scripts\/with-test-keychain.py bash scripts\/run-core-journey-e2e.sh --phase test/);
   assert.ok(swift.indexOf('--phase build') < swift.indexOf('--phase test'));
   for (const phase of ['setup', 'build', 'test']) {
     assert.match(ui, new RegExp(`run: python3 scripts/run-core-journey-stages.py ui --phase ${phase}`));
@@ -139,26 +142,33 @@ function routingContext(event = 'pull_request', repository = 'crmitchelmore/just
   };
 }
 
-test('Apple CI routing keeps UI execution on hosted ARM and compilation on Intel', () => {
+test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
   for (const id of ['build-ios', 'core-journey-fixture-ui']) {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
-  for (const id of ['build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard']) {
-    assert.match(jobBodies[id], /^\s+runs-on: macos-26-intel$/m, id);
+  for (const id of ['build-ios-test-products']) {
+    assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
   assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
+  // Intel appears only as the hosted fallback of the native-eligible jobs.
+  assert.doesNotMatch(workflow, /runs-on: macos-26-intel/);
+  // Lint and Release stay on hosted ARM: on Intel they exceeded their job budgets.
+  for (const id of nativeEligibleJobs) {
+    const hosted = hostedFallback(id);
+    assert.ok(jobBodies[id].includes(`|| '["${hosted}"]') }}`), id);
+  }
 });
 
 test('native pool still requires the exact reviewed source and trusted event', () => {
   for (const id of nativeEligibleJobs) {
     // Restore-only gates must share build-macos's hosted architecture to hit its cache.
-    const fallback = ['macos-26-intel'];
+    const fallback = [hostedFallback(id)];
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
-      ['jsti-macos-build', 'macOS']);
+      ['jsti-reviewed-local', 'macOS']);
     assert.deepEqual(route(id, routingContext(), {
       JSTI_NATIVE_APPROVED_SHA: 'head-sha',
-      JSTI_NATIVE_RUNNER_LABELS: '["mac-mini-3-local","macOS"]',
-    }), ['mac-mini-3-local', 'macOS']);
+      JSTI_NATIVE_RUNNER_LABELS: '["jsti-reviewed-local","macOS","X64"]',
+    }), ['jsti-reviewed-local', 'macOS', 'X64']);
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
       fallback, 'PR approval must match the source head, not merge SHA');
     assert.deepEqual(route(id, routingContext()), fallback, 'unset approval must stay hosted');
@@ -166,7 +176,7 @@ test('native pool still requires the exact reviewed source and trusted event', (
     assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo'), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
       fallback, 'forks cannot enter the native pool');
     assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
-      ['jsti-macos-build', 'macOS']);
+      ['jsti-reviewed-local', 'macOS']);
     assert.deepEqual(route(id, routingContext('push')), fallback);
     assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }), fallback);
     assert.deepEqual(route(id, { ...routingContext('push'), ref: 'refs/heads/feature' },
@@ -176,17 +186,20 @@ test('native pool still requires the exact reviewed source and trusted event', (
   }
 });
 
-test('standalone iOS SwiftPM compilation stays hosted with no new native admission', () => {
+test('iOS SwiftPM compilation keeps its command and bounded budget when native eligible', () => {
   const body = jobBodies['build-ios-swiftpm'];
-  assert.match(body, /^\s+runs-on: macos-26-intel$/m);
+  assert.deepEqual(route('build-ios-swiftpm', routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
+    ['jsti-reviewed-local', 'macOS']);
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
-  assert.doesNotMatch(body, /if:|jsti-macos-build|bravo-mini-local/);
+  // The only permitted condition is the shared Android-only skip.
+  const ungated = body.replace("    if: needs.release-paths.outputs.apple == 'true'\n", '');
+  assert.doesNotMatch(ungated, /if:|bravo-mini-local/);
 });
 
 test('UI jobs cannot be admitted to a native runner by repository variables', () => {
-  for (const id of ['build-ios', 'core-journey-fixture-ui']) {
-    assert.doesNotMatch(jobBodies[id], /JSTI_NATIVE|jsti-macos-build|bravo-mini-local/, id);
+  for (const id of ['build-ios', 'core-journey-fixture-ui', 'build-ios-test-products']) {
+    assert.doesNotMatch(jobBodies[id], /JSTI_NATIVE|jsti-macos-build|jsti-reviewed-local|bravo-mini-local/, id);
   }
 });
 
@@ -243,13 +256,13 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.doesNotMatch(iosPreparation, /"tuist"/);
   assert.match(iosPreparation, /boot.wait\(timeout=600\)/);
   assert.match(body, /xcodebuild test-without-building/);
-  assert.match(body, /needs: build-ios-test-products/);
+  assert.match(body, /needs: \[release-paths, build-ios-test-products\]/);
   assert.match(body, /artifact-ids: \$\{\{ needs.build-ios-test-products.outputs.artifact-id \}\}/);
   assert.match(body, /scripts\/ios-test-products.py unpack/);
   assert.match(body, /-testProductsPath "\$RUNNER_TEMP\/ios-test-products\/SpeakiOS.xctestproducts"/);
   assert.match(body, /name: Upload complete iOS XCTest log separately\n\s+if: always\(\)/);
   const products = jobBodies['build-ios-test-products'];
-  assert.match(products, /^\s+runs-on: macos-26-intel$/m);
+  assert.match(products, /^\s+runs-on: macos-latest$/m);
   assert.match(products, /^\s+timeout-minutes: 30$/m);
   assert.match(products, /TUIST_IOS_KEYBOARD=1 tuist generate/);
   assert.match(products, /xcodebuild build-for-testing/);
@@ -420,7 +433,7 @@ function passing() {
     'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
     'release-paths', 'release-validation', 'core-journey-e2e',
     'core-journey-fixture-ui', 'api-compatibility',
-  ].map(id => [id, { result: 'success', outputs: { package: 'true', 'core-journey': 'true' } }]));
+  ].map(id => [id, { result: 'success', outputs: { package: 'true', 'core-journey': 'true', apple: 'true' } }]));
 }
 
 test('accepts all successful pull-request gates', () => {
@@ -439,7 +452,7 @@ for (const id of Object.keys(passing())) {
 
 test('permits only path-excluded PR gates to skip', () => {
   const needs = passing();
-  needs['release-paths'].outputs = { package: 'false', 'core-journey': 'false' };
+  needs['release-paths'].outputs = { package: 'false', 'core-journey': 'false', apple: 'true' };
   for (const id of ['release-validation', 'core-journey-e2e', 'core-journey-fixture-ui']) {
     needs[id].result = 'skipped';
   }
@@ -447,6 +460,56 @@ test('permits only path-excluded PR gates to skip', () => {
   assert.ok(assessCIGates(needs, 'push').length > 0, 'main cannot skip gates');
   needs['core-journey-e2e'].result = 'failure';
   assert.ok(assessCIGates(needs, 'pull_request').length > 0);
+});
+
+const appleJobs = [
+  'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
+  'api-compatibility',
+];
+
+function androidOnly() {
+  const needs = passing();
+  needs['release-paths'].outputs = { package: 'false', 'core-journey': 'false', apple: 'false' };
+  for (const id of [...appleJobs, 'release-validation', 'core-journey-e2e', 'core-journey-fixture-ui']) {
+    needs[id].result = 'skipped';
+  }
+  return needs;
+}
+
+test('Android-only pull requests may skip every Apple gate', () => {
+  assert.deepEqual(assessCIGates(androidOnly(), 'pull_request'), []);
+});
+
+test('Apple gates still run, and must pass, whenever anything outside the Android app changes', () => {
+  for (const id of appleJobs) {
+    const needs = androidOnly();
+    needs['release-paths'].outputs.apple = 'true';
+    for (const other of appleJobs) needs[other].result = 'success';
+    needs[id].result = 'skipped';
+    assert.ok(assessCIGates(needs, 'pull_request').length > 0, `${id} cannot skip for Apple changes`);
+  }
+});
+
+test('Android-only skips never apply to main or to failed Apple jobs', () => {
+  assert.ok(assessCIGates(androidOnly(), 'push').length > 0, 'main runs every Apple gate');
+  const needs = androidOnly();
+  needs['build-macos'].result = 'failure';
+  assert.ok(assessCIGates(needs, 'pull_request').length > 0, 'a job that ran must succeed');
+});
+
+test('Apple path detection excludes only the Android app and its own workflow and docs', () => {
+  const body = jobBodies['release-paths'];
+  const filter = body.match(
+    /id: apple\n\s+with:\n\s+predicate-quantifier: every\n\s+filters: \|\n\s+apple:\n((?:\s+- '[^']+'\n)+)/);
+  assert.ok(filter, 'apple filter must use the every-pattern quantifier');
+  assert.deepEqual(filter[1].trim().split('\n').map(line => line.trim()), [
+    "- '**'", "- '!android/**'", "- '!.github/workflows/android.yml'", "- '!Docs/android-*.md'",
+  ]);
+  assert.match(body, /# Push to main: no changed-file filtering, run every gate\.\n\s+\{\n(?:\s+echo "[a-z-]+=true"\n)*\s+echo "apple=true"\n/,
+    'pushes must force Apple gates on');
+  for (const id of appleJobs) {
+    assert.match(jobBodies[id], /if: .*needs\.release-paths\.outputs\.apple == 'true'/, `${id} must honour the gate`);
+  }
 });
 
 test('blocks missing path detection outputs', () => {
@@ -460,4 +523,19 @@ test('permits API compatibility skip only on main push', () => {
   needs['api-compatibility'].result = 'skipped';
   assert.deepEqual(assessCIGates(needs, 'push'), []);
   assert.ok(assessCIGates(needs, 'pull_request').length > 0);
+});
+
+test('launched-app UI shards in CI match every shard the verifier requires', () => {
+  const ui = jobBodies['core-journey-fixture-ui'];
+  const matrix = ui.match(/^\s+shard: \[([^\]]+)\]$/m);
+  assert.ok(matrix, 'the UI gate must declare its shard matrix');
+  const ciShards = matrix[1].split(',').map(value => value.trim()).sort();
+  const verifier = readFileSync(new URL('../verify-core-journey-ui.py', import.meta.url), 'utf8');
+  const block = verifier.match(/^SHARDS = \{\n([\s\S]*?)^\}/m);
+  assert.ok(block, 'the verifier must declare SHARDS');
+  const verifierShards = [...block[1].matchAll(/^    "([a-z0-9-]+)": \(/gm)].map(([, name]) => name).sort();
+  assert.deepEqual(ciShards, verifierShards);
+  assert.match(ui, /fail-fast: false/);
+  assert.match(ui, /CORE_JOURNEY_UI_SHARD: \$\{\{ matrix\.shard \}\}/);
+  assert.match(ui, /name: core-journey-fixture-ui-\$\{\{ matrix\.shard \}\}-\$\{\{ github\.run_attempt \}\}/);
 });

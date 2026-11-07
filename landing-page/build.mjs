@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { loadCatalogue } from './qa/manual-checks.mjs';
+import { renderQaPage } from './qa/render.mjs';
 
 const output = new URL('./dist/', import.meta.url);
 await rm(output, { recursive: true, force: true });
@@ -27,3 +29,13 @@ for (const [name, extension, attribute] of [['site', 'css', 'href'], ['voice-mot
   html = html.replace(reference, `${attribute}="/${filename}"`);
 }
 await writeFile(index, html);
+
+// The owner's manual QA checklist is rendered from the repository catalogue so
+// the page and the results workflow always share one source of truth.
+const catalogueSource = await readFile(new URL('../Docs/manual-checks.yml', import.meta.url), 'utf8');
+const qa = new URL('qa/', output);
+await mkdir(qa, { recursive: true });
+await writeFile(new URL('index.html', qa), renderQaPage(loadCatalogue(catalogueSource)));
+for (const [source, target] of [['qa.js', 'qa.js'], ['qa.css', 'qa.css'], ['results-format.mjs', 'results-format.js']]) {
+  await cp(new URL(`qa/${source}`, import.meta.url), new URL(target, qa));
+}

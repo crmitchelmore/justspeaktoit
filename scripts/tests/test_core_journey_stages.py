@@ -44,7 +44,33 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(command[4:], [
             "--enable-code-coverage", "--filter", "|".join(f"{s}/" for s in stages.GATE["REQUIRED_SUITES"]),
         ])
-        self.assertEqual(len(stages.GATE["REQUIRED_SUITES"]), 16)
+        self.assertEqual(len(stages.GATE["REQUIRED_SUITES"]), 17)
+
+    def test_ui_shards_partition_required_suites_and_select_only_their_own(self):
+        shards = stages.UI["SHARDS"]
+        flattened = [suite for suites in shards.values() for suite in suites]
+        self.assertEqual(sorted(flattened), sorted(set(flattened)), "a suite may belong to one shard only")
+        self.assertEqual(tuple(flattened), stages.UI["REQUIRED_SUITES"])
+        self.assertTrue(set(stages.UI["REQUIRED_CASES"]) <= set(flattened))
+        for name, suites in shards.items():
+            with mock.patch.dict(os.environ, {"CORE_JOURNEY_UI_SHARD": name}):
+                self.assertEqual(stages.ui_selection(), [f"-only-testing:SpeakAppUITests/{s}" for s in suites])
+                # A shard log is complete only for its own suites, including required cases.
+                output = "".join(
+                    f"Test Case '-[SpeakAppUITests.{suite} {case}]' passed (0.001 seconds).\n"
+                    for suite in suites for case in stages.UI["REQUIRED_CASES"].get(suite, ("testJourney",))
+                )
+                errors, _ = stages.UI["coverage_errors"](output)
+                self.assertEqual(errors, [], name)
+                missing_case = output.splitlines(keepends=True)[1:]
+                if any(suite in stages.UI["REQUIRED_CASES"] for suite in suites):
+                    errors, _ = stages.UI["coverage_errors"]("".join(missing_case))
+                    self.assertTrue(errors, f"{name}: a missing required case must fail")
+        with mock.patch.dict(os.environ, {"CORE_JOURNEY_UI_SHARD": "unknown"}):
+            with self.assertRaises(ValueError):
+                stages.ui_selection()
+        with mock.patch.dict(os.environ, {"CORE_JOURNEY_UI_SHARD": "all"}):
+            self.assertEqual(len(stages.ui_selection()), len(flattened))
 
     def test_ui_uses_same_built_manifest_destination_and_all_required_suites(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -68,7 +94,7 @@ class CommandTests(unittest.TestCase):
             self.assertNotIn("-scheme", runtime)
             self.assertIn("-disableAutomaticPackageResolution", runtime)
             self.assertIn("-skipPackageUpdates", runtime)
-            self.assertEqual(len(stages.ui_selection()), 6)
+            self.assertEqual(len(stages.ui_selection()), 7)
             self.assertIn("-only-testing:SpeakAppUITests/SettingsCredentialUITests", stages.ui_selection())
             for argument in stages.ui_selection() + [
                 "-skipPackagePluginValidation", "CODE_SIGN_IDENTITY=-",
@@ -102,7 +128,8 @@ class CommandTests(unittest.TestCase):
         with mock.patch.dict(stages.GATE, {"run_gate": mock.Mock(return_value=17)}):
             self.assertEqual(stages.setup(Path("artifacts")), 17)
             stages.GATE["run_gate"].assert_called_once_with(
-                ["bash", "-c", "set -euo pipefail; brew install tuist; tuist generate --no-open"],
+                ["bash", "-c", f"set -euo pipefail; {stages.SETUP_RETRY}; "
+                 "retry brew install tuist; retry tuist generate --no-open"],
                 Path("artifacts/setup"), 300, (), stage="setup",
             )
 
@@ -302,6 +329,9 @@ class StageTests(unittest.TestCase):
             self.assertTrue(coverage["errors"])
 
     def test_swift_product_receipt_includes_bundle_resources_and_libraries(self):
+        environment = mock.patch.dict(os.environ, {"STORAGE_GUARD_BUILD_DIR": ""})
+        environment.start()
+        self.addCleanup(environment.stop)
         original = Path.cwd()
         os.chdir(self.directory)
         self.addCleanup(os.chdir, original)
@@ -317,6 +347,26 @@ class StageTests(unittest.TestCase):
         receipt = stages.products("swift", self.artifacts, time.monotonic() + 60)
         (root / "libExample.dylib").chmod(0o755)
         self.assertNotEqual(receipt, stages.products("swift", self.artifacts, time.monotonic() + 60))
+
+    def test_guarded_swift_receipt_tracks_external_products_not_workspace_decoys(self):
+        original = Path.cwd()
+        os.chdir(self.directory)
+        self.addCleanup(os.chdir, original)
+        guarded = self.directory / "external-build"
+        binary = guarded / "swift/debug/Test.xctest/Contents/MacOS/Test"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("guarded product")
+        decoy = Path(".build/debug/Decoy.xctest/Contents/MacOS/Decoy")
+        decoy.parent.mkdir(parents=True)
+        decoy.write_text("stale workspace product")
+        with mock.patch.dict(os.environ, {"STORAGE_GUARD_BUILD_DIR": str(guarded)}):
+            receipt = stages.products("swift", self.artifacts, time.monotonic() + 60)
+            self.assertEqual(set(receipt), {str(binary.resolve())})
+            binary.write_text("changed external product")
+            self.assertNotEqual(receipt, stages.products("swift", self.artifacts, time.monotonic() + 60))
+            binary.unlink()
+            with self.assertRaisesRegex(ValueError, "products are empty"):
+                stages.products("swift", self.artifacts, time.monotonic() + 60)
 
     def test_mismatched_source_toolchain_or_options_cannot_start_tests(self):
         command = self.prepare()

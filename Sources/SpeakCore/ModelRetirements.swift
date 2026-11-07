@@ -75,8 +75,9 @@ public enum ModelRetirements {
     private static let gptTranscribe = OpenAITranscriptionModels.gptTranscribeCatalogID
     private static let gptLiveTranscribe = OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID
 
-    /// Sources: https://developers.openai.com/api/docs/deprecations and
-    /// https://docs.mistral.ai/models/voxtral-mini-transcribe-26-02 (checked 2026-11).
+    /// Sources: https://developers.openai.com/api/docs/deprecations,
+    /// https://docs.mistral.ai/models/voxtral-mini-transcribe-26-02 and
+    /// https://openrouter.ai/api/v1/models (checked 2026-11).
     public static let all: [ModelRetirement] = [
         ModelRetirement(
             id: "openai/whisper-1", mode: .batch, shutdownDay: "2027-02-26",
@@ -113,7 +114,14 @@ public enum ModelRetirements {
             id: MistralVoxtralRealtime.liveCatalogID, mode: .live, shutdownDay: "2027-04-30",
             recommendedID: MistralVoxtral3.realtimeID,
             migrationNote: "choose a replacement such as Voxtral Realtime 3 "
-                + "($0.008/min, public preview); this selection is not moved automatically.")
+                + "($0.008/min, public preview); this selection is not moved automatically."),
+        // OpenAI names gpt-audio-1.5 as the successor, but OpenRouter does not
+        // list it (checked 2026-11-03), so no hosted ID is invented here.
+        ModelRetirement(
+            id: "openai/gpt-audio", mode: .batch, shutdownDay: "2027-01-20",
+            recommendedID: gptTranscribe,
+            migrationNote: "OpenRouter does not offer its successor. Choose GPT Transcribe or another "
+                + "model; this selection is not moved automatically.")
     ] + OpenAITTSModel.allCases.map {
         // OpenAI's named successor, gpt-realtime-2.1-mini, is a Realtime
         // conversational model that `/v1/audio/speech` does not accept.

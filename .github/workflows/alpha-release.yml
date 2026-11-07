@@ -81,3 +81,17 @@ jobs:
     uses: ./.github/workflows/qualify-desktop-release.yml
     with:
       manifest: ${{ needs.allocate.outputs.tag }}
+  # Signs, stages, clean-installs and then publishes the Windows beta
+  # installer for the qualified runtime bundles. Without the Artifact Signing
+  # configuration it rehearses and publishes nothing.
+  windows-installer:
+    needs: [allocate, desktop-qualification]
+    if: needs.allocate.outputs.tag != ''
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/windows-installer.yml
+    with:
+      manifest: ${{ needs.allocate.outputs.tag }}
+    secrets: inherit

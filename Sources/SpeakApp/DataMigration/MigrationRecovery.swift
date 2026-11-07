@@ -99,7 +99,7 @@ struct MigrationRecovery {
         var values = query(account)
         values[kSecValueData as String] = data
         values[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        guard SecItemAdd(values as CFDictionary, nil) == errSecSuccess else {
+        guard KeychainAccess.add(values as CFDictionary, nil) == errSecSuccess else {
             throw MigrationError
                 .invalid("Keychain could not protect the recovery backup. No data was changed.")
         }
@@ -109,11 +109,11 @@ struct MigrationRecovery {
         values[kSecReturnData as String] = true
         values[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        guard SecItemCopyMatching(values as CFDictionary, &result) == errSecSuccess,
+        guard KeychainAccess.copyMatching(values as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data else {
             throw MigrationError.invalid("Recovery key unavailable")
         }
         return data
     }
-    private func deleteKey(_ account: String) { SecItemDelete(query(account) as CFDictionary) }
+    private func deleteKey(_ account: String) { KeychainAccess.delete(query(account) as CFDictionary) }
 }

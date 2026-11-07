@@ -63,6 +63,9 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable { // swiftlint:
     public static let fields: [Field] = {
         // Appended step by step: one chained `+` expression exceeds the type checker's time limit.
         var all = Self.baseFields
+        all += [.init(key: CleanupModelSelection.preferenceKey,
+                      title: CleanupModelSelection.settingTitle + " (metadata only; refresh on Apply)",
+                      group: "Post-processing", kind: .boolean, defaultValue: AnyCodable(.bool(false)))]
         all += [VoiceSynthesisPreference.quality.field, VoiceAudioFormat.transferField]
         all += ShellPreference.fields
         all += SonioxVoicePreference.fields

@@ -23,7 +23,7 @@ Status key:
 | On-device recognition | Android 12+ (API 31) where the speech service provides it; language checks and model download on Android 13+ (API 33) | These are the platform API levels for `createOnDeviceSpeechRecognizer`, `checkRecognitionSupport` and `triggerModelDownload`. |
 | Target / compile SDK | 36 | Current platform behaviour. |
 | Devices | Phones and tablets with a microphone (`android.hardware.microphone` required) | Wear OS, TV and Auto are out of scope. |
-| Build | Gradle 8.14.3 wrapper, AGP 8.13, Kotlin 2.2, JDK 17 | CI: [`.github/workflows/android.yml`](../.github/workflows/android.yml) on hosted Ubuntu. |
+| Build | Gradle 8.14.3 wrapper, AGP 8.13, Kotlin 2.2, JDK 17 | CI: [`.github/workflows/android.yml`](../.github/workflows/android.yml) on hosted Ubuntu. Dependencies come from `JSTI_MAVEN_MIRROR` when set, otherwise from Google Maven and Maven Central on GitHub-hosted runners only; other machines need a feed (see [android/README.md](../android/README.md#android-dependency-sources)). |
 
 ## Feature matrix
 

@@ -147,5 +147,5 @@ private func deleteKeychainItem(service: String) {
         kSecAttrService as String: service,
         kSecAttrAccount as String: "speak-app-secrets"
     ]
-    SecItemDelete(query as CFDictionary)
+    KeychainAccess.delete(query as CFDictionary)
 }

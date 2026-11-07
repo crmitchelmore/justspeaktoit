@@ -34,6 +34,7 @@ final class LocalModelPipelineLease {
 /// release the files. Retain them for the stream and every suspended call.
 @MainActor
 final class LeasedWhisperKitStream: WhisperKitLiveStreaming {
+    var isStreaming: Bool { self.stream.isStreaming }
     private let stream: any WhisperKitLiveStreaming
     private let lease: LocalModelPipelineLease
 

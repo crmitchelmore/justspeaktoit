@@ -114,6 +114,8 @@ int32_t jsti_widget_save_snapshot(struct _GtkWidget *widget, const char *path, g
  * the Mac app's brand tokens and switch with the desktop's light or dark
  * style. Each builder returns a new floating widget. */
 void jsti_style_install(void);
+void jsti_desktop_palette_install(void);
+int32_t jsti_desktop_palette_self_test(char *error, size_t capacity);
 /* Canonical Mac artwork loaded once from the bundled hicolor theme. */
 void jsti_app_icon_install(void);
 void jsti_app_icon_clear(void);

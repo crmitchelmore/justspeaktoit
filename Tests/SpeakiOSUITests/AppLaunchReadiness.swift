@@ -24,9 +24,15 @@ extension XCUIApplication {
         let finishAppeared = finish.waitForExistence(timeout: 15)
         facts.observe(.finishWaitObserved, finishAppeared)
         if finishAppeared {
-            guard facts.observe(.finishLabelMatchesSkip, finish.label == "Skip"),
-                  facts.observe(.finishEnabled, finish.isEnabled),
-                  facts.observe(.finishHittable, finish.isHittable) else {
+            // The sheet can exist before its presentation settles; a one-shot
+            // isHittable read failed ~1s after a cold 51s launch (run 42302311943).
+            let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                facts.reset([.finishLabelMatchesSkip, .finishEnabled, .finishHittable])
+                return facts.observe(.finishLabelMatchesSkip, finish.label == "Skip")
+                    && facts.observe(.finishEnabled, finish.isEnabled)
+                    && facts.observe(.finishHittable, finish.isHittable)
+            }, object: nil)
+            guard XCTWaiter.wait(for: [idle], timeout: 15) == .completed else {
                 facts.emitFailure(.idleSkip)
                 XCTFail("Expected the actual idle onboarding Skip control")
                 throw AppLaunchTimeout()

@@ -23,3 +23,13 @@
 
 /site.webmanifest
   Cache-Control: public, max-age=0, must-revalidate
+
+/qa
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-store
+  Referrer-Policy: no-referrer
+
+/qa/*
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: public, max-age=0, must-revalidate
+  Referrer-Policy: no-referrer

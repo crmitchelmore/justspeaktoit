@@ -30,6 +30,7 @@ REQUIRED_SUITES = (
     "CaptureSessionOwnershipTests",
     "CoreJourneyRecordingSourceTests",
     "CoreJourneyPolishFixtureTests",
+    "CoreJourneyScenarioFixtureTests",
     "LiveTranscriptSessionIsolationTests",
     "HistoryPersistenceFailureTests",
 )
@@ -169,12 +170,71 @@ def coverage_errors(output, required_suites):
     return errors, counts
 
 
+def wait_cancellably(process, budget, started=None):
+    # Python 3.15's kqueue-based Popen.wait catches OSError around kevent, which
+    # swallows the InterruptedError a cancellation handler raises. Relay each
+    # handler so a cancellation also kills the command group (letting the wait
+    # return) and is re-raised once the wait comes back.
+    cancellations = []
+    previous = {}
+
+    def relay(signum, frame):
+        try:
+            previous[signum](signum, frame)
+        except BaseException as error:
+            cancellations.append(error)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            raise
+
+    if threading.current_thread() is threading.main_thread():
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            handler = signal.getsignal(signum)
+            if callable(handler):
+                previous[signum] = handler
+                signal.signal(signum, relay)
+    try:
+        exit_code = (process.wait(timeout=budget) if started is None
+                     else wait_with_deadline(process, budget, started))
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+    if cancellations:
+        raise cancellations[0]
+    return exit_code
+
+
 def stop_process_group(process):
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        # macOS reports EPERM for a group whose leader is already a zombie.
+        # Only an exited leader is tolerated; anything else is a real failure.
+        if process.poll() is None:
+            raise
     process.wait()
+
+
+def wait_with_deadline(process, budget, started):
+    """Wait until the measured budget is spent, not merely until wait() says so.
+
+    CPython 3.15's kqueue-based Popen._wait subtracts elapsed time from an
+    already absolute deadline when the exit is reported before waitpid reaps
+    it: a hosted run raised TimeoutExpired for a 600s budget after 327s. An
+    early TimeoutExpired therefore only resumes waiting for the remainder.
+    """
+    remaining = budget
+    while True:
+        try:
+            return process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            remaining = budget - (time.monotonic() - started)
+            if remaining <= 0:
+                raise
 
 
 class BuildProgressObserver:
@@ -349,7 +409,7 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES, st
                     command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
                 )
                 try:
-                    exit_code = process.wait(timeout=budget)
+                    exit_code = wait_cancellably(process, budget, command_started)
                     if exit_code != 0:
                         errors.append(f"{stage.capitalize()} command exited with status {exit_code}; see {log_path}.")
                 except subprocess.TimeoutExpired:

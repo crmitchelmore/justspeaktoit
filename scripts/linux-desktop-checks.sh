@@ -28,12 +28,12 @@ for _ in $(seq 1 50); do
     [ -e "/tmp/.X11-unix/X${display#:}" ] && break
     sleep 0.1
 done
-DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 JSTI_COMMAND_FORWARDING_CHECK=1 \
+env -u WAYLAND_DISPLAY XDG_SESSION_TYPE=x11 DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 JSTI_COMMAND_FORWARDING_CHECK=1 \
     timeout 600 dbus-run-session -- "$binary" --ui-smoke-test
 
 if [ -n "${JSTI_UI_SCREENSHOT_DIR:-}" ]; then
     echo "== screenshot tour (sample History, every page)"
-    DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 \
+    env -u WAYLAND_DISPLAY XDG_SESSION_TYPE=x11 DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 \
         timeout 180 dbus-run-session -- "$binary" --ui-screenshots "$JSTI_UI_SCREENSHOT_DIR"
     expected=(dashboard history voice-output general transcription post-processing
               corrections pronunciation profiles keyboard icloud-sync about general-portal-output

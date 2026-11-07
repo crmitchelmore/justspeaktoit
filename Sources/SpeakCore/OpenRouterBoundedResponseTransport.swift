@@ -67,7 +67,15 @@ enum OpenRouterBoundedResponseTransport {
     private static func receiveApple(
         _ request: URLRequest, session: URLSession, limit: Int, accept: @escaping HeaderPolicy
     ) async throws -> Response {
-        let (bytes, response) = try await session.bytes(for: request, delegate: OpenRouterBoundedResponsePolicy())
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (bytes, response) = try await session.bytes(for: request, delegate: OpenRouterBoundedResponsePolicy())
+        } catch let error as URLError where error.code == .cancelled && Task.isCancelled {
+            // Depending on timing, Foundation reports a cancelled header wait as
+            // URLError.cancelled; the caller's cancellation has one meaning.
+            throw CancellationError()
+        }
         defer { bytes.task.cancel() }
         guard let http = response as? HTTPURLResponse else { throw Failure.invalidResponse }
         try accept(http)

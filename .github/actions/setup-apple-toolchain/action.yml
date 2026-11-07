@@ -7,7 +7,7 @@ inputs:
     required: false
     default: ""
   install-tuist:
-    description: Whether to install Tuist with the existing Homebrew mechanism (true or false).
+    description: Require preinstalled Tuist on native runners or Homebrew installation on hosted runners (true or false).
     required: false
     default: "false"
 
@@ -33,4 +33,12 @@ runs:
     - name: Install Tuist
       if: inputs.install-tuist == 'true'
       shell: bash
-      run: brew install tuist
+      # GitHub release downloads intermittently return 5xx; retry with backoff.
+      run: |
+        retry() { for delay in 5 15 0; do "$@" && return 0; [ "$delay" = 0 ] && return 1; echo "Retrying in ${delay}s: $*" >&2; sleep "$delay"; done; }
+        if [ "${RUNNER_ENVIRONMENT:-}" = "self-hosted" ]; then
+          command -v tuist >/dev/null || { echo "::error::Preinstall Tuist on the reviewed native runner"; exit 1; }
+          tuist version
+        else
+          retry brew install tuist
+        fi

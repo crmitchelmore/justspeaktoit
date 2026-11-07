@@ -158,6 +158,7 @@ typedef struct UI {
     GtkButton *retry;
     GtkButton *correction_results;
     GtkButton *export_button;
+    GtkButton *issue_button;
     GtkButton *open_audio;
     GtkButton *recordings_folder;
     GtkButton *recordings_choose;
@@ -351,6 +352,7 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.retry), idle && has_record);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.correction_results), idle && presented);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.export_button), idle && presented && has_text);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.issue_button), idle && presented);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.open_audio), has_record);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.play), has_record && (idle || ui.playback_state != 0));
     gtk_widget_set_sensitive(GTK_WIDGET(ui.stop_play), has_record && ui.playback_state != 0);
@@ -984,6 +986,13 @@ static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) 
     g_clear_pointer(&ui.export_text, g_free);
 }
 
+static void on_issue_report(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.state == JSTI_STATE_IDLE && ui.selected_id != NULL &&
+        g_strcmp0(ui.presented_id, ui.selected_id) == 0)
+        emit(JSTI_EVENT_HISTORY_ISSUE_REPORT, ui.selected_id, 0);
+}
+
 static void on_export(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     if (ui.selected_id == NULL || ui.export_text != NULL) return;
@@ -1029,6 +1038,7 @@ static void on_import(GtkButton *button, gpointer data) {
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
     retire_cleanup_preview();
+    jsti_issue_reports_close();
     jsti_troubleshooting_close();
     jsti_api_keys_close();
     jsti_permissions_close();
@@ -1329,6 +1339,20 @@ static GtkWidget *setup_tile(const char *icon, const char *title, GtkLabel **det
 /* Side by side, or stacked when the window is narrow (see build_window). */
 static GtkWidget *columns;
 
+/* Stack hero actions before their labels force the page wider than its viewport.
+ * Breakpoint setters restore the desktop arrangement when space is available. */
+static void add_compact_hero_setters(AdwBreakpoint *breakpoint, GtkWidget *widget) {
+    if (gtk_widget_has_css_class(widget, "jsti-hero-header")) {
+        GValue orientation = G_VALUE_INIT;
+        g_value_init(&orientation, GTK_TYPE_ORIENTATION);
+        g_value_set_enum(&orientation, GTK_ORIENTATION_VERTICAL);
+        adw_breakpoint_add_setter(breakpoint, G_OBJECT(widget), "orientation", &orientation);
+        g_value_unset(&orientation);
+    }
+    for (GtkWidget *child = gtk_widget_get_first_child(widget); child != NULL;
+         child = gtk_widget_get_next_sibling(child)) add_compact_hero_setters(breakpoint, child);
+}
+
 static GtkWidget *two_columns(GtkWidget *first, GtkWidget *second) {
     columns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 20);
     gtk_box_set_homogeneous(GTK_BOX(columns), TRUE);
@@ -1343,7 +1367,7 @@ static GtkWidget *grid_of(GtkWidget *const *items, int count) {
     GtkWidget *flow = gtk_flow_box_new();
     gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(flow), GTK_SELECTION_NONE);
     gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(flow), TRUE);
-    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(flow), 2);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(flow), 1);
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(flow), 2);
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flow), 10);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow), 10);
@@ -1354,12 +1378,16 @@ static GtkWidget *grid_of(GtkWidget *const *items, int count) {
     return flow;
 }
 
+static void transcript_placeholder_changed(GtkTextBuffer *buffer, GtkWidget *placeholder) {
+    gtk_widget_set_visible(placeholder, gtk_text_buffer_get_char_count(buffer) == 0);
+}
+
 static GtkWidget *build_dashboard(GtkTextBuffer *buffer) {
     GtkWidget *column, *page = jsti_page_new(&column);
     GtkWidget *chips, *trailing;
     GtkWidget *hero = jsti_hero_new(
-        NULL, "Speak Dashboard",
-        "Ready to capture ideas instantly. Check your setup, follow your usage, and pick up your latest session.",
+        NULL, "Ready when you are",
+        "Turn a thought into text. Record, review, and use it anywhere.",
         &chips, &trailing);
     ui.record = GTK_BUTTON(gtk_button_new_with_label("Start Recording"));
     gtk_widget_add_css_class(GTK_WIDGET(ui.record), "jsti-record-hero");
@@ -1380,7 +1408,16 @@ static GtkWidget *build_dashboard(GtkTextBuffer *buffer) {
 
     GtkWidget *body;
     GtkWidget *transcript = jsti_card_new("document-edit-symbolic", "Transcript", &body);
-    gtk_box_append(GTK_BOX(body), transcript_view(buffer, 96));
+    GtkWidget *preview = gtk_overlay_new();
+    gtk_overlay_set_child(GTK_OVERLAY(preview), transcript_view(buffer, 96));
+    GtkWidget *placeholder = gtk_label_new("Your words will appear here.");
+    gtk_widget_add_css_class(placeholder, "jsti-empty");
+    gtk_label_set_wrap(GTK_LABEL(placeholder), TRUE);
+    gtk_widget_set_can_target(placeholder, FALSE);
+    gtk_overlay_add_overlay(GTK_OVERLAY(preview), placeholder);
+    g_signal_connect_object(buffer, "changed", G_CALLBACK(transcript_placeholder_changed), placeholder, 0);
+    transcript_placeholder_changed(buffer, placeholder);
+    gtk_box_append(GTK_BOX(body), preview);
     GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(actions, GTK_ALIGN_END);
     ui.cancel = GTK_BUTTON(gtk_button_new_with_label("Cancel"));
@@ -1534,6 +1571,8 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     g_signal_connect(read_aloud.button, "clicked", G_CALLBACK(on_read_aloud), NULL);
     ui.retry = GTK_BUTTON(gtk_button_new_with_label("Retry"));
     ui.export_button = GTK_BUTTON(gtk_button_new_with_label("Export…"));
+    ui.issue_button = GTK_BUTTON(gtk_button_new_with_label("Create Issue with Details…"));
+    g_signal_connect(ui.issue_button, "clicked", G_CALLBACK(on_issue_report), NULL);
     ui.open_audio = GTK_BUTTON(gtk_button_new_with_label("Open audio"));
     g_signal_connect(ui.retry, "clicked", G_CALLBACK(on_retry), NULL);
     g_signal_connect(ui.export_button, "clicked", G_CALLBACK(on_export), NULL);
@@ -1543,6 +1582,9 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.export_button));
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.open_audio));
     gtk_box_append(GTK_BOX(ui.detail), actions);
+    gtk_widget_set_halign(GTK_WIDGET(ui.issue_button), GTK_ALIGN_END);
+    gtk_widget_set_size_request(GTK_WIDGET(ui.issue_button), -1, 44);
+    gtk_box_append(GTK_BOX(ui.detail), GTK_WIDGET(ui.issue_button));
     GtkWidget *management = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_set_halign(management, GTK_ALIGN_END);
     ui.correction_results = GTK_BUTTON(gtk_button_new_with_label("Correction results"));
@@ -2098,9 +2140,12 @@ static void build_window(void) {
     jsti_style_install();
     GtkWidget *window = adw_application_window_new(GTK_APPLICATION(ui.application));
     ui.window = GTK_WINDOW(window);
+    jsti_issue_reports_bind(ui.window);
     gtk_window_set_title(ui.window, "Just Speak to It");
     gtk_window_set_default_size(ui.window, 1080, 760);
-    gtk_widget_set_size_request(window, 360, 480);
+    /* Settings editors need a usable desktop width; a 360px minimum let
+     * controls overflow in small floating windows on HiDPI displays. */
+    gtk_widget_set_size_request(window, 640, 480);
     g_signal_connect(window, "close-request", G_CALLBACK(on_close_request), NULL);
     GtkEventController *cancel_keys = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(cancel_keys, GTK_PHASE_CAPTURE);
@@ -2121,6 +2166,9 @@ static void build_window(void) {
      * the same displayed text, which Copy, Export and Read aloud act on. */
     GtkTextBuffer *buffer = gtk_text_buffer_new(NULL);
     ui.pages = GTK_STACK(gtk_stack_new());
+    /* A wide hidden settings page must not impose its minimum width on Dashboard. */
+    gtk_stack_set_hhomogeneous(ui.pages, FALSE);
+    gtk_stack_set_vhomogeneous(ui.pages, FALSE);
     gtk_stack_set_transition_type(ui.pages, GTK_STACK_TRANSITION_TYPE_CROSSFADE);
     GtkWidget *sidebar = build_sidebar();
     add_page(JSTI_PAGE_DASHBOARD, build_dashboard(buffer));
@@ -2171,21 +2219,27 @@ static void build_window(void) {
     adw_navigation_split_view_set_max_sidebar_width(ui.split, 280);
     adw_navigation_split_view_set_sidebar(ui.split, adw_navigation_page_new(sidebar, "Just Speak to It"));
     adw_navigation_split_view_set_content(ui.split, adw_navigation_page_new(content, "Just Speak to It"));
-    /* Narrow windows show one pane at a time, as the Mac's compact layout does. */
-    AdwBreakpoint *narrow = adw_breakpoint_new(adw_breakpoint_condition_parse("max-width: 640sp"));
+    /* AdwApplicationWindow applies only the last matching breakpoint, not all
+     * matching conditions. Keep the compact setters together so stacking cannot
+     * accidentally override sidebar collapse on a narrow/HiDPI desktop. */
+    AdwBreakpoint *compact = adw_breakpoint_new(adw_breakpoint_condition_parse("max-width: 900sp"));
     GValue collapsed = G_VALUE_INIT;
     g_value_init(&collapsed, G_TYPE_BOOLEAN);
     g_value_set_boolean(&collapsed, TRUE);
-    adw_breakpoint_add_setter(narrow, G_OBJECT(ui.split), "collapsed", &collapsed);
+    adw_breakpoint_add_setter(compact, G_OBJECT(ui.split), "collapsed", &collapsed);
     g_value_unset(&collapsed);
-    adw_application_window_add_breakpoint(ADW_APPLICATION_WINDOW(window), narrow);
-    AdwBreakpoint *stacked = adw_breakpoint_new(adw_breakpoint_condition_parse("max-width: 900sp"));
     GValue vertical = G_VALUE_INIT;
     g_value_init(&vertical, GTK_TYPE_ORIENTATION);
     g_value_set_enum(&vertical, GTK_ORIENTATION_VERTICAL);
-    adw_breakpoint_add_setter(stacked, G_OBJECT(columns), "orientation", &vertical);
+    adw_breakpoint_add_setter(compact, G_OBJECT(columns), "orientation", &vertical);
     g_value_unset(&vertical);
-    adw_application_window_add_breakpoint(ADW_APPLICATION_WINDOW(window), stacked);
+    GValue unequal = G_VALUE_INIT;
+    g_value_init(&unequal, G_TYPE_BOOLEAN);
+    g_value_set_boolean(&unequal, FALSE);
+    adw_breakpoint_add_setter(compact, G_OBJECT(columns), "homogeneous", &unequal);
+    g_value_unset(&unequal);
+    add_compact_hero_setters(compact, GTK_WIDGET(ui.pages));
+    adw_application_window_add_breakpoint(ADW_APPLICATION_WINDOW(window), compact);
     /* The content paints the window background, so snapshots of it are opaque. */
     gtk_widget_add_css_class(GTK_WIDGET(ui.split), "jsti-root");
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(window), GTK_WIDGET(ui.split));
@@ -2400,6 +2454,7 @@ int32_t jsti_window_run(
     g_signal_connect(ui.application, "activate", G_CALLBACK(on_activate), NULL);
     g_signal_connect(ui.application, "command-line", G_CALLBACK(on_command_line), NULL);
     int status = g_application_run(G_APPLICATION(ui.application), argc, argv);
+    jsti_issue_reports_close();
     jsti_hands_free_guard_stop();
     jsti_setup_close();
     retire_migration_restore();
@@ -6018,7 +6073,9 @@ static gboolean migration_restore_self_test(void) {
 
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_hands_free_guard_self_test(error, capacity) != 0) return -1;
+    if (jsti_desktop_palette_self_test(error, capacity) != 0) return -1;
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    if (jsti_issue_report_self_test(error, capacity) != 0) return -1;
     const JSTIAboutLink invalid_about_link = {"Invalid", "file:///not-an-update"};
     if (ui.about_details == NULL || ui.about_links == NULL ||
         strstr(gtk_label_get_text(ui.about_details), "Version:") == NULL ||

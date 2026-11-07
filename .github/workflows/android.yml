@@ -33,6 +33,7 @@ concurrency:
 jobs:
   build:
     name: Build & Test (Android)
+    # Must stay GitHub-hosted: settings.gradle.kts allows public registries only on hosted runners.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -55,6 +56,8 @@ jobs:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Unit tests, lint and debug build
+        env:
+          JSTI_MAVEN_MIRROR: ${{ vars.JSTI_MAVEN_MIRROR }}
         run: ./gradlew --stacktrace testDebugUnitTest lintDebug assembleDebug
 
       - name: Upload test and lint reports

@@ -1,0 +1,132 @@
+name: Core Journey Flake Qualification
+
+# Issue #802 flake gate: each launched-app shard must pass 20 executions with no
+# failure and no retry, five of them as the first run on a fresh hosted runner.
+# Expensive (ten macOS jobs), so it runs only on request: add the
+# `core-journey-qualification` label to a pull request, or dispatch on main.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-journey-qualification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    name: Qualify ${{ matrix.shard }} on cold runner ${{ matrix.runner }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'core-journey-qualification' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    # Same hosted image as the required Core Journey Fixture UI gate.
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [foundation, p0]
+        runner: [1, 2, 3, 4, 5]
+    env:
+      CORE_JOURNEY_UI_SHARD: ${{ matrix.shard }}
+      ITERATIONS: 4
+    steps:
+      - uses: actions/checkout@v7.0.1
+        timeout-minutes: 2
+
+      - name: Prepare Tuist and macOS project
+        timeout-minutes: 6
+        run: python3 scripts/run-core-journey-stages.py ui --phase setup
+
+      - name: Build launched fixture test products
+        timeout-minutes: 17
+        run: python3 scripts/run-core-journey-stages.py ui --phase build
+
+      # Iteration 1 is the cold run on this fresh VM; 2-4 reuse the same host.
+      # Every iteration runs once under the unchanged 600s budget and is
+      # recorded whatever its outcome; nothing is retried or discarded.
+      - name: Run consecutive launched-app iterations
+        timeout-minutes: 60
+        env:
+          RUNNER_INDEX: ${{ matrix.runner }}
+        run: |
+          # GitHub runs steps with bash -e; a failing iteration must still be
+          # recorded and must not skip the iterations that follow it.
+          set +e -uo pipefail
+          root=.artifacts/core-journey-fixture-ui
+          failed=0
+          for iteration in $(seq 1 "$ITERATIONS"); do
+            started=$(date +%s)
+            python3 scripts/run-core-journey-stages.py ui --phase test
+            code=$?
+            seconds=$(( $(date +%s) - started ))
+            out="$root/iterations/$iteration"
+            mkdir -p "$out"
+            for item in runtime coverage.json CoreJourneyFixture.xcresult test-error.json; do
+              [ -e "$root/$item" ] && mv "$root/$item" "$out/"
+            done
+            python3 - "$out" "$iteration" "$code" "$seconds" <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          out, iteration, code, seconds = Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+          coverage = out / "coverage.json"
+          errors = json.loads(coverage.read_text())["errors"] if coverage.exists() else ["coverage.json missing"]
+          runtime = out / "runtime/result.json"
+          test_seconds = json.loads(runtime.read_text()).get("command_elapsed_seconds") if runtime.exists() else None
+          (out / "iteration.json").write_text(json.dumps({
+              "shard": os.environ["CORE_JOURNEY_UI_SHARD"], "runner": int(os.environ["RUNNER_INDEX"]),
+              "iteration": iteration, "cold": iteration == 1, "exit_code": code,
+              "coverage_errors": errors, "seconds": test_seconds if test_seconds is not None else seconds,
+              "wall_seconds": seconds, "sha": os.environ["GITHUB_SHA"],
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+          }, indent=2) + "\n")
+          PY
+            [ "$code" -eq 0 ] || failed=1
+          done
+          exit "$failed"
+
+      - name: Upload iteration receipts
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: core-journey-qualification-${{ matrix.shard }}-${{ matrix.runner }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/core-journey-fixture-ui
+            !.artifacts/core-journey-fixture-ui/DerivedData
+          include-hidden-files: true
+          if-no-files-found: error
+
+  summarise:
+    name: Record flake qualification
+    needs: qualify
+    if: always() && needs.qualify.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        timeout-minutes: 2
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        timeout-minutes: 5
+        with:
+          # Every attempt of this run: a job whose earlier attempt never reached
+          # its iterations (for example a setup download failure) may qualify
+          # from a rerun. The summariser rejects any job that ran tests twice.
+          pattern: core-journey-qualification-*
+          path: receipts
+      - name: Decide qualification
+        run: |
+          set -o pipefail
+          python3 scripts/summarise-core-journey-qualification.py receipts qualification foundation,p0 \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload qualification record
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: core-journey-qualification-record-${{ github.run_attempt }}
+          path: qualification
+          if-no-files-found: error

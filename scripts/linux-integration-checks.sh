@@ -102,7 +102,9 @@ Xvfb "$display" -screen 0 1280x1024x24 -nolisten tcp >/dev/null 2>&1 &
 xvfb=$!
 pids+=("$xvfb")
 for _ in $(seq 1 50); do [ -e "/tmp/.X11-unix/X${display#:}" ] && break; sleep 0.1; done
-export DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 LANG=C.UTF-8 LC_ALL=C.UTF-8
+# The host may be Wayland; this section deliberately tests a private X11 session.
+unset WAYLAND_DISPLAY
+export XDG_SESSION_TYPE=x11 DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 LANG=C.UTF-8 LC_ALL=C.UTF-8
 openbox >/dev/null 2>&1 & pids+=($!)
 sleep 0.5
 JSTI_TEST_READY_FILE="$work/grab-ready" "$binary" --integration-test x11-hotkey & grab=$!

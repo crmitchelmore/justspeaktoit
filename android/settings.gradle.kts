@@ -1,23 +1,26 @@
-// Dependency sources. By default Gradle resolves from Google Maven, Maven Central
-// and the Gradle Plugin Portal. Set the Gradle property `jsti.mavenMirror` (or the
-// JSTI_MAVEN_MIRROR environment variable) to resolve everything through a single
-// proxy feed instead, as required on machines governed by a package-feed policy.
+// Dependency sources (see "Android dependency sources" in android/README.md):
+// - JSTI_MAVEN_MIRROR (or -Pjsti.mavenMirror) set: resolve only through that one feed.
+// - Otherwise, on GitHub-hosted runners only: Google Maven and Maven Central.
+// - Anywhere else (developer machines, self-hosted runners): stop, so a machine governed by a
+//   package-feed policy never fetches from public registries by accident.
+// Each block is evaluated in isolation by Gradle, so the selection is repeated in both.
 pluginManagement {
     val mirror = providers.gradleProperty("jsti.mavenMirror")
-        .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR")).orNull
+        .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR")).orNull?.takeIf { it.isNotBlank() }
+    val githubHosted = providers.environmentVariable("GITHUB_ACTIONS").orNull == "true" &&
+        providers.environmentVariable("RUNNER_ENVIRONMENT").orNull == "github-hosted"
     repositories {
-        if (mirror != null) {
-            maven(mirror)
-        } else {
-            google {
-                content {
-                    includeGroupByRegex("com\\.android.*")
-                    includeGroupByRegex("com\\.google.*")
-                    includeGroupByRegex("androidx.*")
-                }
+        when {
+            mirror != null -> maven(mirror)
+            githubHosted -> {
+                google()
+                mavenCentral()
             }
-            mavenCentral()
-            gradlePluginPortal()
+            else -> throw GradleException(
+                "No Maven feed configured. Set JSTI_MAVEN_MIRROR (or -Pjsti.mavenMirror) to an approved feed " +
+                    "that proxies Maven Central and Google Maven. Public registries are used only on " +
+                    "GitHub-hosted runners. See android/README.md, \"Android dependency sources\".",
+            )
         }
     }
 }
@@ -25,8 +28,9 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     val mirror = providers.gradleProperty("jsti.mavenMirror")
-        .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR")).orNull
+        .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR")).orNull?.takeIf { it.isNotBlank() }
     repositories {
+        // pluginManagement has already rejected unsupported environments.
         if (mirror != null) {
             maven(mirror)
         } else {

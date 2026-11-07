@@ -203,6 +203,18 @@ final class TranscriptionManager: ObservableObject {
     analyzerFallbackAllowed: Bool = true,
     primedInput: PrimedLiveInput? = nil
   ) async throws {
+    try await startLiveTranscription(
+      preRollBuffers: preRollBuffers, analyzerFallbackAllowed: analyzerFallbackAllowed,
+      primedInput: primedInput, onDiagnostic: nil
+    )
+  }
+
+  func startLiveTranscription(
+    preRollBuffers: [AVAudioPCMBuffer],
+    analyzerFallbackAllowed: Bool = true,
+    primedInput: PrimedLiveInput? = nil,
+    onDiagnostic: ((LiveDiagnosticReceipt) -> Void)?
+  ) async throws {
         guard !isLiveTranscribing, startupGeneration == nil else {
             throw TranscriptionManagerError.liveSessionAlreadyRunning
         }
@@ -225,12 +237,13 @@ final class TranscriptionManager: ObservableObject {
       model: model
     )
     let startupTask = Task { @MainActor in
-      try Task.checkCancellation()
-      try await self.liveController.start(
-        preRollBuffers: preRollBuffers,
-        analyzerFallbackAllowed: analyzerFallbackAllowed,
-        primedInput: primedInput
-      )
+      try await Self.performLiveInvocation(model: model, language: language, onDiagnostic: onDiagnostic) {
+        try await self.liveController.start(
+          preRollBuffers: preRollBuffers,
+          analyzerFallbackAllowed: analyzerFallbackAllowed,
+          primedInput: primedInput
+        )
+      }
     }
     self.startupTask = startupTask
     do {
@@ -251,6 +264,26 @@ final class TranscriptionManager: ObservableObject {
       throw error
     }
     isLiveTranscribing = true
+  }
+
+  // This receipt observes the configured Switching controller call only. Its
+  // internal provider/backend/fallback is opaque, including injected controllers.
+  typealias LiveDiagnosticReceipt = BatchDiagnosticReceipt
+
+  static func performLiveInvocation(
+    model: String, language: String?, onDiagnostic: ((LiveDiagnosticReceipt) -> Void)?,
+    start: () async throws -> Void
+  ) async throws {
+    try Task.checkCancellation()
+    onDiagnostic?(.handoff(RequestDiagnosticContext(
+      provenance: .observedHandoff, model: .project(model), mode: .live, language: .project(language)
+    )))
+    do {
+      try await start()
+    } catch {
+      onDiagnostic?(.failure(Self.batchFailure(error, stage: .request)))
+      throw error
+    }
   }
 
   func stopLiveTranscription() async throws -> TranscriptionResult {
@@ -327,45 +360,140 @@ final class TranscriptionManager: ObservableObject {
 
 /// Batch routing and model/credential selection are separate from live session ownership.
 extension TranscriptionManager {
+  enum BatchDiagnosticReceipt {
+    case handoff(RequestDiagnosticContext)
+    case failure(RequestDiagnosticContext.Failure)
+  }
+
   func transcribeFile(at url: URL) async throws -> TranscriptionResult {
-    let model = offlineTranscriptionModel
-    if AppleLocalModels.isSpeechAnalyzerModel(model) {
-      if #available(macOS 26.0, *) {
-        return try await AppleSpeechAnalyzerTranscriber.transcribeFile(
+    try await transcribeFile(at: url, onDiagnostic: nil)
+  }
+
+  func transcribeFile(
+    at url: URL, onDiagnostic: ((BatchDiagnosticReceipt) -> Void)?
+  ) async throws -> TranscriptionResult {
+    try await Self.performBatchTranscription(
+      at: url, model: { self.offlineTranscriptionModel }, settings: appSettings, batchClient: batchClient,
+      apiKey: { try await self.getAPIKey(for: $0) }, onDiagnostic: onDiagnostic
+    )
+  }
+
+  // Keep the existing routing algorithm together; dependencies preserve its actor/evaluation order.
+  // swiftlint:disable:next function_body_length function_parameter_count
+  static func performBatchTranscription(
+    at url: URL, model modelProvider: () -> String, settings: AppSettings,
+    batchClient: any BatchTranscriptionClient,
+    providerForModel: (String) async -> (any TranscriptionProvider)? = {
+      await TranscriptionProviderRegistry.shared.provider(forModel: $0)
+    },
+    apiKey: (TranscriptionProviderMetadata) async throws -> String,
+    onDiagnostic: ((BatchDiagnosticReceipt) -> Void)?
+  ) async throws -> TranscriptionResult {
+    var stage: RequestDiagnosticContext.Stage = .admission
+    do {
+      let model = modelProvider()
+      if AppleLocalModels.isSpeechAnalyzerModel(model) {
+        if #available(macOS 26.0, *) {
+          let locale = settings.resolvedPreferredLocaleIdentifier
+          let engine = AppleSpeechAnalyzerEngine(modelID: model)
+          stage = .request
+          onDiagnostic?(.handoff(Self.batchHandoff(model: model, language: locale, mode: .local)))
+          return try await AppleSpeechAnalyzerTranscriber.transcribeFile(
+            at: url,
+            localeIdentifier: locale,
+            engine: engine
+          )
+        }
+        throw AppleLocalModelError.speechTranscriberUnavailable
+      }
+      if ModelRouting.family(for: model).isDownloadedLocal {
+        let manager = LocalModelManager.shared
+        let language = settings.preferredModelLanguage
+        stage = .request
+        onDiagnostic?(.handoff(Self.batchHandoff(model: model, language: language, mode: .local)))
+        return try await manager.transcribeFile(
           at: url,
-          localeIdentifier: appSettings.resolvedPreferredLocaleIdentifier,
-          engine: AppleSpeechAnalyzerEngine(modelID: model)
+          modelID: model,
+          language: language
         )
       }
-      throw AppleLocalModelError.speechTranscriberUnavailable
-    }
-    if ModelRouting.family(for: model).isDownloadedLocal {
-      return try await LocalModelManager.shared.transcribeFile(
-        at: url,
-        modelID: model,
-        language: appSettings.preferredModelLanguage
-      )
-    }
 
-    let registry = TranscriptionProviderRegistry.shared
+      // Check if this model uses a dedicated transcription provider
+      if let provider = await providerForModel(model) {
+        let metadata = provider.metadata
+        let apiKey = try await apiKey(metadata)
+        let language = settings.preferredModelLanguage
+        stage = .request
+        onDiagnostic?(.handoff(Self.batchHandoff(
+          model: model, language: language, mode: .batch, providerID: metadata.id
+        )))
+        return try await provider.transcribeFile(
+          at: url,
+          apiKey: apiKey,
+          model: model,
+          language: language
+        )
+      }
 
-    // Check if this model uses a dedicated transcription provider
-    if let provider = await registry.provider(forModel: model) {
-      let apiKey = try await getAPIKey(for: provider.metadata)
-      return try await provider.transcribeFile(
+      // Fallback to OpenRouter for legacy models
+      let language = settings.preferredModelLanguage
+      stage = .request
+      // The injected client may route internally. Never infer its provider from this model.
+      onDiagnostic?(.handoff(Self.batchHandoff(model: model, language: language, mode: .batch)))
+      return try await batchClient.transcribeFile(
         at: url,
-        apiKey: apiKey,
         model: model,
-        language: appSettings.preferredModelLanguage
+        language: language
       )
+    } catch {
+      onDiagnostic?(.failure(Self.batchFailure(error, stage: stage)))
+      throw error
     }
+  }
 
-    // Fallback to OpenRouter for legacy models
-    return try await batchClient.transcribeFile(
-      at: url,
-      model: model,
-      language: appSettings.preferredModelLanguage
+  private static func batchHandoff(
+    model: String, language: String?, mode: RequestDiagnosticContext.Mode, providerID: String? = nil
+  ) -> RequestDiagnosticContext {
+    RequestDiagnosticContext(
+      provenance: .observedHandoff, model: .project(model), observedProvider: providerID.map { .project($0) },
+      mode: mode, language: .project(language), options: .init(streamingEnabled: false)
     )
+  }
+
+  static func batchFailure(_ error: Error, stage: RequestDiagnosticContext.Stage) -> RequestDiagnosticContext.Failure {
+    if error is CancellationError { return .init(stage: stage, code: .cancelled, domain: .application) }
+    if let transport = error as? URLError {
+      let codes: [URLError.Code: RequestDiagnosticContext.FailureCode] = [.timedOut: .timeout, .cancelled: .cancelled]
+      return .init(stage: stage, code: codes[transport.code] ?? .transport, domain: .transport)
+    }
+    if let provider = error as? TranscriptionProviderError {
+      return Self.batchProviderFailure(provider, stage: stage)
+    }
+    if let client = error as? OpenRouterClientError {
+      switch client {
+      case .apiKeyMissing: return .init(stage: stage, code: .authentication, domain: .application)
+      case .invalidResponse: return .init(stage: stage, code: .unknown, domain: .provider)
+      case .httpStatus(let status, _): return Self.batchHTTPFailure(status, stage: stage)
+      case .audioFileTooLarge: return .init(stage: stage, code: .invalidInput, domain: .application)
+      }
+    }
+    return .init(stage: stage, code: .unknown, domain: .unknown)
+  }
+
+  private static func batchProviderFailure(
+    _ error: TranscriptionProviderError, stage: RequestDiagnosticContext.Stage
+  ) -> RequestDiagnosticContext.Failure {
+    switch error {
+    case .apiKeyMissing: return .init(stage: stage, code: .authentication, domain: .application)
+    case .invalidResponse: return .init(stage: stage, code: .unknown, domain: .provider)
+    case .httpError(let status, _): return Self.batchHTTPFailure(status, stage: stage)
+    }
+  }
+
+  private static func batchHTTPFailure(_ status: Int, stage: RequestDiagnosticContext.Stage)
+    -> RequestDiagnosticContext.Failure {
+    .init(stage: stage, code: status == 401 || status == 403 ? .authentication : .unknown,
+          domain: .provider, httpStatus: status)
   }
 
   func batchTranscriptionUsesRemoteService() async -> Bool {

@@ -25,7 +25,7 @@ final class ForegroundTestSession: IOSRecordingSession {
     /// This double persists nothing, so it never reports a loss (#950).
     var recordingLossSummary: String? { nil }
     var inputLevelSample = CaptureInputLevelSample(levelDBFS: -160, sequence: 0)
-    let safetyRecordingID: UUID? = nil
+    var safetyRecordingID: UUID?
     var startOperation: @MainActor () async throws -> Void = {}
     var stopOperation: @MainActor () async throws -> TranscriptionResult = {
         ForegroundTestSession.result("final words")

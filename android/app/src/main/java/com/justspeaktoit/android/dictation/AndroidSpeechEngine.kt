@@ -53,7 +53,7 @@ class AndroidSpeechEngine(context: Context) {
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun checkSupport(languageTag: String, onResult: (LanguageResolution) -> Unit) {
         val generation = probeGeneration
-        val unknown = LanguageResolution(LanguageSupport.Unknown, languageTag)
+        val failed = LanguageResolution(LanguageSupport.CheckFailed, languageTag)
         fun deliver(result: LanguageResolution) {
             if (generation != probeGeneration) return
             releaseProbe()
@@ -62,11 +62,11 @@ class AndroidSpeechEngine(context: Context) {
         val probe = try {
             SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
         } catch (e: UnsupportedOperationException) {
-            onResult(unknown)
+            onResult(failed)
             return
         }
         supportProbe = probe
-        handler.postDelayed({ deliver(unknown) }, PROBE_TOKEN, SUPPORT_TIMEOUT_MS)
+        handler.postDelayed({ deliver(failed) }, PROBE_TOKEN, SUPPORT_TIMEOUT_MS)
         probe.checkRecognitionSupport(
             recognitionIntent(languageTag, RecognitionMode.OnDevice),
             context.mainExecutor,
@@ -80,7 +80,7 @@ class AndroidSpeechEngine(context: Context) {
                     ),
                 )
 
-                override fun onError(error: Int) = deliver(unknown)
+                override fun onError(error: Int) = deliver(failed)
             },
         )
     }
@@ -132,7 +132,15 @@ class AndroidSpeechEngine(context: Context) {
         val listener = Listener(id, onEvent, onLevel)
         activeListener = listener
         created.setRecognitionListener(listener)
-        created.startListening(recognitionIntent(languageTag, mode))
+        try {
+            created.startListening(recognitionIntent(languageTag, mode))
+        } catch (e: SecurityException) {
+            // The service can start requiring a permission after availability was checked.
+            session++
+            release()
+            onEvent(DictationEvent.Error(DictationFailure.PermissionDenied))
+            return
+        }
         // A service that never becomes ready must not leave the session stuck in Starting.
         listener.arm(DictationFailure.RecognizerBusy, START_TIMEOUT_MS)
     }
@@ -235,8 +243,12 @@ class AndroidSpeechEngine(context: Context) {
 
         override fun onResults(results: Bundle?) = finish(DictationEvent.Final(results.bestText()))
 
-        override fun onPartialResults(partialResults: Bundle?) =
-            emit(DictationEvent.Partial(partialResults.bestText()))
+        override fun onPartialResults(partialResults: Bundle?) {
+            // A callback with no hypothesis must not wipe the words already shown.
+            val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                ?: return
+            emit(DictationEvent.Partial(text))
+        }
 
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
 

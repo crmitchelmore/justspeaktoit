@@ -33,7 +33,8 @@ import java.util.Locale
 /**
  * A minimal dictation keyboard: the Android equivalent of the Mac's insert-at-cursor. Live partial
  * text is shown as composing text; only a final transcript is committed. A failed or cancelled
- * session restores whatever it replaced, so it never looks like typed input or loses text. The
+ * session removes only its own composing text. Dictation inserts after a selection rather than
+ * replacing it, so a failure can never lose the user's existing text. The
  * keyboard never uses the app's Cloud (BYOK) providers; the phone's speech service, which may send
  * audio to its provider, is used only after the user has been told so.
  */
@@ -50,9 +51,13 @@ class DictationKeyboardService : InputMethodService() {
     /** Bumped whenever the editor changes, so a pending start cannot reach a different field. */
     private var inputGeneration = 0L
 
-    /** Whether this session has written composing text, and the selection it replaced. */
+    /** Whether the editor still holds composing text written by this session. */
     private var ownsComposing = false
-    private var replacedSelection: CharSequence = ""
+
+    /** The editor has reported our composing region, so a later report without one means it was ended. */
+    private var editorShowedComposing = false
+    private var selectionStart = -1
+    private var selectionEnd = -1
 
     /** Set after the speech-service disclosure has been shown; the next tap starts capture. */
     private var speechServiceDisclosed = false
@@ -179,7 +184,10 @@ class DictationKeyboardService : InputMethodService() {
             }
             disclosing = false
             ownsComposing = false
-            replacedSelection = currentInputConnection?.getSelectedText(0) ?: ""
+            // Insert after any selection instead of replacing it.
+            if (selectionStart != selectionEnd && selectionEnd >= 0) {
+                currentInputConnection?.setSelection(selectionEnd, selectionEnd)
+            }
             dispatch(DictationEvent.Start(mode))
             val language = if (mode == RecognitionMode.OnDevice) resolution.languageTag else tag
             engine.start(mode, language, onEvent = ::dispatch, onLevel = {})
@@ -193,18 +201,37 @@ class DictationKeyboardService : InputMethodService() {
 
     private fun cancelSession() {
         engine.cancel()
-        restoreReplacedText()
+        removeOwnComposingText()
         dispatch(DictationEvent.Cancelled)
     }
 
-    /** Puts back the selection the session's composing text replaced; untouched text is left alone. */
-    private fun restoreReplacedText() {
-        if (!ownsComposing) return
-        currentInputConnection?.let {
-            it.setComposingText(replacedSelection, 1)
-            it.finishComposingText()
-        }
+    /** Removes provisional text the session wrote; text it does not own is never touched. */
+    private fun removeOwnComposingText() {
+        if (ownsComposing) currentInputConnection?.setComposingText("", 1)
         ownsComposing = false
+        editorShowedComposing = false
+    }
+
+    override fun onUpdateSelection(
+        oldSelStart: Int,
+        oldSelEnd: Int,
+        newSelStart: Int,
+        newSelEnd: Int,
+        candidatesStart: Int,
+        candidatesEnd: Int,
+    ) {
+        super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        selectionStart = newSelStart
+        selectionEnd = newSelEnd
+        // Updates can lag behind our writes, so only an end after the editor showed our region counts:
+        // the app or user ended composing, and that text is now theirs rather than provisional.
+        if (!ownsComposing) return
+        if (candidatesStart >= 0) {
+            editorShowedComposing = true
+        } else if (editorShowedComposing) {
+            ownsComposing = false
+            editorShowedComposing = false
+        }
     }
 
     private fun showPartial(partial: String) {
@@ -224,12 +251,13 @@ class DictationKeyboardService : InputMethodService() {
                 if (ic != null) {
                     // Remove the provisional text first, so the spacing check sees the real preceding character.
                     if (ownsComposing) ic.setComposingText("", 1)
+                    editorShowedComposing = false
                     ic.commitText(KeyboardPolicy.textToCommit(s.transcript, ic.getTextBeforeCursor(1, 0)), 1)
                 }
                 ownsComposing = false
                 state = DictationState.Idle
             }
-            is DictationState.Failed -> restoreReplacedText()
+            is DictationState.Failed -> removeOwnComposingText()
             else -> Unit
         }
         render()

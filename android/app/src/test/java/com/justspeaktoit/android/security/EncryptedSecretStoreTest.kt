@@ -92,7 +92,9 @@ class EncryptedSecretStoreTest {
 
     @Test
     fun testMalformedValues_areRejected() {
-        listOf("", "v1:", "v1:!!!", "v2:AAAA", "v1:AAAA").forEach { bad ->
+        // The last value has an IV but too few bytes for a full authentication tag.
+        val shortTag = "v1:" + Base64.getEncoder().encodeToString(ByteArray(20))
+        listOf("", "v1:", "v1:!!!", "v2:AAAA", "v1:AAAA", shortTag).forEach { bad ->
             assertThrows(InvalidSealedValueException::class.java) { SealedBox.open(key, bad, ByteArray(0)) }
         }
     }

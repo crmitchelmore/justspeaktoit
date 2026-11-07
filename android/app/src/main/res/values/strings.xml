@@ -13,6 +13,7 @@
     <string name="status_mode_needs_download">The on-device model for %1$s is not installed yet.</string>
     <string name="status_mode_downloading">The on-device model for %1$s is downloading.</string>
     <string name="status_mode_language_unsupported">On-device recognition does not support %1$s on this phone.</string>
+    <string name="status_mode_unverified">Could not confirm that %1$s is installed for on-device recognition. It may still work offline; if it fails, choose Speech service or try again later.</string>
     <string name="action_download_model">Download language</string>
     <string name="checking_availability">Checking speech recognition…</string>
 

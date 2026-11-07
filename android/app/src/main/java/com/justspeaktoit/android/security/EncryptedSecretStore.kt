@@ -8,7 +8,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Stores named secrets such as provider API keys. Values never leave the device in plain text. */
-interface SecretStore {
+internal interface SecretStore {
     fun read(name: String): String?
 
     fun write(name: String, value: String)
@@ -19,7 +19,7 @@ interface SecretStore {
 }
 
 /** Minimal persistence the encrypted store needs; production uses private SharedPreferences. */
-interface SecretBacking {
+internal interface SecretBacking {
     fun get(key: String): String?
 
     fun put(key: String, value: String)
@@ -33,7 +33,7 @@ interface SecretBacking {
  * AES-256-GCM authenticated encryption. The cipher generates a fresh IV for every value, and the
  * secret's name is bound as associated data, so a ciphertext cannot be moved to another name.
  */
-object SealedBox {
+internal object SealedBox {
     private const val VERSION = "v1:"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val IV_BYTES = 12
@@ -62,7 +62,7 @@ object SealedBox {
         } catch (e: IllegalArgumentException) {
             throw InvalidSealedValueException("Malformed sealed value", e)
         }
-        if (bytes.size <= IV_BYTES) throw InvalidSealedValueException("Truncated sealed value")
+        if (bytes.size < IV_BYTES + TAG_BITS / 8) throw InvalidSealedValueException("Truncated sealed value")
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, bytes, 0, IV_BYTES))
         cipher.updateAAD(associatedData)
@@ -75,7 +75,7 @@ object SealedBox {
 }
 
 /** A sealed value that can never be opened with the current key and name. */
-class InvalidSealedValueException(message: String, cause: Throwable? = null) :
+internal class InvalidSealedValueException(message: String, cause: Throwable? = null) :
     GeneralSecurityException(message, cause)
 
 /**
@@ -84,10 +84,12 @@ class InvalidSealedValueException(message: String, cause: Throwable? = null) :
  * restore, is deleted and reported as absent so the user is asked to enter it again. Any other
  * failure is thrown and the stored value is kept.
  */
-class EncryptedSecretStore(
+internal class EncryptedSecretStore(
     private val backing: SecretBacking,
     private val keyProvider: () -> SecretKey,
 ) : SecretStore {
+    // Serialised so a read that discards an invalid value cannot delete a concurrent replacement.
+    @Synchronized
     override fun read(name: String): String? {
         requireValidName(name)
         val sealed = backing.get(name) ?: return null
@@ -100,6 +102,7 @@ class EncryptedSecretStore(
         }
     }
 
+    @Synchronized
     override fun write(name: String, value: String) {
         requireValidName(name)
         if (value.isEmpty()) {
@@ -109,6 +112,7 @@ class EncryptedSecretStore(
         backing.put(name, SealedBox.seal(keyProvider(), value.toByteArray(), name.toByteArray()))
     }
 
+    @Synchronized
     override fun remove(name: String) {
         requireValidName(name)
         backing.delete(name)

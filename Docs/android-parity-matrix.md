@@ -42,11 +42,11 @@ Status key:
 | Menu bar / HUD | **Android equivalent, planned** | Foreground-service notification with Stop while a session runs, if longer sessions are added; otherwise the in-app screen. |
 | Microphone permission onboarding | **Launch, done** | Runtime request on first use, rationale after a denial, and a Settings link after a permanent denial. |
 | Background recording | **Launch, done (honest stop)** | Leaving the app cancels the session and reports "Dictation stopped because the app left the screen". A foreground service for longer sessions is assessed with the IME/tile milestone. |
-| Interruptions and audio focus | **Launch, partial** | The platform recogniser owns capture and audio focus; its audio/busy/client errors are surfaced as failures. Calls and route changes need physical-device evidence. |
+| Interruptions and audio focus | **Launch, partial** | The platform recogniser owns capture and audio focus in on-device and speech-service modes; its audio/busy/client errors are surfaced as failures. Cloud capture uses `AudioRecord` (voice-recognition source) and fails visibly if the microphone cannot open; it stops automatically after 10 minutes. Calls and route changes need physical-device evidence. |
 | Process death | **Launch, honest loss** | An in-flight session is discarded, never restored as complete. Durable recovery arrives with history (milestone 3). |
-| BYOK secure storage | **Launch, done (storage)** | AES-256-GCM with a non-exportable Android Keystore key; ciphertext bound to the secret name (Mac identifiers such as `openai.apiKey`), excluded from backup and device transfer. Key entry UI arrives with the first cloud provider. |
-| Cloud transcription providers | **Planned (milestone 2)** | Batch upload first (OpenAI, Deepgram, Groq, ElevenLabs, AssemblyAI); streaming providers follow. Model IDs mirror `Sources/SpeakCore/ModelCatalog.swift`. No paid calls in CI. |
-| Post-processing / cleanup | **Planned (milestone 2)** | OpenRouter cleanup with the same prompt semantics as the Mac `PostProcessingManager`; empty transcripts stay empty. |
+| BYOK secure storage | **Launch, done** | AES-256-GCM with a non-exportable Android Keystore key; ciphertext bound to the secret name (Mac identifiers such as `openai.apiKey`), excluded from backup and device transfer. Settings saves and removes keys and never shows a saved key again. |
+| Cloud transcription providers | **Launch, done (batch)** | "Cloud" mode records 16 kHz mono WAV in the app, uploads it with the user's key and deletes it afterwards. Models: GPT Transcribe (OpenAI, `languages[]` hint) and Whisper Large v3 Turbo (Groq). IDs, names, credential IDs and retirement status are checked against `Sources/SpeakCore` by `CloudParityTest`. Cloud is never chosen automatically. Streaming providers (Deepgram, AssemblyAI, ElevenLabs) and further batch providers are planned. No paid calls in CI. |
+| Post-processing / cleanup | **Launch, done** | Optional OpenRouter cleanup with the Mac default model (`openai/gpt-5-mini`) and the shared `TranscriptCleanupPolicy` prompt, which `CloudParityTest` keeps identical. The transcript is sent as JSON data. A failure keeps the original transcript and says so; "Show original" undoes a cleanup. Custom prompts arrive with profiles. |
 | History and recovery | **Planned (milestone 3)** | App-private storage with retention controls; failed sessions recorded as failed. |
 | Personal corrections and vocabulary | **Planned (milestone 3)** | Applied after recognition; keyterms passed to providers that support them. |
 | Language selection | **Planned (milestone 3)** | Launch uses the device language, resolved against the on-device model list. |
@@ -75,5 +75,6 @@ Unit tests and CI cannot prove these; they gate closing the epic:
 3. A device with no recognition service, or with it disabled, shows the reason and no Start.
 4. Microphone permission denial, permanent denial and Settings recovery.
 5. Interruptions: incoming call, Bluetooth headset connect/disconnect, and leaving the app.
-6. Speech-service mode with no network either returns a genuine transcript from an installed offline model or fails visibly; it never shows a false success.
+6. Speech-service and Cloud modes with no network either return a genuine transcript (speech service with an installed offline model) or fail visibly; they never show a false success.
 7. Battery and latency notes for a five-minute dictation series.
+8. Cloud mode with a real OpenAI and Groq key, an invalid key ("rejected the API key"), and cleanup with an OpenRouter key; owner-only, as these calls are paid.

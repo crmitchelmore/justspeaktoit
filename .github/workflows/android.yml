@@ -6,10 +6,22 @@ on:
     paths:
       - android/**
       - .github/workflows/android.yml
+      # Parity tests read these shared Swift definitions.
+      - Sources/SpeakCore/TranscriptCleanupPolicy.swift
+      - Sources/SpeakCore/ModelCatalog.swift
+      - Sources/SpeakCore/ModelRetirements.swift
+      - Sources/SpeakCore/ProviderCredentialCatalogue.swift
+      - Sources/SpeakCore/OpenAITranscriptionModels.swift
   pull_request:
     paths:
       - android/**
       - .github/workflows/android.yml
+      # Parity tests read these shared Swift definitions.
+      - Sources/SpeakCore/TranscriptCleanupPolicy.swift
+      - Sources/SpeakCore/ModelCatalog.swift
+      - Sources/SpeakCore/ModelRetirements.swift
+      - Sources/SpeakCore/ProviderCredentialCatalogue.swift
+      - Sources/SpeakCore/OpenAITranscriptionModels.swift
 
 permissions:
   contents: read

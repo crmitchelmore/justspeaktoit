@@ -68,19 +68,25 @@ app/src/main/java/com/justspeaktoit/android/
 │   ├── RecognizerAvailability.kt  # pure availability and language resolution
 │   ├── AndroidSpeechEngine.kt     # SpeechRecognizer adapter (main thread)
 │   └── DictationViewModel.kt
+├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
+├── settings/                # non-secret preferences
 ├── security/                # Keystore-backed AES-GCM secret store for BYOK keys
 ├── output/                  # copy and share
 └── ui/                      # Compose screen and brand theme
 ```
 
 Policy lives in plain Kotlin so it is unit-tested on the JVM; Android classes stay in the
-adapter, ViewModel and UI.
+adapter, ViewModel and UI. `CloudParityTest` reads `Sources/SpeakCore` to keep model IDs,
+credential IDs and the cleanup prompt identical to the Mac app.
 
 ## Privacy
 
 - **On-device** mode keeps audio on the phone. **Speech service** mode uses the device's
   default recognition service, which may send audio to its provider. The app never switches
   modes on its own.
-- Audio is not stored. Transcripts stay in memory until cleared.
+- **Cloud** mode uploads audio to the provider chosen in Settings with your key. The
+  recording is a temporary file that is deleted after the request, whether it succeeds or fails.
+- Optional cleanup sends the final transcript text (not audio) to OpenRouter.
+- Transcripts stay in memory until cleared.
 - Secrets are encrypted with a non-exportable Android Keystore key. App data is excluded
   from cloud backup and device transfer.

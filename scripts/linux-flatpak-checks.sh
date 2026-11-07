@@ -32,7 +32,7 @@ cleanup_portal() {
   rm -f "$portal_log"
 }
 trap cleanup_portal EXIT
-for portal in /app/libexec/flatpak-portal /usr/libexec/flatpak-portal /usr/lib/flatpak/flatpak-portal; do
+for portal in /app/libexec/flatpak-portal /usr/libexec/flatpak-portal /usr/lib/flatpak-portal /usr/lib/flatpak/flatpak-portal; do
   if [ -x "$portal" ]; then
     "$portal" --no-idle-exit >"$portal_log" 2>&1 &
     portal_pid=$!

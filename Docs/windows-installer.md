@@ -25,6 +25,30 @@ runtime or SDK is involved, and Start, the execution aliases
 work as for any packaged app. Windows 10 2004 (10.0.19041) or later with App
 Installer is required.
 
+The website's Windows download action checks `installer.json` with a three-second
+budget and offers **Install Windows beta** only when qualified, canonical
+installer metadata is available. Otherwise it clearly offers the unsigned ZIP.
+The ZIP fallback link is available before either lookup completes. On Windows, browser
+architecture hints have a 500ms budget and select the native ARM64 or x64 ZIP
+as soon as they resolve, without waiting for installer discovery. The two
+lookups start concurrently: qualified installer metadata can enable installation
+before hints resolve, and the installer budget includes time spent detecting
+architecture. Later hints never replace a qualified installer with a ZIP, and
+timed-out hints cannot change a completed selection.
+Browsers without those hints retain a labelled x64 fallback and explicit links
+for both architectures; **Settings > System > About > System type** is the
+manual authority. Installer-status failures leave the ZIP recovery path visible
+with an explicit notice. The setup disclosure explains extraction, keeping DLLs
+and resources together, separate model downloads, updates and data storage.
+No JavaScript, signing-account enrolment or security-warning bypass is required
+to follow the explicit ZIP instructions.
+
+If the current Alpha has no published ZIP for the requested architecture, or
+availability cannot be verified, the download route retains HTTP 503 and shows
+a recovery page with the architecture, retry action, download choices and setup
+guide. The page is not cached or indexed, and never redirects to an unverified
+asset. This does not publish a build or bypass qualification.
+
 **Identity.** `scripts/windows-package/package-identity-beta.json` declares
 package name `com.justspeaktoit.windows`, display name "Just Speak to It
 (Beta)" and no default publisher: the publisher is always the signing

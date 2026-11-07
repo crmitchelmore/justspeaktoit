@@ -160,7 +160,7 @@ jobs:
         run: |
           swift --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          swift build --configuration release --product SpeakWindows --jobs 4
+          swift build --configuration release --product SpeakWindows --jobs 4 -Xswiftc -Osize
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test shared core, desktop workflow and native adapters
@@ -177,7 +177,7 @@ jobs:
         # single-class capture; every other trigger is completely unaffected.
         if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.owned_capture_diagnostics == true) }}
         run: |
-          swift test --configuration release --jobs 4 --xunit-output windows-tests.xml 2>&1 |
+          swift test --configuration release --jobs 4 -Xswiftc -Osize --xunit-output windows-tests.xml 2>&1 |
             Tee-Object -FilePath windows-native-tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -189,7 +189,7 @@ jobs:
         # consume the bounded process-execution window.
         timeout-minutes: 15
         run: |
-          swift test list --configuration release --jobs 4
+          swift test list --configuration release --jobs 4 -Xswiftc -Osize
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Capture owned-recording crash diagnostics (opt-in, read-only)

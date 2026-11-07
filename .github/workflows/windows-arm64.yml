@@ -160,9 +160,9 @@ jobs:
         run: |
           swift --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          swift build --configuration release --product SpeakWindows --jobs 4
+          swift build --configuration release --product SpeakWindows --jobs 4 -Xswiftc -Osize
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          swift build --configuration release --product speak --jobs 4
+          swift build --configuration release --product speak --jobs 4 -Xswiftc -Osize
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # The test build recompiles the same modules with testable imports, so the
@@ -191,7 +191,7 @@ jobs:
       - name: Test shared core, desktop workflow and native adapters
         id: native-tests
         run: |
-          swift test --configuration release --jobs 4 --xunit-output windows-arm64-tests.xml 2>&1 |
+          swift test --configuration release --jobs 4 -Xswiftc -Osize --xunit-output windows-arm64-tests.xml 2>&1 |
             Tee-Object -FilePath windows-arm64-native-tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -442,10 +442,16 @@ jobs:
           if [ -f scripts/windows-bundle/swift-runtime-lock-arm64.json ]; then
             lock=scripts/windows-bundle/swift-runtime-lock-arm64.json
           fi
+          python3 -B scripts/windows-bundle/prepare-zip-optimizer.py \
+            --downloads "$RUNNER_TEMP/archive-optimizer-downloads" \
+            --output "$RUNNER_TEMP/archive-optimizer"
+          JSTI_ADVZIP="$RUNNER_TEMP/archive-optimizer/advzip" \
+            python3 -B -m unittest discover -s scripts/windows-bundle -p test_zip_optimization.py
           python3 scripts/windows-bundle/build-windows-bundle.py --architecture arm64 \
             --app "$RUNNER_TEMP/windows-arm64-app" \
             --swift-runtime "$RUNNER_TEMP/swift-runtime-arm64" --swift-runtime-lock "$lock" \
             --downloads "$RUNNER_TEMP/bundle-downloads" --output "$output" \
+            --zip-optimizer "$RUNNER_TEMP/archive-optimizer/advzip" \
             --local-runtime "$RUNNER_TEMP/windows-local-runtime-arm64" 2>&1 |
             tee "$output/bootstrap.log"
       - name: Upload the self-contained ARM64 runtime bundle

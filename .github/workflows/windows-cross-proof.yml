@@ -142,11 +142,17 @@ jobs:
           set -o pipefail
           python3 -B -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s scripts/windows-bundle -p 'test_*.py'
           mkdir -p "$RUNNER_TEMP/windows-runtime-bundle"
+          python3 -B scripts/windows-bundle/prepare-zip-optimizer.py \
+            --downloads "$RUNNER_TEMP/archive-optimizer-downloads" \
+            --output "$RUNNER_TEMP/archive-optimizer"
+          JSTI_ADVZIP="$RUNNER_TEMP/archive-optimizer/advzip" \
+            python3 -B -m unittest discover -s scripts/windows-bundle -p test_zip_optimization.py
           python3 scripts/windows-bundle/build-windows-bundle.py \
             --app "$RUNNER_TEMP/windows-app-cross" \
             --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
             --downloads "$RUNNER_TEMP/private-windows-cross-sdk/bundle-downloads" \
             --output "$RUNNER_TEMP/windows-runtime-bundle" \
+            --zip-optimizer "$RUNNER_TEMP/archive-optimizer/advzip" \
             --local-runtime "$RUNNER_TEMP/windows-local-runtime" \
             --llvm-readobj "$RUNNER_TEMP/private-windows-cross-sdk/llvm-20/LLVM-20.1.8-macOS-ARM64/bin/llvm-readobj" 2>&1 |
             tee "$RUNNER_TEMP/windows-runtime-bundle/bootstrap.log"

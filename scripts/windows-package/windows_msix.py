@@ -570,12 +570,13 @@ def verify_bundle(bundle_dir, expected_commit=None):
     except (OSError, ValueError) as error:
         raise PackageError("cannot read bundle-evidence.json: %s" % error)
     archive_record = evidence.get("zip") or {}
-    name = archive_record.get("name")
-    if not isinstance(name, str) or pathlib.PurePosixPath(name).name != name or not name.endswith(".zip") or "\\" in name:
+    archive_name = archive_record.get("name")
+    if (not isinstance(archive_name, str) or pathlib.PurePosixPath(archive_name).name != archive_name
+            or not archive_name.endswith(".zip") or "\\" in archive_name):
         raise PackageError("bundle evidence names an unexpected archive")
-    archive = bundle_dir / name
+    archive = bundle_dir / archive_name
     if not archive.is_file() or archive.is_symlink():
-        raise PackageError("bundle archive is missing: " + name)
+        raise PackageError("bundle archive is missing: " + archive_name)
     data = archive.read_bytes()
     if len(data) != archive_record.get("bytes") or sha256(data) != archive_record.get("sha256"):
         raise PackageError("bundle archive does not match bundle-evidence.json")
@@ -687,7 +688,7 @@ def verify_bundle(bundle_dir, expected_commit=None):
         raise PackageError(str(error)) from error
     return {"evidence": evidence, "manifest": manifest, "manifestSHA256": sha256(manifest_bytes),
             "entries": entries, "rows": rows, "commit": commit, "architecture": architecture,
-            "archive": {"name": name, "sha256": archive_record["sha256"], "bytes": archive_record["bytes"]},
+            "archive": {"name": archive_name, "sha256": archive_record["sha256"], "bytes": archive_record["bytes"]},
             "executableSHA256": sha256(executable), "subsystem": pe_subsystem(executable)}
 
 

@@ -12,6 +12,65 @@ those remain separate gates. This document describes the x64 bundle; the ARM64
 bundle, built from the native ARM64 build, is described in
 [Windows ARM64](windows-arm64.md).
 
+Windows release code uses Swift's `-Osize` optimizer in both the native and
+cross-build paths; the tests compile the same optimized modules. Production
+debug stripping still retains source-bound diagnostic originals separately.
+The dependency closure, CPU variants and Vulkan support remain intact, so a
+smaller executable is not achieved by removing a supported runtime or language.
+Compare the ZIP's byte count and sum of its uncompressed entries against the
+same source's qualified baseline before claiming a download or installed-size
+improvement.
+
+## Lossless download compression
+
+Both macOS bundle producers prepare **AdvanceCOMP 2.6** privately with
+`scripts/windows-bundle/prepare-zip-optimizer.py` and pass its absolute path as
+`--zip-optimizer` to the bundle builder. Source and Windows x64 tool downloads
+are pinned by exact size and SHA-256 in `archive-optimizer.json`. macOS builds
+only `advzip` with `configure` and `make advzip`; nothing installs globally.
+The optimizer and its build dependencies are not included in the runtime ZIP.
+
+The deterministic zlib level-9 writer still runs first. AdvanceCOMP's normal
+libdeflate mode recompresses an owned temporary copy with a five-minute budget.
+Before atomic replacement, the builder verifies every payload's SHA-256/CRC
+and size, member order and names, timestamps, attributes, comments, extras and
+meaningful flags. Only compression-level hint bits may change. Output must
+remain classic Store/DEFLATE ZIP, and may not grow. Tool errors, timeout,
+mutation or concurrent source changes fail explicitly, without publishing the
+candidate over the original archive. ZIP64 and unsupported extraction
+requirements are refused rather than silently downgraded.
+
+`bundle-evidence.json` records the tool hash/version/mode, original archive hash,
+before/after bytes and verified member count. Its final archive hash and size
+are calculated **after** recompression. An explicit local build without
+`--zip-optimizer` retains standard-library zlib level 9 and records that choice;
+both production workflow invocations use the pinned optimizer.
+
+The downstream MSIX layout retains the source ZIP's own filename, size and
+SHA-256 separately from GUI/CLI member names. x64 and ARM64 fixtures cover this
+provenance handoff and acceptance of the optional compression receipt.
+
+On the qualified `d7c3248` x64 baseline, normal mode reduced **54,165,499 to
+51,421,937 bytes (5.07%)** in approximately 36 seconds, preserving all 55
+members and 159,467,419 expanded bytes. Extra mode saved only 19 further bytes
+and took approximately 209 seconds, so it is not used. This is a
+baseline-recompression measurement, not a final-source build-size or runtime
+acceptance claim. It does not reduce installed size or remove CPU/GPU features.
+
+Prepare the tool on the packaging host, then add its absolute path to the
+existing builder invocation:
+
+```sh
+python3 -B scripts/windows-bundle/prepare-zip-optimizer.py \
+  --downloads /private/optimizer-downloads --output /private/archive-optimizer
+# build-windows-bundle.py ... --zip-optimizer /private/archive-optimizer/advzip
+```
+
+Windows x64 preparation produces `advzip.exe` instead. For offline real-tool
+fixture coverage, set `JSTI_ADVZIP` to that absolute prepared path before
+running `python3 -B -m unittest discover -s scripts/windows-bundle -p test_zip_optimization.py`.
+These checks do not launch the application or qualify native installation.
+
 ## What the bundle contains
 
 | Path | Origin | Why it is included |

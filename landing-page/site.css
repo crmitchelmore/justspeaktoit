@@ -244,6 +244,15 @@ em { font-style: italic; }
 .section-head h2 { font-size: clamp(2.1rem, 1.1rem + 3.6vw, 3.5rem); margin-block: .7rem .8rem; }
 .section-head p { color: var(--text-dim); font-size: 1.06rem; }
 
+.download-unavailable .section-head { max-width: 65ch; }
+.download-unavailable h1 {
+  font-size: clamp(1.75rem, 1rem + 3.6vw, 3.5rem);
+  margin-block: .7rem .8rem;
+  overflow-wrap: anywhere;
+}
+.download-recovery { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+.download-unavailable .button { max-width: 100%; text-align: center; }
+
 .card {
   background: linear-gradient(180deg, rgba(255, 255, 255, .045), rgba(255, 255, 255, .015));
   border: 1px solid var(--line);
@@ -428,6 +437,23 @@ em { font-style: italic; }
 }
 
 /* ---------- Captures ---------- */
+
+.windows-setup {
+  max-width: 75ch;
+  margin-top: 1.5rem;
+  color: var(--text-dim);
+}
+
+.windows-setup summary {
+  padding: .75rem 0;
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.windows-setup li { margin: .75rem 0; }
+.windows-setup ol { padding-left: 1.5rem; }
+.windows-setup summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 
 .capture {
   margin: 0;

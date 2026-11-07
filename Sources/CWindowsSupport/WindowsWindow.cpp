@@ -952,7 +952,7 @@ Role roleOf(HWND window, int identifier) {
 
 // What WM_PAINT draws behind the controls, laid out with them.
 struct Card { RECT rect; wchar_t glyph; std::wstring title; };
-struct Chip { RECT rect; std::wstring label; };
+struct Chip { RECT rect; std::wstring label; RECT labelRect{}; };
 struct Paragraph { RECT rect; std::wstring text; jsti::chrome::Font font; bool secondary; };
 struct Frame {
     RECT sidebar{}, header{}, status{}, hero{}, speakHeading{}, settingsHeading{}, icon{};
@@ -982,9 +982,13 @@ int heightOf(const RECT &rect) { return rect.bottom - rect.top; }
 
 // Every control's client-area rectangle, as placed, for its painted backdrop.
 std::unordered_map<int, RECT> placed;
+unsigned placementMoves = 0;
 
 void place(HWND window, int identifier, const RECT &rect) {
+    const auto previous = placed.find(identifier);
+    if (previous != placed.end() && EqualRect(&previous->second, &rect)) return;
     placed[identifier] = rect;
+    ++placementMoves;
     MoveWindow(GetDlgItem(window, identifier), rect.left, rect.top, widthOf(rect), heightOf(rect), FALSE);
 }
 
@@ -1049,11 +1053,25 @@ void setLabel(HWND window, int identifier, const wchar_t *text) {
 
 void layoutDashboard(HWND window, const RECT &content) {
     const int gap = densitySpace(window, 18, visualDensity.section_spacing);
-    const int heroBottom = layoutHero(window, content, scale(window, 200), jsti::chrome::Gradient::brand);
+    const bool compact = heightOf(content) < scale(window, 640);
+    const int heroBottom = layoutHero(window, content, scale(window, compact ? 176 : 200),
+                                      jsti::chrome::Gradient::brand);
+    if (compact) frame.heroSubtitle.clear();
     place(window, recordID, box(frame.hero.right - scale(window, 26) - scale(window, 196), frame.hero.top + scale(window, 26),
                                 scale(window, 196), scale(window, 50)));
     layoutChips(window, {{chipSessionsID, L"Sessions"}, {chipTimeID, L"Recording Time"}, {chipSpendID, L"Spend"}});
-    const int rowHeight = scale(window, 190);
+    HDC metricsDC = GetDC(window);
+    const UINT dpi = GetDpiForWindow(window);
+    const int captionHeight = jsti::chrome::measure(metricsDC, L"Ag", scale(window, 100),
+        jsti::chrome::Font::caption, dpi);
+    const int valueHeight = jsti::chrome::measure(metricsDC, L"Ag", scale(window, 100),
+        jsti::chrome::Font::chipValue, dpi);
+    ReleaseDC(window, metricsDC);
+    const int statValueTop = scale(window, 4) + captionHeight + scale(window, 2);
+    const int minimumTileHeight = std::max(statValueTop + valueHeight + scale(window, 4),
+        scale(window, 28) + captionHeight + scale(window, 4));
+    const int rowHeight = std::max(scale(window, 190), cardHeaderHeight(window) +
+        densitySpace(window, 20, visualDensity.card_padding) + scale(window, 10) + 2 * minimumTileHeight);
     const RECT transcript{content.left, heroBottom + gap, content.right, content.bottom - rowHeight - gap};
     addCard(transcript, 0xE70F, L"Transcript");
     place(window, transcriptLabelID, RECT{transcript.left + widthOf(transcript) / 3, transcript.top + scale(window, 26),
@@ -1079,9 +1097,10 @@ void layoutDashboard(HWND window, const RECT &content) {
         {insightAverageID, L"Average Length"}, {insightSpendID, L"Spend"}};
     for (int index = 0; index < 4; ++index) {
         const RECT tile = grid(insights, index);
-        frame.stats.push_back({tile, stats[index].second});
-        place(window, stats[index].first, RECT{tile.left + scale(window, 14), tile.bottom - scale(window, 30),
-                                               tile.right - scale(window, 10), tile.bottom - scale(window, 6)});
+        frame.stats.push_back({tile, stats[index].second, RECT{tile.left + scale(window, 14),
+            tile.top + scale(window, 4), tile.right - scale(window, 8), tile.top + scale(window, 4) + captionHeight}});
+        place(window, stats[index].first, RECT{tile.left + scale(window, 14), tile.top + statValueTop,
+                                               tile.right - scale(window, 10), tile.bottom - scale(window, 4)});
     }
     const std::tuple<int, wchar_t, const wchar_t *> tiles[] = {
         {setupMicrophoneID, 0xE720, L"Microphone"}, {setupModelID, 0xE70F, L"Model"},
@@ -1096,7 +1115,10 @@ void layoutDashboard(HWND window, const RECT &content) {
 
 void layoutHistory(HWND window, const RECT &content) {
     const int gap = densitySpace(window, 18, visualDensity.section_spacing), row = scale(window, 34);
-    const int heroBottom = layoutHero(window, content, scale(window, 168), jsti::chrome::Gradient::brand);
+    const bool compact = heightOf(content) < scale(window, 640);
+    const int heroBottom = layoutHero(window, content, scale(window, compact ? 156 : 168),
+                                      jsti::chrome::Gradient::brand);
+    if (compact) frame.heroSubtitle.clear();
     place(window, importID, box(frame.hero.right - scale(window, 26) - scale(window, 124), frame.hero.top + scale(window, 24),
                                 scale(window, 124), row));
     place(window, historyClearID, box(frame.hero.right - scale(window, 294), frame.hero.top + scale(window, 24),
@@ -1517,17 +1539,17 @@ void paintFrame(HWND window, HDC dc) {
         chrome::fillGradient(dc, frame.hero, s(28), frame.gradient);
         const int reserved = state.page == dashboardPage ? s(250) : state.page == historyPage ? s(170) : s(28);
         chrome::text(dc, frame.heroTitle, RECT{frame.hero.left + s(26), frame.hero.top + s(20), frame.hero.right - reserved,
-                     frame.hero.top + s(58)}, chrome::Font::heroTitle, dpi, RGB(255, 255, 255),
+                     frame.hero.top + s(58)}, chrome::Font::heroTitle, dpi, chrome::onAccent,
                      DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
         chrome::text(dc, frame.heroSubtitle, RECT{frame.hero.left + s(26), frame.hero.top + s(60), frame.hero.right - reserved,
-                     frame.hero.top + s(100)}, chrome::Font::heroSubtitle, dpi, RGB(0xFF, 0xF4, 0xEE),
+                     frame.hero.top + s(100)}, chrome::Font::heroSubtitle, dpi, chrome::onAccent,
                      DT_LEFT | DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS);
         for (const auto &chip : frame.chips) {
             chrome::fillRound(dc, chip.rect, s(18), RGB(255, 255, 255), 44);
             std::wstring upper = chip.label;
             CharUpperBuffW(&upper[0], static_cast<DWORD>(upper.size()));
             chrome::text(dc, upper, RECT{chip.rect.left + s(14), chip.rect.top + s(9), chip.rect.right - s(8),
-                         chip.rect.top + s(26)}, chrome::Font::smallBold, dpi, RGB(0xFF, 0xEE, 0xE6),
+                         chip.rect.top + s(26)}, chrome::Font::smallBold, dpi, chrome::onAccent,
                          DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
         }
     }
@@ -1546,8 +1568,7 @@ void paintFrame(HWND window, HDC dc) {
     }
     for (const auto &stat : frame.stats) {
         chrome::fillRound(dc, stat.rect, s(16), chrome::accent, chrome::dark() ? 34 : 22);
-        chrome::text(dc, stat.label, RECT{stat.rect.left + s(14), stat.rect.top + s(8), stat.rect.right - s(8),
-                     stat.rect.top + s(28)}, chrome::Font::caption, dpi, palette.secondary,
+        chrome::text(dc, stat.label, stat.labelRect, chrome::Font::caption, dpi, palette.secondary,
                      DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
     }
     for (const auto &tile : frame.tiles) {
@@ -1731,10 +1752,10 @@ void drawControl(HWND window, const DRAWITEMSTRUCT &item) {
         COLORREF ink = palette.text;
         if (role == Role::primary) {
             chrome::fillRound(dc, rect, radius, disabled ? chrome::mix(palette.window, chrome::accentDeep, 90) : chrome::accentDeep);
-            ink = RGB(255, 255, 255);
+            ink = chrome::onAccent;
         } else if (role == Role::heroButton) {
             chrome::fillRound(dc, rect, radius, RGB(255, 255, 255), disabled ? 30 : 56);
-            ink = RGB(255, 255, 255);
+            ink = chrome::onAccent;
         } else {
             chrome::fillRound(dc, rect, radius, palette.field);
             chrome::strokeRound(dc, rect, radius, palette.fieldBorder, 255, 1.0f);
@@ -1758,7 +1779,7 @@ void drawControl(HWND window, const DRAWITEMSTRUCT &item) {
     }
     case Role::link: break;
     case Role::chipValue:
-        chrome::text(dc, label, rect, chrome::Font::chipValue, dpi, RGB(255, 255, 255),
+        chrome::text(dc, label, rect, chrome::Font::chipValue, dpi, chrome::onAccent,
                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         return;
     case Role::statValue:
@@ -2797,9 +2818,15 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return reinterpret_cast<LRESULT>(brushFor(surface));
     }
     case WM_SETTINGCHANGE:
-        if (lparam && jsti::chrome::appearance() == 0 &&
-            wcscmp(reinterpret_cast<const wchar_t *>(lparam), L"ImmersiveColorSet") == 0) applyTheme(window);
+        if (lparam && wcscmp(reinterpret_cast<const wchar_t *>(lparam), L"ImmersiveColorSet") == 0) {
+            jsti::chrome::refreshSystemAppearance();
+            if (jsti::chrome::appearance() == 0) applyTheme(window);
+        }
         break;
+    case WM_THEMECHANGED:
+        jsti::chrome::refreshSystemAppearance();
+        applyTheme(window);
+        return 0;
     case guideMessage: jsti_show_guide(window); return 0;
     case permissionsMessage: jsti_show_permissions(window); return 0;
     case profilesMessage:
@@ -3705,6 +3732,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     }
     state.callback = callback; state.context = context;
     state.controls.clear();
+    placed.clear();
     state.displayedHistory.clear();
     state.displayedVariant = -1;
     state.variantSwitchable = false;
@@ -4495,6 +4523,9 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
     }
+    std::string appearanceFailure;
+    if (!jsti::chrome::appearanceSelfTest(appearanceFailure))
+        return jsti::fail(appearanceFailure, error, errorCapacity);
     jsti_smoke_stage("window.escape.begin");
     std::string escapeFailure;
     if (!jsti::globalEscape::selfTest(window, escapeFailure)) {
@@ -5495,6 +5526,41 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         for (int page = 0; page < pageCount; ++page) {
             showPage(window, page);
             if (!checkBounds()) return false;
+            const unsigned moves = placementMoves;
+            layout(window);
+            if (placementMoves != moves) {
+                failure = "An unchanged native layout moved controls again."; return false;
+            }
+            if (page == dashboardPage || page == historyPage) {
+                HDC dc = GetDC(window);
+                const int lineHeight = jsti::chrome::measure(dc, L"Ag", widthOf(placed.at(transcriptID)),
+                    jsti::chrome::Font::mono, GetDpiForWindow(window));
+                bool summariesFit = true;
+                if (page == dashboardPage) {
+                    const int captionHeight = jsti::chrome::measure(dc, L"Ag", scale(window, 100),
+                        jsti::chrome::Font::caption, GetDpiForWindow(window));
+                    const int valueHeight = jsti::chrome::measure(dc, L"Ag", scale(window, 100),
+                        jsti::chrome::Font::chipValue, GetDpiForWindow(window));
+                    const int stats[] = {insightSessionsID, insightTimeID, insightAverageID, insightSpendID};
+                    const int details[] = {setupMicrophoneID, setupModelID, setupShortcutID, setupOutputID};
+                    for (int index = 0; index < 4; ++index) {
+                        const RECT &value = placed.at(stats[index]);
+                        summariesFit = summariesFit &&
+                            heightOf(frame.stats[index].labelRect) >= captionHeight &&
+                            frame.stats[index].labelRect.bottom + scale(window, 2) <= value.top &&
+                            heightOf(value) >= valueHeight && heightOf(placed.at(details[index])) >= captionHeight;
+                    }
+                }
+                ReleaseDC(window, dc);
+                if (!summariesFit) {
+                    failure = "Dashboard summary labels, values or setup details overlap or clip.";
+                    return false;
+                }
+                if (heightOf(placed.at(transcriptID)) < 3 * lineHeight || !frame.heroSubtitle.empty()) {
+                    failure = "Compact desktop layout lost its three-line transcript or collapsed hero.";
+                    return false;
+                }
+            }
             if (page == profilesPage && !IsWindowVisible(GetDlgItem(window, profilesID))) {
                 failure = "The Profiles page did not show App profiles."; return false;
             }
@@ -5502,6 +5568,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
                 failure = "A page showed another page's controls."; return false;
             }
         }
+        std::fprintf(stdout, "Windows layout: %d minimum-size pages, zero redundant control moves; "
+            "Dashboard and History retain three transcript lines; Dashboard summary text fits.\n", pageCount);
         showPage(window, transcriptionPage);
         // A host initially exposing only batch can add its first live route
         // without restarting or changing the current batch preference.

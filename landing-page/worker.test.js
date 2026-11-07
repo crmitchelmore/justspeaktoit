@@ -4,12 +4,17 @@ import worker from './_worker.js';
 
 const release = 'https://github.com/crmitchelmore/justspeaktoit/releases/download';
 const serve = async (path, published) => {
-  globalThis.fetch = async (url, init = {}) => {
-    if (url.endsWith('/alpha-latest/alpha-pointer.json')) return Response.json({tag: 'alpha-build-7'});
-    assert.equal(init.method, 'HEAD');
-    return new Response(null, {status: published.some(name => url.endsWith(`/${name}`)) ? 302 : 404});
-  };
-  return worker.fetch(new Request(`https://justspeaktoit.com${path}`), {ASSETS: {fetch: () => new Response('static')}});
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, init = {}) => {
+      if (url.endsWith('/alpha-latest/alpha-pointer.json')) return Response.json({tag: 'alpha-build-7'});
+      assert.equal(init.method, 'HEAD');
+      return new Response(null, {status: published.some(name => url.endsWith(`/${name}`)) ? 302 : 404});
+    };
+    return await worker.fetch(new Request(`https://justspeaktoit.com${path}`), {ASSETS: {fetch: () => new Response('static')}});
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 };
 
 test('desktop Alpha routes redirect to the pointed Alpha only when the asset was published', async () => {
@@ -45,7 +50,55 @@ test('desktop Alpha routes return unavailable when the asset HEAD request reject
       const response = await worker.fetch(new Request(`https://justspeaktoit.com/alpha/download/${platform}`), {});
       assert.equal(response.status, 503);
       assert.equal(response.headers.get('Location'), null);
-      assert.equal(await response.text(), 'Desktop Alpha build not yet available');
+      assert.match(await response.text(), /download unavailable<\/h1>/);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('unavailable desktop downloads explain recovery without advertising an unqualified asset', async () => {
+  for (const [platform, label, guide] of [
+    ['windows-x64', 'Windows x64', 'windows-runtime-bundle'],
+    ['windows-arm64', 'Windows ARM64', 'windows-runtime-bundle'],
+    ['linux-x86_64', 'Linux x86_64', 'linux-packaging'],
+  ]) {
+    const path = `/alpha/download/${platform}`;
+    const response = await serve(`${path}?next=https://untrusted.example`, []);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('Location'), null);
+    assert.equal(response.headers.get('Content-Disposition'), null);
+    assert.match(response.headers.get('Content-Type'), /^text\/html/);
+    assert.equal(response.headers.get('Cache-Control'), 'no-store');
+    assert.equal(response.headers.get('X-Robots-Tag'), 'noindex');
+    const body = await response.text();
+    assert.ok(body.includes(`<h1>${label} download unavailable</h1>`));
+    assert.match(body, /No download has started/);
+    assert.ok(body.includes(`href="${path}"`));
+    assert.ok(body.includes(`Docs/${guide}.md`));
+    assert.match(body, /href="\/#desktop"/);
+    assert.match(body, /<main id="main"/);
+    assert.ok(!body.includes('untrusted.example'));
+    assert.ok(!body.includes('<script'));
+  }
+});
+
+test('desktop pointer failures retain the recovery page and never redirect to an unverified download', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const upstream of [
+      async () => new Response('Not Found', {status: 404}),
+      async () => { throw new TypeError('Network unavailable'); },
+      async () => new Response('not JSON'),
+      async () => Response.json({tag: '<script>untrusted</script>'}),
+    ]) {
+      globalThis.fetch = upstream;
+      const response = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/windows-arm64'), {});
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('Location'), null);
+      const body = await response.text();
+      assert.match(body, /<h1>Windows ARM64 download unavailable<\/h1>/);
+      assert.ok(!body.includes('<script>untrusted'));
     }
   } finally {
     globalThis.fetch = originalFetch;

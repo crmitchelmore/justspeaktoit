@@ -1,5 +1,6 @@
 const ARM64_DOWNLOAD = "/download/mac";
 const UNIVERSAL_DOWNLOAD = "/download/mac-intel";
+const WINDOWS_ARCHITECTURE_BUDGET_MS = 500;
 
 export function classifyArchitecture(value) {
   const architecture = String(value || "").toLowerCase();
@@ -49,6 +50,88 @@ export async function enhanceMacDownloads(documentObject, navigatorObject) {
   return { architecture, download };
 }
 
+export async function detectWindowsArchitecture(navigatorObject) {
+  const platform = `${navigatorObject?.userAgentData?.platform || ""} ${navigatorObject?.userAgent || ""} ${navigatorObject?.platform || ""}`;
+  if (!/Windows|Win32|Win64/i.test(platform)) return "unknown";
+  if (!navigatorObject?.userAgentData?.getHighEntropyValues) return "unknown";
+  let timeout;
+  try {
+    const hints = await Promise.race([
+      navigatorObject.userAgentData.getHighEntropyValues(["architecture", "bitness"]),
+      new Promise((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("Windows architecture lookup timed out")),
+          WINDOWS_ARCHITECTURE_BUDGET_MS);
+      }),
+    ]);
+    return classifyArchitecture(hints.architecture);
+  } catch {
+    return "unknown";
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function enhanceWindowsDownloads(documentObject, navigatorObject, fetchObject = globalThis.fetch) {
+  const links = documentObject.querySelectorAll("[data-auto-windows-download]");
+  if (!links.length) return;
+  let architecture = "unknown";
+  let hasQualifiedInstaller = false;
+  let download = "/alpha/download/windows-x64";
+  let action = "Download Windows x64 ZIP (or choose ARM64 below)";
+  let note = "Unsigned developer preview. Extract all files before opening SpeakWindows.exe. No Swift installation or automatic updates.";
+  const render = () => {
+    links.forEach((link) => {
+      link.href = download;
+      link.textContent = action;
+      link.dataset.detectedArchitecture = architecture;
+    });
+    documentObject.querySelectorAll("[data-windows-download-note]").forEach((element) => {
+      element.textContent = note;
+    });
+  };
+  render();
+  const architectureLookup = detectWindowsArchitecture(navigatorObject).then((detected) => {
+    architecture = detected;
+    if (!hasQualifiedInstaller) {
+      const arch = architecture === "arm64" ? "arm64" : "x64";
+      const label = architecture === "unknown" ? "x64 ZIP (or choose ARM64 below)" : `${arch === "arm64" ? "ARM64" : "x64"} ZIP`;
+      download = `/alpha/download/windows-${arch}`;
+      action = `Download Windows ${label}`;
+    }
+    render();
+  });
+  const installerLookup = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    try {
+      const response = await fetchObject("/alpha/windows/installer.json", { signal: controller.signal });
+      if (!response.ok) throw new Error("Installer availability request failed");
+      const installer = await response.json();
+      if (installer?.available === true) {
+        if (installer.appInstaller !== "https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller"
+          || typeof installer.publisher !== "string" || !installer.publisher
+          || typeof installer.version !== "string" || !installer.version) {
+          throw new Error("Invalid installer metadata");
+        }
+        hasQualifiedInstaller = true;
+        download = "/alpha/windows/JustSpeakToIt.appinstaller";
+        action = "Install Windows beta";
+        note = `Version ${installer.version}. Publisher: ${installer.publisher}. Open the downloaded App Installer file; Windows chooses your architecture and checks for updates.`;
+      } else if (installer?.available !== false) {
+        throw new Error("Invalid installer availability");
+      }
+    } catch {
+      note = "Installer status could not be checked. The unsigned ZIP links remain available; extract all files before opening SpeakWindows.exe. ZIP builds have no automatic updates.";
+    } finally {
+      clearTimeout(timeout);
+    }
+    render();
+  })();
+  await Promise.all([architectureLookup, installerLookup]);
+  return { architecture, download };
+}
+
 if (typeof document !== "undefined" && typeof navigator !== "undefined") {
   enhanceMacDownloads(document, navigator);
+  enhanceWindowsDownloads(document, navigator);
 }

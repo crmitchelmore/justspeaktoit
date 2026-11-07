@@ -20,6 +20,8 @@ void setAppearance(int appearance);
 int appearance();
 bool dark();
 const Palette &palette();
+void refreshSystemAppearance();
+bool appearanceSelfTest(std::string &error);
 
 // GDI+ for the process; idempotent.
 bool startup();
@@ -33,6 +35,7 @@ constexpr COLORREF green = RGB(0x26, 0xA2, 0x69);
 constexpr COLORREF blue = RGB(0x35, 0x84, 0xE4);
 constexpr COLORREF orange = RGB(0xE6, 0x61, 0x00);
 constexpr COLORREF red = RGB(0xD9, 0x2A, 0x2A);
+constexpr COLORREF onAccent = RGB(0x16, 0x16, 0x18);
 
 enum class Gradient { brand, voice, settings, record, recording };
 

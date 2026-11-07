@@ -257,13 +257,28 @@
       <div class="section-head">
         <p class="eyebrow eyebrow--lagoon">New · Windows &amp; Linux beta</p>
         <h2 id="desktop-title">New: native Windows and Linux apps, in beta.</h2>
-        <p>These beta builds come from the same source as the latest Mac Alpha, and each one passed its native build, test, packaging and install checks before it was published. They are unsigned developer builds: no installer, no automatic updates, and Windows may show a SmartScreen warning. Signed installers, automatic updates and Stable releases come later.</p>
+        <p>These beta builds share the Mac app&rsquo;s Swift core. Published downloads pass native build, test and packaging checks. Windows uses a signed installer only after clean-device qualification; until then, the self-contained ZIP is an unsigned developer preview. Beta does not mean full feature parity or a Stable release.</p>
       </div>
+      <h3>Windows: install or run the portable preview</h3>
+      <p class="hero-actions">
+        <a class="button" href="/alpha/download/windows-x64" data-auto-windows-download rel="nofollow">Download Windows x64 ZIP</a>
+      </p>
+      <p class="download-meta" data-windows-download-note>Unsigned developer preview. Extract all files before opening SpeakWindows.exe. No Swift installation or automatic updates.</p>
       <p class="provider-foot">
         <a class="quiet-link" href="/alpha/download/windows-x64" rel="nofollow">Windows x64 (.zip) ↓</a>
         <a class="quiet-link" href="/alpha/download/windows-arm64" rel="nofollow">Windows ARM64 (.zip) ↓</a>
         <a class="quiet-link" href="/alpha/download/linux-x86_64" rel="nofollow">Linux x86_64 (Flatpak) ↓</a>
       </p>
+      <details class="windows-setup">
+        <summary>Which Windows download should I choose, and how do I open it?</summary>
+        <ol>
+          <li>Open <strong>Settings &gt; System &gt; About &gt; System type</strong>. Choose x64 for an Intel or AMD PC, or ARM64 for an ARM-based PC. Browser detection may be unavailable; the explicit links above always let you choose.</li>
+          <li>For a ZIP, use <strong>Extract All</strong> into a permanent folder, then open <strong>SpeakWindows.exe</strong> from that folder. Keep its DLLs and resource folders beside it. The download includes the Swift runtime; do not install a compiler or SDK.</li>
+          <li>For a qualified installer, open the downloaded <strong>.appinstaller</strong> file. Windows App Installer selects the native package, adds Start menu and uninstall entries, and checks for updates. It needs Windows 10 2004 or later and App Installer.</li>
+          <li>In the app, open <strong>About &gt; Setup guide</strong>, choose your microphone and model, and set a shortcut. Remote models need your own provider key; local models require a separate model download.</li>
+        </ol>
+        <p>Unsigned ZIP builds may trigger SmartScreen. Do not bypass a security warning unless you have independently verified and trust the source. ZIP builds do not install themselves or update automatically. Keep your extracted folder when upgrading; History and settings live separately in <code>%LOCALAPPDATA%\JustSpeakToIt</code>.</p>
+      </details>
       <p class="provider-foot">
         <a class="quiet-link" href="https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/windows-runtime-bundle.md">Running the Windows bundle →</a>
         <a class="quiet-link" href="https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/linux-packaging.md">Installing the Flatpak →</a>

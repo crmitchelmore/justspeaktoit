@@ -1,0 +1,15 @@
+{
+  "version": "2.6",
+  "source": {
+    "name": "advancecomp-2.6.tar.gz",
+    "url": "https://github.com/amadvance/advancecomp/releases/download/v2.6/advancecomp-2.6.tar.gz",
+    "bytes": 1343700,
+    "sha256": "b07d77735540409771cbe1b6df165b5151c11bb9c3d8f01290be0ec88ec3498f"
+  },
+  "windows-x64": {
+    "name": "advancecomp-2.6-windows-x64.zip",
+    "url": "https://github.com/amadvance/advancecomp/releases/download/v2.6/advancecomp-2.6-windows-x64.zip",
+    "bytes": 1515501,
+    "sha256": "39478e2810d2e6fecea321d11a8e8aad678e9e52f83c684d85dcb70342607704"
+  }
+}

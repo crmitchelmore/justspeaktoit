@@ -164,6 +164,8 @@ def swift_build_command(tool, sdk, microsoft, scratch, configuration, jobs):
     command = [tool / "bin/swift", "build", "--package-path", HERE.parent.parent,
                "--triple", "x86_64-unknown-windows-msvc", "--sdk", sdk,
                "--scratch-path", scratch, "--configuration", configuration, "--jobs", str(jobs)]
+    if configuration == "release":
+        command += ["-Xswiftc", "-Osize"]
     for flag in ["-resource-dir", sdk / "usr/lib/swift", "-tools-directory", tool / "bin", "-use-ld=lld"]:
         command += ["-Xswiftc", flag]
     for directory in [sdk / "usr/include", headers, kits / "ucrt", kits / "um", kits / "shared", kits / "winrt"]:

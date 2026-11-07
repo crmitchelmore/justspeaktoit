@@ -4,6 +4,46 @@ const release = 'https://github.com/crmitchelmore/justspeaktoit/releases/downloa
 const appInstallerPath = '/alpha/windows/JustSpeakToIt.appinstaller';
 const appInstallerAsset = 'JustSpeakToIt.appinstaller';
 
+function desktopUnavailable(path) {
+  const windows = path.includes('/windows-');
+  const platform = windows ? `Windows ${path.endsWith('arm64') ? 'ARM64' : 'x64'}` : 'Linux x86_64';
+  const guide = windows ? 'windows-runtime-bundle' : 'linux-packaging';
+  return new Response(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>${platform} download unavailable | Just Speak to It</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/site.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="/"><img src="/favicon.svg" width="34" height="34" alt="">Just Speak to It</a>
+  </header>
+  <main id="main" class="wrap section download-unavailable">
+    <div class="section-head">
+      <h1>${platform} download unavailable</h1>
+      <p>No download has started. This preview may not be published for this architecture
+        in the current Alpha, or we could not verify its availability.</p>
+    </div>
+    <div class="download-recovery">
+      <a class="button" href="${path}">Try again</a>
+      <a class="quiet-link" href="/#desktop">Back to download choices</a>
+    </div>
+    <p><a href="https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/${guide}.md">${windows ? 'Windows' : 'Linux'} setup guide</a></p>
+  </main>
+</body>
+</html>`, {status: 503, headers: {
+    'Content-Type': 'text/html; charset=UTF-8',
+    'Cache-Control': 'no-store',
+    'X-Robots-Tag': 'noindex',
+    'X-Content-Type-Options': 'nosniff',
+  }});
+}
+
 // The signed Windows beta installer advances its own pointer only after the
 // published App Installer file installed on clean x64 and ARM64 runners, so it
 // can lag the Alpha pointer and is absent until a publisher is configured.
@@ -78,24 +118,31 @@ export default {
       return windowsInstallerRoutes[path](installer, new URL(request.url));
     }
     if (!Object.hasOwn(assets, path)) return env.ASSETS.fetch(request);
-    const response = await fetch('https://github.com/crmitchelmore/justspeaktoit/releases/download/alpha-latest/alpha-pointer.json', {
-      cf: {cacheTtl: 30}, headers: {'Accept': 'application/json'},
-    });
-    if (!response.ok) return new Response('Alpha build not yet available', {status: 503});
+    const desktop = /^\/alpha\/download\/(windows|linux)-/.test(path);
+    const unavailable = message => desktop ? desktopUnavailable(path) : new Response(message, {status: 503});
+    let response;
+    try {
+      response = await fetch('https://github.com/crmitchelmore/justspeaktoit/releases/download/alpha-latest/alpha-pointer.json', {
+        cf: {cacheTtl: 30}, headers: {'Accept': 'application/json'},
+      });
+    } catch {
+      return unavailable('Alpha build not yet available');
+    }
+    if (!response.ok) return unavailable('Alpha build not yet available');
     let pointer;
     try { pointer = await response.json(); } catch {
-      return new Response('Invalid Alpha pointer', {status: 503});
+      return unavailable('Invalid Alpha pointer');
     }
-    if (!pointer || typeof pointer !== 'object' || !/^alpha-build-[1-9][0-9]*$/.test(pointer.tag)) return new Response('Invalid Alpha pointer', {status: 503});
+    if (!pointer || typeof pointer !== 'object' || !/^alpha-build-[1-9][0-9]*$/.test(pointer.tag)) return unavailable('Invalid Alpha pointer');
     const location = `${release}/${pointer.tag}/${assets[path]}`;
     // Windows and Linux downloads exist only on Alphas whose desktop qualification
     // published them; never redirect to a missing asset.
-    if (/^\/alpha\/download\/(windows|linux)-/.test(path)) {
+    if (desktop) {
       try {
         const probe = await fetch(location, {method: 'HEAD', redirect: 'manual', cf: {cacheTtl: 30}});
-        if (probe.status !== 302) return new Response('Desktop Alpha build not yet available', {status: 503});
+        if (probe.status !== 302) return unavailable('Desktop Alpha build not yet available');
       } catch {
-        return new Response('Desktop Alpha build not yet available', {status: 503});
+        return unavailable('Desktop Alpha build not yet available');
       }
     }
     return new Response(null, {status: 302, headers: {

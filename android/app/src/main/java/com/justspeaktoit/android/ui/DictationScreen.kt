@@ -390,6 +390,7 @@ private fun ModeAvailability.explanation(languageName: String, state: DictationU
         state.cloudModel.displayName,
     )
     ModeStatus.NeedsDownload -> stringResource(R.string.status_mode_needs_download, languageName)
+    ModeStatus.Unverified -> stringResource(R.string.status_mode_unverified, languageName)
     ModeStatus.Downloading -> stringResource(R.string.status_mode_downloading, languageName)
     ModeStatus.LanguageUnsupported -> stringResource(R.string.status_mode_language_unsupported, languageName)
     ModeStatus.RequiresNewerAndroid -> stringResource(R.string.status_mode_requires_android12)

@@ -53,6 +53,20 @@
             android:exported="false"
             android:targetActivity=".MainActivity" />
 
+        <!-- Dictation keyboard: commits final transcripts into the focused field. -->
+        <service
+            android:name=".ime.DictationKeyboardService"
+            android:exported="true"
+            android:label="@string/keyboard_name"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/dictation_keyboard" />
+        </service>
+
         <service
             android:name=".surfaces.DictateTileService"
             android:exported="true"

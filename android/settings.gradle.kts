@@ -3,6 +3,8 @@
 // - Otherwise, on GitHub-hosted runners only: Google Maven and Maven Central.
 // - Anywhere else (developer machines, self-hosted runners): stop, so a machine governed by a
 //   package-feed policy never fetches from public registries by accident.
+// A private feed takes credentials from jsti.mavenMirrorUser/jsti.mavenMirrorToken (for example in
+// ~/.gradle/gradle.properties) or JSTI_MAVEN_MIRROR_USER/JSTI_MAVEN_MIRROR_TOKEN.
 // Each block is evaluated in isolation by Gradle, so the selection is repeated in both.
 pluginManagement {
     val mirror = providers.gradleProperty("jsti.mavenMirror")
@@ -11,7 +13,17 @@ pluginManagement {
         providers.environmentVariable("RUNNER_ENVIRONMENT").orNull == "github-hosted"
     repositories {
         when {
-            mirror != null -> maven(mirror)
+            mirror != null -> maven(mirror) {
+                val token = providers.gradleProperty("jsti.mavenMirrorToken")
+                    .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR_TOKEN")).orNull
+                if (!token.isNullOrBlank()) {
+                    credentials {
+                        username = providers.gradleProperty("jsti.mavenMirrorUser")
+                            .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR_USER")).getOrElse("jsti")
+                        password = token
+                    }
+                }
+            }
             githubHosted -> {
                 google()
                 mavenCentral()
@@ -32,7 +44,17 @@ dependencyResolutionManagement {
     repositories {
         // pluginManagement has already rejected unsupported environments.
         if (mirror != null) {
-            maven(mirror)
+            maven(mirror) {
+                val token = providers.gradleProperty("jsti.mavenMirrorToken")
+                    .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR_TOKEN")).orNull
+                if (!token.isNullOrBlank()) {
+                    credentials {
+                        username = providers.gradleProperty("jsti.mavenMirrorUser")
+                            .orElse(providers.environmentVariable("JSTI_MAVEN_MIRROR_USER")).getOrElse("jsti")
+                        password = token
+                    }
+                }
+            }
         } else {
             google()
             mavenCentral()

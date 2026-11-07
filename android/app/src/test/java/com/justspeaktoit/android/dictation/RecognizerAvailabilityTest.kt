@@ -2,6 +2,7 @@ package com.justspeaktoit.android.dictation
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RecognizerAvailabilityTest {
@@ -54,6 +55,19 @@ class RecognizerAvailabilityTest {
         assertNull(RecognizerAvailability.defaultMode(withKey))
         val noKey = RecognizerAvailability.evaluate(none, LanguageSupport.Unknown)
         assertEquals(ModeStatus.NeedsKey, noKey.single { it.mode == RecognitionMode.Cloud }.status)
+    }
+
+    @Test
+    fun testFailedLanguageCheck_isUsableButNotPreferred() {
+        val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
+        val options = RecognizerAvailability.evaluate(both, LanguageSupport.CheckFailed)
+        val onDevice = options.single { it.mode == RecognitionMode.OnDevice }
+        assertEquals(ModeStatus.Unverified, onDevice.status)
+        assertTrue(onDevice.usable)
+        assertEquals(RecognitionMode.SpeechService, RecognizerAvailability.defaultMode(options))
+        val onlyOnDevice = RecognizerCapabilities(34, speechServiceAvailable = false, onDeviceAvailable = true)
+        val unverifiedOnly = RecognizerAvailability.evaluate(onlyOnDevice, LanguageSupport.CheckFailed)
+        assertEquals(RecognitionMode.OnDevice, RecognizerAvailability.defaultMode(unverifiedOnly))
     }
 
     @Test

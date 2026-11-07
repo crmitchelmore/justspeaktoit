@@ -136,13 +136,16 @@ jobs:
             -destination "generic/platform=iOS Simulator" -only-testing:SpeakiOSUITests/SiteMediaCaptureUITests \
             -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" -skipPackagePluginValidation -quiet
 
-      - name: Create and prepare an owned Simulator
-        timeout-minutes: 12
+      - name: Create an owned Simulator
+        timeout-minutes: 3
         run: |
           python3 scripts/owned-ios-ci-simulator.py create \
             --receipt "$RUNNER_TEMP/owned-ios-simulator.json" --github-env "$GITHUB_ENV" \
             --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
-          python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
+
+      - name: Prepare the Simulator
+        timeout-minutes: 12
+        run: python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
 
       - name: Start Simulator recording
         timeout-minutes: 2
@@ -175,7 +178,7 @@ jobs:
             kill -INT "$pid" || true
             for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
           fi
-          ls -la "$CAPTURE"
+          ls -la "$CAPTURE" || true
 
       - name: Export captures from result bundle
         if: always()

@@ -120,8 +120,8 @@ CLIPS = {
         ],
     },
     "iphone": {
-        "source": "ios", "size": PORTRAIT, "badge": "iPhone", "poster": 2,
-        "alt": "The iPhone app: tap record, see the words, copy them, then the Action Button settings",
+        "source": "ios", "size": PORTRAIT, "badge": None, "poster": 2,
+        "alt": "The iPhone app: tap record, see the words, copy them, then on-device and Action Button settings",
         "scenes": [
             card("Speak on the go", "Just Speak to It for iPhone", 2.0,
                  "Just Speak to It for iPhone, recorded in the iOS Simulator. " + SYNTHETIC),
@@ -129,8 +129,7 @@ CLIPS = {
             cut("recording", 0.3, "stopped", 0.5,
                 "Words appear as you speak. The Simulator uses fixed test text, not a microphone"),
             cut("stopped", 0.5, "copied", 2.0, "Stop, then copy the text into any app"),
-            cut("history", 0.3, "settings", 0.0, "Every capture is kept in History"),
-            cut("models", 0.0, "action-button", 0.0, "Use Apple\u2019s on-device speech, or a cloud model"),
+            cut("models", 0.0, "models", 3.0, "Use Apple\u2019s on-device speech, or a cloud model"),
             cut("action-button", 0.0, "end", 0.0,
                 "Set what the Action Button and Shortcuts do with the words"),
             card("Just Speak to It", "On the App Store", 2.0, "Just Speak to It for iPhone"),

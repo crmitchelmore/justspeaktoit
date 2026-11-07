@@ -30,6 +30,11 @@ final class SiteMediaCaptureUITests: XCTestCase {
         app.launch()
         let record = app.buttons["recordToggleButton"]
         try app.skipFirstRunForUITest(ready: record)
+        // A one-time notice would otherwise cover the transcript in every frame.
+        let notice = app.buttons["Got it"]
+        if notice.waitForExistence(timeout: 3) {
+            notice.tap()
+        }
         mark("ready")
         pause(2.5)
         save("ios-ready")

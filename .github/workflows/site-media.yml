@@ -84,6 +84,7 @@ jobs:
         run: |
           pid=$(cat "$RUNNER_TEMP/screencapture.pid" 2>/dev/null || true)
           if [ -n "$pid" ]; then
+            python3 -c 'import time; print(time.time())' > "$CAPTURE/recording-stop.txt"
             kill -INT "$pid" || true
             for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
           fi

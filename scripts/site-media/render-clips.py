@@ -277,8 +277,8 @@ def load_marks(folder, screen):
     shift = 0.0
     stop_file = folder / "recording-stop.txt"
     if stop_file.exists():
-        # simctl recordVideo writes its first frame some seconds after it starts, so its
-        # timeline is anchored to the stop request instead: video end == stop time.
+        # screencapture and simctl recordVideo write their first frame some seconds after
+        # they start, so the timeline is anchored to the stop request: video end == stop.
         duration = float(subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(screen)],
             capture_output=True, text=True, check=True).stdout.strip())
@@ -384,6 +384,10 @@ def render_clip(name, spec, captures, output, work):
             run("ffmpeg", "-y", "-loglevel", "error", "-ss", f"{begin:.3f}", "-t", f"{length:.3f}",
                 "-i", str(screen), "-i", str(badge_png), "-filter_complex", graph, "-map", "[out]",
                 "-an", "-c:v", "libx264", "-crf", "12", str(part))
+        # Measure what was written so captions cannot drift if a cut ran short.
+        length = float(subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(part)],
+            capture_output=True, text=True, check=True).stdout.strip())
         parts.append(part)
         cues.append((cursor, cursor + length, scene["caption"]))
         cursor += length

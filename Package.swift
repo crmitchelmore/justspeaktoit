@@ -145,6 +145,7 @@ let appleSyncSources: [String] = [
     "HistorySyncEngine.swift",
     "HistorySyncPushRouting.swift",
     "SyncConfiguration.swift",
+    "SyncContainerTransition.swift",
     "SyncRecord.swift",
     "SyncState.swift"
 ]
@@ -156,7 +157,8 @@ let appleSyncTestSources: [String] = [
     "HistorySyncEngineGuardTests.swift",
     "HistorySyncSwitchTests.swift",
     "HistorySyncEngineTests.swift",
-    "NativeRecordParityTests.swift"
+    "NativeRecordParityTests.swift",
+    "SyncContainerTransitionTests.swift"
 ]
 
 let migrationArchiveTarget = Target.target(

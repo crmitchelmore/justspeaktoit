@@ -359,8 +359,9 @@ six `SyncKey` cases, availability/status behaviour and local fallback; it is dis
 
 For Stable, [ReleaseTrains.json](../Sources/SpeakCore/Resources/ReleaseTrains.json) currently selects iOS container
 `iCloud.com.justspeaktoit.ios` and macOS container `iCloud.com.justspeaktoit`; Alpha has separate counterparts.
-`SpeakSync.SyncConfiguration` uses `TranscriptionHistoryZone` and selects the platform's current-train container.
-Any container consolidation is an undecided migration, not current behaviour.
+`SpeakSync.SyncConfiguration` uses `TranscriptionHistoryZone` and selects the current-train container of
+`SyncConfiguration.family`. iOS builds generated with `TUIST_IOS_SHARED_CLOUD_CONTAINER=1` join the macOS container and
+re-push local History once; see [cloudkit-shared-container.md](cloudkit-shared-container.md) (#1119).
 
 ## Automation
 

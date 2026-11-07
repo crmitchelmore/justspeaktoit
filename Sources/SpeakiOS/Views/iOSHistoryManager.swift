@@ -46,6 +46,15 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
     private var loadingCount = 0
 
     static let syncedIDsKey = "speak.sync.syncedHistoryIDs"
+
+    /// Runs at launch before History or key sync read their state, so a build
+    /// that moved to another CloudKit container re-pushes local History there
+    /// (#1119). Idempotent: only the first call after a move resets anything.
+    @discardableResult
+    public static func resetSyncStateIfContainerChanged(defaults: UserDefaults = .standard) -> Bool {
+        SyncContainerTransition.resetIfContainerChanged(defaults: defaults, additionalKeys: [syncedIDsKey])
+    }
+
     static let remoteCommitDebounce: Duration = .milliseconds(250)
     private var currentItemIDs: Set<UUID> { Set(items.map(\.id)) }
     private var reconciledSyncedIDs: Set<UUID> { syncedIDs.intersection(currentItemIDs) }
@@ -57,6 +66,7 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
     }
 
     private convenience init() {
+        Self.resetSyncStateIfContainerChanged()
         let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         self.init(
             fileURL: documentsURL.appendingPathComponent("transcription-history.json"),

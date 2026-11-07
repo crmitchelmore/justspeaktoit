@@ -132,7 +132,8 @@ CLIPS = {
             cut("models", 0.0, "models", 3.0, "Use Apple\u2019s on-device speech, or a cloud model"),
             cut("action-button", 0.0, "end", 0.0,
                 "Set what the Action Button and Shortcuts do with the words"),
-            card("Just Speak to It", "On the App Store", 2.0, "Just Speak to It for iPhone"),
+            card("Just Speak to It", "iPhone details at justspeaktoit.com", 2.0,
+                 "Just Speak to It for iPhone. Details at justspeaktoit.com"),
         ],
     },
     "windows": {
@@ -271,11 +272,20 @@ def find_still(captures, reference):
     return None
 
 
-def load_marks(folder):
+def load_marks(folder, screen):
     start = float((folder / "recording-start.txt").read_text())
+    shift = 0.0
+    stop_file = folder / "recording-stop.txt"
+    if stop_file.exists():
+        # simctl recordVideo writes its first frame some seconds after it starts, so its
+        # timeline is anchored to the stop request instead: video end == stop time.
+        duration = float(subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(screen)],
+            capture_output=True, text=True, check=True).stdout.strip())
+        shift = max(0.0, float(stop_file.read_text()) - start - duration)
     marks = {}
     for item in json.loads((folder / "marks.json").read_text()):
-        marks.setdefault(item["name"], item["time"] - start)
+        marks.setdefault(item["name"], item["time"] - start - shift)
     return marks
 
 
@@ -334,7 +344,7 @@ def render_clip(name, spec, captures, output, work):
         if screen is None or not (folder / "marks.json").exists():
             print(f"skip {name}: no {spec['source']} recording", file=sys.stderr)
             return None
-        marks = load_marks(folder)
+        marks = load_marks(folder, screen)
     parts, cues, cursor = [], [], 0.0
     for index, scene in enumerate(spec["scenes"]):
         part = work / f"{name}-{index:02d}.mp4"

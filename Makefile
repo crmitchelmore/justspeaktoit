@@ -47,6 +47,7 @@ test-all: test test-release ## Run tests in both debug and release
 test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
 	node --test scripts/tests/*.test.mjs
 	node --test .github/scripts/dependabot-merge.test.mjs
+	node --test .github/scripts/posthog-retention-purge.test.mjs
 	ruby scripts/tests/release_apple_test.rb
 	ruby scripts/tests/apple_reconciliation_test.rb
 	ruby scripts/tests/mac_review_notes_test.rb

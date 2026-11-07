@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {buildQuery, computeCutoff, listStatuses, resolveHost, run, submissionId} from './posthog-retention-purge.mjs';
+import {buildQuery, computeCutoff, listStatuses, resolveHost, run, submissionId} from '../../.github/scripts/posthog-retention-purge.mjs';
 
 const KEY = 'phx_secret_test_key_do_not_log';
 const NOW = new Date('2026-11-07T18:00:00Z');

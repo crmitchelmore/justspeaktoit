@@ -43,7 +43,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Test purge script
-        run: node --test .github/scripts/posthog-retention-purge.test.mjs
+        run: node --test scripts/tests/posthog-retention-purge.test.mjs
       - name: Purge expired PostHog events
         env:
           POSTHOG_PURGE_API_KEY: ${{ secrets.POSTHOG_PURGE_API_KEY }}

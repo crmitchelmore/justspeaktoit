@@ -91,7 +91,7 @@ jobs:
         run: node --test scripts/tests/brand-assets.test.mjs
 
       - name: Test PostHog retention purge script
-        run: node --test .github/scripts/posthog-retention-purge.test.mjs
+        run: node --test scripts/tests/posthog-retention-purge.test.mjs
 
       - name: Check Package.resolved drift
         # Resolving the app/test graph must reproduce the checked-in pins;

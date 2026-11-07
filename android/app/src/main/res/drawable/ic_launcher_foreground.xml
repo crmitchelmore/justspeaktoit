@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Microphone glyph on the brand gradient; replace with the final Android artwork when available. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,30a9,9 0,0 0,-9 9v15a9,9 0,0 0,18 0V39a9,9 0,0 0,-9 -9z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M39,52h4a11,11 0,0 0,22 0h4a15,15 0,0 1,-13 14.9V74h-4v-7.1A15,15 0,0 1,39 52z" />
+</vector>

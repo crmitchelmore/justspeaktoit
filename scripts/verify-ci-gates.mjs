@@ -10,14 +10,13 @@ export function assessCIGates(needs, event) {
       errors.push(`${id}: expected success, got ${needs[id]?.result ?? 'missing'}`);
     }
   };
-  for (const id of [
-    'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products',
-    'build-ios-keyboard', 'lint', 'release-paths',
-  ]) {
-    requireSuccess(id);
-  }
+  requireSuccess('release-paths');
   const outputs = needs['release-paths']?.outputs ?? {};
   for (const [flag, ids] of [
+    // Apple jobs skip only for pull requests that change nothing outside the Android app.
+    ['apple', [
+      'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
+    ]],
     ['package', ['release-validation']],
     ['core-journey', ['core-journey-e2e', 'core-journey-fixture-ui']],
   ]) {
@@ -30,7 +29,8 @@ export function assessCIGates(needs, event) {
       if (required || needs[id]?.result !== 'skipped') requireSuccess(id);
     }
   }
-  if (event === 'pull_request' || needs['api-compatibility']?.result !== 'skipped') {
+  const apiSkipAllowed = event !== 'pull_request' || outputs.apple === 'false';
+  if (!apiSkipAllowed || needs['api-compatibility']?.result !== 'skipped') {
     requireSuccess('api-compatibility');
   }
   return errors;

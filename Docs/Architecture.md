@@ -430,6 +430,12 @@ been eliminated.
   identifiers and public protocol surfaces are compatibility contracts.
 - New live clients implement the streaming/finalisation contracts used by the shared factory; providers that retain a
   dedicated controller must preserve that controller's audio, cancellation and transcript-shape semantics.
+  A live provider is registered in `ModelCatalog`, `LiveTranscriptionProviderID` and a
+  `LiveTranscriptionClientFactory` case. The Mac's `SwitchingLiveTranscriber` chooses a cloud controller with an
+  exhaustive switch over `LiveTranscriptionProviderID`, so a new case fails to compile until it is assigned (normally
+  the shared client); Deepgram, Modulate, ElevenLabs, Soniox and Cartesia keep dedicated Mac controllers and OpenAI
+  keeps its platform adapters. `ProviderCatalogueCoverageTests` fails when a catalogued live model has no factory
+  client, and `BatchCatalogueCoverageTests` when a batch model has no route on either platform.
   AssemblyAI's bounded shared-route fold and outstanding provider/device gates are recorded in
   [the parity inventory](assemblyai-shared-live-parity.md).
 - New history fields require an explicit decision about local-only versus the nine-field sync projection and migrations

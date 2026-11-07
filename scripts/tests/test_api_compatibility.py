@@ -75,7 +75,7 @@ class APICompatibilityTests(unittest.TestCase):
                 if args[:2] == ["package", "diagnose-api-breaking-changes"] and release:
                     import time
                     print("streaming-fixture-prefix", flush=True)
-                    deadline = time.monotonic() + 5
+                    deadline = time.monotonic() + 40
                     while not Path(release).exists():
                         if time.monotonic() >= deadline:
                             raise SystemExit(19)
@@ -146,7 +146,11 @@ class APICompatibilityTests(unittest.TestCase):
         reader = threading.Thread(target=read_output)
         reader.start()
         try:
-            self.assertTrue(prefix_seen.wait(2), "wrapper must stream before the owned tool is released")
+            # Event-driven: the bound covers wrapper start-up before the tool prints and
+            # only catches a hang (2s failed on a loaded runner, run 42078046115). The
+            # tool stays held until released, so a longer wait cannot pass a buffered
+            # wrapper: the prefix must arrive while the tool is still running.
+            self.assertTrue(prefix_seen.wait(30), "wrapper must stream before the owned tool is released")
             self.assertIsNone(process.poll(), "the diagnostic tool must still be held")
         finally:
             release.write_text("release", encoding="utf-8")

@@ -211,7 +211,7 @@ final class PermissionsManager: ObservableObject {
       kSecMatchLimit as String: kSecMatchLimitOne
     ]
 
-    let status = SecItemCopyMatching(query as CFDictionary, nil)
+    let status = KeychainAccess.copyMatching(query as CFDictionary, nil)
     switch status {
     case errSecSuccess, errSecItemNotFound:
       return true

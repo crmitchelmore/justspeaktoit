@@ -71,7 +71,10 @@ def build_record(environment, event, built_sha, parents, bundle_sha256):
                 'event': environment['GITHUB_EVENT_NAME'], 'sourceSHA': source_sha}
     record = dict(metadata, version=1, builtRevision=built_sha, parents=parents,
                   bundleSHA256=bundle_sha256, pullRequest=request)
-    if environment['GITHUB_SHA'] != built_sha:
+    # PR packaging explicitly checks out its immutable head. GITHUB_SHA still
+    # names GitHub's synthetic merge, so accept the authenticated event head too.
+    exact_pr_head = environment['GITHUB_EVENT_NAME'] == 'pull_request' and built_sha == source_sha
+    if environment['GITHUB_SHA'] != built_sha and not exact_pr_head:
         raise ValueError('Build checkout does not match its Actions environment')
     VERIFY['verify_revision'](built_sha, parents, metadata, record, bundle_sha256)
     return record

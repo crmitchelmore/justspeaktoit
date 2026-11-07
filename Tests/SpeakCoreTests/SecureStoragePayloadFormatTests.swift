@@ -358,7 +358,7 @@ private func addKeychainPayload(
         kSecAttrAccount as String: account,
         kSecValueData as String: Data(payload.utf8)
     ]
-    let status = SecItemAdd(query as CFDictionary, nil)
+    let status = KeychainAccess.add(query as CFDictionary, nil)
     guard status == errSecSuccess else {
         throw SecureStorageError.unexpectedStatus(status)
     }
@@ -373,7 +373,7 @@ private func readKeychainPayload(service: String, account: String = aggregateAcc
     query[kSecReturnData as String] = true
 
     var item: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    let status = KeychainAccess.copyMatching(query as CFDictionary, &item)
     guard status == errSecSuccess, let data = item as? Data else { return nil }
     return String(data: data, encoding: .utf8)
 }
@@ -390,6 +390,6 @@ private func deleteKeychainItem(service: String, account: String? = nil) {
             kSecAttrService as String: service,
             kSecAttrAccount as String: accountName
         ]
-        SecItemDelete(query as CFDictionary)
+        KeychainAccess.delete(query as CFDictionary)
     }
 }

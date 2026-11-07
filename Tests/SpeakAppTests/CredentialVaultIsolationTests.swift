@@ -148,7 +148,7 @@ private func deleteSyntheticVaultItems(services: [String]) {
                 kSecAttrService as String: ReleaseTrain.current.namespace(service),
                 kSecAttrAccount as String: account
             ]
-            SecItemDelete(query as CFDictionary)
+            KeychainAccess.delete(query as CFDictionary)
         }
     }
 }
@@ -161,5 +161,5 @@ private func syntheticItemExists(service: String) -> Bool {
         kSecAttrService as String: ReleaseTrain.current.namespace(service),
         kSecMatchLimit as String: kSecMatchLimitOne
     ]
-    return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+    return KeychainAccess.copyMatching(query as CFDictionary, nil) == errSecSuccess
 }

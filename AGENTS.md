@@ -55,6 +55,13 @@ When a user reports that a freshly shipped macOS release won't install or launch
 4. Verify launch locally (e.g. `open -n /Applications/JustSpeakToIt.app`) before asking the user to retry.
 5. If local install verification is requested, confirm `/Applications/JustSpeakToIt.app` exists, read `CFBundleShortVersionString`, and verify the process is running.
 
+## Owner Manual Checks
+
+When an issue is blocked only on an owner device check or decision, add it to
+`Docs/manual-checks.yml` (served at `justspeaktoit.com/qa`) instead of asking in
+the issue; results come back through the `manual-qa-results` workflow. See
+[Docs/manual-qa.md](Docs/manual-qa.md).
+
 ## Project Structure & Module Organization
 
 The canonical current target inventory, build graphs and runtime map live in
@@ -93,7 +100,7 @@ of hand-maintained structure documentation.
 - `make build` – Debug compilation only
 - `make rebuild` – Clean and rebuild from scratch
 - `make test` – Execute XCTest suite
-- `python3 scripts/with-test-keychain.py <command>` – CI wrapper that runs tests against a disposable Keychain. Locally it is a plain passthrough unless `JSTI_TEST_KEYCHAIN=1`; all other explicit values disable swapping. Overlapping swap runs serialise on a per-user lock. Use `--repair` to recover a valid journal from an interrupted run; an unreadable journal fails closed without changing Keychain settings.
+- `python3 scripts/with-test-keychain.py <command>` – CI wrapper that runs tests against a disposable Keychain. Locally it is a plain passthrough unless `JSTI_TEST_KEYCHAIN=1`; all other explicit values disable swapping. Overlapping swap runs serialise on a per-user lock. Use `--repair` to recover a valid journal from an interrupted run; an unreadable journal fails closed without changing Keychain settings. The private (native/opt-in) flow also requires `JSTI_TEST_KEYCHAIN_REDIRECT=1`, which compiles the test-only Keychain redirect; never set it for distribution builds.
 - `swift build --target SpeakiOSLib` – Verify iOS library compiles
 
 ### iOS (Xcode)

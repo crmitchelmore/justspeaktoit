@@ -99,6 +99,7 @@ $virtualisedDataDirectory = Join-Path $packageDataDirectory ('LocalCache\Local\'
 $aliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.executionAlias)
 $cliAliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.cliExecutionAlias)
 . (Join-Path $PSScriptRoot '..\windows-bundle\BundleCLI.ps1')
+. (Join-Path $PSScriptRoot '..\windows-bundle\FailureDiagnostics.ps1')
 $systemRoot = $env:SystemRoot
 $isolatedPath = "$systemRoot\System32;$systemRoot;$systemRoot\System32\Wbem;$systemRoot\System32\WindowsPowerShell\v1.0"
 $readyPattern = '^(Enter and save the selected provider.s API key|Ready\. Ctrl\+Alt\+Space|Recording sounds unavailable\. Check audio output; dictation still works\.$)'
@@ -596,12 +597,32 @@ function Invoke-AliasRun([string] $Label, [string] $Arguments, $Installed, [int]
     $variables['PATH'] = $isolatedPath
     if ($Handshake) { $variables['JSTI_BUNDLE_PROBE_RELEASE_PATH'] = $release }
     foreach ($key in $Environment.Keys) { $variables[$key] = $Environment[$key] }
+    # Optional preparation precedes the original process/watch; no diagnostic
+    # collector/event-query process starts on a passing run; the alias is never replayed.
+    $eventCandidate = $Label -ceq 'base-ui-smoke-test' -and $Arguments -ceq '--ui-smoke-test' -and
+        $Seconds -eq 60 -and ([string] $Installed.Architecture).ToLowerInvariant() -ceq 'arm64'
+    $eventSetup = $null; $eventExecutable = $null; $eventHash = $null
+    if ($eventCandidate) {
+        try {
+            $eventExecutable = Join-Path $Installed.InstallLocation 'SpeakWindows.exe'
+            $eventHash = $bundleManifest.application.executables.'SpeakWindows.exe'
+            $image = Get-Item -LiteralPath $eventExecutable -ErrorAction Stop
+            if (-not $image.PSIsContainer -and -not ($image.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -and
+                    $eventHash -cmatch '^[0-9a-f]{64}\z' -and (Get-JstiSha256 $eventExecutable) -ceq $eventHash) {
+                $eventSetup = New-JstiPackagedEventSetup $pythonPath
+            }
+        } catch { }
+    }
+    $eventStartedUTC = if ($eventCandidate) { [datetime]::UtcNow } else { $null }
     $process = [System.Diagnostics.Process]::Start($startInfo)
+    $eventPid = if ($eventCandidate) { [int] $process.Id } else { 0 }
     Add-JstiOwnedProcess $script:ledger $process
     $standardOutput = $process.StandardOutput.ReadToEndAsync()
     $standardError = $process.StandardError.ReadToEndAsync()
     $loaded = @{}
     $identity = $null; $integrity = $null; $identityError = $null
+    # Conservative anchor BEFORE the unchanged original watch, never after it.
+    $eventStartedTicks = if ($eventCandidate) { [System.Diagnostics.Stopwatch]::GetTimestamp() } else { [long] 0 }
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     while (-not $process.HasExited) {
         if ($null -eq $identity -and $null -eq $identityError) {
@@ -624,6 +645,8 @@ function Invoke-AliasRun([string] $Label, [string] $Arguments, $Installed, [int]
         Start-Sleep -Milliseconds 20
     }
     $process.WaitForExit()
+    $eventEndedTicks = if ($eventCandidate) { [System.Diagnostics.Stopwatch]::GetTimestamp() } else { [long] 0 }
+    $eventEndedUTC = if ($eventCandidate) { [datetime]::UtcNow } else { $null }
     $output = $standardOutput.Result
     [System.IO.File]::WriteAllText((Join-Path $evidenceDirectory "$Label.log"), $output + $standardError.Result,
         (New-Object System.Text.UTF8Encoding $false))
@@ -632,8 +655,25 @@ function Invoke-AliasRun([string] $Label, [string] $Arguments, $Installed, [int]
         integrityLevel = $integrity; identityError = $identityError
         modules = Get-ModuleProvenance $loaded $Installed.InstallLocation; seconds = [math]::Round($watch.Elapsed.TotalSeconds, 2)
     }
-    [void] $script:report.runs.Add($run)
     $run.output = $output
+    if ($eventCandidate) {
+        $run.applicationErrorPreparation = if ($eventSetup) { 'prepared' } else { 'unavailable' }
+    }
+    [void] $script:report.runs.Add($run)
+    if ($eventCandidate -and $run.exitCode -in @(-1073741819, -1073740940, -1073740791)) {
+        # Only the original naturally failed process; original exit/checks stay
+        # authoritative even when optional admission/collection is unavailable.
+        try {
+            $frequency = [System.Diagnostics.Stopwatch]::Frequency
+            $context = @{
+                originalPid = $eventPid; startedUTC = $eventStartedUTC; endedUTC = $eventEndedUTC
+                startedTicks = $eventStartedTicks; endedTicks = $eventEndedTicks
+                originalDeadlineTicks = $eventStartedTicks + (60 * $frequency); frequency = $frequency
+            }
+            $run.applicationErrorEvidence = Invoke-JstiPackagedEventDiagnostic $eventSetup $run $context `
+                $eventExecutable $eventHash $Installed.PackageFullName
+        } catch { $run.applicationErrorEvidence = @{ status = 'unavailable'; originalFailurePreserved = $true } }
+    }
     return $run
 }
 

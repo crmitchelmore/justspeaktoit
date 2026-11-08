@@ -208,9 +208,9 @@ final class ViewSnapshotTests: XCTestCase {
     private static func nearBlackOpaquePixelCount(in image: NSImage) throws -> Int {
         let bitmap = try XCTUnwrap(image.representations.first as? NSBitmapImageRep)
         var count = 0
-        for y in 0..<bitmap.pixelsHigh {
-            for x in 0..<bitmap.pixelsWide {
-                guard let colour = bitmap.colorAt(x: x, y: y), colour.alphaComponent > 0.9 else { continue }
+        for row in 0..<bitmap.pixelsHigh {
+            for column in 0..<bitmap.pixelsWide {
+                guard let colour = bitmap.colorAt(x: column, y: row), colour.alphaComponent > 0.9 else { continue }
                 let luminance = 0.2126 * colour.redComponent + 0.7152 * colour.greenComponent
                     + 0.0722 * colour.blueComponent
                 if luminance < 0.08 { count += 1 }

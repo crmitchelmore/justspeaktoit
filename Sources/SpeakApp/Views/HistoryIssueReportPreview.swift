@@ -1,16 +1,64 @@
 import SpeakCore
 import SwiftUI
 
+/// Presented once from `HistoryView`, never from a lazy row. Every phase renders
+/// a sized view with Cancel bound to Escape, so the sheet can always be closed.
 @MainActor
 struct HistoryIssueReportPreview: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var controller: HistoryIssueReportController
+    @StateObject private var loader: HistoryIssueReportLoader
 
-    init(report: IssueDiagnosticReport, reportWithoutDetails: IssueDiagnosticReport) {
-        _controller = StateObject(wrappedValue: HistoryIssueReportController(
-            report: report, reportWithoutDetails: reportWithoutDetails
-        ))
+    init(item: HistoryItem) {
+        _loader = StateObject(wrappedValue: HistoryIssueReportLoader(item: item))
     }
+
+    var body: some View {
+        Group {
+            switch loader.phase {
+            case .loading:
+                placeholder {
+                    ProgressView("Preparing issue report…")
+                }
+            case .timedOut:
+                placeholder {
+                    Text("The issue report took too long to prepare. Close this window and try again.")
+                }
+            case .ready(let controller):
+                HistoryIssueReportContent(controller: controller, close: close)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 560, idealWidth: 680, minHeight: 520, idealHeight: 640)
+        .onExitCommand(perform: close)
+        .onAppear { loader.start() }
+        .onDisappear { loader.cancel() }
+    }
+
+    private func close() {
+        loader.cancel()
+        dismiss()
+    }
+
+    private func placeholder<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Review Public Issue Report")
+                .font(.title2.bold())
+            Spacer()
+            content().frame(maxWidth: .infinity)
+            Spacer()
+            HStack {
+                Button("Cancel", action: close)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+            }
+        }
+    }
+}
+
+@MainActor
+private struct HistoryIssueReportContent: View {
+    @ObservedObject var controller: HistoryIssueReportController
+    let close: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -42,11 +90,8 @@ struct HistoryIssueReportPreview: View {
                 Text(status.message).font(.callout)
             }
             HStack {
-                Button("Cancel") {
-                    controller.cancel()
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
+                Button("Cancel", action: close)
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save JSON…") { Task { await controller.exportJSON() } }
                     .disabled(controller.isExporting)
@@ -54,8 +99,5 @@ struct HistoryIssueReportPreview: View {
                 Button("Open GitHub") { controller.openGitHub() }
             }
         }
-        .onDisappear { controller.cancel() }
-        .padding(24)
-        .frame(minWidth: 560, idealWidth: 680, minHeight: 520, idealHeight: 640)
     }
 }

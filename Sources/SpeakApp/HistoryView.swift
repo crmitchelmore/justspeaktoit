@@ -11,6 +11,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   @Environment(\.appVisualDensity) private var density
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var searchText: String = ""
+  @State private var issueReportItem: HistoryItem?
   @State private var showErrorsOnly: Bool = false
   @State private var dateRangeEnabled: Bool = false
   @State private var startDate: Date = Calendar.current.startOfDay(for: Date().addingTimeInterval(-7 * 24 * 60 * 60))
@@ -183,7 +184,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
           } else {
             LazyVStack(spacing: density.sectionSpacing) {
               ForEach(filteredItems) { item in
-                HistoryListRow(item: item)
+                HistoryListRow(item: item) { issueReportItem = $0 }
                   .id(item.id)
               }
             }
@@ -195,6 +196,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .padding(density.pagePadding)
         .frame(maxWidth: 1100, alignment: .center)
       }
+      .sheet(item: $issueReportItem) { HistoryIssueReportPreview(item: $0) }
       .onAppear {
         historyLoadState = environment.history.loadState
         historyItems = environment.history.allItems

@@ -437,6 +437,7 @@ def render_clip(name, spec, captures, output, work, narrator):
                   file=sys.stderr)
             continue
         voice = work / f"{name}-{index:02d}.wav"
+        print(f"{name}: narrating scene {index}", flush=True)
         spoken = narrator.speak(scene["spoken"] or scene["caption"], voice)
         length = frames(max(max(value[0] for value in visuals.values()),
                             NARRATION_LEAD + spoken + NARRATION_TAIL))
@@ -460,7 +461,7 @@ def render_clip(name, spec, captures, output, work, narrator):
 
     available = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True).stdout
     if "libsvtav1" in available:
-        av = ["-c:v", "libsvtav1", "-preset", "4", "-crf", "52", "-g", str(FPS * 4)]
+        av = ["-c:v", "libsvtav1", "-preset", "6", "-crf", "50", "-g", str(FPS * 4)]
     elif "libaom-av1" in available:
         av = ["-c:v", "libaom-av1", "-cpu-used", "4", "-crf", "46", "-b:v", "0", "-row-mt", "1"]
     else:
@@ -469,6 +470,7 @@ def render_clip(name, spec, captures, output, work, narrator):
     result = {"name": name, "width": size[0], "height": size[1], "alt": spec["alt"], "badge": badge,
               "scenes": len(plan), "webm_codec": av[1], "bytes": {}}
     for appearance in APPEARANCES:
+        print(f"{name}: rendering {appearance} ({len(plan)} scenes, {sum(p[4] for p in plan):.1f}s)", flush=True)
         palette = PALETTES[appearance]
         parts = []
         for index, scene, visuals, _, length in plan:

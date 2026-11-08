@@ -7,6 +7,11 @@ name: Site Media Capture
 # or signing. See landing-page/images/README.md.
 on:
   workflow_dispatch:
+    inputs:
+      captures_run:
+        description: Re-render from this earlier run's Mac and iPhone captures instead of capturing again
+        required: false
+        default: ""
   pull_request:
     paths:
       - .github/workflows/site-media.yml
@@ -26,6 +31,7 @@ concurrency:
 jobs:
   capture:
     name: Capture Mac app (${{ matrix.appearance }})
+    if: ${{ !inputs.captures_run }}
     strategy:
       fail-fast: false
       matrix:
@@ -123,6 +129,7 @@ jobs:
 
   capture-ios:
     name: Capture iPhone app (Simulator, ${{ matrix.appearance }})
+    if: ${{ !inputs.captures_run }}
     strategy:
       fail-fast: false
       matrix:
@@ -211,9 +218,9 @@ jobs:
   render:
     name: Render marketing clips
     needs: [capture, capture-ios]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (inputs.captures_run || (needs.capture.result == 'success' && needs.capture-ios.result == 'success')) }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7.0.1
         timeout-minutes: 2
@@ -238,8 +245,10 @@ jobs:
       - name: Download Mac and iPhone captures
         uses: actions/download-artifact@v8
         with:
-          pattern: site-media-*-${{ github.run_attempt }}
+          pattern: site-media-*
           path: ${{ runner.temp }}/downloads
+          run-id: ${{ inputs.captures_run || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Fetch Windows and Linux page tours from hosted runs
         timeout-minutes: 5
@@ -249,17 +258,18 @@ jobs:
           mkdir -p "$RUNNER_TEMP/captures"
           for source in mac ios; do
             for appearance in light dark; do
-              mv "$RUNNER_TEMP/downloads/site-media-$source-$appearance-${{ github.run_attempt }}" \
-                "$RUNNER_TEMP/captures/$source-$appearance" || true
+              # The newest attempt of a re-run wins.
+              latest=$(ls -d "$RUNNER_TEMP/downloads/site-media-$source-$appearance-"* | sort -V | tail -1)
+              mv "$latest" "$RUNNER_TEMP/captures/$source-$appearance"
             done
           done
           python3 scripts/site-media/fetch-desktop-tours.py "$RUNNER_TEMP/captures"
           ls -R "$RUNNER_TEMP/captures" | head -80
 
       - name: Render clips
-        timeout-minutes: 15
+        timeout-minutes: 60
         run: |
-          "$RUNNER_TEMP/venv/bin/python" scripts/site-media/render-clips.py "$RUNNER_TEMP/captures" \
+          "$RUNNER_TEMP/venv/bin/python" -u scripts/site-media/render-clips.py "$RUNNER_TEMP/captures" \
             .artifacts/site-clips --voices "$RUNNER_TEMP/voices"
           cp "$RUNNER_TEMP/captures/source.json" .artifacts/site-clips/desktop-source.json
           for clip in .artifacts/site-clips/*.mp4 .artifacts/site-clips/*.webm; do

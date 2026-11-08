@@ -64,6 +64,17 @@ contents.
 An upload or green workflow is not proof that Apple processed, distributed, or
 physically verified the build.
 
+## Named Alpha testers
+
+Owner-nominated testers live only in the `TESTFLIGHT_TESTER_EMAILS` repository
+secret (comma-separated); the repository is public, so never commit or log an
+address. Each Alpha iOS release adds them to the external **Public Alpha** group,
+and the **TestFlight tester access** workflow (`testflight-testers.yml`, manual)
+repeats that, reconciles beta review, starts a hosted iOS Alpha release when no
+recent valid build exists, and then verifies membership, invitation and that the
+newest build is `IN_BETA_TESTING` or `WAITING_FOR_BETA_REVIEW`. It logs counts
+and Apple states only.
+
 ## Repair a keyboard App Group profile
 
 Use this sequence when the workflow reports that the keyboard profile does not

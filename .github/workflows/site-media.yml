@@ -19,6 +19,7 @@ on:
       - Sources/SpeakApp/CoreJourneySiteMediaFixture.swift
       - Tests/SpeakAppUITests/SiteMediaCaptureUITests.swift
       - Tests/SpeakiOSUITests/SiteMediaCaptureUITests.swift
+      - Tests/Fixtures/CoreJourneyTargetApp/**
 
 permissions:
   contents: read
@@ -71,7 +72,13 @@ jobs:
           mkdir -p "$CAPTURE"
           swift scripts/site-media/select-display-mode.swift | tee "$CAPTURE/display-modes.txt"
           defaults write com.apple.dock autohide -bool true
-          if [ "${{ matrix.appearance }}" = dark ]; then defaults write -g AppleInterfaceStyle Dark; fi
+          if [ "${{ matrix.appearance }}" = dark ]; then
+            defaults write -g AppleInterfaceStyle Dark
+            # System-wide dark mode also darkens the recording HUD and menu bar; best effort.
+            perl -e 'alarm 20; exec @ARGV' osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' \
+              || echo "::warning::Could not switch the runner to dark mode"
+            perl -e 'alarm 20; exec @ARGV' osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode' || true
+          fi
           killall Dock || true
           sleep 3
           system_profiler SPDisplaysDataType | tee -a "$CAPTURE/display-modes.txt"

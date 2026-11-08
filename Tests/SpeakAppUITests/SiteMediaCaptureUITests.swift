@@ -39,6 +39,7 @@ final class SiteMediaCaptureUITests: XCTestCase {
         if appearance == "dark" {
             app.launchArguments += ["-AppleInterfaceStyle", "Dark"]
             fixture.launchArguments += ["-AppleInterfaceStyle", "Dark"]
+            fixture.launchEnvironment["CORE_JOURNEY_TARGET_APPEARANCE"] = "dark"
         }
         addTeardownBlock {
             XCTAssertNoThrow(try self.attachMarks())

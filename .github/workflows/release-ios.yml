@@ -21,8 +21,8 @@ env:
   TUIST_IOS_KEYBOARD: "1"
   TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
   # #1119: set the IOS_SHARED_CLOUD_CONTAINER repository variable to 1 only
-  # after the Mac container is assigned to the iOS App IDs and profiles
-  # (Docs/cloudkit-shared-container.md); otherwise signing fails.
+  # after the Mac container is assigned to the iOS App IDs
+  # (Docs/cloudkit-shared-container.md); profiles are then fetched with it.
   TUIST_IOS_SHARED_CLOUD_CONTAINER: ${{ vars.IOS_SHARED_CLOUD_CONTAINER == '1' && '1' || '0' }}
 
 jobs:
@@ -84,6 +84,7 @@ jobs:
           IOS_APPSTORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_IOS_APPSTORE_PROFILE || secrets.IOS_APPSTORE_PROFILE }}
           IOS_WIDGET_APPSTORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_IOS_WIDGET_APPSTORE_PROFILE || secrets.IOS_WIDGET_APPSTORE_PROFILE }}
           IOS_KEYBOARD_APPSTORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_IOS_KEYBOARD_APPSTORE_PROFILE || secrets.IOS_KEYBOARD_APPSTORE_PROFILE }}
+          APP_STORE_CONNECT_KEY_ID: ${{ env.APP_STORE_CONNECT_KEY_ID }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/ios-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -103,28 +104,56 @@ jobs:
             rm -f "$CERT_PATH" "$CERT_PEM_PATH"
           fi
 
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          if [ -n "$IOS_APPSTORE_PROFILE" ]; then
-            APP_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-appstore.provisionprofile
-            echo -n "$IOS_APPSTORE_PROFILE" | base64 --decode -o "$APP_PROFILE_PATH"
-            APP_PROFILE_UUID=$(security cms -D -i "$APP_PROFILE_PATH" | plutil -extract UUID raw -)
-            APP_PROFILE_NAME=$(security cms -D -i "$APP_PROFILE_PATH" | plutil -extract Name raw -)
-            echo "APP_PROFILE_UUID=$APP_PROFILE_UUID" >> "$GITHUB_ENV"
-            echo "APP_PROFILE_NAME=$APP_PROFILE_NAME" >> "$GITHUB_ENV"
-          fi
-          if [ -n "$IOS_WIDGET_APPSTORE_PROFILE" ]; then
-            WIDGET_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-widget-appstore.provisionprofile
-            echo -n "$IOS_WIDGET_APPSTORE_PROFILE" | base64 --decode -o "$WIDGET_PROFILE_PATH"
-            WIDGET_PROFILE_UUID=$(security cms -D -i "$WIDGET_PROFILE_PATH" | plutil -extract UUID raw -)
-            WIDGET_PROFILE_NAME=$(security cms -D -i "$WIDGET_PROFILE_PATH" | plutil -extract Name raw -)
-            echo "WIDGET_PROFILE_UUID=$WIDGET_PROFILE_UUID" >> "$GITHUB_ENV"
-            echo "WIDGET_PROFILE_NAME=$WIDGET_PROFILE_NAME" >> "$GITHUB_ENV"
-          fi
+          # #1119: fetch each App Store profile through the App Store Connect
+          # API so App ID capability changes never need a manual download. A
+          # stored secret is only a fallback (older frozen sources lack the
+          # script, or the API is unavailable).
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILE_DIR"
+          GROUP_KEY=com.apple.security.application-groups
+          ICLOUD_KEY=com.apple.developer.icloud-container-identifiers
+          SHARED_CONTAINER_RULE=--prefer
+          [ "$TUIST_IOS_SHARED_CLOUD_CONTAINER" = "1" ] && SHARED_CONTAINER_RULE=--require
+          install_profile() {
+            local name="$1" bundle="$2" stored="$3"
+            shift 3
+            if [ -n "${IOS_DISTRIBUTION_CERT_SERIAL:-}" ] && [ -f scripts/ensure-ios-app-store-profile.rb ] \
+              && APP_STORE_CONNECT_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
+                ruby scripts/ensure-ios-app-store-profile.rb --bundle-id "$bundle" \
+                  --certificate-serial "$IOS_DISTRIBUTION_CERT_SERIAL" --output "$PROFILE_DIR/$name.provisionprofile" "$@"; then
+              echo "- $name: App Store Connect API" >> "$GITHUB_STEP_SUMMARY"
+              return 0
+            fi
+            [ -n "$stored" ] || return 1
+            echo "::warning::Using the stored $name profile because the App Store Connect fetch failed."
+            echo -n "$stored" | base64 --decode -o "$PROFILE_DIR/$name.provisionprofile"
+            echo "- $name: stored secret" >> "$GITHUB_STEP_SUMMARY"
+          }
+          echo "### Provisioning profiles" >> "$GITHUB_STEP_SUMMARY"
+
+          install_profile ios-appstore "$BUNDLE_ID" "$IOS_APPSTORE_PROFILE" \
+            --require "$GROUP_KEY=$IOS_APP_GROUP" --require "$ICLOUD_KEY=$IOS_CLOUD_CONTAINER" \
+            "$SHARED_CONTAINER_RULE" "$ICLOUD_KEY=$MAC_CLOUD_CONTAINER" \
+            || { echo "::error::No App Store profile for $BUNDLE_ID"; exit 1; }
+          APP_PROFILE_PATH="$PROFILE_DIR/ios-appstore.provisionprofile"
+          APP_PROFILE_UUID=$(security cms -D -i "$APP_PROFILE_PATH" | plutil -extract UUID raw -)
+          APP_PROFILE_NAME=$(security cms -D -i "$APP_PROFILE_PATH" | plutil -extract Name raw -)
+          echo "APP_PROFILE_UUID=$APP_PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "APP_PROFILE_NAME=$APP_PROFILE_NAME" >> "$GITHUB_ENV"
+
+          install_profile ios-widget-appstore "$BUNDLE_ID.JustSpeakToItWidgetExtension" "$IOS_WIDGET_APPSTORE_PROFILE" \
+            --require "$GROUP_KEY=$IOS_APP_GROUP" \
+            || { echo "::error::No App Store profile for $BUNDLE_ID.JustSpeakToItWidgetExtension"; exit 1; }
+          WIDGET_PROFILE_PATH="$PROFILE_DIR/ios-widget-appstore.provisionprofile"
+          WIDGET_PROFILE_UUID=$(security cms -D -i "$WIDGET_PROFILE_PATH" | plutil -extract UUID raw -)
+          WIDGET_PROFILE_NAME=$(security cms -D -i "$WIDGET_PROFILE_PATH" | plutil -extract Name raw -)
+          echo "WIDGET_PROFILE_UUID=$WIDGET_PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "WIDGET_PROFILE_NAME=$WIDGET_PROFILE_NAME" >> "$GITHUB_ENV"
+
           if [ "$TUIST_IOS_KEYBOARD" = "1" ]; then
             KEYBOARD_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-keyboard-appstore.provisionprofile
-            if [ -n "$IOS_KEYBOARD_APPSTORE_PROFILE" ]; then
-              echo -n "$IOS_KEYBOARD_APPSTORE_PROFILE" | base64 --decode -o "$KEYBOARD_PROFILE_PATH"
-            else
+            if ! install_profile ios-keyboard-appstore "$BUNDLE_ID.keyboard" "$IOS_KEYBOARD_APPSTORE_PROFILE" \
+              --require "$GROUP_KEY=$IOS_APP_GROUP"; then
               APP_STORE_CONNECT_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
                 ruby scripts/create-ios-app-store-profile.rb \
                   --bundle-id "$BUNDLE_ID.keyboard" \
@@ -146,6 +175,17 @@ jobs:
             echo "KEYBOARD_PROFILE_UUID=$KEYBOARD_PROFILE_UUID" >> "$GITHUB_ENV"
             echo "KEYBOARD_PROFILE_NAME=$KEYBOARD_PROFILE_NAME" >> "$GITHUB_ENV"
           fi
+
+          # Container ids and App Groups only; never the profile itself.
+          for name in ios-appstore ios-widget-appstore ios-keyboard-appstore; do
+            [ -f "$PROFILE_DIR/$name.provisionprofile" ] || continue
+            security cms -D -i "$PROFILE_DIR/$name.provisionprofile" | python3 -c '
+          import plistlib, sys
+          e = plistlib.load(sys.stdin.buffer)["Entitlements"]
+          print("- {}: containers {}; groups {}".format(sys.argv[1],
+              ", ".join(e.get("com.apple.developer.icloud-container-identifiers", [])) or "none",
+              ", ".join(e.get("com.apple.security.application-groups", [])) or "none"))' "$name" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Validate installed profile identities
         if: steps.preflight.outputs.skip_upload != 'true'

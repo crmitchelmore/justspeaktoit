@@ -32,11 +32,11 @@ profile that carries them.
    `com.justspeaktoit.ios` › iCloud › Configure: tick `iCloud.com.justspeaktoit`
    as well as `iCloud.com.justspeaktoit.ios`, then Save. Do the same for
    `com.justspeaktoit.ios.alpha` with `iCloud.com.justspeaktoit.alpha`.
-2. **Profiles.** Edit and save (regenerate) the iOS App Store profiles for both
-   App IDs, which the capability change invalidates. Replace any stored copies:
-   `IOS_APPSTORE_PROFILE` for Stable and `ALPHA_IOS_APPSTORE_PROFILE` for Alpha.
-   The release preflight accepts a profile with or without the shared
-   container until the flag is on, then requires it.
+2. **Profiles.** Nothing to do by hand: release builds fetch the App Store
+   profiles through the App Store Connect API and replace any that lack the
+   containers ([details](ios-testflight-release.md#provisioning-profiles)).
+   Run the **Apple App IDs and profiles** workflow to regenerate and check them
+   ahead of a build.
 3. **Schema.** In CloudKit Console, check that the Production schema of
    `iCloud.com.justspeaktoit` (and `.alpha`) has every record type that the
    `iCloud.com.justspeaktoit.ios` Production schema has. If one is missing,

@@ -255,7 +255,6 @@ sessions:
           - "Steps: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/cloudkit-shared-container.md"
         steps:
           - "Identifiers \u203a com.justspeaktoit.ios \u203a iCloud \u203a Configure: also tick iCloud.com.justspeaktoit; do the same for com.justspeaktoit.ios.alpha with iCloud.com.justspeaktoit.alpha."
-          - "Regenerate the iOS App Store profiles for both App IDs, and update the IOS_APPSTORE_PROFILE secret if it holds one."
           - "In CloudKit Console, deploy the Development schema of iCloud.com.justspeaktoit and .alpha to Production if any iPhone record type is missing."
           - "Set the repository variable IOS_SHARED_CLOUD_CONTAINER to 1."
         expected: "The next Alpha iOS build signs and uploads with both containers. Then run iphone-shared-icloud-container."

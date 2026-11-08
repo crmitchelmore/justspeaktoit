@@ -291,7 +291,7 @@ sessions:
         steps:
           - "Create the D1 databases paid-access and paid-access-staging and put their ids in workers/paid-access/wrangler.toml."
           - "In Stripe test mode create the prices, enable the Customer Portal and add the webhook endpoint; put the price ids in wrangler.toml and the secrets in the Worker."
-          - "Only if you approve it: create the Sign in with Apple .p8 key and store APPLE_SIGNIN_KEY_ID and APPLE_SIGNIN_PRIVATE_KEY, as Docs/paid-access.md (Mac sign-in) describes. The web sign-in works without it."
+          - "After the Worker exists, run the Paid Access Worker secrets workflow on main for staging to install the Sign in with Apple key (already stored as repository secrets)."
           - "Sign off the privacy and retention text in Docs/paid-access-privacy.md."
         expected: "Staging is configured so an agent can sign in on a Developer ID build through the web flow and run the staging purchase and refund drill. Paid Access stays switched off for users."
         final_gate: false

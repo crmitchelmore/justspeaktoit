@@ -146,7 +146,8 @@ npx wrangler d1 create paid-access-staging
 - [ ] Separately commission supported native Sign in with Apple for App Store builds, including authorised App IDs, matching provisioning profiles and signed-artifact verification. Ordinary shipping entitlements currently omit this capability.
 - [x] Create the Services ID `com.justspeaktoit.mac.signin` (primary App ID `com.justspeaktoit.mac`, domain `api.justspeaktoit.com`, return URL `https://api.justspeaktoit.com/v1/auth/apple/callback`) for the Developer ID web flow.
 - [ ] Qualify the web sign-in on staging with a Developer ID build before enabling paid access for it.
-- [ ] Optional, only with owner approval: create the Sign in with Apple `.p8` key described in [Mac sign-in](#mac-sign-in-sign-in-with-apple-web-flow).
+- [x] Create the Sign in with Apple `.p8` key (Key ID in `APPLE_SIGNIN_KEY_ID`, key in `APPLE_SIGNIN_PRIVATE_KEY`).
+- [ ] Run the **Paid Access Worker secrets** workflow for each Worker environment once it exists.
 - [ ] After the identity flow is approved, confirm every audience in use appears in `APPLE_IDENTITY_AUDIENCES`, and every native bundle id in `APPLE_BUNDLE_IDS`.
 
 An identity token whose audience is missing from `APPLE_IDENTITY_AUDIENCES` is rejected with `unauthorized`. That is the most common cause of "sign-in works on iPhone but not on Mac".
@@ -172,26 +173,30 @@ Apple's web flow (owner decision in #1386):
 App Store builds keep the native sheet. Paid Access stays compiled out of
 normal builds (`PAID_ACCESS`) and `PAID_ROUTING_DISABLED` stays `true`.
 
-The flow does not exchange the authorisation code, so it needs no
-`client_secret`. A Sign in with Apple private key is needed only if the
-server later exchanges codes or revokes Apple tokens (for example on account
-deletion). If the owner approves creating it:
+The flow does not exchange the authorisation code, so sign-in itself needs no
+`client_secret`. The Sign in with Apple key exists for when the server
+exchanges codes or revokes Apple tokens (for example on account deletion):
 
-1. Apple Developer › Certificates, Identifiers & Profiles › Keys › **+**.
-   Name it "Just Speak to It Sign in with Apple", tick **Sign in with Apple**,
-   **Configure**, choose the primary App ID `com.justspeaktoit.mac`, **Save**,
-   **Continue**, **Register**.
-2. **Download** the `.p8` file (it can be downloaded only once) and note the
-   Key ID shown on the page.
-3. Store both in each environment, then delete the local file:
+| Value | Where |
+| --- | --- |
+| Team ID | `8X4ZN58TYH` |
+| Services ID (`client_id`) | `com.justspeaktoit.mac.signin`, primary App ID `com.justspeaktoit.mac` |
+| Return URL | `https://api.justspeaktoit.com/v1/auth/apple/callback` |
+| Key ID | repository secret `APPLE_SIGNIN_KEY_ID` |
+| `.p8` private key | repository secret `APPLE_SIGNIN_PRIVATE_KEY` |
 
-   ```bash
-   cd workers/paid-access
-   printf '%s' 'KEYID12345' | npx wrangler secret put APPLE_SIGNIN_KEY_ID --env staging
-   npx wrangler secret put APPLE_SIGNIN_PRIVATE_KEY --env staging < AuthKey_KEYID12345.p8
-   # repeat with --env production
-   ```
+To put the key into a Worker environment, run the **Paid Access Worker
+secrets** workflow on `main` and choose `staging` or `production` (the Worker
+must exist). It uploads both values with `wrangler secret bulk` without
+printing them and checks they are present. Run it again after rotating the
+key.
 
+To rotate the key: Apple Developer › Certificates, Identifiers & Profiles ›
+Keys › **+**, name it "Just Speak to It Sign in with Apple", tick **Sign in
+with Apple**, **Configure** with primary App ID `com.justspeaktoit.mac`,
+**Save**, **Continue**, **Register**, then **Download** the `.p8` (once only)
+and note its Key ID. Update the repository secrets, run the workflow for each
+environment, delete the local file, and revoke the old key.
 
 ## Secrets
 
@@ -216,8 +221,8 @@ npx wrangler secret list --env production
 | `DEEPGRAM_API_KEY` | Yes | Live transcription |
 | `OPENAI_API_KEY` | No | Reserved; not used by the current Best paths |
 | `APPSTORE_ROOT_CA_G3_BASE64` | No | Overrides the pinned Apple Root CA G3. Testing only |
-| `APPLE_SIGNIN_KEY_ID` | No | Key ID of the Sign in with Apple `.p8` key, for a `client_secret`. Reserved: the web sign-in does not use it yet |
-| `APPLE_SIGNIN_PRIVATE_KEY` | No | Contents of that `.p8` file (PEM). Reserved, as above |
+| `APPLE_SIGNIN_KEY_ID` | No | Key ID of the Sign in with Apple `.p8` key, for a `client_secret`. Set by the Paid Access Worker secrets workflow; the web sign-in does not read it yet |
+| `APPLE_SIGNIN_PRIVATE_KEY` | No | Contents of that `.p8` file (PEM). Set by the same workflow; not read yet |
 
 Rotating `SESSION_SIGNING_KEY` invalidates every access token immediately. Clients recover by refreshing, so rotate deliberately and expect a burst of `/v1/auth/refresh` traffic.
 

@@ -42,10 +42,14 @@ jobs:
           persist-credentials: false
 
       - name: Prepare Tuist and macOS project
-        timeout-minutes: 8
+        timeout-minutes: 12
+        # GitHub release downloads (Tuist, binary packages) intermittently return 5xx.
         run: |
-          brew install tuist ffmpeg
-          tuist generate --no-open
+          retry() { for delay in 10 30 0; do "$@" && return 0; [ "$delay" = 0 ] && return 1; sleep "$delay"; done; }
+          retry brew install tuist
+          retry tuist generate --no-open
+          retry xcodebuild -resolvePackageDependencies -workspace "Just Speak to It.xcworkspace" -scheme SpeakApp \
+            -skipPackagePluginValidation
 
       - name: Build app, fixture and capture suite
         timeout-minutes: 20
@@ -142,7 +146,10 @@ jobs:
         timeout-minutes: 25
         run: |
           set -o pipefail
-          tuist generate --no-open
+          retry() { for delay in 10 30 0; do "$@" && return 0; [ "$delay" = 0 ] && return 1; sleep "$delay"; done; }
+          retry tuist generate --no-open
+          retry xcodebuild -resolvePackageDependencies -workspace "Just Speak to It.xcworkspace" -scheme SpeakiOS \
+            -skipPackagePluginValidation
           xcodebuild build-for-testing -workspace "Just Speak to It.xcworkspace" -scheme SpeakiOS \
             -destination "generic/platform=iOS Simulator" -only-testing:SpeakiOSUITests/SiteMediaCaptureUITests \
             -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" -skipPackagePluginValidation -quiet

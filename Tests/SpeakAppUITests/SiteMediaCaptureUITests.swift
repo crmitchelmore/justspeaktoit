@@ -52,10 +52,11 @@ final class SiteMediaCaptureUITests: XCTestCase {
         try capturePage(app, sidebar: "sidebarHistory", name: "mac-history")
         // Feature clips: optional so a renamed page cannot block the core demo.
         for (sidebar, name, scrolls) in [
-            ("sidebarCorrections", "mac-corrections", true),
             ("sidebarSettings-transcription", "mac-transcription", false),
             ("sidebarSettings-postProcessing", "mac-post-processing", false),
-            ("sidebarSettings-shortcuts", "mac-shortcuts", false)
+            ("sidebarSettings-shortcuts", "mac-shortcuts", false),
+            // Last: later sidebar items were not found after this page scrolled.
+            ("sidebarCorrections", "mac-corrections", true)
         ] {
             captureOptionalPage(app, sidebar: sidebar, name: name, scrollsToList: scrolls)
         }

@@ -154,11 +154,17 @@ jobs:
           mkdir -p "$CAPTURE"
           xcrun simctl status_bar "$SIMULATOR_ID" override --time 9:41 --dataNetwork wifi --wifiBars 3 \
             --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
-          python3 -c 'import time; print(time.time())' > "$CAPTURE/recording-start.txt"
           xcrun simctl io "$SIMULATOR_ID" recordVideo --codec=h264 --force "$CAPTURE/screen.mp4" \
             > "$CAPTURE/recordVideo.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/recordVideo.pid"
-          sleep 3
+          # The video's first frame is written when recordVideo reports it has started;
+          # its file is variable frame rate, so its end cannot anchor the timeline.
+          for _ in $(seq 1 300); do
+            grep -q "Recording started" "$CAPTURE/recordVideo.log" && break
+            sleep 0.1
+          done
+          python3 -c 'import time; print(time.time())' > "$CAPTURE/recording-start.txt"
+          grep -q "Recording started" "$CAPTURE/recordVideo.log"
           kill -0 "$(cat "$RUNNER_TEMP/recordVideo.pid")"
 
       - name: Run capture suite
@@ -176,7 +182,6 @@ jobs:
         run: |
           pid=$(cat "$RUNNER_TEMP/recordVideo.pid" 2>/dev/null || true)
           if [ -n "$pid" ]; then
-            python3 -c 'import time; print(time.time())' > "$CAPTURE/recording-stop.txt"
             kill -INT "$pid" || true
             for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
           fi

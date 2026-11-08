@@ -8,12 +8,12 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   @EnvironmentObject private var environment: AppEnvironment
   @Environment(\.appVisualDensity) private var density
   let item: HistoryItem
+  /// Presentation is owned by `HistoryView`: a sheet on a lazy row can present
+  /// empty, undismissable content when SwiftUI rebuilds or recycles the row.
+  let onReviewIssueReport: (HistoryItem) -> Void
   @State private var isExpanded: Bool = false
   @State private var showNetworkDetails: Bool = false
   @State private var showDeleteConfirmation: Bool = false
-  @State private var issueReport: IssueDiagnosticReport?
-  @State private var issueReportWithoutDetails: IssueDiagnosticReport?
-  @State private var showIssuePreview = false
   @FocusState private var isFocused: Bool
 
   var body: some View {
@@ -22,11 +22,6 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
       .focused($isFocused)
       .focusEffectDisabled()
       .contextMenu { contextMenuContent }
-      .sheet(isPresented: $showIssuePreview) {
-        if let issueReport, let issueReportWithoutDetails {
-          HistoryIssueReportPreview(report: issueReport, reportWithoutDetails: issueReportWithoutDetails)
-        }
-      }
       .onChange(of: isExpanded) { _, expanded in
         if !expanded {
           showNetworkDetails = false
@@ -1030,9 +1025,7 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   }
 
   private func presentIssueReport() {
-    issueReport = HistoryIssueReporter.report(for: item)
-    issueReportWithoutDetails = HistoryIssueReporter.report(for: item, includeDiagnostics: false)
-    showIssuePreview = true
+    onReviewIssueReport(item)
   }
 
   private func formatDuration(_ duration: TimeInterval) -> String {

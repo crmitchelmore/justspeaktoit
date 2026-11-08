@@ -114,13 +114,21 @@ public enum AppleSpeechAnalyzerWarmup {
             modules: [setup.configuration.module.speechModule],
             options: AppleSpeechAnalyzerLiveSetup.analyzerOptions
         )
+        let cancellation = SpeechAnalyzerCancellation(analyzer: analyzer)
         do {
-            try await analyzer.prepareToAnalyze(in: setup.format)
+            try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                try await analyzer.prepareToAnalyze(in: setup.format)
+            } onCancel: {
+                cancellation.start()
+            }
         } catch {
-            AppleSpeechAnalyzerLiveSetup.cache.remove(setup.key)
-            await analyzer.cancelAndFinishNow()
+            if !(error is CancellationError) {
+                AppleSpeechAnalyzerLiveSetup.cache.remove(setup.key)
+            }
+            await cancellation.finish()
             throw error
         }
-        await analyzer.cancelAndFinishNow()
+        await cancellation.finish()
     }
 }

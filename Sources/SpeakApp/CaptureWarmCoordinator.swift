@@ -89,7 +89,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   private let now: @MainActor () -> Date
   private let warmAudio: @MainActor (CaptureWarmContext, Bool) async -> Void
   private let invalidateAudio: @MainActor () async -> Void
-  private let warmSpeechAnalyzer: @MainActor (_ modelID: String, _ localeIdentifier: String) -> Void
+  private let warmSpeechAnalyzer: @Sendable (_ modelID: String, _ localeIdentifier: String) async -> Bool
 
   private var streamTracker = LiveStreamWarmTracker()
   private var isSessionActive = false
@@ -104,6 +104,8 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   private var knownRecordingsDirectory: URL?
   private var endpointProbeTask: Task<Void, Never>?
   private var warmedSpeechAnalyzerKey: String?
+  private var warmingSpeechAnalyzerKey: String?
+  private var speechAnalyzerWarmTask: Task<Void, Never>?
 
   init(
     appSettings: AppSettings,
@@ -118,7 +120,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     now: (@MainActor () -> Date)? = nil,
     warmAudio: (@MainActor (CaptureWarmContext, Bool) async -> Void)? = nil,
     invalidateAudio: (@MainActor () async -> Void)? = nil,
-    warmSpeechAnalyzer: (@MainActor (String, String) -> Void)? = nil
+    warmSpeechAnalyzer: (@Sendable (String, String) async -> Bool)? = nil
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
@@ -196,6 +198,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.audioWarmTask = nil
     self.endpointProbeTask?.cancel()
     self.endpointProbeTask = nil
+    self.cancelSpeechAnalyzerWarmUp()
     self.streamTracker.invalidate()
   }
 
@@ -213,6 +216,8 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.scheduler.cancel()
     self.endpointProbeTask?.cancel()
     self.audioWarmTask?.cancel()
+    let speechAnalyzerWarmTask = self.speechAnalyzerWarmTask
+    self.cancelSpeechAnalyzerWarmUp()
     self.networkMonitor.cancel()
     for observer in self.workspaceObservers {
       self.workspaceNotificationCenter.removeObserver(observer)
@@ -226,6 +231,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.streamTracker.invalidate()
     await self.audioWarmTask?.value
     await self.endpointProbeTask?.value
+    await speechAnalyzerWarmTask?.value
     await self.audioFileManager.setRecordingLifecycleHandler(nil)
     await self.invalidateAudio()
   }
@@ -277,36 +283,55 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
 
   /// Loads the selected SpeechAnalyzer model before the first recording, and
   /// again after a model, locale or permission change (issue #614). The model
-  /// is retained for the app's lifetime, so one warm-up per selection is
-  /// enough; it never downloads assets and never opens the microphone.
+  /// is retained for the app's lifetime, so one successful warm-up per
+  /// selection is enough; a failed one is retried on the next idle trigger.
+  /// It never downloads assets and never opens the microphone.
   private func reconcileSpeechAnalyzerWarmUp() {
     let model = self.appSettings.liveTranscriptionModel
     guard self.appSettings.transcriptionMode == .liveNative,
       AppleLocalModels.isSpeechAnalyzerModel(model),
       self.permissionsManager.status(for: .speechRecognition).isGranted
     else {
+      self.cancelSpeechAnalyzerWarmUp()
       self.warmedSpeechAnalyzerKey = nil
       return
     }
     let locale = self.appSettings.preferredModelLanguage ?? self.appSettings.resolvedPreferredLocaleIdentifier
     let key = "\(model)|\(locale)"
-    guard self.warmedSpeechAnalyzerKey != key else { return }
-    self.warmedSpeechAnalyzerKey = key
-    self.warmSpeechAnalyzer(model, locale)
+    guard self.warmedSpeechAnalyzerKey != key, self.warmingSpeechAnalyzerKey != key else { return }
+    self.cancelSpeechAnalyzerWarmUp()
+    self.warmingSpeechAnalyzerKey = key
+    let warm = self.warmSpeechAnalyzer
+    self.speechAnalyzerWarmTask = Task(priority: .utility) { [weak self] in
+      let succeeded = await warm(model, locale)
+      guard let self, !Task.isCancelled, self.warmingSpeechAnalyzerKey == key else { return }
+      self.warmingSpeechAnalyzerKey = nil
+      self.speechAnalyzerWarmTask = nil
+      if succeeded { self.warmedSpeechAnalyzerKey = key }
+    }
   }
 
-  private static func prewarmSpeechAnalyzer(modelID: String, localeIdentifier: String) {
-    guard #available(macOS 26.0, *) else { return }
-    Task.detached(priority: .utility) {
-      do {
-        try await AppleSpeechAnalyzerWarmup.prewarm(
-          engine: AppleSpeechAnalyzerEngine(modelID: modelID),
-          localeIdentifier: localeIdentifier
-        )
-      } catch {
+  /// Model loading must not compete with a capture that is starting.
+  private func cancelSpeechAnalyzerWarmUp() {
+    self.speechAnalyzerWarmTask?.cancel()
+    self.speechAnalyzerWarmTask = nil
+    self.warmingSpeechAnalyzerKey = nil
+  }
+
+  private nonisolated static func prewarmSpeechAnalyzer(modelID: String, localeIdentifier: String) async -> Bool {
+    guard #available(macOS 26.0, *) else { return false }
+    do {
+      try await AppleSpeechAnalyzerWarmup.prewarm(
+        engine: AppleSpeechAnalyzerEngine(modelID: modelID),
+        localeIdentifier: localeIdentifier
+      )
+      return true
+    } catch {
+      if !(error is CancellationError) {
         SpeakLogger.logger(category: "CaptureWarm").info(
           "SpeechAnalyzer warm-up skipped: \(error.localizedDescription, privacy: .public)")
       }
+      return false
     }
   }
 

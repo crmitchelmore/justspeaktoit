@@ -7,7 +7,7 @@ import XCTest
 
 @MainActor
 final class CaptureWarmCoordinatorTests: XCTestCase {
-    private var defaults: UserDefaults!
+    var defaults: UserDefaults!
     private var suiteName: String!
 
     override func setUp() {
@@ -143,53 +143,11 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
         XCTAssertNil(harness.scheduler.delay)
     }
 
-    func testSpeechAnalyzerModel_IsWarmedOncePerSelectionAndNotDuringASession() async {
-        self.defaults.set(AppleLocalModels.speechTranscriberModelID, forKey: "liveTranscriptionModel")
-        let harness = self.makeHarness(speechStatus: .granted)
-        harness.coordinator.start()
-        await self.waitUntil { harness.speechWarms.calls.count == 1 }
-        XCTAssertEqual(harness.speechWarms.calls.first?.model, AppleLocalModels.speechTranscriberModelID)
-        XCTAssertEqual(
-            harness.speechWarms.calls.first?.locale,
-            harness.settings.preferredModelLanguage ?? harness.settings.resolvedPreferredLocaleIdentifier
-        )
-
-        harness.coordinator.sessionWillBegin()
-        harness.settings.liveTranscriptionModel = AppleLocalModels.dictationTranscriberModelID
-        await self.drainTasks()
-        XCTAssertEqual(harness.speechWarms.calls.count, 1, "warm-up must not compete with a live capture")
-
-        harness.coordinator.sessionDidEnd()
-        harness.coordinator.warmUp()
-        await self.drainTasks()
-        XCTAssertEqual(harness.speechWarms.calls.map(\.model), [
-            AppleLocalModels.speechTranscriberModelID,
-            AppleLocalModels.dictationTranscriberModelID
-        ])
-        await harness.coordinator.invalidate()
-    }
-
-    func testSpeechAnalyzerModel_IsNotWarmedWithoutSpeechPermissionOrForCloudModels() async {
-        self.defaults.set(AppleLocalModels.speechTranscriberModelID, forKey: "liveTranscriptionModel")
-        let denied = self.makeHarness(speechStatus: .denied)
-        denied.coordinator.start()
-        await self.drainTasks()
-        XCTAssertTrue(denied.speechWarms.calls.isEmpty)
-        await denied.coordinator.invalidate()
-
-        self.defaults.set("deepgram/nova-3-streaming", forKey: "liveTranscriptionModel")
-        let cloud = self.makeHarness(speechStatus: .granted)
-        cloud.coordinator.start()
-        await self.drainTasks(untilProbeCount: 1, in: cloud.warmer)
-        XCTAssertTrue(cloud.speechWarms.calls.isEmpty)
-        await cloud.coordinator.invalidate()
-    }
-
-    private func makeHarness(
+    func makeHarness(
         microphoneStatus: PermissionStatus = .granted,
         speechStatus: PermissionStatus = .denied,
         now: @escaping @MainActor () -> Date = Date.init
-    ) -> Harness {
+    ) -> CaptureWarmHarness {
         let settings = AppSettings(defaults: self.defaults)
         let permissions = PermissionsManager(
             statusProvider: { type in
@@ -226,9 +184,9 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
             now: now,
             warmAudio: { _, _ in },
             invalidateAudio: { audioInvalidation.record() },
-            warmSpeechAnalyzer: { speechWarms.record(model: $0, locale: $1) }
+            warmSpeechAnalyzer: { await speechWarms.warm(model: $0, locale: $1) }
         )
-        return Harness(
+        return CaptureWarmHarness(
             coordinator: coordinator,
             settings: settings,
             warmer: warmer,
@@ -240,11 +198,11 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
         )
     }
 
-    private func drainTasks() async {
+    func drainTasks() async {
         for _ in 0..<5 { await Task.yield() }
     }
 
-    private func waitUntil(_ condition: @escaping @MainActor () -> Bool) async {
+    func waitUntil(_ condition: @escaping @MainActor () -> Bool) async {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline, !condition() {
             await Task.yield()
@@ -255,7 +213,7 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
 
     // A fixed number of yields is not enough on a loaded CI runner; poll the
     // observable probe count with a deadline before settling with a final drain.
-    private func drainTasks(untilProbeCount expected: Int, in warmer: EndpointWarmerSpy) async {
+    func drainTasks(untilProbeCount expected: Int, in warmer: EndpointWarmerSpy) async {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
             let count = await warmer.hosts().count
@@ -268,7 +226,7 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
 }
 
 @MainActor
-private struct Harness {
+struct CaptureWarmHarness {
     let coordinator: CaptureWarmCoordinator
     let settings: AppSettings
     let warmer: EndpointWarmerSpy
@@ -279,16 +237,7 @@ private struct Harness {
     let speechWarms: SpeechAnalyzerWarmSpy
 }
 
-@MainActor
-private final class SpeechAnalyzerWarmSpy {
-    private(set) var calls: [(model: String, locale: String)] = []
-
-    func record(model: String, locale: String) {
-        self.calls.append((model, locale))
-    }
-}
-
-private actor EndpointWarmCalls {
+actor EndpointWarmCalls {
     private var storedHosts: [String] = []
 
     func append(_ host: String) {
@@ -300,7 +249,7 @@ private actor EndpointWarmCalls {
     }
 }
 
-private final class EndpointWarmerSpy: StreamingEndpointWarming, @unchecked Sendable {
+final class EndpointWarmerSpy: StreamingEndpointWarming, @unchecked Sendable {
     private let calls = EndpointWarmCalls()
 
     func hosts() async -> [String] {
@@ -314,7 +263,7 @@ private final class EndpointWarmerSpy: StreamingEndpointWarming, @unchecked Send
 }
 
 @MainActor
-private final class CaptureWarmSchedulerSpy: CaptureWarmScheduling {
+final class CaptureWarmSchedulerSpy: CaptureWarmScheduling {
     private(set) var delay: TimeInterval?
     private var operation: (@MainActor @Sendable () -> Void)?
 
@@ -336,7 +285,7 @@ private final class CaptureWarmSchedulerSpy: CaptureWarmScheduling {
 }
 
 @MainActor
-private final class CaptureWarmNetworkMonitorSpy: CaptureWarmNetworkMonitoring {
+final class CaptureWarmNetworkMonitorSpy: CaptureWarmNetworkMonitoring {
     var statusDidChange: ((NWPath.Status) -> Void)?
     private(set) var wasCancelled = false
 
@@ -353,7 +302,7 @@ private final class CaptureWarmNetworkMonitorSpy: CaptureWarmNetworkMonitoring {
 }
 
 @MainActor
-private final class AudioInvalidationSpy {
+final class AudioInvalidationSpy {
     private(set) var count = 0
 
     func record() {

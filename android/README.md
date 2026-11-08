@@ -95,7 +95,8 @@ credential IDs and the cleanup prompt identical to the Mac app.
 - The app itself does not store audio, except for Cloud mode's temporary upload file below.
 - **Cloud** mode uploads audio to the provider chosen in Settings with your key. The
   recording is a temporary file that is deleted after the request, whether it succeeds or fails.
-- Optional cleanup sends the final transcript text (not audio) to OpenRouter.
+- Optional cleanup sends the final transcript text (not audio) to the chosen model's provider:
+  a native provider (Anthropic, OpenAI, Google Gemini, Groq or Mistral) or OpenRouter.
 - History is stored only in app-private storage (excluded from backup) and follows the
   retention chosen in History; Off saves nothing and deletes existing entries.
 - Secrets are encrypted with a non-exportable Android Keystore key. App data is excluded

@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.justspeaktoit.android.cloud.CallHandle
+import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
 import com.justspeaktoit.android.cloud.CloudException
@@ -63,6 +64,7 @@ data class DictationUiState(
     val cloudModel: CloudModel = CloudCatalog.defaultTranscriptionModel,
     val savedKeys: Set<CloudProvider> = emptySet(),
     val cleanupEnabled: Boolean = false,
+    val cleanupModel: CleanupModel = CloudCatalog.cleanupModel(null),
     val cleanup: CleanupStatus = CleanupStatus.None,
     val originalTranscript: String? = null,
     /** Set when a key could not be saved or removed securely. */
@@ -98,9 +100,9 @@ data class DictationUiState(
         get() = !dictation.isActive && !checkingAvailability && !releasingMicrophone &&
             cleanup != CleanupStatus.Running && options.firstOrNull { it.mode == activeMode }?.usable == true
 
-    /** Cleanup runs only when switched on and an OpenRouter key exists. */
+    /** Cleanup runs only when switched on and the chosen model's provider has a key. */
     val cleanupReady: Boolean
-        get() = cleanupEnabled && CloudProvider.OpenRouter in savedKeys
+        get() = cleanupEnabled && cleanupModel.provider in savedKeys
 }
 
 class DictationViewModel(application: Application) : AndroidViewModel(application) {
@@ -120,6 +122,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             chosenMode = prefs.chosenMode,
             cloudModel = CloudCatalog.transcriptionModel(prefs.cloudModelId),
             cleanupEnabled = prefs.cleanupEnabled,
+            cleanupModel = CloudCatalog.cleanupModel(prefs.cleanupModelId),
             retention = prefs.retention,
         ),
     )
@@ -311,6 +314,11 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         prefs.cloudModelId = model.catalogId
         _state.update { it.copy(cloudModel = model) }
         refreshAvailability()
+    }
+
+    fun chooseCleanupModel(model: CleanupModel) {
+        prefs.cleanupModelId = model.selectionId
+        _state.update { it.copy(cleanupModel = model) }
     }
 
     fun setCleanupEnabled(enabled: Boolean) {
@@ -630,8 +638,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         _state.update { it.copy(cleanup = CleanupStatus.Running) }
         work = viewModelScope.launch {
             val cleaned = try {
-                val key = withContext(Dispatchers.IO) { secrets.read(CloudProvider.OpenRouter.credentialId) }
-                key?.let { cloudCall(CLEANUP_DEADLINE_MS) { call -> cloud.cleanup(it, done.transcript, call) } }
+                val model = _state.value.cleanupModel
+                val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
+                key?.let { cloudCall(CLEANUP_DEADLINE_MS) { call -> cloud.cleanup(model, it, done.transcript, call) } }
             } catch (e: CloudException) {
                 null
             } catch (e: GeneralSecurityException) {

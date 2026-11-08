@@ -20,6 +20,11 @@ class AppPreferences(context: Context) {
         get() = prefs.getString(KEY_CLOUD_MODEL, null)
         set(value) = prefs.edit { putString(KEY_CLOUD_MODEL, value) }
 
+    /** Null until chosen; existing installs keep the default OpenRouter cleanup route. */
+    var cleanupModelId: String?
+        get() = prefs.getString(KEY_CLEANUP_MODEL, null)
+        set(value) = prefs.edit { putString(KEY_CLEANUP_MODEL, value) }
+
     var cleanupEnabled: Boolean
         get() = prefs.getBoolean(KEY_CLEANUP, false)
         set(value) = prefs.edit { putBoolean(KEY_CLEANUP, value) }
@@ -36,5 +41,6 @@ class AppPreferences(context: Context) {
         const val KEY_MODE = "chosen_mode"
         const val KEY_CLOUD_MODEL = "cloud_model"
         const val KEY_CLEANUP = "cleanup_enabled"
+        const val KEY_CLEANUP_MODEL = "cleanup_model"
     }
 }

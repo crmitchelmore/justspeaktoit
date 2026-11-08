@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
                             onRemoveKey = viewModel::removeKey,
                             onChooseModel = viewModel::chooseCloudModel,
                             onCleanupChanged = viewModel::setCleanupEnabled,
+                            onChooseCleanupModel = viewModel::chooseCleanupModel,
                         ),
                     )
                     Screen.History -> HistoryScreen(

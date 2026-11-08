@@ -4,54 +4,6 @@
 version: 1
 updated: "2026-11-08"
 sessions:
-  - id: "decisions"
-    device: "Decision"
-    title: "Decisions"
-    items:
-      - id: "decision-provider-spend-cap"
-        issues:
-          - 1210
-          - 1051
-          - 1052
-          - 821
-          - 1104
-          - 1113
-          - 1114
-        title: "Spend cap for paid-provider live acceptance runs"
-        minutes: 2
-        core: true
-        question: "How much may be spent on short synthetic-speech runs against paid speech providers?"
-        context: "Seven issues are code-complete and only need real calls with a few seconds of synthetic speech per route: #1210 (Pulse Pro, Reson8, StepAudio, Alibaba, OpenRouter audio routes, AssemblyAI Universal-3.6 Pro live), #1104 (8 live providers), #1113 and #1114 (one OpenAI or Groq Mac batch run), #821 (OpenRouter playback), #1051 and #1052 (Azure Speech/MAI). Usage is likely under $10; minimum top-ups for new accounts are most of the cost. Runs need a person at a Mac with a microphone; receipts are posted to each issue without keys or billing details. Azure also needs you to create or name a Speech resource in a region that serves MAI models."
-        options:
-          - id: "cap-40"
-            label: "Up to $40 total, at most $10 per provider, no auto top-ups"
-            consequence: "Covers all seven issues; any provider needing a larger minimum top-up or a paid plan is skipped and noted. Alibaba uses the international (Singapore) workspace only."
-            recommended: true
-          - id: "cap-15-existing"
-            label: "Up to $15, existing accounts only"
-            consequence: "#1104, #1113, #1114 and #821 can close; #1210's new providers and Azure (#1051, #1052) stay open."
-          - id: "defer"
-            label: "Defer all paid runs"
-            consequence: "No spend; all seven issues stay open."
-      - id: "decision-paid-mac-signin"
-        issues:
-          - 648
-        title: "Paid Access: how Mac users sign in"
-        minutes: 2
-        core: false
-        question: "How should direct-download Mac users sign in to Paid Access?"
-        context: "Stripe on direct-download Mac is the chosen rail. The paid-access server already verifies Apple identity tokens, but native Sign in with Apple does not work in Developer ID builds, so Paid Access cannot launch on Mac until a supported sign-in exists. Docs/paid-access.md lists the rest of the setup."
-        options:
-          - id: "apple-web-flow"
-            label: "Sign in with Apple through its web flow"
-            consequence: "You create a Services ID and return URL in the Apple Developer portal; an agent adds the browser sign-in to the Mac app and the Services ID to the accepted audiences. The same Apple account works if iOS is added later."
-            recommended: true
-          - id: "email-link"
-            label: "Email sign-in link"
-            consequence: "No Apple setup, but needs an email-sending provider and a second identity type on the server."
-          - id: "defer"
-            label: "Defer Paid Access"
-            consequence: "Paid Access stays off and #648 is parked; no external setup."
   - id: "mac"
     device: "Mac"
     title: "Mac"
@@ -177,55 +129,6 @@ sessions:
           - "An agent then reads only the numeric latency fields in History and posts the result on #611."
         expected: "About 50 or more recent hotkey recordings exist. The agent reports hotkey-to-capture p50 and p95; #611 closes if p50 is under 100 ms and the #664 streaming checks have passed."
         final_gate: false
-      - id: "mac-paid-existing-providers"
-        issues:
-          - 1104
-        title: "Every remote streaming provider with your keys"
-        minutes: 12
-        core: false
-        build: "Just Speak to It for Mac, Alpha build 61 or later"
-        prerequisites:
-          - "Decision: a provider spend cap is approved (decision-provider-spend-cap)"
-          - "Use made-up sentences only. If a listed model has no key or fails, mark Fail and name it in the note."
-        steps:
-          - "Settings \u203a Transcription \u203a Remote \u203a Streaming: choose each of OpenAI Realtime, ElevenLabs, Soniox, Modulate, Cartesia, Gladia, Deepgram Nova-3 and Deepgram Flux in turn."
-          - "For each, dictate \u201cprovider check one two three\u201d into TextEdit and stop, then start again at once, say \u201csecond run\u201d and stop."
-          - "Open History and check the newest items."
-        expected: "All eight models show words while you speak and finish within a few seconds of Stop; each second run starts cleanly and the microphone indicator goes away after it. History shows every item with its model name and cost."
-        final_gate: true
-      - id: "mac-paid-batch-providers"
-        issues:
-          - 1114
-        title: "OpenAI and Groq recorded transcription"
-        minutes: 3
-        core: false
-        build: "Just Speak to It for Mac, Alpha build 61 or later"
-        prerequisites:
-          - "Decision: a provider spend cap is approved (decision-provider-spend-cap)"
-          - "Use made-up sentences only. If a listed model has no key or fails, mark Fail and name it in the note."
-        steps:
-          - "Settings \u203a Transcription \u203a Remote \u203a Batch: choose an OpenAI model."
-          - "Dictate \u201cbatch check\u201d into TextEdit and stop."
-          - "Choose a Groq model and repeat, then open History."
-        expected: "Each run inserts the phrase once and History shows both items with their model names and cost."
-        final_gate: true
-      - id: "mac-openrouter-audio"
-        issues:
-          - 821
-        title: "OpenRouter speech and transcription models from the catalogue"
-        minutes: 6
-        core: false
-        build: "Just Speak to It for Mac, Alpha build 61 or later"
-        prerequisites:
-          - "Decision: a provider spend cap is approved (decision-provider-spend-cap)"
-          - "An OpenRouter key saved in Settings"
-        steps:
-          - "In Settings, open the OpenRouter speech model picker, search for a speech model, pick a voice and select it for voice output."
-          - "Have the app speak a long paragraph, then start it again and stop it halfway."
-          - "Open the OpenRouter transcription model picker, select a transcription model and dictate \u201copenrouter check\u201d."
-          - "Open History."
-        expected: "Speech starts before the whole clip has downloaded, uses the chosen voice and stops at once when stopped. The transcription inserts once and History shows the chosen model\u2019s name and cost."
-        final_gate: true
       - id: "mac-paid-new-providers"
         issues:
           - 1210
@@ -235,7 +138,7 @@ sessions:
         core: false
         build: "Just Speak to It for Mac, Alpha build 61 or later"
         prerequisites:
-          - "Decision: \u201cUp to $40\u201d spend cap (new accounts allowed)"
+          - "Spend cap (owner decision, #1386): up to $40 total, at most $10 per provider, no auto top-ups; new accounts allowed"
           - "An Azure Speech resource in a region that serves MAI models"
           - "Steps and route list: Docs/azure-speech.md and #1210"
         steps:
@@ -288,7 +191,7 @@ sessions:
         core: false
         build: "Stripe dashboard, Cloudflare and Apple Developer portal"
         prerequisites:
-          - "Decision: decision-paid-mac-signin answered with a sign-in method (skip this check if you chose Defer)"
+          - "Mac sign-in (owner decision, #1386): Sign in with Apple through its web flow"
           - "Steps: Docs/paid-access.md (External product setup). Use Stripe test mode only; no live keys."
         steps:
           - "Create the D1 databases paid-access and paid-access-staging and put their ids in workers/paid-access/wrangler.toml."

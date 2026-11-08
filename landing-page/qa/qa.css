@@ -1,6 +1,6 @@
 /* Manual QA checklist — phone first, palette from /site.css. */
 :root {
-  color-scheme: dark;
+  color-scheme: light dark;
   --ground: #121417;
   --surface: #191c21;
   --surface-2: #212630;
@@ -13,6 +13,24 @@
   --fail: #ff6b6b;
   --skip: #adb4bd;
   --radius: 14px;
+  --bar: rgba(18, 20, 23, .96);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #f7f5f2;
+    --surface: #ffffff;
+    --surface-2: #ece8e3;
+    --line: rgba(22, 24, 28, .16);
+    --text: #16181c;
+    --text-dim: #464d56;
+    --accent: #c9461c;
+    --accent-link: #b23d14;
+    --pass: #0d7c6f;
+    --fail: #c22f2f;
+    --skip: #5f6670;
+    --bar: rgba(247, 245, 242, .96);
+  }
 }
 
 * { box-sizing: border-box; }
@@ -34,7 +52,7 @@ a { color: var(--accent-link); }
 
 .qa-top {
   position: sticky; top: 0; z-index: 2;
-  background: rgba(18, 20, 23, .96);
+  background: var(--bar);
   border-bottom: 1px solid var(--line);
   padding: .75rem 1rem;
 }
@@ -104,7 +122,7 @@ legend { font-weight: 600; margin-bottom: .5rem; }
 
 .qa-submit {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
-  background: rgba(18, 20, 23, .97); border-top: 1px solid var(--line);
+  background: var(--bar); border-top: 1px solid var(--line);
   padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom));
 }
 .qa-status { max-width: 44rem; margin: 0 auto .5rem; color: var(--text-dim); font-size: .95rem; }
@@ -132,4 +150,13 @@ legend { font-weight: 600; margin-bottom: .5rem; }
 .qa-optional > summary {
   cursor: pointer; min-height: 3rem; display: flex; align-items: center;
   padding: .5rem 1rem; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--text-dim); font-weight: 600;
+}
+
+/* Strong light-mode fills need light text; must follow the base rules. */
+@media (prefers-color-scheme: light) {
+  .qa-choice-pass input:checked + span,
+  .qa-choice-fail input:checked + span,
+  .qa-choice-skip input:checked + span,
+  .qa-badge,
+  .qa-actions .qa-primary { color: #ffffff; }
 }

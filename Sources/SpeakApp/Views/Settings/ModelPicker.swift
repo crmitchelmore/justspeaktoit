@@ -95,11 +95,36 @@ struct ModelPicker: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query: String = ""
     @State private var selectedTag: ModelCatalog.Tag? = nil
+    /// Native routes are listed first; OpenRouter is one row that opens its own list.
+    @State private var isBrowsingOpenRouter = false
+
+    private var groups: ModelPickerGrouping.Groups {
+      ModelPickerGrouping.groups(options, purpose: credentialPurpose)
+    }
+
+    /// Group only when both kinds exist, so single-route pickers stay unchanged.
+    private var isGrouped: Bool {
+      !groups.direct.isEmpty && !groups.openRouter.isEmpty
+    }
+
+    private var levelOptions: [ModelCatalog.Option] {
+      guard isGrouped else { return options }
+      return isBrowsingOpenRouter ? groups.openRouter : groups.direct
+    }
 
     var body: some View {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
-          Text(title)
+          if isBrowsingOpenRouter {
+            Button {
+              isBrowsingOpenRouter = false
+              query = ""
+            } label: {
+              Label("Back", systemImage: "chevron.left")
+            }
+            .accessibilityIdentifier("modelPicker.openRouter.back")
+          }
+          Text(isBrowsingOpenRouter ? ModelPickerGrouping.openRouterTitle : title)
             .font(.headline)
           Spacer()
           Button("Done") { dismiss() }
@@ -159,6 +184,10 @@ struct ModelPicker: View {
             .buttonStyle(.plain)
           }
 
+          if isGrouped && !isBrowsingOpenRouter {
+            openRouterRow
+          }
+
           Divider()
 
           Button {
@@ -185,6 +214,44 @@ struct ModelPicker: View {
       .frame(minWidth: 780, minHeight: 520)
     }
 
+    private var openRouterRow: some View {
+      Button {
+        isBrowsingOpenRouter = true
+        query = ""
+      } label: {
+        HStack(spacing: 10) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text(ModelPickerGrouping.openRouterTitle)
+              .font(.body)
+            Text(openRouterRowSubtitle)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+          ModelCredentialStatusView(
+            availability: ModelCredentialResolver.availability(
+              for: groups.openRouter[0].id,
+              purpose: credentialPurpose,
+              storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
+            )
+          )
+          Image(systemName: "chevron.right")
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityIdentifier("modelPicker.openRouter")
+    }
+
+    private var openRouterRowSubtitle: String {
+      if let selected = groups.openRouter.first(where: { $0.id == selection }) {
+        return "Selected: \(selected.displayName)"
+      }
+      return "\(groups.openRouter.count) models from many providers, with one OpenRouter key."
+    }
+
     private var trimmedQuery: String {
       query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -196,7 +263,7 @@ struct ModelPicker: View {
     }
 
     private var filteredOptions: [ModelCatalog.Option] {
-      var result = options
+      var result = levelOptions
       if let selectedTag {
         result = result.filter { $0.tags.contains(selectedTag) }
       }
@@ -283,7 +350,7 @@ struct ModelPicker: View {
           isShowingChooser = true
         } label: {
           HStack {
-            Text(selectedOption?.displayName ?? (customValue.isEmpty ? "Custom…" : customValue))
+            Text(selectedOption.map(selectionLabel) ?? (customValue.isEmpty ? "Custom…" : customValue))
             Spacer()
             ModelCredentialStatusView(availability: selectedCredentialAvailability)
             if let option = selectedOption {
@@ -314,14 +381,15 @@ struct ModelPicker: View {
         }
       } else {
         Picker(title, selection: $selection) {
-          ForEach(options) { option in
-            HStack {
-              Text(option.displayName)
-              Spacer()
-              ModelCredentialStatusView(availability: credentialAvailability(for: option.id))
+          let groups = ModelPickerGrouping.groups(options, purpose: credentialPurpose)
+          if groups.direct.isEmpty || groups.openRouter.isEmpty {
+            menuRows(options)
+          } else {
+            // Native routes first; OpenRouter routes in their own labelled group.
+            menuRows(groups.direct)
+            Section(ModelPickerGrouping.openRouterTitle) {
+              menuRows(groups.openRouter)
             }
-            .accessibilityElement(children: .combine)
-            .tag(option.id)
           }
           if allowsCustom {
             HStack {
@@ -426,8 +494,27 @@ struct ModelPicker: View {
   }
 
   /// The label VoiceOver reads as the picker's current value.
+  private func menuRows(_ rows: [ModelCatalog.Option]) -> some View {
+    ForEach(rows) { option in
+      HStack {
+        Text(option.displayName)
+        Spacer()
+        ModelCredentialStatusView(availability: credentialAvailability(for: option.id))
+      }
+      .accessibilityElement(children: .combine)
+      .tag(option.id)
+    }
+  }
+
   private var selectedDisplayName: String {
-    selectedOption?.displayName ?? (customValue.isEmpty ? "Custom" : customValue)
+    selectedOption.map(selectionLabel) ?? (customValue.isEmpty ? "Custom" : customValue)
+  }
+
+  /// "OpenRouter › Model" for OpenRouter routes, so the route is never ambiguous.
+  private func selectionLabel(_ option: ModelCatalog.Option) -> String {
+    ModelPickerGrouping.selectionLabel(
+      for: option.id, displayName: option.displayName, purpose: credentialPurpose
+    )
   }
 
   /// Stable, UI-test friendly component derived from the picker's title,

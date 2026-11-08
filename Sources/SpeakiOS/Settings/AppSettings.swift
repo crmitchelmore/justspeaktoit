@@ -565,8 +565,13 @@ public final class AppSettings: ObservableObject {
 
     public static let defaultPostProcessingPrompt = TranscriptCleanupPolicy.baseSystemPrompt
 
+    /// Native text providers whose key this app stores. Groq has no iOS key slot,
+    /// so its native cleanup routes stay macOS/desktop-only.
+    static let nativeTextProviderIDs: Set<String> = ["openai", "google", "mistral"]
+
     public static let postProcessingModels = ModelCatalog.postProcessing.filter {
         !$0.id.hasPrefix("local/post-processing/")
+            && (NativeTextModels.route(for: $0.id).map { nativeTextProviderIDs.contains($0.provider.id) } ?? true)
     }
 
     /// - Parameters:
@@ -1052,6 +1057,35 @@ public final class AppSettings: ObservableObject {
         case .apiKey(let identifier, _):
             return apiKeysByIdentifier[identifier] ?? openRouterAPIKey
         }
+    }
+
+    /// The key the post-processing model's route needs: the provider's own key
+    /// for a native model, the OpenRouter key otherwise, and "" on device.
+    public func postProcessingAPIKey(for modelIdentifier: String) -> String {
+        switch ModelCredentialResolver.requirement(for: modelIdentifier, purpose: .postProcessing) {
+        case .notRequired:
+            return ""
+        case .apiKey(let identifier, _):
+            return apiKeysByIdentifier[identifier] ?? ""
+        }
+    }
+
+    public func hasPostProcessingKey(for modelIdentifier: String) -> Bool {
+        if case .notRequired = ModelCredentialResolver.requirement(for: modelIdentifier, purpose: .postProcessing) {
+            return true
+        }
+        return !postProcessingAPIKey(for: modelIdentifier).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Whether the selected post-processing model can run with the stored keys.
+    public var hasPostProcessingKey: Bool { hasPostProcessingKey(for: postProcessingModel) }
+
+    /// The provider name the selected post-processing model needs a key for.
+    public var postProcessingKeyProviderName: String {
+        if case .apiKey(_, let providerName) = ModelCredentialResolver.requirement(
+            for: postProcessingModel, purpose: .postProcessing
+        ) { return providerName }
+        return "OpenRouter"
     }
 
     /// Every stored transcription credential keyed by its canonical

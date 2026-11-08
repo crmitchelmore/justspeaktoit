@@ -304,6 +304,22 @@ extension SettingsView {
     }
   }
 
+  /// The provider the selected cloud model is actually sent to.
+  private var remotePostProcessingRequirement: (identifier: String, providerName: String)? {
+    guard case .apiKey(let identifier, let providerName) = ModelCredentialResolver.requirement(
+      for: cloudPostProcessingModelBinding.wrappedValue, purpose: .postProcessing
+    ) else { return nil }
+    return (identifier, providerName)
+  }
+
+  private var remotePostProcessingProviderName: String {
+    remotePostProcessingRequirement?.providerName ?? "OpenRouter"
+  }
+
+  private var isRemotePostProcessingKeyStored: Bool {
+    remotePostProcessingRequirement.map { isAPIKeyStored($0.identifier) } ?? true
+  }
+
   private var remotePostProcessingSection: some View {
     VStack(alignment: .leading, spacing: 12) {
       CleanupModelDiscoveryView(
@@ -313,8 +329,8 @@ extension SettingsView {
       ModelPicker(
         title: "Remote Post-processing Model",
         help: """
-        Choose the OpenRouter model Speak will call for cloud LLM cleanup. \
-        Mini and Lite models are faster and cheaper.
+        Native provider models are listed first and use that provider's own key. \
+        Choose OpenRouter to pick from its wider catalogue. Mini and Lite models are faster and cheaper.
         """,
         options: cloudPostProcessingOptions,
         value: cloudPostProcessingModelBinding,
@@ -324,18 +340,19 @@ extension SettingsView {
       )
 
       SettingsInlineInfo(
-        title: "Remote post-processing uses OpenRouter",
+        title: "Remote post-processing uses \(remotePostProcessingProviderName)",
         message:
           """
-          Speak sends transcript cleanup requests for this model to OpenRouter. \
-          Add an OpenRouter API key in Settings > API Keys before using remote post-processing.
+          Speak sends transcript cleanup requests for this model to \(remotePostProcessingProviderName). \
+          Save your \(remotePostProcessingProviderName) API key in Settings > API Keys \
+          before using remote post-processing.
           """,
         systemImage: "network"
       )
 
-      if !isOpenRouterKeyStored {
+      if !isRemotePostProcessingKeyStored {
         HStack(alignment: .center, spacing: 10) {
-          Label("OpenRouter API key missing", systemImage: "exclamationmark.triangle.fill")
+          Label("\(remotePostProcessingProviderName) API key missing", systemImage: "exclamationmark.triangle.fill")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.orange)
           Text(
@@ -346,7 +363,7 @@ extension SettingsView {
           .font(.caption)
           .foregroundStyle(.secondary)
           Spacer()
-          Button("Add OpenRouter Key") {
+          Button("Add \(remotePostProcessingProviderName) Key") {
             sidebarSelection = .settings(.apiKeys)
           }
           .buttonStyle(.borderedProminent)

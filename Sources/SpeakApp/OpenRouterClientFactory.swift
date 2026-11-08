@@ -16,7 +16,8 @@ extension OpenRouterAPIClient {
       apiKeyProvider: { try? await secureStorage.secret(identifier: apiKeyIdentifier) },
       session: session,
       apiKeyOverride: apiKeyOverride,
-      maximumInlineAudioBytes: maximumInlineAudioBytes
+      maximumInlineAudioBytes: maximumInlineAudioBytes,
+      nativeAPIKeyProvider: { try? await secureStorage.secret(identifier: $0) }
     )
   }
 }

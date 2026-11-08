@@ -159,7 +159,7 @@ bool createControls(HWND window, SettingsDialog &dialog) {
         add(L"BUTTON", L"Include lexicon context &tags", BS_AUTOCHECKBOX | WS_TABSTOP, tagsID) &&
         add(L"STATIC", L"&Instructions for the model", 0, promptLabelID) &&
         add(L"EDIT", dialog.config.prompt.c_str(), ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_TABSTOP, promptID) &&
-        add(L"STATIC", L"New OpenRouter API &key (leave blank to keep the saved key)", 0, keyLabelID) &&
+        add(L"STATIC", L"New API &key for the selected model's provider (leave blank to keep the saved key)", 0, keyLabelID) &&
         add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, keyID) &&
         add(L"BUTTON", L"&Apply", BS_DEFPUSHBUTTON | WS_TABSTOP, IDOK) &&
         add(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, IDCANCEL);

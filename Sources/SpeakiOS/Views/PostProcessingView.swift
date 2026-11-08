@@ -6,7 +6,8 @@ import SpeakCore
 
 // MARK: - Post-Processing Manager
 
-/// Manages post-processing of transcriptions via OpenRouter API.
+/// Manages post-processing of transcriptions: on device, through a native
+/// provider, or through OpenRouter, following the selected model's route.
 @MainActor
 public final class iOSPostProcessingManager: ObservableObject {
     public static let shared = iOSPostProcessingManager()
@@ -29,7 +30,8 @@ public final class iOSPostProcessingManager: ObservableObject {
         guard !text.isEmpty else { return }
         let usesAppleModel = model == AppleLocalModels.foundationModelID
         guard usesAppleModel || !apiKey.isEmpty else {
-            error = "OpenRouter API key required for post-processing"
+            error = PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
+                .errorDescription
             return
         }
         
@@ -118,7 +120,9 @@ public final class iOSPostProcessingManager: ObservableObject {
                 userMessage: userMessage
             )
         }
-        guard !apiKey.isEmpty else { throw PostProcessingError.apiKeyMissing }
+        guard !apiKey.isEmpty else {
+            throw PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
+        }
 
         var result = ""
         for try await chunk in sendChatStreaming(
@@ -136,17 +140,26 @@ public final class iOSPostProcessingManager: ObservableObject {
     nonisolated static func effectiveSystemPrompt() -> String {
         TranscriptCleanupPolicy.systemPrompt()
     }
-    
-    // MARK: - OpenRouter API
 
-    /// Streams a chat completion through the shared SpeakCore OpenRouter client.
+    nonisolated static func keyProviderName(for model: String) -> String {
+        if case .apiKey(_, let providerName) = ModelCredentialResolver.requirement(
+            for: model, purpose: .postProcessing
+        ) { return providerName }
+        return "OpenRouter"
+    }
+    
+    // MARK: - Remote API
+
+    /// Streams a chat completion through the shared SpeakCore client. `apiKey` is
+    /// the key for the model's route: the native provider's key for a `native/`
+    /// model, otherwise the OpenRouter key.
     private func sendChatStreaming(
         systemPrompt: String,
         userMessage: String,
         model: String,
         apiKey: String
     ) -> AsyncThrowingStream<String, Error> {
-        OpenRouterAPIClient(apiKey: apiKey).sendChatStreaming(
+        OpenRouterAPIClient(apiKey: apiKey, nativeAPIKeyProvider: { _ in apiKey }).sendChatStreaming(
             systemPrompt: systemPrompt,
             messages: [ChatMessage(role: .user, content: userMessage)],
             model: model,
@@ -159,7 +172,7 @@ enum PostProcessingError: LocalizedError {
     case invalidURL
     case invalidResponse
     case httpError(Int)
-    case apiKeyMissing
+    case apiKeyMissing(providerName: String)
     case emptyResult
     
     var errorDescription: String? {
@@ -167,7 +180,7 @@ enum PostProcessingError: LocalizedError {
         case .invalidURL: return "Invalid API URL"
         case .invalidResponse: return "Invalid response from server"
         case .httpError(let code): return "Server error: \(code)"
-        case .apiKeyMissing: return "OpenRouter API key is required"
+        case .apiKeyMissing(let providerName): return "\(providerName) API key is required"
         case .emptyResult: return "Polishing returned no text"
         }
     }
@@ -298,7 +311,7 @@ public struct PostProcessingView: View {
                                 await processor.process(
                                     text: inputText,
                                     model: settings.postProcessingModel,
-                                    apiKey: settings.openRouterAPIKey
+                                    apiKey: settings.postProcessingAPIKey(for: settings.postProcessingModel)
                                 )
                             }
                         } label: {
@@ -315,7 +328,7 @@ public struct PostProcessingView: View {
                             .frame(height: 44)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(inputText.isEmpty || !settings.hasOpenRouterKey || processor.isProcessing)
+                        .disabled(inputText.isEmpty || !settings.hasPostProcessingKey || processor.isProcessing)
                         
                         // Use result button
                         if !processor.processedText.isEmpty {
@@ -332,8 +345,11 @@ public struct PostProcessingView: View {
                     }
                     
                     // API key warning
-                    if !settings.hasOpenRouterKey {
-                        Label("Add OpenRouter API key in Settings", systemImage: "key")
+                    if !settings.hasPostProcessingKey {
+                        Label(
+                            "Add \(settings.postProcessingKeyProviderName) API key in Settings",
+                            systemImage: "key"
+                        )
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -369,7 +385,10 @@ public struct PostProcessingView: View {
 
 private extension PostProcessingView {
     private var modelDisplayName: String {
-        ModelCatalog.friendlyName(for: settings.postProcessingModel)
+        let model = settings.postProcessingModel
+        return ModelPickerGrouping.selectionLabel(
+            for: model, displayName: ModelCatalog.friendlyName(for: model), purpose: .postProcessing
+        )
     }
     
     // MARK: - Model Picker Sheet
@@ -378,38 +397,8 @@ private extension PostProcessingView {
     private var modelPickerSheet: some View {
         NavigationStack {
             List {
-                ForEach(Array(AppSettings.postProcessingModels.enumerated()), id: \.offset) { _, model in
-                    Button {
-                        settings.postProcessingModel = model.id
-                        showingModelPicker = false
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(model.displayName)
-                                    .foregroundStyle(.primary)
-                                if !density.isCompact {
-                                    Text(model.description ?? "")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            
-                            Spacer()
-
-                            IOSModelCredentialStatusView(
-                                availability: ModelCredentialResolver.availability(
-                                    for: model.id,
-                                    purpose: .postProcessing,
-                                    storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
-                                )
-                            )
-                            
-                            if settings.postProcessingModel == model.id {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                        }
-                    }
+                PostProcessingModelPickerRows(settings: settings, showsDescriptions: !density.isCompact) {
+                    showingModelPicker = false
                 }
             }
             .navigationTitle("Select Model")

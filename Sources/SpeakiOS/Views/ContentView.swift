@@ -1633,7 +1633,7 @@ public struct ContentView: View {
             logger.info("Final result: \(result.text.count) chars, duration: \(result.duration)s")
 
             // Auto post-process if enabled
-            if settings.autoPostProcess && settings.hasOpenRouterKey && !result.text.isEmpty {
+            if settings.autoPostProcess && settings.hasPostProcessingKey && !result.text.isEmpty {
                 showingPostProcessing = true
             }
         } else {

@@ -133,6 +133,7 @@ class TestflightTestersTest < Minitest::Test
     assert_empty result[:problems]
     assert_equal '11', result[:build][:number]
     assert lines.any? { |l| l.include?('build 11: IN_BETA_TESTING') }
+    assert lines.any? { |l| l.end_with?('1 invited (INVITED=1)') }
     refute lines.join.include?('@')
   end
 

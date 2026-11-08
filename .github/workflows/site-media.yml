@@ -1,7 +1,10 @@
 name: Site Media Capture
 
-# Manual capture of website screenshots and the demo video from the real Debug app.
-# Fictional History and the batch fixture only: no secrets, providers or signing.
+# Capture of website screenshots and marketing clips from the real apps on
+# GitHub-hosted runners only: the Mac Debug app (screen recording), the iPhone
+# app in the Simulator, and the Windows/Linux page tours from windows.yml and
+# linux.yml. Fictional History and fixed test text only: no secrets, providers
+# or signing. See landing-page/images/README.md.
 on:
   workflow_dispatch:
   pull_request:
@@ -10,9 +13,11 @@ on:
       - scripts/site-media/**
       - Sources/SpeakApp/CoreJourneySiteMediaFixture.swift
       - Tests/SpeakAppUITests/SiteMediaCaptureUITests.swift
+      - Tests/SpeakiOSUITests/SiteMediaCaptureUITests.swift
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: site-media-${{ github.ref }}
@@ -20,7 +25,7 @@ concurrency:
 
 jobs:
   capture:
-    name: Capture site media
+    name: Capture Mac app
     # Hosted ARM has the UI automation entitlement used by the core journey suites.
     runs-on: macos-latest
     timeout-minutes: 50
@@ -79,6 +84,7 @@ jobs:
         run: |
           pid=$(cat "$RUNNER_TEMP/screencapture.pid" 2>/dev/null || true)
           if [ -n "$pid" ]; then
+            python3 -c 'import time; print(time.time())' > "$CAPTURE/recording-stop.txt"
             kill -INT "$pid" || true
             for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
           fi
@@ -93,18 +99,154 @@ jobs:
           python3 scripts/site-media/collect-attachments.py "$CAPTURE/attachments" "$CAPTURE"
           ls -la "$CAPTURE"
 
-      - name: Render demo video
-        timeout-minutes: 8
-        run: |
-          python3 scripts/site-media/render-demo.py "$CAPTURE"
-          ffprobe -v error -show_entries format=duration:stream=width,height,codec_name \
-            "$CAPTURE/demo/speak-demo.mp4"
-
-      - name: Upload site media
+      - name: Upload Mac captures
         if: always()
         timeout-minutes: 5
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: site-media-${{ github.run_attempt }}
-          path: .artifacts/site-media
+          name: site-media-mac-${{ github.run_attempt }}
+          path: |
+            .artifacts/site-media
+            !.artifacts/site-media/SiteMedia.xcresult
+            !.artifacts/site-media/attachments
+          if-no-files-found: error
+
+  capture-ios:
+    name: Capture iPhone app (Simulator)
+    runs-on: macos-latest
+    timeout-minutes: 50
+    env:
+      CAPTURE: ${{ github.workspace }}/.artifacts/site-media-ios
+    steps:
+      - uses: actions/checkout@v7.0.1
+        timeout-minutes: 2
+        with:
+          persist-credentials: false
+
+      - name: Set up Apple toolchain
+        uses: ./.github/actions/setup-apple-toolchain
+        with:
+          install-tuist: "true"
+
+      - name: Build app and capture suite for the Simulator
+        timeout-minutes: 25
+        run: |
+          set -o pipefail
+          tuist generate --no-open
+          xcodebuild build-for-testing -workspace "Just Speak to It.xcworkspace" -scheme SpeakiOS \
+            -destination "generic/platform=iOS Simulator" -only-testing:SpeakiOSUITests/SiteMediaCaptureUITests \
+            -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" -skipPackagePluginValidation -quiet
+
+      - name: Create an owned Simulator
+        timeout-minutes: 3
+        run: |
+          python3 scripts/owned-ios-ci-simulator.py create \
+            --receipt "$RUNNER_TEMP/owned-ios-simulator.json" --github-env "$GITHUB_ENV" \
+            --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
+
+      - name: Prepare the Simulator
+        timeout-minutes: 12
+        run: |
+          python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
+          xcrun simctl status_bar "$SIMULATOR_ID" override --time 9:41 --dataNetwork wifi --wifiBars 3 \
+            --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+
+      - name: Run capture suite
+        timeout-minutes: 12
+        run: |
+          mkdir -p "$CAPTURE"
+          TEST_RUNNER_SITE_MEDIA_CAPTURE=1 xcodebuild test-without-building \
+            -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -only-testing:SpeakiOSUITests/SiteMediaCaptureUITests \
+            -resultBundlePath "$CAPTURE/SiteMedia.xcresult"
+
+      - name: Export captures from result bundle
+        if: always()
+        timeout-minutes: 3
+        run: |
+          xcrun xcresulttool export attachments --path "$CAPTURE/SiteMedia.xcresult" \
+            --output-path "$CAPTURE/attachments"
+          python3 scripts/site-media/collect-attachments.py "$CAPTURE/attachments" "$CAPTURE"
+
+      - name: Remove owned Simulator
+        if: always()
+        timeout-minutes: 2
+        run: |
+          if [ -f "$RUNNER_TEMP/owned-ios-simulator.json" ]; then
+            python3 scripts/owned-ios-ci-simulator.py cleanup --receipt "$RUNNER_TEMP/owned-ios-simulator.json" \
+              --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
+          fi
+
+      - name: Upload iPhone captures
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site-media-ios-${{ github.run_attempt }}
+          path: |
+            .artifacts/site-media-ios
+            !.artifacts/site-media-ios/SiteMedia.xcresult
+            !.artifacts/site-media-ios/attachments
+          if-no-files-found: error
+
+  render:
+    name: Render marketing clips
+    needs: [capture, capture-ios]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        timeout-minutes: 2
+        with:
+          persist-credentials: false
+
+      - name: Install ffmpeg, Pillow and Inter
+        timeout-minutes: 8
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends ffmpeg python3-pil fonts-inter
+          ffmpeg -hide_banner -encoders | grep -E 'libx264|libsvtav1|libaom' || true
+
+      - name: Download Mac and iPhone captures
+        uses: actions/download-artifact@v8
+        with:
+          pattern: site-media-*-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/downloads
+
+      - name: Fetch Windows and Linux page tours from hosted runs
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/captures"
+          mv "$RUNNER_TEMP/downloads/site-media-mac-${{ github.run_attempt }}" "$RUNNER_TEMP/captures/mac" || true
+          mv "$RUNNER_TEMP/downloads/site-media-ios-${{ github.run_attempt }}" "$RUNNER_TEMP/captures/ios" || true
+          python3 scripts/site-media/fetch-desktop-tours.py "$RUNNER_TEMP/captures"
+          ls -R "$RUNNER_TEMP/captures" | head -80
+
+      - name: Render clips
+        timeout-minutes: 15
+        run: |
+          python3 scripts/site-media/render-clips.py "$RUNNER_TEMP/captures" .artifacts/site-clips
+          cp "$RUNNER_TEMP/captures/source.json" .artifacts/site-clips/desktop-source.json
+          for clip in .artifacts/site-clips/*.mp4 .artifacts/site-clips/*.webm; do
+            ffprobe -v error -show_entries format=duration,size:stream=width,height,codec_name -of compact "$clip"
+          done
+          python3 - <<'PY'
+          import json
+          clips = {clip["name"] for clip in json.load(open(".artifacts/site-clips/manifest.json"))}
+          missing = {"hero", "corrections", "history", "models", "iphone", "windows", "linux"} - clips
+          if missing:
+              raise SystemExit(f"Clips not rendered: {sorted(missing)}")
+          PY
+
+      - name: Upload clips
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site-clips-${{ github.run_attempt }}
+          path: .artifacts/site-clips
           if-no-files-found: error

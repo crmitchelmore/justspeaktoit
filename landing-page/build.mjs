@@ -11,7 +11,7 @@ await mkdir(output, { recursive: true });
 for (const asset of [
   '_worker.js', '_routes.json', 'index.html', 'privacy.html', 'support.html', 'site.css', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png',
   'icon-192.png', 'icon-512.png', 'site.webmanifest',
-  'download-architecture.js', 'voice-motion.js', 'images', '.well-known', '_headers', '_redirects',
+  'download-architecture.js', 'voice-motion.js', 'clips.js', 'images', '.well-known', '_headers', '_redirects',
 ]) {
   await cp(new URL(asset, import.meta.url), new URL(asset, output), { recursive: true });
 }
@@ -20,7 +20,7 @@ for (const asset of [
 // Keep source previews simple while making every production build cache-safe.
 const index = new URL('index.html', output);
 let html = await readFile(index, 'utf8');
-for (const [name, extension, attribute] of [['site', 'css', 'href'], ['voice-motion', 'js', 'src']]) {
+for (const [name, extension, attribute] of [['site', 'css', 'href'], ['voice-motion', 'js', 'src'], ['clips', 'js', 'src']]) {
   const bytes = await readFile(new URL(`${name}.${extension}`, output));
   const filename = `${name}.${createHash('sha256').update(bytes).digest('hex').slice(0, 12)}.${extension}`;
   await writeFile(new URL(filename, output), bytes);

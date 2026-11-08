@@ -37,8 +37,11 @@ public enum ModelComparisonHistory {
             events.append(ApplicationHistoryEvent(kind: .transcriptionReceived, timestamp: savedAt,
                                                   description: summary))
         }
-        let latency = SessionLatencyMetrics(firstPartialMs: entry.timeToFirstPartialMs,
-                                            stopToFinalMs: entry.timeToFinalMs)
+        // File rounds time the whole request, not Stop to final, so only a
+        // streaming lane's timings map onto History's live latency fields.
+        let latency = round.inputMode == .streaming
+            ? SessionLatencyMetrics(firstPartialMs: entry.timeToFirstPartialMs, stopToFinalMs: entry.timeToFinalMs)
+            : SessionLatencyMetrics()
         return ApplicationHistoryItem(
             createdAt: round.createdAt,
             updatedAt: savedAt,

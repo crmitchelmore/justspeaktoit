@@ -60,9 +60,10 @@ final class ModelComparisonHistoryTests: XCTestCase {
         XCTAssertTrue(failed.events.contains { $0.kind == .error })
     }
 
-    func testItems_fileRoundsRecordBatchUsage() {
+    func testItems_fileRoundsRecordBatchUsageWithoutLiveLatency() {
         let items = ModelComparisonHistory.items(for: makeRound(mode: .file))
         XCTAssertTrue(items.allSatisfy { $0.modelUsages.first?.phase == .transcriptionBatch })
+        XCTAssertTrue(items.allSatisfy { $0.latency == nil }, "A request duration is not Stop-to-final latency")
     }
 
     func testItems_roundTripThroughTheExistingHistorySchema() throws {

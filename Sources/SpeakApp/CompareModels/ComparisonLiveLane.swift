@@ -142,10 +142,12 @@ final class ComparisonLiveLane {
                 accumulated.replace(with: transcript)
                 entry.transcript = accumulated.text
             case .success(nil):
-                // The client finished but confirmed nothing beyond what it
-                // already streamed: keep the live text. An empty lane is
-                // still reported below as "returned no transcript".
-                break
+                // Finished without confirming any text. Whatever is on
+                // screen is unconfirmed interim text, so keep it visible but
+                // do not let it be ranked as a result.
+                if !entry.transcript.isEmpty {
+                    entry.errorDescription = "The model finished without confirming a final transcript."
+                }
             case .failure, nil:
                 entry.errorDescription = "The model did not finish within its time limit."
             }

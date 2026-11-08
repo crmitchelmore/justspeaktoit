@@ -5,11 +5,11 @@ import XCTest
 @testable import SpeakApp
 
 /// Lane finish and error reporting for Compare Models: a client that finishes
-/// without confirming more text keeps what it streamed, and refused loopback
+/// without confirming text keeps its interim text visible but fails, and refused loopback
 /// Azure endpoints name the local proxy.
 @MainActor
 final class ComparisonLaneFinishTests: XCTestCase {
-    func testFinishWithNoConfirmedTextKeepsTheStreamedTranscriptWithoutFailing() async throws {
+    func testFinishWithNoConfirmedTextKeepsTheInterimTextButMarksTheLaneFailed() async throws {
         let route = try XCTUnwrap(LiveTranscriptionRouting.route(for: "deepgram/flux-general-en-streaming"))
         let client = NilFinishingClient()
         let lane = ComparisonLiveLane(candidate: ComparisonCandidate(
@@ -28,7 +28,7 @@ final class ComparisonLaneFinishTests: XCTestCase {
         await lane.finish(stoppedAt: Date())
 
         XCTAssertEqual(lane.entry.transcript, "Streamed words")
-        XCTAssertNil(lane.entry.errorDescription)
+        XCTAssertEqual(lane.entry.errorDescription, "The model finished without confirming a final transcript.")
         XCTAssertNotNil(lane.entry.timeToFinalMs)
     }
 

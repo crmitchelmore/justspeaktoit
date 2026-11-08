@@ -36,6 +36,7 @@ final class HistoryIssueReportLoader: ObservableObject {
     private let makeController: @MainActor (Reports) -> HistoryIssueReportController
     private var work: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
+    private var controllerChanges: AnyCancellable?
 
     convenience init(item: HistoryItem) {
         self.init(item: item, timeout: Self.defaultTimeout, generate: Self.liveGenerate) {
@@ -67,7 +68,12 @@ final class HistoryIssueReportLoader: ObservableObject {
             let reports = await Task.detached(priority: .userInitiated) { generate(item) }.value
             guard let self, !Task.isCancelled, self.isLoading else { return }
             self.deadline?.cancel()
-            self.phase = .ready(self.makeController(reports))
+            let controller = self.makeController(reports)
+            // The sheet observes only the loader, so forward the controller's changes.
+            self.controllerChanges = controller.objectWillChange.sink { [weak self] in
+                self?.objectWillChange.send()
+            }
+            self.phase = .ready(controller)
         }
         let timeout = timeout
         deadline = Task { [weak self] in

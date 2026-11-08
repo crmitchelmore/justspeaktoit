@@ -24,7 +24,7 @@ struct HistoryIssueReportPreview: View {
                     Text("The issue report took too long to prepare. Close this window and try again.")
                 }
             case .ready(let controller):
-                HistoryIssueReportContent(controller: controller, close: close)
+                readyContent(controller)
             }
         }
         .padding(24)
@@ -53,14 +53,8 @@ struct HistoryIssueReportPreview: View {
             }
         }
     }
-}
 
-@MainActor
-private struct HistoryIssueReportContent: View {
-    @ObservedObject var controller: HistoryIssueReportController
-    let close: () -> Void
-
-    var body: some View {
+    private func readyContent(_ controller: HistoryIssueReportController) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Review Public Issue Report")
                 .font(.title2.bold())

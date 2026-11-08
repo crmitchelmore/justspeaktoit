@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SpeakCore
 import XCTest
@@ -16,7 +17,11 @@ final class HistoryIssueReportLoaderTests: XCTestCase {
         }
         XCTAssertEqual(controller.report.jsonData, HistoryIssueReporter.report(for: item).jsonData)
         XCTAssertFalse(controller.report.body.isEmpty)
+        var loaderChanges = 0
+        let subscription = loader.objectWillChange.sink { loaderChanges += 1 }
+        defer { subscription.cancel() }
         controller.setIncludesDiagnostics(false)
+        XCTAssertGreaterThan(loaderChanges, 0, "The sheet observes the loader, so it must see controller changes")
         XCTAssertEqual(
             controller.report.jsonData,
             HistoryIssueReporter.report(for: item, includeDiagnostics: false).jsonData

@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
   <title>Support — JustSpeakToIt</title>
   <meta name="description" content="Get help with Just Speak to It on iPhone, iPad and Mac. Contact support and troubleshoot recording, permissions and provider keys.">
   <meta name="robots" content="index,follow">
@@ -14,15 +15,28 @@
   <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&amp;f[]=general-sans@400,500,600&amp;display=swap" rel="stylesheet">
   <style>
     :root {
-      color-scheme: dark;
+      color-scheme: light dark;
       --bg: #121417;
       --surface: #191c21;
       --text: #f5f3f0;
       --muted: #adb4bd;
       --accent: #ff9166;
       --border: rgba(255, 255, 255, 0.1);
+      --nav-bg: rgba(18, 20, 23, 0.88);
       --display: 'Cabinet Grotesk', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
       --body: 'General Sans', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f7f5f2;
+        --surface: #ffffff;
+        --text: #16181c;
+        --muted: #464d56;
+        --accent: #b23d14;
+        --border: rgba(22, 24, 28, 0.12);
+        --nav-bg: rgba(247, 245, 242, 0.88);
+      }
     }
 
     * { box-sizing: border-box; }
@@ -42,7 +56,7 @@
 
     .nav {
       border-bottom: 1px solid var(--border);
-      background: rgba(18, 20, 23, 0.88);
+      background: var(--nav-bg);
       backdrop-filter: blur(18px);
     }
 

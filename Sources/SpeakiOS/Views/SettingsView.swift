@@ -363,6 +363,7 @@ public struct SettingsView: View {
                 } label: {
                     HStack {
                         Label("Action Button & Shortcuts", systemImage: "button.programmable")
+                            .layoutPriority(1)
                         Spacer()
                         Text(settings.hardwareTriggerDestination.displayName)
                             .foregroundStyle(.secondary)
@@ -404,6 +405,7 @@ public struct SettingsView: View {
                 } label: {
                     HStack {
                         Label("Model & Prompt", systemImage: "slider.horizontal.3")
+                            .layoutPriority(1)
                         Spacer()
                         Text(postProcessingModelName)
                             .foregroundStyle(.secondary)
@@ -427,6 +429,7 @@ public struct SettingsView: View {
                     } label: {
                         HStack {
                             Label("Paid Access", systemImage: "creditcard")
+                                .layoutPriority(1)
                             Spacer()
                             Text(PaidAccessStore.shared.entitlement.status.displayName)
                                 .foregroundStyle(.secondary)

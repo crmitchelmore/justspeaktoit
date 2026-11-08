@@ -89,6 +89,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   private let now: @MainActor () -> Date
   private let warmAudio: @MainActor (CaptureWarmContext, Bool) async -> Void
   private let invalidateAudio: @MainActor () async -> Void
+  private let warmSpeechAnalyzer: @MainActor (_ modelID: String, _ localeIdentifier: String) -> Void
 
   private var streamTracker = LiveStreamWarmTracker()
   private var isSessionActive = false
@@ -102,6 +103,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   private var audioWarmGeneration = 0
   private var knownRecordingsDirectory: URL?
   private var endpointProbeTask: Task<Void, Never>?
+  private var warmedSpeechAnalyzerKey: String?
 
   init(
     appSettings: AppSettings,
@@ -115,7 +117,8 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     notificationCenter: NotificationCenter? = nil,
     now: (@MainActor () -> Date)? = nil,
     warmAudio: (@MainActor (CaptureWarmContext, Bool) async -> Void)? = nil,
-    invalidateAudio: (@MainActor () async -> Void)? = nil
+    invalidateAudio: (@MainActor () async -> Void)? = nil,
+    warmSpeechAnalyzer: (@MainActor (String, String) -> Void)? = nil
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
@@ -137,6 +140,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.invalidateAudio = invalidateAudio ?? {
       await audioFileManager.invalidateWarmRecorder()
     }
+    self.warmSpeechAnalyzer = warmSpeechAnalyzer ?? Self.prewarmSpeechAnalyzer
   }
 
   func start() {
@@ -165,6 +169,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   /// from any trigger; it no-ops when nothing has changed.
   func warmUp() {
     guard self.isStarted, !self.isInvalidated, !self.isSessionActive else { return }
+    self.reconcileSpeechAnalyzerWarmUp()
     self.permissionsManager.refresh(.microphone)
     guard self.permissionsManager.status(for: .microphone).isGranted else {
       self.reconcileAudioWarmUp()
@@ -266,6 +271,43 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
       requiresDefaultDeviceSwitch: requiresSwitch,
       microphonePermissionGranted: self.permissionsManager.status(for: .microphone).isGranted
     )
+  }
+
+  // MARK: - On-device SpeechAnalyzer model
+
+  /// Loads the selected SpeechAnalyzer model before the first recording, and
+  /// again after a model, locale or permission change (issue #614). The model
+  /// is retained for the app's lifetime, so one warm-up per selection is
+  /// enough; it never downloads assets and never opens the microphone.
+  private func reconcileSpeechAnalyzerWarmUp() {
+    let model = self.appSettings.liveTranscriptionModel
+    guard self.appSettings.transcriptionMode == .liveNative,
+      AppleLocalModels.isSpeechAnalyzerModel(model),
+      self.permissionsManager.status(for: .speechRecognition).isGranted
+    else {
+      self.warmedSpeechAnalyzerKey = nil
+      return
+    }
+    let locale = self.appSettings.preferredModelLanguage ?? self.appSettings.resolvedPreferredLocaleIdentifier
+    let key = "\(model)|\(locale)"
+    guard self.warmedSpeechAnalyzerKey != key else { return }
+    self.warmedSpeechAnalyzerKey = key
+    self.warmSpeechAnalyzer(model, locale)
+  }
+
+  private static func prewarmSpeechAnalyzer(modelID: String, localeIdentifier: String) {
+    guard #available(macOS 26.0, *) else { return }
+    Task.detached(priority: .utility) {
+      do {
+        try await AppleSpeechAnalyzerWarmup.prewarm(
+          engine: AppleSpeechAnalyzerEngine(modelID: modelID),
+          localeIdentifier: localeIdentifier
+        )
+      } catch {
+        SpeakLogger.logger(category: "CaptureWarm").info(
+          "SpeechAnalyzer warm-up skipped: \(error.localizedDescription, privacy: .public)")
+      }
+    }
   }
 
   // MARK: - Streaming endpoint
@@ -424,6 +466,7 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
       queue: .main
     ) { [weak self] _ in
       Task { @MainActor [weak self] in
+        self?.warmedSpeechAnalyzerKey = nil
         self?.invalidateEndpointWarmUp()
         self?.warmUp()
       }

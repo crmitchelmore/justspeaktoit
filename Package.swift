@@ -39,6 +39,7 @@ let appleCoreSources: [String] = [
     "AppGroupAvailability.swift",
     "AppleSpeechAnalyzerLiveSession.swift",
     "AppleSpeechAnalyzerTranscriber.swift",
+    "AppleSpeechAnalyzerWarmup.swift",
     "AppleSpeechAssets.swift",
     "AppleSpeechDependencyWait.swift",
     "AppleSpeechDetector.swift",

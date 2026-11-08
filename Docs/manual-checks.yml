@@ -151,14 +151,14 @@ sessions:
       - id: "mac-speechanalyzer-latency"
         issues:
           - 614
-        title: "SpeechTranscriber shows first words no later than Apple Speech"
-        minutes: 8
+        title: "SpeechTranscriber shows first words no later than Apple Dictation"
+        minutes: 5
         core: false
-        build: "Just Speak to It for Mac, Alpha build 61 or later, macOS 26 or later"
+        build: "Just Speak to It for Mac, Alpha build 64 or later with the SpeechTranscriber warm-up fix, macOS 26 or later"
         steps:
           - "Settings \u203a Transcription \u203a Local \u203a Streaming: choose Apple SpeechTranscriber (On-device)."
-          - "In TextEdit, read the same paragraph (about 30 seconds) three times, one recording each."
-          - "Choose Apple Speech (On-device) and read the same paragraph three more times."
+          - "In TextEdit, read the same short paragraph three times, one recording each. About 6 seconds per recording is enough."
+          - "Choose Apple Dictation and read the same paragraph three more times."
           - "Mark this Pass. An agent then compares first-words latency for the two models using only the numeric latency fields in History."
         expected: "Six recordings exist, three per model. The agent posts both first-words p50 values on #614 and closes it if SpeechTranscriber\u2019s is the same or lower and iphone-hands-free has passed."
         final_gate: false

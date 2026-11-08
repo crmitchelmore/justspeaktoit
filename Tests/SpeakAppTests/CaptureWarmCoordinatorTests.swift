@@ -143,13 +143,62 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
         XCTAssertNil(harness.scheduler.delay)
     }
 
+    func testSpeechAnalyzerModel_IsWarmedOncePerSelectionAndNotDuringASession() async {
+        self.defaults.set(AppleLocalModels.speechTranscriberModelID, forKey: "liveTranscriptionModel")
+        let harness = self.makeHarness(speechStatus: .granted)
+        harness.coordinator.start()
+        await self.waitUntil { harness.speechWarms.calls.count == 1 }
+        XCTAssertEqual(harness.speechWarms.calls.first?.model, AppleLocalModels.speechTranscriberModelID)
+        XCTAssertEqual(
+            harness.speechWarms.calls.first?.locale,
+            harness.settings.preferredModelLanguage ?? harness.settings.resolvedPreferredLocaleIdentifier
+        )
+
+        harness.coordinator.sessionWillBegin()
+        harness.settings.liveTranscriptionModel = AppleLocalModels.dictationTranscriberModelID
+        await self.drainTasks()
+        XCTAssertEqual(harness.speechWarms.calls.count, 1, "warm-up must not compete with a live capture")
+
+        harness.coordinator.sessionDidEnd()
+        harness.coordinator.warmUp()
+        await self.drainTasks()
+        XCTAssertEqual(harness.speechWarms.calls.map(\.model), [
+            AppleLocalModels.speechTranscriberModelID,
+            AppleLocalModels.dictationTranscriberModelID
+        ])
+        await harness.coordinator.invalidate()
+    }
+
+    func testSpeechAnalyzerModel_IsNotWarmedWithoutSpeechPermissionOrForCloudModels() async {
+        self.defaults.set(AppleLocalModels.speechTranscriberModelID, forKey: "liveTranscriptionModel")
+        let denied = self.makeHarness(speechStatus: .denied)
+        denied.coordinator.start()
+        await self.drainTasks()
+        XCTAssertTrue(denied.speechWarms.calls.isEmpty)
+        await denied.coordinator.invalidate()
+
+        self.defaults.set("deepgram/nova-3-streaming", forKey: "liveTranscriptionModel")
+        let cloud = self.makeHarness(speechStatus: .granted)
+        cloud.coordinator.start()
+        await self.drainTasks(untilProbeCount: 1, in: cloud.warmer)
+        XCTAssertTrue(cloud.speechWarms.calls.isEmpty)
+        await cloud.coordinator.invalidate()
+    }
+
     private func makeHarness(
         microphoneStatus: PermissionStatus = .granted,
+        speechStatus: PermissionStatus = .denied,
         now: @escaping @MainActor () -> Date = Date.init
     ) -> Harness {
         let settings = AppSettings(defaults: self.defaults)
         let permissions = PermissionsManager(
-            statusProvider: { type in type == .microphone ? microphoneStatus : .denied },
+            statusProvider: { type in
+                switch type {
+                case .microphone: return microphoneStatus
+                case .speechRecognition: return speechStatus
+                default: return .denied
+                }
+            },
             notificationCenter: NotificationCenter()
         )
         let audioDevices = AudioInputDeviceManager(appSettings: settings)
@@ -163,6 +212,7 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
         let network = CaptureWarmNetworkMonitorSpy()
         let audioInvalidation = AudioInvalidationSpy()
         let workspaceCenter = NotificationCenter()
+        let speechWarms = SpeechAnalyzerWarmSpy()
         let coordinator = CaptureWarmCoordinator(
             appSettings: settings,
             permissionsManager: permissions,
@@ -175,7 +225,8 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
             notificationCenter: NotificationCenter(),
             now: now,
             warmAudio: { _, _ in },
-            invalidateAudio: { audioInvalidation.record() }
+            invalidateAudio: { audioInvalidation.record() },
+            warmSpeechAnalyzer: { speechWarms.record(model: $0, locale: $1) }
         )
         return Harness(
             coordinator: coordinator,
@@ -184,7 +235,8 @@ final class CaptureWarmCoordinatorTests: XCTestCase {
             scheduler: scheduler,
             network: network,
             audioInvalidation: audioInvalidation,
-            workspaceCenter: workspaceCenter
+            workspaceCenter: workspaceCenter,
+            speechWarms: speechWarms
         )
     }
 
@@ -224,6 +276,16 @@ private struct Harness {
     let network: CaptureWarmNetworkMonitorSpy
     let audioInvalidation: AudioInvalidationSpy
     let workspaceCenter: NotificationCenter
+    let speechWarms: SpeechAnalyzerWarmSpy
+}
+
+@MainActor
+private final class SpeechAnalyzerWarmSpy {
+    private(set) var calls: [(model: String, locale: String)] = []
+
+    func record(model: String, locale: String) {
+        self.calls.append((model, locale))
+    }
 }
 
 private actor EndpointWarmCalls {

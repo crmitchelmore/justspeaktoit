@@ -6,12 +6,14 @@ Usage: render-clips.py <captures> <output> [--only name ...]
 <captures> holds one folder per platform, produced on hosted CI runners by
 .github/workflows/site-media.yml:
   mac/      screen.mov, marks.json, recording-start.txt  (real Debug app, UI test)
-  ios/      screen.mp4, marks.json, recording-start.txt  (Simulator, UI test)
+  ios/      ios-*.png  (full-screen Simulator screenshots from the UI test)
   windows/  NN-page.bmp or .png  (windows.yml --ui-screenshots tour)
   linux/    NN-page.png          (linux.yml page screenshots)
 
-Recorded scenes are cut from the unedited screen recordings at the UI tests'
-scene marks; stills are shown unretouched and never enlarged beyond 1x. The
+Mac scenes are cut from the unedited screen recording at the UI test's scene marks;
+stills are shown unretouched and never enlarged beyond 1x. (The Simulator's own
+recorder writes variable-frame-rate video that drifts 9-17 s from the test clock, so
+iPhone scenes use the test's exact screenshots instead.) The
 only additions are title cards and a platform badge. Every clip is silent and
 gets an H.264 MP4, an AV1 WebM (VP9 if no AV1 encoder), a WebP poster and
 WebVTT captions. Rendering is deterministic for the same inputs and fonts.
@@ -124,14 +126,13 @@ CLIPS = {
         "alt": "The iPhone app: tap record, see the words, copy them, then on-device and Action Button settings",
         "scenes": [
             card("Speak on the go", "Just Speak to It for iPhone", 2.0,
-                 "Just Speak to It for iPhone, recorded in the iOS Simulator. " + SYNTHETIC),
-            cut("ready", 0.5, "recording", 0.3, "Tap the button to start"),
-            cut("recording", 0.3, "stopped", 0.5,
-                "Words appear as you speak. The Simulator uses fixed test text, not a microphone"),
-            cut("stopped", 0.5, "copied", 2.0, "Stop, then copy the text into any app"),
-            cut("models", 0.0, "models", 3.0, "Use Apple\u2019s on-device speech, or a cloud model"),
-            cut("action-button", 0.0, "end", 0.0,
-                "Set what the Action Button and Shortcuts do with the words"),
+                 "Just Speak to It for iPhone, captured in the iOS Simulator. " + SYNTHETIC),
+            still("ios:ios-ready", 2.5, "Tap the button to start"),
+            still("ios:ios-recording", 3.5,
+                  "Words appear as you speak. The Simulator uses fixed test text, not a microphone"),
+            still("ios:ios-transcript", 3.0, "Stop, then copy the text into any app"),
+            still("ios:ios-models", 3.5, "Use Apple\u2019s on-device speech, or a cloud model"),
+            still("ios:ios-action-button", 3.5, "Set what the Action Button and Shortcuts do with the words"),
             card("Just Speak to It", "iPhone details at justspeaktoit.com", 2.0,
                  "Just Speak to It for iPhone. Details at justspeaktoit.com"),
         ],
@@ -278,8 +279,7 @@ def load_marks(folder, screen):
     stop_file = folder / "recording-stop.txt"
     if stop_file.exists():
         # screencapture writes its first frame some seconds after it starts, so its
-        # timeline is anchored to the stop request: video end == stop. (The Simulator
-        # stamps its start when recordVideo reports it has started instead.)
+        # timeline is anchored to the stop request: video end == stop.
         duration = float(subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(screen)],
             capture_output=True, text=True, check=True).stdout.strip())
@@ -340,7 +340,7 @@ def render_clip(name, spec, captures, output, work):
     size, badge = spec["size"], spec["badge"]
     folder = captures / spec["source"]
     marks, screen = {}, None
-    if spec["source"] in ("mac", "ios"):
+    if spec["source"] == "mac":
         screen = recording(folder)
         if screen is None or not (folder / "marks.json").exists():
             print(f"skip {name}: no {spec['source']} recording", file=sys.stderr)

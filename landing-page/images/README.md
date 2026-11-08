@@ -37,10 +37,13 @@ GitHub-hosted runners, never the owner's machine:
   because the runner cannot grant Accessibility. It also tours Corrections
   (three fictional rules), Transcription and Post-processing. Scenes are cut at the test's marks and cropped 1:1 to the
   window frames it records; frames are never enlarged or retouched.
-- iPhone: `xcrun simctl io recordVideo` of the Debug app in an owned
-  Simulator, driven by `Tests/SpeakiOSUITests/SiteMediaCaptureUITests.swift`.
-  The Simulator transcript hook returns fixed fictional text instead of a
-  microphone and transcriber, and the captions say so.
+- iPhone: full-screen screenshots of the Debug app in an owned Simulator,
+  saved by `Tests/SpeakiOSUITests/SiteMediaCaptureUITests.swift` at each step
+  and shown as unretouched stills. (`simctl io recordVideo` writes
+  variable-frame-rate video that drifts 9-17 s from the test clock, so it
+  cannot be cut reliably.) The Simulator transcript hook returns fixed
+  fictional text instead of a microphone and transcriber, and the captions
+  say so.
 - Windows and Linux: unretouched page screenshots from the native apps'
   `--ui-screenshots` tours in `windows.yml` and `linux.yml` (sample History),
   fetched from the newest successful `main` run whose job ran on a hosted

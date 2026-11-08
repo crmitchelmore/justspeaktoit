@@ -1,10 +1,10 @@
 import XCTest
 
-/// Drives the real iPhone app on the Simulator while the site-media workflow
-/// records the screen. The deterministic `JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT`
+/// Drives the real iPhone app on the Simulator and saves full-screen screenshots for
+/// the website clips. The deterministic `JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT`
 /// hook stands in for the microphone and transcriber, so the text is fictional
 /// and fixed. Skipped unless the workflow passes TEST_RUNNER_SITE_MEDIA_CAPTURE;
-/// not a qualification gate. Scene marks are attachments the workflow exports.
+/// not a qualification gate. Screenshots are attachments the workflow exports.
 final class SiteMediaCaptureUITests: XCTestCase {
     private static let transcript =
         "Pick up oat milk and lemons on the way home, and move the team lunch to Thursday."

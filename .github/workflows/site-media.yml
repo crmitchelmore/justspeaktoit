@@ -146,46 +146,20 @@ jobs:
 
       - name: Prepare the Simulator
         timeout-minutes: 12
-        run: python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
-
-      - name: Start Simulator recording
-        timeout-minutes: 2
         run: |
-          mkdir -p "$CAPTURE"
+          python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
           xcrun simctl status_bar "$SIMULATOR_ID" override --time 9:41 --dataNetwork wifi --wifiBars 3 \
             --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
-          xcrun simctl io "$SIMULATOR_ID" recordVideo --codec=h264 --force "$CAPTURE/screen.mp4" \
-            > "$CAPTURE/recordVideo.log" 2>&1 &
-          echo $! > "$RUNNER_TEMP/recordVideo.pid"
-          # The video's first frame is written when recordVideo reports it has started;
-          # its file is variable frame rate, so its end cannot anchor the timeline.
-          for _ in $(seq 1 300); do
-            grep -q "Recording started" "$CAPTURE/recordVideo.log" && break
-            sleep 0.1
-          done
-          python3 -c 'import time; print(time.time())' > "$CAPTURE/recording-start.txt"
-          grep -q "Recording started" "$CAPTURE/recordVideo.log"
-          kill -0 "$(cat "$RUNNER_TEMP/recordVideo.pid")"
 
       - name: Run capture suite
         timeout-minutes: 12
         run: |
+          mkdir -p "$CAPTURE"
           TEST_RUNNER_SITE_MEDIA_CAPTURE=1 xcodebuild test-without-building \
             -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -only-testing:SpeakiOSUITests/SiteMediaCaptureUITests \
             -resultBundlePath "$CAPTURE/SiteMedia.xcresult"
-
-      - name: Stop Simulator recording
-        if: always()
-        timeout-minutes: 2
-        run: |
-          pid=$(cat "$RUNNER_TEMP/recordVideo.pid" 2>/dev/null || true)
-          if [ -n "$pid" ]; then
-            kill -INT "$pid" || true
-            for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
-          fi
-          ls -la "$CAPTURE" || true
 
       - name: Export captures from result bundle
         if: always()

@@ -75,7 +75,10 @@ The page loads no clip data until someone presses play (`preload="none"`).
 `clips.js` serves the variant matching the visitor's `prefers-color-scheme`,
 switches it live (keeping the playback position) when the scheme changes, and
 defers each poster until its clip nears the viewport; without JavaScript the
-`<source media>` queries pick the variant. PAGE_WEIGHT
+`<source media>` queries pick the variant. Initial page weight is only the visible posters (all 7
+posters are about 170 KiB per appearance); a played clip costs about
+0.3–0.5 MiB as AV1 WebM, or a little more as the H.264 MP4 fallback. Each
+appearance totals about 2.6 MiB of WebM across all seven clips.
 
 Earlier captures that showed the developer's own usage and dictation
 (app-dashboard.png, app-history.png) and superseded captures were removed.

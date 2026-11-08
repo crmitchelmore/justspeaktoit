@@ -1,22 +1,22 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:02.533
-Just Speak to It for Windows, in beta. Sample data: fictional History and fixed test text.
+00:00:00.000 --> 00:00:05.900
+Just Speak to It is now on Windows, in beta. Everything here is sample data.
 
-00:00:02.533 --> 00:00:05.533
-The dashboard shows your shortcut, model and recent text
+00:00:05.900 --> 00:00:10.900
+The dashboard shows your shortcut, model and latest text.
 
-00:00:05.533 --> 00:00:08.533
-Press Ctrl+Alt+Space in any app to start
+00:00:10.900 --> 00:00:16.067
+Press Ctrl+Alt+Space in any app to start.
 
-00:00:08.533 --> 00:00:11.533
-A small overlay shows the words as you speak
+00:00:16.067 --> 00:00:19.467
+A small overlay shows the words as you speak.
 
-00:00:11.533 --> 00:00:14.067
-Stop, and the text goes back into the window you were in
+00:00:19.467 --> 00:00:23.733
+Stop, and the text goes back into the window you were in.
 
-00:00:14.067 --> 00:00:17.067
-Choose the microphone, text output, and the speak CLI and MCP
+00:00:23.733 --> 00:00:31.067
+Settings cover the microphone, text output, and the speak CLI and MCP server.
 
-00:00:17.067 --> 00:00:19.600
-Windows beta. Download at justspeaktoit.com
+00:00:31.067 --> 00:00:35.033
+Download the Windows beta at justspeaktoit.com.

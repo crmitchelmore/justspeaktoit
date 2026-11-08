@@ -1,39 +1,44 @@
 [
   {
     "name": "hero",
-    "duration": 37.43,
     "width": 1280,
     "height": 720,
     "alt": "Dictating into a text field on a Mac, then finding the text in History",
     "badge": null,
-    "scenes": 9,
+    "scenes": 8,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "hero-poster.webp": 20940,
-      "hero.en.vtt": 854,
-      "hero.mp4": 418812,
-      "hero.webm": 374072
-    }
+      "hero-dark-poster.webp": 17274,
+      "hero-dark.mp4": 659094,
+      "hero-dark.webm": 541233,
+      "hero-light-poster.webp": 20956,
+      "hero-light.mp4": 727413,
+      "hero-light.webm": 554965,
+      "hero.en.vtt": 733
+    },
+    "duration": 43.57
   },
   {
     "name": "corrections",
-    "duration": 14.37,
     "width": 1280,
     "height": 720,
     "alt": "The Corrections page on Mac listing preferred spellings for names and jargon",
     "badge": null,
-    "scenes": 3,
+    "scenes": 4,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "corrections-poster.webp": 23228,
-      "corrections.en.vtt": 330,
-      "corrections.mp4": 191316,
-      "corrections.webm": 151899
-    }
+      "corrections-dark-poster.webp": 21488,
+      "corrections-dark.mp4": 255945,
+      "corrections-dark.webm": 220918,
+      "corrections-light-poster.webp": 23226,
+      "corrections-light.mp4": 285077,
+      "corrections-light.webm": 222853,
+      "corrections.en.vtt": 328
+    },
+    "duration": 17.43
   },
   {
     "name": "history",
-    "duration": 12.8,
     "width": 1280,
     "height": 720,
     "alt": "History on Mac and Linux: every past dictation with its model, length and actions",
@@ -41,31 +46,37 @@
     "scenes": 4,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "history-poster.webp": 36232,
-      "history.en.vtt": 413,
-      "history.mp4": 160073,
-      "history.webm": 183316
-    }
+      "history-dark-poster.webp": 34900,
+      "history-dark.mp4": 337910,
+      "history-dark.webm": 365936,
+      "history-light-poster.webp": 35856,
+      "history-light.mp4": 436346,
+      "history-light.webm": 364162,
+      "history.en.vtt": 380
+    },
+    "duration": 20.83
   },
   {
     "name": "models",
-    "duration": 20.07,
     "width": 1280,
     "height": 720,
-    "alt": "Transcription and clean-up settings: on-device models alongside cloud providers",
+    "alt": "Transcription and clean-up settings on Mac: on-device models alongside cloud providers",
     "badge": null,
-    "scenes": 5,
+    "scenes": 4,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "models-poster.webp": 30352,
-      "models.en.vtt": 516,
-      "models.mp4": 219390,
-      "models.webm": 246128
-    }
+      "models-dark-poster.webp": 30500,
+      "models-dark.mp4": 293208,
+      "models-dark.webm": 273666,
+      "models-light-poster.webp": 30158,
+      "models-light.mp4": 347697,
+      "models-light.webm": 273259,
+      "models.en.vtt": 371
+    },
+    "duration": 18.67
   },
   {
     "name": "iphone",
-    "duration": 20.13,
     "width": 640,
     "height": 1280,
     "alt": "The iPhone app: tap record, see the words, copy them, then on-device and Action Button settings",
@@ -73,42 +84,52 @@
     "scenes": 7,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "iphone-poster.webp": 12946,
-      "iphone.en.vtt": 644,
-      "iphone.mp4": 169347,
-      "iphone.webm": 195537
-    }
+      "iphone-dark-poster.webp": 13026,
+      "iphone-dark.mp4": 420597,
+      "iphone-dark.webm": 393010,
+      "iphone-light-poster.webp": 13092,
+      "iphone-light.mp4": 469818,
+      "iphone-light.webm": 383404,
+      "iphone.en.vtt": 582
+    },
+    "duration": 30.8
   },
   {
     "name": "windows",
-    "duration": 19.6,
     "width": 1280,
     "height": 720,
-    "alt": "The Windows beta: dashboard, recording overlay, completed overlay and settings",
+    "alt": "The Windows beta: dashboard, shortcut, recording overlay, completed overlay and settings",
     "badge": "Windows \u00b7 Beta",
     "scenes": 7,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "windows-poster.webp": 30170,
-      "windows.en.vtt": 621,
-      "windows.mp4": 205136,
-      "windows.webm": 209685
-    }
+      "windows-dark-poster.webp": 29888,
+      "windows-dark.mp4": 523804,
+      "windows-dark.webm": 460379,
+      "windows-light-poster.webp": 22810,
+      "windows-light.mp4": 587153,
+      "windows-light.webm": 457794,
+      "windows.en.vtt": 631
+    },
+    "duration": 35.03
   },
   {
     "name": "linux",
-    "duration": 19.6,
     "width": 1280,
     "height": 720,
-    "alt": "The Linux beta: GTK dashboard, recording overlay, History and on-device models",
+    "alt": "The Linux beta: GTK dashboard, shortcut, recording overlay, completed overlay and settings",
     "badge": "Linux \u00b7 Beta",
     "scenes": 7,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "linux-poster.webp": 23878,
-      "linux.en.vtt": 594,
-      "linux.mp4": 174759,
-      "linux.webm": 196517
-    }
+      "linux-dark-poster.webp": 23950,
+      "linux-dark.mp4": 449182,
+      "linux-dark.webm": 407144,
+      "linux-light-poster.webp": 35294,
+      "linux-light.mp4": 546782,
+      "linux-light.webm": 434235,
+      "linux.en.vtt": 606
+    },
+    "duration": 31.27
   }
 ]

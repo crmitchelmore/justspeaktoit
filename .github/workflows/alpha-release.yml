@@ -103,6 +103,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: testflight-testers
+    # Same lane as the reconciler and manual tester job: enrolment writes and
+    # pending-invitation rollback must never interleave.
+    concurrency:
+      group: apple-release-observation
+      queue: max
+      cancel-in-progress: false
     permissions:
       contents: read
     env:

@@ -40,6 +40,7 @@ jobs:
     # Shares the reconciler's lane so beta review submission is never raced.
     concurrency:
       group: apple-release-observation
+      queue: max
       cancel-in-progress: false
     env:
       APP_STORE_CONNECT_KEY_ID: S747NJ9DZY

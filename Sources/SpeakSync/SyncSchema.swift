@@ -138,14 +138,15 @@ enum KeySyncMetadataRecordField {
     static let updatedAt = "updatedAt"
 }
 
-/// The two existing CloudKit containers. iOS and macOS use different
-/// containers, so History syncs within a platform family and never across it
-/// (see `Docs/Architecture.md`). A client joins one family explicitly;
-/// consolidating them would be a data migration, which no client performs.
+/// The two existing CloudKit containers. `macOS` is the shared container
+/// (#1119): Windows, Linux and the Mac App Store build use it, and iOS builds
+/// with the shared-container flag join it. `iOS` is the legacy iPhone
+/// container, kept until the move is verified on devices
+/// (`Docs/cloudkit-shared-container.md`).
 public enum SyncContainerFamily: String, CaseIterable, Sendable {
-    /// Mac App Store History, Compare Models rounds and encrypted API keys.
+    /// The shared container: History, Compare Models rounds and encrypted API keys.
     case macOS
-    /// iPhone and iPad History and encrypted API keys.
+    /// Legacy iPhone and iPad History and encrypted API keys.
     case iOS
 
     /// The container identifier for this family in a release train, read from

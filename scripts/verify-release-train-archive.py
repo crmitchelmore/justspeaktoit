@@ -33,8 +33,10 @@ def signed_entitlements(bundle):
 
 if surface != 'mac-direct':
     entitlements = signed_entitlements(app)
-    cloud = config['iosCloudContainer' if surface == 'ios' else 'macCloudContainer']
-    if entitlements.get('com.apple.developer.icloud-container-identifiers') != [cloud]:
+    cloud = [config['iosCloudContainer' if surface == 'ios' else 'macCloudContainer']]
+    if surface == 'ios' and info.get('SpeakSharedCloudContainer') is True:
+        cloud.append(config['macCloudContainer'])  # #1119: iPhone joins the Mac container
+    if entitlements.get('com.apple.developer.icloud-container-identifiers') != cloud:
         raise SystemExit('Signed archive has the wrong CloudKit containers')
     kv = config['iosKVStoreIdentifier' if surface == 'ios' else 'macKVStoreIdentifier']
     if entitlements.get('com.apple.developer.ubiquity-kvstore-identifier', '').split('.', 1)[-1] != kv:

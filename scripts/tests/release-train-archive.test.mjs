@@ -25,6 +25,13 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
   assert.throws(verify,error=>error.stderr.toString().includes('unavailable local-network feature'));
  }
  plist(join(app,'Info.plist'),info);assert.match(verify().toString(),/Verified ios alpha/);
+ const shared={...entitlements,'com.apple.developer.icloud-container-identifiers':['iCloud.com.justspeaktoit.ios.alpha','iCloud.com.justspeaktoit.alpha']};
+ plist(join(app,'signed.plist'),shared);
+ assert.throws(verify,error=>error.stderr.toString().includes('wrong CloudKit containers'));
+ plist(join(app,'Info.plist'),{...info,SpeakSharedCloudContainer:true});assert.match(verify().toString(),/Verified ios alpha/);
+ plist(join(app,'signed.plist'),entitlements);
+ assert.throws(verify,error=>error.stderr.toString().includes('wrong CloudKit containers'));
+ plist(join(app,'Info.plist'),info);
  plist(join(app,'signed.plist'),{...entitlements,'com.apple.developer.ubiquity-kvstore-identifier':'TEAM.com.justspeaktoit.ios'});
  assert.throws(verify,error=>error.stderr.toString().includes('wrong iCloud key-value store'));
  plist(join(app,'signed.plist'),entitlements);catalogue.entries[0].markdown='Changed';writeFileSync(join(ext,'ReleaseNotes.json'),JSON.stringify(catalogue));

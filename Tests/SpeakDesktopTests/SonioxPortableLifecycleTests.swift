@@ -184,7 +184,7 @@ final class SonioxPortableLifecycleTests: XCTestCase {
         XCTAssertEqual(socket.binary, [opening], "The opening audio survives a stop before ready")
         socket.completeSend()
         socket.completeSend() // finalize
-        XCTAssertEqual(socket.binary.last, Data(), "End-of-stream follows the drained opening audio")
+        XCTAssertEqual(socket.controls.last, "", "End-of-stream follows the drained opening audio")
         socket.completeSend()
         socket.emit(Self.tokens([(text: "Opening words.", final: true)]))
         socket.emit(Self.finished())

@@ -60,7 +60,8 @@ final class SonioxControllerWireTests: XCTestCase {
         fixture.socket.completeSend()
         XCTAssertEqual(fixture.socket.controls.last, #"{"type":"finalize"}"#, "Finalize follows the drained audio")
         fixture.socket.completeSend()
-        XCTAssertEqual(fixture.socket.binary, [pcm, Data()])
+        XCTAssertEqual(fixture.socket.binary, [pcm], "End-of-stream is not an audio frame")
+        XCTAssertEqual(fixture.socket.controls.last, "", "Soniox ends a stream on an empty text frame")
         fixture.socket.completeSend()
         fixture.socket.emit(#"{"tokens":[{"text":" world.","is_final":true}],"finished":true}"#)
         let snapshot = await finished.value

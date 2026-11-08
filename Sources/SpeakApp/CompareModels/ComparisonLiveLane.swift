@@ -65,7 +65,7 @@ final class ComparisonLiveLane {
             onError: { [weak self] error in
                 Task { @MainActor [weak self] in
                     guard let self, self.entry.id == entryID, !self.abandoned else { return }
-                    self.entry.errorDescription = error.localizedDescription
+                    self.entry.errorDescription = Self.describe(error, modelID: self.candidate.modelID)
                 }
             }
         )
@@ -133,14 +133,20 @@ final class ComparisonLiveLane {
         if let finalizing = client as? FinalizingStreamingTranscriptionClient {
             // The catalogue budget is the provider's own finalisation
             // allowance; the floor covers providers that declare none.
-            let seconds = max(ModelCatalog.liveCapabilities(for: candidate.modelID).postStopFinalizeBudget, 8)
-            let budget = Duration.seconds(seconds)
-            let outcome = await BoundedOperation.run(timeout: budget) { await finalizing.finishAndWait() }
+            let outcome = await BoundedOperation.run(timeout: Self.finishBudget(for: candidate.modelID)) {
+                await finalizing.finishAndWait()
+            }
             guard !abandoned else { return }
-            if case .success(let transcript?) = outcome {
+            switch outcome {
+            case .success(let transcript?):
                 accumulated.replace(with: transcript)
                 entry.transcript = accumulated.text
-            } else {
+            case .success(nil):
+                // The client finished but confirmed nothing beyond what it
+                // already streamed: keep the live text. An empty lane is
+                // still reported below as "returned no transcript".
+                break
+            case .failure, nil:
                 entry.errorDescription = "The model did not finish within its time limit."
             }
             client.stop()
@@ -149,6 +155,12 @@ final class ComparisonLiveLane {
         }
         entry.timeToFinalMs = SessionLatencyMetrics.milliseconds(from: stoppedAt, to: Date())
         self.client = nil
+    }
+
+    /// Longer than any client's own finish deadline (8 s floor), so the
+    /// client settles with what it has before the lane gives up on it.
+    nonisolated static func finishBudget(for modelID: String) -> Duration {
+        .seconds(max(ModelCatalog.liveCapabilities(for: modelID).postStopFinalizeBudget, 8) + 3)
     }
 
     private func finishApple(_ box: AppleLiveSessionBox, stoppedAt: Date) async {
@@ -208,4 +220,22 @@ final class AppleSpeechAudioConverterBox: @unchecked Sendable {
     }
 
     func convert(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? { convertHandler(buffer) }
+}
+
+extension ComparisonLiveLane {
+    /// The lane's failure text. A refused loopback Azure endpoint is the local
+    /// Entra proxy not running, which the bare URL error does not say.
+    nonisolated static func describe(
+        _ error: Error, modelID: String,
+        azureEndpoint: String = ComparisonLiveFanOut.configuredAzureEndpoint
+    ) -> String {
+        let underlying = error as NSError
+        if modelID.hasPrefix("azure/"),
+           underlying.domain == NSURLErrorDomain, underlying.code == NSURLErrorCannotConnectToHost,
+           let host = URL(string: azureEndpoint)?.host, ["127.0.0.1", "localhost", "::1"].contains(host) {
+            return "Could not reach the local Azure proxy at \(azureEndpoint). "
+                + "Start scripts/azure-speech-proxy.py, or set an HTTPS resource endpoint in Settings."
+        }
+        return error.localizedDescription
+    }
 }

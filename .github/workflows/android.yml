@@ -6,10 +6,22 @@ on:
     paths:
       - android/**
       - .github/workflows/android.yml
+      # Parity tests read these shared Swift definitions.
+      - Sources/SpeakCore/TranscriptCleanupPolicy.swift
+      - Sources/SpeakCore/ModelCatalog.swift
+      - Sources/SpeakCore/ModelRetirements.swift
+      - Sources/SpeakCore/ProviderCredentialCatalogue.swift
+      - Sources/SpeakCore/OpenAITranscriptionModels.swift
   pull_request:
     paths:
       - android/**
       - .github/workflows/android.yml
+      # Parity tests read these shared Swift definitions.
+      - Sources/SpeakCore/TranscriptCleanupPolicy.swift
+      - Sources/SpeakCore/ModelCatalog.swift
+      - Sources/SpeakCore/ModelRetirements.swift
+      - Sources/SpeakCore/ProviderCredentialCatalogue.swift
+      - Sources/SpeakCore/OpenAITranscriptionModels.swift
 
 permissions:
   contents: read
@@ -32,7 +44,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "17"

@@ -10,12 +10,31 @@ import Security
 /// Schema names forward to the portable `SyncSchema`, which the CloudKit Web
 /// Services transport shares; this type adds the native container and database.
 public enum SyncConfiguration {
-    /// The CloudKit container identifier.
+    /// Info.plist Boolean set by `TUIST_IOS_SHARED_CLOUD_CONTAINER=1`. It is
+    /// written together with the entitlement for the shared container, so the
+    /// app never opens a container it is not entitled to.
+    public static let sharedContainerInfoKey = "SpeakSharedCloudContainer"
+
+    /// The container family this build syncs with (#1119). The Mac family is
+    /// the shared container; iOS joins it only in builds entitled to it.
     #if os(iOS)
-    public static let containerIdentifier = SyncContainerFamily.iOS.containerIdentifier(in: .current)
-    #elseif os(macOS)
-    public static let containerIdentifier = SyncContainerFamily.macOS.containerIdentifier(in: .current)
+    public static let family = resolveFamily(
+        legacy: .iOS,
+        sharedContainerEnabled: Bundle.main.object(forInfoDictionaryKey: sharedContainerInfoKey) as? Bool == true
+    )
+    /// The container iOS builds used before joining the shared one.
+    public static let legacyFamily = SyncContainerFamily.iOS
+    #else
+    public static let family = SyncContainerFamily.macOS
+    public static let legacyFamily = SyncContainerFamily.macOS
     #endif
+
+    /// The CloudKit container identifier.
+    public static let containerIdentifier = family.containerIdentifier(in: .current)
+
+    static func resolveFamily(legacy: SyncContainerFamily, sharedContainerEnabled: Bool) -> SyncContainerFamily {
+        sharedContainerEnabled ? .macOS : legacy
+    }
 
     /// The custom zone name for transcription history.
     public static let zoneName = SyncSchema.zoneName

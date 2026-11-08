@@ -7,6 +7,9 @@ enum class RecognitionMode {
 
     /** The default recognition service, which may send audio to its provider. */
     SpeechService,
+
+    /** A bring-your-own-key cloud model. Audio is uploaded to the chosen provider. */
+    Cloud,
 }
 
 /** Why a session ended without a usable transcript. */
@@ -25,6 +28,11 @@ enum class DictationFailure {
     LanguageUnavailable,
     LeftApp,
     Unavailable,
+    InvalidKey,
+    KeyUnavailable,
+    MissingKey,
+    AudioTooLarge,
+    UnsupportedAudio,
     Unknown,
 }
 

@@ -14,15 +14,19 @@ import javax.crypto.SecretKey
  * backup and device transfer), and the AES key is generated inside, and never leaves, the Android
  * Keystore.
  */
-object KeystoreSecretStore {
+internal object KeystoreSecretStore {
     private const val KEY_ALIAS = "jsti.secrets.v1"
     private const val PREFS = "jsti_secrets"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_BITS = 256
 
-    fun create(context: Context): SecretStore {
+    @Volatile private var instance: SecretStore? = null
+
+    /** One shared store per process, so its locking covers every caller. */
+    @Synchronized
+    fun create(context: Context): SecretStore = instance ?: run {
         val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        return EncryptedSecretStore(PreferencesBacking(prefs), ::keystoreKey)
+        EncryptedSecretStore(PreferencesBacking(prefs), ::keystoreKey).also { instance = it }
     }
 
     @Synchronized

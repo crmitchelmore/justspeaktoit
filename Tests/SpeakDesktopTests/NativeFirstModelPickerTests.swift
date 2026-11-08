@@ -144,9 +144,8 @@ final class NativeFirstModelPickerTests: XCTestCase {
             ModelPickerGrouping.isOpenRouter($0.id, purpose: .postProcessing)
         })
         XCTAssertEqual(
-            groups.direct.filter { NativeTextModels.isNative($0.id) }.map(\.id),
-            NativeTextModels.postProcessing.map(\.id),
-            "native models keep their curated provider order"
+            Set(groups.direct.filter { NativeTextModels.isNative($0.id) }.map(\.id)),
+            Set(NativeTextModels.postProcessing.map(\.id))
         )
         // A model available both ways is never a top-level OpenRouter entry.
         XCTAssertTrue(groups.direct.contains { $0.id == "native/openai/gpt-6-luna" })
@@ -158,12 +157,51 @@ final class NativeFirstModelPickerTests: XCTestCase {
         XCTAssertLessThan(lastNative, firstOpenRouter ?? Int.max, "native entries precede OpenRouter")
     }
 
-    func testNativeProvidersFollowCuratedOrderAndIDsAreUnique() {
-        let order = NativeTextModels.postProcessing.compactMap { NativeTextModels.route(for: $0.id)?.provider.id }
-        var seenProviders: [String] = []
-        for id in order where seenProviders.last != id { seenProviders.append(id) }
-        XCTAssertEqual(seenProviders, NativeTextModels.providers.map(\.id))
+    func testCatalogueIDsAreUnique() {
         XCTAssertEqual(Set(ModelCatalog.postProcessing.map(\.id)).count, ModelCatalog.postProcessing.count)
+    }
+
+    // MARK: - Alphabetical ordering
+
+    func testEachGroupIsAlphabeticalByProviderThenModel() {
+        let groups = ModelPickerGrouping.groups(ModelCatalog.cloudPostProcessing, purpose: .postProcessing)
+        for group in [groups.direct, groups.openRouter] {
+            let keys = group.map {
+                (ModelPickerGrouping.providerName(for: $0.id, purpose: .postProcessing), $0.displayName)
+            }
+            for (lhs, rhs) in zip(keys, keys.dropFirst()) {
+                let providerOrder = ModelPickerGrouping.ordered(lhs.0, rhs.0)
+                XCTAssertNotEqual(providerOrder, false, "\(lhs.0) listed before \(rhs.0)")
+                if providerOrder == nil {
+                    XCTAssertNotEqual(ModelPickerGrouping.ordered(lhs.1, rhs.1), false, "\(lhs.1) before \(rhs.1)")
+                }
+            }
+        }
+        XCTAssertEqual(
+            groups.direct.map { ModelPickerGrouping.providerName(for: $0.id, purpose: .postProcessing) }.uniqued(),
+            ["Google Gemini", "Groq", "Mistral", "OpenAI"]
+        )
+        XCTAssertEqual(groups.direct.first?.id, "native/google/gemini-2.5-flash")
+    }
+
+    func testOpenRouterGroupSortsByVendorPrefix() {
+        let groups = ModelPickerGrouping.groups(ModelCatalog.cloudPostProcessing, purpose: .postProcessing)
+        let vendors = groups.openRouter.map { ModelPickerGrouping.providerName(for: $0.id, purpose: .postProcessing) }
+            .uniqued()
+        XCTAssertEqual(vendors, ["Anthropic", "Google", "Meta Llama", "Mistral", "OpenAI", "Qwen"])
+        XCTAssertEqual(
+            ModelPickerGrouping.providerName(for: CleanupModelSelection.prefix + "openai/x", purpose: .postProcessing),
+            "OpenAI"
+        )
+    }
+
+    func testOrderingIsCaseInsensitiveNumericAndStable() {
+        let options = ["gpt-5.10", "GPT-5.4", "gpt-5.4 mini", "Alpha", "alpha"].enumerated().map {
+            ModelCatalog.Option(id: "openai/m\($0.offset)", displayName: $0.element)
+        }
+        let sorted = ModelPickerGrouping.sortedByProvider(options, purpose: .postProcessing)
+        XCTAssertEqual(sorted.map(\.displayName), ["Alpha", "alpha", "GPT-5.4", "gpt-5.4 mini", "gpt-5.10"])
+        XCTAssertNil(ModelPickerGrouping.ordered("openai", "OpenAI"))
     }
 
     func testGroupingDropsDuplicatesAndTheCustomEntry() {
@@ -207,7 +245,7 @@ final class NativeFirstModelPickerTests: XCTestCase {
             return XCTFail("OpenRouter entries are not labelled")
         }
         XCTAssertTrue(flat[..<firstOpenRouter].allSatisfy { NativeTextModels.isNative($0.id) })
-        XCTAssertEqual(DesktopPostProcessing.remoteModels.first?.id, NativeTextModels.postProcessing.first?.id)
+        XCTAssertEqual(DesktopPostProcessing.remoteModels.first?.id, "native/google/gemini-2.5-flash")
     }
 
     func testSearchMatchesNameIdentifierAndDescription() {
@@ -218,5 +256,11 @@ final class NativeFirstModelPickerTests: XCTestCase {
                 || ($0.description?.lowercased().contains("qwen") ?? false)
         })
         XCTAssertFalse(ModelPickerGrouping.filter(options, query: "qwen").isEmpty)
+    }
+}
+
+private extension Array where Element == String {
+    func uniqued() -> [String] {
+        reduce(into: []) { result, value in if result.last != value { result.append(value) } }
     }
 }

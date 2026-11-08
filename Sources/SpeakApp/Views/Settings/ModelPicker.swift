@@ -108,7 +108,7 @@ struct ModelPicker: View {
     }
 
     private var levelOptions: [ModelCatalog.Option] {
-      guard isGrouped else { return options }
+      guard isGrouped else { return groups.direct + groups.openRouter }
       return isBrowsingOpenRouter ? groups.openRouter : groups.direct
     }
 
@@ -276,18 +276,7 @@ struct ModelPicker: View {
             || ($0.description?.lowercased().contains(lowered) ?? false)
         }
       }
-      result.sort { lhs, rhs in
-        let lhsLeading = lhs.tags.contains(.leading)
-        let rhsLeading = rhs.tags.contains(.leading)
-        if lhsLeading != rhsLeading { return lhsLeading && !rhsLeading }
-        let lhsCheap = lhs.tags.contains(.cheap)
-        let rhsCheap = rhs.tags.contains(.cheap)
-        if lhsCheap != rhsCheap { return lhsCheap && !rhsCheap }
-        let lhsFast = lhs.tags.contains(.fast)
-        let rhsFast = rhs.tags.contains(.fast)
-        if lhsFast != rhsFast { return lhsFast && !rhsFast }
-        return lhs.displayName < rhs.displayName
-      }
+      // Already alphabetical by provider, then model (ModelPickerGrouping).
       return result
     }
 
@@ -383,7 +372,7 @@ struct ModelPicker: View {
         Picker(title, selection: $selection) {
           let groups = ModelPickerGrouping.groups(options, purpose: credentialPurpose)
           if groups.direct.isEmpty || groups.openRouter.isEmpty {
-            menuRows(options)
+            menuRows(groups.direct + groups.openRouter)
           } else {
             // Native routes first; OpenRouter routes in their own labelled group.
             menuRows(groups.direct)

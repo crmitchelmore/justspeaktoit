@@ -43,7 +43,8 @@ and send `max_completion_tokens`. iOS lists only providers it stores keys for (n
 
 `ModelPickerGrouping` puts native and on-device models first and shows OpenRouter as
 one entry that opens its own searchable list; grouping follows the credential each model
-resolves to. The unprefixed entries below remain OpenRouter routes, so saved selections
+resolves to. Each group is alphabetical by provider (OpenRouter: vendor prefix), then by
+model name, case-insensitive and numeric-aware; tags remain badges, not ordering. The unprefixed entries below remain OpenRouter routes, so saved selections
 keep their route. The section that follows describes those OpenRouter routes.
 
 ## Runtime compatibility

@@ -122,32 +122,38 @@
         </article>
       </div>
       <figure class="capture demo clip">
-        <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" poster="/images/clips/hero-poster.webp" aria-label="Dictating into a text field on a Mac, then finding the text in History" aria-describedby="clip-hero-caption">
-          <source src="/images/clips/hero.webm" type='video/webm; codecs="av01.0.05M.08"'>
-          <source src="/images/clips/hero.mp4" type="video/mp4">
+        <video class="clip-video" controls playsinline preload="none" width="1280" height="720" data-clip="hero" aria-label="Dictating into a text field on a Mac, then finding the text in History" aria-describedby="clip-hero-caption">
+          <source src="/images/clips/hero-dark.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;" media="(prefers-color-scheme: dark)">
+          <source src="/images/clips/hero-light.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;">
+          <source src="/images/clips/hero-dark.mp4" type="video/mp4" media="(prefers-color-scheme: dark)">
+          <source src="/images/clips/hero-light.mp4" type="video/mp4">
           <track kind="captions" src="/images/clips/hero.en.vtt" srclang="en" label="English" default>
-          <a href="/images/clips/hero.mp4">Download the clip (MP4)</a>
+          <a href="/images/clips/hero-light.mp4" data-clip-download="hero">Download the clip (MP4)</a>
         </video>
-        <figcaption id="clip-hero-caption"><span>The Mac app. No sound, captions on. Recorded on a test machine: fictional History, a synthetic audio clip and a test fixture that returns fixed text, with waiting time cut. Clipboard mode is shown because the test machine cannot grant Accessibility.</span><a href="/images/clips/hero.mp4">MP4 ↗</a></figcaption>
+        <figcaption id="clip-hero-caption"><span>The Mac app, narrated by a synthesised voice, captions on. Recorded on a test machine: fictional History, a synthetic audio clip and a test fixture that returns fixed text, with waiting time cut. Clipboard mode is shown because the test machine cannot grant Accessibility.</span><a href="/images/clips/hero-light.mp4" data-clip-download="hero">MP4 ↗</a></figcaption>
       </figure>
       <div class="clip-grid">
         <figure class="capture clip">
-          <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" data-poster="/images/clips/corrections-poster.webp" aria-label="The Corrections page on Mac listing preferred spellings for names and jargon" aria-describedby="clip-corrections-caption">
-            <source src="/images/clips/corrections.webm" type='video/webm; codecs="av01.0.05M.08"'>
-            <source src="/images/clips/corrections.mp4" type="video/mp4">
+          <video class="clip-video" controls playsinline preload="none" width="1280" height="720" data-clip="corrections" aria-label="The Corrections page on Mac listing preferred spellings for names and jargon" aria-describedby="clip-corrections-caption">
+            <source src="/images/clips/corrections-dark.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;" media="(prefers-color-scheme: dark)">
+            <source src="/images/clips/corrections-light.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;">
+            <source src="/images/clips/corrections-dark.mp4" type="video/mp4" media="(prefers-color-scheme: dark)">
+            <source src="/images/clips/corrections-light.mp4" type="video/mp4">
             <track kind="captions" src="/images/clips/corrections.en.vtt" srclang="en" label="English" default>
-            <a href="/images/clips/corrections.mp4">Download the clip (MP4)</a>
+            <a href="/images/clips/corrections-light.mp4" data-clip-download="corrections">Download the clip (MP4)</a>
           </video>
-          <figcaption id="clip-corrections-caption"><span>Personal corrections: teach it your names and jargon once.</span><a href="/images/clips/corrections.mp4">MP4 ↗</a></figcaption>
+          <figcaption id="clip-corrections-caption"><span>Personal corrections: teach it your names and jargon once.</span><a href="/images/clips/corrections-light.mp4" data-clip-download="corrections">MP4 ↗</a></figcaption>
         </figure>
         <figure class="capture clip">
-          <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" data-poster="/images/clips/history-poster.webp" aria-label="History on Mac and Linux: every past dictation with its model, length and actions" aria-describedby="clip-history-caption">
-            <source src="/images/clips/history.webm" type='video/webm; codecs="av01.0.05M.08"'>
-            <source src="/images/clips/history.mp4" type="video/mp4">
+          <video class="clip-video" controls playsinline preload="none" width="1280" height="720" data-clip="history" aria-label="History on Mac and Linux: every past dictation with its model, length and actions" aria-describedby="clip-history-caption">
+            <source src="/images/clips/history-dark.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;" media="(prefers-color-scheme: dark)">
+            <source src="/images/clips/history-light.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;">
+            <source src="/images/clips/history-dark.mp4" type="video/mp4" media="(prefers-color-scheme: dark)">
+            <source src="/images/clips/history-light.mp4" type="video/mp4">
             <track kind="captions" src="/images/clips/history.en.vtt" srclang="en" label="English" default>
-            <a href="/images/clips/history.mp4">Download the clip (MP4)</a>
+            <a href="/images/clips/history-light.mp4" data-clip-download="history">Download the clip (MP4)</a>
           </video>
-          <figcaption id="clip-history-caption"><span>History and recovery: every dictation kept, searchable and reusable.</span><a href="/images/clips/history.mp4">MP4 ↗</a></figcaption>
+          <figcaption id="clip-history-caption"><span>History and recovery: every dictation kept, searchable and reusable.</span><a href="/images/clips/history-light.mp4" data-clip-download="history">MP4 ↗</a></figcaption>
         </figure>
       </div>
       <p class="note">Automatic insertion belongs to the direct download, which uses macOS Accessibility. There is no Mac App Store build: a sandboxed one could only ever reach the clipboard, so the Mac app ships as a direct download only.</p>
@@ -220,13 +226,15 @@
         </article>
       </div>
       <figure class="capture clip clip--wide">
-        <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" data-poster="/images/clips/models-poster.webp" aria-label="Transcription and clean-up settings: on-device models alongside cloud providers" aria-describedby="clip-models-caption">
-          <source src="/images/clips/models.webm" type='video/webm; codecs="av01.0.05M.08"'>
-          <source src="/images/clips/models.mp4" type="video/mp4">
+        <video class="clip-video" controls playsinline preload="none" width="1280" height="720" data-clip="models" aria-label="Transcription and clean-up settings: on-device models alongside cloud providers" aria-describedby="clip-models-caption">
+          <source src="/images/clips/models-dark.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;" media="(prefers-color-scheme: dark)">
+          <source src="/images/clips/models-light.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;">
+          <source src="/images/clips/models-dark.mp4" type="video/mp4" media="(prefers-color-scheme: dark)">
+          <source src="/images/clips/models-light.mp4" type="video/mp4">
           <track kind="captions" src="/images/clips/models.en.vtt" srclang="en" label="English" default>
-          <a href="/images/clips/models.mp4">Download the clip (MP4)</a>
+          <a href="/images/clips/models-light.mp4" data-clip-download="models">Download the clip (MP4)</a>
         </video>
-        <figcaption id="clip-models-caption"><span>Choosing models: on-device or cloud, plus optional clean-up. Mac app with a Linux beta frame; sample data.</span><a href="/images/clips/models.mp4">MP4 ↗</a></figcaption>
+        <figcaption id="clip-models-caption"><span>Choosing models: on-device or cloud, plus optional clean-up. Mac app with a Linux beta frame; sample data.</span><a href="/images/clips/models-light.mp4" data-clip-download="models">MP4 ↗</a></figcaption>
       </figure>
       <p class="provider-foot">
         <span>Counts are of the shipped model catalogue, <code>Sources/SpeakCore/ModelCatalog.swift</code>. Availability varies by platform and by macOS version — iPhone shows a smaller set.</span>
@@ -274,11 +282,13 @@
           </ul>
         </div>
         <figure class="mobile-shot mobile-clip">
-          <video class="clip-video" controls muted playsinline preload="none" width="640" height="1280" data-poster="/images/clips/iphone-poster.webp" aria-label="The iPhone app: tap record, see the words, copy them, then on-device and Action Button settings" aria-describedby="clip-iphone-caption">
-            <source src="/images/clips/iphone.webm" type='video/webm; codecs="av01.0.05M.08"'>
-            <source src="/images/clips/iphone.mp4" type="video/mp4">
+          <video class="clip-video" controls playsinline preload="none" width="640" height="1280" data-clip="iphone" aria-label="The iPhone app: tap record, see the words, copy them, then on-device and Action Button settings" aria-describedby="clip-iphone-caption">
+            <source src="/images/clips/iphone-dark.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;" media="(prefers-color-scheme: dark)">
+            <source src="/images/clips/iphone-light.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;">
+            <source src="/images/clips/iphone-dark.mp4" type="video/mp4" media="(prefers-color-scheme: dark)">
+            <source src="/images/clips/iphone-light.mp4" type="video/mp4">
             <track kind="captions" src="/images/clips/iphone.en.vtt" srclang="en" label="English" default>
-            <a href="/images/clips/iphone.mp4">Download the iPhone clip (MP4)</a>
+            <a href="/images/clips/iphone-light.mp4" data-clip-download="iphone">Download the iPhone clip (MP4)</a>
           </video>
           <figcaption id="clip-iphone-caption">The iPhone app: Simulator screenshots, with fixed sample text. <a href="/images/ios-history-current.png">Full-size History screenshot ↗</a></figcaption>
         </figure>
@@ -294,22 +304,26 @@
       </div>
       <div class="clip-grid">
         <figure class="capture clip">
-          <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" data-poster="/images/clips/windows-poster.webp" aria-label="The Windows beta: dashboard, recording overlay, completed overlay and settings" aria-describedby="clip-windows-caption">
-            <source src="/images/clips/windows.webm" type='video/webm; codecs="av01.0.05M.08"'>
-            <source src="/images/clips/windows.mp4" type="video/mp4">
+          <video class="clip-video" controls playsinline preload="none" width="1280" height="720" data-clip="windows" aria-label="The Windows beta: dashboard, recording overlay, completed overlay and settings" aria-describedby="clip-windows-caption">
+            <source src="/images/clips/windows-dark.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;" media="(prefers-color-scheme: dark)">
+            <source src="/images/clips/windows-light.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;">
+            <source src="/images/clips/windows-dark.mp4" type="video/mp4" media="(prefers-color-scheme: dark)">
+            <source src="/images/clips/windows-light.mp4" type="video/mp4">
             <track kind="captions" src="/images/clips/windows.en.vtt" srclang="en" label="English" default>
-            <a href="/images/clips/windows.mp4">Download the clip (MP4)</a>
+            <a href="/images/clips/windows-light.mp4" data-clip-download="windows">Download the clip (MP4)</a>
           </video>
-          <figcaption id="clip-windows-caption"><span>Windows beta. Frames from the native app's page tour on a GitHub-hosted runner, with sample History.</span><a href="/images/clips/windows.mp4">MP4 ↗</a></figcaption>
+          <figcaption id="clip-windows-caption"><span>Windows beta. Frames from the native app's page tour on a GitHub-hosted runner, with sample History.</span><a href="/images/clips/windows-light.mp4" data-clip-download="windows">MP4 ↗</a></figcaption>
         </figure>
         <figure class="capture clip">
-          <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" data-poster="/images/clips/linux-poster.webp" aria-label="The Linux beta: GTK dashboard, recording overlay, History and on-device models" aria-describedby="clip-linux-caption">
-            <source src="/images/clips/linux.webm" type='video/webm; codecs="av01.0.05M.08"'>
-            <source src="/images/clips/linux.mp4" type="video/mp4">
+          <video class="clip-video" controls playsinline preload="none" width="1280" height="720" data-clip="linux" aria-label="The Linux beta: GTK dashboard, recording overlay, History and on-device models" aria-describedby="clip-linux-caption">
+            <source src="/images/clips/linux-dark.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;" media="(prefers-color-scheme: dark)">
+            <source src="/images/clips/linux-light.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;">
+            <source src="/images/clips/linux-dark.mp4" type="video/mp4" media="(prefers-color-scheme: dark)">
+            <source src="/images/clips/linux-light.mp4" type="video/mp4">
             <track kind="captions" src="/images/clips/linux.en.vtt" srclang="en" label="English" default>
-            <a href="/images/clips/linux.mp4">Download the clip (MP4)</a>
+            <a href="/images/clips/linux-light.mp4" data-clip-download="linux">Download the clip (MP4)</a>
           </video>
-          <figcaption id="clip-linux-caption"><span>Linux beta. Frames from the native GTK app's page tour on a GitHub-hosted runner, with sample History.</span><a href="/images/clips/linux.mp4">MP4 ↗</a></figcaption>
+          <figcaption id="clip-linux-caption"><span>Linux beta. Frames from the native GTK app's page tour on a GitHub-hosted runner, with sample History.</span><a href="/images/clips/linux-light.mp4" data-clip-download="linux">MP4 ↗</a></figcaption>
         </figure>
       </div>
       <p class="provider-foot">

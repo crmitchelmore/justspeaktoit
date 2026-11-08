@@ -181,7 +181,7 @@ jobs:
             [ -f "$PROFILE_DIR/$name.provisionprofile" ] || continue
             security cms -D -i "$PROFILE_DIR/$name.provisionprofile" | python3 -c '
           import plistlib, sys
-          e = plistlib.load(sys.stdin.buffer)["Entitlements"]
+          e = plistlib.loads(sys.stdin.buffer.read())["Entitlements"]
           print("- {}: containers {}; groups {}".format(sys.argv[1],
               ", ".join(e.get("com.apple.developer.icloud-container-identifiers", [])) or "none",
               ", ".join(e.get("com.apple.security.application-groups", [])) or "none"))' "$name" >> "$GITHUB_STEP_SUMMARY"

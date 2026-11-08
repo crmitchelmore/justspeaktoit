@@ -57,6 +57,7 @@ jobs:
           IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
           IOS_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
         run: |
+          set -o pipefail
           export APP_STORE_CONNECT_KEY_PATH=$RUNNER_TEMP/AuthKey.p8
           echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > "$APP_STORE_CONNECT_KEY_PATH"
           # Only the public certificate's serial is read; the key is never extracted.
@@ -76,7 +77,7 @@ jobs:
             security cms -D -i "$output" | python3 -c '
           import plistlib, sys
           bundle, group, expected = sys.argv[1], sys.argv[2], [c for c in sys.argv[3].split(",") if c]
-          profile = plistlib.load(sys.stdin.buffer)
+          profile = plistlib.loads(sys.stdin.buffer.read())
           e = profile["Entitlements"]
           containers = e.get("com.apple.developer.icloud-container-identifiers", [])
           groups = e.get("com.apple.security.application-groups", [])
@@ -95,7 +96,7 @@ jobs:
           rm -f "$APP_STORE_CONNECT_KEY_PATH"
 
   mac-sign-in-with-apple:
-    if: inputs.enable_mac_sign_in_with_apple || github.event_name == 'push'
+    if: inputs.enable_mac_sign_in_with_apple
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

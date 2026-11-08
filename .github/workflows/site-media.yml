@@ -32,7 +32,7 @@ jobs:
         appearance: [light, dark]
     # Hosted ARM has the UI automation entitlement used by the core journey suites.
     runs-on: macos-latest
-    timeout-minutes: 50
+    timeout-minutes: 65
     env:
       CAPTURE: ${{ github.workspace }}/.artifacts/site-media
     steps:
@@ -42,10 +42,10 @@ jobs:
           persist-credentials: false
 
       - name: Prepare Tuist and macOS project
-        timeout-minutes: 12
+        timeout-minutes: 20
         # GitHub release downloads (Tuist, binary packages) intermittently return 5xx.
         run: |
-          retry() { for delay in 10 30 0; do "$@" && return 0; [ "$delay" = 0 ] && return 1; sleep "$delay"; done; }
+          retry() { for delay in 15 30 45 60 90 120 0; do "$@" && return 0; [ "$delay" = 0 ] && return 1; sleep "$delay"; done; }
           retry brew install tuist
           retry tuist generate --no-open
           retry xcodebuild -resolvePackageDependencies -workspace "Just Speak to It.xcworkspace" -scheme SpeakApp \
@@ -128,7 +128,7 @@ jobs:
       matrix:
         appearance: [light, dark]
     runs-on: macos-latest
-    timeout-minutes: 50
+    timeout-minutes: 65
     env:
       CAPTURE: ${{ github.workspace }}/.artifacts/site-media-ios
     steps:
@@ -143,10 +143,10 @@ jobs:
           install-tuist: "true"
 
       - name: Build app and capture suite for the Simulator
-        timeout-minutes: 25
+        timeout-minutes: 35
         run: |
           set -o pipefail
-          retry() { for delay in 10 30 0; do "$@" && return 0; [ "$delay" = 0 ] && return 1; sleep "$delay"; done; }
+          retry() { for delay in 15 30 45 60 90 120 0; do "$@" && return 0; [ "$delay" = 0 ] && return 1; sleep "$delay"; done; }
           retry tuist generate --no-open
           retry xcodebuild -resolvePackageDependencies -workspace "Just Speak to It.xcworkspace" -scheme SpeakiOS \
             -skipPackagePluginValidation

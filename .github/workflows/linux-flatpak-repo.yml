@@ -115,6 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           site="$RUNNER_TEMP/site"
+          mkdir -p "$site/repo"
           ostree init --mode=archive-z2 --repo="$site/repo"
           flatpak build-import-bundle --gpg-sign="$FINGERPRINT" --gpg-homedir="$GPG_HOME" \
             "$site/repo" "$BUNDLE"

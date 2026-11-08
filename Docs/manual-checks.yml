@@ -286,14 +286,14 @@ sessions:
         core: false
         build: "Stripe dashboard, Cloudflare and Apple Developer portal"
         prerequisites:
-          - "Decision: decision-paid-mac-signin answered with a sign-in method (skip this check if you chose Defer)"
+          - "Mac sign-in (owner decision, #1386): Sign in with Apple through its web flow"
           - "Steps: Docs/paid-access.md (External product setup). Use Stripe test mode only; no live keys."
         steps:
           - "Create the D1 databases paid-access and paid-access-staging and put their ids in workers/paid-access/wrangler.toml."
           - "In Stripe test mode create the prices, enable the Customer Portal and add the webhook endpoint; put the price ids in wrangler.toml and the secrets in the Worker."
-          - "Do the portal steps for the chosen Mac sign-in."
+          - "Only if you approve it: create the Sign in with Apple .p8 key and store APPLE_SIGNIN_KEY_ID and APPLE_SIGNIN_PRIVATE_KEY, as Docs/paid-access.md (Mac sign-in) describes. The web sign-in works without it."
           - "Sign off the privacy and retention text in Docs/paid-access-privacy.md."
-        expected: "Staging is configured so an agent can wire the Mac sign-in and run the staging purchase and refund drill. Paid Access stays switched off for users."
+        expected: "Staging is configured so an agent can sign in on a Developer ID build through the web flow and run the staging purchase and refund drill. Paid Access stays switched off for users."
         final_gate: false
       - id: "owner-partner-center"
         issues:

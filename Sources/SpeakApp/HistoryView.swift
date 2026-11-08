@@ -11,6 +11,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   @Environment(\.appVisualDensity) private var density
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var searchText: String = ""
+  @State private var issueReportItem: HistoryItem?
   @State private var showErrorsOnly: Bool = false
   @State private var dateRangeEnabled: Bool = false
   @State private var startDate: Date = Calendar.current.startOfDay(for: Date().addingTimeInterval(-7 * 24 * 60 * 60))
@@ -183,7 +184,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
           } else {
             LazyVStack(spacing: density.sectionSpacing) {
               ForEach(filteredItems) { item in
-                HistoryListRow(item: item)
+                HistoryListRow(item: item) { issueReportItem = $0 }
                   .id(item.id)
               }
             }
@@ -195,6 +196,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .padding(density.pagePadding)
         .frame(maxWidth: 1100, alignment: .center)
       }
+      .sheet(item: $issueReportItem) { HistoryIssueReportPreview(item: $0) }
       .onAppear {
         historyLoadState = environment.history.loadState
         historyItems = environment.history.allItems
@@ -459,70 +461,21 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
 
   private var normalHeader: some View {
     VStack(alignment: .leading, spacing: 18) {
-      VStack(alignment: .leading, spacing: 8) {
-        Text("Session History")
-          .font(.largeTitle.bold())
-          .foregroundStyle(.white)
-        Text(
-          "Search, filter, and replay past recordings with full network context and transcripts."
-        )
-        .font(.headline)
-        .foregroundStyle(.white.opacity(0.85))
-      }
-
-      HStack(spacing: 16) {
-        HStack(spacing: 10) {
-          Image(systemName: "magnifyingglass")
-            .foregroundStyle(.white.opacity(0.7))
-          TextField("Search history", text: $searchText)
-            .textFieldStyle(.plain)
-            .foregroundColor(.white)
-            .speakTooltip("Search your past sessions by transcript, model, or keyword so you can quickly revisit the right moment.")
-            .accessibilityIdentifier("historySearchField")
-        }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 16)
-        .background(
-          RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color.white.opacity(0.14))
-        )
-
-        Toggle("Errors only", isOn: $showErrorsOnly)
-          .toggleStyle(.switch)
-          .tint(.brandAccentWarm)
-          .foregroundStyle(.white)
-          .speakTooltip("Show only sessions where Speak spotted issues, making it easy to focus on what needs attention.")
-          .accessibilityIdentifier("historyErrorsOnlyToggle")
-
-        Toggle("Date range", isOn: $dateRangeEnabled)
-          .toggleStyle(.switch)
-          .tint(.brandAccentWarm)
-          .foregroundStyle(.white)
-          .speakTooltip("Filter sessions to a specific date range.")
-
-        if dateRangeEnabled {
-          DatePicker("From", selection: $startDate, displayedComponents: .date)
-            .labelsHidden()
-            .datePickerStyle(.compact)
-          DatePicker("To", selection: $endDate, in: startDate..., displayedComponents: .date)
-            .labelsHidden()
-            .datePickerStyle(.compact)
+      // The actions sit beside the title so the filter row keeps enough room
+      // for its labels instead of wrapping or truncating them.
+      HStack(alignment: .top, spacing: 16) {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Session History")
+            .font(.largeTitle.bold())
+            .foregroundStyle(.white)
+          Text(
+            "Search, filter, and replay past recordings with full network context and transcripts."
+          )
+          .font(.headline)
+          .foregroundStyle(.white.opacity(0.85))
         }
 
-        if !availableModels.isEmpty {
-          Picker("Model", selection: $selectedModelFilter) {
-            Text("All Models").tag(String?.none)
-            Divider()
-            ForEach(availableModels, id: \.self) { model in
-              Text(ModelCatalog.friendlyName(for: model)).tag(String?.some(model))
-            }
-          }
-          .pickerStyle(.menu)
-          .tint(.white)
-          .speakTooltip("Filter sessions by the transcription or processing model used.")
-        }
-
-        Spacer()
+        Spacer(minLength: 0)
 
         if isImportingFiles {
           ProgressView()
@@ -552,6 +505,63 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         .disabled(historyItems.isEmpty || isClearingAll || isImportingFiles)
         .speakTooltip("Clear every saved session entry from this history view.")
         .accessibilityIdentifier("historyClearAllButton")
+      }
+
+      HStack(spacing: 16) {
+        HStack(spacing: 10) {
+          Image(systemName: "magnifyingglass")
+            .foregroundStyle(.white.opacity(0.7))
+          TextField("Search history", text: $searchText)
+            .textFieldStyle(.plain)
+            .foregroundColor(.white)
+            .speakTooltip("Search your past sessions by transcript, model, or keyword so you can quickly revisit the right moment.")
+            .accessibilityIdentifier("historySearchField")
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .background(
+          RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color.white.opacity(0.14))
+        )
+
+        Toggle("Errors only", isOn: $showErrorsOnly)
+          .toggleStyle(.switch)
+          .fixedSize()
+          .tint(.brandAccentWarm)
+          .foregroundStyle(.white)
+          .speakTooltip("Show only sessions where Speak spotted issues, making it easy to focus on what needs attention.")
+          .accessibilityIdentifier("historyErrorsOnlyToggle")
+
+        Toggle("Date range", isOn: $dateRangeEnabled)
+          .toggleStyle(.switch)
+          .fixedSize()
+          .tint(.brandAccentWarm)
+          .foregroundStyle(.white)
+          .speakTooltip("Filter sessions to a specific date range.")
+
+        if dateRangeEnabled {
+          DatePicker("From", selection: $startDate, displayedComponents: .date)
+            .labelsHidden()
+            .datePickerStyle(.compact)
+          DatePicker("To", selection: $endDate, in: startDate..., displayedComponents: .date)
+            .labelsHidden()
+            .datePickerStyle(.compact)
+        }
+
+        if !availableModels.isEmpty {
+          Picker("Model", selection: $selectedModelFilter) {
+            Text("All Models").tag(String?.none)
+            Divider()
+            ForEach(availableModels, id: \.self) { model in
+              Text(ModelCatalog.friendlyName(for: model)).tag(String?.some(model))
+            }
+          }
+          .pickerStyle(.menu)
+          .fixedSize()
+          .tint(.white)
+          .foregroundStyle(.white)
+          .speakTooltip("Filter sessions by the transcription or processing model used.")
+        }
       }
 
       HStack(spacing: 16) {

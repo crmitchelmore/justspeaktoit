@@ -47,6 +47,8 @@ object CloudWire {
         return Multipart(boundary, head.toByteArray(), tail.toByteArray())
     }
 
+    fun cleanupUrl(model: CleanupModel): String = "${model.provider.baseUrl}/chat/completions"
+
     fun cleanupBody(model: String, transcript: String): String = JSONObject()
         .put("model", model)
         .put(

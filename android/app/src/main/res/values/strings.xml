@@ -80,8 +80,14 @@
     <string name="action_remove">Remove</string>
     <string name="settings_cloud_model_title">Cloud transcription model</string>
     <string name="settings_cleanup_title">Clean up transcripts</string>
-    <string name="settings_cleanup_note">Sends the final transcript to OpenRouter to fix punctuation and spelling. Needs an OpenRouter key. If cleanup fails, the original transcript is kept.</string>
-    <string name="settings_cleanup_needs_key">Add an OpenRouter key to use cleanup.</string>
+    <string name="settings_cleanup_note">Sends the final transcript to the chosen model\'s provider to fix punctuation and spelling. Needs that provider\'s key. If cleanup fails, the original transcript is kept.</string>
+    <string name="settings_cleanup_needs_key">Add a %1$s key to use cleanup.</string>
+    <string name="settings_cleanup_model">Cleanup model</string>
+    <string name="cleanup_picker_title">Cleanup model</string>
+    <string name="cleanup_picker_openrouter_note">%1$d models from many providers with one OpenRouter key</string>
+    <string name="cleanup_picker_openrouter_footer">These models are sent to OpenRouter with your OpenRouter key.</string>
+    <string name="cleanup_picker_search">Search OpenRouter models</string>
+    <string name="cleanup_picker_no_results">No models match.</string>
     <string name="settings_keep_audio_title">Keep audio when a recording is cancelled</string>
     <string name="settings_keep_audio_note">Cancelled cloud recordings stay in History so you can transcribe them later.</string>
     <string name="history_title">History</string>

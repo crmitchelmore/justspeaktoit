@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -39,6 +40,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.justspeaktoit.android.R
+import com.justspeaktoit.android.cloud.CleanupModel
+import com.justspeaktoit.android.cloud.CleanupModelPicker
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
@@ -51,6 +54,7 @@ class SettingsActions(
     val onChooseModel: (CloudModel) -> Unit,
     val onCleanupChanged: (Boolean) -> Unit,
     val onKeepAudioOnCancelChanged: (Boolean) -> Unit,
+    val onChooseCleanupModel: (CleanupModel) -> Unit,
 )
 
 @Composable
@@ -111,8 +115,12 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
                 Switch(checked = state.cleanupEnabled, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_cleanup_note), style = MaterialTheme.typography.bodyMedium)
-            if (state.cleanupEnabled && CloudProvider.OpenRouter !in state.savedKeys) {
-                Text(stringResource(R.string.settings_cleanup_needs_key), color = MaterialTheme.colorScheme.error)
+            CleanupModelRow(state, actions)
+            if (state.cleanupEnabled && state.cleanupModel.provider !in state.savedKeys) {
+                Text(
+                    stringResource(R.string.settings_cleanup_needs_key, state.cleanupModel.provider.displayName),
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
 
             HorizontalDivider()
@@ -145,6 +153,40 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
                 KeyRow(provider, saved = provider in state.savedKeys, actions)
             }
         }
+    }
+}
+
+@Composable
+private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions) {
+    var picking by remember { mutableStateOf(false) }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button) { picking = true }
+            .padding(vertical = 8.dp),
+    ) {
+        Text(
+            stringResource(R.string.settings_cleanup_model),
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            CleanupModelPicker.selectionLabel(state.cleanupModel),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+    if (picking) {
+        CleanupModelPickerDialog(
+            selected = state.cleanupModel,
+            savedKeys = state.savedKeys,
+            onChoose = {
+                actions.onChooseCleanupModel(it)
+                picking = false
+            },
+            onDismiss = { picking = false },
+        )
     }
 }
 

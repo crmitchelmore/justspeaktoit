@@ -5,9 +5,6 @@ name: Apple App IDs and profiles
 # at build time. Optionally enables Sign in with Apple on the direct-download
 # Mac App ID, which the Paid Access web flow uses as its primary App ID.
 on:
-  # TEMPORARY pre-merge proof; removed before merge.
-  push:
-    branches: [crmitchelmore-ios-profiles-build-time-fetch]
   workflow_dispatch:
     inputs:
       enable_mac_sign_in_with_apple:

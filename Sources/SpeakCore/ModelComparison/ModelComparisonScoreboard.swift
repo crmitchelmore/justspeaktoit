@@ -31,7 +31,7 @@ public struct ModelComparisonScore: Identifiable, Hashable, Sendable {
         meanTimeToFirstPartialMs: Int?,
         meanTimeToFinalMs: Int?,
         meanEstimatedCostUSD: Decimal?,
-        latestFailure: String? = nil
+        latestFailure: String?
     ) {
         self.modelID = modelID
         self.modelDisplayName = modelDisplayName
@@ -44,6 +44,27 @@ public struct ModelComparisonScore: Identifiable, Hashable, Sendable {
         self.meanTimeToFinalMs = meanTimeToFinalMs
         self.meanEstimatedCostUSD = meanEstimatedCostUSD
         self.latestFailure = latestFailure
+    }
+
+    /// Preserved public initializer from before `latestFailure` existed.
+    public init(
+        modelID: String,
+        modelDisplayName: String,
+        providerDisplayName: String,
+        roundsPlayed: Int,
+        wins: Int,
+        meanRank: Double?,
+        failures: Int,
+        meanTimeToFirstPartialMs: Int?,
+        meanTimeToFinalMs: Int?,
+        meanEstimatedCostUSD: Decimal?
+    ) {
+        self.init(
+            modelID: modelID, modelDisplayName: modelDisplayName, providerDisplayName: providerDisplayName,
+            roundsPlayed: roundsPlayed, wins: wins, meanRank: meanRank, failures: failures,
+            meanTimeToFirstPartialMs: meanTimeToFirstPartialMs, meanTimeToFinalMs: meanTimeToFinalMs,
+            meanEstimatedCostUSD: meanEstimatedCostUSD, latestFailure: nil
+        )
     }
 
     public var winRate: Double? {

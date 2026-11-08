@@ -5,35 +5,37 @@ import XCTest
 
 /// SpeechAnalyzer model warm-up (issue #614), driven through the shared harness.
 extension CaptureWarmCoordinatorTests {
-    func testSpeechAnalyzerModel_IsWarmedOncePerSelectionAndNotDuringASession() async {
+    func testSpeechAnalyzerModel_IsWarmedOncePerSelectionAndNotDuringASession() async throws {
         self.defaults.set(AppleLocalModels.speechTranscriberModelID, forKey: "liveTranscriptionModel")
         let harness = self.makeHarness(speechStatus: .granted)
+        try self.skipUnlessSpeechAnalyzerSelected(harness)
+        let model = harness.settings.liveTranscriptionModel
         harness.coordinator.start()
         await self.waitUntil { harness.speechWarms.calls.count == 1 }
-        XCTAssertEqual(harness.speechWarms.calls.first?.model, AppleLocalModels.speechTranscriberModelID)
+        XCTAssertEqual(harness.speechWarms.calls.first?.model, model)
         XCTAssertEqual(
             harness.speechWarms.calls.first?.locale,
             harness.settings.preferredModelLanguage ?? harness.settings.resolvedPreferredLocaleIdentifier
         )
 
         harness.coordinator.sessionWillBegin()
-        harness.settings.liveTranscriptionModel = AppleLocalModels.dictationTranscriberModelID
+        harness.settings.preferredLocaleIdentifier = "fr-FR"
         await self.drainTasks()
         XCTAssertEqual(harness.speechWarms.calls.count, 1, "warm-up must not compete with a live capture")
 
         harness.coordinator.sessionDidEnd()
+        await self.waitUntil { harness.speechWarms.calls.count == 2 }
         harness.coordinator.warmUp()
         await self.drainTasks()
-        XCTAssertEqual(harness.speechWarms.calls.map(\.model), [
-            AppleLocalModels.speechTranscriberModelID,
-            AppleLocalModels.dictationTranscriberModelID
-        ])
+        XCTAssertEqual(harness.speechWarms.calls.map(\.model), [model, model])
+        XCTAssertNotEqual(harness.speechWarms.calls.first?.locale, harness.speechWarms.calls.last?.locale)
         await harness.coordinator.invalidate()
     }
 
-    func testSpeechAnalyzerWarmUp_FailureIsRetriedOnTheNextIdleTrigger() async {
+    func testSpeechAnalyzerWarmUp_FailureIsRetriedOnTheNextIdleTrigger() async throws {
         self.defaults.set(AppleLocalModels.speechTranscriberModelID, forKey: "liveTranscriptionModel")
         let harness = self.makeHarness(speechStatus: .granted)
+        try self.skipUnlessSpeechAnalyzerSelected(harness)
         harness.speechWarms.succeeds = false
         harness.coordinator.start()
         await self.waitUntil { harness.speechWarms.calls.count == 1 }
@@ -47,9 +49,10 @@ extension CaptureWarmCoordinatorTests {
         await harness.coordinator.invalidate()
     }
 
-    func testSpeechAnalyzerWarmUp_InFlightPreparationIsCancelledWhenASessionBegins() async {
+    func testSpeechAnalyzerWarmUp_InFlightPreparationIsCancelledWhenASessionBegins() async throws {
         self.defaults.set(AppleLocalModels.speechTranscriberModelID, forKey: "liveTranscriptionModel")
         let harness = self.makeHarness(speechStatus: .granted)
+        try self.skipUnlessSpeechAnalyzerSelected(harness)
         harness.speechWarms.holdsUntilReleased = true
         harness.coordinator.start()
         await self.waitUntil { harness.speechWarms.calls.count == 1 }
@@ -79,6 +82,14 @@ extension CaptureWarmCoordinatorTests {
         await self.drainTasks(untilProbeCount: 1, in: cloud.warmer)
         XCTAssertTrue(cloud.speechWarms.calls.isEmpty)
         await cloud.coordinator.invalidate()
+    }
+
+    /// Settings move SpeechTranscriber to another Apple engine where it is unavailable.
+    private func skipUnlessSpeechAnalyzerSelected(_ harness: CaptureWarmHarness) throws {
+        try XCTSkipUnless(
+            AppleLocalModels.isSpeechAnalyzerModel(harness.settings.liveTranscriptionModel),
+            "no SpeechAnalyzer engine on this OS"
+        )
     }
 }
 

@@ -131,14 +131,16 @@ jobs:
         run: |
           set -euo pipefail
           flatpak remote-add --user --gpg-import="$RUNNER_TEMP/public.gpg" jsti-check "file://$RUNNER_TEMP/site/repo"
-          flatpak remote-ls --user --app jsti-check | tee "$RUNNER_TEMP/remote-ls.txt"
-          grep -q "$APP_ID" "$RUNNER_TEMP/remote-ls.txt"
-          # A remote added with a different key must refuse the summary.
+          flatpak remote-ls --user --app --columns=application jsti-check | tee "$RUNNER_TEMP/remote-ls.txt"
+          grep -qx "$APP_ID" "$RUNNER_TEMP/remote-ls.txt"
+          # A remote with a different key must refuse the signed summary,
+          # either when it is added or when it is listed.
           wrong_home=$(mktemp -d)
           gpg --homedir "$wrong_home" --batch --passphrase '' --quick-gen-key "Wrong <wrong@invalid>" ed25519 sign 1d 2>/dev/null
           gpg --homedir "$wrong_home" --batch --export > "$RUNNER_TEMP/wrong.gpg"
-          flatpak remote-add --user --gpg-import="$RUNNER_TEMP/wrong.gpg" jsti-wrong "file://$RUNNER_TEMP/site/repo"
-          if flatpak remote-ls --user jsti-wrong >/dev/null 2>&1; then
+          if flatpak remote-add --user --gpg-import="$RUNNER_TEMP/wrong.gpg" jsti-wrong \
+              "file://$RUNNER_TEMP/site/repo" 2>/dev/null \
+            && flatpak remote-ls --user jsti-wrong >/dev/null 2>&1; then
             echo "::error::the repository verified with an unrelated key"; exit 1
           fi
       - name: Skip an Alpha older than the published one

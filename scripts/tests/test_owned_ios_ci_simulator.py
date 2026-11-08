@@ -221,5 +221,33 @@ class OwnedSimulatorTests(unittest.TestCase):
             owned.selected_configuration({})
 
 
+
+class InventoryRetryTests(unittest.TestCase):
+    def test_read_only_inventory_retries_cold_simctl_timeouts(self):
+        payload = json.dumps({"devices": inventory()})
+        timeout = subprocess.TimeoutExpired(["xcrun", "simctl"], 120)
+        with mock.patch.object(owned, "run", side_effect=[timeout, payload]) as run, \
+                mock.patch.object(owned.time, "sleep") as sleep, mock.patch("sys.stderr"):
+            self.assertEqual(owned.devices(), inventory())
+        self.assertEqual(run.call_count, 2)
+        self.assertTrue(all(call.args[0] == "list" for call in run.call_args_list))
+        self.assertGreaterEqual(run.call_args.kwargs["timeout"], 120)
+        sleep.assert_called_once()
+
+    def test_inventory_gives_up_after_bounded_attempts(self):
+        timeout = subprocess.TimeoutExpired(["xcrun", "simctl"], 120)
+        with mock.patch.object(owned, "run", side_effect=timeout) as run, \
+                mock.patch.object(owned.time, "sleep"), mock.patch("sys.stderr"):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                owned.devices(available=False)
+        self.assertEqual(run.call_count, len(owned.LIST_TIMEOUTS))
+
+    def test_mutations_are_never_retried(self):
+        error = subprocess.TimeoutExpired(["xcrun", "simctl"], 60)
+        with mock.patch.object(owned.subprocess, "run", side_effect=error) as run:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                owned.run("create", "name", "type", "runtime")
+        run.assert_called_once()
+
 if __name__ == "__main__":
     unittest.main()

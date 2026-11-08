@@ -52,8 +52,9 @@ extension DesktopHostController {
             }
             let round = try DesktopComparisonRunner.completing(pending, entries: entries, sample: sample)
             try await comparisons.upsert(round)
+            let historyNote = await saveComparisonToHistory(round)
             comparisonSelection = round.id
-            comparisonStatus("Comparison saved. Review or rank the results below.")
+            comparisonStatus("Comparison saved. Review or rank the results below." + historyNote)
         } catch {
             fanOut.cancel()
             comparisonStatus("Comparison recording retained: \(error.localizedDescription)")

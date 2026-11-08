@@ -87,13 +87,11 @@ extension DesktopHostController {
         }
         try snapshot.budget.finish(round)
         try await comparisons.upsert(round)
+        let historyNote = await saveComparisonToHistory(round)
         guard comparisonGeneration == configuration.generation else { return }
         comparisonSelection = round.id
         if comparisonBatch?.remaining.isEmpty == true { comparisonBatch = nil }
-        comparisonStatus(
-            comparisonBatch == nil ? "Comparison results saved. Review or rank the results below."
-                : "Batch paused. Judge this round, then choose Next file. No further requests start automatically."
-        )
+        comparisonStatus((comparisonBatch == nil ? comparisonFileSaved : comparisonBatchPaused) + historyNote)
         await refreshComparison()
     }
 

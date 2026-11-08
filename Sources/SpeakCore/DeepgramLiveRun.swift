@@ -13,6 +13,9 @@ final class DeepgramLiveRun: @unchecked Sendable {
     var closeSent = false
     let sendBudget: StreamingAudioSendBudget
     var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
+    /// Flux only: the latest interim text of the turn still open. `CloseStream`
+    /// never emits `EndOfTurn`, so Deepgram documents this as the final text.
+    var openFluxTurn: String?
     var waiters: [CheckedContinuation<String?, Never>] = []
     var onTranscript: ((String, Bool) -> Void)?
     var onError: ((Error) -> Void)?

@@ -195,11 +195,12 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
         transmit(.data(audioData), on: task)
     }
 
-    /// Soniox graceful close: send an empty binary frame to flush the final tokens.
+    /// Soniox graceful close: an empty text frame flushes the final tokens.
+    /// An empty binary frame is only an empty audio chunk and ends nothing.
     func signalEndOfStream() {
         guard let task = currentWebSocketTask(), task.state == .running else { return }
         flushPreroll(on: task)
-        transmit(.data(Data()), on: task)
+        transmit(.string(""), on: task)
     }
 
     /// Send Soniox `{"type":"finalize"}` to force any in-flight non-final tokens

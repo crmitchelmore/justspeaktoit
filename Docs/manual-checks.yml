@@ -139,14 +139,16 @@ sessions:
         title: "History: Review Issue Report shows only safe details"
         minutes: 4
         core: false
-        build: "Just Speak to It for Mac, Alpha build 61 or later"
+        build: "Just Speak to It for Mac, Alpha build 64 or later"
         steps:
           - "Open History and choose Review Issue Report\u2026 on any recording (a failed one if you have it)."
           - "Read the draft and the JSON attachment, then turn Include diagnostics off and on again."
           - "Click Save JSON\u2026 and save to the Desktop, then click Copy Draft and paste into a new TextEdit document."
           - "Click Open GitHub, check the issue page is prefilled with the draft, and close the tab without submitting."
           - "Delete the saved file and the TextEdit document."
-        expected: "The draft and JSON name the model, mode and settings of that recording but contain no transcript text, prompt, file path, API key, device or app name. With Include diagnostics off, the JSON keeps only its version and removal notes, with no model or settings. The saved file, copied draft and GitHub page match the preview, and nothing was posted."
+          - "Start a recording and press Escape to cancel it. In History, open that cancelled recording and click Review Issue Report\u2026, then press Escape."
+          - "On the same cancelled recording click Review Before Copying\u2026, check the draft is shown, then click Cancel."
+        expected: "The draft and JSON name the model, mode and settings of that recording but contain no transcript text, prompt, file path, API key, device or app name. With Include diagnostics off, the JSON keeps only its version and removal notes, with no model or settings. The saved file, copied draft and GitHub page match the preview, and nothing was posted. For the cancelled recording, both buttons open a full review window (never an empty white box), Escape and Cancel close it, and the app stays responsive without a force quit."
         final_gate: true
       - id: "mac-speechanalyzer-latency"
         issues:

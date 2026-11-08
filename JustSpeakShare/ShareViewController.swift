@@ -192,6 +192,7 @@ final class ShareViewController: UIViewController {
         view.backgroundColor = .systemBackground
 
         statusLabel.text = "Copying the recording…"
+        statusLabel.textColor = .label
         statusLabel.numberOfLines = 0
         statusLabel.textAlignment = .center
         statusLabel.font = .preferredFont(forTextStyle: .body)

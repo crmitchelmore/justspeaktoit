@@ -1,0 +1,20 @@
+{
+  "windows": {
+    "run": 42332067239,
+    "sha": "ace2ebe2da02294b87da505a16d2b4a68ee86656",
+    "job": "Native Windows x64 (Swift 6.2.3)",
+    "runner": [
+      "windows-2022"
+    ],
+    "artifact": "windows-ui-screenshots-ace2ebe2da02294b87da505a16d2b4a68ee86656"
+  },
+  "linux": {
+    "run": 42345379010,
+    "sha": "43410e45f531ad41ec714ed46ef138750ee8bf77",
+    "job": "Linux desktop (GTK 4, Swift 6.2.3)",
+    "runner": [
+      "ubuntu-24.04"
+    ],
+    "artifact": "linux-ui-screenshots"
+  }
+}

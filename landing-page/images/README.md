@@ -60,7 +60,11 @@ To regenerate for a release: run the Site Media Capture workflow, download its
 from downloaded capture artifacts (needs ffmpeg and Pillow).
 
 The page loads no clip data until someone presses play (`preload="none"`), and
-`clips.js` defers below-the-fold posters until they near the viewport.
+`clips.js` defers below-the-fold posters until they near the viewport. Measured
+for the 8 November 2026 render: the first view loads only the 21 KB hero
+poster and the 0.9 KB script (the previous demo poster was 32 KB); the other six
+posters add 157 KB as they are scrolled to, replacing the 465 KB iPhone PNG that
+was previously lazy-loaded; each clip costs 150-420 KB only when played.
 
 Earlier captures that showed the developer's own usage and dictation
 (app-dashboard.png, app-history.png) and superseded captures were removed.

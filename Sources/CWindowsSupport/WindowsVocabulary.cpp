@@ -1,5 +1,6 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
+#include "WindowsWindowChrome.hpp"
 #include <commdlg.h>
 #include <array>
 #include <cwctype>
@@ -467,6 +468,8 @@ LRESULT CALLBACK procedure(HWND w, UINT message, WPARAM wp, LPARAM lp) {
         d->window = w; SetWindowLongPtrW(w, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(d));
     }
     if (!d) return DefWindowProcW(w, message, wp, lp);
+    LRESULT themed = 0;
+    if (jsti::chrome::dialogMessage(w, message, wp, lp, themed)) return themed;
     switch (message) {
     case WM_CREATE: return createControls(*d) ? 0 : -1;
     case WM_SIZE: layout(*d); return 0;

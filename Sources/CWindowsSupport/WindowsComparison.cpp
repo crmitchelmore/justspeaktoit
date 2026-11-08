@@ -432,6 +432,13 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         HBRUSH brush = CreateSolidBrush(jsti::chrome::palette().window);
         FillRect(reinterpret_cast<HDC>(wparam), &client, brush); DeleteObject(brush); return 1;
     }
+    case WM_SETTINGCHANGE:
+        if (lparam && jsti::chrome::appearance() == 0 &&
+            wcscmp(reinterpret_cast<const wchar_t *>(lparam), L"ImmersiveColorSet") == 0) {
+            jsti::chrome::themeWindow(window);
+            RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+        }
+        break;
     case WM_CLOSE: emit(*dialog, 123); DestroyWindow(window); return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
@@ -474,6 +481,7 @@ void jsti_show_comparison(HWND owner, JSTIWindowCallback callback, void *context
         work.top + (work.bottom - work.top - height) / 2, width, height, owner, nullptr, type.hInstance, &dialog);
     if (!window) { MessageBoxW(owner, L"Could not create Compare Models.", L"Comparison", MB_OK); return; }
     { std::lock_guard<std::mutex> lock(mutex); activeWindow = window; }
+    jsti::chrome::themeWindow(window);
     EnableWindow(owner, FALSE); ShowWindow(window, SW_SHOW);
     emit(dialog, 100);
     MSG message{};
@@ -561,6 +569,7 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
         require(text(window, detailID).find("test/") == std::string::npos, "Blind result reveals model identities.");
         auto snapshot = [&](const char *name) {
             if (check.directory.empty()) return;
+            jsti::chrome::themeWindow(window);
             char failure[512]{};
             const auto path = check.directory + "\\" + name;
             if (jsti_owned_window_save_snapshot(window, path.c_str(), failure, sizeof failure) != 0)

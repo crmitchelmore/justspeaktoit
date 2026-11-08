@@ -1,5 +1,6 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
+#include "WindowsWindowChrome.hpp"
 #include <commdlg.h>
 #include <objbase.h>
 #include <mutex>
@@ -195,6 +196,8 @@ LRESULT CALLBACK markupProcedure(HWND window, UINT message, WPARAM wparam, LPARA
         SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
     }
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
+    LRESULT themed = 0;
+    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
     if (message == DM_GETDEFID) return MAKELRESULT(markupWrapID, DC_HASDEFID);
     if (message == WM_CREATE) {
         dialog->source->markupWindow = window;
@@ -519,6 +522,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
     }
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
+    LRESULT themed = 0;
+    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
     switch (message) {
     case formatMessage:
         { std::lock_guard<std::mutex> lock(mutex); dialog->formats = formatState; }

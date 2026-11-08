@@ -47,10 +47,11 @@ module IOSProfileEnsure
       "\x30\x82\x01\x00signed#{xml}\x00trailer".b
     end
 
-    def profile(id, name:, state: "ACTIVE", containers: %w[iCloud.legacy], type: "IOS_APP_STORE")
+    def profile(id, name:, state: "ACTIVE", containers: %w[iCloud.legacy], type: "IOS_APP_STORE",
+                groups: ["group.example"])
       { "id" => id, "attributes" => {
         "name" => name, "profileState" => state, "profileType" => type,
-        "profileContent" => Base64.strict_encode64(profile_der(groups: ["group.example"], containers: containers)),
+        "profileContent" => Base64.strict_encode64(profile_der(groups: groups, containers: containers)),
       } }
     end
 
@@ -70,8 +71,8 @@ module IOSProfileEnsure
       transport = FakeTransport.new(script)
       [Ensurer.new(client: IOSProfileBootstrap::Client.new(transport: transport), bundle_id: BUNDLE_ID,
                    certificate_serial: SERIAL, required: { GROUP => ["group.example"], ICLOUD => ["iCloud.legacy"] },
-                   preferred: { ICLOUD => ["iCloud.shared"] }, logger: ->(m) { logs << m },
-                   warner: ->(m) { warnings << m }), transport]
+                   preferred: { ICLOUD => ["iCloud.shared"] }, exact: [GROUP], logger: ->(m) { logs << m },
+                   warner: ->(m) { warnings << m }, sleeper: ->(_seconds) {}), transport]
     end
 
     def test_profile_name_is_unique_per_bundle_and_certificate
@@ -142,7 +143,40 @@ module IOSProfileEnsure
       ]
       subject, = ensurer(script)
       error = assert_raises(ValidationError) { subject.ensure_profile }
-      assert_match(/lacks #{ICLOUD}=iCloud.legacy\. Enable that capability/, error.message)
+      assert_match(/lacks #{ICLOUD}=iCloud.legacy\. Match the App ID/, error.message)
+    end
+
+    def test_skips_profile_with_an_extra_value_under_an_exact_key
+      extra = profile("P2", name: "Extra group", containers: %w[iCloud.legacy iCloud.shared],
+                            groups: %w[group.example group.other])
+      exact = profile("P3", name: "Exact", containers: %w[iCloud.legacy iCloud.shared])
+      script = setup_steps + [
+        ["GET", "/v1/bundleIds/B1/profiles", 200, { "data" => [extra, exact] }],
+        certificates("P2"),
+        certificates("P3"),
+      ]
+      logs = []
+      subject, transport = ensurer(script, logs)
+      subject.ensure_profile
+      assert transport.drained?
+      assert(logs.any? { |log| log.include?("has unexpected #{GROUP}=group.other") })
+      assert(logs.any? { |log| log.include?("Reusing provisioning profile Exact") })
+    end
+
+    def test_concurrent_refresh_converges_on_the_other_runs_profile
+      name = ensurer([]).first.profile_name
+      fresh = profile("P6", name: name, containers: %w[iCloud.legacy iCloud.shared])
+      script = setup_steps + [
+        ["GET", "/v1/bundleIds/B1/profiles", 200, { "data" => [profile("P1", name: name, state: "INVALID")] }],
+        ["DELETE", "/v1/profiles/P1", 404, { "errors" => [] }],
+        ["POST", "/v1/profiles", 409, { "errors" => [] }],
+      ] + setup_steps + [
+        ["GET", "/v1/bundleIds/B1/profiles", 200, { "data" => [fresh] }],
+        certificates("P6"),
+      ]
+      subject, transport = ensurer(script)
+      assert_includes subject.ensure_profile, "iCloud.shared"
+      assert transport.drained?
     end
 
     def test_unregistered_app_id_fails_without_creating_one

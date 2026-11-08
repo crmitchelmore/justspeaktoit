@@ -36,7 +36,9 @@ profile that carries them.
    profiles through the App Store Connect API and replace any that lack the
    containers ([details](ios-testflight-release.md#provisioning-profiles)).
    Run the **Apple App IDs and profiles** workflow to regenerate and check them
-   ahead of a build.
+   ahead of a build. A rebuild of a frozen source older than this automation
+   still installs the stored `IOS_APPSTORE_PROFILE`/`ALPHA_IOS_APPSTORE_PROFILE`
+   secret, which fails once the flag is on; select a newer source instead.
 3. **Schema.** In CloudKit Console, check that the Production schema of
    `iCloud.com.justspeaktoit` (and `.alpha`) has every record type that the
    `iCloud.com.justspeaktoit.ios` Production schema has. If one is missing,

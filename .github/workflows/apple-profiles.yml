@@ -31,7 +31,7 @@ jobs:
       matrix:
         train: [alpha, stable]
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -49,6 +49,7 @@ jobs:
 
       - name: Ensure and check App Store profiles
         env:
+          SHARED_CONTAINER: ${{ vars.IOS_SHARED_CLOUD_CONTAINER == '1' && '1' || '0' }}
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
@@ -65,12 +66,15 @@ jobs:
           GROUP_KEY=com.apple.security.application-groups
           ICLOUD_KEY=com.apple.developer.icloud-container-identifiers
           echo "### ${{ matrix.train }} App Store profiles" >> "$GITHUB_STEP_SUMMARY"
+          SHARED_CONTAINER_RULE=--prefer
+          [ "$SHARED_CONTAINER" = "1" ] && SHARED_CONTAINER_RULE=--require
+          # Mirrors release-ios.yml. Extension profiles may carry containers they don't use.
           check() {
             local bundle="$1" expected_containers="$2"
             shift 2
             local output="$RUNNER_TEMP/$bundle.mobileprovision"
             ruby scripts/ensure-ios-app-store-profile.rb --bundle-id "$bundle" --certificate-serial "$SERIAL" \
-              --output "$output" --require "$GROUP_KEY=$IOS_APP_GROUP" "$@"
+              --output "$output" --require "$GROUP_KEY=$IOS_APP_GROUP" --exact "$GROUP_KEY" "$@"
             security cms -D -i "$output" | python3 -c '
           import plistlib, sys
           bundle, group, expected = sys.argv[1], sys.argv[2], [c for c in sys.argv[3].split(",") if c]
@@ -82,12 +86,14 @@ jobs:
               ", ".join(containers) or "none", ", ".join(groups) or "none", profile["ExpirationDate"]))
           assert e["application-identifier"].split(".", 1)[1] == bundle, "wrong App ID"
           assert groups == [group], "wrong App Group"
-          assert sorted(containers) == sorted(expected), "wrong iCloud containers"
+          if expected:
+              assert expected[0] in containers and set(containers) <= set(expected), "wrong iCloud containers"
           ' "$bundle" "$IOS_APP_GROUP" "$expected_containers" | tee -a "$GITHUB_STEP_SUMMARY"
             rm -f "$output"
           }
           check "$BUNDLE_ID" "$IOS_CLOUD_CONTAINER,$MAC_CLOUD_CONTAINER" \
-            --require "$ICLOUD_KEY=$IOS_CLOUD_CONTAINER" --require "$ICLOUD_KEY=$MAC_CLOUD_CONTAINER"
+            --require "$ICLOUD_KEY=$IOS_CLOUD_CONTAINER" "$SHARED_CONTAINER_RULE" "$ICLOUD_KEY=$MAC_CLOUD_CONTAINER" \
+            --exact "$ICLOUD_KEY"
           check "$BUNDLE_ID.JustSpeakToItWidgetExtension" ""
           check "$BUNDLE_ID.keyboard" ""
           rm -f "$APP_STORE_CONNECT_KEY_PATH"
@@ -97,7 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -110,5 +116,6 @@ jobs:
           echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > "$APP_STORE_CONNECT_KEY_PATH"
           BUNDLE_ID=$(python3 -c 'import json; print(json.load(open("Sources/SpeakCore/Resources/ReleaseTrains.json"))["stable"]["directMacBundleIdentifier"])')
           export BUNDLE_ID
+          set -o pipefail
           ruby scripts/enable-sign-in-with-apple.rb | tee -a "$GITHUB_STEP_SUMMARY"
           rm -f "$APP_STORE_CONNECT_KEY_PATH"

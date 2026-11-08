@@ -7,11 +7,14 @@
 #
 # A profile is usable when it is ACTIVE, IOS_APP_STORE, includes the
 # distribution certificate being imported (matched by serial) and carries every
-# required and preferred entitlement value. Otherwise this run's own profile
+# required and preferred entitlement value, with no extra values under an
+# --exact key. Otherwise this run's own profile
 # (named "<bundle id> App Store <serial suffix>") is deleted if present and
 # created again, which picks up the App ID's current capabilities. A freshly
 # created profile must carry every required value; a missing preferred value
-# only warns. Profiles this script did not name are never deleted.
+# only warns. Profiles this script did not name are never deleted. A
+# concurrent refresh of the same profile (404 on delete, 409 on create) is
+# resolved by searching again.
 #
 # Never prints profile content. Run with:
 #   APP_STORE_CONNECT_KEY_ID=... APP_STORE_CONNECT_ISSUER_ID=... \
@@ -67,13 +70,16 @@ module IOSProfileEnsure
   end
 
   class Ensurer
-    def initialize(client:, bundle_id:, certificate_serial:, required: {}, preferred: {},
-                   logger: ->(message) { puts message }, warner: ->(message) { warn message })
+    def initialize(client:, bundle_id:, certificate_serial:, required: {}, preferred: {}, exact: [],
+                   logger: ->(message) { puts message }, warner: ->(message) { warn message },
+                   sleeper: ->(seconds) { sleep(seconds) })
       @client = client
       @bundle_id = bundle_id
       @certificate_serial = certificate_serial
       @required = required
       @preferred = preferred
+      @exact = exact
+      @sleeper = sleeper
       @logger = logger
       @warner = warner
     end
@@ -88,6 +94,12 @@ module IOSProfileEnsure
 
     # Returns the decoded profile bytes.
     def ensure_profile
+      attempt(retry_conflict: true)
+    end
+
+    private
+
+    def attempt(retry_conflict:)
       bundle_resource_id = fetch_bundle.fetch("id")
       certificate_id = find_certificate.fetch("id")
       candidates = @client.list("/v1/bundleIds/#{bundle_resource_id}/profiles?limit=200")
@@ -103,16 +115,24 @@ module IOSProfileEnsure
 
       candidates.select { |profile| profile.dig("attributes", "name") == profile_name }.each do |stale|
         @logger.call("Deleting #{stale.dig('attributes', 'profileState')} provisioning profile #{profile_name}")
-        @client.request(method: Net::HTTP::Delete, path: "/v1/profiles/#{stale.fetch('id')}")
+        delete_profile(stale)
       end
-      created = create_profile(bundle_resource_id, certificate_id)
+      begin
+        created = create_profile(bundle_resource_id, certificate_id)
+      rescue IOSProfileBootstrap::ConflictError
+        raise unless retry_conflict
+
+        @logger.call("Provisioning profile #{profile_name} was created concurrently; searching again")
+        @sleeper.call(5)
+        return attempt(retry_conflict: false)
+      end
       der = decode(created)
       entitlements = ProfileEntitlements.parse(der).fetch("Entitlements")
-      missing_required = missing(entitlements, @required)
-      unless missing_required.empty?
+      mismatches = missing(entitlements, @required).map { |entry| "lacks #{entry}" } + extra(entitlements)
+      unless mismatches.empty?
         raise ValidationError,
-              "The new provisioning profile for #{@bundle_id} lacks #{missing_required.join(', ')}. " \
-              "Enable that capability on the App ID in the Apple Developer portal, then rerun this workflow."
+              "The new provisioning profile for #{@bundle_id} #{mismatches.join('; ')}. " \
+              "Match the App ID's capabilities in the Apple Developer portal, then rerun this workflow."
       end
       missing(entitlements, @preferred).each do |entry|
         @warner.call("Provisioning profile for #{@bundle_id} lacks preferred #{entry}")
@@ -120,8 +140,6 @@ module IOSProfileEnsure
       @logger.call("Created provisioning profile #{profile_name} for #{@bundle_id}")
       der
     end
-
-    private
 
     def fetch_bundle
       escaped = URI.encode_www_form_component(@bundle_id)
@@ -149,7 +167,7 @@ module IOSProfileEnsure
       return false unless certificate_ids.include?(certificate_id)
 
       entitlements = ProfileEntitlements.parse(decode(profile)).fetch("Entitlements")
-      gaps = missing(entitlements, @required) + missing(entitlements, @preferred)
+      gaps = missing(entitlements, @required) + missing(entitlements, @preferred) + extra(entitlements)
       @logger.call("Profile #{profile.dig('attributes', 'name')} lacks #{gaps.join(', ')}") unless gaps.empty?
       gaps.empty?
     rescue ValidationError
@@ -170,12 +188,28 @@ module IOSProfileEnsure
       @client.post("/v1/profiles", body).fetch("data")
     end
 
+    def delete_profile(profile)
+      @client.request(method: Net::HTTP::Delete, path: "/v1/profiles/#{profile.fetch('id')}")
+    rescue ApiError => error
+      raise unless error.status == 404
+
+      @logger.call("Provisioning profile #{profile_name} was already deleted")
+    end
+
     def decode(profile)
       content = profile.dig("attributes", "profileContent")
       content ||= @client.get("/v1/profiles/#{profile.fetch('id')}").dig("data", "attributes", "profileContent")
       raise ValidationError, "Apple returned a profile without profileContent" unless content
 
       Base64.decode64(content)
+    end
+
+    # Values under an --exact key that no expectation asked for.
+    def extra(entitlements)
+      @exact.flat_map do |key|
+        allowed = Array(@required[key]) + Array(@preferred[key])
+        Array(entitlements[key]).reject { |value| allowed.include?(value) }.map { |value| "has unexpected #{key}=#{value}" }
+      end
     end
 
     def missing(entitlements, expectations)
@@ -193,12 +227,13 @@ module IOSProfileEnsure
   end
 
   def self.main(argv)
-    options = { required: {}, preferred: {} }
+    options = { required: {}, preferred: {}, exact: [] }
     OptionParser.new do |parser|
       parser.on("--bundle-id IDENTIFIER") { |value| options[:bundle_id] = value }
       parser.on("--certificate-serial SERIAL") { |value| options[:certificate_serial] = value }
       parser.on("--require KEY=VALUE") { |value| parse_expectation(value, options[:required]) }
       parser.on("--prefer KEY=VALUE") { |value| parse_expectation(value, options[:preferred]) }
+      parser.on("--exact KEY") { |value| options[:exact] << value }
       parser.on("--output PATH") { |value| options[:output] = value }
     end.parse!(argv)
     missing_options = %i[bundle_id certificate_serial output].reject { |key| options[key] && !options[key].empty? }
@@ -211,7 +246,8 @@ module IOSProfileEnsure
     transport = IOSProfileBootstrap::HttpTransport.new(api_base: "https://api.appstoreconnect.apple.com", token: token)
     ensurer = Ensurer.new(client: IOSProfileBootstrap::Client.new(transport: transport),
                           bundle_id: options[:bundle_id], certificate_serial: options[:certificate_serial],
-                          required: options[:required], preferred: options[:preferred])
+                          required: options[:required], preferred: options[:preferred],
+                          exact: options[:exact])
     File.binwrite(options[:output], ensurer.ensure_profile)
   rescue ApiError, ValidationError => error
     abort(error.message)

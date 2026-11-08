@@ -91,9 +91,10 @@ mismatch.
 2. In Apple Developer **Certificates, Identifiers & Profiles**, open that exact
    keyboard identifier. Enable App Groups, associate the exact selected
    `IOS_APP_GROUP`, save, and confirm the association.
-3. Run the **Apple App IDs and profiles** workflow. It replaces a profile that
-   lacks the group; enabling the capability alone does not update an existing
-   profile's entitlement. Release builds do the same at build time.
+3. Run the **Apple App IDs and profiles** workflow, or retry the release: both
+   replace a profile that lacks the group, since enabling the capability alone
+   does not update an existing profile's entitlement. The workflow also checks
+   the app's profile, so an unrelated app-profile problem fails it first.
 4. The stored `ALPHA_IOS_KEYBOARD_APPSTORE_PROFILE` and
    `IOS_KEYBOARD_APPSTORE_PROFILE` secrets are only a fallback; the workflow
    still fails closed unless the profile contains the expected group.

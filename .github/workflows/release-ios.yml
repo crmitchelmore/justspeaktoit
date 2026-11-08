@@ -126,14 +126,14 @@ jobs:
             fi
             [ -n "$stored" ] || return 1
             echo "::warning::Using the stored $name profile because the App Store Connect fetch failed."
-            echo -n "$stored" | base64 --decode -o "$PROFILE_DIR/$name.provisionprofile"
+            echo -n "$stored" | base64 --decode -o "$PROFILE_DIR/$name.provisionprofile" || return 1
             echo "- $name: stored secret" >> "$GITHUB_STEP_SUMMARY"
           }
           echo "### Provisioning profiles" >> "$GITHUB_STEP_SUMMARY"
 
           install_profile ios-appstore "$BUNDLE_ID" "$IOS_APPSTORE_PROFILE" \
             --require "$GROUP_KEY=$IOS_APP_GROUP" --require "$ICLOUD_KEY=$IOS_CLOUD_CONTAINER" \
-            "$SHARED_CONTAINER_RULE" "$ICLOUD_KEY=$MAC_CLOUD_CONTAINER" \
+            "$SHARED_CONTAINER_RULE" "$ICLOUD_KEY=$MAC_CLOUD_CONTAINER" --exact "$GROUP_KEY" --exact "$ICLOUD_KEY" \
             || { echo "::error::No App Store profile for $BUNDLE_ID"; exit 1; }
           APP_PROFILE_PATH="$PROFILE_DIR/ios-appstore.provisionprofile"
           APP_PROFILE_UUID=$(security cms -D -i "$APP_PROFILE_PATH" | plutil -extract UUID raw -)
@@ -142,7 +142,7 @@ jobs:
           echo "APP_PROFILE_NAME=$APP_PROFILE_NAME" >> "$GITHUB_ENV"
 
           install_profile ios-widget-appstore "$BUNDLE_ID.JustSpeakToItWidgetExtension" "$IOS_WIDGET_APPSTORE_PROFILE" \
-            --require "$GROUP_KEY=$IOS_APP_GROUP" \
+            --require "$GROUP_KEY=$IOS_APP_GROUP" --exact "$GROUP_KEY" \
             || { echo "::error::No App Store profile for $BUNDLE_ID.JustSpeakToItWidgetExtension"; exit 1; }
           WIDGET_PROFILE_PATH="$PROFILE_DIR/ios-widget-appstore.provisionprofile"
           WIDGET_PROFILE_UUID=$(security cms -D -i "$WIDGET_PROFILE_PATH" | plutil -extract UUID raw -)
@@ -153,7 +153,7 @@ jobs:
           if [ "$TUIST_IOS_KEYBOARD" = "1" ]; then
             KEYBOARD_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-keyboard-appstore.provisionprofile
             if ! install_profile ios-keyboard-appstore "$BUNDLE_ID.keyboard" "$IOS_KEYBOARD_APPSTORE_PROFILE" \
-              --require "$GROUP_KEY=$IOS_APP_GROUP"; then
+              --require "$GROUP_KEY=$IOS_APP_GROUP" --exact "$GROUP_KEY"; then
               APP_STORE_CONNECT_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
                 ruby scripts/create-ios-app-store-profile.rb \
                   --bundle-id "$BUNDLE_ID.keyboard" \

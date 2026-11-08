@@ -20,10 +20,18 @@ module SignInWithApple
     raise IOSProfileBootstrap::ValidationError, "Expected one App ID #{bundle_id}, found #{bundles.length}" unless bundles.length == 1
 
     bundle_resource_id = bundles.first.fetch("id")
-    enabled = client.list("/v1/bundleIds/#{bundle_resource_id}/bundleIdCapabilities")
-      .map { |capability| capability.dig("attributes", "capabilityType") }
-    if enabled.include?(CAPABILITY)
-      log.call("- Sign in with Apple was already enabled on #{bundle_id}")
+    existing = client.list("/v1/bundleIds/#{bundle_resource_id}/bundleIdCapabilities")
+      .find { |capability| capability.dig("attributes", "capabilityType") == CAPABILITY }
+    if existing
+      consent = Array(existing.dig("attributes", "settings"))
+        .find { |setting| setting["key"] == "APPLE_ID_AUTH_APP_CONSENT" }
+      options = Array(consent&.fetch("options", nil)).map { |option| option["key"] }
+      unless options.include?("PRIMARY_APP_CONSENT")
+        raise IOSProfileBootstrap::ValidationError,
+              "Sign in with Apple on #{bundle_id} is not configured as a primary App ID (#{options.join(', ')}). " \
+              "In the Apple Developer portal, set it to \"Enable as a primary App ID\", then rerun."
+      end
+      log.call("- Sign in with Apple was already enabled on #{bundle_id} as a primary App ID")
     else
       client.post("/v1/bundleIdCapabilities", {
         data: {

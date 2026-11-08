@@ -22,6 +22,13 @@ public struct NativeTextProvider: Sendable, Hashable {
 public enum NativeTextModels {
     public static let prefix = "native/"
 
+    /// Claude through Anthropic's OpenAI-compatible endpoint. Claude 4.7 and later
+    /// reject a temperature below 1, so none is sent.
+    public static let anthropic = NativeTextProvider(
+        id: "anthropic", displayName: "Anthropic",
+        chatCompletionsURL: URL(string: "https://api.anthropic.com/v1/chat/completions")!,
+        sendsTemperature: false, usesMaxCompletionTokens: false
+    )
     public static let openAI = NativeTextProvider(
         id: "openai", displayName: "OpenAI",
         chatCompletionsURL: URL(string: "https://api.openai.com/v1/chat/completions")!,
@@ -43,8 +50,8 @@ public enum NativeTextModels {
         sendsTemperature: true, usesMaxCompletionTokens: false
     )
 
-    /// Picker order: providers appear in this order, each with its curated models.
-    public static let providers: [NativeTextProvider] = [openAI, google, groq, mistral]
+    /// Every native text provider. Pickers sort by provider name, then model name.
+    public static let providers: [NativeTextProvider] = [anthropic, openAI, google, groq, mistral]
 
     public static func selectionID(provider: NativeTextProvider, model: String) -> String {
         "\(prefix)\(provider.id)/\(model)"
@@ -65,9 +72,17 @@ public enum NativeTextModels {
 
     public static func isNative(_ selection: String) -> Bool { route(for: selection) != nil }
 
-    // Native IDs verified November 2026 against each provider's model docs; OpenAI and
-    // Gemini rates match the OpenRouter entries for the same models.
+    // Native IDs verified November 2026 against each provider's model docs; Anthropic,
+    // OpenAI and Gemini rates match the OpenRouter entries for the same models.
     public static let postProcessing: [ModelCatalog.Option] = [
+        option(anthropic, "claude-haiku-4-5", "Claude Haiku 4.5",
+               "Fast, reliable formatting, direct from Anthropic.",
+               latency: 900, tier: .fast, tags: [.fast, .quality],
+               pricing: .init(promptPerMTokens: 1.0, completionPerMTokens: 5.0), context: 200_000),
+        option(anthropic, "claude-sonnet-4-6", "Claude Sonnet 4.6",
+               "Excellent structure and tone preservation, direct from Anthropic.",
+               latency: 1400, tier: .medium, tags: [.quality, .leading],
+               pricing: .init(promptPerMTokens: 3.0, completionPerMTokens: 15.0), context: 1_000_000),
         option(openAI, "gpt-6-luna", "GPT-6 Luna", "Cost-efficient GPT-6, direct from OpenAI.",
                tags: [.cheap], pricing: .init(promptPerMTokens: 0.10, completionPerMTokens: 0.50),
                context: 1_050_000),

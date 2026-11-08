@@ -278,6 +278,11 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(mistralAPIKey, identifier: Self.mistralKeyID) }
     }
 
+    /// Used only by native Anthropic cleanup models.
+    @Published public var anthropicAPIKey: String {
+        didSet { persistSecret(anthropicAPIKey, identifier: Self.anthropicKeyID) }
+    }
+
     @Published public var azureAPIKey: String {
         didSet { persistSecret(azureAPIKey, identifier: Self.azureKeyID) }
     }
@@ -317,6 +322,7 @@ public final class AppSettings: ObservableObject {
     static let speechmaticsKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "speechmatics")
     static let revAIKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "revai")
     static let mistralKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "mistral")
+    static let anthropicKeyID = NativeTextModels.anthropic.credentialIdentifier
     static let stepfunKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "stepfun")
     static let reson8KeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "reson8")
     static let smallestKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "smallest")
@@ -567,7 +573,7 @@ public final class AppSettings: ObservableObject {
 
     /// Native text providers whose key this app stores. Groq has no iOS key slot,
     /// so its native cleanup routes stay macOS/desktop-only.
-    static let nativeTextProviderIDs: Set<String> = ["openai", "google", "mistral"]
+    static let nativeTextProviderIDs: Set<String> = ["anthropic", "google", "mistral", "openai"]
 
     public static let postProcessingModels = ModelCatalog.postProcessing.filter {
         !$0.id.hasPrefix("local/post-processing/")
@@ -709,6 +715,7 @@ public final class AppSettings: ObservableObject {
         self.speechmaticsAPIKey = ""
         self.revAIAPIKey = ""
         self.mistralAPIKey = ""
+        self.anthropicAPIKey = ""
         self.transcriptionKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.storageKey) ?? ""
         self.transcriptReadyNotificationsEnabled = defaults.bool(
             forKey: DefaultsKey.transcriptReadyNotificationsEnabled.storageKey
@@ -880,6 +887,7 @@ public final class AppSettings: ObservableObject {
     }
     public var hasRevAIKey: Bool { !revAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasMistralKey: Bool { !mistralAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasAnthropicKey: Bool { !anthropicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Identifiers currently available to model pickers. Because this is
     /// derived from the published key values, readiness badges refresh as soon
@@ -909,6 +917,7 @@ public final class AppSettings: ObservableObject {
         if hasSpeechmaticsKey { identifiers.insert(Self.speechmaticsKeyID) }
         if hasRevAIKey { identifiers.insert(Self.revAIKeyID) }
         if hasMistralKey { identifiers.insert(Self.mistralKeyID) }
+        if hasAnthropicKey { identifiers.insert(Self.anthropicKeyID) }
         return identifiers
     }
 
@@ -946,6 +955,7 @@ public final class AppSettings: ObservableObject {
         await reloadSyncedAPIKey(\.speechmaticsAPIKey, identifier: Self.speechmaticsKeyID)
         await reloadSyncedAPIKey(\.revAIAPIKey, identifier: Self.revAIKeyID)
         await reloadSyncedAPIKey(\.mistralAPIKey, identifier: Self.mistralKeyID)
+        await reloadSyncedAPIKey(\.anthropicAPIKey, identifier: Self.anthropicKeyID)
     }
 
     @discardableResult
@@ -1093,6 +1103,7 @@ public final class AppSettings: ObservableObject {
     private var apiKeysByIdentifier: [String: String] {
         var keys = liveAPIKeysByIdentifier
         keys[Self.openRouterKeyID] = openRouterAPIKey
+        keys[Self.anthropicKeyID] = anthropicAPIKey
         keys[Self.smallestKeyID] = smallestAPIKey
         keys[Self.stepfunKeyID] = stepfunAPIKey
         return keys

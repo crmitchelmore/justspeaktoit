@@ -11,6 +11,8 @@ struct MacAPIKeyItem: Identifiable {
     case openRouter
     case transcription(TranscriptionProviderMetadata)
     case textToSpeech(TTSProvider)
+    /// A native cleanup provider whose key no speech card already manages.
+    case postProcessing(NativeTextProvider)
   }
 
   let entry: APIKeyListEntry
@@ -242,6 +244,21 @@ struct SettingsView: View {
         source: .textToSpeech(provider)
       )
     }
+    let covered = Set(transcriptionProviders.map(\.apiKeyIdentifier))
+      .union(TTSProvider.allCases.map(\.apiKeyIdentifier))
+    items += NativeTextModels.providers
+      .filter { !covered.contains($0.credentialIdentifier) }
+      .map { provider in
+        MacAPIKeyItem(
+          entry: APIKeyListEntry(
+            id: "text-\(provider.id)",
+            title: provider.displayName,
+            category: "Post-processing",
+            isStored: isAPIKeyStored(provider.credentialIdentifier)
+          ),
+          source: .postProcessing(provider)
+        )
+      }
     return items
   }
 

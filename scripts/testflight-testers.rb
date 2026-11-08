@@ -9,7 +9,9 @@ module AppleRelease
   class TesterAccess
     GROUP = 'Public Alpha'
     INVITED = %w[INVITED ACCEPTED INSTALLED].freeze
-    LIVE_BUILD_STATES = %w[IN_BETA_TESTING WAITING_FOR_BETA_REVIEW].freeze
+    # Waiting/in review are on their way; testable states must be assigned.
+    REVIEW_BUILD_STATES = %w[WAITING_FOR_BETA_REVIEW IN_BETA_REVIEW].freeze
+    TESTABLE_BUILD_STATES = %w[IN_BETA_TESTING READY_FOR_BETA_TESTING].freeze
     EMAIL = /\A[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+\z/
 
     class InputError < StandardError; end
@@ -67,7 +69,13 @@ module AppleRelease
         end
         # A linked account tester's state can reflect another app, so invite it.
         next if !linked && INVITED.include?(tester.dig('attributes', 'state'))
-        counts[invite(tester) ? :invited : :invite_pending] += 1
+        if invite(tester)
+          counts[:invited] += 1
+        else
+          counts[:invite_pending] += 1
+          # Membership alone would hide the missing invitation from later runs.
+          unlink(tester) if linked
+        end
       end
       @log.call("Testers: #{emails.length} configured, #{counts[:already]} already in #{GROUP}, " \
                 "#{counts[:linked]} linked, #{counts[:created]} created, #{counts[:invited]} invitations sent, " \
@@ -76,9 +84,9 @@ module AppleRelease
     end
 
     def latest_build
-      query = URI.encode_www_form('filter[app]' => @app, 'sort' => '-uploadedDate', 'limit' => 10)
-      builds = @client.get("/v1/builds?#{query}").fetch('data')
-      found = builds.find { |b| b.dig('attributes', 'processingState') == 'VALID' && !b.dig('attributes', 'expired') }
+      query = URI.encode_www_form('filter[app]' => @app, 'filter[processingState]' => 'VALID',
+        'filter[expired]' => 'false', 'sort' => '-uploadedDate', 'limit' => 1)
+      found = @client.get("/v1/builds?#{query}").fetch('data').first
       return nil unless found
       detail = @client.get("/v1/builds/#{found.fetch('id')}/buildBetaDetail").fetch('data')
       assigned = @client.list("/v1/betaGroups/#{group.fetch('id')}/builds?limit=200").any? { |b| b['id'] == found['id'] }
@@ -106,8 +114,10 @@ module AppleRelease
       else
         @log.call("Latest iOS Alpha build #{build[:number]}: #{build[:state]}, " \
                   "#{build[:assigned] ? 'assigned to' : 'not assigned to'} #{GROUP}")
-        problems << "Build #{build[:number]} is #{build[:state]}" unless LIVE_BUILD_STATES.include?(build[:state])
-        if build[:state] == 'IN_BETA_TESTING' && !build[:assigned]
+        unless (REVIEW_BUILD_STATES + TESTABLE_BUILD_STATES).include?(build[:state])
+          problems << "Build #{build[:number]} is #{build[:state]}"
+        end
+        if TESTABLE_BUILD_STATES.include?(build[:state]) && !build[:assigned]
           problems << "Build #{build[:number]} is not assigned to #{GROUP}"
         end
       end
@@ -144,6 +154,11 @@ module AppleRelease
       @client.post("/v1/betaGroups/#{group.fetch('id')}/relationships/betaTesters",
         data: [{type: 'betaTesters', id: existing.fetch('id')}])
       [member(email) || raise('Tester group membership was not observed'), :linked]
+    end
+
+    def unlink(tester)
+      @client.request(method: Net::HTTP::Delete, path: "/v1/betaGroups/#{group.fetch('id')}/relationships/betaTesters",
+        body: {data: [{type: 'betaTesters', id: tester.fetch('id')}]})
     end
 
     # Apple only invites once a build is testable; until then it stays pending

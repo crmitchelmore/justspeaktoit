@@ -408,29 +408,3 @@ jobs:
           APP_STORE_CONNECT_KEY_PATH: /Users/runner/.appstoreconnect/private_keys/AuthKey_S747NJ9DZY.p8
         run: |
           ruby scripts/release-apple.rb distribute "$RUNNER_TEMP/release-manifest.json" ios
-
-      # Alpha only: keep owner-nominated testers in Public Alpha. Addresses
-      # come from a secret, are masked, and never reach logs. A pending
-      # invitation is retried by the TestFlight tester access workflow.
-      - name: Ensure TestFlight testers for Alpha
-        if: hashFiles('scripts/testflight-testers.rb') != ''
-        continue-on-error: true
-        env:
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          APP_STORE_CONNECT_KEY_PATH: /Users/runner/.appstoreconnect/private_keys/AuthKey_S747NJ9DZY.p8
-          TESTFLIGHT_TESTER_EMAILS: ${{ secrets.TESTFLIGHT_TESTER_EMAILS }}
-        shell: bash
-        run: |
-          train=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("train")' "$RUNNER_TEMP/release-manifest.json")
-          if [ "$train" != alpha ] || [ -z "$TESTFLIGHT_TESTER_EMAILS" ]; then
-            echo "No Alpha tester access to ensure."
-            exit 0
-          fi
-          IFS=',' read -ra entries <<< "$TESTFLIGHT_TESTER_EMAILS"
-          for entry in "${entries[@]}"; do
-            entry="$(printf '%s' "$entry" | tr -d '[:space:]')"
-            [ -n "$entry" ] || continue
-            echo "::add-mask::$entry"
-            echo "::add-mask::$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
-          done
-          ruby scripts/testflight-testers.rb ensure

@@ -9,6 +9,7 @@ on:
       - scripts/testflight-testers.rb
       - scripts/tests/testflight_testers_test.rb
       - scripts/release-apple.rb
+      - scripts/mask-tester-emails.sh
   workflow_dispatch:
     inputs:
       release_if_stale:
@@ -22,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Test tester access without secrets
@@ -32,6 +33,7 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: testflight-testers
     permissions:
       contents: write
       actions: write
@@ -44,19 +46,11 @@ jobs:
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       TESTFLIGHT_TESTER_EMAILS: ${{ secrets.TESTFLIGHT_TESTER_EMAILS }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
       - name: Mask each configured tester address
-        shell: bash
-        run: |
-          IFS=',' read -ra entries <<< "$TESTFLIGHT_TESTER_EMAILS"
-          for entry in "${entries[@]}"; do
-            entry="$(printf '%s' "$entry" | tr -d '[:space:]')"
-            [ -n "$entry" ] || continue
-            echo "::add-mask::$entry"
-            echo "::add-mask::$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
-          done
+        run: ./scripts/mask-tester-emails.sh
       - name: Install existing Apple API key
         env:
           KEY_DATA: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
@@ -89,6 +83,12 @@ jobs:
           source=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push \
             --status success --limit 1 --json headSha --jq '.[0].headSha')
           test -n "$source"
+          active=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow alpha-release.yml --limit 20 \
+            --json status --jq '[.[] | select(.status != "completed")] | length')
+          if [ "$active" -gt 0 ]; then
+            echo "An Alpha release is already running; rerun this workflow after TestFlight processing."
+            exit 1
+          fi
           gh workflow run alpha-release.yml --repo "$GITHUB_REPOSITORY" --ref main -f source="$source" -f rebuild=true
           echo "Started an Alpha release for $source; rerun this workflow after TestFlight processing."
           exit 1

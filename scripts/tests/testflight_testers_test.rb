@@ -22,7 +22,10 @@ class TestflightTestersTest < Minitest::Test
       params = URI.decode_www_form(query.to_s).to_h
       case route
       when '/v1/apps/alpha-app' then {'data' => {'attributes' => {'bundleId' => 'com.justspeaktoit.ios.alpha'}}}
-      when '/v1/builds' then {'data' => builds}
+      when '/v1/builds'
+        raise 'Build discovery must filter server-side' unless params['filter[processingState]'] == 'VALID' &&
+          params['filter[expired]'] == 'false' && params['sort'] == '-uploadedDate'
+        {'data' => builds.select { |b| b.dig('attributes', 'processingState') == 'VALID' }.first(1)}
       when %r{\A/v1/builds/.+/buildBetaDetail\z} then {'data' => {'attributes' => {'externalBuildState' => build_state}}}
       when '/v1/betaTesters'
         found = testers.select { |email, t| email == params['filter[email]'] &&
@@ -35,6 +38,13 @@ class TestflightTestersTest < Minitest::Test
       return groups if path == '/v1/apps/alpha-app/betaGroups?limit=200'
       return assigned ? [{'id' => 'b1'}] : [] if path == '/v1/betaGroups/public/builds?limit=200'
       raise "Unexpected list #{path}"
+    end
+    def request(method:, path:, body: nil)
+      raise "Unexpected #{method} #{path}" unless method == Net::HTTP::Delete && path == '/v1/betaGroups/public/relationships/betaTesters'
+      @posts << [:delete, body]
+      id = body[:data].first[:id]
+      testers.each_value { |t| t['groups'].delete('public') if t['id'] == id }
+      nil
     end
     def post(path, body)
       @posts << [path, body]
@@ -97,6 +107,19 @@ class TestflightTestersTest < Minitest::Test
     assert_equal ['/v1/betaGroups/public/relationships/betaTesters', '/v1/betaTesterInvitations'], client.posts.map(&:first)
   end
 
+  def test_linked_tester_with_pending_invitation_is_unlinked_so_next_run_retries
+    client = FakeClient.new
+    client.testers['me@example.com'] = {'id' => 't0', 'groups' => ['other'], 'state' => 'INSTALLED'}
+    client.invite_status = 409
+    counts = access(client).ensure_testers(['me@example.com'])
+    assert_equal 1, counts[:invite_pending]
+    assert_equal ['other'], client.testers['me@example.com']['groups']
+    client.invite_status = nil
+    counts = access(client).ensure_testers(['me@example.com'])
+    assert_equal [1, 1], [counts[:linked], counts[:invited]]
+    assert_includes client.testers['me@example.com']['groups'], 'public'
+  end
+
   def test_create_conflict_falls_back_to_linking
     client = FakeClient.new
     client.create_conflict = true
@@ -144,8 +167,14 @@ class TestflightTestersTest < Minitest::Test
     assert_empty access(client).verify(['me@example.com'])[:problems]
     client.build_state = 'READY_FOR_BETA_SUBMISSION'
     assert_equal ['Build 11 is READY_FOR_BETA_SUBMISSION'], access(client).verify(['me@example.com'])[:problems]
-    client.build_state = 'IN_BETA_TESTING'
-    assert_equal ['Build 11 is not assigned to Public Alpha'], access(client).verify(['me@example.com'])[:problems]
+    client.build_state = 'IN_BETA_REVIEW'
+    assert_empty access(client).verify(['me@example.com'])[:problems]
+    %w[IN_BETA_TESTING READY_FOR_BETA_TESTING].each do |state|
+      client.build_state = state
+      assert_equal ['Build 11 is not assigned to Public Alpha'], access(client).verify(['me@example.com'])[:problems]
+    end
+    client.assigned = true
+    assert_empty access(client).verify(['me@example.com'])[:problems]
   end
 
   def test_verify_flags_missing_and_uninvited_testers_by_count

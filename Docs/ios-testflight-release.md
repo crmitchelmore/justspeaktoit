@@ -66,14 +66,20 @@ physically verified the build.
 
 ## Named Alpha testers
 
-Owner-nominated testers live only in the `TESTFLIGHT_TESTER_EMAILS` repository
-secret (comma-separated); the repository is public, so never commit or log an
-address. Each Alpha iOS release adds them to the external **Public Alpha** group,
-and the **TestFlight tester access** workflow (`testflight-testers.yml`, manual)
-repeats that, reconciles beta review, starts a hosted iOS Alpha release when no
-recent valid build exists, and then verifies membership, invitation and that the
-newest build is `IN_BETA_TESTING` or `WAITING_FOR_BETA_REVIEW`. It logs counts
-and Apple states only.
+Owner-nominated testers live only in the `TESTFLIGHT_TESTER_EMAILS` secret
+(comma-separated) of the main-only `testflight-testers` environment; the
+repository is public, so never commit or log an address. Only jobs in that
+environment read it, and they log counts and Apple states only.
+
+- After a successful iOS Alpha upload, `alpha-release.yml`'s `ios-testers` job
+  adds the testers to the external **Public Alpha** group and sends invitations.
+  An invitation Apple refuses because no build is testable yet stays pending.
+- **TestFlight tester access** (`testflight-testers.yml`, manual from `main`)
+  repeats that, runs the Apple reconciler (assignment and beta review), and
+  verifies membership, invitation and that the newest valid build is in or
+  waiting for beta review, or testable and assigned to Public Alpha. When no
+  recent valid build exists it starts a hosted iOS Alpha rebuild (unless one is
+  already running) and fails; rerun it after TestFlight processing.
 
 ## Repair a keyboard App Group profile
 

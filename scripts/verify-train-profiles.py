@@ -21,7 +21,15 @@ for name, identifier in profiles:
     if surface == 'ios' and entitlements.get('com.apple.security.application-groups', []) != [os.environ['IOS_APP_GROUP']]:
         raise SystemExit(f'Profile {name} has the wrong App Group')
     if name in ['ios-appstore', 'mac-app-store']:
-        cloud = os.environ['IOS_CLOUD_CONTAINER' if surface == 'ios' else 'MAC_CLOUD_CONTAINER']
-        if entitlements.get('com.apple.developer.icloud-container-identifiers', []) != [cloud]:
+        containers = set(entitlements.get('com.apple.developer.icloud-container-identifiers', []))
+        if surface == 'ios':
+            # #1119: a profile may also authorise this train's shared Mac container;
+            # builds that use it must have it.
+            legacy, shared = os.environ['IOS_CLOUD_CONTAINER'], os.environ['MAC_CLOUD_CONTAINER']
+            needs_shared = os.environ.get('TUIST_IOS_SHARED_CLOUD_CONTAINER') == '1'
+            allowed = [{legacy, shared}] if needs_shared else [{legacy}, {legacy, shared}]
+        else:
+            allowed = [{os.environ['MAC_CLOUD_CONTAINER']}]
+        if containers not in allowed:
             raise SystemExit(f'Profile {name} has the wrong CloudKit container')
     print(f'Validated {identifier}')

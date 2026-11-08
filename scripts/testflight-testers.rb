@@ -113,7 +113,7 @@ module AppleRelease
       end
       @log.call("Verified #{emails.length - missing}/#{emails.length} testers in #{GROUP}, " \
                 "#{emails.length - missing - uninvited} invited " \
-                "(#{members.compact.map { |t| t.dig('attributes', 'state') || 'UNKNOWN' }.tally.sort.map { |k, v| "#{k}=#{v}" }.join(', ')})")
+                "(#{members.compact.group_by { |t| t.dig('attributes', 'state') || 'UNKNOWN' }.sort.map { |k, v| "#{k}=#{v.length}" }.join(', ')})")
       {build: build, problems: problems}
     end
 

@@ -73,6 +73,23 @@ final class VoiceChooserFilterTests: XCTestCase {
     XCTAssertTrue(ids(filter).isEmpty)
   }
 
+  func testChooserOrdering_SortsLocalizedNamesWithIDTieBreakerAndKeepsSelectionPinned() {
+    let unsorted = [
+      TTSVoice(id: "system/samantha", name: "Samantha", provider: .system, traits: [], previewURL: nil),
+      TTSVoice(id: "system/alex-z", name: "Alex", provider: .system, traits: [], previewURL: nil),
+      TTSVoice(id: "system/daniel", name: "Daniel", provider: .system, traits: [], previewURL: nil),
+      TTSVoice(id: "system/alex-a", name: "Alex", provider: .system, traits: [], previewURL: nil)
+    ]
+    let sorted = VoiceChooserFilter.sortedVoices(unsorted)
+    XCTAssertEqual(sorted.map(\.id), ["system/alex-a", "system/alex-z", "system/daniel", "system/samantha"])
+    let catalog = LongListPickerItems(items: sorted, id: { $0.id })
+    XCTAssertEqual(catalog.pinned(selection: "system/daniel")?.name, "Daniel")
+    let groups = catalog.groups(
+      selection: "system/daniel", query: "", searchText: { [$0.name] }, group: { $0.provider.displayName }
+    )
+    XCTAssertEqual(groups.first?.items.map(\.id), ["system/alex-a", "system/alex-z", "system/samantha"])
+  }
+
   func testAvailability_MissingIsNotUsable() {
     XCTAssertFalse(VoiceChooserFilter.isUsable(.missing(providerName: "OpenAI")))
     XCTAssertTrue(VoiceChooserFilter.isUsable(.ready(providerName: "OpenAI")))

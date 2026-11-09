@@ -21,7 +21,7 @@ struct VoicePicker: View {
   var body: some View {
     let included = includedIDs
     LongListPicker(
-      title: "Voice", items: voices, id: { $0.id }, selection: $selection,
+      title: "Voice", items: VoiceChooserFilter.sortedVoices(voices), id: { $0.id }, selection: $selection,
       searchText: { [$0.name, $0.provider.displayName] + $0.traits.map(\.rawValue) },
       group: { $0.provider.displayName }, alwaysUsesSheet: true,
       includes: { included.contains($0.id) },

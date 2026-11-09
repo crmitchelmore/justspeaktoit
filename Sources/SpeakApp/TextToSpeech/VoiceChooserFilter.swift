@@ -30,6 +30,14 @@ struct VoiceChooserFilter {
     return true
   }
 
+  static func sortedVoices(_ voices: [TTSVoice]) -> [TTSVoice] {
+    voices.sorted {
+      let order = $0.name.localizedStandardCompare($1.name)
+      if order == .orderedSame { return $0.id < $1.id }
+      return order == .orderedAscending
+    }
+  }
+
   func groups(
     in voices: [TTSVoice],
     selection: String,
@@ -46,10 +54,7 @@ struct VoiceChooserFilter {
       return terms.allSatisfy { searchable.contains($0) }
     }
     return Dictionary(grouping: matches, by: \.provider).map { provider, voices in
-      Group(provider: provider, voices: voices.sorted {
-        if $0.name == $1.name { return $0.id < $1.id }
-        return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-      })
+      Group(provider: provider, voices: Self.sortedVoices(voices))
     }.sorted { $0.provider.displayName.localizedStandardCompare($1.provider.displayName) == .orderedAscending }
   }
 }

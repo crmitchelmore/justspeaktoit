@@ -348,6 +348,8 @@ int configureSidebarShortcuts(SidebarDelivery &delivery, HWND window,
 }
 
 constexpr UINT_PTR tourTimerID = 90;
+// Recording state changes are spoken after queued HUD updates land, and only when the HUD is hidden.
+constexpr UINT_PTR announceTimerID = 91;
 // How each owner-drawn control is drawn.
 enum class Role { label, caption, status, detail, chipValue, statValue, tileValue, value, button, primary, record,
                   heroButton, nav, toggle, link };
@@ -2415,6 +2417,7 @@ void applyUpdate(HWND window) {
     if (state.displayedRecording != recording) {
         state.displayedRecording = recording;
         InvalidateRect(GetDlgItem(window, recordID), nullptr, FALSE);
+        SetTimer(window, announceTimerID, 150, nullptr);
         jsti::tray::setState(recording, state.traySummary);
     }
     for (int id : {keyID, saveID, microphoneID, profilesID}) EnableWindow(GetDlgItem(window, id), recording == 0);
@@ -2873,6 +2876,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case WM_TIMER:
         if (wparam == tourTimerID) { KillTimer(window, tourTimerID); tourStep(window); return 0; }
+        if (wparam == announceTimerID) {
+            KillTimer(window, announceTimerID);
+            if (!jsti::hud::visible())
+                jsti::accessibility::announce(GetDlgItem(window, statusID), controlText(GetDlgItem(window, statusID)), false);
+            return 0;
+        }
         if (jsti_hotkey_message(window, message, wparam)) return 0;
         break;
     case tourMessage: {
@@ -5697,6 +5706,17 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     SetWindowPos(window, nullptr, originalBounds.left, originalBounds.top,
         originalBounds.right - originalBounds.left, originalBounds.bottom - originalBounds.top,
         SWP_NOZORDER | SWP_NOACTIVATE);
+    jsti_smoke_stage("window.accessibility.begin");
+    for (int page = 0; passed && page < pageCount; ++page) {
+        showPage(window, page);
+        std::string auditFailure;
+        const int checked = jsti::accessibility::audit(window, auditFailure);
+        if (checked <= 0) {
+            passed = false;
+            failure = checked < 0 ? auditFailure + " Page: " + std::to_string(page) + "."
+                                  : "Accessibility audit found no focusable controls on page " + std::to_string(page) + ".";
+        }
+    }
     showPage(window, originalPage);
     jsti_smoke_stage("window.final-helpers.begin");
     if (passed) passed = jsti::hud::selfTest(failure);

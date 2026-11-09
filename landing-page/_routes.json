@@ -1,7 +1,8 @@
 {
   "version": 1,
   "include": [
-    "/alpha/*"
+    "/alpha/*",
+    "/linux/*"
   ],
   "exclude": []
 }

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import platform
 import runpy
+import shlex
 import signal
 import subprocess
 import sys
@@ -17,7 +18,7 @@ import time
 GATE = runpy.run_path(str(Path(__file__).with_name("run-core-journey-e2e.py")))
 UI = runpy.run_path(str(Path(__file__).with_name("verify-core-journey-ui.py")))
 BUILD_BUDGET = 900
-SETUP_BUDGET = 300
+SETUP_BUDGET = 600
 RUNTIME_BUDGET = {"swift": 480, "ui": 600}
 RECEIPT_BUDGET = 60
 
@@ -192,17 +193,24 @@ def execute(kind, directory):
     return code
 
 
-# Tuist and SwiftPM binary targets (Sentry.xcframework) download from GitHub
-# releases, which intermittently return 5xx (run 41984795106). Three tries with
-# 5s and 15s backoff stay inside the unchanged setup budget.
-SETUP_RETRY = 'retry() { for delay in 5 15 0; do \"$@\" && return 0; [ \"$delay\" = 0 ] && return 1; echo \"Retrying in ${delay}s: $*\" >&2; sleep \"$delay\"; done; }'
+# Tuist (pinned, via scripts/install-tuist.sh) and SwiftPM binary targets
+# (Sentry, Sparkle, NemoTextProcessing) download from GitHub release assets,
+# which return 5xx (runs 41984795106, 42561777264, 42573814973). Generation and
+# package resolution retry with scripts/retry-network.sh backoff, and resolve
+# into the build's own DerivedData so the measured build reuses the artefacts.
+# The setup budget covers that worst-case backoff; it is not a test budget.
+def setup_command(directory):
+    derived = shlex.quote(str(directory / "DerivedData"))
+    return ["bash", "-c", "set -euo pipefail; "
+            'PATH="$(scripts/install-tuist.sh):$PATH"; '
+            "scripts/retry-network.sh tuist generate --no-open; "
+            "scripts/retry-network.sh xcodebuild -resolvePackageDependencies "
+            "-workspace 'Just Speak to It.xcworkspace' -scheme SpeakApp "
+            f"-derivedDataPath {derived} -skipPackagePluginValidation"]
 
 
 def setup(directory):
-    return GATE["run_gate"](
-        ["bash", "-c", f"set -euo pipefail; {SETUP_RETRY}; retry brew install tuist; retry tuist generate --no-open"],
-        directory / "setup", SETUP_BUDGET, (), stage="setup",
-    )
+    return GATE["run_gate"](setup_command(directory), directory / "setup", SETUP_BUDGET, (), stage="setup")
 
 
 def main(arguments=None):

@@ -80,6 +80,23 @@ To regenerate and check both trains' profiles outside a release, run the
 An upload or green workflow is not proof that Apple processed, distributed, or
 physically verified the build.
 
+## Named Alpha testers
+
+Owner-nominated testers live only in the `TESTFLIGHT_TESTER_EMAILS` secret
+(comma-separated) of the main-only `testflight-testers` environment; the
+repository is public, so never commit or log an address. Only jobs in that
+environment read it, and they log counts and Apple states only.
+
+- After a successful iOS Alpha upload, `alpha-release.yml`'s `ios-testers` job
+  adds the testers to the external **Public Alpha** group and sends invitations.
+  An invitation Apple refuses because no build is testable yet stays pending.
+- **TestFlight tester access** (`testflight-testers.yml`, manual from `main`)
+  repeats that, runs the Apple reconciler (assignment and beta review), and
+  verifies membership, invitation and that the newest valid build is in or
+  waiting for beta review, or testable and assigned to Public Alpha. When no
+  recent valid build exists it starts a hosted iOS Alpha rebuild (unless one is
+  already running) and fails; rerun it after TestFlight processing.
+
 ## Repair a keyboard App Group profile
 
 Use this sequence when the workflow reports that the keyboard profile does not

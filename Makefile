@@ -53,6 +53,7 @@ test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
 	ruby scripts/tests/apple_release_credentials_test.rb
 	ruby scripts/tests/create_ios_app_store_profile_test.rb
 	ruby scripts/tests/ensure_ios_app_store_profile_test.rb
+	ruby scripts/tests/testflight_testers_test.rb
 	python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 	python3 -B -m unittest discover -s scripts/linux-local-runtime -p 'test_*.py' -v
 	python3 -B -m unittest discover -s scripts/windows-local-runtime -p 'test_*.py' -v

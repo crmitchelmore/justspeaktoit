@@ -20,8 +20,9 @@ enabled = true
 [vars]
 ENVIRONMENT = "development"
 # Sign in with Apple audiences. Native apps use the bundle identifier; the
-# macOS direct-download web flow uses the Services ID.
-APPLE_IDENTITY_AUDIENCES = "com.justspeaktoit.ios,com.justspeaktoit,com.justspeaktoit.signin"
+# macOS direct-download web flow uses the Services ID com.justspeaktoit.mac.signin,
+# whose return URL is https://api.justspeaktoit.com/v1/auth/apple/callback.
+APPLE_IDENTITY_AUDIENCES = "com.justspeaktoit.ios,com.justspeaktoit,com.justspeaktoit.mac.signin"
 APPLE_BUNDLE_IDS = "com.justspeaktoit.ios,com.justspeaktoit"
 SESSION_TTL_SECONDS = "3600"
 REFRESH_TTL_SECONDS = "2592000"
@@ -70,7 +71,7 @@ workers_dev = true
 
 [env.staging.vars]
 ENVIRONMENT = "staging"
-APPLE_IDENTITY_AUDIENCES = "com.justspeaktoit.ios,com.justspeaktoit,com.justspeaktoit.signin"
+APPLE_IDENTITY_AUDIENCES = "com.justspeaktoit.ios,com.justspeaktoit,com.justspeaktoit.mac.signin"
 APPLE_BUNDLE_IDS = "com.justspeaktoit.ios,com.justspeaktoit"
 SESSION_TTL_SECONDS = "3600"
 REFRESH_TTL_SECONDS = "2592000"
@@ -108,7 +109,7 @@ routes = [{ pattern = "api.justspeaktoit.com/*", zone_name = "justspeaktoit.com"
 
 [env.production.vars]
 ENVIRONMENT = "production"
-APPLE_IDENTITY_AUDIENCES = "com.justspeaktoit.ios,com.justspeaktoit,com.justspeaktoit.signin"
+APPLE_IDENTITY_AUDIENCES = "com.justspeaktoit.ios,com.justspeaktoit,com.justspeaktoit.mac.signin"
 APPLE_BUNDLE_IDS = "com.justspeaktoit.ios,com.justspeaktoit"
 SESSION_TTL_SECONDS = "3600"
 REFRESH_TTL_SECONDS = "2592000"

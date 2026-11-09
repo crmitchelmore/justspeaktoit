@@ -17,7 +17,36 @@ public struct ModelComparisonScore: Identifiable, Hashable, Sendable {
     public let meanTimeToFirstPartialMs: Int?
     public let meanTimeToFinalMs: Int?
     public let meanEstimatedCostUSD: Decimal?
+    /// The error text of this model's most recent failed round, if any.
+    public let latestFailure: String?
 
+    public init(
+        modelID: String,
+        modelDisplayName: String,
+        providerDisplayName: String,
+        roundsPlayed: Int,
+        wins: Int,
+        meanRank: Double?,
+        failures: Int,
+        meanTimeToFirstPartialMs: Int?,
+        meanTimeToFinalMs: Int?,
+        meanEstimatedCostUSD: Decimal?,
+        latestFailure: String?
+    ) {
+        self.modelID = modelID
+        self.modelDisplayName = modelDisplayName
+        self.providerDisplayName = providerDisplayName
+        self.roundsPlayed = roundsPlayed
+        self.wins = wins
+        self.meanRank = meanRank
+        self.failures = failures
+        self.meanTimeToFirstPartialMs = meanTimeToFirstPartialMs
+        self.meanTimeToFinalMs = meanTimeToFinalMs
+        self.meanEstimatedCostUSD = meanEstimatedCostUSD
+        self.latestFailure = latestFailure
+    }
+
+    /// Preserved public initializer from before `latestFailure` existed.
     public init(
         modelID: String,
         modelDisplayName: String,
@@ -30,16 +59,12 @@ public struct ModelComparisonScore: Identifiable, Hashable, Sendable {
         meanTimeToFinalMs: Int?,
         meanEstimatedCostUSD: Decimal?
     ) {
-        self.modelID = modelID
-        self.modelDisplayName = modelDisplayName
-        self.providerDisplayName = providerDisplayName
-        self.roundsPlayed = roundsPlayed
-        self.wins = wins
-        self.meanRank = meanRank
-        self.failures = failures
-        self.meanTimeToFirstPartialMs = meanTimeToFirstPartialMs
-        self.meanTimeToFinalMs = meanTimeToFinalMs
-        self.meanEstimatedCostUSD = meanEstimatedCostUSD
+        self.init(
+            modelID: modelID, modelDisplayName: modelDisplayName, providerDisplayName: providerDisplayName,
+            roundsPlayed: roundsPlayed, wins: wins, meanRank: meanRank, failures: failures,
+            meanTimeToFirstPartialMs: meanTimeToFirstPartialMs, meanTimeToFinalMs: meanTimeToFinalMs,
+            meanEstimatedCostUSD: meanEstimatedCostUSD, latestFailure: nil
+        )
     }
 
     public var winRate: Double? {
@@ -95,6 +120,8 @@ public enum ModelComparisonScoreboard {
         var rankTotal = 0
         var failures = 0
         var latestNameAt = Date.distantPast
+        var latestFailure: String?
+        var latestFailureAt = Date.distantPast
         var firstPartialSamples: [Int] = []
         var finalSamples: [Int] = []
         var costSamples: [Decimal] = []
@@ -115,7 +142,14 @@ public enum ModelComparisonScoreboard {
             if let first = entry.timeToFirstPartialMs { firstPartialSamples.append(first) }
             if let final = entry.timeToFinalMs { finalSamples.append(final) }
             if let cost = entry.estimatedCostUSD { costSamples.append(cost) }
-            if entry.didFail { failures += 1; return }
+            if let error = entry.errorDescription {
+                failures += 1
+                if round.createdAt >= latestFailureAt {
+                    latestFailureAt = round.createdAt
+                    latestFailure = error
+                }
+                return
+            }
             guard round.isJudged, let rank = round.rank(for: entry.id) else { return }
             roundsPlayed += 1
             rankTotal += rank
@@ -133,7 +167,8 @@ public enum ModelComparisonScoreboard {
                 failures: failures,
                 meanTimeToFirstPartialMs: Self.mean(firstPartialSamples),
                 meanTimeToFinalMs: Self.mean(finalSamples),
-                meanEstimatedCostUSD: Self.mean(costSamples)
+                meanEstimatedCostUSD: Self.mean(costSamples),
+                latestFailure: latestFailure
             )
         }
 

@@ -27,6 +27,15 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       case .dark: return .dark
       }
     }
+
+    /// The app-wide AppKit appearance; nil follows the system setting.
+    var nsAppearance: NSAppearance? {
+      switch self {
+      case .system: return nil
+      case .light: return NSAppearance(named: .aqua)
+      case .dark: return NSAppearance(named: .darkAqua)
+      }
+    }
   }
 
   enum TranscriptionMode: String, CaseIterable, Identifiable {

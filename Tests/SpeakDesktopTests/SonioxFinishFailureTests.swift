@@ -54,7 +54,7 @@ final class SonioxFinishFailureTests: XCTestCase {
             if case .text(SonioxLiveFixture.finalize) = message {
                 DispatchQueue.global().async { fixture.socket.completeSend() }
             }
-            if case .binary(let data) = message, data.isEmpty {
+            if case .text("") = message {
                 fixture.socket.emit(#"{"tokens":[{"text":"Complete.","is_final":true}],"finished":true}"#)
             }
         }

@@ -106,7 +106,7 @@ The client selects controls for its build channel. The Worker requires a caller-
 
 **iOS does not sell paid access yet.** `PaidAccessStore` compiles and can hold an entitlement bought on a Mac, but nothing on iOS routes work through it — `iOSBatchTranscriber`, `VoiceSummariser` and `PostProcessingView` all go straight to the user's own key or an on-device model. The purchase UI is therefore switched off behind `PaidAccessFeature.isAvailableOnIOS` (`Sources/SpeakiOS/Services/PaidAccessStore.swift`) so nobody is charged for routing that does not happen. Routing those three call sites through a proxy client is necessary; supported identity, signing, products and staging must also be qualified before enabling that constant. Automatic StoreKit observation and transaction handlers remain off with it.
 
-The server contract maps the same verified Apple account to one user row and entitlement across channels. This does not establish a working direct-download Mac sign-in flow or qualified cross-channel access. Native Sign in with Apple is unsupported for Developer ID apps ([Apple DTS](https://developer.apple.com/forums/thread/793244)); a supported direct-distribution identity flow remains a separate commissioning decision.
+The server contract maps the same verified Apple account to one user row and entitlement across channels. This does not establish a working direct-download Mac sign-in flow or qualified cross-channel access. Native Sign in with Apple is unsupported for Developer ID apps ([Apple DTS](https://developer.apple.com/forums/thread/793244)), so direct-download builds use Sign in with Apple's web flow; see [Mac sign-in](#mac-sign-in-sign-in-with-apple-web-flow). Cross-channel access still needs a staging qualification.
 
 ## External product setup
 
@@ -144,10 +144,59 @@ npx wrangler d1 create paid-access-staging
 ### Apple Developer
 
 - [ ] Separately commission supported native Sign in with Apple for App Store builds, including authorised App IDs, matching provisioning profiles and signed-artifact verification. Ordinary shipping entitlements currently omit this capability.
-- [ ] Resolve and qualify a supported direct-distribution identity flow before enabling paid access for Developer ID builds. Native Sign in with Apple is unsupported there; this source recovery does not add a web flow, signing variant or capability.
+- [x] Create the Services ID `com.justspeaktoit.mac.signin` (primary App ID `com.justspeaktoit.mac`, domain `api.justspeaktoit.com`, return URL `https://api.justspeaktoit.com/v1/auth/apple/callback`) for the Developer ID web flow.
+- [ ] Qualify the web sign-in on staging with a Developer ID build before enabling paid access for it.
+- [x] Create the Sign in with Apple `.p8` key (Key ID in `APPLE_SIGNIN_KEY_ID`, key in `APPLE_SIGNIN_PRIVATE_KEY`).
+- [ ] Run the **Paid Access Worker secrets** workflow for each Worker environment once it exists.
 - [ ] After the identity flow is approved, confirm every audience in use appears in `APPLE_IDENTITY_AUDIENCES`, and every native bundle id in `APPLE_BUNDLE_IDS`.
 
 An identity token whose audience is missing from `APPLE_IDENTITY_AUDIENCES` is rejected with `unauthorized`. That is the most common cause of "sign-in works on iPhone but not on Mac".
+
+### Mac sign-in (Sign in with Apple web flow)
+
+Direct-download Mac builds cannot use native Sign in with Apple, so they use
+Apple's web flow (owner decision in #1386):
+
+1. `PaidAccessManager` opens `https://appleid.apple.com/auth/authorize` in an
+   `ASWebAuthenticationSession` with `client_id=com.justspeaktoit.mac.signin`
+   (the Services ID), `response_mode=form_post`, a random `state` and the
+   SHA-256 of a fresh raw nonce.
+2. Apple form-posts the identity token to the Services ID's return URL,
+   `https://api.justspeaktoit.com/v1/auth/apple/callback`. That Worker route
+   only relays `state` and `id_token` (or `error`) to
+   `justspeaktoit-auth://apple-callback`; it creates no session and stores nothing.
+3. The app checks `state`, then exchanges the token at `POST /v1/auth/apple`
+   with the raw nonce, exactly like the native flow. The Worker verifies the
+   signature, the audience (`com.justspeaktoit.mac.signin` is in
+   `APPLE_IDENTITY_AUDIENCES`) and the nonce.
+
+App Store builds keep the native sheet. Paid Access stays compiled out of
+normal builds (`PAID_ACCESS`) and `PAID_ROUTING_DISABLED` stays `true`.
+
+The flow does not exchange the authorisation code, so sign-in itself needs no
+`client_secret`. The Sign in with Apple key exists for when the server
+exchanges codes or revokes Apple tokens (for example on account deletion):
+
+| Value | Where |
+| --- | --- |
+| Team ID | `8X4ZN58TYH` |
+| Services ID (`client_id`) | `com.justspeaktoit.mac.signin`, primary App ID `com.justspeaktoit.mac` |
+| Return URL | `https://api.justspeaktoit.com/v1/auth/apple/callback` |
+| Key ID | repository secret `APPLE_SIGNIN_KEY_ID` |
+| `.p8` private key | repository secret `APPLE_SIGNIN_PRIVATE_KEY` |
+
+To put the key into a Worker environment, run the **Paid Access Worker
+secrets** workflow on `main` and choose `staging` or `production` (the Worker
+must exist). It uploads both values with `wrangler secret bulk` without
+printing them and checks they are present. Run it again after rotating the
+key.
+
+To rotate the key: Apple Developer › Certificates, Identifiers & Profiles ›
+Keys › **+**, name it "Just Speak to It Sign in with Apple", tick **Sign in
+with Apple**, **Configure** with primary App ID `com.justspeaktoit.mac`,
+**Save**, **Continue**, **Register**, then **Download** the `.p8` (once only)
+and note its Key ID. Update the repository secrets, run the workflow for each
+environment, delete the local file, and revoke the old key.
 
 ## Secrets
 
@@ -172,6 +221,8 @@ npx wrangler secret list --env production
 | `DEEPGRAM_API_KEY` | Yes | Live transcription |
 | `OPENAI_API_KEY` | No | Reserved; not used by the current Best paths |
 | `APPSTORE_ROOT_CA_G3_BASE64` | No | Overrides the pinned Apple Root CA G3. Testing only |
+| `APPLE_SIGNIN_KEY_ID` | No | Key ID of the Sign in with Apple `.p8` key, for a `client_secret`. Set by the Paid Access Worker secrets workflow; the web sign-in does not read it yet |
+| `APPLE_SIGNIN_PRIVATE_KEY` | No | Contents of that `.p8` file (PEM). Set by the same workflow; not read yet |
 
 Rotating `SESSION_SIGNING_KEY` invalidates every access token immediately. Clients recover by refreshing, so rotate deliberately and expect a burst of `/v1/auth/refresh` traffic.
 

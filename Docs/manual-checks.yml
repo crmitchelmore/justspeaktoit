@@ -2,56 +2,8 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-07"
+updated: "2026-11-08"
 sessions:
-  - id: "decisions"
-    device: "Decision"
-    title: "Decisions"
-    items:
-      - id: "decision-provider-spend-cap"
-        issues:
-          - 1210
-          - 1051
-          - 1052
-          - 821
-          - 1104
-          - 1113
-          - 1114
-        title: "Spend cap for paid-provider live acceptance runs"
-        minutes: 2
-        core: true
-        question: "How much may be spent on short synthetic-speech runs against paid speech providers?"
-        context: "Seven issues are code-complete and only need real calls with a few seconds of synthetic speech per route: #1210 (Pulse Pro, Reson8, StepAudio, Alibaba, OpenRouter audio routes, AssemblyAI Universal-3.6 Pro live), #1104 (8 live providers), #1113 and #1114 (one OpenAI or Groq Mac batch run), #821 (OpenRouter playback), #1051 and #1052 (Azure Speech/MAI). Usage is likely under $10; minimum top-ups for new accounts are most of the cost. Runs need a person at a Mac with a microphone; receipts are posted to each issue without keys or billing details. Azure also needs you to create or name a Speech resource in a region that serves MAI models."
-        options:
-          - id: "cap-40"
-            label: "Up to $40 total, at most $10 per provider, no auto top-ups"
-            consequence: "Covers all seven issues; any provider needing a larger minimum top-up or a paid plan is skipped and noted. Alibaba uses the international (Singapore) workspace only."
-            recommended: true
-          - id: "cap-15-existing"
-            label: "Up to $15, existing accounts only"
-            consequence: "#1104, #1113, #1114 and #821 can close; #1210's new providers and Azure (#1051, #1052) stay open."
-          - id: "defer"
-            label: "Defer all paid runs"
-            consequence: "No spend; all seven issues stay open."
-      - id: "decision-paid-mac-signin"
-        issues:
-          - 648
-        title: "Paid Access: how Mac users sign in"
-        minutes: 2
-        core: false
-        question: "How should direct-download Mac users sign in to Paid Access?"
-        context: "Stripe on direct-download Mac is the chosen rail. The paid-access server already verifies Apple identity tokens, but native Sign in with Apple does not work in Developer ID builds, so Paid Access cannot launch on Mac until a supported sign-in exists. Docs/paid-access.md lists the rest of the setup."
-        options:
-          - id: "apple-web-flow"
-            label: "Sign in with Apple through its web flow"
-            consequence: "You create a Services ID and return URL in the Apple Developer portal; an agent adds the browser sign-in to the Mac app and the Services ID to the accepted audiences. The same Apple account works if iOS is added later."
-            recommended: true
-          - id: "email-link"
-            label: "Email sign-in link"
-            consequence: "No Apple setup, but needs an email-sending provider and a second identity type on the server."
-          - id: "defer"
-            label: "Defer Paid Access"
-            consequence: "Paid Access stays off and #648 is parked; no external setup."
   - id: "mac"
     device: "Mac"
     title: "Mac"
@@ -80,13 +32,13 @@ sessions:
         title: "Notes: typing elsewhere or switching notes mid-dictation is safe"
         minutes: 4
         core: true
-        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
+        build: "Just Speak to It for Mac, an Alpha build that includes the #664 note-switch fix"
         steps:
           - "At the end of the same note start dictating a long sentence."
           - "After the first words appear, click the first line, type XX, keep talking, then stop."
           - "Start dictating again at the end of the note; after the first words appear, click into a different, empty note, keep talking, then stop."
           - "Check both notes."
-        expected: "XX is kept and nothing outside the dictated text changed or duplicated (streaming may pause). The second note stays empty; the first note has the dictated text once, with no extra paste."
+        expected: "XX is kept and nothing outside the dictated text changed or duplicated (streaming may pause). After the switch, streaming pauses: the second note stays empty, the first note keeps only the words dictated before you switched, and a notice says the full transcript is on the clipboard. This holds for every \u201cIf you switch apps\u201d setting, because both notes are in the same app."
         final_gate: true
       - id: "mac-one-shot-baselines"
         issues:
@@ -139,14 +91,16 @@ sessions:
         title: "History: Review Issue Report shows only safe details"
         minutes: 4
         core: false
-        build: "Just Speak to It for Mac, Alpha build 61 or later"
+        build: "Just Speak to It for Mac, Alpha build 64 or later"
         steps:
           - "Open History and choose Review Issue Report\u2026 on any recording (a failed one if you have it)."
           - "Read the draft and the JSON attachment, then turn Include diagnostics off and on again."
           - "Click Save JSON\u2026 and save to the Desktop, then click Copy Draft and paste into a new TextEdit document."
           - "Click Open GitHub, check the issue page is prefilled with the draft, and close the tab without submitting."
           - "Delete the saved file and the TextEdit document."
-        expected: "The draft and JSON name the model, mode and settings of that recording but contain no transcript text, prompt, file path, API key, device or app name. With Include diagnostics off, the JSON keeps only its version and removal notes, with no model or settings. The saved file, copied draft and GitHub page match the preview, and nothing was posted."
+          - "Start a recording and press Escape to cancel it. In History, open that cancelled recording and click Review Issue Report\u2026, then press Escape."
+          - "On the same cancelled recording click Review Before Copying\u2026, check the draft is shown, then click Cancel."
+        expected: "The draft and JSON name the model, mode and settings of that recording but contain no transcript text, prompt, file path, API key, device or app name. With Include diagnostics off, the JSON keeps only its version and removal notes, with no model or settings. The saved file, copied draft and GitHub page match the preview, and nothing was posted. For the cancelled recording, both buttons open a full review window (never an empty white box), Escape and Cancel close it, and the app stays responsive without a force quit."
         final_gate: true
       - id: "mac-speechanalyzer-latency"
         issues:
@@ -168,62 +122,13 @@ sessions:
         title: "Enough everyday recordings to re-measure start latency"
         minutes: 1
         core: false
-        build: "Just Speak to It for Mac, Alpha build 46 or later (6 Nov 2026 onwards)"
+        build: "Just Speak to It for Mac, an Alpha build that includes the #611 key-down permission check"
         steps:
           - "Keep the Alpha app updated and dictate with the hotkey as usual."
-          - "Once the Alpha has about 50 hotkey recordings made on builds from 6 Nov 2026 or later, mark this Pass."
+          - "Once the Alpha has about 50 hotkey recordings made on such a build, mark this Pass."
           - "An agent then reads only the numeric latency fields in History and posts the result on #611."
         expected: "About 50 or more recent hotkey recordings exist. The agent reports hotkey-to-capture p50 and p95; #611 closes if p50 is under 100 ms and the #664 streaming checks have passed."
         final_gate: false
-      - id: "mac-paid-existing-providers"
-        issues:
-          - 1104
-        title: "Every remote streaming provider with your keys"
-        minutes: 12
-        core: false
-        build: "Just Speak to It for Mac, Alpha build 61 or later"
-        prerequisites:
-          - "Decision: a provider spend cap is approved (decision-provider-spend-cap)"
-          - "Use made-up sentences only. If a listed model has no key or fails, mark Fail and name it in the note."
-        steps:
-          - "Settings \u203a Transcription \u203a Remote \u203a Streaming: choose each of OpenAI Realtime, ElevenLabs, Soniox, Modulate, Cartesia, Gladia, Deepgram Nova-3 and Deepgram Flux in turn."
-          - "For each, dictate \u201cprovider check one two three\u201d into TextEdit and stop, then start again at once, say \u201csecond run\u201d and stop."
-          - "Open History and check the newest items."
-        expected: "All eight models show words while you speak and finish within a few seconds of Stop; each second run starts cleanly and the microphone indicator goes away after it. History shows every item with its model name and cost."
-        final_gate: true
-      - id: "mac-paid-batch-providers"
-        issues:
-          - 1114
-        title: "OpenAI and Groq recorded transcription"
-        minutes: 3
-        core: false
-        build: "Just Speak to It for Mac, Alpha build 61 or later"
-        prerequisites:
-          - "Decision: a provider spend cap is approved (decision-provider-spend-cap)"
-          - "Use made-up sentences only. If a listed model has no key or fails, mark Fail and name it in the note."
-        steps:
-          - "Settings \u203a Transcription \u203a Remote \u203a Batch: choose an OpenAI model."
-          - "Dictate \u201cbatch check\u201d into TextEdit and stop."
-          - "Choose a Groq model and repeat, then open History."
-        expected: "Each run inserts the phrase once and History shows both items with their model names and cost."
-        final_gate: true
-      - id: "mac-openrouter-audio"
-        issues:
-          - 821
-        title: "OpenRouter speech and transcription models from the catalogue"
-        minutes: 6
-        core: false
-        build: "Just Speak to It for Mac, Alpha build 61 or later"
-        prerequisites:
-          - "Decision: a provider spend cap is approved (decision-provider-spend-cap)"
-          - "An OpenRouter key saved in Settings"
-        steps:
-          - "In Settings, open the OpenRouter speech model picker, search for a speech model, pick a voice and select it for voice output."
-          - "Have the app speak a long paragraph, then start it again and stop it halfway."
-          - "Open the OpenRouter transcription model picker, select a transcription model and dictate \u201copenrouter check\u201d."
-          - "Open History."
-        expected: "Speech starts before the whole clip has downloaded, uses the chosen voice and stops at once when stopped. The transcription inserts once and History shows the chosen model\u2019s name and cost."
-        final_gate: true
       - id: "mac-paid-new-providers"
         issues:
           - 1210
@@ -233,7 +138,7 @@ sessions:
         core: false
         build: "Just Speak to It for Mac, Alpha build 61 or later"
         prerequisites:
-          - "Decision: \u201cUp to $40\u201d spend cap (new accounts allowed)"
+          - "Spend cap (owner decision, #1386): up to $40 total, at most $10 per provider, no auto top-ups; new accounts allowed"
           - "An Azure Speech resource in a region that serves MAI models"
           - "Steps and route list: Docs/azure-speech.md and #1210"
         steps:
@@ -285,14 +190,14 @@ sessions:
         core: false
         build: "Stripe dashboard, Cloudflare and Apple Developer portal"
         prerequisites:
-          - "Decision: decision-paid-mac-signin answered with a sign-in method (skip this check if you chose Defer)"
+          - "Mac sign-in (owner decision, #1386): Sign in with Apple through its web flow"
           - "Steps: Docs/paid-access.md (External product setup). Use Stripe test mode only; no live keys."
         steps:
           - "Create the D1 databases paid-access and paid-access-staging and put their ids in workers/paid-access/wrangler.toml."
           - "In Stripe test mode create the prices, enable the Customer Portal and add the webhook endpoint; put the price ids in wrangler.toml and the secrets in the Worker."
-          - "Do the portal steps for the chosen Mac sign-in."
+          - "After the Worker exists, run the Paid Access Worker secrets workflow on main for staging to install the Sign in with Apple key (already stored as repository secrets)."
           - "Sign off the privacy and retention text in Docs/paid-access-privacy.md."
-        expected: "Staging is configured so an agent can wire the Mac sign-in and run the staging purchase and refund drill. Paid Access stays switched off for users."
+        expected: "Staging is configured so an agent can sign in on a Developer ID build through the web flow and run the staging purchase and refund drill. Paid Access stays switched off for users."
         final_gate: false
       - id: "owner-partner-center"
         issues:
@@ -309,6 +214,20 @@ sessions:
           - "Copy the Package/Identity Name and Publisher values from Product identity into a comment on #1157."
         expected: "The reserved identity is on #1157, so an agent can set the MSIX identity and add the Store submission job."
         final_gate: false
+      - id: "mac-compare-models-history"
+        issues:
+          - 1387
+        title: "Compare Models: Save results to History and visible lane errors"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the fix for #1387"
+        steps:
+          - "Open Compare Models \u203a Streaming and turn on Save results to History."
+          - "Select Deepgram Flux (English), Soniox Real-time v5 and one Azure model, plus any working model."
+          - "Start listening, say \"Compare these models please\", press Stop, then rank or finish the round."
+          - "Open History."
+        expected: "Flux and Soniox finish with a transcript and no error. Any failed lane shows its error under the reveal and in the scoreboard. History has one new item per selected model (failures show their error), each tagged Compare Models with its model, cost and latency. With the toggle off, a new round adds nothing to History."
+        final_gate: true
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"

@@ -21,6 +21,7 @@ directly between them:
 | stop | Stop Dictation | `speak stop` | `stop_dictation` |
 | transcribe | Transcribe Audio File | `speak transcribe <file>` | `transcribe_file` |
 | history | Get Last Transcription | `speak history` | `get_history` |
+| say | — | `speak say <text>` | `speak_text` |
 | polish | Polish Text | — | — |
 
 ## Named local capture await (qualification pending)
@@ -325,10 +326,39 @@ speak await --capture-id <uuid> [--since-id <uuid>] [--timeout <seconds>] [--jso
 speak listen [--json]
 speak stop [--json]
 speak history [--last <n>] [--json]
+speak say [<text>... | -f <file> | -] [--voice <id>] [-o <file>] [--play] [--json] [--timeout <seconds>]
 speak status [--json]
 speak mcp
 speak --help | --version
 ```
+
+### Text to speech (`speak say`)
+
+`speak say` speaks text with the running app's own voices, keys,
+pronunciation dictionary and speed/pitch settings. The CLI still holds no
+credentials and no provider code; it sends the text and the app synthesizes it.
+
+- **Text** comes from the arguments, from `-f <file>` (UTF-8), or from standard
+  input when neither is given (or with `-`). Use `--` before text that starts
+  with a dash. Up to 100,000 characters.
+- **Voice**: without `--voice`, the Mac uses its on-device system voice for your
+  language — no API key and no network. `--voice app` uses the voice selected
+  in the app's Voice settings; `--voice <id>` names any voice the app offers,
+  such as `openai/alloy` or `system/Daniel` on the Mac. Cloud voices need their
+  key saved in the app.
+- **Output**: with no `-o`, the speech plays aloud and the command returns when
+  it finishes. `-o <file>` writes `.wav`, `.mp3` or `.m4a` (chosen by the
+  extension) without playing; add `--play` to do both. An existing file is
+  replaced only once the new audio is complete.
+- **Platforms**: the Windows and Linux apps have no on-device voice yet, so
+  `speak say` without `--voice` fails with `unsupported_command` there rather
+  than spend cloud credit; pass `--voice app` or a voice ID. They encode MP3
+  and M4A with the same native encoders as Voice export; a format the host
+  cannot encode fails before anything is synthesized. The Mac
+  cannot encode MP3 from its system voice, so ask for `.wav` or `.m4a` with it.
+- Speaking aloud is refused while dictation is recording (`already_recording`),
+  so the microphone never hears it. On Windows and Linux, Stop in the app or a
+  new recording ends the speech with `speech_failed`.
 
 ### Recipes
 
@@ -350,6 +380,14 @@ Pull the last five transcriptions as JSON:
 
 ```bash
 speak history --last 5 --json | jq -r '.data.entries[].text'
+```
+
+Read a file aloud, or save a greeting with the app's selected voice:
+
+```bash
+speak say -f notes.txt
+echo "Build finished" | speak say
+speak say "Hello and welcome." --voice app -o greeting.m4a
 ```
 
 Fail a script cleanly when the app is closed:
@@ -400,7 +438,7 @@ are added without a bump, so pin on the version and ignore unknown keys.
 
 `app_unavailable`, `schema_mismatch`, `invalid_argument`, `unsupported_command`,
 `file_not_found`, `file_too_large`, `not_recording`, `already_recording`,
-`transcription_failed`, `timed_out`, `internal_error`.
+`transcription_failed`, `speech_failed`, `timed_out`, `internal_error`.
 
 Branch on `error.code`, not on the message text.
 
@@ -443,6 +481,7 @@ of the client's PATH (replace `<you>` with your user name, or use
 | `stop_dictation` | — | Transcript of the finished session |
 | `status` | — | App state and active local capture identity, when present |
 | `await_transcript` | `capture_id` (required), `since_id`, `timeout_seconds` (>0–600; default 60) | Exact successful local capture and frozen History entry |
+| `speak_text` | `text` (required), `voice`, `path`, `play`, `timeout_seconds` | Voice used and the file written, once playback has finished |
 
 Every tool also returns `structuredContent` with the same fields as the CLI's
 `--json` `data` object.

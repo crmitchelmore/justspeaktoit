@@ -12,6 +12,14 @@ public enum CLIInvocation: Equatable {
     case run(CLIPlan)
 }
 
+/// Where `speak say` reads its text. Files and standard input are read by the
+/// runner, not the parser, so parsing stays free of I/O.
+public enum CLISpeechSource: Equatable {
+    case inline(String)
+    case file(String)
+    case standardInput
+}
+
 /// A validated, transport-agnostic description of one CLI command.
 public struct CLIPlan: Equatable {
     public var command: AutomationCommand
@@ -21,6 +29,10 @@ public struct CLIPlan: Equatable {
     public var captureID: String?
     public var sinceID: String?
     public var json: Bool
+    public var speechSource: CLISpeechSource?
+    public var text: String?
+    public var voice: String?
+    public var play: Bool?
 
     public init(
         command: AutomationCommand,
@@ -46,7 +58,7 @@ public struct CLIPlan: Equatable {
     /// Builds the wire request. The id is injected so a retry can reuse one and
     /// tests can assert on a fixed value.
     public func request(id: String = UUID().uuidString) -> AutomationRequest {
-        AutomationRequest(
+        var request = AutomationRequest(
             id: id,
             command: self.command,
             path: self.path,
@@ -55,6 +67,10 @@ public struct CLIPlan: Equatable {
             captureID: self.captureID,
             sinceID: self.sinceID
         )
+        request.text = self.text
+        request.voice = self.voice
+        request.play = self.play
+        return request
     }
 }
 
@@ -80,6 +96,7 @@ public enum CommandLineParser {
       speak listen [--json]
       speak stop [--json]
       speak history [--last <n>] [--json]
+      speak say [<text>... | -f <file> | -] [--voice <id>] [-o <file>] [--play] [--json]
       speak status [--json]
       speak mcp
       speak --help | --version
@@ -90,6 +107,13 @@ public enum CommandLineParser {
       listen       Start a dictation session in the running app.
       stop         Stop the active dictation session and print the transcript.
       history      Print the most recent transcriptions (default 10).
+      say          Speak text aloud, or save it as audio with -o (.wav, .mp3 or .m4a).
+                   Text comes from the arguments, -f <file>, or standard input.
+                   The default is the on-device voice on macOS (no API key);
+                   Windows and Linux have none, so pass --voice there.
+                   --voice app uses the app's selected voice and --voice <id>
+                   names one of its voices; cloud voices use the keys saved in
+                   the app. -o writes without playing unless --play is given.
       status       Report whether the app is reachable and dictating.
       mcp          Run a stdio MCP server exposing the same commands as tools.
 
@@ -121,6 +145,12 @@ public enum CommandLineParser {
         "status": (.status, [.json])
     ]
 
+    /// Verbs with their own argument grammar.
+    private static let customVerbs: [String: ([String]) throws -> CLIPlan] = [
+        "transcribe": parseTranscribe,
+        "say": parseSay
+    ]
+
     public static func parse(_ arguments: [String]) throws -> CLIInvocation {
         var remaining = arguments
         guard let verb = remaining.first else { return .help }
@@ -138,9 +168,8 @@ public enum CommandLineParser {
                 )
             }
             return .mcpServer
-        case "transcribe":
-            return .run(try self.parseTranscribe(remaining))
         default:
+            if let custom = self.customVerbs[verb] { return .run(try custom(remaining)) }
             guard let entry = self.verbs[verb] else {
                 throw CLIUsageError(message: "Unknown command \"\(verb)\". Run `speak --help`.")
             }
@@ -177,15 +206,27 @@ public enum CommandLineParser {
 
     // MARK: - Options
 
-    private enum Option: String, CaseIterable {
+    enum Option: String, CaseIterable {
         case json = "--json"
         case timeout = "--timeout"
         case last = "--last"
         case captureID = "--capture-id"
         case sinceID = "--since-id"
+        case voice = "--voice"
+        case output = "--output"
+        case play = "--play"
+        case file = "--file"
+
+        init?(token: String) {
+            switch token {
+            case "-o": self = .output
+            case "-f": self = .file
+            default: self.init(rawValue: token)
+            }
+        }
 
         var takesValue: Bool {
-            self != .json
+            self != .json && self != .play
         }
     }
 
@@ -204,7 +245,7 @@ public enum CommandLineParser {
     }
 
     /// Applies recognised options to `plan` and returns the positional leftovers.
-    private static func applyOptions(
+    static func applyOptions(
         _ plan: inout CLIPlan,
         arguments: [String],
         allowed: Set<Option>
@@ -216,7 +257,13 @@ public enum CommandLineParser {
             let token = arguments[index]
             index += 1
 
-            guard token.hasPrefix("-") else {
+            // `-` names standard input and `--` ends the options, so text that
+            // starts with a dash can still be spoken.
+            if token == "--" {
+                positional.append(contentsOf: arguments[index...])
+                break
+            }
+            guard token.hasPrefix("-"), token != "-" else {
                 positional.append(token)
                 continue
             }
@@ -226,7 +273,7 @@ public enum CommandLineParser {
             let parts = token
                 .split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
                 .map(String.init)
-            guard let option = Option(rawValue: parts[0]) else {
+            guard let option = Option(token: parts[0]) else {
                 throw CLIUsageError(message: "Unknown option \"\(parts[0])\".")
             }
             guard allowed.contains(option) else {
@@ -236,7 +283,7 @@ public enum CommandLineParser {
                 guard parts.count == 1 else {
                     throw CLIUsageError(message: "\(option.rawValue) does not take a value.")
                 }
-                plan.json = true
+                if option == .play { plan.play = true } else { plan.json = true }
                 continue
             }
 
@@ -257,8 +304,10 @@ public enum CommandLineParser {
 
     private static func apply(option: Option, value: String, to plan: inout CLIPlan) throws {
         switch option {
-        case .json:
-            plan.json = true
+        case .json, .play:
+            break
+        case .voice, .output, .file:
+            try self.applySpeech(option: option, value: value, to: &plan)
         case .timeout:
             guard let seconds = TimeInterval(value), seconds > 0 else {
                 throw CLIUsageError(message: "--timeout must be a positive number of seconds.")

@@ -56,6 +56,29 @@ extension MCPRequestHandler {
             "name": AutomationCommand.stopDictation.rawValue,
             "description": "Stop the active dictation session and return its transcript.",
             "inputSchema": ["type": "object", "properties": [:]]
+        ],
+        [
+            "name": AutomationCommand.speakText.rawValue,
+            "description": "Speak text aloud with the app's voices, or save it as an audio file. "
+                + "Returns once playback finishes and the file is complete.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "text": [
+                        "type": "string", "maxLength": AutomationLimits.maxSpeechCharacters,
+                        "description": "The text to speak."
+                    ],
+                    "voice": [
+                        "type": "string",
+                        "description": "Omit for the on-device voice, \"app\" for the app's selected voice, "
+                            + "or a voice identifier."
+                    ],
+                    "path": ["type": "string", "description": "Audio file to write (.wav, .mp3 or .m4a)."],
+                    "play": ["type": "boolean", "description": "Play aloud. Defaults to true without a path."],
+                    "timeout_seconds": ["type": "number", "description": "Deadline in seconds."]
+                ],
+                "required": ["text"]
+            ]
         ]
     ]
 

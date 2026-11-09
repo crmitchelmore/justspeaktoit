@@ -26,6 +26,11 @@ public protocol AutomationCommandHost: AnyObject, Sendable {
     /// Stops the active session and returns its transcript. Throws
     /// `AutomationError.noDictationRunning` when nothing is recording.
     func automationStopDictation() async throws -> AutomationResult
+    /// Speaks text that has passed `AutomationRequestPolicy.speech(for:)`, with
+    /// the app's own voices and credentials: aloud, to the output file, or both.
+    /// Returns once playback has finished and the file is complete. A host
+    /// without the requested voice or format throws rather than substituting.
+    func automationSpeak(_ speech: AutomationSpeechRequest) async throws -> AutomationResult
 }
 
 /// Maps one validated automation request onto an `AutomationCommandHost`.
@@ -52,6 +57,8 @@ public enum AutomationCommandDispatcher {
                 result = try await host.automationStartDictation()
             case .stopDictation:
                 result = try await host.automationStopDictation()
+            case .speakText:
+                result = try await host.automationSpeak(AutomationRequestPolicy.speech(for: request))
             }
             return .success(id: request.id, command: request.command, result: result)
         } catch let error as AutomationError {

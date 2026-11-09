@@ -505,3 +505,32 @@ struct TTSUsageRecord: Codable {
 extension TextToSpeechManager {
     func reloadAfterMigration() { loadUsageHistory() }
 }
+
+// MARK: - Automation
+
+extension TextToSpeechManager {
+  /// The no-key on-device voice: the system voice for the current language.
+  static let onDeviceVoiceID = "system/default"
+
+  /// The voice selected in Settings, after the same migration synthesis applies.
+  var selectedVoiceID: String { migrateAndValidateVoiceID(appSettings.defaultTTSVoice) }
+
+  /// Synthesizes for `speak say` with the app's clients, keys, voice settings,
+  /// pronunciation and usage ledger, but none of the window's playback state,
+  /// auto-play or recordings copy. The caller owns the returned file.
+  func synthesizeForAutomation(text: String, voice: String, format: AudioFormat) async throws -> TTSResult {
+    guard TTSProvider.knownVoiceIDPrefixes.contains(where: { voice.hasPrefix($0) }) else {
+      throw TTSError.invalidVoice(voice)
+    }
+    let provider = TTSProvider.from(voiceID: voice)
+    guard let client = clients[provider] else { throw TTSError.providerNotAvailable(provider) }
+    if provider.requiresAPIKey, !(await hasAPIKey(for: provider)) { throw TTSError.apiKeyMissing(provider) }
+    var settings = synthesisSettings(useSSML: nil)
+    settings.format = format
+    let processed = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
+    let result = try await client.synthesize(text: processed, voice: voice, settings: settings)
+    usageHistory.append(result)
+    saveUsageHistory()
+    return result
+  }
+}

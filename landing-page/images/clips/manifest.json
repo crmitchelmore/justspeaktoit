@@ -8,15 +8,15 @@
     "scenes": 8,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "hero-dark-poster.webp": 17274,
-      "hero-dark.mp4": 659094,
-      "hero-dark.webm": 541233,
-      "hero-light-poster.webp": 20956,
-      "hero-light.mp4": 727413,
-      "hero-light.webm": 554965,
+      "hero-dark-poster.webp": 19570,
+      "hero-dark.mp4": 661048,
+      "hero-dark.webm": 572555,
+      "hero-light-poster.webp": 18248,
+      "hero-light.mp4": 747432,
+      "hero-light.webm": 559809,
       "hero.en.vtt": 733
     },
-    "duration": 43.57
+    "duration": 44.1
   },
   {
     "name": "corrections",
@@ -27,15 +27,15 @@
     "scenes": 4,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "corrections-dark-poster.webp": 21488,
-      "corrections-dark.mp4": 255945,
-      "corrections-dark.webm": 220918,
-      "corrections-light-poster.webp": 23226,
-      "corrections-light.mp4": 285077,
-      "corrections-light.webm": 222853,
+      "corrections-dark-poster.webp": 22032,
+      "corrections-dark.mp4": 280872,
+      "corrections-dark.webm": 230536,
+      "corrections-light-poster.webp": 22620,
+      "corrections-light.mp4": 308406,
+      "corrections-light.webm": 246868,
       "corrections.en.vtt": 328
     },
-    "duration": 17.43
+    "duration": 17.47
   },
   {
     "name": "history",
@@ -46,12 +46,12 @@
     "scenes": 4,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "history-dark-poster.webp": 34900,
-      "history-dark.mp4": 337910,
-      "history-dark.webm": 365936,
-      "history-light-poster.webp": 35856,
-      "history-light.mp4": 436346,
-      "history-light.webm": 364162,
+      "history-dark-poster.webp": 35434,
+      "history-dark.mp4": 334375,
+      "history-dark.webm": 367415,
+      "history-light-poster.webp": 36898,
+      "history-light.mp4": 440404,
+      "history-light.webm": 372308,
       "history.en.vtt": 380
     },
     "duration": 20.83
@@ -65,15 +65,15 @@
     "scenes": 4,
     "webm_codec": "libsvtav1",
     "bytes": {
-      "models-dark-poster.webp": 30500,
-      "models-dark.mp4": 293208,
-      "models-dark.webm": 273666,
-      "models-light-poster.webp": 30158,
-      "models-light.mp4": 347697,
-      "models-light.webm": 273259,
+      "models-dark-poster.webp": 30244,
+      "models-dark.mp4": 326345,
+      "models-dark.webm": 278781,
+      "models-light-poster.webp": 30396,
+      "models-light.mp4": 349945,
+      "models-light.webm": 280143,
       "models.en.vtt": 371
     },
-    "duration": 18.67
+    "duration": 19.3
   },
   {
     "name": "iphone",
@@ -85,11 +85,11 @@
     "webm_codec": "libsvtav1",
     "bytes": {
       "iphone-dark-poster.webp": 13026,
-      "iphone-dark.mp4": 420597,
-      "iphone-dark.webm": 393010,
+      "iphone-dark.mp4": 420696,
+      "iphone-dark.webm": 393145,
       "iphone-light-poster.webp": 13092,
-      "iphone-light.mp4": 469818,
-      "iphone-light.webm": 383404,
+      "iphone-light.mp4": 468086,
+      "iphone-light.webm": 383508,
       "iphone.en.vtt": 582
     },
     "duration": 30.8

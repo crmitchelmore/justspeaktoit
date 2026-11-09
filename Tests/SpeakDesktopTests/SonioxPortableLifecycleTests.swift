@@ -16,7 +16,7 @@ final class SonioxPortableLifecycleTests: XCTestCase {
     // MARK: - Configuration, model and language
 
     func testConfigFrameCarriesModelSampleRateAndLanguageAfterTheHandshake() throws {
-        let fixture = SonioxLiveFixture(model: "stt-rt-v5", language: "fr_FR", sampleRate: 16_000)
+        let fixture = SonioxLiveFixture(model: "stt-rt-v6", language: "fr_FR", sampleRate: 16_000)
         fixture.start()
         let request = fixture.factory.requests[0]
         XCTAssertEqual(request.url?.absoluteString, "wss://stt-rt.soniox.com/transcribe-websocket")
@@ -29,7 +29,7 @@ final class SonioxPortableLifecycleTests: XCTestCase {
         XCTAssertEqual(socket.controls.count, 1, "The configuration frame is the first frame")
         let config = try XCTUnwrap(Self.object(socket.controls[0]))
         XCTAssertEqual(config["api_key"] as? String, "synthetic")
-        XCTAssertEqual(config["model"] as? String, "stt-rt-v5")
+        XCTAssertEqual(config["model"] as? String, "stt-rt-v6")
         XCTAssertEqual(config["audio_format"] as? String, "pcm_s16le")
         XCTAssertEqual(config["sample_rate"] as? Int, 16_000)
         XCTAssertEqual(config["num_channels"] as? Int, 1)

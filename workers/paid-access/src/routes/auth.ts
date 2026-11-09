@@ -169,3 +169,55 @@ export async function handleSignOut(context: AuthenticatedContext): Promise<Resp
   });
   return jsonResponse({ signed_out: true }, { correlationId: context.correlationId });
 }
+
+/**
+ * Return URL for Sign in with Apple's web flow, used by the direct-download
+ * Mac app (native Sign in with Apple is unavailable to Developer ID builds).
+ *
+ * Apple form-posts the identity token here. This route only relays it to the
+ * app's ASWebAuthenticationSession through the app's private callback scheme;
+ * it creates no session and stores nothing. The app checks `state`, then
+ * exchanges the token at POST /v1/auth/apple, which verifies the signature,
+ * the Services ID audience and the nonce that only the app knows.
+ */
+export const APPLE_WEB_CALLBACK_URL = 'justspeaktoit-auth://apple-callback';
+const STATE_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
+const JWT_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
+function relay(parameters: Record<string, string>): Response {
+  const location = `${APPLE_WEB_CALLBACK_URL}?${new URLSearchParams(parameters).toString()}`;
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location,
+      'cache-control': 'no-store',
+      'referrer-policy': 'no-referrer',
+    },
+  });
+}
+
+export async function handleAppleWebCallback(request: Request): Promise<Response> {
+  const declared = Number(request.headers.get('content-length') ?? '0');
+  const contentType = request.headers.get('content-type') ?? '';
+  if (declared > MAX_AUTH_BODY_BYTES || !contentType.startsWith('application/x-www-form-urlencoded')) {
+    throw new ApiError('bad_request', 'Unsupported callback');
+  }
+  const body = await request.arrayBuffer();
+  if (body.byteLength > MAX_AUTH_BODY_BYTES) {
+    throw new ApiError('bad_request', 'Unsupported callback');
+  }
+  const form = new URLSearchParams(new TextDecoder().decode(body));
+  const state = form.get('state') ?? '';
+  if (!STATE_PATTERN.test(state)) {
+    throw new ApiError('bad_request', 'Missing or malformed state');
+  }
+  const error = form.get('error');
+  if (error !== null) {
+    return relay({ state, error: error === 'user_cancelled_authorize' ? 'cancelled' : 'failed' });
+  }
+  const identityToken = form.get('id_token') ?? '';
+  if (identityToken.length > 8_192 || !JWT_PATTERN.test(identityToken)) {
+    return relay({ state, error: 'failed' });
+  }
+  return relay({ state, id_token: identityToken });
+}

@@ -43,6 +43,11 @@ export interface Env {
   OPENAI_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
   DEEPGRAM_API_KEY?: string;
+  // Reserved for Sign in with Apple's client_secret (code exchange or token
+  // revocation). The web sign-in uses the form-posted identity token and does
+  // not read these yet.
+  APPLE_SIGNIN_KEY_ID?: string;
+  APPLE_SIGNIN_PRIVATE_KEY?: string;
 }
 
 export type ProviderSecretName = 'OPENAI_API_KEY' | 'OPENROUTER_API_KEY' | 'DEEPGRAM_API_KEY';

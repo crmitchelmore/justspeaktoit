@@ -13,7 +13,7 @@ import { authenticate, createContext } from './context.js';
 import { describeError } from './logging.js';
 import { operationError } from './routes/settlement.js';
 import { Repository } from './data/repository.js';
-import { handleAppleSignIn, handleRefresh, handleSignOut } from './routes/auth.js';
+import { handleAppleSignIn, handleAppleWebCallback, handleRefresh, handleSignOut } from './routes/auth.js';
 import {
   handleEntitlement,
   handleStoreKitSync,
@@ -77,6 +77,8 @@ export default {
         // Authentication -----------------------------------------------------
         case 'POST /v1/auth/apple':
           return await handleAppleSignIn(request, context);
+        case 'POST /v1/auth/apple/callback':
+          return await handleAppleWebCallback(request);
         case 'POST /v1/auth/refresh':
           return await handleRefresh(request, context);
         case 'POST /v1/auth/sign-out':

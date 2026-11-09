@@ -3,7 +3,7 @@ import SwiftUI
 
 struct VoicePicker: View {
   let voices: [TTSVoice]
-  let storedAPIKeyIdentifiers: Set<String>
+  let storedAPIKeyIdentifiers: [String]
   @Binding var selection: String
   var preview: ((String) -> Void)?
   var previewDisabled = false
@@ -45,7 +45,7 @@ struct VoicePicker: View {
 
 private struct VoiceChooserSheet: View {
   let voices: [TTSVoice]
-  let storedAPIKeyIdentifiers: Set<String>
+  let storedAPIKeyIdentifiers: [String]
   @Binding var selection: String
   let preview: ((String) -> Void)?
   let previewDisabled: Bool

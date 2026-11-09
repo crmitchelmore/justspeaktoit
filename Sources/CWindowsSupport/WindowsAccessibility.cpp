@@ -1,7 +1,7 @@
 #include "WindowsSupportInternal.hpp"
 
+#include <ole2.h>
 #include <uiautomation.h>
-#include <oleauto.h>
 
 #include <set>
 
@@ -11,17 +11,32 @@
 // static label just before it in tab order, and AutomationId is the control ID.
 namespace jsti::accessibility {
 
+// UiaRaiseNotificationEvent (Windows 10 1709) is resolved at run time, so the
+// SDK's version guards and older systems cannot break the build or the launch.
+using RaiseNotification = HRESULT(WINAPI *)(IRawElementProviderSimple *, int, int, BSTR, BSTR);
+constexpr int notificationKindOther = 4;
+constexpr int processingImportantMostRecent = 1, processingMostRecent = 3;
+
+static RaiseNotification raiseNotification() {
+    static const RaiseNotification function = [] {
+        HMODULE module = GetModuleHandleW(L"UIAutomationCore.dll");
+        if (!module) module = LoadLibraryExW(L"UIAutomationCore.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        return module ? reinterpret_cast<RaiseNotification>(
+            reinterpret_cast<void *>(GetProcAddress(module, "UiaRaiseNotificationEvent"))) : nullptr;
+    }();
+    return function;
+}
+
 void announce(HWND element, const std::wstring &text, bool important) {
-    if (!element || text.empty() || !UiaClientsAreListening()) return;
+    const RaiseNotification raise = raiseNotification();
+    if (!raise || !element || text.empty() || !UiaClientsAreListening()) return;
     IRawElementProviderSimple *provider = nullptr;
     if (FAILED(UiaHostProviderFromHwnd(element, &provider)) || !provider) return;
     BSTR message = SysAllocString(text.c_str());
     BSTR activity = SysAllocString(L"JustSpeakToIt.State");
-    if (message && activity) {
-        UiaRaiseNotificationEvent(provider, NotificationKind_Other,
-            important ? NotificationProcessing_ImportantMostRecent : NotificationProcessing_MostRecent,
-            message, activity);
-    }
+    if (message && activity)
+        raise(provider, notificationKindOther, important ? processingImportantMostRecent : processingMostRecent,
+              message, activity);
     SysFreeString(message);
     SysFreeString(activity);
     provider->Release();

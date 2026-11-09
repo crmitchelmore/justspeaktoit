@@ -365,6 +365,12 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertEqual(settings.appearance, .system)
     }
 
+    func testAppearance_mapsToAppWideAppKitAppearance() {
+        XCTAssertNil(AppSettings.Appearance.system.nsAppearance)
+        XCTAssertEqual(AppSettings.Appearance.light.nsAppearance?.name, .aqua)
+        XCTAssertEqual(AppSettings.Appearance.dark.nsAppearance?.name, .darkAqua)
+    }
+
     @MainActor
     func testCoreDefaults_visualDensityIsNormal() {
         let settings = AppSettings(defaults: defaults)

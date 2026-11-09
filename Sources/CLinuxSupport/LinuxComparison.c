@@ -15,6 +15,7 @@ typedef struct {
     GtkButton *run, *stop, *cancel, *judge, *json, *markdown, *play, *stop_audio, *delete_round;
     GtkCheckButton *sync;
     GtkButton *sync_now;
+    GtkCheckButton *save_history;
     GtkButton *select_all, *select_none;
     GtkButton *copy_json, *copy_markdown;
     GtkButton *next_file;
@@ -230,6 +231,10 @@ static void sync_changed(GtkCheckButton *button, gpointer data) {
     (void)data;
     if (!ui.suppress) comparison_emit(121, "", gtk_check_button_get_active(button));
 }
+static void save_history_changed(GtkCheckButton *button, gpointer data) {
+    (void)data;
+    if (!ui.suppress) comparison_emit(129, "", gtk_check_button_get_active(button));
+}
 static void confirm_deletion(PickerRequest *request, const char *response) {
     if (strcmp(response, "delete") == 0 && ui.window == request->window
         && gtk_widget_get_sensitive(GTK_WIDGET(ui.delete_round))
@@ -439,6 +444,13 @@ void jsti_comparison_open(GtkWindow *parent) {
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.sync));
     ui.sync_now = GTK_BUTTON(button_new("Sync now / retry", G_CALLBACK(action_clicked)));
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.sync_now));
+    ui.save_history = GTK_CHECK_BUTTON(gtk_check_button_new());
+    GtkWidget *history_label = gtk_label_new("Save results to History (one item per model, including failures)");
+    gtk_label_set_wrap(GTK_LABEL(history_label), TRUE); gtk_label_set_xalign(GTK_LABEL(history_label), 0);
+    gtk_check_button_set_child(ui.save_history, history_label);
+    named(GTK_WIDGET(ui.save_history), "Save results to History, one item per model, including failures");
+    g_signal_connect(ui.save_history, "toggled", G_CALLBACK(save_history_changed), NULL);
+    gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.save_history));
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), column);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), scrolled);
     adw_window_set_content(ADW_WINDOW(ui.window), toolbar);
@@ -557,6 +569,17 @@ int32_t jsti_comparison_present_batch(const char *models, const char *rounds, co
     p->batch_round = g_strdup(batch_round); p->batch_remaining = batch_remaining; p->can_next = can_next != 0;
     return jsti_window_post(present, p, free_presentation);
 }
+static void present_save_history(gpointer value) {
+    if (ui.window == NULL) return;
+    ui.suppress = TRUE;
+    gtk_check_button_set_active(ui.save_history, *(gboolean *)value);
+    ui.suppress = FALSE;
+}
+int32_t jsti_comparison_set_save_history(int32_t enabled) {
+    gboolean *state = g_new(gboolean, 1);
+    *state = enabled != 0;
+    return jsti_window_post(present_save_history, state, g_free);
+}
 
 static Presentation fixture(gboolean revealed) {
     Presentation p = {
@@ -614,6 +637,13 @@ int32_t jsti_comparison_self_test(GtkWindow *parent, char *error, size_t capacit
     valid = valid && gtk_widget_get_sensitive(GTK_WIDGET(ui.sync_now));
     g_signal_emit_by_name(ui.sync_now, "clicked");
     valid = valid && test_event == 122;
+    valid = valid && !gtk_check_button_get_active(ui.save_history)
+        && gtk_label_get_wrap(GTK_LABEL(gtk_check_button_get_child(ui.save_history)));
+    gtk_check_button_set_active(ui.save_history, TRUE);
+    valid = valid && test_event == 129 && test_index == 1;
+    gboolean saved = FALSE;
+    present_save_history(&saved);
+    valid = valid && !gtk_check_button_get_active(ui.save_history) && test_event == 129 && test_index == 1;
     gtk_drop_down_set_selected(ui.mode, 1);
     for (guint i = 0; i < ui.model_ids->len; ++i) {
         GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.models, (int)i);

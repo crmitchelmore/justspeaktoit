@@ -40,6 +40,10 @@ final class CompareModelsController: ObservableObject {
     /// Files still to run as consecutive batch rounds.
     @Published var queuedFiles: [URL] = []
     @Published var isDictationBusy = false
+    /// Writes each lane of a finished round to History. Off by default.
+    @Published var saveResultsToHistory: Bool {
+        didSet { defaults.set(saveResultsToHistory, forKey: Self.saveToHistoryDefaultsKey) }
+    }
 
     let store: ComparisonRoundStore
     /// The environment owns this controller for the app's lifetime (see
@@ -55,6 +59,7 @@ final class CompareModelsController: ObservableObject {
     var captureLimitTask: Task<Void, Never>?
 
     static let selectionDefaultsKey = "compareModels.selectedModelIDs"
+    static let saveToHistoryDefaultsKey = "compareModels.saveResultsToHistory"
 
     init(environment: AppEnvironment, store: ComparisonRoundStore, defaults: UserDefaults = .standard) {
         self.environment = environment
@@ -68,6 +73,7 @@ final class CompareModelsController: ObservableObject {
         )
         fileRunner = ComparisonFileRunner(secureStorage: environment.secureStorage, openRouter: environment.openRouter)
         selectedModelIDs = Set(defaults.stringArray(forKey: Self.selectionDefaultsKey) ?? [])
+        saveResultsToHistory = defaults.bool(forKey: Self.saveToHistoryDefaultsKey)
         refreshCandidates()
     }
 
@@ -214,6 +220,13 @@ final class CompareModelsController: ObservableObject {
 
     func beginJudging(_ round: ModelComparisonRound) {
         currentRound = round
+        if saveResultsToHistory {
+            let items = ModelComparisonHistory.items(for: round)
+            let history = environment.history
+            Task {
+                for item in items { await history.append(item) }
+            }
+        }
         liveTranscripts = Dictionary(uniqueKeysWithValues: round.entries.map { ($0.id, $0.transcript) })
         pendingRanks = [:]
         referenceEntryID = round.entriesInBlindOrder.first(where: { !$0.didFail })?.id

@@ -7,7 +7,10 @@ import SwiftUI
 extension SettingsView {
   var aboutSettings: some View {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
-      SettingsCard(title: ReleaseTrain.current.displayName, systemImage: "info.circle", tint: Color.blue) {
+      SettingsCard(
+        title: ReleaseTrain.current.displayName, systemImage: "info.circle", tint: Color.blue,
+        searchEntryID: "about.version"
+      ) {
         VStack(alignment: .leading, spacing: 16) {
           HStack(alignment: .top, spacing: 16) {
             Image(nsImage: AppIconProvider.applicationIcon())

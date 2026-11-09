@@ -54,6 +54,10 @@ final class AppEnvironment: ObservableObject {
   /// matching `.id("transcription-<provider.id>")` section.
   @Published var apiKeysScrollTarget: String?
   @Published var sidebarNavigationTarget: SidebarItem?
+  /// Settings search entry to reveal once its page is selected; consumed by
+  /// SettingsView, which scrolls to and highlights the matching card.
+  @Published var settingsSearchTarget: String?
+  @Published var isSettingsSearchPresented = false
 
   /// Bridges HistoryManager mutations to CloudKit history sync. Retained here
   /// because `HistorySyncEngine` only holds its delegate weakly; without this

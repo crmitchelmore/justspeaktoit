@@ -47,6 +47,7 @@ extension SettingsView {
           ) {
             ForEach(visibleMacAPIKeyItems) { item in
               macAPIKeyView(for: item)
+                .settingsSearchHighlight(entryID: MacSettingsSearch.apiKeyEntryPrefix + item.id)
                 .id(item.id)
             }
           }

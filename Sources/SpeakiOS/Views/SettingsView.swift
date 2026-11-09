@@ -33,6 +33,12 @@ public struct SettingsView: View {
     @State private var changingTranscriptReadyNotifications = false
     @State private var transcriptReadyPermissionDenied = false
     @State private var missingTranscriptionAPIKeyAlert: IOSMissingTranscriptionAPIKeyAlert?
+    @State private var searchQuery = ""
+    @State private var searchHighlightID: String?
+    @State private var searchIndex = SettingsSearchIndex(
+        entries: IOSSettingsSearch.catalogEntries(keyboardEnabled: false)
+    )
+    @AppStorage("settingsSearch.recentEntryIDs") private var storedSearchRecents = ""
 
     public init() {}
 
@@ -43,8 +49,74 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
+        ScrollViewReader { proxy in
+            settingsForm
+                .environment(\.settingsSearchHighlightID, searchHighlightID)
+                .overlay {
+                    if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                        IOSSettingsSearchResults(query: searchQuery, index: searchIndex) { entry in
+                            reveal(entry, using: proxy)
+                        }
+                    }
+                }
+        }
+        .searchable(text: $searchQuery, prompt: "Search settings")
+        .searchSuggestions { searchSuggestions }
+        .onAppear {
+            searchIndex = SettingsSearchIndex(
+                entries: IOSSettingsSearch.catalogEntries(keyboardEnabled: iOSKeyboardEnabled)
+                    + IOSSettingsSearch.apiKeyEntries(managedAPIKeyEntries)
+            )
+        }
+        .task(id: searchHighlightID) {
+            guard searchHighlightID != nil else { return }
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            searchHighlightID = nil
+        }
+    }
+
+    /// Typeahead completions while typing; recent and suggested destinations
+    /// before anything is typed.
+    @ViewBuilder
+    private var searchSuggestions: some View {
+        let query = searchQuery.trimmingCharacters(in: .whitespaces)
+        if query.isEmpty {
+            let recentIDs = SettingsSearchRecents.decode(storedSearchRecents)
+            let ids = recentIDs + SettingsSearchCatalog.suggestedEntryIDs.filter { !recentIDs.contains($0) }
+            ForEach(ids.compactMap { searchIndex.entry(id: $0) }) { entry in
+                Label(entry.title, systemImage: recentIDs.contains(entry.id) ? "clock" : entry.systemImage)
+                    .searchCompletion(entry.title)
+                    .accessibilityIdentifier("settingsSearchSuggestion.\(entry.id)")
+            }
+        } else {
+            ForEach(searchIndex.completions(for: query, limit: 5), id: \.self) { completion in
+                Label(completion, systemImage: "magnifyingglass")
+                    .searchCompletion(completion)
+            }
+        }
+    }
+
+    private func reveal(_ entry: SettingsSearchEntry, using proxy: ScrollViewProxy) {
+        storedSearchRecents = SettingsSearchRecents.encode(
+            SettingsSearchRecents.recording(entry.id, in: SettingsSearchRecents.decode(storedSearchRecents))
+        )
+        searchQuery = ""
+        if IOSSettingsSearch.opensAPIKeys(entry) {
+            showingAPIKeys = true
+            return
+        }
+        Task { @MainActor in
+            // Let the search overlay dismiss before scrolling the list beneath it.
+            try? await Task.sleep(for: .milliseconds(250))
+            withAnimation { proxy.scrollTo(entry.id, anchor: .top) }
+            searchHighlightID = entry.id
+        }
+    }
+
+    private var settingsForm: some View {
         Form {
-            Section("Appearance") {
+            SearchableSettingsSection("Appearance") {
                 Picker("Layout Density", selection: $settings.visualDensity) {
                     ForEach(AppVisualDensity.allCases) { density in
                         Text(density.displayName).tag(density)
@@ -62,7 +134,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Language") {
+            SearchableSettingsSection("Language") {
                 Picker("Spoken Language", selection: $settings.preferredLocaleIdentifier) {
                     ForEach(TranscriptionLanguageCatalog.options) { option in
                         Text(option.displayName).tag(option.id)
@@ -81,7 +153,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Transcription") {
+            SearchableSettingsSection("Transcription") {
                 Picker("Where transcription runs", selection: transcriptionLocationBinding) {
                     ForEach(IOSTranscriptionLocation.allCases) { location in
                         Text(location.displayName).tag(location)
@@ -259,7 +331,7 @@ public struct SettingsView: View {
 
             }
 
-            Section("Behavior") {
+            SearchableSettingsSection("Behavior") {
                 Toggle(isOn: $settings.autoStartRecording) {
                     Label("Auto-Start Recording", systemImage: "mic.badge.plus")
                 }
@@ -294,7 +366,7 @@ public struct SettingsView: View {
             }
 
             if iOSKeyboardEnabled {
-                Section("Just Speak Keyboard") {
+                SearchableSettingsSection("Just Speak Keyboard") {
                     NavigationLink {
                         KeyboardSetupView()
                     } label: {
@@ -315,7 +387,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Saved Results") {
+            SearchableSettingsSection("Saved Results") {
                 Toggle(isOn: Binding(
                     get: { self.settings.transcriptReadyNotificationsEnabled },
                     set: { enabled in
@@ -357,7 +429,7 @@ public struct SettingsView: View {
 
             FocusCaptureSettingsSection()
 
-            Section("Hardware Trigger") {
+            SearchableSettingsSection("Hardware Trigger") {
                 NavigationLink {
                     HardwareTriggerSettingsView(settings: settings)
                 } label: {
@@ -389,7 +461,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Post-Processing") {
+            SearchableSettingsSection("Post-Processing") {
                 Toggle(isOn: $settings.autoPostProcess) {
                     Label("Auto-Polish After Recording", systemImage: "wand.and.stars")
                 }
@@ -423,7 +495,7 @@ public struct SettingsView: View {
             // Hidden while iOS paid routing is unwired — see `PaidAccessFeature`.
             // The screen stays compiled so re-enabling is one constant.
             if PaidAccessFeature.isAvailableOnIOS {
-                Section("Subscription") {
+                SearchableSettingsSection("Subscription") {
                     NavigationLink {
                         PaidAccessSettingsView()
                     } label: {
@@ -439,7 +511,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("API Keys") {
+            SearchableSettingsSection("API Keys") {
                 if usesInlineDensityLayout {
                     NavigationLink {
                         APIKeysView(settings: settings)
@@ -476,7 +548,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Sync") {
+            SearchableSettingsSection("Sync") {
                 // CloudKit History Sync
                 CloudKitSyncSettingsSection()
 
@@ -523,7 +595,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Capture Health") {
+            SearchableSettingsSection("Capture Health") {
                 NavigationLink {
                     CaptureHealthView()
                 } label: {
@@ -542,7 +614,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Recordings") {
+            SearchableSettingsSection("Recordings") {
                 NavigationLink {
                     RecordingsView()
                 } label: {
@@ -559,7 +631,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Privacy & Debugging") {
+            SearchableSettingsSection("Privacy & Debugging") {
                 NavigationLink {
                     PrivacyView()
                 } label: {
@@ -580,7 +652,7 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("About") {
+            SearchableSettingsSection("About") {
                 if usesInlineDensityLayout {
                     compactBuildSummary
                 } else {

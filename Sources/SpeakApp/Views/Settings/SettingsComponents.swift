@@ -30,16 +30,27 @@ struct SettingsInlineInfo: View {
   }
 }
 
+/// A titled settings card. Its title must match an entry in `SettingsSearchCatalog`
+/// (enforced by `SettingsSearchCoverageTests`) so settings search can reveal it;
+/// pass `searchEntryID` when the title is computed at runtime.
 struct SettingsCard<Content: View>: View {
   let title: String
   let systemImage: String
   let tint: Color
+  let searchEntryID: String?
   @ViewBuilder let content: Content
 
-  init(title: String, systemImage: String, tint: Color, @ViewBuilder content: () -> Content) {
+  init(
+    title: String,
+    systemImage: String,
+    tint: Color,
+    searchEntryID: String? = nil,
+    @ViewBuilder content: () -> Content
+  ) {
     self.title = title
     self.systemImage = systemImage
     self.tint = tint
+    self.searchEntryID = searchEntryID
     self.content = content()
   }
 
@@ -53,6 +64,7 @@ struct SettingsCard<Content: View>: View {
     ) {
       content
     }
+    .settingsSearchAnchor(title: title, entryID: searchEntryID)
   }
 }
 

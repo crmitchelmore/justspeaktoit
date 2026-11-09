@@ -18,6 +18,15 @@ struct MacAPIKeyItem: Identifiable {
   var id: String { entry.id }
 }
 
+extension TTSProvider {
+  /// Voice-output providers with their own API-key card, in display order.
+  /// OpenRouter shares the general card; the system voice needs no key.
+  static let apiKeyCardProviders: [TTSProvider] = [
+    .elevenlabs, .openai, .azure, .deepgram, .soniox, .cartesia,
+    .groq, .gemini, .mistral, .speechmatics, .xai
+  ]
+}
+
 struct SettingsView: View {
   @EnvironmentObject var environment: AppEnvironment
   @EnvironmentObject var settings: AppSettings
@@ -52,6 +61,7 @@ struct SettingsView: View {
   @State var apiKeySortOrder: APIKeySortOrder = .name
   @State private var didResolveAPIKeyStorage = false
   @State private var missingTranscriptionAPIKeyAlert: MissingLiveAPIKeyAlert?
+  @State private var settingsSearchHighlightID: String?
   @State var showSystemPromptPreview = false
   @State var systemPromptPreview = ""
   @State var showingConfigTransfer = false
@@ -227,10 +237,7 @@ struct SettingsView: View {
           source: .transcription(provider)
         )
       }
-    items += [
-      TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox, .cartesia,
-      .groq, .gemini, .mistral, .speechmatics, .xai
-    ].map { provider in
+    items += TTSProvider.apiKeyCardProviders.map { provider in
       let isShared = provider.sharesTranscriptionCredential
       return MacAPIKeyItem(
         entry: APIKeyListEntry(
@@ -483,6 +490,24 @@ struct SettingsView: View {
     }
   }
 
+  /// Scrolls to and briefly highlights the card settings search selected.
+  /// Section-root entries only select the page, which MainView already did.
+  /// The target is cleared last: clearing it restarts this task.
+  private func revealSettingsSearchTarget(using proxy: ScrollViewProxy) async {
+    guard let target = environment.settingsSearchTarget else { return }
+    if target.hasPrefix(MacSettingsSearch.apiKeyEntryPrefix) {
+      environment.apiKeysScrollTarget = String(target.dropFirst(MacSettingsSearch.apiKeyEntryPrefix.count))
+      settingsSearchHighlightID = target
+    } else if SettingsSearchSection(rawValue: target) == nil {
+      // Let the newly selected page lay out before scrolling to its card.
+      try? await Task.sleep(for: .milliseconds(150))
+      guard !Task.isCancelled else { return }
+      withAnimation { proxy.scrollTo(target, anchor: .top) }
+      settingsSearchHighlightID = target
+    }
+    environment.settingsSearchTarget = nil
+  }
+
   var audioInputSelectionBinding: Binding<String> {
     Binding(
       get: {
@@ -707,13 +732,25 @@ struct SettingsView: View {
 
   var body: some View {
     let density = settings.visualDensity
-    ScrollView {
-      VStack(alignment: .leading, spacing: density.isCompact ? density.sectionSpacing : 28) {
-        overviewHeader
-        tabContent
+    ScrollViewReader { proxy in
+      ScrollView {
+        VStack(alignment: .leading, spacing: density.isCompact ? density.sectionSpacing : 28) {
+          overviewHeader
+          tabContent
+        }
+        .padding(density.pagePadding)
+        .frame(maxWidth: 1100, alignment: .center)
       }
-      .padding(density.pagePadding)
-      .frame(maxWidth: 1100, alignment: .center)
+      .environment(\.settingsSearchHighlightID, settingsSearchHighlightID)
+      .task(id: environment.settingsSearchTarget) {
+        await revealSettingsSearchTarget(using: proxy)
+      }
+      .task(id: settingsSearchHighlightID) {
+        guard settingsSearchHighlightID != nil else { return }
+        try? await Task.sleep(for: .seconds(2.5))
+        guard !Task.isCancelled else { return }
+        settingsSearchHighlightID = nil
+      }
     }
     .background(
       LinearGradient(

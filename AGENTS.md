@@ -162,6 +162,17 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 #endif
 ```
 
+### Settings Search Registry
+
+- Every setting, settings card/section and settings page must be indexed in
+  `SettingsSearchCatalog` (`Sources/SpeakCore/SettingsSearch/`). The entry
+  `title` must equal the on-screen heading, `settingKeys` must list the
+  persisted property names, and `keywords` should hold the words people search
+  for. On iOS, use `SearchableSettingsSection` for top-level Settings sections.
+- `SettingsSearchCoverageTests` fails when a card, section or `@Published`
+  setting is missing. Exempt a setting only with a reason in that test. See
+  [Docs/settings-search.md](Docs/settings-search.md).
+
 ### Shared Evolving Catalogues
 
 - Any capability list that can grow over time (models, providers, voices,

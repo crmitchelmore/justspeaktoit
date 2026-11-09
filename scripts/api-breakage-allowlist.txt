@@ -63,3 +63,6 @@ API breakage: enumelement AutomationCommand.awaitTranscript has been added as a 
 API breakage: enumelement DesktopSpeechVoice.openaiRealtime has been added as a new enum case
 # Opt-in cleanup discovery adds one per-install preference key; existing keys/raw values are unchanged.
 API breakage: enumelement ApplicationPreferenceKey.cleanupModelDiscoveryEnabled has been added as a new enum case
+# Gemini 3.8 Flash-Lite TTS replaces the 3.1 preview before its shutdown. The
+# retired raw values stay decodable and resolve to the replacement selection.
+API breakage: enumelement GeminiTTSModel.flash38LiteTTS has been added as a new enum case

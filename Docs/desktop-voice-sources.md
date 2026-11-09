@@ -279,7 +279,7 @@ provider access or installed application.
 |---|---|---|---|
 | OpenAI | TTS-1, TTS-1 HD and mini; 29 compatible model/voice tuples | Separate `openai.tts.apiKey`, never the transcription key | 24 kHz mono PCM16 WAV; full canonical speed 0.25-4; no pitch/SSML |
 | Groq | 12 canonical English/Saudi Arabic Orpheus personas paired with their actual model | Shared `groq.apiKey` | 24 kHz mono PCM16 WAV; normal controls only |
-| Gemini | Every `GeminiTTSCatalog.models` / voice tuple; currently 30 voices with Gemini 3.1 Flash TTS | Shared `google.apiKey` | 24 kHz mono PCM16 WAV, or validated raw L16 wrapped without resampling; normal controls only |
+| Gemini | Every `GeminiTTSCatalog.models` / voice tuple; currently 30 voices with Gemini 3.8 Flash-Lite TTS | Shared `google.apiKey` | 24 kHz mono PCM16 WAV, or validated raw L16 wrapped without resampling; normal controls only |
 | Speechmatics | Four canonical English voices | Shared `speechmatics.apiKey` | Actual 16 kHz mono PCM16 WAV; normal controls only |
 
 The native Voice list projects the same canonical executable tuples. OpenAI and Gemini
@@ -309,10 +309,13 @@ The Gemini configuration successor remains **source-only, uncompiled and
 unexecuted**. Its model projection and strict resolver enumerate the actual
 canonical models, and the captured model reaches request construction and
 per-model usage estimates. The current canonical Mac catalogue/runtime defines
-**only Gemini 3.1 Flash TTS Preview**; its comments explicitly exclude the older
-2.5 previews. Those are not new desktop routes or a remaining catalogue-parity
-gap. Provider aliases and absent model IDs retain the existing default; unknown
-model IDs remain unavailable rather than falling back.
+**only Gemini 3.8 Flash-Lite TTS** as a selectable model; its comments
+explicitly exclude the older 2.5 previews. Those are not new desktop routes or a
+remaining catalogue-parity gap. Provider aliases and absent model IDs retain the
+existing default. A saved `gemini-3.1-flash-tts-preview` choice (shut down by
+Google on 2026-11-17) resolves to Flash-Lite, Google's named replacement with
+the same voices and schema; History keeps the 3.1 model and price it was
+recorded with. Unknown model IDs remain unavailable rather than falling back.
 
 Both native preference editors use one canonical `ttsLanguage` text field, with
 an active-provider label for Gemini or Soniox. Other executable providers

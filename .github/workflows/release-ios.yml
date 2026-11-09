@@ -20,6 +20,10 @@ env:
   # keyboard-process microphone or Speech permission path.
   TUIST_IOS_KEYBOARD: "1"
   TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
+  # #1119: set the IOS_SHARED_CLOUD_CONTAINER repository variable to 1 only
+  # after the Mac container is assigned to the iOS App IDs and profiles
+  # (Docs/cloudkit-shared-container.md); otherwise signing fails.
+  TUIST_IOS_SHARED_CLOUD_CONTAINER: ${{ vars.IOS_SHARED_CLOUD_CONTAINER == '1' && '1' || '0' }}
 
 jobs:
   build-and-upload:

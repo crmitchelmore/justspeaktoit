@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Just Speak to It — Dictation that answers to you</title>
   <meta name="description" content="Open-source dictation for Mac, iPhone and iPad. Run speech models on your device or bring your own provider keys. No account, no middleman server.">
-  <meta name="theme-color" content="#121417">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f7f5f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121417" media="(prefers-color-scheme: dark)">
   <meta property="og:title" content="Just Speak to It — Dictation that answers to you">
   <meta property="og:description" content="Open-source dictation for Mac, iPhone and iPad. On-device models or your own provider keys. Your words never pass through anyone else's server.">
   <meta property="og:type" content="website">
@@ -24,6 +26,7 @@
   <link rel="stylesheet" href="/site.css">
   <script type="module" src="/download-architecture.js"></script>
   <script type="module" src="/voice-motion.js"></script>
+  <script type="module" src="/clips.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -120,15 +123,35 @@
           <p class="step-demo"><span class="tick" aria-hidden="true">✓</span> <span>Back into the app you started from</span></p>
         </article>
       </div>
-      <figure class="capture demo">
-        <video controls muted playsinline preload="none" width="1280" height="720" poster="/images/demo/speak-demo-poster.webp" aria-describedby="demo-caption">
-          <source src="/images/demo/speak-demo.webm" type="video/webm">
-          <source src="/images/demo/speak-demo.mp4" type="video/mp4">
-          <track kind="captions" src="/images/demo/speak-demo.en.vtt" srclang="en" label="English" default>
-          <a href="/images/demo/speak-demo.mp4">Download the 36-second demo (MP4)</a>
+      <figure class="capture demo clip">
+        <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" poster="/images/clips/hero-poster.webp" aria-label="Dictating into a text field on a Mac, then finding the text in History" aria-describedby="clip-hero-caption">
+          <source src="/images/clips/hero.webm" type='video/webm; codecs="av01.0.05M.08"'>
+          <source src="/images/clips/hero.mp4" type="video/mp4">
+          <track kind="captions" src="/images/clips/hero.en.vtt" srclang="en" label="English" default>
+          <a href="/images/clips/hero.mp4">Download the clip (MP4)</a>
         </video>
-        <figcaption id="demo-caption"><span>36 seconds, no sound, captions on. Recorded from the real Mac app on a test machine: fictional history, a synthetic audio clip and a test fixture that returns fixed text, with waiting time cut. Clipboard mode is shown because the test machine cannot grant Accessibility.</span><a href="/images/demo/speak-demo.mp4">Download MP4 ↗</a></figcaption>
+        <figcaption id="clip-hero-caption"><span>The Mac app. No sound, captions on. Recorded on a test machine: fictional History, a synthetic audio clip and a test fixture that returns fixed text, with waiting time cut. Clipboard mode is shown because the test machine cannot grant Accessibility.</span><a href="/images/clips/hero.mp4">MP4 ↗</a></figcaption>
       </figure>
+      <div class="clip-grid">
+        <figure class="capture clip">
+          <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" data-poster="/images/clips/corrections-poster.webp" aria-label="The Corrections page on Mac listing preferred spellings for names and jargon" aria-describedby="clip-corrections-caption">
+            <source src="/images/clips/corrections.webm" type='video/webm; codecs="av01.0.05M.08"'>
+            <source src="/images/clips/corrections.mp4" type="video/mp4">
+            <track kind="captions" src="/images/clips/corrections.en.vtt" srclang="en" label="English" default>
+            <a href="/images/clips/corrections.mp4">Download the clip (MP4)</a>
+          </video>
+          <figcaption id="clip-corrections-caption"><span>Personal corrections: teach it your names and jargon once.</span><a href="/images/clips/corrections.mp4">MP4 ↗</a></figcaption>
+        </figure>
+        <figure class="capture clip">
+          <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" data-poster="/images/clips/history-poster.webp" aria-label="History on Mac and Linux: every past dictation with its model, length and actions" aria-describedby="clip-history-caption">
+            <source src="/images/clips/history.webm" type='video/webm; codecs="av01.0.05M.08"'>
+            <source src="/images/clips/history.mp4" type="video/mp4">
+            <track kind="captions" src="/images/clips/history.en.vtt" srclang="en" label="English" default>
+            <a href="/images/clips/history.mp4">Download the clip (MP4)</a>
+          </video>
+          <figcaption id="clip-history-caption"><span>History and recovery: every dictation kept, searchable and reusable.</span><a href="/images/clips/history.mp4">MP4 ↗</a></figcaption>
+        </figure>
+      </div>
       <p class="note">Automatic insertion belongs to the direct download, which uses macOS Accessibility. There is no Mac App Store build: a sandboxed one could only ever reach the clipboard, so the Mac app ships as a direct download only.</p>
     </section>
 
@@ -198,6 +221,15 @@
           <p>Optional clean-up pass that fixes punctuation and filler, or follows a prompt you wrote. Cloud ones route through your OpenRouter key.</p>
         </article>
       </div>
+      <figure class="capture clip clip--wide">
+        <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" data-poster="/images/clips/models-poster.webp" aria-label="Transcription and clean-up settings: on-device models alongside cloud providers" aria-describedby="clip-models-caption">
+          <source src="/images/clips/models.webm" type='video/webm; codecs="av01.0.05M.08"'>
+          <source src="/images/clips/models.mp4" type="video/mp4">
+          <track kind="captions" src="/images/clips/models.en.vtt" srclang="en" label="English" default>
+          <a href="/images/clips/models.mp4">Download the clip (MP4)</a>
+        </video>
+        <figcaption id="clip-models-caption"><span>Choosing models: on-device or cloud, plus optional clean-up. Mac app with a Linux beta frame; sample data.</span><a href="/images/clips/models.mp4">MP4 ↗</a></figcaption>
+      </figure>
       <p class="provider-foot">
         <span>Counts are of the shipped model catalogue, <code>Sources/SpeakCore/ModelCatalog.swift</code>. Availability varies by platform and by macOS version — iPhone shows a smaller set.</span>
       </p>
@@ -243,11 +275,14 @@
             </li>
           </ul>
         </div>
-        <figure class="mobile-shot">
-          <a href="/images/ios-history-current.png" aria-label="Open the full-size iPhone screenshot">
-            <img src="/images/ios-history-current.png" width="1320" height="2868" alt="The iPhone app showing History: session totals along the top and a list of transcriptions, each tagged with the model that produced it." loading="lazy" decoding="async">
-          </a>
-          <figcaption>The iPhone app. Sample history.</figcaption>
+        <figure class="mobile-shot mobile-clip">
+          <video class="clip-video" controls muted playsinline preload="none" width="640" height="1280" data-poster="/images/clips/iphone-poster.webp" aria-label="The iPhone app: tap record, see the words, copy them, then on-device and Action Button settings" aria-describedby="clip-iphone-caption">
+            <source src="/images/clips/iphone.webm" type='video/webm; codecs="av01.0.05M.08"'>
+            <source src="/images/clips/iphone.mp4" type="video/mp4">
+            <track kind="captions" src="/images/clips/iphone.en.vtt" srclang="en" label="English" default>
+            <a href="/images/clips/iphone.mp4">Download the iPhone clip (MP4)</a>
+          </video>
+          <figcaption id="clip-iphone-caption">The iPhone app: Simulator screenshots, with fixed sample text. <a href="/images/ios-history-current.png">Full-size History screenshot ↗</a></figcaption>
         </figure>
       </div>
     </section>
@@ -264,6 +299,26 @@
         <a class="button" href="/alpha/download/windows-x64" data-auto-windows-download rel="nofollow">Download Windows x64 ZIP</a>
       </p>
       <p class="download-meta" data-windows-download-note>Unsigned developer preview. Extract all files before opening SpeakWindows.exe. No Swift installation or automatic updates.</p>
+      <div class="clip-grid">
+        <figure class="capture clip">
+          <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" data-poster="/images/clips/windows-poster.webp" aria-label="The Windows beta: dashboard, recording overlay, completed overlay and settings" aria-describedby="clip-windows-caption">
+            <source src="/images/clips/windows.webm" type='video/webm; codecs="av01.0.05M.08"'>
+            <source src="/images/clips/windows.mp4" type="video/mp4">
+            <track kind="captions" src="/images/clips/windows.en.vtt" srclang="en" label="English" default>
+            <a href="/images/clips/windows.mp4">Download the clip (MP4)</a>
+          </video>
+          <figcaption id="clip-windows-caption"><span>Windows beta. Frames from the native app's page tour on a GitHub-hosted runner, with sample History.</span><a href="/images/clips/windows.mp4">MP4 ↗</a></figcaption>
+        </figure>
+        <figure class="capture clip">
+          <video class="clip-video" controls muted playsinline preload="none" width="1280" height="720" data-poster="/images/clips/linux-poster.webp" aria-label="The Linux beta: GTK dashboard, recording overlay, History and on-device models" aria-describedby="clip-linux-caption">
+            <source src="/images/clips/linux.webm" type='video/webm; codecs="av01.0.05M.08"'>
+            <source src="/images/clips/linux.mp4" type="video/mp4">
+            <track kind="captions" src="/images/clips/linux.en.vtt" srclang="en" label="English" default>
+            <a href="/images/clips/linux.mp4">Download the clip (MP4)</a>
+          </video>
+          <figcaption id="clip-linux-caption"><span>Linux beta. Frames from the native GTK app's page tour on a GitHub-hosted runner, with sample History.</span><a href="/images/clips/linux.mp4">MP4 ↗</a></figcaption>
+        </figure>
+      </div>
       <p class="provider-foot">
         <a class="quiet-link" href="/alpha/download/windows-x64" rel="nofollow">Windows x64 (.zip) ↓</a>
         <a class="quiet-link" href="/alpha/download/windows-arm64" rel="nofollow">Windows ARM64 (.zip) ↓</a>

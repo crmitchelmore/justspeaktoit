@@ -3,7 +3,7 @@
    Accent #FF6B3D · warm #FF9C4A · deep #E3522E · lagoon #2ED4BF / #1AAB99 */
 
 :root {
-  color-scheme: dark;
+  color-scheme: light dark;
 
   --ground: #121417;
   --ground-deep: #0d0f11;
@@ -15,6 +15,12 @@
   --text: #f5f3f0;
   --text-dim: #adb4bd;
   --text-faint: #868e98;
+
+  --wash: rgba(255, 255, 255, .045);
+  --wash-faint: rgba(255, 255, 255, .015);
+  --wash-hover: rgba(255, 255, 255, .05);
+  --shadow-deep: var(--shadow-deep);
+  --terminal: #0a0c0e;
 
   --accent: #ff6b3d;
   --accent-warm: #ff9c4a;
@@ -34,6 +40,32 @@
   --block: clamp(4.5rem, 9vw, 7.5rem);
 
   --ease: cubic-bezier(.2, .8, .2, 1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #f7f5f2;
+    --ground-deep: #efebe6;
+    --surface: #ffffff;
+    --surface-2: #ece8e3;
+    --line: rgba(22, 24, 28, .12);
+    --line-strong: rgba(22, 24, 28, .22);
+
+    --text: #16181c;
+    --text-dim: #464d56;
+    --text-faint: #5f6670;
+
+    --accent: #c9461c;
+    --accent-link: #b23d14;
+    --lagoon: #0d7c6f;
+    --lagoon-deep: #0a6a5f;
+
+    --wash: rgba(255, 255, 255, .85);
+    --wash-faint: rgba(255, 255, 255, .55);
+    --wash-hover: rgba(22, 24, 28, .05);
+    --shadow-deep: rgba(22, 24, 28, .35);
+    --terminal: #fbfaf8;
+  }
 }
 
 *,
@@ -152,7 +184,10 @@ em { font-style: italic; }
 .site-nav {
   margin-left: auto;
   display: flex;
-  gap: clamp(.9rem, 2vw, 1.9rem);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: .35rem clamp(.9rem, 2vw, 1.9rem);
 }
 
 .site-nav a {
@@ -204,7 +239,7 @@ em { font-style: italic; }
   box-shadow: none;
 }
 
-.button-ghost:hover { color: var(--text); background: rgba(255, 255, 255, .05); box-shadow: none; }
+.button-ghost:hover { color: var(--text); background: var(--wash-hover); box-shadow: none; }
 
 .button-small { padding: .6rem 1.1rem; font-size: .93rem; }
 
@@ -254,7 +289,7 @@ em { font-style: italic; }
 .download-unavailable .button { max-width: 100%; text-align: center; }
 
 .card {
-  background: linear-gradient(180deg, rgba(255, 255, 255, .045), rgba(255, 255, 255, .015));
+  background: linear-gradient(180deg, var(--wash), var(--wash-faint));
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: clamp(1.25rem, 2.4vw, 1.7rem);
@@ -298,7 +333,7 @@ em { font-style: italic; }
   font-size: .85rem;
   font-weight: 500;
   color: var(--text-dim);
-  background: rgba(255, 255, 255, .05);
+  background: var(--wash-hover);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: .4rem .9rem;
@@ -461,7 +496,7 @@ em { font-style: italic; }
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: .5rem .5rem .35rem;
-  box-shadow: 0 40px 80px -50px rgba(0, 0, 0, .95);
+  box-shadow: 0 40px 80px -50px var(--shadow-deep);
 }
 
 .capture > a {
@@ -476,13 +511,39 @@ em { font-style: italic; }
 
 .demo { margin-top: 2.5rem; }
 
-.demo video {
+.clip video {
   display: block;
   width: 100%;
   height: auto;
   aspect-ratio: 16 / 9;
   border-radius: calc(var(--radius-lg) - 8px);
-  background: #000;
+  background: var(--ground);
+}
+
+.clip-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+@media (max-width: 760px) {
+  .clip-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.clip--wide { margin-top: 1.5rem; }
+
+#desktop .clip-grid { margin-bottom: 1.5rem; }
+
+.mobile-clip video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 2;
+  border-radius: 30px;
+  border: 1px solid var(--line);
+  background: var(--ground);
+  box-shadow: 0 40px 80px -50px var(--shadow-deep);
 }
 
 .capture figcaption {
@@ -623,7 +684,7 @@ kbd {
 .chips li {
   font-size: .86rem;
   color: var(--text-dim);
-  background: rgba(255, 255, 255, .045);
+  background: var(--wash);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: .26rem .7rem;
@@ -678,7 +739,7 @@ kbd {
   border-radius: 30px;
   overflow: hidden;
   border: 1px solid var(--line);
-  box-shadow: 0 40px 80px -50px rgba(0, 0, 0, .95);
+  box-shadow: 0 40px 80px -50px var(--shadow-deep);
 }
 
 .mobile-shot figcaption { margin-top: .8rem; font-size: .82rem; color: var(--text-faint); text-align: center; }
@@ -697,7 +758,7 @@ kbd {
 @media (max-width: 900px) { .automate-grid { grid-template-columns: minmax(0, 1fr); } }
 
 .terminal {
-  background: #0a0c0e;
+  background: var(--terminal);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
@@ -901,4 +962,9 @@ kbd {
     color: inherit;
     -webkit-text-fill-color: currentColor;
   }
+}
+
+/* The light-mode accent is too dark behind the skip link's dark text. */
+@media (prefers-color-scheme: light) {
+  .skip-link { background: var(--accent-warm); }
 }

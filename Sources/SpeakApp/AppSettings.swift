@@ -27,6 +27,15 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       case .dark: return .dark
       }
     }
+
+    /// The app-wide AppKit appearance; nil follows the system setting.
+    var nsAppearance: NSAppearance? {
+      switch self {
+      case .system: return nil
+      case .light: return NSAppearance(named: .aqua)
+      case .dark: return NSAppearance(named: .darkAqua)
+      }
+    }
   }
 
   enum TranscriptionMode: String, CaseIterable, Identifiable {
@@ -431,6 +440,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       }
       store(postProcessingEnabled, key: .postProcessingEnabled)
     }
+  }
+
+  /// Device-local metadata discovery; intentionally outside automatic settings transfer.
+  @Published var cleanupModelDiscoveryEnabled: Bool {
+    didSet { defaults.set(cleanupModelDiscoveryEnabled, forKey: CleanupModelSelection.preferenceKey) }
   }
 
   @Published var postProcessingModel: String {
@@ -1123,6 +1137,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)
     postProcessingEnabled =
       defaults.object(forKey: DefaultsKey.postProcessingEnabled.rawValue) as? Bool ?? true
+    cleanupModelDiscoveryEnabled = defaults.bool(forKey: CleanupModelSelection.preferenceKey)
     postProcessingModel = Self.normalizedPostProcessingModel(
       defaults.string(forKey: DefaultsKey.postProcessingModel.rawValue)
     )
@@ -1420,6 +1435,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     self.preferredLocaleIdentifier = restored.preferredLocaleIdentifier
     self.preferredAudioInputUID = restored.preferredAudioInputUID
     self.postProcessingEnabled = restored.postProcessingEnabled
+    self.cleanupModelDiscoveryEnabled = restored.cleanupModelDiscoveryEnabled
     self.postProcessingModel = restored.postProcessingModel
     self.postProcessingTemperature = restored.postProcessingTemperature
     self.assemblyAIKeyterms = restored.assemblyAIKeyterms

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher shortcut icon: the brand gradient behind a microphone. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_launcher_background" />
+    <item
+        android:bottom="12dp"
+        android:drawable="@drawable/ic_mic"
+        android:left="12dp"
+        android:right="12dp"
+        android:top="12dp" />
+</layer-list>

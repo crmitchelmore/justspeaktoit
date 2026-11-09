@@ -24,6 +24,32 @@ enum CoreJourneySiteMediaFixture {
         try data.write(to: historyDirectory.appendingPathComponent("history-log.json"), options: .atomic)
     }
 
+    /// Fictional personal corrections so the Corrections page has something to show.
+    static func seedCorrections(in directory: URL, now: Date = Date()) throws {
+        let lexiconDirectory = directory
+            .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
+            .appendingPathComponent("PersonalLexicon", isDirectory: true)
+        try FileManager.default.createDirectory(at: lexiconDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(sampleCorrections(now: now))
+        try data.write(to: lexiconDirectory.appendingPathComponent("lexicon.json"), options: .atomic)
+    }
+
+    static func sampleCorrections(now: Date) -> [PersonalLexiconRule] {
+        [
+            ("Project name", "Lighthouse", ["light house", "lighthouse"], ["work"]),
+            ("Colleague", "Saoirse", ["seer sha", "sir sha"], ["people"]),
+            ("Product", "Kestrel API", ["kestral api", "castrel a p i"], ["work"])
+        ].map { name, canonical, aliases, tags in
+            PersonalLexiconRule(
+                displayName: name, canonical: canonical, aliases: aliases, activation: .automatic,
+                contextTags: Set(tags), confidence: .high, notes: nil, source: .manual,
+                createdAt: now.addingTimeInterval(-86_400), updatedAt: now.addingTimeInterval(-86_400)
+            )
+        }
+    }
+
     static func sampleItems(now: Date) -> [HistoryItem] {
         [
             item(

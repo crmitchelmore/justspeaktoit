@@ -46,6 +46,7 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         // before launch actions can start a session, never on foreground entry.
         SharedTranscriptionState.shared.clearRecordingState()
         if HostedUnitTestLaunch.isActive { return true }
+        iOSHistoryManager.resetSyncStateIfContainerChanged()
         UNUserNotificationCenter.current().delegate = self
         TranscriptReadyNotificationRoute.reconcileDisabledPreference()
         Task { await TranscriptReadyNotificationRoute.registerCategory() }

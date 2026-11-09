@@ -23,5 +23,18 @@ final class CoreJourneySiteMediaFixtureTests: XCTestCase {
         XCTAssertTrue(items.allSatisfy { $0.modelsUsed == $0.modelUsages.map(\.modelIdentifier) })
         XCTAssertEqual(items.map(\.createdAt), items.map(\.createdAt).sorted(by: >))
     }
+
+    func testSeedCorrections_writesRulesThatTheLexiconStoreLoads() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("site-media-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try CoreJourneySiteMediaFixture.seedCorrections(in: directory)
+
+        let store = PersonalLexiconStore(baseDirectory: directory)
+        let rules = try await store.load()
+        XCTAssertEqual(rules.map(\.canonical), ["Lighthouse", "Saoirse", "Kestrel API"])
+        XCTAssertTrue(rules.allSatisfy { !$0.aliases.isEmpty && $0.activation == .automatic })
+    }
 }
 #endif

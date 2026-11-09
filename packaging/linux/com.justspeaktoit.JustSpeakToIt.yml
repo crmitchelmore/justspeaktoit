@@ -121,6 +121,23 @@ modules:
         path: ../../scripts/linux-local-runtime/dependencies.json
         dest-filename: jsti-linux-runtime-policy.json
 
+  # The GNOME SDK does not include patchelf. It is needed only while staging
+  # the shared Swift runtime; remove the tool from the finished application.
+  - name: patchelf
+    buildsystem: simple
+    build-commands:
+      - ./bootstrap.sh
+      - ./configure --prefix=/app
+      - make -j "$FLATPAK_BUILDER_N_JOBS"
+      - make install
+    cleanup:
+      - "*"
+    sources:
+      - type: git
+        url: https://github.com/NixOS/patchelf.git
+        tag: 0.18.0
+        commit: 99c24238981b7b1084313aca8f5c493bb46f302c
+
   - name: justspeaktoit
     buildsystem: simple
     build-options:
@@ -130,15 +147,18 @@ modules:
       - swift --version
       - python3 scripts/migration/verify-miniz.py
       - packaging/linux/swiftpm-offline-setup.sh
-      - swift build --configuration release --product SpeakLinux --static-swift-stdlib --disable-sandbox
+      - swift build --configuration release --product SpeakLinux --disable-sandbox
         --force-resolved-versions
-      - swift build --configuration release --product speak --static-swift-stdlib --disable-sandbox
+      - swift build --configuration release --product speak --disable-sandbox
         --force-resolved-versions
       - install -Dm644 Sources/CMigrationArchive/miniz/LICENSE
         /app/share/licenses/justspeaktoit/LICENSE-miniz.txt
-      # Share production resource collection and icon staging with native layouts.
+      # Share the SDK runtime between GUI and CLI instead of statically embedding it twice.
+      # The stager copies only DT_NEEDED libraries and sets relative runtime search paths.
+      # Flatpak keeps separate debug symbols during its normal cleanup phase.
       - python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux
         --output .build/linux-desktop-layout --prefix /app --cli .build/release/speak
+        --swift-runtime "$(swift -print-target-info | python3 -c 'import json,sys; print(json.load(sys.stdin)["paths"]["runtimeLibraryPaths"][0])')"
       - cp -r .build/linux-desktop-layout/. /app/
       - install -Dm644 LICENSE /app/share/licenses/justspeaktoit/LICENSE
     sources:

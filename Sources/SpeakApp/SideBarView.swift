@@ -202,11 +202,16 @@ struct SideBarView: View {
         .foregroundStyle(item.color)
         .imageScale(settings.visualDensity.isCompact ? .small : .medium)
         .frame(width: settings.visualDensity.isCompact ? 16 : 20)
+      // The title is laid out first and keeps its natural width; the shortcut
+      // hint only takes what is left and disappears rather than squeezing the
+      // title when a long or localised label needs the room.
       sidebarTitle(title, isSelected: isSelected)
+        .layoutPriority(1)
       ViewThatFits(in: .horizontal) {
         shortcutHint(for: item)
         EmptyView()
       }
+      .frame(maxWidth: .infinity, alignment: .trailing)
     }
     .contentShape(Rectangle())
     .padding(.leading, indented && !settings.visualDensity.isCompact ? 10 : 0)
@@ -245,8 +250,8 @@ struct SideBarView: View {
     let font: Font = settings.visualDensity.isCompact ? .caption : .body
 
     return ZStack(alignment: .leading) {
-      // Always reserve the selected label's width so changing font weight cannot
-      // cause a long title to wrap and change the sidebar row's height.
+      // Always reserve the selected label's size so changing font weight cannot
+      // change the row's width or wrapping, and so its height stays stable.
       Text(title)
         .font(font)
         .fontWeight(.semibold)
@@ -257,11 +262,11 @@ struct SideBarView: View {
         .fontWeight(isSelected ? .semibold : .regular)
         .foregroundStyle(.primary)
     }
-    .lineLimit(1)
-    .truncationMode(.tail)
+    // A narrow sidebar or a long localised title wraps onto a second line
+    // instead of being cut off with an ellipsis.
+    .lineLimit(2)
+    .fixedSize(horizontal: false, vertical: true)
     .multilineTextAlignment(.leading)
-    .layoutPriority(3)
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   @ViewBuilder

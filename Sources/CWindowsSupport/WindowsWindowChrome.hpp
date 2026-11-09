@@ -22,6 +22,22 @@ bool dark();
 const Palette &palette();
 void refreshSystemAppearance();
 bool appearanceSelfTest(std::string &error);
+// Native controls and the title bar in the current light or dark mode.
+// Themed check box, radio and group box labels ignore WM_CTLCOLOR* text
+// colours and stay black, so dark mode draws those unthemed and the parent's
+// WM_CTLCOLORSTATIC colours apply. Owner-drawn buttons are left alone.
+void themeControl(HWND control);
+// A light or dark title bar.
+void themeTitleBar(HWND window);
+// The window's title bar and every child control.
+void themeWindow(HWND window);
+// Lets an ordinary dialog procedure follow the appearance: call it before
+// handling `message` and return `result` when it returns true. It themes the
+// title bar on WM_CREATE and each control as it is created, and everything
+// again when Windows' app mode changes while the app follows Windows. In dark
+// mode it paints the background and gives labels, check boxes and fields light
+// text on dark surfaces; in light mode the system colours stay.
+bool dialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT &result);
 
 // GDI+ for the process; idempotent.
 bool startup();

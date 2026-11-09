@@ -237,7 +237,7 @@ final class ComparisonLiveFanOut {
         case .success: break
         case .failure(let error):
             lane.abandon()
-            lane.entry.errorDescription = error.localizedDescription
+            lane.entry.errorDescription = ComparisonLiveLane.describe(error, modelID: candidate.modelID)
         case nil:
             lane.abandon()
             lane.entry.errorDescription = "The model did not start within its time limit."

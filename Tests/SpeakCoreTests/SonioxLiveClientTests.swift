@@ -33,7 +33,9 @@ final class SonioxLiveClientTests: XCTestCase {
         XCTAssertEqual(pcm, Data([1, 2, 3]))
         guard case .string(let finalize) = socket.messages[2] else { return XCTFail("finalize must be text") }
         XCTAssertEqual(try json(finalize)["type"] as? String, "finalize")
-        guard case .data(let eos) = socket.messages[3] else { return XCTFail("EOS must be binary") }
+        // An empty binary frame is an empty audio chunk to Soniox; only an
+        // empty text frame ends the stream and yields `finished`.
+        guard case .string(let eos) = socket.messages[3] else { return XCTFail("EOS must be an empty text frame") }
         XCTAssertTrue(eos.isEmpty)
     }
 

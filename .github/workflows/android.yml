@@ -1,0 +1,81 @@
+name: Android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - android/**
+      - .github/workflows/android.yml
+      # Parity tests read these shared Swift definitions.
+      - Sources/SpeakCore/TranscriptCleanupPolicy.swift
+      - Sources/SpeakCore/ModelCatalog.swift
+      - Sources/SpeakCore/ModelRetirements.swift
+      - Sources/SpeakCore/ProviderCredentialCatalogue.swift
+      - Sources/SpeakCore/OpenAITranscriptionModels.swift
+  pull_request:
+    paths:
+      - android/**
+      - .github/workflows/android.yml
+      # Parity tests read these shared Swift definitions.
+      - Sources/SpeakCore/TranscriptCleanupPolicy.swift
+      - Sources/SpeakCore/ModelCatalog.swift
+      - Sources/SpeakCore/ModelRetirements.swift
+      - Sources/SpeakCore/ProviderCredentialCatalogue.swift
+      - Sources/SpeakCore/OpenAITranscriptionModels.swift
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build & Test (Android)
+    # Must stay GitHub-hosted: settings.gradle.kts allows public registries only on hosted runners.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # Also validates gradle-wrapper.jar against Gradle's published checksums.
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          validate-wrappers: true
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Unit tests, lint and debug build
+        env:
+          JSTI_MAVEN_MIRROR: ${{ vars.JSTI_MAVEN_MIRROR }}
+        run: ./gradlew --stacktrace testDebugUnitTest lintDebug assembleDebug
+
+      - name: Upload test and lint reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-reports
+          path: |
+            android/app/build/reports/
+            android/app/build/test-results/
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Debug-signed developer build for emulator or sideload testing; not a release.
+      - name: Upload debug APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: justspeaktoit-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+          if-no-files-found: error

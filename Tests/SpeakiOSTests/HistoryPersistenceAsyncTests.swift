@@ -340,8 +340,11 @@ extension HistoryPersistenceAsyncTests {
         return try decoder.decode([iOSHistoryItem].self, from: Data(contentsOf: file))
     }
 
+    // Every wait is event-driven; this bound only reports a hang. On loaded
+    // hosted simulators a held write took over 2s just to start (run
+    // 42283665401, where a neighbouring cold delete took 11s).
     private func completed(_ expectations: XCTestExpectation...) async -> Bool {
-        let result = await XCTWaiter.fulfillment(of: expectations, timeout: 2)
+        let result = await XCTWaiter.fulfillment(of: expectations, timeout: 30)
         if result != .completed { XCTFail("History worker did not settle within its bounded fixture wait") }
         return result == .completed
     }

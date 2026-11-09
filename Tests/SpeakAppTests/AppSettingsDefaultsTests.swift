@@ -26,6 +26,20 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testDiscoveredCleanupSelectionSurvivesRelaunchWithoutDiscoveryCache() {
+        let selection = "openrouter/cleanup/openai/future-model"
+        defaults.set(selection, forKey: "postProcessingModel")
+        defaults.set(false, forKey: CleanupModelSelection.preferenceKey)
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.postProcessingModel, selection)
+        XCTAssertFalse(settings.cleanupModelDiscoveryEnabled)
+        settings.cleanupModelDiscoveryEnabled = true
+        XCTAssertTrue(defaults.bool(forKey: CleanupModelSelection.preferenceKey))
+        settings.postProcessingModel = "openrouter/cleanup/openai/another-model"
+        XCTAssertEqual(AppSettings(defaults: defaults).postProcessingModel, settings.postProcessingModel)
+    }
+
+    @MainActor
     func testPortablePreferenceDefaultsMatchCanonicalMacSettings() throws {
         let settings = AppSettings(defaults: defaults)
         let portable = try DesktopConfiguration()
@@ -349,6 +363,12 @@ final class AppSettingsDefaultsTests: XCTestCase {
     func testCoreDefaults_appearanceIsSystem() {
         let settings = AppSettings(defaults: defaults)
         XCTAssertEqual(settings.appearance, .system)
+    }
+
+    func testAppearance_mapsToAppWideAppKitAppearance() {
+        XCTAssertNil(AppSettings.Appearance.system.nsAppearance)
+        XCTAssertEqual(AppSettings.Appearance.light.nsAppearance?.name, .aqua)
+        XCTAssertEqual(AppSettings.Appearance.dark.nsAppearance?.name, .darkAqua)
     }
 
     @MainActor

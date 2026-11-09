@@ -876,8 +876,11 @@ GDI+ and GDI (no web view). A sidebar lists **Speak** (Dashboard, History,
 Voice Output) and **Settings** (General, Transcription, Post-processing,
 Profiles, Keyboard, iCloud Sync, About); Ctrl+1 to Ctrl+0 select them in that
 order. The header carries the page title with the selected model, Import audio
-and Record, and the status line sits at the bottom of every page. The minimum
-window is 980 × 760 at 96 DPI and scales with the monitor's DPI.
+and Record, and the status line sits at the bottom of every page. The sidebar
+is 232 px at 96 DPI, widened when a measured page title (semibold, at the
+window's DPI) plus its Ctrl+digit hint would not fit, so titles never clip.
+The minimum window is 980 × 760 at 96 DPI plus any sidebar widening, and
+scales with the monitor's DPI.
 
 - **Dashboard**: the brand-gradient hero with Start Recording and Sessions,
   Recording Time and Spend; the displayed transcript with Copy; Insights
@@ -902,8 +905,14 @@ window is 980 × 760 at 96 DPI and scales with the monitor's DPI.
   (`WindowsWindowChrome.cpp`). The window follows Windows' app mode
   (`AppsUseLightTheme`) with a dark title bar and dark common controls;
   **General › Appearance** overrides it (Follow Windows, Light, Dark), saved as
-  `appearance` in `settings.json` and shared with Linux. Icons come from Segoe
-  Fluent Icons on Windows 11 and Segoe MDL2 Assets on Windows 10.
+  `appearance` in `settings.json` and shared with Linux. Every secondary
+  window (API keys, Settings, Profiles, onboarding and the rest) follows it
+  too through `chrome::dialogMessage`: dark title bar, dark surfaces and light
+  text, re-themed when Windows' app mode or the Appearance choice changes.
+  Check box, radio and group box labels draw unthemed in dark mode, because
+  themed ones ignore `WM_CTLCOLOR*` and stay black. Date pickers keep the
+  system's light field. Icons come from Segoe Fluent Icons on Windows 11 and
+  Segoe MDL2 Assets on Windows 10.
 - Common Controls v6 are activated from a private manifest at start-up, so the
   unpackaged executable, the bundle and the MSIX all draw themed controls.
 - **Recording HUD** (`WindowsHUD.cpp`): the Mac's bottom-centre dictation

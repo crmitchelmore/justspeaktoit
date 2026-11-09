@@ -160,6 +160,9 @@ final class WhisperKitLiveController: LiveTranscriptionController {
         if let streamFailure {
             throw streamFailure
         }
+        guard stream.isStreaming else {
+            throw TranscriptionManagerError.liveSessionNotRunning
+        }
         phase = .running
     }
 

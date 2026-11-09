@@ -26,10 +26,16 @@ let portableCoreBuild = windowsTargetBuild || ProcessInfo.processInfo.environmen
 let portableCoreBuild = true
 #endif
 
+// Test-only Keychain redirection for native CI (#1360). Only CI test commands
+// set this; distribution builds never do, and release packaging verifies that
+// no shipped binary contains the redirect's environment names.
+let testKeychainRedirect = ProcessInfo.processInfo.environment["JSTI_TEST_KEYCHAIN_REDIRECT"] == "1"
+
 // New SpeakCore files are portable by default. An Apple adapter must be
 // explicitly classified here, so future domain work reaches every platform.
 let appleCoreSources: [String] = [
     "AlibabaSpeechConfigurationFields.swift",
+    "APIKeyGuideDisclosure.swift",
     "AppGroupAvailability.swift",
     "AppleSpeechAnalyzerLiveSession.swift",
     "AppleSpeechAnalyzerTranscriber.swift",
@@ -52,6 +58,7 @@ let appleCoreSources: [String] = [
     "CaptureSafetyClaim.swift",
     "CaptureSelfTest.swift",
     "CaptureWatchdogs.swift",
+    "CleanupModelDiscoveryView.swift",
     "DeepgramBalanceClient.swift",
     "DeprecatedCompatibility.swift",
     "DeviceIdentityStore.swift",
@@ -138,6 +145,7 @@ let appleSyncSources: [String] = [
     "HistorySyncEngine.swift",
     "HistorySyncPushRouting.swift",
     "SyncConfiguration.swift",
+    "SyncContainerTransition.swift",
     "SyncRecord.swift",
     "SyncState.swift"
 ]
@@ -149,7 +157,8 @@ let appleSyncTestSources: [String] = [
     "HistorySyncEngineGuardTests.swift",
     "HistorySyncSwitchTests.swift",
     "HistorySyncEngineTests.swift",
-    "NativeRecordParityTests.swift"
+    "NativeRecordParityTests.swift",
+    "SyncContainerTransitionTests.swift"
 ]
 
 let migrationArchiveTarget = Target.target(
@@ -548,7 +557,7 @@ let package = portableCoreBuild ? portablePackage : Package(
                 // mode). Tuist consumes this same package target, so the setting
                 // applies to Xcode builds too.
                 .enableExperimentalFeature("StrictConcurrency")
-            ]
+            ] + (testKeychainRedirect ? [.define("JSTI_TEST_KEYCHAIN_REDIRECT")] : [])
         ),
         .target(
             name: "SpeakSync",

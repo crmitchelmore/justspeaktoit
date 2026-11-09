@@ -860,9 +860,31 @@ void clearSearch(HWND window) {
 
 int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
 
+// The Mac's 232-point sidebar, widened when a page title (semibold, as when
+// selected) plus the Ctrl+digit hint's space would clip in the current font
+// and DPI. The hint's space is always reserved so the width does not change
+// when hints are turned on or off.
+int measuredSidebarWidth(HWND window) {
+    const UINT dpi = GetDpiForWindow(window);
+    int widest = 0;
+    if (HDC dc = GetDC(window)) {
+        HGDIOBJ previous = SelectObject(dc, jsti::chrome::font(jsti::chrome::Font::bodySemibold, dpi));
+        for (const auto &page : pageInfo) {
+            SIZE extent{};
+            if (GetTextExtentPoint32W(dc, page.title, static_cast<int>(wcslen(page.title)), &extent)) {
+                widest = std::max<int>(widest, extent.cx);
+            }
+        }
+        SelectObject(dc, previous);
+        ReleaseDC(window, dc);
+    }
+    // Row inset 10 each side, glyph column 42, hint column 62, and 4 for ClearType overhang.
+    return std::max(scale(window, 232), widest + scale(window, 10 + 42 + 62 + 4 + 10));
+}
+
 // The smallest window every page fits in without scrolling, as the Mac's
 // 960 × 640 main window minimum, plus the sidebar and status line.
-int minimumWindowWidth(HWND window) { return scale(window, 980); }
+int minimumWindowWidth(HWND window) { return scale(window, 980) + measuredSidebarWidth(window) - scale(window, 232); }
 int minimumWindowHeight(HWND window) { return scale(window, 760); }
 
 // ------------------------------------------------------------------ pages
@@ -1452,7 +1474,8 @@ void layout(HWND window) {
     RECT client{};
     GetClientRect(window, &client);
     frame = Frame{};
-    const int sidebarWidth = scale(window, 232), headerHeight = scale(window, 64), statusHeight = scale(window, 44);
+    const int sidebarWidth = measuredSidebarWidth(window);
+    const int headerHeight = scale(window, 64), statusHeight = scale(window, 44);
     const int padding = densitySpace(window, 24, visualDensity.page_padding);
     frame.sidebar = RECT{0, 0, sidebarWidth, client.bottom};
     frame.header = RECT{sidebarWidth, 0, client.right, headerHeight};
@@ -1887,20 +1910,18 @@ HBRUSH brushFor(COLORREF color) {
 // Dark or light native controls, title bar and repaint, after the choice or
 // Windows' own setting changes.
 void applyTheme(HWND window) {
-    const BOOL dark = jsti::chrome::dark() ? TRUE : FALSE;
-    constexpr DWORD immersiveDarkMode = 20;
-    DwmSetWindowAttribute(window, immersiveDarkMode, &dark, sizeof(dark));
-    for (HWND control : state.controls) {
-        wchar_t kind[16] = {};
-        GetClassNameW(control, kind, 16);
-        if (_wcsicmp(kind, L"COMBOBOX") == 0) SetWindowTheme(control, dark ? L"DarkMode_CFD" : nullptr, nullptr);
-        else if (GetDlgCtrlID(control) == backupAudioID || GetDlgCtrlID(control) == backupProfilesID) {
-            SetWindowTheme(control, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+    // The backup check boxes draw unthemed in dark mode so WM_CTLCOLORSTATIC's
+    // light text applies; themed check box labels stay black on the dark card.
+    jsti::chrome::themeTitleBar(window);
+    for (HWND control : state.controls) jsti::chrome::themeControl(control);
+    // Open dialogs follow an in-app Appearance change too.
+    EnumThreadWindows(GetCurrentThreadId(), [](HWND other, LPARAM owner) -> BOOL {
+        if (GetWindow(other, GW_OWNER) == reinterpret_cast<HWND>(owner)) {
+            jsti::chrome::themeWindow(other);
+            RedrawWindow(other, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
         }
-        else if (_wcsicmp(kind, L"EDIT") == 0 || _wcsicmp(kind, L"LISTBOX") == 0) {
-            SetWindowTheme(control, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
-        }
-    }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(window));
     backdrop.dirty = true;
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
     jsti::hud::refresh();
@@ -4613,7 +4634,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             const auto cards = frame.cards;
             const RECT hero = frame.hero;
             const RECT lastRow = placed.at(navBaseID + pageCount - 1);
-            okay = okay && frame.sidebar.right == scale(window, 232) &&
+            okay = okay && frame.sidebar.right == measuredSidebarWidth(window) &&
+                frame.sidebar.right >= scale(window, 232) &&
                 heightOf(placed.at(navBaseID)) == scale(window, 36);
             if (edit) SetFocus(edit);
             okay = apply(compact) && okay;

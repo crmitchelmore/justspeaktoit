@@ -97,6 +97,38 @@ class SwapPolicyTests(unittest.TestCase):
         self.assertFalse(keychain_script.swap_enabled({'JSTI_TEST_KEYCHAIN': 'enabled'}))
         self.assertFalse(keychain_script.swap_enabled({'CI': 'true', 'JSTI_TEST_KEYCHAIN': 'typo'}))
 
+    def test_native_and_hosted_flow_selection(self):
+        self.assertTrue(keychain_script.use_private_keychain({'RUNNER_ENVIRONMENT': 'self-hosted'}))
+        self.assertTrue(keychain_script.use_private_keychain({}))
+        self.assertFalse(keychain_script.use_private_keychain({'RUNNER_ENVIRONMENT': 'github-hosted'}))
+        keychain_script.require_enabled_native_ci({'RUNNER_ENVIRONMENT': 'self-hosted', 'CI': 'true'})
+        with self.assertRaises(keychain_script.UnsafeCI):
+            keychain_script.require_enabled_native_ci({
+                'RUNNER_ENVIRONMENT': 'self-hosted', 'CI': 'true', 'JSTI_TEST_KEYCHAIN': '0',
+            })
+
+    def test_native_ci_dispatches_private_isolation_without_global_security_calls(self):
+        with patch.dict(os.environ, {'CI': 'true', 'RUNNER_ENVIRONMENT': 'self-hosted',
+                                     'JSTI_TEST_KEYCHAIN_REDIRECT': '1'}, clear=True), \
+                patch.object(keychain_script, 'security') as security_call, \
+                patch.object(keychain_script, 'run_private_isolated', return_value=17) as private_run, \
+                patch.object(keychain_script, 'run_hosted_isolated') as hosted_run:
+            self.assertEqual(keychain_script.main(['synthetic-command']), 17)
+            private_run.assert_called_once_with(['synthetic-command'])
+            hosted_run.assert_not_called()
+            security_call.assert_not_called()
+
+    def test_private_isolation_refuses_builds_without_the_test_redirect(self):
+        for value in (None, '0', 'true'):
+            environ = {'CI': 'true', 'RUNNER_ENVIRONMENT': 'self-hosted'}
+            if value is not None:
+                environ['JSTI_TEST_KEYCHAIN_REDIRECT'] = value
+            with self.subTest(value=value), patch.dict(os.environ, environ, clear=True), \
+                    patch.object(keychain_script, 'run_private_isolated') as private_run, \
+                    patch('sys.stderr'):
+                self.assertEqual(keychain_script.main(['synthetic-command']), 78)
+                private_run.assert_not_called()
+
     def test_security_calls_have_a_bounded_timeout(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(
             keychain_script.subprocess, 'check_output', return_value=''
@@ -137,6 +169,7 @@ class WithTestKeychainTests(unittest.TestCase):
             'JSTI_TEST_KEYCHAIN_STATE_DIR': str(self.state_dir),
             'FAKE_SECURITY_STATE': str(self.fake_state),
             'CI': 'true',
+            'RUNNER_ENVIRONMENT': 'github-hosted',
             'CHILD_PID_FILE': str(self.root / 'child-pids'),
             'CHILD_READY_FILE': str(self.root / 'child-ready'),
             'JSTI_TEST_KEYCHAIN_GRACE_SECONDS': '1',
@@ -283,6 +316,13 @@ class WithTestKeychainTests(unittest.TestCase):
         self.assertEqual(self.run_script(*self.child_command()), 0)
         self.assert_restored()
         self.assert_children_gone()
+
+    def test_repair_without_journal_preserves_deliberately_custom_search_list(self):
+        self.write_state(self.extra, [self.extra])
+        before = self.state()
+        native = dict(self.env, RUNNER_ENVIRONMENT='self-hosted')
+        self.assertEqual(self.run_script('--repair', env=native), 0)
+        self.assertEqual(self.state(), before)
 
     def test_repair_recovers_after_sigkill(self):
         process = self.start_script(*self.child_command(sleep=30))

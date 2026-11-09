@@ -37,7 +37,7 @@ public struct KeychainDeviceIdentityStore: DeviceIdentityStoring {
         query[kSecReturnData as String] = true
 
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let status = KeychainAccess.copyMatching(query as CFDictionary, &item)
         guard status == errSecSuccess,
               let data = item as? Data,
               let id = String(data: data, encoding: .utf8),
@@ -52,7 +52,7 @@ public struct KeychainDeviceIdentityStore: DeviceIdentityStoring {
     /// callers fall back to the UserDefaults mirror written alongside.
     public func storeDeviceId(_ id: String) {
         let data = Data(id.utf8)
-        let status = SecItemUpdate(
+        let status = KeychainAccess.update(
             baseQuery() as CFDictionary,
             [kSecValueData as String: data] as CFDictionary
         )
@@ -64,7 +64,7 @@ public struct KeychainDeviceIdentityStore: DeviceIdentityStoring {
         // names this physical device, so it must never follow the user's
         // iCloud Keychain onto another device.
         addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(addQuery as CFDictionary, nil)
+        KeychainAccess.add(addQuery as CFDictionary, nil)
     }
 
     private func baseQuery() -> [String: Any] {

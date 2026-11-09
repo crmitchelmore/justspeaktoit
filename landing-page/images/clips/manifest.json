@@ -1,0 +1,114 @@
+[
+  {
+    "name": "hero",
+    "duration": 37.43,
+    "width": 1280,
+    "height": 720,
+    "alt": "Dictating into a text field on a Mac, then finding the text in History",
+    "badge": null,
+    "scenes": 9,
+    "webm_codec": "libsvtav1",
+    "bytes": {
+      "hero-poster.webp": 20940,
+      "hero.en.vtt": 854,
+      "hero.mp4": 418812,
+      "hero.webm": 374072
+    }
+  },
+  {
+    "name": "corrections",
+    "duration": 14.37,
+    "width": 1280,
+    "height": 720,
+    "alt": "The Corrections page on Mac listing preferred spellings for names and jargon",
+    "badge": null,
+    "scenes": 3,
+    "webm_codec": "libsvtav1",
+    "bytes": {
+      "corrections-poster.webp": 23228,
+      "corrections.en.vtt": 330,
+      "corrections.mp4": 191316,
+      "corrections.webm": 151899
+    }
+  },
+  {
+    "name": "history",
+    "duration": 12.8,
+    "width": 1280,
+    "height": 720,
+    "alt": "History on Mac and Linux: every past dictation with its model, length and actions",
+    "badge": null,
+    "scenes": 4,
+    "webm_codec": "libsvtav1",
+    "bytes": {
+      "history-poster.webp": 36232,
+      "history.en.vtt": 413,
+      "history.mp4": 160073,
+      "history.webm": 183316
+    }
+  },
+  {
+    "name": "models",
+    "duration": 20.07,
+    "width": 1280,
+    "height": 720,
+    "alt": "Transcription and clean-up settings: on-device models alongside cloud providers",
+    "badge": null,
+    "scenes": 5,
+    "webm_codec": "libsvtav1",
+    "bytes": {
+      "models-poster.webp": 30352,
+      "models.en.vtt": 516,
+      "models.mp4": 219390,
+      "models.webm": 246128
+    }
+  },
+  {
+    "name": "iphone",
+    "duration": 20.13,
+    "width": 640,
+    "height": 1280,
+    "alt": "The iPhone app: tap record, see the words, copy them, then on-device and Action Button settings",
+    "badge": null,
+    "scenes": 7,
+    "webm_codec": "libsvtav1",
+    "bytes": {
+      "iphone-poster.webp": 12946,
+      "iphone.en.vtt": 644,
+      "iphone.mp4": 169347,
+      "iphone.webm": 195537
+    }
+  },
+  {
+    "name": "windows",
+    "duration": 19.6,
+    "width": 1280,
+    "height": 720,
+    "alt": "The Windows beta: dashboard, recording overlay, completed overlay and settings",
+    "badge": "Windows \u00b7 Beta",
+    "scenes": 7,
+    "webm_codec": "libsvtav1",
+    "bytes": {
+      "windows-poster.webp": 30170,
+      "windows.en.vtt": 621,
+      "windows.mp4": 205136,
+      "windows.webm": 209685
+    }
+  },
+  {
+    "name": "linux",
+    "duration": 19.6,
+    "width": 1280,
+    "height": 720,
+    "alt": "The Linux beta: GTK dashboard, recording overlay, History and on-device models",
+    "badge": "Linux \u00b7 Beta",
+    "scenes": 7,
+    "webm_codec": "libsvtav1",
+    "bytes": {
+      "linux-poster.webp": 23878,
+      "linux.en.vtt": 594,
+      "linux.mp4": 174759,
+      "linux.webm": 196517
+    }
+  }
+]

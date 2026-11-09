@@ -2,175 +2,8 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-04"
+updated: "2026-11-08"
 sessions:
-  - id: "decisions"
-    device: "Decision"
-    title: "Decisions"
-    items:
-      - id: "decision-provider-spend-cap"
-        issues:
-          - 1210
-          - 1051
-          - 1052
-          - 821
-          - 1104
-          - 1113
-          - 1114
-        title: "Spend cap for paid-provider live acceptance runs"
-        minutes: 2
-        core: true
-        question: "How much may be spent on short synthetic-speech runs against paid speech providers?"
-        context: "Seven issues are code-complete and only need real calls with a few seconds of synthetic speech per route: #1210 (Pulse Pro, Reson8, StepAudio, Alibaba, OpenRouter audio routes, AssemblyAI Universal-3.6 Pro live), #1104 (8 live providers), #1113 and #1114 (one OpenAI or Groq Mac batch run), #821 (OpenRouter playback), #1051 and #1052 (Azure Speech/MAI). Usage is likely under $10; minimum top-ups for new accounts are most of the cost. Runs need a person at a Mac with a microphone; receipts are posted to each issue without keys or billing details. Azure also needs you to create or name a Speech resource in a region that serves MAI models."
-        options:
-          - id: "cap-40"
-            label: "Up to $40 total, at most $10 per provider, no auto top-ups"
-            consequence: "Covers all seven issues; any provider needing a larger minimum top-up or a paid plan is skipped and noted. Alibaba uses the international (Singapore) workspace only."
-            recommended: true
-          - id: "cap-15-existing"
-            label: "Up to $15, existing accounts only"
-            consequence: "#1104, #1113, #1114 and #821 can close; #1210's new providers and Azure (#1051, #1052) stay open."
-          - id: "defer"
-            label: "Defer all paid runs"
-            consequence: "No spend; all seven issues stay open."
-      - id: "decision-windows-signing"
-        issues:
-          - 1157
-        title: "Windows signing route (gates #1157 signing scope)"
-        minutes: 2
-        core: true
-        question: "Which signing route should the Windows installer use? You are a UK individual."
-        context: "Nothing ships to Windows users until you pick and enrol in a route; Azure Artifact Signing is US/Canada-only for individuals. The first route fixes the package identity, so switching later means users reinstall. Owner steps and costs: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/windows-installer.md#routes-for-a-uk-individual-november-2026 (from PR #1336)."
-        options:
-          - id: "microsoft-store"
-            label: "Microsoft Store"
-            consequence: "Fewest owner steps: free individual account with ID check, the Store signs the app and shows your chosen publisher name, no SmartScreen download prompt; an agent then wires the Store identity and upload job."
-            recommended: true
-          - id: "sslcom-esigner"
-            label: "SSL.com IV certificate + eSigner (direct download)"
-            consequence: "About $129/yr certificate plus eSigner from $180/yr; shows your legal name; CI signs with a TOTP secret you add to the windows-signing environment; first release is a pilot and SmartScreen reputation builds over time."
-          - id: "signpath-foundation"
-            label: "SignPath Foundation (direct download)"
-            consequence: "Free for open source; publisher shown as \"SignPath Foundation\"; needs a code-signing policy page and an approval per release."
-      - id: "decision-billing-rail"
-        issues:
-          - 648
-        title: "Paid Access billing rail"
-        minutes: 2
-        core: true
-        question: "Which billing rail should Paid Access launch with?"
-        context: "Paid Access (a monthly fee instead of your own API keys) is merged but switched off. The Mac App Store is retired, so Mac can only sell through Stripe; iOS would need StoreKit, and iOS does not yet route work through the paid proxy. Whichever rail you pick, you still need to choose a Mac sign-in method (native Sign in with Apple does not work in Developer ID builds) and sign off privacy and retention."
-        options:
-          - id: "stripe-mac-first"
-            label: "Stripe on direct-download Mac only, iOS later"
-            consequence: "Smallest launch: one rail and a simple entitlement model. Next: Mac sign-in choice, Stripe prices, D1 database and staging purchase/refund drills."
-            recommended: true
-          - id: "stripe-and-storekit"
-            label: "Stripe on Mac and StoreKit on iOS together"
-            consequence: "One subscription on both platforms, but needs iOS paid routing, App Store Connect products and the two-rail entitlement model before launch."
-          - id: "storekit-ios-only"
-            label: "StoreKit on iOS only"
-            consequence: "No Mac purchases. iOS paid routing must be built first and Stripe code stays unused."
-          - id: "defer"
-            label: "Defer Paid Access"
-            consequence: "Stays off; #648 is parked and no external setup is needed."
-      - id: "decision-cloudkit-container"
-        issues:
-          - 1119
-        title: "Shared CloudKit container for Mac and iPhone sync"
-        minutes: 1
-        core: true
-        question: "Which iCloud container should both macOS and iOS use for history and key sync?"
-        context: "Mac and iPhone currently write to different iCloud containers, so history and key sync between them cannot work. After the choice, an agent writes a one-time migration for the moving platform; you then update entitlements/profiles in the Apple Developer portal and run a two-device test. Alpha uses the matching .alpha container."
-        options:
-          - id: "mac-container"
-            label: "iCloud.com.justspeaktoit (current Mac container)"
-            consequence: "Mac data stays put; iPhone history and keys migrate once. You add this container to the iOS app id and profile."
-            recommended: true
-          - id: "ios-container"
-            label: "iCloud.com.justspeaktoit.ios (current iPhone container)"
-            consequence: "iPhone data stays put; Mac history and keys migrate once. You add the container to the Developer ID Mac profile."
-          - id: "new-container"
-            label: "A new shared container"
-            consequence: "Both platforms migrate and both profiles change; most work and most risk."
-          - id: "defer"
-            label: "Defer"
-            consequence: "Mac and iPhone keep syncing only within their own platform."
-      - id: "decision-analytics-go"
-        issues:
-          - 776
-          - 814
-        title: "Opt-in analytics: continue the go/no-go or pause"
-        minutes: 2
-        core: true
-        question: "Should the opt-in PostHog analytics rollout (direct-download Mac only) continue through its remaining gates?"
-        context: "All client engineering is merged; nothing is sent unless a user opts in. Remaining gates need you: authorise a Release network capture and an ingestion-key rotation drill, confirm PostHog Production settings and EU residency, and decide what to do with 7 earlier test events that carry city/postcode GeoIP data (IP is discarded; new events disable GeoIP). #814 (detailed telemetry) stays blocked until this passes plus one clean inspection week."
-        options:
-          - id: "continue-delete-history"
-            label: "Continue, and delete the 7 GeoIP-tagged test events"
-            consequence: "An agent prepares the network capture and rotation drill for you to run; the historical location data is removed before the inspection week starts."
-            recommended: true
-          - id: "continue-keep-history"
-            label: "Continue, keep the old test events"
-            consequence: "Same gates, but the existing city/postcode data stays in PostHog and must be disclosed or aged out under retention."
-          - id: "pause"
-            label: "Pause analytics"
-            consequence: "Stays off for all users; #776 and #814 are parked."
-      - id: "decision-watch-provisioning"
-        issues:
-          - 657
-          - 659
-        title: "Apple Watch app: provision a dev build now or defer"
-        minutes: 1
-        core: true
-        question: "Do you want to do the watch provisioning needed to test the watch app (#657, #659) now?"
-        context: "The watch app and complication are built and tested in CI but feature-flagged out of TestFlight until the watch bundle ids and App Group exist in the Apple Developer portal. #963 (Stop from the iPhone Live Activity in the Smart Stack) works without the watch app and is not affected by this choice."
-        options:
-          - id: "dev-build-now"
-            label: "Dev build now: portal steps 1 to 3, then an Xcode build"
-            consequence: "About 10 minutes in the portal plus a 10-minute Xcode build; then run the 2 optional watch-app checks. TestFlight stays watch-free."
-            recommended: true
-          - id: "full-provisioning"
-            label: "Full provisioning: also App Store profiles and release workflow"
-            consequence: "You create two App Store profiles and secrets; an agent wires TUIST_WATCH_APP=1 into release-ios.yml, so the watch app ships in the next TestFlight build and checks run from TestFlight."
-          - id: "defer-watch"
-            label: "Defer the watch app"
-            consequence: "Run only the #963 check; #657 and #659 stay open with no further work."
-      - id: "decision-analytics-retention"
-        issues:
-          - 776
-        title: "How to enforce the 12-month analytics retention promise"
-        minutes: 2
-        core: false
-        question: "How should the published \"raw events kept no more than 12 months\" promise be enforced?"
-        context: "The privacy page promises raw events are kept no more than 12 months. PostHog's plan retention is a query window, not proven deletion, and the read-only project settings show no retention control, so the go/no-go needs a deletion mechanism or a changed promise. No events are near 12 months old yet."
-        options:
-          - id: "scheduled-purge"
-            label: "Scheduled purge job before rollout"
-            consequence: "An agent builds a monthly job that deletes or aggregates events over 12 months, using a write-scoped PostHog key you add as an environment secret."
-            recommended: true
-          - id: "manual-purge"
-            label: "Manual purge with a yearly reminder"
-            consequence: "No new secret or code; you run a documented deletion each year, and the gate relies on that runbook."
-          - id: "change-promise"
-            label: "Change the promise to PostHog's plan retention"
-            consequence: "An agent updates the privacy page and docs; weaker promise, no deletion work."
-      - id: "decision-azure-voice-ios"
-        issues:
-          - 1052
-        title: "Azure voice output on iOS or macOS only"
-        minutes: 1
-        core: false
-        question: "Should Azure neural and MAI-Voice speech output also be added to iOS?"
-        context: "Azure voice output, including MAI-Voice-2.1 and Flash, exists on macOS only. iOS voice output supports Deepgram, Soniox and OpenRouter, and the docs say macOS-only without a test enforcing it."
-        options:
-          - id: "macos-only"
-            label: "macOS only for now"
-            consequence: "An agent adds a test and doc note pinning the restriction; #1052 can close after the Azure live check."
-            recommended: true
-          - id: "add-ios"
-            label: "Add Azure voice output to iOS"
-            consequence: "New iOS provider case, router path and settings; adds an iPhone playback check before #1052 can close."
   - id: "mac"
     device: "Mac"
     title: "Mac"
@@ -199,13 +32,13 @@ sessions:
         title: "Notes: typing elsewhere or switching notes mid-dictation is safe"
         minutes: 4
         core: true
-        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
+        build: "Just Speak to It for Mac, an Alpha build that includes the #664 note-switch fix"
         steps:
           - "At the end of the same note start dictating a long sentence."
           - "After the first words appear, click the first line, type XX, keep talking, then stop."
           - "Start dictating again at the end of the note; after the first words appear, click into a different, empty note, keep talking, then stop."
           - "Check both notes."
-        expected: "XX is kept and nothing outside the dictated text changed or duplicated (streaming may pause). The second note stays empty; the first note has the dictated text once, with no extra paste."
+        expected: "XX is kept and nothing outside the dictated text changed or duplicated (streaming may pause). After the switch, streaming pauses: the second note stays empty, the first note keeps only the words dictated before you switched, and a notice says the full transcript is on the clipboard. This holds for every \u201cIf you switch apps\u201d setting, because both notes are in the same app."
         final_gate: true
       - id: "mac-one-shot-baselines"
         issues:
@@ -252,6 +85,150 @@ sessions:
           - "Answer reviewers yourself, and accept the maintainer invitation within a week of approval."
         expected: "Your submission pull request is open on flathub/flathub with the disclosure. After acceptance, an agent can publish the domain verification token and point the website at the listing."
         final_gate: false
+      - id: "mac-issue-report-preview"
+        issues:
+          - 1284
+        title: "History: Review Issue Report shows only safe details"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, Alpha build 64 or later"
+        steps:
+          - "Open History and choose Review Issue Report\u2026 on any recording (a failed one if you have it)."
+          - "Read the draft and the JSON attachment, then turn Include diagnostics off and on again."
+          - "Click Save JSON\u2026 and save to the Desktop, then click Copy Draft and paste into a new TextEdit document."
+          - "Click Open GitHub, check the issue page is prefilled with the draft, and close the tab without submitting."
+          - "Delete the saved file and the TextEdit document."
+          - "Start a recording and press Escape to cancel it. In History, open that cancelled recording and click Review Issue Report\u2026, then press Escape."
+          - "On the same cancelled recording click Review Before Copying\u2026, check the draft is shown, then click Cancel."
+        expected: "The draft and JSON name the model, mode and settings of that recording but contain no transcript text, prompt, file path, API key, device or app name. With Include diagnostics off, the JSON keeps only its version and removal notes, with no model or settings. The saved file, copied draft and GitHub page match the preview, and nothing was posted. For the cancelled recording, both buttons open a full review window (never an empty white box), Escape and Cancel close it, and the app stays responsive without a force quit."
+        final_gate: true
+      - id: "mac-speechanalyzer-latency"
+        issues:
+          - 614
+        title: "SpeechTranscriber shows first words no later than Apple Speech"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Mac, Alpha build 61 or later, macOS 26 or later"
+        steps:
+          - "Settings \u203a Transcription \u203a Local \u203a Streaming: choose Apple SpeechTranscriber (On-device)."
+          - "In TextEdit, read the same paragraph (about 30 seconds) three times, one recording each."
+          - "Choose Apple Speech (On-device) and read the same paragraph three more times."
+          - "Mark this Pass. An agent then compares first-words latency for the two models using only the numeric latency fields in History."
+        expected: "Six recordings exist, three per model. The agent posts both first-words p50 values on #614 and closes it if SpeechTranscriber\u2019s is the same or lower and iphone-hands-free has passed."
+        final_gate: false
+      - id: "mac-start-latency-sample"
+        issues:
+          - 611
+        title: "Enough everyday recordings to re-measure start latency"
+        minutes: 1
+        core: false
+        build: "Just Speak to It for Mac, an Alpha build that includes the #611 key-down permission check"
+        steps:
+          - "Keep the Alpha app updated and dictate with the hotkey as usual."
+          - "Once the Alpha has about 50 hotkey recordings made on such a build, mark this Pass."
+          - "An agent then reads only the numeric latency fields in History and posts the result on #611."
+        expected: "About 50 or more recent hotkey recordings exist. The agent reports hotkey-to-capture p50 and p95; #611 closes if p50 is under 100 ms and the #664 streaming checks have passed."
+        final_gate: false
+      - id: "mac-paid-new-providers"
+        issues:
+          - 1210
+          - 1051
+        title: "New providers and Azure with newly opened accounts"
+        minutes: 20
+        core: false
+        build: "Just Speak to It for Mac, Alpha build 61 or later"
+        prerequisites:
+          - "Spend cap (owner decision, #1386): up to $40 total, at most $10 per provider, no auto top-ups; new accounts allowed"
+          - "An Azure Speech resource in a region that serves MAI models"
+          - "Steps and route list: Docs/azure-speech.md and #1210"
+        steps:
+          - "Save keys for Pulse, Reson8, StepAudio, Alibaba (international workspace), AssemblyAI and Azure Speech."
+          - "For each batch model of those providers, dictate \u201cnew provider batch\u201d into TextEdit and stop."
+          - "For each streaming model (Reson8, Alibaba Fun-ASR realtime, AssemblyAI Universal-3.6 Pro, Azure Speech, Azure MAI), dictate \u201cnew provider live\u201d and stop."
+          - "For Pulse, choose a non-English language and try once."
+          - "Open History."
+        expected: "Every route transcribes the phrase once, streaming routes show words while you speak (Azure MAI Transcribe (Turn-based) shows each turn when you pause), and History names the model with its cost. Pulse refuses the non-English run before sending audio. Note any route that is unavailable to your account."
+        final_gate: true
+      - id: "owner-cloudkit-shared-container"
+        issues:
+          - 1119
+        title: "Assign the shared iCloud container to the iPhone app"
+        minutes: 15
+        core: false
+        build: "Apple Developer portal and CloudKit Console; current main with PR #1369"
+        prerequisites:
+          - "Steps: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/cloudkit-shared-container.md"
+        steps:
+          - "Identifiers \u203a com.justspeaktoit.ios \u203a iCloud \u203a Configure: also tick iCloud.com.justspeaktoit; do the same for com.justspeaktoit.ios.alpha with iCloud.com.justspeaktoit.alpha."
+          - "Regenerate the iOS App Store profiles for both App IDs, and update the IOS_APPSTORE_PROFILE secret if it holds one."
+          - "In CloudKit Console, deploy the Development schema of iCloud.com.justspeaktoit and .alpha to Production if any iPhone record type is missing."
+          - "Set the repository variable IOS_SHARED_CLOUD_CONTAINER to 1."
+        expected: "The next Alpha iOS build signs and uploads with both containers. Then run iphone-shared-icloud-container."
+        final_gate: false
+      - id: "owner-posthog-gates"
+        issues:
+          - 776
+          - 814
+        title: "PostHog: purge key, deletion and production evidence"
+        minutes: 30
+        core: false
+        build: "PostHog EU Production and GitHub settings; current main with PR #1370"
+        prerequisites:
+          - "Steps: Docs/posthog-maintenance.md (12-month retention purge)"
+        steps:
+          - "Create a PostHog personal API key for the Production project with only Data deletion write access; add it as POSTHOG_PURGE_API_KEY, and the project id as POSTHOG_PROJECT_ID, in a new GitHub environment posthog-purge limited to main."
+          - "Run the PostHog retention purge workflow with mode geoip-test-events, first as a dry run (expect 7), then for real; then run mode retention as a dry run."
+          - "Screenshot PostHog Production settings showing EU hosting, GeoIP off and IP discarding, and add them to #776."
+          - "Rotate the PostHog project API key once, let an agent ship the new key in an Alpha, and confirm opted-in events still arrive."
+          - "Approve one Release-build network capture with analytics opted in, for an agent to inspect."
+        expected: "Purge runs succeed, the 7 GeoIP-tagged events are gone, and the settings, rotation and capture evidence is on #776. One clean inspection week then unblocks #814."
+        final_gate: false
+      - id: "owner-stripe-setup"
+        issues:
+          - 648
+        title: "Paid Access: Stripe and server setup"
+        minutes: 45
+        core: false
+        build: "Stripe dashboard, Cloudflare and Apple Developer portal"
+        prerequisites:
+          - "Mac sign-in (owner decision, #1386): Sign in with Apple through its web flow"
+          - "Steps: Docs/paid-access.md (External product setup). Use Stripe test mode only; no live keys."
+        steps:
+          - "Create the D1 databases paid-access and paid-access-staging and put their ids in workers/paid-access/wrangler.toml."
+          - "In Stripe test mode create the prices, enable the Customer Portal and add the webhook endpoint; put the price ids in wrangler.toml and the secrets in the Worker."
+          - "After the Worker exists, run the Paid Access Worker secrets workflow on main for staging to install the Sign in with Apple key (already stored as repository secrets)."
+          - "Sign off the privacy and retention text in Docs/paid-access-privacy.md."
+        expected: "Staging is configured so an agent can sign in on a Developer ID build through the web flow and run the staging purchase and refund drill. Paid Access stays switched off for users."
+        final_gate: false
+      - id: "owner-partner-center"
+        issues:
+          - 1157
+        title: "Microsoft Store: open a Partner Center account"
+        minutes: 30
+        core: false
+        build: "Microsoft Partner Center"
+        prerequisites:
+          - "Steps: Docs/windows-installer.md (Owner steps: Microsoft Store)"
+        steps:
+          - "Go to https://storedeveloper.microsoft.com and create a free individual developer account, completing the ID check."
+          - "Reserve the app name Just Speak to It."
+          - "Copy the Package/Identity Name and Publisher values from Product identity into a comment on #1157."
+        expected: "The reserved identity is on #1157, so an agent can set the MSIX identity and add the Store submission job."
+        final_gate: false
+      - id: "mac-compare-models-history"
+        issues:
+          - 1387
+        title: "Compare Models: Save results to History and visible lane errors"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the fix for #1387"
+        steps:
+          - "Open Compare Models \u203a Streaming and turn on Save results to History."
+          - "Select Deepgram Flux (English), Soniox Real-time v5 and one Azure model, plus any working model."
+          - "Start listening, say \"Compare these models please\", press Stop, then rank or finish the round."
+          - "Open History."
+        expected: "Flux and Soniox finish with a transcript and no error. Any failed lane shows its error under the reveal and in the scoreboard. History has one new item per selected model (failures show their error), each tagged Compare Models with its model, cost and latency. With the toggle off, a new round adds nothing to History."
+        final_gate: true
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"
@@ -457,13 +434,47 @@ sessions:
           - "Record once, force-quit, reopen and check History."
         expected: "Older items are unchanged and the new recording survives the relaunch."
         final_gate: false
+      - id: "iphone-shared-icloud-container"
+        issues:
+          - 1119
+        title: "iPhone History moves into the shared iCloud container"
+        minutes: 8
+        core: false
+        build: "TestFlight Just Speak to It Alpha built after IOS_SHARED_CLOUD_CONTAINER=1"
+        prerequisites:
+          - "owner-cloudkit-shared-container done"
+        steps:
+          - "Before updating, check iCloud sync is on and note the date and time of your oldest iPhone History item."
+          - "Update in TestFlight, open the app and wait a minute on the History screen."
+          - "In CloudKit Console open iCloud.com.justspeaktoit.alpha \u203a Production \u203a Private Database, act as your iCloud account and query the History zone."
+          - "Record \u201cshared container\u201d and query again after a minute."
+          - "Settings: turn API key sync on again with your passphrase."
+        expected: "History on the iPhone is unchanged. The shared container has a History record created at the same date and time as your oldest iPhone item, and the new recording appears there within a minute. Key sync turns on without errors."
+        final_gate: true
+      - id: "iphone-marketing-footage"
+        issues:
+          - 1368
+        title: "Website footage: Action Button start, Live Activity and Control Centre stop"
+        minutes: 8
+        core: false
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        prerequisites:
+          - "Turn on Do Not Disturb, set the time to 9:41 if you can, and use only fictional words; nothing personal may appear on screen."
+        steps:
+          - "Start a screen recording from Control Centre, then go to the Home Screen."
+          - "Press and hold the Action Button and say \"Pick up oat milk and lemons on the way home\"."
+          - "While talking, show the Dynamic Island, then tap Stop in the Live Activity."
+          - "Start again from the Transcribe control in Control Centre, say \"Move the team lunch to Thursday\", and stop it the same way."
+          - "Stop the screen recording and attach it to #1368 (or share it with the agent)."
+        expected: "A recording under one minute showing both starts and stops, the Live Activity with the fictional words, and no notifications, names or personal data on screen."
+        final_gate: false
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"
     setup:
       - "Double Tap-capable Watch (Series 9+, Ultra 2) on watchOS 11+, paired with the iPhone; Watch Settings \u203a Gestures \u203a Double Tap on."
       - "iPhone Watch app \u203a Smart Stack \u203a Live Activities on; Transcribe Voice in iPhone Control Center."
-      - "Optional watch-app checks only: if you chose \"Dev build now\", register the watch ids and App Group (Docs/watch-provisioning.md steps 1-3), then build with TUIST_WATCH_APP=1 tuist generate and run the SpeakiOS scheme on your iPhone."
+      - "Optional watch-app checks only (decided: dev build now): register the watch ids and App Group (Docs/watch-provisioning.md steps 1-3), then build with TUIST_WATCH_APP=1 tuist generate and run the SpeakiOS scheme on your iPhone."
     items:
       - id: "watch-smart-stack-stop"
         issues:
@@ -490,7 +501,7 @@ sessions:
         core: false
         build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (see Watch setup)"
         prerequisites:
-          - "Decision: Dev build now, and watch provisioning done"
+          - "Watch provisioning done (Docs/watch-provisioning.md steps 1-3)"
         steps:
           - "Add the Just Speak to It \"Record\" complication to a watch face; note the Watch battery %."
           - "Tap the complication, say \"marker alpha\" and lower your wrist so the screen sleeps."
@@ -508,7 +519,7 @@ sessions:
         core: false
         build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (see Watch setup)"
         prerequisites:
-          - "Decision: Dev build now, and watch provisioning done"
+          - "Watch provisioning done (Docs/watch-provisioning.md steps 1-3)"
         steps:
           - "Turn on iPhone Airplane Mode (Bluetooth and Wi-Fi off)."
           - "Tap the complication, say \"offline seven\", tap to stop."
@@ -517,3 +528,20 @@ sessions:
           - "Open iPhone History."
         expected: "While offline the captures wait (never Failed or stuck Recording). After reconnecting both show In history, and iPhone History has exactly one entry each for \"offline seven\" and \"force quit eight\"."
         final_gate: true
+      - id: "watch-marketing-footage"
+        issues:
+          - 1368
+        title: "Website footage: stop a locked iPhone from the Watch Smart Stack"
+        minutes: 6
+        core: false
+        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later; no watch app needed"
+        prerequisites:
+          - "Do Not Disturb on both devices; a second phone or camera to film the Watch and iPhone together; fictional words only."
+        steps:
+          - "Start filming the Watch and the iPhone together."
+          - "On the iPhone tap Transcribe Voice in Control Center, say \"Book the team lunch for Thursday\" and lock the iPhone."
+          - "Raise the Watch, open the Smart Stack and tap Stop on the Just Speak to It card."
+          - "Unlock the iPhone and open History so the new item is visible, then stop filming."
+          - "Attach the video to #1368 (or share it with the agent)."
+        expected: "A clip under 30 seconds showing the Watch stop ending the iPhone recording and the new item in History, with no notifications or personal data visible."
+        final_gate: false

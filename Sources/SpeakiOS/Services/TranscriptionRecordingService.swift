@@ -984,6 +984,15 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
     }
 
+    /// A start intent refused its own Shortcut parameters before any admission,
+    /// so the foreground helper never ran and nothing else journals the refusal.
+    /// Recorded only while nothing is in flight or owned in the foreground, so a
+    /// refused retry cannot overwrite a running or in-app capture's outcome.
+    func recordRefusedStartParameters(_ failure: CaptureParameterFailure) {
+        guard state == .idle, !foregroundOwnership.isOwned else { return }
+        CaptureOutcomeJournal.record(.failed, failure: failure, defaults: outcomeJournalDefaults())
+    }
+
     private func validateCredentialAvailability(
         settings: AppSettings,
         usesBatchTranscription: Bool,

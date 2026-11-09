@@ -8,9 +8,9 @@ public enum ReleaseTrain: String, Codable, CaseIterable, Sendable {
 
     public static var current: ReleaseTrain {
         #if ALPHA
-        return .alpha
+        .alpha
         #else
-        return resolve(
+        resolve(
             metadata: Bundle.main.object(forInfoDictionaryKey: "SpeakReleaseTrain") as? String,
             bundleIdentifier: Bundle.main.bundleIdentifier
         )

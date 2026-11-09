@@ -106,7 +106,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 status: status,
                 isSaved: isSaved,
                 keyPageURL: entry.keyPageURL?.absoluteString ?? "",
-                entryHint: entry.format.entryHint
+                entryHint: entry.setupHint
             )
         }
     }

@@ -252,6 +252,10 @@ struct APIKeysView: View {
                 }
             }
 
+            APIKeyGuideDisclosure(
+                identifier: Self.credentialIdentifier(for: entry.id), uses: Self.guideUses(for: entry)
+            )
+
             // Purely informational: a billing endpoint that fails changes this
             // line and nothing else on the screen.
             ProviderBalanceView(
@@ -375,6 +379,18 @@ struct APIKeysView: View {
     /// `<entry id>.apiKey`.
     static func credentialIdentifier(for id: String) -> String {
         ProviderCredentialCatalogue.apiKeyIdentifier(for: id)
+    }
+
+    /// The uses this screen lists for an entry, so its key guide names only
+    /// the permissions those features need.
+    static func guideUses(for entry: APIKeyListEntry) -> APIKeyUses {
+        // The OpenRouter key also backs OpenRouter Audio transcription and speech.
+        if entry.id == "openrouter" { return [.transcription, .postProcessing, .voiceOutput] }
+        var uses: APIKeyUses = []
+        if entry.category.contains("Transcription") { uses.insert(.transcription) }
+        if entry.category.contains("Post-processing") { uses.insert(.postProcessing) }
+        if entry.category.contains("Voice Output") { uses.insert(.voiceOutput) }
+        return uses
     }
 
     private var storedCredentialIdentifiers: Set<String> {

@@ -86,6 +86,12 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
   /// by the app) and for rejecting a re-anchor onto identical pre-existing text.
   private var streamingBaselineFieldText: String?
 
+  /// Whether a read-back has confirmed this session's streamed text in the
+  /// field. After that, finding the text absent means focus moved to another
+  /// field (for example a different note in the same app), not that the text
+  /// never landed, so a one-shot paste into the new field would be wrong.
+  private var streamedTextConfirmedInField = false
+
   /// Whether incremental live updates should pause until finalization.
   private var shouldPauseIncrementalUpdates: Bool = false
 
@@ -130,6 +136,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     self.streamingAnchorUTF16 = nil
     self.streamingPendingSelectionUTF16 = 0
     self.streamingBaselineFieldText = nil
+    self.streamedTextConfirmedInField = false
     shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = true
@@ -163,6 +170,7 @@ final class LiveTextInserter: ObservableObject { // swiftlint:disable:this type_
     self.streamingAnchorUTF16 = nil
     self.streamingPendingSelectionUTF16 = 0
     self.streamingBaselineFieldText = nil
+    self.streamedTextConfirmedInField = false
     shouldPauseIncrementalUpdates = false
     usingClipboardFallback = false
     isActive = false
@@ -523,11 +531,7 @@ extension LiveTextInserter {
       case .matched:
         break
       case .absent:
-        abandonStreaming(
-          reason: "streamed text is no longer in the field",
-          error: nil,
-          textAbsentFromField: true
-        )
+        streamedTextWentAbsent()
         return
       case .unknown:
         pauseStreaming(reason: "streamed region could not be verified")
@@ -543,6 +547,17 @@ extension LiveTextInserter {
 
     if !firstInsertionVerified {
       verifyFirstStreamingInsertion(on: field)
+    }
+  }
+
+  /// Text confirmed on screen earlier and now missing means focus moved to a
+  /// different field, so pause; otherwise the first write never landed and the
+  /// standard one-shot delivery is safe.
+  private func streamedTextWentAbsent() {
+    if self.streamedTextConfirmedInField {
+      pauseStreaming(reason: "streamed text left the focused field")
+    } else {
+      abandonStreaming(reason: "streamed text is no longer in the field", error: nil, textAbsentFromField: true)
     }
   }
 
@@ -576,6 +591,14 @@ extension LiveTextInserter {
     switch inspectStreamingRegion(on: field) {
     case .matched:
       break
+    case .absent where self.streamedTextConfirmedInField:
+      // The text was seen in the field earlier, so the focused field is now a
+      // different one (another note or document). Pasting the whole transcript
+      // there would split it across two places; keep it on the clipboard and
+      // leave the original field's streamed words untouched.
+      lastError = TextOutputError.capturedFieldChanged
+      logger.info("Streaming finalize: focused field changed, keeping final on the clipboard")
+      return .clipboard(.capturedFieldChanged)
     case .absent:
       // Nothing from this session is on screen, so one standard delivery of the
       // final text is safe and cannot duplicate anything.
@@ -731,9 +754,12 @@ extension LiveTextInserter {
       anchor: anchor,
       baselineFieldText: self.streamingBaselineFieldText
     )
-    if case let .matched(resolvedAnchor) = state, resolvedAnchor != anchor {
-      self.streamingAnchorUTF16 = resolvedAnchor
-      logger.debug("Streaming anchor re-synced to \(resolvedAnchor)")
+    if case let .matched(resolvedAnchor) = state {
+      if !insertedText.isEmpty { self.streamedTextConfirmedInField = true }
+      if resolvedAnchor != anchor {
+        self.streamingAnchorUTF16 = resolvedAnchor
+        logger.debug("Streaming anchor re-synced to \(resolvedAnchor)")
+      }
     }
     return state
   }

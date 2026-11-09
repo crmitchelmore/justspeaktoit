@@ -1,10 +1,15 @@
 #include "WindowsWindowChrome.hpp"
 
+#include <commctrl.h>
+#include <dwmapi.h>
+#include <uxtheme.h>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cwchar>
 #include <map>
 #include <mutex>
 
@@ -23,6 +28,8 @@ std::mutex fontLock;
 std::map<std::pair<int, UINT>, HFONT> fonts;
 std::atomic<int> chosenAppearance{0};
 std::atomic<unsigned> appearanceQueries{0};
+std::mutex brushLock;
+std::map<COLORREF, HBRUSH> brushes;
 ULONG_PTR gdiplusToken = 0;
 
 bool systemUsesDark() {
@@ -47,6 +54,16 @@ const Palette darkPalette{
     RGB(0x1E, 0x1E, 0x20), RGB(0x26, 0x26, 0x29), RGB(0x1E, 0x1E, 0x20), RGB(0x2B, 0x2B, 0x2E),
     RGB(0x36, 0x36, 0x3A), RGB(0x46, 0x46, 0x4B), RGB(0xF2, 0xF2, 0xF3), RGB(0xA1, 0xA1, 0xA8),
     RGB(0x5A, 0x38, 0x2E), RGB(0x4A, 0x30, 0x2A)};
+
+// Palette brushes live for the process, so WM_CTLCOLOR* can return them.
+HBRUSH solidBrush(COLORREF value) {
+    std::lock_guard<std::mutex> lock(brushLock);
+    const auto found = brushes.find(value);
+    if (found != brushes.end()) return found->second;
+    HBRUSH created = CreateSolidBrush(value);
+    if (created) brushes[value] = created;
+    return created;
+}
 
 Gdiplus::Color color(COLORREF value, int alpha = 255) {
     return Gdiplus::Color(static_cast<BYTE>(alpha), GetRValue(value), GetGValue(value), GetBValue(value));
@@ -189,6 +206,100 @@ bool appearanceSelfTest(std::string &error) {
     if (stable && before == after && refreshed && light && forcedDark && minimumContrast >= 4.5) return true;
     error = "Windows appearance caching, refresh, explicit selection or action contrast failed.";
     return false;
+void themeControl(HWND control) {
+    if (!control) return;
+    const bool useDark = dark();
+    wchar_t kind[32] = {};
+    GetClassNameW(control, kind, 32);
+    if (_wcsicmp(kind, L"COMBOBOX") == 0) {
+        SetWindowTheme(control, useDark ? L"DarkMode_CFD" : nullptr, nullptr);
+    } else if (_wcsicmp(kind, L"BUTTON") == 0) {
+        switch (static_cast<DWORD>(GetWindowLongPtrW(control, GWL_STYLE)) & BS_TYPEMASK) {
+        case BS_OWNERDRAW: break;
+        case BS_CHECKBOX: case BS_AUTOCHECKBOX: case BS_3STATE: case BS_AUTO3STATE:
+        case BS_RADIOBUTTON: case BS_AUTORADIOBUTTON: case BS_GROUPBOX:
+            SetWindowTheme(control, useDark ? L"" : nullptr, useDark ? L"" : nullptr);
+            break;
+        default: SetWindowTheme(control, useDark ? L"DarkMode_Explorer" : nullptr, nullptr); break;
+        }
+    } else if (_wcsicmp(kind, WC_LISTVIEWW) == 0) {
+        // List views ignore WM_CTLCOLOR*; their colours are set on the control.
+        SetWindowTheme(control, useDark ? L"DarkMode_Explorer" : nullptr, nullptr);
+        const COLORREF back = useDark ? palette().field : GetSysColor(COLOR_WINDOW);
+        SendMessageW(control, LVM_SETBKCOLOR, 0, static_cast<LPARAM>(back));
+        SendMessageW(control, LVM_SETTEXTBKCOLOR, 0, static_cast<LPARAM>(back));
+        SendMessageW(control, LVM_SETTEXTCOLOR, 0,
+            static_cast<LPARAM>(useDark ? palette().text : GetSysColor(COLOR_WINDOWTEXT)));
+        const HWND header = reinterpret_cast<HWND>(SendMessageW(control, LVM_GETHEADER, 0, 0));
+        if (header) SetWindowTheme(header, useDark ? L"DarkMode_ItemsView" : nullptr, nullptr);
+    } else if (_wcsicmp(kind, WC_HEADERW) == 0) {
+        SetWindowTheme(control, useDark ? L"DarkMode_ItemsView" : nullptr, nullptr);
+    } else if (_wcsicmp(kind, L"EDIT") == 0 || _wcsicmp(kind, L"LISTBOX") == 0 ||
+               _wcsicmp(kind, WC_TREEVIEWW) == 0 || _wcsicmp(kind, L"ScrollBar") == 0) {
+        SetWindowTheme(control, useDark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+    }
+}
+
+void themeTitleBar(HWND window) {
+    if (!window) return;
+    const BOOL useDark = dark() ? TRUE : FALSE;
+    // DWMWA_USE_IMMERSIVE_DARK_MODE is 20 from Windows 10 20H1 and 19 before it.
+    if (FAILED(DwmSetWindowAttribute(window, 20, &useDark, sizeof(useDark)))) {
+        DwmSetWindowAttribute(window, 19, &useDark, sizeof(useDark));
+    }
+}
+
+void themeWindow(HWND window) {
+    if (!window) return;
+    themeTitleBar(window);
+    EnumChildWindows(window, [](HWND control, LPARAM) -> BOOL {
+        themeControl(control);
+        return TRUE;
+    }, 0);
+}
+
+bool dialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT &result) {
+    switch (message) {
+    case WM_CREATE: themeTitleBar(window); return false;
+    case WM_PARENTNOTIFY:
+        if (LOWORD(wparam) == WM_CREATE) themeControl(reinterpret_cast<HWND>(lparam));
+        return false;
+    case WM_SETTINGCHANGE:
+        if (lparam && appearance() == 0 &&
+            wcscmp(reinterpret_cast<const wchar_t *>(lparam), L"ImmersiveColorSet") == 0) {
+            // Each top-level window may see the broadcast before the main window.
+            refreshSystemAppearance();
+            themeWindow(window);
+            RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+        }
+        return false;
+    case WM_ERASEBKGND: {
+        if (!dark()) return false;
+        RECT client{};
+        GetClientRect(window, &client);
+        FillRect(reinterpret_cast<HDC>(wparam), &client, solidBrush(palette().window));
+        result = 1;
+        return true;
+    }
+    case WM_CTLCOLORDLG:
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN:
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX: {
+        if (!dark()) return false;
+        const Palette &colours = palette();
+        // Editable fields and lists sit on the field colour; labels, check
+        // boxes and read-only text on the window's surface.
+        const COLORREF surface = message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX
+            ? colours.field : colours.window;
+        HDC dc = reinterpret_cast<HDC>(wparam);
+        SetTextColor(dc, colours.text);
+        SetBkColor(dc, surface);
+        result = reinterpret_cast<LRESULT>(solidBrush(surface));
+        return true;
+    }
+    default: return false;
+    }
 }
 
 COLORREF mix(COLORREF under, COLORREF over, int amount) {

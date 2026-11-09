@@ -125,6 +125,9 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
 
   /// Identifier for the encoder settings every recording uses.
   static let encoderProfileID = EncoderProfile.id
+  /// How long a microphone permission answer stays authoritative for a
+  /// capture start. Covers a hold or double tap after key-down with margin.
+  static let microphoneStatusMaxAge: TimeInterval = 2
 
   init(
     appSettings: AppSettings,
@@ -401,7 +404,9 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     }
 
     let permissionStatus = await MainActor.run {
-      permissionsManager.refresh(.microphone)
+      // Reuses the authoritative query made at hotkey key-down when it is
+      // fresh, keeping 15-35 ms of TCC off the trigger-to-capture path (#611).
+      permissionsManager.refresh(.microphone, ifOlderThan: Self.microphoneStatusMaxAge)
       return permissionsManager.status(for: .microphone)
     }
     if !permissionStatus.isGranted {

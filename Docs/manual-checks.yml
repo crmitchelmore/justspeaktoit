@@ -122,10 +122,10 @@ sessions:
         title: "Enough everyday recordings to re-measure start latency"
         minutes: 1
         core: false
-        build: "Just Speak to It for Mac, Alpha build 46 or later (6 Nov 2026 onwards)"
+        build: "Just Speak to It for Mac, an Alpha build that includes the #611 key-down permission check"
         steps:
           - "Keep the Alpha app updated and dictate with the hotkey as usual."
-          - "Once the Alpha has about 50 hotkey recordings made on builds from 6 Nov 2026 or later, mark this Pass."
+          - "Once the Alpha has about 50 hotkey recordings made on such a build, mark this Pass."
           - "An agent then reads only the numeric latency fields in History and posts the result on #611."
         expected: "About 50 or more recent hotkey recordings exist. The agent reports hotkey-to-capture p50 and p95; #611 closes if p50 is under 100 ms and the #664 streaming checks have passed."
         final_gate: false

@@ -113,7 +113,7 @@ public enum DataMigrationPreferenceCatalog {
             return nil
         case .analyticsEnabled, .audioPreWarmingEnabled, .autoCorrectionsEnabled, .cancelRecordingOnEscape,
              .compactStatusBarIcon, .connectionPreWarmingEnabled, .enableAutomationServer,
-             .enableSendToMac, .handsFreeDictationEnabled, .modulateAccentSignal,
+             .enableSendToMac, .handsFreeDictationEnabled, .keepAudioOnCancel, .modulateAccentSignal,
              .modulateEmotionSignal, .modulatePIIPhiTagging, .modulateSpeakerDiarization,
              .paidAccessRoutingEnabled, .pasteRemoteTranscriptsAtCursor, .postProcessingEnabled,
              .postProcessingIncludeContextTags, .postProcessingIncludeLexiconDirectives,

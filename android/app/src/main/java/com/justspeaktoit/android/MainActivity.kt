@@ -83,17 +83,23 @@ class MainActivity : ComponentActivity() {
                             onRemoveKey = viewModel::removeKey,
                             onChooseModel = viewModel::chooseCloudModel,
                             onCleanupChanged = viewModel::setCleanupEnabled,
+                            onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
                         ),
                     )
                     Screen.History -> HistoryScreen(
                         entries = state.history,
                         retention = state.retention,
                         saveFailed = state.historyError,
+                        transcribe = HistoryTranscription(
+                            sessionActive = state.dictation.isActive,
+                            entryId = state.transcribingEntryId,
+                        ),
                         actions = HistoryActions(
                             onBack = { screen = Screen.Dictation },
                             onRetention = viewModel::setRetention,
                             onDelete = viewModel::deleteHistoryEntry,
                             onClear = viewModel::clearHistory,
+                            onTranscribe = viewModel::transcribeHistoryEntry,
                         ),
                     )
                     Screen.Dictation -> DictationScreen(

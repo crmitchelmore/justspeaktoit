@@ -4,7 +4,11 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
-enum class HistoryStatus { Completed, Failed }
+/**
+ * [Cancelled] is a recording the user cancelled while "Keep audio when a recording is cancelled"
+ * was on. Its audio stays at [HistoryEntry.audioPath] until it is transcribed or deleted.
+ */
+enum class HistoryStatus { Completed, Failed, Cancelled }
 
 /**
  * One finished dictation. Failed sessions are kept too, with any unfinished words, so they can be
@@ -19,6 +23,8 @@ data class HistoryEntry(
     val text: String,
     val failure: String? = null,
     val cleanedUp: Boolean = false,
+    /** App-private audio kept for a later transcription; null when there is none. */
+    val audioPath: String? = null,
 )
 
 /** How long history is kept. [Off] stores nothing and deletes existing entries. */
@@ -59,7 +65,8 @@ object HistoryCodec {
                     .put("status", e.status.name)
                     .put("text", e.text)
                     .put("failure", e.failure ?: JSONObject.NULL)
-                    .put("cleanedUp", e.cleanedUp),
+                    .put("cleanedUp", e.cleanedUp)
+                    .put("audioPath", e.audioPath ?: JSONObject.NULL),
             )
         }
         return JSONObject().put("version", VERSION).put("entries", items).toString()
@@ -90,6 +97,7 @@ object HistoryCodec {
             text = text,
             failure = o.opt("failure") as? String,
             cleanedUp = o.opt("cleanedUp") == true,
+            audioPath = o.opt("audioPath") as? String,
         )
     }
 }
@@ -111,7 +119,12 @@ interface HistoryFile {
  * "dirty"): additions, replacements and deletions remain as made, and every later change or
  * refresh retries the write instead of re-reading the stale file.
  */
-class HistoryStore(private val file: HistoryFile, private val now: () -> Long = System::currentTimeMillis) {
+class HistoryStore(
+    private val file: HistoryFile,
+    /** Deletes kept audio that no remaining entry refers to, so removing an entry leaves no orphan. */
+    private val deleteAudio: (String) -> Unit = {},
+    private val now: () -> Long = System::currentTimeMillis,
+) {
     private var entries: List<HistoryEntry>? = null
     private var dirty = false
 
@@ -128,11 +141,13 @@ class HistoryStore(private val file: HistoryFile, private val now: () -> Long = 
         val loaded = stored?.let(HistoryCodec::decode).orEmpty()
         val pruned = HistoryPolicy.prune(loaded, now(), retention)
         val mustRewrite = pruned != loaded || (stored != null && loaded.isEmpty())
-        return if (mustRewrite) save(pruned) else pruned.also { entries = it }
+        return if (mustRewrite) save(pruned, considered = loaded) else pruned.also { entries = it }
     }
 
-    fun add(entry: HistoryEntry, retention: Retention): List<HistoryEntry> =
-        save(HistoryPolicy.prune(listOf(entry) + current(retention), now(), retention))
+    fun add(entry: HistoryEntry, retention: Retention): List<HistoryEntry> {
+        val candidates = listOf(entry) + current(retention)
+        return save(HistoryPolicy.prune(candidates, now(), retention), considered = candidates)
+    }
 
     /** Replaces an existing entry (for example after cleanup); does nothing if it has gone. */
     fun replace(entry: HistoryEntry, retention: Retention): List<HistoryEntry> {
@@ -148,11 +163,33 @@ class HistoryStore(private val file: HistoryFile, private val now: () -> Long = 
 
     private fun current(retention: Retention) = entries ?: load(retention)
 
-    private fun save(next: List<HistoryEntry>): List<HistoryEntry> {
+    /**
+     * Audio referred to by [considered] but by nothing in [next] is deleted even if the write fails,
+     * because the cache (which no longer refers to it) stays authoritative.
+     */
+    private fun save(next: List<HistoryEntry>, considered: List<HistoryEntry> = cached): List<HistoryEntry> {
         entries = next
         dirty = true
-        if (next.isEmpty()) file.delete() else file.write(HistoryCodec.encode(next))
-        dirty = false
+        try {
+            if (next.isEmpty()) file.delete() else file.write(HistoryCodec.encode(next))
+            dirty = false
+        } finally {
+            HistoryAudio.released(considered, next).forEach(deleteAudio)
+        }
         return next
+    }
+}
+
+object HistoryAudio {
+    /** Audio paths referred to by [before] that no entry in [after] still refers to. */
+    fun released(before: List<HistoryEntry>, after: List<HistoryEntry>): List<String> {
+        val kept = after.mapNotNullTo(mutableSetOf()) { it.audioPath }
+        return before.mapNotNull { it.audioPath }.filterNot { it in kept }.distinct()
+    }
+
+    /** Stored audio file names that no entry refers to, for example after a crash mid-save. */
+    fun orphans(storedPaths: List<String>, entries: List<HistoryEntry>): List<String> {
+        val kept = entries.mapNotNullTo(mutableSetOf()) { it.audioPath }
+        return storedPaths.filterNot { it in kept }
     }
 }

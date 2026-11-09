@@ -327,6 +327,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var cancellationRequested = false {
         didSet { if cancellationRequested { retireCleanupPresentation() } }
     }
+    /// The recording the user cancelled while `keepAudioOnCancel` was off.
+    var discardCancelledRecordingID: UUID?
     var historyDeletionInProgress = false
     var historyDeletionTask: Task<Void, Never>?
     var folderRevealTask: Task<Void, Error>?
@@ -476,7 +478,7 @@ extension DesktopHostController {
             update("\(message) History error: \(error.localizedDescription)", state: 0)
             return
         }
-        if let record { present(record, output: nil) } else {
+        if let record { await presentCancelledRecording(record) } else {
             reportFailure("Recording stopped and retained: \(message)", for: recordingID, headline: "Recording stopped")
         }
     }

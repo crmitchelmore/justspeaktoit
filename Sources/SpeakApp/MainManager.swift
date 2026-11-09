@@ -428,20 +428,24 @@ final class MainManager: ObservableObject {
   }
 
   func userRequestedStopDueToError() {
-    guard let session = activeSession else { return }
-    session.errors.append(
-      HistoryError(phase: .recording, message: "User cancelled", debugDescription: nil)
-    )
-    cleanupAfterFailure(message: "Recording cancelled", preserveFile: false, transcriptPolicy: .discard)
+    guard activeSession != nil else { return }
+    cancelRecordingByUser(reason: "User cancelled")
   }
 
   func cancelRecordingWithEscape() {
     guard appSettings.cancelRecordingOnEscape, state == .recording, activeSession != nil else { return }
     logger.info("Cancelling recording via Escape key")
-    activeSession?.errors.append(
-      HistoryError(phase: .recording, message: "Cancelled by user (Escape)", debugDescription: nil)
+    cancelRecordingByUser(reason: "Cancelled by user (Escape)")
+  }
+
+  /// A user cancellation either keeps the audio as a cancelled History entry
+  /// that can be reprocessed later, or deletes it and records nothing.
+  private func cancelRecordingByUser(reason: String) {
+    activeSession?.errors.append(HistoryError(phase: .recording, message: reason, debugDescription: nil))
+    cleanupAfterFailure(
+      message: "Recording cancelled", preserveFile: appSettings.keepAudioOnCancel,
+      transcriptPolicy: .discard, historyRequiresAudio: true
     )
-    cleanupAfterFailure(message: "Recording cancelled", preserveFile: false, transcriptPolicy: .discard)
   }
 
   /// Hands-free replaces press-to-talk with press-to-arm.
@@ -1991,7 +1995,7 @@ extension MainManager {
     )
   }
 
-  fileprivate func makeRecordingSummary(from url: URL, fallbackDuration: TimeInterval)
+  func makeRecordingSummary(from url: URL, fallbackDuration: TimeInterval)
     -> RecordingSummary {
     let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
     let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0

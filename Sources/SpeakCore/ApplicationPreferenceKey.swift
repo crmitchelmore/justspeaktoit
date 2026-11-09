@@ -25,6 +25,7 @@ public enum ApplicationPreferenceKey: String, CaseIterable, Sendable {
     case recordingsDirectory
     case hotKeyActivation
     case cancelRecordingOnEscape
+    case keepAudioOnCancel
     case holdThreshold
     case doubleTapWindow
     case trackedKeyIdentifiers

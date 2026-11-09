@@ -1,5 +1,6 @@
 package com.justspeaktoit.android.dictation
 
+import com.justspeaktoit.android.settings.AppPreferences
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -7,6 +8,13 @@ import org.junit.Test
 
 class DictationUiStateTest {
     private val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
+
+    @Test
+    fun testKeepAudioOnCancel_defaultsOnWithTheCanonicalKey() {
+        assertEquals("keepAudioOnCancel", AppPreferences.KEY_KEEP_AUDIO_ON_CANCEL)
+        assertTrue(AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL)
+        assertTrue(DictationUiState().keepAudioOnCancel)
+    }
 
     @Test
     fun testCanStart_waitsForAvailabilityCheck() {

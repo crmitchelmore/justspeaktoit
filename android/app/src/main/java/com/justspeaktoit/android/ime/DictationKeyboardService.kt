@@ -82,12 +82,14 @@ class DictationKeyboardService : InputMethodService() {
         val accent = ContextCompat.getColor(this, R.color.brand_accent_deep)
 
         val statusView = TextView(this).apply {
+            id = R.id.keyboard_status
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             gravity = Gravity.CENTER
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
             setPadding(dp(12), dp(8), dp(12), dp(4))
         }
         val micButton = ImageButton(this).apply {
+            id = R.id.keyboard_mic
             setImageResource(R.drawable.ic_mic)
             imageTintList = ColorStateList.valueOf(Color.WHITE)
             background = GradientDrawable().apply {
@@ -97,7 +99,8 @@ class DictationKeyboardService : InputMethodService() {
             layoutParams = LinearLayout.LayoutParams(dp(72), dp(72)).apply { setMargins(dp(16), 0, dp(16), 0) }
             setOnClickListener { onMicTapped() }
         }
-        fun key(label: Int, onClick: () -> Unit) = Button(this).apply {
+        fun key(viewId: Int, label: Int, onClick: () -> Unit) = Button(this).apply {
+            id = viewId
             text = getString(label)
             isAllCaps = false
             setOnClickListener { onClick() }
@@ -106,10 +109,10 @@ class DictationKeyboardService : InputMethodService() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dp(8), dp(4), dp(8), dp(12))
-            addView(key(R.string.keyboard_switch) { switchKeyboard() })
+            addView(key(R.id.keyboard_switch, R.string.keyboard_switch) { switchKeyboard() })
             addView(micButton)
-            addView(key(R.string.keyboard_delete) { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL) })
-            addView(key(R.string.keyboard_enter) { sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER) })
+            addView(key(R.id.keyboard_delete, R.string.keyboard_delete) { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL) })
+            addView(key(R.id.keyboard_enter, R.string.keyboard_enter) { sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER) })
         }
         status = statusView
         mic = micButton

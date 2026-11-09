@@ -4755,7 +4755,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         RECT client{};
         GetClientRect(window, &client);
         for (HWND control : state.controls) {
-            if (!IsWindowVisible(control)) continue;
+            // The transcript's accessible-name label is zero-size by design.
+            if (!IsWindowVisible(control) || GetDlgCtrlID(control) == transcriptNameID) continue;
             RECT bounds{};
             GetWindowRect(control, &bounds);
             MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&bounds), 2);

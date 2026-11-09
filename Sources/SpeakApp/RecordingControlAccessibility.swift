@@ -10,6 +10,9 @@ import SwiftUI
 struct RecordingControlAccessibility: Equatable {
   let label: String
   let hint: String
+  /// Current recording state, read after the label so VoiceOver reports
+  /// whether the control is live (e.g. "Stop recording, Recording").
+  let value: String
 
   /// Whether activating the control begins microphone capture.
   let beginsCapture: Bool
@@ -23,18 +26,22 @@ struct RecordingControlAccessibility: Equatable {
     switch state {
     case .idle, .completed, .failed:
       label = "Start recording"
+      value = "Not recording"
       hint = "Starts a new recording"
       beginsCapture = true
     case .recording:
       label = "Stop recording"
+      value = "Recording"
       hint = "Stops recording and processes the transcription"
       beginsCapture = false
     case .processing:
       label = "Processing recording"
+      value = "Processing"
       hint = ""
       beginsCapture = false
     case .delivering:
       label = "Delivering transcription"
+      value = "Delivering"
       hint = ""
       beginsCapture = false
     }

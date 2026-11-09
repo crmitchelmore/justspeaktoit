@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-08"
+updated: "2026-11-09"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -227,6 +227,20 @@ sessions:
           - "Start listening, say \"Compare these models please\", press Stop, then rank or finish the round."
           - "Open History."
         expected: "Flux and Soniox finish with a transcript and no error. Any failed lane shows its error under the reveal and in the scoreboard. History has one new item per selected model (failures show their error), each tagged Compare Models with its model, cost and latency. With the toggle off, a new round adds nothing to History."
+        final_gate: true
+      - id: "mac-record-button-follows-hotkey"
+        issues:
+          - 1407
+        title: "Main window record button follows a recording started elsewhere"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the fix for #1407"
+        steps:
+          - "Close the main window, start a recording with your recording shortcut and say a made-up sentence."
+          - "Open the main window from the menu bar icon and look at the top-right toolbar button and the Dashboard record button."
+          - "Click the toolbar Stop button."
+          - "Start another recording from the menu bar's Start Recording item while the window is open, then stop it with the Dashboard button."
+        expected: "Both buttons show Stop (red) as soon as the window opens mid-recording and switch the moment a recording starts or ends from anywhere. Each Stop ends the recording, which is transcribed and appears in History; the buttons then return to Record."
         final_gate: true
   - id: "iphone"
     device: "iPhone"

@@ -7,6 +7,7 @@ import SwiftUI
 struct DashboardView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var history: HistoryManager
+  @EnvironmentObject private var recording: RecordingControlModel
   @Environment(\.appVisualDensity) private var density
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @StateObject private var speechInsights = SpeechInsightsModel()
@@ -77,15 +78,16 @@ struct DashboardView: View {
           accessibilityLabel: "Spend"
         )
 
-        Button(action: environment.main.toggleRecordingFromUI) {
+        Button(action: recording.toggle) {
           compactRecordButtonLabel
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.small)
-        .tint(environment.main.state == .recording ? .red : .accentColor)
+        .tint(recording.isRecording ? .red : .accentColor)
         .disabled(isBusy)
         .keyboardShortcut(.space, modifiers: [.command])
         .accessibilityLabel(recordButtonAccessibility.label)
+        .accessibilityValue(recordButtonAccessibility.value)
         .accessibilityHint(recordButtonAccessibility.hint)
         .accessibilityAddTraits(recordButtonAccessibility.traits)
       }
@@ -124,7 +126,7 @@ struct DashboardView: View {
           .foregroundStyle(.white.opacity(0.85))
         }
         Spacer()
-        Button(action: environment.main.toggleRecordingFromUI) {
+        Button(action: recording.toggle) {
           recordButtonLabel
             .padding(.horizontal, 32)
             .padding(.vertical, 18)
@@ -144,10 +146,11 @@ struct DashboardView: View {
         .disabled(isBusy)
         .speakTooltip("Start a new recording instantly or stop the current one—Speak keeps you informed every step of the way.")
         .accessibilityLabel(recordButtonAccessibility.label)
+        .accessibilityValue(recordButtonAccessibility.value)
         .accessibilityHint(recordButtonAccessibility.hint)
         .accessibilityAddTraits(recordButtonAccessibility.traits)
         .shadow(color: Color.black.opacity(0.25), radius: 18, x: 0, y: 12)
-        .animation(.easeInOut(duration: 0.2), value: environment.main.state)
+        .animation(.easeInOut(duration: 0.2), value: recording.state)
       }
 
       if let preview = livePreviewText, !preview.isEmpty {
@@ -211,7 +214,7 @@ struct DashboardView: View {
 
   @ViewBuilder
   private var compactRecordButtonLabel: some View {
-    switch environment.main.state {
+    switch recording.state {
     case .processing, .delivering:
       ProgressView()
         .controlSize(.mini)
@@ -306,12 +309,12 @@ struct DashboardView: View {
   }
 
   private var livePreviewText: String? {
-    guard case .recording = environment.main.state else { return nil }
+    guard recording.isRecording else { return nil }
     return environment.main.livePreview
   }
 
   private var buttonTitle: String {
-    switch environment.main.state {
+    switch recording.state {
     case .idle, .completed(_), .failed(_):
       return "Start Recording"
     case .recording:
@@ -324,7 +327,7 @@ struct DashboardView: View {
   }
 
   private var buttonIcon: String {
-    switch environment.main.state {
+    switch recording.state {
     case .idle, .completed(_), .failed(_):
       return "mic.fill"
     case .recording:
@@ -337,12 +340,12 @@ struct DashboardView: View {
   }
 
   private var recordButtonAccessibility: RecordingControlAccessibility {
-    RecordingControlAccessibility(state: environment.main.state)
+    recording.accessibility
   }
 
   @ViewBuilder
   private var recordButtonLabel: some View {
-    switch environment.main.state {
+    switch recording.state {
     case .processing, .delivering:
       HStack(spacing: 12) {
         ProgressView()
@@ -368,7 +371,7 @@ struct DashboardView: View {
   }
 
   private var recordButtonBackground: LinearGradient {
-    switch environment.main.state {
+    switch recording.state {
     case .recording:
       return LinearGradient(
         colors: [.red, Color.red.opacity(0.75)],
@@ -391,12 +394,7 @@ struct DashboardView: View {
   }
 
   private var isBusy: Bool {
-    switch environment.main.state {
-    case .processing, .delivering:
-      return true
-    default:
-      return false
-    }
+    recording.isBusy
   }
 
   private var permissionsSection: some View {

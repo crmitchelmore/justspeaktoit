@@ -74,6 +74,8 @@ public struct HistoryView: View {
                         )
                     }
                     .accessibilityLabel("Filter history")
+                    .accessibilityValue(hasActiveFilters ? "Filters active" : "No filters")
+                    .accessibilityIdentifier("historyFilterButton")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(role: .destructive) {
@@ -82,6 +84,8 @@ public struct HistoryView: View {
                         Image(systemName: "trash")
                     }
                     .disabled(!historyManager.isStorageReady)
+                    .accessibilityLabel("Clear all history")
+                    .accessibilityIdentifier("historyClearAllToolbarButton")
                 }
             }
         }

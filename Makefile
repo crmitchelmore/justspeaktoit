@@ -89,6 +89,11 @@ preflight: test-all verify ## Full pre-release check (tests + launch verificatio
 .PHONY: lint
 lint: ## Run strict SwiftLint (isolated Tooling graph) against the checked-in debt baseline
 	./scripts/swiftlint.sh lint --strict --baseline .swiftlint-baseline.json
+	python3 scripts/check-apple-accessibility.py
+
+.PHONY: lint-accessibility
+lint-accessibility: ## Check Apple SwiftUI controls have accessible names and identifiers
+	python3 scripts/check-apple-accessibility.py
 
 .PHONY: format
 format: ## Auto-fix formatting and lint violations where possible

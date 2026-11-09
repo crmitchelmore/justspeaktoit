@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-08"
+updated: "2026-11-09"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -228,6 +228,21 @@ sessions:
           - "Start listening, say \"Compare these models please\", press Stop, then rank or finish the round."
           - "Open History."
         expected: "Flux and Soniox finish with a transcript and no error. Any failed lane shows its error under the reveal and in the scoreboard. History has one new item per selected model (failures show their error), each tagged Compare Models with its model, cost and latency. With the toggle off, a new round adds nothing to History."
+        final_gate: true
+      - id: "mac-voiceover-pass"
+        issues:
+          - 1399
+        title: "Mac: VoiceOver and keyboard reach every control"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the fix for #1399"
+        steps:
+          - "Turn on VoiceOver (Command-F5). Open the menu bar item with VoiceOver and listen to its name and state."
+          - "Open the main window and move through the sidebar and Settings with VoiceOver; listen for any button read only as \"button\" or an image name."
+          - "In Settings \u203a Voice Output open the SSML helper, and in Profiles open New Profile; press Escape in each."
+          - "Start and stop a dictation with the hot key and listen to the announcements."
+          - "Turn VoiceOver off."
+        expected: "The menu bar item reads \"Just Speak to It\" with the current state. Every control has a meaningful name, both sheets close on Escape, and recording, transcribing and errors are announced."
         final_gate: true
   - id: "iphone"
     device: "iPhone"
@@ -468,6 +483,21 @@ sessions:
           - "Stop the screen recording and attach it to #1368 (or share it with the agent)."
         expected: "A recording under one minute showing both starts and stops, the Live Activity with the fictional words, and no notifications, names or personal data on screen."
         final_gate: false
+      - id: "iphone-voiceover-pass"
+        issues:
+          - 1399
+        title: "iPhone: VoiceOver and largest text reach every control"
+        minutes: 8
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes the fix for #1399"
+        steps:
+          - "Settings \u203a Accessibility: turn on VoiceOver and set Larger Text to the largest size."
+          - "In Just Speak to It swipe through the main screen, History (including the filter and trash buttons) and Settings."
+          - "Double-tap Start recording, speak a fictional sentence, then double-tap Stop recording."
+          - "Share an audio file to Just Speak to It and use a two-finger scrub on the import sheet."
+          - "Switch to the Just Speak keyboard in Notes and swipe through its keys."
+        expected: "Every control has a meaningful name and nothing is clipped. \"Recording\" and \"Transcribing\" are announced, the scrub closes the import sheet, and every keyboard key is named."
+        final_gate: true
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"
@@ -545,3 +575,16 @@ sessions:
           - "Attach the video to #1368 (or share it with the agent)."
         expected: "A clip under 30 seconds showing the Watch stop ending the iPhone recording and the new item in History, with no notifications or personal data visible."
         final_gate: false
+      - id: "watch-voiceover-pass"
+        issues:
+          - 1399
+        title: "Watch: VoiceOver reads the record button and captures"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes the fix for #1399, with the watch app installed"
+        steps:
+          - "Turn on VoiceOver on the Watch."
+          - "Open Just Speak to It, double-tap Start recording, say a fictional sentence, then double-tap Stop recording."
+          - "Swipe to the new capture row."
+        expected: "The button reads Start recording, then Stop recording, and the row reads its time, length and status as one item."
+        final_gate: true

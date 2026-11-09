@@ -260,6 +260,9 @@ final class StatusBarController {
   private func updateButton(for state: MainManager.State) {
     guard let button = statusItem.button else { return }
     let appearance = Self.appearance(for: state, handsFree: mainManager.handsFreeState)
+    // A stable name plus a state value lets VoiceOver and agents find the item in either icon mode.
+    button.setAccessibilityLabel("Just Speak to It")
+    button.setAccessibilityValue(appearance.label)
 
     if appSettings.compactStatusBarIcon {
       button.image = NSImage(

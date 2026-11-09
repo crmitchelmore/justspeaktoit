@@ -520,6 +520,8 @@ extension SettingsView {
                     .buttonStyle(.borderless)
                     .foregroundStyle(.secondary)
                     .speakTooltip("Disconnect this device")
+                    .accessibilityLabel("Disconnect \(device.name)")
+                    .accessibilityIdentifier("transportDisconnectDevice-\(device.id)")
                   }
                   .padding(8)
                   .background(

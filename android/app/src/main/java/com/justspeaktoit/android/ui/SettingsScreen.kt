@@ -143,14 +143,15 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
             SettingsSearchField(query, onQueryChange = { query = it })
             if (query.isNotBlank()) {
                 SettingsSearchResults(
-                    results = searchIndex.search(query, limit = 20),
+                    // Only destinations this screen renders; the catalogue can run ahead of the UI.
+                    results = searchIndex.search(query, limit = 20).filter { anchorFor(it.entry) in anchors },
                     completions = searchIndex.completions(query),
                     onComplete = { query = it },
                     onOpen = ::open,
                 )
                 return@Column
             }
-            val recentEntries = recents.mapNotNull(searchIndex::entry)
+            val recentEntries = recents.mapNotNull(searchIndex::entry).filter { anchorFor(it) in anchors }
             if (recentEntries.isNotEmpty()) {
                 Text(
                     stringResource(R.string.settings_search_recent),

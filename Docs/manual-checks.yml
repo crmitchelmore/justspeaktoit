@@ -67,23 +67,22 @@ sessions:
           - "Make one short recording, quit and reopen the app, then open History."
         expected: "Older items are unchanged and the new recording survives the relaunch."
         final_gate: false
-      - id: "owner-flathub-submission"
+      - id: "owner-flatpak-repo-key"
         issues:
           - 1219
-        title: "Submit Just Speak to It to Flathub yourself"
-        minutes: 60
+        title: "Linux: add the Flatpak signing key so updates publish"
+        minutes: 10
         core: false
-        build: "Tagged main release; packaging/linux Flatpak manifest as a reference only"
+        build: "GitHub settings and a trusted terminal; current main with the signed Flatpak repository workflow"
         prerequisites:
-          - "Flathub bars AI-written manifests, PRs and replies: do every step yourself, without an agent"
-          - "Steps: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/linux-packaging.md (Recommended next step: Flathub)"
+          - "Replaces the Flathub submission: Flathub bars agent-written submissions, so Linux now updates from the project's own signed repository"
+          - "Steps and exact commands: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/linux-packaging.md (Owner setup)"
         steps:
-          - "Write your own Flathub manifest building from a tagged git source of this repository, with the same pinned SwiftPM sources."
-          - "Add Linux screenshots at stable URLs and a release entry to the metainfo; run flatpak-builder-lint appstream and flatpak-builder-lint repo on a built repo."
-          - "Signed in to GitHub as yourself (2FA on), open a pull request to flathub/flathub against the new-pr branch titled \"Add com.justspeaktoit.JustSpeakToIt\"."
-          - "In the description, disclose which parts of the app were AI-generated and roughly how much, and justify each finish-args permission."
-          - "Answer reviewers yourself, and accept the maintainer invitation within a week of approval."
-        expected: "Your submission pull request is open on flathub/flathub with the disclosure. After acceptance, an agent can publish the domain verification token and point the website at the listing."
+          - "On a trusted machine, create the ed25519 signing key with the commands in the guide and keep an offline backup."
+          - "Create the flatpak-repo environment limited to main and save the private key there as FLATPAK_GPG_PRIVATE_KEY."
+          - "Run the Linux Flatpak repository workflow on main with the newest alpha-build tag that has a Linux bundle."
+          - "Open https://justspeaktoit.com/linux/flatpak in a browser."
+        expected: "The workflow run is green and deploys, and the link downloads a .flatpakref file (not the .flatpak bundle). An agent then confirms an install and a flatpak update on a hosted Linux runner and closes #1219."
         final_gate: false
       - id: "mac-issue-report-preview"
         issues:

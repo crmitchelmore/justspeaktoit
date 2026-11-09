@@ -2,6 +2,7 @@
 #include "WindowsSupportInternal.hpp"
 #include "WindowsOnboarding.hpp"
 #include "WindowsTray.hpp"
+#include "WindowsWindowChrome.hpp"
 #include <mutex>
 #include <new>
 
@@ -182,6 +183,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(guide));
     }
     if (!guide) return DefWindowProcW(window, message, wparam, lparam);
+    LRESULT themed = 0;
+    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
     switch (message) {
     case WM_CREATE: return controls(window, *guide) ? 0 : -1;
     case WM_SIZE: layout(window); return 0;

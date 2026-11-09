@@ -106,11 +106,12 @@ static void apply_palette(void) {
     char *css = g_strdup_printf(
         "@define-color window_bg_color %s; @define-color window_fg_color %s;"
         "@define-color card_bg_color %s; @define-color card_fg_color %s;"
+        "@define-color view_bg_color %s; @define-color view_fg_color %s;"
         "@define-color accent_bg_color %s; @define-color accent_fg_color %s; @define-color accent_color %s;"
         ":root { --window-bg-color: %s; --window-fg-color: %s; --view-bg-color: %s; --view-fg-color: %s;"
         " --card-bg-color: %s; --card-fg-color: %s; --headerbar-bg-color: %s; --headerbar-fg-color: %s;"
         " --sidebar-bg-color: %s; --sidebar-fg-color: %s; --accent-bg-color: %s; --accent-fg-color: %s; --accent-color: %s; }",
-        bg, fg, bg, fg, accent, accent_fg, accent, bg, fg, bg, fg, bg, fg, bg, fg, bg, fg, accent, accent_fg, accent);
+        bg, fg, bg, fg, bg, fg, accent, accent_fg, accent, bg, fg, bg, fg, bg, fg, bg, fg, bg, fg, accent, accent_fg, accent);
     gtk_css_provider_load_from_string(provider, css);
     g_free(css); g_free(bg); g_free(fg); g_free(accent);
 }

@@ -210,7 +210,10 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
                 active.sendBudget.release(audioBytes)
                 if let error { self.fail(error, active); return }
                 if audioBytes == 0 {
-                    self.after(1, active) { client, active in client.close(active) }
+                    // Flux decodes the received audio, then closes the socket
+                    // itself and sends no Metadata, so allow it longer to do so.
+                    let grace: TimeInterval = Self.isFluxModel(self.model) ? 3 : 1
+                    self.after(grace, active) { client, active in client.close(active) }
                 } else { self.pump(active) }
             }
         }
@@ -252,6 +255,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         }
         guard let event = Self.transcriptEvent(from: json, model: model) else { return }
         if event.isFinal { active.accumulated.append(final: event.text) }
+        if Self.isFluxModel(model) { active.openFluxTurn = event.isFinal ? nil : event.text }
         if active.phase != .finishing { active.onTranscript?(event.text, event.isFinal) }
     }
 
@@ -260,7 +264,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         let onError = active.onError
         let waiters = active.waiters
         active.waiters.removeAll()
-        let transcript = active.accumulated.transcriptOrNil
+        let transcript = settledTranscript(active)
         close(active)
         log("WebSocket session failed")
         // Publish failure before finish returns. The closed run owns these
@@ -280,11 +284,20 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         if active === run { preroll.reset() }
         let waiters = active.waiters
         active.waiters.removeAll()
-        let transcript = active.accumulated.transcriptOrNil
+        let transcript = settledTranscript(active)
         connection?.cancel()
         waiters.forEach { $0.resume(returning: transcript) }
         active.onTranscript = nil
         active.onError = nil
+    }
+
+    /// Folds a Flux turn left open at close into the finals, once.
+    private func settledTranscript(_ active: DeepgramLiveRun) -> String? {
+        if let open = active.openFluxTurn {
+            active.openFluxTurn = nil
+            active.accumulated.append(final: open)
+        }
+        return active.accumulated.transcriptOrNil
     }
 
     private func isCurrent(_ active: DeepgramLiveRun) -> Bool { active === run && active.phase != .closed }

@@ -68,7 +68,7 @@ extension SonioxPortableLifecycleTests {
         let finishing = expectation(description: "End-of-stream proves the finish waiter is registered")
         old.onSend = { message in
             if case .text(SonioxLiveFixture.finalize) = message { DispatchQueue.global().async { old.completeSend() } }
-            if case .binary(let data) = message, data.isEmpty { finishing.fulfill() }
+            if case .text("") = message { finishing.fulfill() }
         }
         let finish = Task {
             let result = await client.finishAndWait()

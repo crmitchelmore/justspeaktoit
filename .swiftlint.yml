@@ -30,3 +30,17 @@ custom_rules:
       - identifier
     message: "Use installTapSafely(onBus:bufferSize:format:block:) so a rejected tap throws instead of crashing."
     severity: error
+  # Fixed black text vanishes on dark backgrounds. Use semantic colours
+  # (.primary, .secondary, NSColor.labelColor, UIColor.label) instead.
+  fixed_black_text:
+    name: "Fixed black text"
+    regex: '(\.(foregroundStyle|foregroundColor)\(\s*(Color)?\.black\b)|((textColor|\.foregroundColor)\s*[=:]\s*(NSColor|UIColor)?\.black\b)'
+    message: "Black text is unreadable in dark mode; use .primary, .label or labelColor."
+    severity: error
+  # AppKit and UIKit draw an attributed string without a foreground colour in
+  # black, whatever the appearance.
+  attributed_string_without_foreground:
+    name: "Attributed string without foreground colour"
+    regex: '\b(NS|NSMutable)AttributedString\(\s*string:\s*[^,()]+\)'
+    message: "Pass attributes with a semantic .foregroundColor (labelColor / .label) so the text adapts to dark mode."
+    severity: error

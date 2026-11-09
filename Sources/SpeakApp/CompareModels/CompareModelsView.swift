@@ -128,6 +128,12 @@ struct CompareModelsContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Spacer()
+            Toggle("Save results to History", isOn: $controller.saveResultsToHistory)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help("Adds one History item per model for each round, including failed models and their errors.")
+                .accessibilityIdentifier("compareModelsSaveToHistory")
         }
     }
 }

@@ -167,6 +167,8 @@ Set with `wrangler secret put <NAME>` (add `--env staging` or `--env production`
 | `DEEPGRAM_API_KEY` | Yes | Live transcription |
 | `OPENAI_API_KEY` | No | Reserved; not used by the current Best paths |
 | `APPSTORE_ROOT_CA_G3_BASE64` | No | Overrides the pinned Apple Root CA G3. Testing only |
+| `APPLE_SIGNIN_KEY_ID` | No | Key ID of the Sign in with Apple `.p8` key, for a `client_secret`. Set by the Paid Access Worker secrets workflow; the web sign-in does not read it yet |
+| `APPLE_SIGNIN_PRIVATE_KEY` | No | Contents of that `.p8` file (PEM). Set by the same workflow; not read yet |
 
 Non-secret configuration lives in `[vars]` in `wrangler.toml`: `ENVIRONMENT`, `APPLE_IDENTITY_AUDIENCES`, `APPLE_BUNDLE_IDS`, `SESSION_TTL_SECONDS`, `REFRESH_TTL_SECONDS`, `PLAN_MONTHLY_SECONDS`, `PLAN_MONTHLY_POSTPROCESS_TOKENS`, `MAX_CONCURRENT_SESSIONS`, `MAX_LIVE_SESSION_SECONDS`, `MAX_REQUEST_BYTES`, `UPSTREAM_TIMEOUT_MS`, `LIVE_UPSTREAM_TIMEOUT_MS`, `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`, `STRIPE_PORTAL_RETURN_URL`, `STRIPE_PRICE_IDS`, `STOREKIT_SUBSCRIPTION_PRODUCT_IDS`, `PAID_ROUTING_DISABLED`.
 

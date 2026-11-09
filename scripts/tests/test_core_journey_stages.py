@@ -129,7 +129,7 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(stages.setup(Path("artifacts")), 17)
             stages.GATE["run_gate"].assert_called_once_with(
                 ["bash", "-c", f"set -euo pipefail; {stages.SETUP_RETRY}; "
-                 "retry brew install tuist; retry tuist generate --no-open"],
+                 'PATH="$(scripts/install-tuist.sh):$PATH"; retry tuist generate --no-open'],
                 Path("artifacts/setup"), 300, (), stage="setup",
             )
 

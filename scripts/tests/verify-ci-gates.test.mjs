@@ -264,7 +264,8 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   const products = jobBodies['build-ios-test-products'];
   assert.match(products, /^\s+runs-on: macos-latest$/m);
   assert.match(products, /^\s+timeout-minutes: 30$/m);
-  assert.match(products, /TUIST_IOS_KEYBOARD=1 tuist generate/);
+  assert.match(products, /TUIST_IOS_KEYBOARD=1 scripts\/retry-network.sh tuist generate/);
+  assert.match(products, /scripts\/retry-network.sh xcodebuild -resolvePackageDependencies/);
   assert.match(products, /xcodebuild build-for-testing/);
   assert.match(products, /-only-testing:SpeakiOSTests/);
   assert.match(products, /-only-testing:SpeakiOSUITests/);
@@ -281,7 +282,7 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(devices, /Build Keyboard Extension, hand-off shape/);
   assert.match(devices, /Build Keyboard Extension, direct-capture shape/);
   assert.match(devices, /Build watchOS App \(feature-flagged\)/);
-  assert.match(devices, /TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate/);
+  assert.match(devices, /TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 scripts\/retry-network.sh tuist generate/);
   assert.match(devices, /-scheme JustSpeakWatchApp/);
   assert.match(devices, /-destination generic\/platform=watchOS/);
   assert.match(devices, /-scheme SpeakiOS/);
@@ -538,4 +539,21 @@ test('launched-app UI shards in CI match every shard the verifier requires', () 
   assert.match(ui, /fail-fast: false/);
   assert.match(ui, /CORE_JOURNEY_UI_SHARD: \$\{\{ matrix\.shard \}\}/);
   assert.match(ui, /name: core-journey-fixture-ui-\$\{\{ matrix\.shard \}\}-\$\{\{ github\.run_attempt \}\}/);
+});
+
+test('network-bound package resolution and Tuist generation retry before Apple builds', () => {
+  const retry = 'scripts/retry-network.sh';
+  for (const id of ['build-macos', 'release-validation', 'build-ios-swiftpm']) {
+    const body = jobBodies[id];
+    const resolve = body.indexOf(`run: ${retry} swift package resolve`);
+    assert.ok(resolve > 0, `${id}: resolve with retries`);
+    assert.ok(resolve < body.search(/run: (?:SWIFT_FLAGS=.*make build|python3 scripts\/with-test-keychain\.py swift test -c release|swift build --disable-dependency-cache --target SpeakiOSLib)/),
+      `${id}: resolution must precede the build`);
+  }
+  for (const id of ['build-ios-test-products', 'build-ios-keyboard']) {
+    const body = jobBodies[id];
+    assert.doesNotMatch(body.replaceAll(`${retry} tuist generate`, ''), /tuist generate/, `${id}: every generate retries`);
+    assert.equal((body.match(/xcodebuild -resolvePackageDependencies/g) || []).length,
+      (body.match(/tuist generate/g) || []).length, `${id}: resolve after each generate`);
+  }
 });

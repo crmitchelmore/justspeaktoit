@@ -82,6 +82,11 @@ jobs:
 
       # Keep dependency fetches in this workspace: the shared SwiftPM repository
       # cache can reference a missing directory. Retain the compiled .build cache.
+      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
+      # release assets, which intermittently return 5xx; resolve with retries first.
+      - name: Resolve Swift packages
+        run: scripts/retry-network.sh swift package resolve --disable-dependency-cache
+
       - name: Build
         # Match the Test (Debug) step flag. A plain debug build here produces a
         # cached .build that the coverage-enabled swift test below cannot reuse
@@ -526,6 +531,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-release-
 
+      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
+      # release assets, which intermittently return 5xx; resolve with retries first.
+      - name: Resolve Swift packages
+        run: scripts/retry-network.sh swift package resolve
+
       - name: Test (Release)
         run: python3 scripts/with-test-keychain.py swift test -c release
 
@@ -540,6 +550,10 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
+      # release assets, which intermittently return 5xx; resolve with retries first.
+      - name: Resolve Swift packages
+        run: scripts/retry-network.sh swift package resolve --disable-dependency-cache
       - name: Build iOS Library
         run: swift build --disable-dependency-cache --target SpeakiOSLib
 
@@ -563,7 +577,9 @@ jobs:
       - name: Build complete simulator test products without booting a simulator
         run: |
           set -o pipefail
-          TUIST_IOS_KEYBOARD=1 tuist generate --no-open
+          TUIST_IOS_KEYBOARD=1 scripts/retry-network.sh tuist generate --no-open
+          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
+            -workspace "Just Speak to It.xcworkspace" -scheme SpeakiOS
           xcodebuild build-for-testing \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakiOS \
@@ -757,7 +773,9 @@ jobs:
           TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
         run: |
           set -o pipefail
-          tuist generate --no-open
+          scripts/retry-network.sh tuist generate --no-open
+          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
+            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakKeyboard
           xcodebuild build \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme JustSpeakKeyboard \
@@ -778,7 +796,9 @@ jobs:
           TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "1"
         run: |
           set -o pipefail
-          tuist generate --no-open
+          scripts/retry-network.sh tuist generate --no-open
+          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
+            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakKeyboard
           xcodebuild build \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme JustSpeakKeyboard \
@@ -793,7 +813,9 @@ jobs:
         # The containing iOS build also verifies watch companion embedding.
         run: |
           set -o pipefail
-          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate --no-open
+          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 scripts/retry-network.sh tuist generate --no-open
+          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
+            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakWatchApp
           xcodebuild build \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme JustSpeakWatchApp \

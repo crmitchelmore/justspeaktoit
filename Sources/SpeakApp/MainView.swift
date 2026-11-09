@@ -7,6 +7,7 @@ struct MainView: View {
   @EnvironmentObject private var history: HistoryManager
   @EnvironmentObject private var personalLexicon: PersonalLexiconService
   @EnvironmentObject private var settings: AppSettings
+  @EnvironmentObject private var recording: RecordingControlModel
   @State private var selection: SidebarItem? = .dashboard
 
   var body: some View {
@@ -103,18 +104,19 @@ struct MainView: View {
       .accessibilityIdentifier("settingsSearchButton")
     }
     ToolbarItem(placement: .primaryAction) {
-      Button(action: environment.main.toggleRecordingFromUI) {
+      Button(action: recording.toggle) {
         toolbarRecordLabel
       }
       // No shortcut here: Start/Stop Recording has one canonical binding, owned
       // by ShortcutManager and installed on exactly one menu item — the Speak
       // menu's, built by MenuBarManager.
       .speakTooltip("Start or stop a recording from anywhere in Speak. We'll let you know when we're listening.")
-      .accessibilityLabel(recordButtonAccessibility.label)
-      .accessibilityHint(recordButtonAccessibility.hint)
-      .accessibilityAddTraits(recordButtonAccessibility.traits)
+      .accessibilityLabel(recording.accessibility.label)
+      .accessibilityValue(recording.accessibility.value)
+      .accessibilityHint(recording.accessibility.hint)
+      .accessibilityAddTraits(recording.accessibility.traits)
       .accessibilityIdentifier("toolbarRecordToggleButton")
-      .disabled(isRecordButtonDisabled)
+      .disabled(recording.isBusy)
     }
     if !settings.visualDensity.isCompact {
       ToolbarItem(placement: .status) {
@@ -145,7 +147,7 @@ struct MainView: View {
 
   @ViewBuilder
   private var toolbarRecordLabel: some View {
-    switch environment.main.state {
+    switch recording.state {
     case .idle, .completed, .failed:
       if settings.visualDensity.isCompact {
         Label("Record", systemImage: "mic")
@@ -164,19 +166,6 @@ struct MainView: View {
       }
     case .processing, .delivering:
       ProgressView()
-    }
-  }
-
-  private var recordButtonAccessibility: RecordingControlAccessibility {
-    RecordingControlAccessibility(state: environment.main.state)
-  }
-
-  private var isRecordButtonDisabled: Bool {
-    switch environment.main.state {
-    case .processing, .delivering:
-      return true
-    case .idle, .recording, .completed, .failed:
-      return false
     }
   }
 }

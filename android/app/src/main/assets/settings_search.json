@@ -1,0 +1,221 @@
+{
+  "entries" : [
+    {
+      "id" : "android.cloudModel",
+      "keywords" : [
+        "transcription model",
+        "model picker",
+        "openai",
+        "deepgram",
+        "whisper",
+        "provider"
+      ],
+      "section" : "transcription",
+      "sectionTitle" : "Transcription",
+      "settingKeys" : [
+        "cloud_model"
+      ],
+      "summary" : "The cloud model used when dictating in cloud mode.",
+      "title" : "Cloud transcription model"
+    },
+    {
+      "id" : "android.cleanup",
+      "keywords" : [
+        "post-processing",
+        "polish",
+        "cleanup",
+        "llm",
+        "openrouter",
+        "grammar"
+      ],
+      "section" : "postProcessing",
+      "sectionTitle" : "Post-processing",
+      "settingKeys" : [
+        "cleanup_enabled"
+      ],
+      "summary" : "Send the final transcript to OpenRouter to fix punctuation and filler words.",
+      "title" : "Clean up transcripts"
+    },
+    {
+      "id" : "android.keepAudio",
+      "keywords" : [
+        "keep audio",
+        "cancel",
+        "discard",
+        "delete recording",
+        "cancelled recording"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "keepAudioOnCancel"
+      ],
+      "summary" : "Keep cancelled cloud recordings in History so you can transcribe them later.",
+      "title" : "Keep audio when a recording is cancelled"
+    },
+    {
+      "id" : "android.apiKeys",
+      "keywords" : [
+        "credentials",
+        "token",
+        "keystore",
+        "openrouter key",
+        "openai key",
+        "deepgram key"
+      ],
+      "section" : "apiKeys",
+      "sectionTitle" : "API Keys",
+      "settingKeys" : [
+
+      ],
+      "summary" : "Add or remove provider keys, encrypted with the Android Keystore.",
+      "title" : "API keys"
+    }
+  ],
+  "synonyms" : [
+    [
+      "cancel",
+      "discard",
+      "abort",
+      "escape",
+      "esc"
+    ],
+    [
+      "delete",
+      "remove",
+      "erase",
+      "clear",
+      "purge"
+    ],
+    [
+      "keep",
+      "save",
+      "retain",
+      "store",
+      "preserve"
+    ],
+    [
+      "shortcut",
+      "hotkey",
+      "keybinding",
+      "chord",
+      "trigger"
+    ],
+    [
+      "microphone",
+      "mic",
+      "input"
+    ],
+    [
+      "theme",
+      "appearance",
+      "dark",
+      "light"
+    ],
+    [
+      "colour",
+      "color"
+    ],
+    [
+      "behaviour",
+      "behavior"
+    ],
+    [
+      "tts",
+      "voice",
+      "speak"
+    ],
+    [
+      "stt",
+      "transcription",
+      "transcribe",
+      "dictation",
+      "dictate"
+    ],
+    [
+      "api",
+      "key",
+      "token",
+      "credential",
+      "secret"
+    ],
+    [
+      "polish",
+      "cleanup",
+      "rewrite",
+      "postprocessing"
+    ],
+    [
+      "sound",
+      "chime",
+      "beep"
+    ],
+    [
+      "silence",
+      "quiet"
+    ],
+    [
+      "login",
+      "startup",
+      "launch",
+      "boot"
+    ],
+    [
+      "update",
+      "upgrade"
+    ],
+    [
+      "sync",
+      "icloud",
+      "cloud"
+    ],
+    [
+      "analytics",
+      "telemetry",
+      "tracking"
+    ],
+    [
+      "hud",
+      "overlay",
+      "indicator"
+    ],
+    [
+      "paste",
+      "insert",
+      "output",
+      "type"
+    ],
+    [
+      "language",
+      "locale"
+    ],
+    [
+      "offline",
+      "local",
+      "device"
+    ],
+    [
+      "streaming",
+      "live",
+      "realtime"
+    ],
+    [
+      "model",
+      "engine",
+      "provider"
+    ],
+    [
+      "llm",
+      "gpt",
+      "openrouter"
+    ],
+    [
+      "vocabulary",
+      "keyterms",
+      "keywords",
+      "jargon",
+      "terms"
+    ]
+  ],
+  "version" : 1
+}

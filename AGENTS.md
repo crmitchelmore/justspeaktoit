@@ -170,8 +170,11 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
   persisted property names, and `keywords` should hold the words people search
   for. On iOS, use `SearchableSettingsSection` for top-level Settings sections.
 - `SettingsSearchCoverageTests` fails when a card, section or `@Published`
-  setting is missing. Exempt a setting only with a reason in that test. See
-  [Docs/settings-search.md](Docs/settings-search.md).
+  setting is missing. Exempt a setting only with a reason in that test. Desktop
+  (`DesktopSettingsSearchTests`) and Android (`SettingsSearchCoverageTest`) have
+  equivalent guards. After changing Android entries, regenerate
+  `android/app/src/main/assets/settings_search.json` (see
+  [Docs/settings-search.md](Docs/settings-search.md)).
 
 ### Shared Evolving Catalogues
 

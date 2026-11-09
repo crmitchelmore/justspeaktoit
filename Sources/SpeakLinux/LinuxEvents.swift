@@ -36,6 +36,8 @@ final class LinuxEventContext: @unchecked Sendable {
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
     /// Set before the window opens, when iCloud sync is configured.
     var cloudSync: LinuxCloudSync?
+    /// Sidebar settings search; read and written on the GTK main thread only.
+    lazy var settingsSearch = DesktopSettingsSearchSession(platform: .linux)
 
     init(controller: LinuxAppController, smokeTest: Bool) {
         self.controller = controller
@@ -265,6 +267,7 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
         return
     }
     if linuxActionEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxSettingsSearchEvent(event, value: value, slot: slot, holder: holder) { return }
     if event == 70 || event == 71 || event == 72 {
         linuxVocabularyEvent(Int32(event), payload: value, kind: slot, holder: holder)
         return

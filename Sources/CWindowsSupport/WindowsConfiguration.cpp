@@ -409,9 +409,50 @@ HWND createDialog(HWND owner, Dialog &dialog) {
         L"Dictation preferences - Just Speak to It", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_VSCROLL,
         CW_USEDEFAULT, CW_USEDEFAULT, scale(owner, 700), scale(owner, 660), owner, nullptr, type.hInstance, &dialog);
 }
+
+// Scrolls field `index` of the shown group to the top of the view (as far as the
+// scroll range allows) and focuses it. False when it is not in the shown group.
+bool revealField(HWND window, Dialog &dialog, size_t index) {
+    if (index >= dialog.config.fields.size() || dialog.config.fields[index].group != dialog.group) return false;
+    int offset = 0;
+    for (size_t i = 0; i < index; ++i)
+        if (dialog.config.fields[i].group == dialog.group) offset += scale(window, dialog.config.fields[i].boolean ? 34 : 60);
+    dialog.scrollOffset = offset;
+    layout(window, dialog);
+    HWND control = GetDlgItem(window, fieldBase + static_cast<int>(index));
+    if (!control || !(GetWindowLongW(control, GWL_STYLE) & WS_VISIBLE)) return false;
+    if (IsWindowEnabled(control)) {
+        SetFocus(control);
+        wchar_t kind[16]{};
+        GetClassNameW(control, kind, 16);
+        if (_wcsicmp(kind, L"Edit") == 0) SendMessageW(control, EM_SETSEL, 0, -1);
+    }
+    return true;
+}
 } // namespace
 
+bool jsti_configuration_field_available(size_t index) {
+    std::lock_guard<std::mutex> lock(configurationMutex);
+    return configuration.callback && index < configuration.fields.size();
+}
+
+static void showConfiguration(HWND owner, const wchar_t *group, size_t focusField);
+
 void jsti_show_configuration(HWND owner, const wchar_t *group) {
+    showConfiguration(owner, group, static_cast<size_t>(-1));
+}
+
+void jsti_show_configuration_field(HWND owner, size_t index) {
+    std::wstring group;
+    {
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        if (!configuration.callback || index >= configuration.fields.size()) return;
+        group = configuration.fields[index].group;
+    }
+    showConfiguration(owner, group.c_str(), index);
+}
+
+static void showConfiguration(HWND owner, const wchar_t *group, size_t focusField) {
     Dialog dialog;
     { std::lock_guard<std::mutex> lock(configurationMutex); dialog.config = configuration; }
     dialog.group = group;
@@ -427,6 +468,7 @@ void jsti_show_configuration(HWND owner, const wchar_t *group) {
     EnableWindow(owner, FALSE);
     ShowWindow(window, SW_SHOW);
     SetFocus(GetDlgItem(window, groupID));
+    if (focusField != static_cast<size_t>(-1)) revealField(window, dialog, focusField);
     MSG message{};
     BOOL result = 1;
     while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
@@ -825,7 +867,43 @@ static bool configurationWarmApprovalSelfTest(HWND owner, std::string &error) {
     return valid;
 }
 
+// Search reveals a field: its group is shown, it scrolls into view and takes the
+// focus; a field of another group or out of range is refused.
+static bool configurationRevealSelfTest(HWND owner, std::string &error) {
+    Dialog fixture;
+    for (int index = 0; index < 24; ++index)
+        fixture.config.fields.push_back({L"Setting " + std::to_wstring(index), L"value",
+            index == 2 ? L"General" : L"Transcription", false});
+    fixture.group = L"Transcription";
+    HWND window = createDialog(owner, fixture);
+    if (!window) { error = "Could not create the configuration reveal fixture."; return false; }
+    const bool lateHidden = !(GetWindowLongW(GetDlgItem(window, fieldBase + 23), GWL_STYLE) & WS_VISIBLE);
+    const bool revealed = revealField(window, fixture, 23) && fixture.scrollOffset > 0 &&
+        (GetWindowLongW(GetDlgItem(window, fieldBase + 23), GWL_STYLE) & WS_VISIBLE) &&
+        !(GetWindowLongW(GetDlgItem(window, fieldBase), GWL_STYLE) & WS_VISIBLE);
+    const bool refused = !revealField(window, fixture, 2) && !revealField(window, fixture, 24);
+    DestroyWindow(window);
+    Configuration previous;
+    {
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        previous = configuration;
+        configuration = Configuration();
+    }
+    const bool unconfigured = !jsti_configuration_field_available(0) &&
+        jsti_window_reveal_configuration_field(0) == -1;
+    { std::lock_guard<std::mutex> lock(configurationMutex); configuration = std::move(previous); }
+    const bool outOfRange = !jsti_configuration_field_available(maximumConfigurationFields) &&
+        jsti_window_reveal_configuration_field(maximumConfigurationFields) == -1 &&
+        jsti_window_reveal_configuration_field(static_cast<size_t>(-1)) == -1;
+    if (!lateHidden || !revealed || !refused || !unconfigured || !outOfRange) {
+        error = "Revealing a configuration field from search failed to scroll, focus or refuse.";
+        return false;
+    }
+    return true;
+}
+
 bool jsti_configuration_self_test(HWND owner, std::string &error) {
+    if (!configurationRevealSelfTest(owner, error)) return false;
     if (!configurationWarmApprovalSelfTest(owner, error)) return false;
     if (!configurationTitleSelfTest(owner, error)) return false;
     if (!configurationAutoCleanSelfTest(owner, error)) return false;

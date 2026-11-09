@@ -75,6 +75,8 @@ void jsti_show_voice_credentials(HWND owner);
 bool jsti_voice_credentials_self_test(HWND owner, std::string &error);
 bool jsti_azure_resource_available();
 void jsti_show_configuration(HWND owner, const wchar_t *group);
+void jsti_show_configuration_field(HWND owner, size_t index);
+bool jsti_configuration_field_available(size_t index);
 void jsti_show_azure_resource_settings(HWND owner);
 bool jsti_azure_resource_settings_self_test(HWND owner, std::string &error);
 bool jsti_configuration_self_test(HWND owner, std::string &error);
@@ -229,6 +231,9 @@ const PageInfo pageInfo[pageCount] = {
     {L"iCloud Sync", L"Keep History in step with your Mac, through your own iCloud account.", 0xE753, "icloud-sync"},
     {L"About", L"Voice-to-text made simple. Windows developer preview.", 0xE946, "about"},
 };
+static_assert(JSTI_PAGE_COUNT == pageCount && JSTI_PAGE_CORRECTIONS == correctionsPage &&
+    JSTI_PAGE_PRONUNCIATION == pronunciationPage && JSTI_PAGE_PROFILES == profilesPage &&
+    JSTI_PAGE_ABOUT == aboutPage, "JSTI_PAGE_* must follow the sidebar's page order.");
 // Sidebar buttons are navBaseID + page. The values in the heroes, Insights and
 // Setup are owner-drawn static controls, so screen readers read them.
 constexpr int navBaseID = 300;
@@ -252,6 +257,16 @@ constexpr UINT shellMessage = WM_APP + 32;
 // openAPIKeys() request (jsti_window_request_api_keys).
 constexpr int apiKeysID = 491;
 constexpr UINT apiKeysMessage = WM_APP + 98;
+// The sidebar's settings search: its label (the box's accessible name), the box,
+// the results list and the empty state. UI Automation exposes these control IDs
+// as the elements' AutomationId, so they stay fixed.
+constexpr int settingsSearchLabelID = 494, settingsSearchID = 495, settingsResultsID = 496,
+    settingsNoMatchID = 497;
+// Results from jsti_window_set_settings_search_results, a field reveal from
+// jsti_window_reveal_configuration_field, and a deferred focus-loss check.
+constexpr UINT settingsSearchMessage = WM_APP + 120, revealFieldMessage = WM_APP + 121,
+    settingsLeaveMessage = WM_APP + 122;
+constexpr size_t maximumSettingsResults = 50;
 struct SidebarBindings {
     int digits[pageCount];
     std::wstring hints[pageCount];
@@ -470,6 +485,19 @@ struct CleanupPreview {
     bool active = false, changed = false;
     std::wstring text;
 } cleanupPreview;
+
+// The sidebar's settings search. Rows are delivered under `mutex`; the rest is
+// UI-thread only. `shown` matches the results list row for row.
+struct SettingsSearchRow { std::wstring title, detail; std::string identifier; };
+struct SettingsSearch {
+    std::mutex mutex;
+    std::vector<SettingsSearchRow> pending;
+    bool changed = false, posted = false;
+    std::vector<SettingsSearchRow> shown;
+    // The box or list has focus and wants results; `suppress` silences
+    // programmatic edits; `focusPage` moves focus to the page a choice opens.
+    bool active = false, suppress = false, focusPage = false;
+} settingsSearch;
 
 void retireCleanupPreview() {
     std::lock_guard<std::mutex> lock(cleanupPreview.mutex);
@@ -897,6 +925,7 @@ unsigned pagesOf(int identifier) {
     if (identifier >= aboutLinkBaseID && identifier < aboutLinkBaseID + 8) return page(aboutPage);
     switch (identifier) {
     case statusID: case recordID: case importID: return all;
+    case settingsSearchLabelID: case settingsSearchID: case settingsResultsID: case settingsNoMatchID: return all;
     case transcriptID: case copyID: return page(dashboardPage) | page(historyPage);
     case transcriptLabelID: case chipSessionsID: case chipTimeID: case chipSpendID:
     case insightSessionsID: case insightTimeID: case insightAverageID: case insightSpendID:
@@ -957,7 +986,8 @@ Role roleOf(HWND window, int identifier) {
     case importID: return state.page == historyPage ? Role::heroButton : Role::button;
     case automationID: case loginItemID: return Role::toggle;
     case statusID: case aboutDetailsID: return Role::status;
-    case historyDetailID: case modelStatusID: case transcriptLabelID: return Role::caption;
+    case historyDetailID: case modelStatusID: case transcriptLabelID: case settingsSearchLabelID:
+    case settingsNoMatchID: return Role::caption;
     case playbackTimeID: case shortcutValueID: return Role::value;
     case chipSessionsID: case chipTimeID: case chipSpendID: case historySessionsID: case historyErrorsID:
     case historyAverageID: case historySpendID: return Role::chipValue;
@@ -977,7 +1007,7 @@ struct Card { RECT rect; wchar_t glyph; std::wstring title; };
 struct Chip { RECT rect; std::wstring label; };
 struct Paragraph { RECT rect; std::wstring text; jsti::chrome::Font font; bool secondary; };
 struct Frame {
-    RECT sidebar{}, header{}, status{}, hero{}, speakHeading{}, settingsHeading{}, icon{};
+    RECT sidebar{}, header{}, status{}, hero{}, speakHeading{}, settingsHeading{}, icon{}, searchHint{};
     jsti::chrome::Gradient gradient = jsti::chrome::Gradient::brand;
     std::wstring heroTitle, heroSubtitle;
     std::vector<Chip> chips;
@@ -1448,6 +1478,49 @@ void layoutAbout(HWND window, const RECT &content) {
     place(window, troubleshootingID, box(content.left + inset, y + row + gap, scale(window, 240), row));
 }
 
+bool settingsSearchOpen(HWND window) {
+    return settingsSearch.active &&
+        (!settingsSearch.shown.empty() || GetWindowTextLengthW(GetDlgItem(window, settingsSearchID)) > 0);
+}
+
+// Each results row: a semibold title over a caption detail.
+int settingsResultHeight(HWND window) {
+    const UINT dpi = GetDpiForWindow(window);
+    HDC dc = GetDC(window);
+    const int title = jsti::chrome::measure(dc, L"Ag", scale(window, 200), jsti::chrome::Font::bodySemibold, dpi);
+    const int detail = jsti::chrome::measure(dc, L"Ag", scale(window, 200), jsti::chrome::Font::caption, dpi);
+    ReleaseDC(window, dc);
+    return title + detail + scale(window, 18);
+}
+
+// The search label, box and (while searching) the results or empty state, which
+// take the pages' place. Returns where the Speak heading starts.
+int layoutSettingsSearch(HWND window, int sidebarWidth, int bottom) {
+    const UINT dpi = GetDpiForWindow(window);
+    const int inner = sidebarWidth - scale(window, 44);
+    HDC dc = GetDC(window);
+    const int captionHeight = jsti::chrome::measure(dc, L"Search settings", inner, jsti::chrome::Font::caption, dpi);
+    const int lineHeight = jsti::chrome::measure(dc, L"Ag", inner, jsti::chrome::Font::body, dpi);
+    const int noMatchHeight = jsti::chrome::measure(dc, L"No settings match", inner, jsti::chrome::Font::caption, dpi);
+    ReleaseDC(window, dc);
+    int y = scale(window, 58);
+    const RECT label = box(scale(window, 22), y, inner, captionHeight);
+    place(window, settingsSearchLabelID, label);
+    frame.searchHint = label;
+    y += captionHeight + scale(window, 4);
+    const int editHeight = std::max(scale(window, 20), lineHeight + scale(window, 2));
+    const RECT field = box(scale(window, 12), y, sidebarWidth - scale(window, 24),
+                           std::max(scale(window, 34), editHeight + scale(window, 14)));
+    frame.fields.push_back(field);
+    place(window, settingsSearchID, box(field.left + scale(window, 10), field.top + (heightOf(field) - editHeight) / 2,
+                                        widthOf(field) - scale(window, 20), editHeight));
+    y = field.bottom + scale(window, 12);
+    place(window, settingsResultsID, RECT{scale(window, 10), y, sidebarWidth - scale(window, 10),
+                                          std::max<int>(y + settingsResultHeight(window), bottom - scale(window, 12))});
+    place(window, settingsNoMatchID, box(scale(window, 22), y, inner, noMatchHeight));
+    return y;
+}
+
 void layout(HWND window) {
     RECT client{};
     GetClientRect(window, &client);
@@ -1458,14 +1531,17 @@ void layout(HWND window) {
     frame.sidebar = RECT{0, 0, sidebarWidth, client.bottom};
     frame.header = RECT{sidebarWidth, 0, client.right, headerHeight};
     frame.status = RECT{sidebarWidth, client.bottom - statusHeight, client.right, client.bottom};
-    // Sidebar: Speak, then Settings, as on the Mac.
-    int y = scale(window, 70);
-    frame.speakHeading = box(scale(window, 22), y, sidebarWidth - scale(window, 44), scale(window, 20));
+    // Sidebar: settings search, then Speak and Settings, as on the Mac. The
+    // search label and box take their heights from the fonts at this DPI.
+    const bool searchOpen = settingsSearchOpen(window);
+    int y = layoutSettingsSearch(window, sidebarWidth, client.bottom);
+    if (!searchOpen) frame.speakHeading = box(scale(window, 22), y, sidebarWidth - scale(window, 44), scale(window, 20));
     y += scale(window, 24);
     for (int page = 0; page < pageCount; ++page) {
         if (page == generalPage) {
             y += densitySpace(window, 10, visualDensity.section_spacing);
-            frame.settingsHeading = box(scale(window, 22), y, sidebarWidth - scale(window, 44), scale(window, 20));
+            if (!searchOpen)
+                frame.settingsHeading = box(scale(window, 22), y, sidebarWidth - scale(window, 44), scale(window, 20));
             y += scale(window, 24);
         }
         const int rowHeight = densitySpace(window, 36, std::max(36, visualDensity.minimum_row_height));
@@ -1525,6 +1601,9 @@ void paintFrame(HWND window, HDC dc) {
                      DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
         chrome::text(dc, L"Settings", frame.settingsHeading, chrome::Font::caption, dpi, palette.secondary,
                      DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
+        // The search label draws over this from the backdrop, so the hint sits at its right.
+        chrome::text(dc, L"Ctrl+K", frame.searchHint, chrome::Font::caption, dpi, palette.secondary,
+                     DT_RIGHT | DT_SINGLELINE | DT_NOPREFIX);
     }
     if (visible(frame.header)) {
         const RECT title{frame.header.left + s(24), s(10), frame.header.right - s(300), s(36)};
@@ -1875,6 +1954,54 @@ void drawHistoryItem(HWND window, const DRAWITEMSTRUCT &item) {
                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 }
 
+bool highContrast() {
+    HIGHCONTRASTW contrast{};
+    contrast.cbSize = sizeof(contrast);
+    return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) &&
+        (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
+}
+
+// One settings search result: its title over a dimmer detail. High contrast
+// uses the system's window and highlight colours.
+void drawSettingsResult(HWND window, const DRAWITEMSTRUCT &item) {
+    namespace chrome = jsti::chrome;
+    const auto &palette = chrome::palette();
+    const UINT dpi = GetDpiForWindow(window);
+    auto s = [&](int value) { return scale(window, value); };
+    Canvas canvas(item.hDC, item.rcItem);
+    if (!canvas.ready()) return;
+    HDC dc = canvas.dc;
+    RECT area = canvas.bounds();
+    const bool contrast = highContrast();
+    const bool selected = (item.itemState & ODS_SELECTED) != 0;
+    HBRUSH background = CreateSolidBrush(contrast ? GetSysColor(selected ? COLOR_HIGHLIGHT : COLOR_WINDOW)
+                                                  : palette.sidebar);
+    FillRect(dc, &area, background);
+    DeleteObject(background);
+    if (item.itemID == static_cast<UINT>(-1) || item.itemID >= settingsSearch.shown.size()) return;
+    const SettingsSearchRow &row = settingsSearch.shown[item.itemID];
+    if (selected && !contrast)
+        chrome::fillRound(dc, RECT{area.left, area.top + s(2), area.right, area.bottom - s(2)}, s(10), chrome::accent,
+                          chrome::dark() ? 58 : 40);
+    const COLORREF ink = contrast ? GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT) : palette.text;
+    const COLORREF dim = contrast ? ink : palette.secondary;
+    const int width = widthOf(area) - s(22);
+    const int titleHeight = chrome::measure(dc, L"Ag", width, chrome::Font::bodySemibold, dpi);
+    const int detailHeight = chrome::measure(dc, L"Ag", width, chrome::Font::caption, dpi);
+    const int top = area.top + std::max(0, (heightOf(area) - titleHeight - detailHeight - s(2)) / 2);
+    const RECT title{area.left + s(12), top, area.right - s(10), top + titleHeight};
+    const RECT detail{title.left, title.bottom + s(2), title.right, title.bottom + s(2) + detailHeight};
+    const UINT line = DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX;
+    chrome::text(dc, row.title, title, chrome::Font::bodySemibold, dpi, ink, line);
+    chrome::text(dc, row.detail, detail, chrome::Font::caption, dpi, dim, line);
+    if ((item.itemState & ODS_FOCUS) != 0 && (item.itemState & ODS_NOFOCUSRECT) == 0) {
+        RECT ring = area;
+        InflateRect(&ring, -s(1), -s(1));
+        if (contrast) DrawFocusRect(dc, &ring);
+        else chrome::strokeRound(dc, ring, s(10), chrome::accent, 220, 2.0f);
+    }
+}
+
 // ------------------------------------------------------------ appearance
 
 HBRUSH brushFor(COLORREF color) {
@@ -1915,6 +2042,7 @@ void refreshFont(HWND window) {
         SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(chosen), TRUE);
     }
     SendDlgItemMessageW(window, historyID, LB_SETITEMHEIGHT, 0, scale(window, 132));
+    SendDlgItemMessageW(window, settingsResultsID, LB_SETITEMHEIGHT, 0, settingsResultHeight(window));
 }
 
 void updateModelLayout(HWND window) {
@@ -1953,6 +2081,167 @@ void applySidebarBindings(HWND window, const SidebarBindings &bindings) {
 }
 
 void applySidebarBindings(HWND window) { applySidebarBindings(window, state.sidebar); }
+
+// --------------------------------------------------------- settings search
+
+// The results (or "No settings match") replace the sidebar's pages while the
+// search is open; choosing, Escape or leaving the search restores them.
+void refreshSettingsSearch(HWND window) {
+    const bool open = settingsSearchOpen(window);
+    bool changed = false;
+    auto want = [&](int identifier, bool shown) {
+        const auto found = state.wanted.find(identifier);
+        if (found != state.wanted.end() && found->second == shown) return;
+        state.wanted[identifier] = shown;
+        changed = true;
+    };
+    want(settingsResultsID, open && !settingsSearch.shown.empty());
+    want(settingsNoMatchID, open && settingsSearch.shown.empty());
+    for (int page = 0; page < pageCount; ++page) want(navBaseID + page, !open);
+    if (changed) layout(window);
+}
+
+// Every edit, and focusing the box, reports the whole query; the host answers
+// with jsti_window_set_settings_search_results (recent destinations when empty).
+void emitSettingsSearch(HWND window) {
+    if (settingsSearch.suppress) return;
+    settingsSearch.active = true;
+    settingsSearch.focusPage = false;
+    const std::string query = jsti::utf8(controlText(GetDlgItem(window, settingsSearchID)));
+    emit(window, JSTI_EVENT_SETTINGS_SEARCH, query.c_str());
+}
+
+void closeSettingsSearch(HWND window, bool clear) {
+    settingsSearch.active = false;
+    if (clear) {
+        settingsSearch.suppress = true;
+        SetDlgItemTextW(window, settingsSearchID, L"");
+        settingsSearch.suppress = false;
+        settingsSearch.shown.clear();
+        SendDlgItemMessageW(window, settingsResultsID, LB_RESETCONTENT, 0, 0);
+    }
+    refreshSettingsSearch(window);
+}
+
+// Posted on focus loss: the search stays open while the box or its list has focus.
+void leaveSettingsSearch(HWND window) {
+    const HWND focus = GetFocus();
+    if (!settingsSearch.active || focus == GetDlgItem(window, settingsSearchID) ||
+        focus == GetDlgItem(window, settingsResultsID)) return;
+    closeSettingsSearch(window, false);
+}
+
+void applySettingsResults(HWND window) {
+    std::vector<SettingsSearchRow> rows;
+    {
+        std::lock_guard<std::mutex> lock(settingsSearch.mutex);
+        settingsSearch.posted = false;
+        if (!settingsSearch.changed) return;
+        settingsSearch.changed = false;
+        rows.swap(settingsSearch.pending);
+    }
+    HWND list = GetDlgItem(window, settingsResultsID);
+    const bool listFocused = GetFocus() == list;
+    SendMessageW(list, WM_SETREDRAW, FALSE, 0);
+    SendMessageW(list, LB_RESETCONTENT, 0, 0);
+    settingsSearch.shown.clear();
+    for (auto &row : rows) {
+        // The item text is its accessible name: "<title>, <detail>".
+        const std::wstring name = row.detail.empty() ? row.title : row.title + L", " + row.detail;
+        const LRESULT added = SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name.c_str()));
+        if (added == LB_ERR || added == LB_ERRSPACE) break;
+        settingsSearch.shown.push_back(std::move(row));
+    }
+    SendMessageW(list, LB_SETCURSEL, listFocused && !settingsSearch.shown.empty() ? 0 : static_cast<WPARAM>(-1), 0);
+    SendMessageW(list, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(list, nullptr, TRUE);
+    if (listFocused && settingsSearch.shown.empty()) {
+        settingsSearch.suppress = true;
+        SetFocus(GetDlgItem(window, settingsSearchID));
+        settingsSearch.suppress = false;
+    }
+    refreshSettingsSearch(window);
+}
+
+// Clears and closes the search, then reports the chosen row; the host opens its
+// page (focus follows to that page's sidebar entry) and may reveal a preference.
+void chooseSettingsResult(HWND window, LRESULT row) {
+    if (row < 0 || static_cast<size_t>(row) >= settingsSearch.shown.size()) return;
+    const std::string identifier = settingsSearch.shown[static_cast<size_t>(row)].identifier;
+    closeSettingsSearch(window, true);
+    SetFocus(GetDlgItem(window, navBaseID + state.page));
+    settingsSearch.focusPage = true;
+    if (state.callback) state.callback(JSTI_EVENT_SETTINGS_SEARCH_OPEN, identifier.c_str(), static_cast<int>(row),
+                                       state.context);
+}
+
+void focusSearch(HWND window, int identifier) {
+    HWND target = GetDlgItem(window, identifier);
+    if (!target || !IsWindowVisible(target) || !IsWindowEnabled(target)) return;
+    SetFocus(target);
+    SendMessageW(target, EM_SETSEL, 0, -1);
+}
+
+// Ctrl+K searches settings from anywhere in the window. Ctrl+F does too, except
+// on History, where it finds in History. Down, Up, Enter and Escape move between
+// the box and its results, choose one, or back out.
+bool settingsSearchKeyMessage(HWND window, const MSG &message) {
+    if (message.message != WM_KEYDOWN || !IsWindowEnabled(window) ||
+        !(message.hwnd == window || IsChild(window, message.hwnd))) return false;
+    const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0, alt = (GetKeyState(VK_MENU) & 0x8000) != 0,
+        shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+        windows = (GetKeyState(VK_LWIN) & 0x8000) != 0 || (GetKeyState(VK_RWIN) & 0x8000) != 0;
+    if (control && !alt && !shift && !windows && (message.wParam == 'K' || message.wParam == 'F')) {
+        const bool history = message.wParam == 'F' && state.page == historyPage;
+        focusSearch(window, history ? searchID : settingsSearchID);
+        return true;
+    }
+    if (control || alt || windows) return false;
+    HWND edit = GetDlgItem(window, settingsSearchID), list = GetDlgItem(window, settingsResultsID);
+    const bool listed = IsWindowVisible(list) != FALSE && !settingsSearch.shown.empty();
+    if (message.hwnd == edit) {
+        switch (message.wParam) {
+        case VK_DOWN:
+            if (!listed) return false;
+            SetFocus(list);
+            SendMessageW(list, LB_SETCURSEL, 0, 0);
+            return true;
+        case VK_RETURN:
+            if (listed) chooseSettingsResult(window, 0);
+            return true;
+        case VK_ESCAPE:
+            // The first Escape clears the query (showing recents); the next leaves.
+            if (GetWindowTextLengthW(edit) > 0) SetWindowTextW(edit, L"");
+            else {
+                closeSettingsSearch(window, true);
+                SetFocus(GetDlgItem(window, navBaseID + state.page));
+            }
+            return true;
+        default: return false;
+        }
+    }
+    if (message.hwnd != list) return false;
+    const LRESULT row = SendMessageW(list, LB_GETCURSEL, 0, 0);
+    switch (message.wParam) {
+    case VK_RETURN: chooseSettingsResult(window, row == LB_ERR ? 0 : row); return true;
+    case VK_ESCAPE: SetFocus(edit); return true;
+    case VK_UP:
+        if (row != LB_ERR && row > 0) return false;
+        SetFocus(edit);
+        return true;
+    default: return false;
+    }
+}
+
+// A click chooses the row under the pointer once the list has seen the release.
+bool settingsSearchMouseMessage(HWND window, MSG &message) {
+    HWND list = GetDlgItem(window, settingsResultsID);
+    if (message.message != WM_LBUTTONUP || message.hwnd != list || !list) return false;
+    const LRESULT hit = SendMessageW(list, LB_ITEMFROMPOINT, 0, message.lParam);
+    DispatchMessageW(&message);
+    if (HIWORD(hit) == 0) chooseSettingsResult(window, static_cast<LRESULT>(LOWORD(hit)));
+    return true;
+}
 
 bool navigateSidebar(HWND window, int digit, bool exactControl, HWND focused) {
     if (!exactControl || digit < 0 || digit > 9 || !IsWindowEnabled(window) ||
@@ -2065,7 +2354,15 @@ bool createControls(HWND window) {
         if (control) state.controls.push_back(control);
         return control != nullptr;
     };
-    bool okay = true;
+    // The search label precedes its box, so the box's accessible name is
+    // "Search settings"; results are hidden until a search opens.
+    state.wanted[settingsResultsID] = false;
+    state.wanted[settingsNoMatchID] = false;
+    bool okay = add(L"STATIC", L"Search settings", 0, settingsSearchLabelID) &&
+        add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, settingsSearchID) &&
+        add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL |
+            WS_TABSTOP, settingsResultsID) &&
+        add(L"STATIC", L"No settings match", 0, settingsNoMatchID);
     for (int page = 0; page < pageCount && okay; ++page) {
         okay = add(L"BUTTON", pageInfo[page].title, BS_PUSHBUTTON | WS_TABSTOP, navBaseID + page);
     }
@@ -2171,6 +2468,8 @@ bool createControls(HWND window) {
     SendDlgItemMessageW(window, searchID, EM_LIMITTEXT, 512, 0);
     SendDlgItemMessageW(window, searchID, EM_SETCUEBANNER, TRUE,
                         reinterpret_cast<LPARAM>(L"Search transcripts, models and profiles"));
+    SendDlgItemMessageW(window, settingsSearchID, EM_LIMITTEXT, 256, 0);
+    SendDlgItemMessageW(window, settingsSearchID, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Search settings"));
     SendDlgItemMessageW(window, transcriptID, EM_LIMITTEXT, 4 * 1024 * 1024, 0);
     refreshFont(window);
     if (SendDlgItemMessageW(window, sourceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Remote (API providers)")) < 0 ||
@@ -2794,12 +3093,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     }
     case WM_MEASUREITEM: {
         auto item = reinterpret_cast<MEASUREITEMSTRUCT *>(lparam);
-        if (item->CtlType == ODT_LISTBOX) item->itemHeight = static_cast<UINT>(scale(window, 132));
+        if (item->CtlType == ODT_LISTBOX) item->itemHeight = static_cast<UINT>(
+            item->CtlID == settingsResultsID ? settingsResultHeight(window) : scale(window, 132));
         return TRUE;
     }
     case WM_DRAWITEM: {
         const auto &item = *reinterpret_cast<const DRAWITEMSTRUCT *>(lparam);
-        if (item.CtlType == ODT_LISTBOX) drawHistoryItem(window, item);
+        if (item.CtlType == ODT_LISTBOX && item.CtlID == settingsResultsID) drawSettingsResult(window, item);
+        else if (item.CtlType == ODT_LISTBOX) drawHistoryItem(window, item);
         else drawControl(window, item);
         return TRUE;
     }
@@ -2813,6 +3114,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         const int identifier = GetDlgCtrlID(reinterpret_cast<HWND>(lparam));
         COLORREF surface = message == WM_CTLCOLORLISTBOX && identifier == historyID ? palette.window : palette.field;
         if (identifier == backupAudioID || identifier == backupProfilesID) surface = palette.card;
+        if (identifier == settingsResultsID) {
+            if (highContrast()) {
+                SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+                SetBkColor(dc, GetSysColor(COLOR_WINDOW));
+                return reinterpret_cast<LRESULT>(GetSysColorBrush(COLOR_WINDOW));
+            }
+            surface = palette.sidebar;
+        }
         SetTextColor(dc, palette.text);
         SetBkColor(dc, surface);
         return reinterpret_cast<LRESULT>(brushFor(surface));
@@ -2889,6 +3198,22 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case pageMessage:
         showPage(window, static_cast<int>(wparam));
+        if (settingsSearch.focusPage) {
+            settingsSearch.focusPage = false;
+            SetFocus(GetDlgItem(window, navBaseID + state.page));
+        }
+        return 0;
+    case settingsSearchMessage:
+        applySettingsResults(window);
+        return 0;
+    case settingsLeaveMessage:
+        leaveSettingsSearch(window);
+        return 0;
+    case revealFieldMessage:
+        // Search reveals a preference only where the Preferences button would open.
+        if (idleControl(window, configurationID) && IsWindowEnabled(window))
+            jsti_show_configuration_field(window, static_cast<size_t>(wparam));
+        else SetDlgItemTextW(window, statusID, L"Finish the recording or close the open dialog, then search again.");
         return 0;
     case sidebarMessage: {
         std::unique_ptr<SidebarBindings> bindings;
@@ -3140,6 +3465,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case searchID:
             if (HIWORD(wparam) == EN_CHANGE) searchChanged(window);
             return 0;
+        case settingsSearchID:
+            if (HIWORD(wparam) == EN_CHANGE || (HIWORD(wparam) == EN_SETFOCUS && !settingsSearch.suppress))
+                emitSettingsSearch(window);
+            else if (HIWORD(wparam) == EN_KILLFOCUS) PostMessageW(window, settingsLeaveMessage, 0, 0);
+            return 0;
+        case settingsResultsID:
+            if (HIWORD(wparam) == LBN_KILLFOCUS) PostMessageW(window, settingsLeaveMessage, 0, 0);
+            return 0;
         case clearSearchID:
             if (idleControl(window, clearSearchID)) clearSearch(window);
             return 0;
@@ -3316,6 +3649,13 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             state.densityDelivery.retire();
             state.shellDelivery.retire();
         }
+        {
+            std::lock_guard<std::mutex> lock(settingsSearch.mutex);
+            settingsSearch.pending.clear();
+            settingsSearch.changed = settingsSearch.posted = false;
+        }
+        settingsSearch.shown.clear();
+        settingsSearch.active = settingsSearch.focusPage = false;
         jsti::migrationRestore::clear();
         PostQuitMessage(0); return 0;
     }
@@ -3799,6 +4139,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
             if (cancelKeyMessage(window, message)) continue;
             if (sidebarKeyMessage(window, message)) continue;
             if (jsti_action_shortcut_key_message(window, message)) continue;
+            if (settingsSearchKeyMessage(window, message) || settingsSearchMouseMessage(window, message)) continue;
             if (!jsti_issue_report_message(&message) && !jsti_history_filters_message(&message) && !jsti_guide_message(&message) &&
                 !jsti_permissions_message(&message) && !IsDialogMessageW(window, &message)) {
                 TranslateMessage(&message); DispatchMessageW(&message);
@@ -4211,6 +4552,37 @@ int jsti_window_show_page(int page) {
     return state.window && PostMessageW(state.window, pageMessage, static_cast<WPARAM>(page), 0) ? 0 : -1;
 }
 
+int jsti_window_set_settings_search_results(const JSTISettingsSearchResult *results, size_t count) {
+    if ((count && !results) || count > maximumSettingsResults) return -1;
+    try {
+        std::vector<SettingsSearchRow> rows;
+        rows.reserve(count);
+        for (size_t index = 0; index < count; ++index) {
+            const auto &result = results[index];
+            SettingsSearchRow row;
+            std::wstring identifier;
+            if (!jsti::wide(result.title, row.title) || !jsti::wide(result.detail, row.detail) ||
+                !jsti::wide(result.identifier, identifier) || row.title.empty() || row.title.size() > 256 ||
+                row.detail.size() > 1024 || identifier.empty() || identifier.size() > 256) return -1;
+            row.identifier = result.identifier;
+            rows.push_back(std::move(row));
+        }
+        std::lock_guard<std::mutex> windowLock(state.mutex);
+        if (!state.window) return -1;
+        std::lock_guard<std::mutex> lock(settingsSearch.mutex);
+        settingsSearch.pending = std::move(rows);
+        settingsSearch.changed = true;
+        if (!settingsSearch.posted) settingsSearch.posted = PostMessageW(state.window, settingsSearchMessage, 0, 0) != FALSE;
+        return settingsSearch.posted ? 0 : -1;
+    } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_reveal_configuration_field(size_t index) {
+    if (!jsti_configuration_field_available(index)) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    return state.window && PostMessageW(state.window, revealFieldMessage, static_cast<WPARAM>(index), 0) ? 0 : -1;
+}
+
 int jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int showHints) {
     int result = -1;
     try {
@@ -4509,6 +4881,64 @@ static void jsti_smoke_stage(const char *stage) {
     std::fflush(stderr);
 }
 
+// Results replace the list and read as "<title>, <detail>"; Enter reports the
+// chosen row and closes the search; an empty set says "No settings match";
+// invalid input and an unknown preference are refused.
+static bool settingsSearchSelfTest(HWND window) {
+    struct Observed { int event = 0, row = -1, calls = 0; std::string text; } observed;
+    const auto originalCallback = state.callback;
+    void *const originalContext = state.context;
+    HWND originalFocus = GetFocus();
+    state.callback = [](int event, const char *text, int row, void *context) {
+        auto &seen = *static_cast<Observed *>(context);
+        seen.event = event; seen.text = text ? text : ""; seen.row = row; ++seen.calls;
+    };
+    state.context = &observed;
+    auto visible = [&](int identifier) {
+        return (GetWindowLongW(GetDlgItem(window, identifier), GWL_STYLE) & WS_VISIBLE) != 0;
+    };
+    const std::vector<JSTISettingsSearchResult> tooMany(maximumSettingsResults + 1,
+        JSTISettingsSearchResult{"Title", "Detail", "settingsSearchResult.title"});
+    const JSTISettingsSearchResult missing{"Title", nullptr, "settingsSearchResult.title"};
+    const JSTISettingsSearchResult invalid{"\xFF", "Detail", "settingsSearchResult.title"};
+    bool okay = jsti_window_set_settings_search_results(tooMany.data(), tooMany.size()) == -1 &&
+        jsti_window_set_settings_search_results(&missing, 1) == -1 &&
+        jsti_window_set_settings_search_results(&invalid, 1) == -1 &&
+        jsti_window_set_settings_search_results(nullptr, 1) == -1 &&
+        jsti_window_reveal_configuration_field(static_cast<size_t>(-1)) == -1;
+    HWND edit = GetDlgItem(window, settingsSearchID), list = GetDlgItem(window, settingsResultsID);
+    SetWindowTextW(edit, L"mic");
+    okay = okay && observed.event == JSTI_EVENT_SETTINGS_SEARCH && observed.text == "mic";
+    const JSTISettingsSearchResult rows[] = {
+        {"Microphone", "General - The input device.", "settingsSearchResult.general.microphone"},
+        {"Model", "Transcription - The transcription model.", "settingsSearchResult.desktop.model"}};
+    okay = jsti_window_set_settings_search_results(rows, 2) == 0 && okay;
+    SendMessageW(window, settingsSearchMessage, 0, 0);
+    wchar_t name[128]{};
+    if (SendMessageW(list, LB_GETTEXTLEN, 1, 0) < 128) SendMessageW(list, LB_GETTEXT, 1, reinterpret_cast<LPARAM>(name));
+    okay = okay && SendMessageW(list, LB_GETCOUNT, 0, 0) == 2 && visible(settingsResultsID) &&
+        !visible(settingsNoMatchID) && !visible(navBaseID) &&
+        std::wstring(name) == L"Model, Transcription - The transcription model.";
+    SendMessageW(list, LB_SETCURSEL, 1, 0);
+    MSG enter{};
+    enter.hwnd = list; enter.message = WM_KEYDOWN; enter.wParam = VK_RETURN;
+    okay = okay && settingsSearchKeyMessage(window, enter) && observed.event == JSTI_EVENT_SETTINGS_SEARCH_OPEN &&
+        observed.row == 1 && observed.text == "settingsSearchResult.desktop.model" &&
+        GetWindowTextLengthW(edit) == 0 && !visible(settingsResultsID) && visible(navBaseID);
+    settingsSearch.focusPage = false;
+    SetWindowTextW(edit, L"zzzz");
+    okay = jsti_window_set_settings_search_results(nullptr, 0) == 0 && okay;
+    SendMessageW(window, settingsSearchMessage, 0, 0);
+    okay = okay && visible(settingsNoMatchID) && !visible(settingsResultsID) && !visible(navBaseID) &&
+        controlText(GetDlgItem(window, settingsNoMatchID)) == L"No settings match";
+    closeSettingsSearch(window, true);
+    okay = okay && !visible(settingsNoMatchID) && visible(navBaseID);
+    state.callback = originalCallback;
+    state.context = originalContext;
+    if (originalFocus && IsWindowVisible(originalFocus)) SetFocus(originalFocus);
+    return okay;
+}
+
 int jsti_window_self_test(char *error, size_t errorCapacity) {
     jsti_smoke_stage("window.self-test.enter");
     HWND window;
@@ -4546,6 +4976,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             !onPage(aboutLinkBaseID + static_cast<int>(i), aboutPage))
             return jsti::fail("About link labels or page scope failed.", error, errorCapacity);
     }
+    jsti_smoke_stage("window.settings-search.begin");
+    if (!settingsSearchSelfTest(window))
+        return jsti::fail("Settings search results, keyboard choice, empty state or input refusal failed.",
+                          error, errorCapacity);
     jsti_smoke_stage("window.issue-helper.begin");
     { std::string failure;
       if (!jsti_issue_report_self_test(failure)) return jsti::fail(failure, error, errorCapacity); }

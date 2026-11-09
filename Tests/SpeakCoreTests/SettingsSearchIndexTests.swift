@@ -91,7 +91,7 @@ final class SettingsSearchCatalogTests: XCTestCase {
     }
 
     func testTitlesAreUniquePerPlatform() {
-        for platform in [SettingsSearchPlatforms.macOS, .iOS] {
+        for platform in [SettingsSearchPlatforms.macOS, .iOS, .windows, .linux] {
             let titles = SettingsSearchCatalog.entries(for: platform).filter { !$0.isSectionRoot }.map(\.title)
             XCTAssertEqual(titles.count, Set(titles).count, "Duplicate titles for \(platform): \(titles)")
         }

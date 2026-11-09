@@ -32,13 +32,13 @@ sessions:
         title: "Notes: typing elsewhere or switching notes mid-dictation is safe"
         minutes: 4
         core: true
-        build: "Just Speak to It for Mac, mac-v3.2.0 or Alpha build 45 or later"
+        build: "Just Speak to It for Mac, an Alpha build that includes the #664 note-switch fix"
         steps:
           - "At the end of the same note start dictating a long sentence."
           - "After the first words appear, click the first line, type XX, keep talking, then stop."
           - "Start dictating again at the end of the note; after the first words appear, click into a different, empty note, keep talking, then stop."
           - "Check both notes."
-        expected: "XX is kept and nothing outside the dictated text changed or duplicated (streaming may pause). The second note stays empty; the first note has the dictated text once, with no extra paste."
+        expected: "XX is kept and nothing outside the dictated text changed or duplicated (streaming may pause). After the switch, streaming pauses: the second note stays empty, the first note keeps only the words dictated before you switched, and a notice says the full transcript is on the clipboard. This holds for every \u201cIf you switch apps\u201d setting, because both notes are in the same app."
         final_gate: true
       - id: "mac-one-shot-baselines"
         issues:

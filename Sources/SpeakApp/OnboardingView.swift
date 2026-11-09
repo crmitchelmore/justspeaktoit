@@ -108,7 +108,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
     var defaultLiveTranscriptionModel: String? {
         switch self {
         case .deepgram: return "deepgram/nova-3-streaming"
-        case .soniox: return "soniox/stt-rt-v5-streaming"
+        case .soniox: return "soniox/stt-rt-v6-streaming"
         case .openai, .openrouter, .revai: return nil
         case .meta: return MetaMuseVoiceTranscribe.liveCatalogID
         }

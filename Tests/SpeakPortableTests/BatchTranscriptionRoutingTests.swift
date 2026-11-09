@@ -77,7 +77,7 @@ final class BatchTranscriptionRoutingTests: XCTestCase {
             ("elevenlabs/scribe_v2", "elevenlabs"),
             ("groq/whisper-large-v3-turbo", "groq"),
             ("deepgram/nova-3", "deepgram"),
-            ("soniox/stt-async-v5", "soniox"),
+            ("soniox/stt-async-v6", "soniox"),
             ("revai/default", "revai")
         ]
         for (model, provider) in cases {

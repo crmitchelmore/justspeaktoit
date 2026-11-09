@@ -57,10 +57,10 @@ speech-to-text, and none is advertised.
 | --- | --- |
 | Credential | `google.apiKey`, shared with Gemini transcription |
 | Endpoint | `POST https://generativelanguage.googleapis.com/v1beta/interactions`, `x-goog-api-key` |
-| Model | `gemini-3.1-flash-tts-preview` |
+| Model | `gemini-3.8-flash-lite-tts` (replaced `gemini-3.1-flash-tts-preview`, shut down 2026-11-17) |
 | Voices | The 30 documented prebuilt voices, `Zephyr` … `Sulafat` |
-| Output | 24 kHz mono 16-bit PCM, wrapped in a RIFF header by `PCMWaveWriter` |
-| Price | $20 / 1M audio-output tokens, at 25 tokens per second of speech |
+| Output | 24 kHz mono 16-bit PCM (`response_format.mime_type: audio/l16`, since 3.8 defaults to WAV), wrapped in a RIFF header by `PCMWaveWriter` |
+| Price | $12 / 1M audio-output tokens from 2027-01-01 ($6 introductory until 2026-12-31; the estimate uses $12), at 25 tokens per second of speech |
 
 This is Google's own billing and quota, not the OpenRouter speech route tracked
 in #821. Speak already reaches Gemini transcription over the Interactions API,
@@ -68,10 +68,14 @@ and the speech-generation guide documents the same surface, so both directions
 share one host, one header and one credential.
 
 `gemini-2.5-flash-preview-tts` and `gemini-2.5-pro-preview-tts` are supported by
-the Interactions API too, and are simply not offered yet: `gemini-3.1-flash-tts`
+the Interactions API too, and are simply not offered yet: the 3.x Flash TTS line
 supersedes both, it is the only one of the three that supports streaming, and a
 one-model picker is one fewer choice with no benefit attached. Adding them is a
-catalogue entry and a price, not a new code path.
+catalogue entry and a price, not a new code path. The same applies to
+`gemini-3.8-flash-tts`: Google positions Flash-Lite as the workhorse replacement
+for the 3.1 preview, and Flash-Lite covers every explicit language Speak offers.
+Gemini 3.8 reads text verbatim; inline delivery directions are no longer
+interpreted, which Speak never sent.
 
 Because the charge is per generated audio token rather than per submitted
 character, there is no honest pre-synthesis estimate — the cost shown in History

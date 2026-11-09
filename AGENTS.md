@@ -92,6 +92,13 @@ of hand-maintained structure documentation.
   the current parity matrix and performance/device acceptance gates. Preserve
   `Package.resolved` when the dependency-free portable graph removes it.
 
+## Accessibility and Computer Use
+
+Every control needs an accessible name, role, state and a stable automation ID,
+and recording state changes must be announced. Follow
+[Docs/accessibility.md](Docs/accessibility.md) for per-platform rules and the CI
+guards that enforce them.
+
 ## Build, Test, and Development Commands
 
 ### macOS (SwiftPM)

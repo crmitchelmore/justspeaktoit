@@ -179,6 +179,8 @@ constexpr int shortcutID = 171;
 // Opens the native Action shortcuts dialog (WindowsActionShortcuts.cpp).
 constexpr int actionShortcutsID = 478;
 constexpr int transcriptLabelID = 92;
+// Zero-size label created just before the transcript field, so UI Automation names it "Transcript".
+constexpr int transcriptNameID = 88;
 // Read aloud emits an event; Voice… opens the native Voice output dialog.
 constexpr int readAloudID = 172;
 constexpr int voiceSettingsID = 173;
@@ -899,7 +901,7 @@ unsigned pagesOf(int identifier) {
     if (identifier >= aboutLinkBaseID && identifier < aboutLinkBaseID + 8) return page(aboutPage);
     switch (identifier) {
     case statusID: case recordID: case importID: return all;
-    case transcriptID: case copyID: return page(dashboardPage) | page(historyPage);
+    case transcriptID: case transcriptNameID: case copyID: return page(dashboardPage) | page(historyPage);
     case transcriptLabelID: case chipSessionsID: case chipTimeID: case chipSpendID:
     case insightSessionsID: case insightTimeID: case insightAverageID: case insightSpendID:
     case setupMicrophoneID: case setupModelID: case setupShortcutID: case setupOutputID:
@@ -2148,6 +2150,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Windows permissions…", BS_PUSHBUTTON | WS_TABSTOP, permissionsID) &&
         add(L"BUTTON", L"&Troubleshooting…", BS_PUSHBUTTON | WS_TABSTOP, troubleshootingID) &&
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
+        add(L"STATIC", L"Transcript", 0, transcriptNameID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
     for (size_t i = 0; i < state.aboutLinks.size() && okay; ++i)
@@ -2174,6 +2177,7 @@ bool createControls(HWND window) {
     SendDlgItemMessageW(window, searchID, EM_SETCUEBANNER, TRUE,
                         reinterpret_cast<LPARAM>(L"Search transcripts, models and profiles"));
     SendDlgItemMessageW(window, transcriptID, EM_LIMITTEXT, 4 * 1024 * 1024, 0);
+    SetWindowPos(GetDlgItem(window, transcriptNameID), nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_NOACTIVATE);
     refreshFont(window);
     if (SendDlgItemMessageW(window, sourceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Remote (API providers)")) < 0 ||
         SendDlgItemMessageW(window, sourceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Local (on this PC)")) < 0 ||

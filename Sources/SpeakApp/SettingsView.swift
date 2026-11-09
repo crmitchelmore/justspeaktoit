@@ -801,10 +801,12 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
           }
 
-          Picker("Language", selection: settingsBinding(\AppSettings.ttsLanguageIdentifier)) {
-            ForEach(VoiceOutputLanguageCatalog.options) { option in
-              Text(option.displayName).tag(option.id)
-            }
+          LongListPicker(
+            title: "Language", items: VoiceOutputLanguageCatalog.options,
+            id: { $0.id }, selection: settingsBinding(\AppSettings.ttsLanguageIdentifier),
+            searchText: { [$0.displayName, $0.id] }
+          ) { option in
+            Text(option.displayName)
           }
           .pickerStyle(.menu)
 

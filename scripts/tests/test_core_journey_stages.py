@@ -121,17 +121,24 @@ class CommandTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CORE_JOURNEY_BUDGET_SECONDS": "999999"}):
             self.assertEqual(stages.RUNTIME_BUDGET, {"swift": 480, "ui": 600})
         self.assertEqual(stages.BUILD_BUDGET, 900)
-        self.assertEqual(stages.SETUP_BUDGET, 300)
+        self.assertEqual(stages.SETUP_BUDGET, 600)
         self.assertEqual(stages.RECEIPT_BUDGET, 60)
 
     def test_tuist_setup_is_bounded_and_keeps_original_generation_options(self):
         with mock.patch.dict(stages.GATE, {"run_gate": mock.Mock(return_value=17)}):
             self.assertEqual(stages.setup(Path("artifacts")), 17)
-            stages.GATE["run_gate"].assert_called_once_with(
-                ["bash", "-c", f"set -euo pipefail; {stages.SETUP_RETRY}; "
-                 'PATH="$(scripts/install-tuist.sh):$PATH"; retry tuist generate --no-open'],
-                Path("artifacts/setup"), 300, (), stage="setup",
-            )
+            command, directory, budget, extra = stages.GATE["run_gate"].call_args.args
+            self.assertEqual((directory, budget, extra), (Path("artifacts/setup"), 600, ()))
+            self.assertEqual(stages.GATE["run_gate"].call_args.kwargs, {"stage": "setup"})
+            script = command[2]
+            self.assertEqual(command[:2], ["bash", "-c"])
+            self.assertIn('PATH="$(scripts/install-tuist.sh):$PATH"', script)
+            self.assertIn("scripts/retry-network.sh tuist generate --no-open", script)
+            self.assertIn("scripts/retry-network.sh xcodebuild -resolvePackageDependencies", script)
+            self.assertIn("-derivedDataPath artifacts/DerivedData", script)
+            self.assertLess(script.index("tuist generate"), script.index("-resolvePackageDependencies"))
+            # The measured build uses the same DerivedData, so it reuses resolved artefacts.
+            self.assertIn("artifacts/DerivedData", stages.build_command("ui", Path("artifacts")))
 
 
 class IdentityTests(unittest.TestCase):

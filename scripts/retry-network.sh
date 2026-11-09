@@ -12,7 +12,7 @@ if [[ $# -eq 0 ]]; then
     exit 64
 fi
 
-read -r -a delays <<< "${RETRY_NETWORK_DELAYS:-10 30 60}"
+read -r -a delays <<< "${RETRY_NETWORK_DELAYS:-10 30 60 120}"
 attempt=1
 total=$((${#delays[@]} + 1))
 while true; do

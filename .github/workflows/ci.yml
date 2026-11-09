@@ -478,7 +478,8 @@ jobs:
     # The former 600s job spent ~505s preparing before UI tests. Setup now has a
     # separate 300s command budget; build has 900s; actual UI tests keep 600s.
     # Each product/source receipt is separately bounded to 60s, not hidden setup.
-    timeout-minutes: 42
+    # Setup's retried package resolution may take 11 minutes; tests keep 12.
+    timeout-minutes: 47
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
@@ -486,7 +487,7 @@ jobs:
         timeout-minutes: 2
 
       - name: Prepare Tuist and macOS project
-        timeout-minutes: 6
+        timeout-minutes: 11
         run: python3 scripts/run-core-journey-stages.py ui --phase setup
 
       - name: Build launched fixture test products
@@ -912,6 +913,12 @@ jobs:
       # Stable version selection and publication remain explicit decisions.
       - name: Test public API compatibility fixtures
         run: python3 -B -m unittest discover -s scripts/tests -p test_api_compatibility.py -v
+
+      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
+      # release assets, which return 5xx (run 42573814973). Resolve with retries
+      # first so the diagnosis reuses the shared SwiftPM artefact cache.
+      - name: Resolve Swift packages
+        run: scripts/retry-network.sh swift package resolve
 
       - name: Diagnose breaking public API changes
         env:

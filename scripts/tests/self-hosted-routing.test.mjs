@@ -17,10 +17,12 @@ function route(body, github, vars = {}) {
   return new Function('github', 'vars', 'fromJSON', `return (${expression});`)(github, vars, JSON.parse);
 }
 
-function context(event = 'pull_request', repository = 'crmitchelmore/justspeaktoit') {
+function context(event = 'pull_request', repository = 'crmitchelmore/justspeaktoit',
+  { actor = 'crmitchelmore', author = 'crmitchelmore' } = {}) {
   return {
     event_name: event, ref: 'refs/heads/main', sha: 'merge-sha', repository: 'crmitchelmore/justspeaktoit',
-    event: { pull_request: { head: { sha: 'head-sha', repo: { full_name: repository } } } },
+    actor, triggering_actor: actor,
+    event: { pull_request: { user: { login: author }, head: { sha: 'head-sha', repo: { full_name: repository } } } },
   };
 }
 
@@ -41,33 +43,33 @@ const macJobs = {
 
 function assertGuarded(body, pool, fallback, label) {
   const hosted = [fallback];
-  assert.deepEqual(route(body, context(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }), pool, label);
-  assert.deepEqual(route(body, context('push'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }), pool, label);
-  assert.deepEqual(route(body, context()), hosted, `${label}: unset approval stays hosted`);
-  assert.deepEqual(route(body, context(), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }), hosted,
-    `${label}: PR approval must match the head, not the merge commit`);
-  assert.deepEqual(route(body, context('pull_request', 'fork/repo'), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
-    hosted, `${label}: forks never reach self-hosted runners`);
-  assert.deepEqual(route(body, { ...context('push'), ref: 'refs/heads/feature' },
-    { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }), hosted, `${label}: only main pushes`);
+  const bot = 'dependabot[bot]';
+  assert.deepEqual(route(body, context()), pool, label);
+  assert.deepEqual(route(body, context('push')), pool, label);
+  assert.deepEqual(route(body, context('pull_request', undefined, { actor: 'bravostation', author: 'bravostation' })),
+    pool, label);
+  assert.deepEqual(route(body, context(), { JSTI_LOCAL_RUNNERS: 'off' }), hosted, `${label}: master kill switch`);
+  assert.deepEqual(route(body, context('pull_request', 'fork/repo')), hosted,
+    `${label}: forks never reach self-hosted runners`);
+  assert.deepEqual(route(body, context('pull_request', undefined, { actor: bot, author: bot })), hosted,
+    `${label}: bot-authored pull requests stay hosted`);
+  assert.deepEqual(route(body, context('pull_request', undefined, { author: bot })), hosted,
+    `${label}: owner pushes to bot-authored pull requests stay hosted`);
+  assert.deepEqual(route(body, context('push', undefined, { actor: bot })), hosted, `${label}: bot pushes stay hosted`);
+  assert.deepEqual(route(body, { ...context('push'), ref: 'refs/heads/feature' }), hosted, `${label}: only main pushes`);
   for (const event of ['workflow_dispatch', 'schedule', 'pull_request_target', 'workflow_call']) {
-    assert.deepEqual(route(body, context(event), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }), hosted,
-      `${label}: ${event} stays hosted`);
+    assert.deepEqual(route(body, context(event)), hosted, `${label}: ${event} stays hosted`);
   }
 }
 
-test('Linux workloads use Omarchy only for the approved same-repository source', () => {
+test('Linux workloads use Omarchy only for owner-authored same-repository sources', () => {
   for (const [file, ids] of Object.entries(linuxJobs)) {
     const bodies = jobs(workflows[file]);
     for (const [id, fallback] of Object.entries(ids)) {
       const label = `${file}:${id}`;
       assertGuarded(bodies[id], omarchy, fallback, label);
-      assert.deepEqual(route(bodies[id], context(), {
-        JSTI_NATIVE_APPROVED_SHA: 'head-sha', JSTI_LINUX_RUNNER_LABELS: '["ubuntu-24.04"]',
-      }), ['ubuntu-24.04'], `${label}: the Linux label variable is an independent kill switch`);
-      assert.deepEqual(route(bodies[id], context(), {
-        JSTI_NATIVE_APPROVED_SHA: 'head-sha', JSTI_NATIVE_RUNNER_LABELS: '["x"]',
-      }), omarchy, `${label}: Mac pool labels never select Linux runners`);
+      assert.deepEqual(route(bodies[id], context(), { JSTI_LINUX_RUNNER_LABELS: '["ubuntu-24.04"]' }), ['ubuntu-24.04'], `${label}: the Linux label variable is an independent kill switch`);
+      assert.deepEqual(route(bodies[id], context(), { JSTI_NATIVE_RUNNER_LABELS: '["x"]' }), omarchy, `${label}: Mac pool labels never select Linux runners`);
     }
   }
 });

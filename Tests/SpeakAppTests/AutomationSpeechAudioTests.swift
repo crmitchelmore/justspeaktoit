@@ -82,3 +82,47 @@ final class AutomationSpeechAudioTests: XCTestCase {
         XCTAssertGreaterThan(result.duration, 0)
     }
 }
+
+/// The Mac's `speak voices` list comes from the app's own settings and keys.
+final class AutomationVoiceListingTests: XCTestCase {
+    @MainActor
+    private func manager(selectedVoice: String) throws -> (TextToSpeechManager, () -> Void) {
+        let suite = "AutomationVoiceListing-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.set(selectedVoice, forKey: "defaultTTSVoice")
+        let settings = AppSettings(defaults: defaults)
+        let storage = SecureAppStorage(
+            permissionsManager: PermissionsManager(), appSettings: settings,
+            keychainService: "com.justspeaktoit.tests.automation-voices.\(UUID().uuidString)"
+        )
+        let manager = TextToSpeechManager(
+            appSettings: settings, secureStorage: storage,
+            clients: [.openai: OpenAITTSClient(secureStorage: storage), .system: SystemTTSClient()],
+            defaults: defaults
+        )
+        return (manager, { defaults.removePersistentDomain(forName: suite) })
+    }
+
+    @MainActor
+    func testUnkeyedSelectedVoice_IsNotListedSoTheDefaultFallsBackOnDevice() async throws {
+        let (manager, cleanup) = try self.manager(selectedVoice: "openai/alloy")
+        defer { cleanup() }
+        let voices = await manager.automationVoices(refresh: false)
+        XCTAssertEqual(voices.first?.id, TextToSpeechManager.onDeviceVoiceID)
+        XCTAssertTrue(voices.allSatisfy(\.onDevice))
+        let choice = try AutomationVoiceResolver.resolve(AutomationSpeechSelection(), in: voices)
+        XCTAssertTrue(choice.isFallback)
+        XCTAssertEqual(choice.voice.id, TextToSpeechManager.onDeviceVoiceID)
+    }
+
+    @MainActor
+    func testSelectedSystemVoice_IsTheDefault() async throws {
+        let (manager, cleanup) = try self.manager(selectedVoice: "system/samantha")
+        defer { cleanup() }
+        let voices = await manager.automationVoices(refresh: false)
+        let choice = try AutomationVoiceResolver.resolve(AutomationSpeechSelection(), in: voices)
+        XCTAssertFalse(choice.isFallback)
+        XCTAssertEqual(choice.voice.id, "system/samantha")
+        XCTAssertTrue(choice.voice.selected)
+    }
+}

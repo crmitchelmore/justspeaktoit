@@ -12,11 +12,14 @@ extension AppAutomationHandler {
                 code: .alreadyRecording, message: "Stop dictation before speaking aloud, or write a file with -o."
             )
         }
-        let voice = self.voiceID(for: speech.voice)
+        let choice = try AutomationVoiceResolver.resolve(
+            speech.voice, in: await self.tts.automationVoices(refresh: false, including: speech.voice.voice)
+        )
+        let voice = choice.voice.id
         let result: TTSResult
         do {
             result = try await self.tts.synthesizeForAutomation(
-                text: speech.text, voice: voice, format: speech.output?.format ?? .macDefault
+                text: speech.text, voice: voice, model: choice.model, format: speech.output?.format ?? .macDefault
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -36,20 +39,18 @@ extension AppAutomationHandler {
         } catch {
             throw AutomationError(code: .speechFailed, message: error.localizedDescription)
         }
-        var reply = AutomationResult(durationSeconds: result.duration)
+        var reply = AutomationResult(model: choice.model, durationSeconds: result.duration)
         reply.voice = voice
         reply.path = speech.output?.path
+        if choice.isFallback {
+            reply.notice = "Used the on-device voice because the app's voice (\(self.tts.selectedVoiceID)) "
+                + "has no saved key. Choose a voice in the app's Voice settings, or pass --voice."
+        }
         return reply
     }
-}
 
-extension AppAutomationHandler {
-    fileprivate func voiceID(for voice: AutomationSpeechVoice) -> String {
-        switch voice {
-        case .onDevice: TextToSpeechManager.onDeviceVoiceID
-        case .app: self.tts.selectedVoiceID
-        case .identifier(let identifier): identifier
-        }
+    func automationVoices() async throws -> [AutomationVoice] {
+        await self.tts.automationVoices(refresh: true)
     }
 }
 

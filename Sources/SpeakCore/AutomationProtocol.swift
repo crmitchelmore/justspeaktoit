@@ -49,6 +49,7 @@ public enum AutomationCommand: String, Codable, Sendable, CaseIterable {
     case history = "get_history"
     case awaitTranscript = "await_transcript"
     case speakText = "speak_text"
+    case listVoices = "list_voices"
 }
 
 /// Stable machine-readable failure codes.
@@ -112,11 +113,8 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     public var timeout: TimeInterval?
     public var captureID: String?
     public var sinceID: String?
-    /// `speak_text` only: the text to speak, a voice identifier (nil for the
-    /// on-device voice) and whether to play it. `path` names the output file.
-    public var text: String?
-    public var voice: String?
-    public var play: Bool?
+    /// `speak_text` only (`provider` too): see `AutomationSpeechSelection`.
+    public var text: String?, voice: String?, play: Bool?, model: String?, favorite: String?
 
     public init(
         schemaVersion: Int = AutomationSchema.currentVersion,
@@ -139,6 +137,7 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
         let fallback: TimeInterval = switch self.command {
         case .transcribeFile: AutomationLimits.transcriptionTimeout
         case .speakText: AutomationLimits.speechTimeout
+        case .listVoices: AutomationLimits.voiceListingTimeout
         default: AutomationLimits.defaultTimeout
         }
         guard let timeout, timeout > 0 else { return fallback }
@@ -190,7 +189,7 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
                     message: "get_history limit must be between 1 and \(AutomationLimits.maxHistoryLimit)."
                 )
             }
-        case .status, .startDictation, .stopDictation, .speakText:
+        case .status, .startDictation, .stopDictation, .speakText, .listVoices:
             break
         }
         return self
@@ -254,9 +253,10 @@ public struct AutomationResult: Codable, Sendable, Equatable {
     public var entries: [AutomationHistoryEntry]?
     public var captureID: String?
     public var entry: AutomationHistoryEntry?
-    /// `speak_text`: the voice used and the audio file written, if any.
-    public var voice: String?
-    public var path: String?
+    /// `speak_text`: the voice used, the file written and any `notice` worth
+    /// telling a person (such as a fallback); `list_voices`: `voices`.
+    public var voice: String?, path: String?, notice: String?
+    public var voices: [AutomationVoice]?
 
     public init(
         text: String? = nil,

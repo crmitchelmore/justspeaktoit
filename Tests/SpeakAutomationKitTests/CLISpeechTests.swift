@@ -36,7 +36,7 @@ final class CLISpeechTests: XCTestCase {
         var request = plan.request()
         request.text = "hello world"
         XCTAssertTrue(request.resolvedPlay)
-        XCTAssertEqual(AutomationSpeechVoice(wireValue: request.voice), .onDevice)
+        XCTAssertNil(request.voice)
     }
 
     func testSay_outputWritesWithoutPlayingUnlessAsked() throws {
@@ -47,6 +47,46 @@ final class CLISpeechTests: XCTestCase {
 
         let both = try self.plan(["say", "hi", "--output=out.m4a", "--play"])
         XCTAssertTrue(both.request().resolvedPlay)
+    }
+
+    func testSay_passesTheVoiceSelectionFlags() throws {
+        let request = try self.plan([
+            "say", "hi", "--provider", "openai", "--model", "tts-1-hd", "--favorite", "Nova", "--voice", "alloy"
+        ]).request()
+        XCTAssertEqual(request.provider, "openai")
+        XCTAssertEqual(request.model, "tts-1-hd")
+        XCTAssertEqual(request.favorite, "Nova")
+        XCTAssertEqual(request.voice, "alloy")
+    }
+
+    func testVoices_listsWithMarkersAndModels() throws {
+        let plan = try self.plan(["voices", "--provider", "openai", "--json"])
+        XCTAssertEqual(plan.command, .listVoices)
+        XCTAssertEqual(plan.provider, "openai")
+        XCTAssertThrowsError(try CommandLineParser.parse(["voices", "--voice", "x"]))
+
+        var reply = AutomationResult()
+        reply.voices = [
+            AutomationVoice(id: "openai/alloy", name: "Alloy", provider: "openai", providerName: "OpenAI",
+                            models: ["openai/tts-1", "openai/tts-1-hd"], model: "openai/tts-1", selected: true),
+            AutomationVoice(id: "system/default", name: "System default", provider: "system",
+                            providerName: "macOS System", favorite: true, onDevice: true)
+        ]
+        let output = try self.run(["voices"], client: StubAutomationClient(result: reply))
+        XCTAssertEqual(output.stdout, """
+        *  openai/alloy    Alloy (OpenAI)
+              models: openai/tts-1 (default), openai/tts-1-hd
+         + system/default  System default (macOS System)
+
+        """)
+    }
+
+    func testSay_printsAFallbackNoticeOnStandardError() throws {
+        var reply = AutomationResult()
+        reply.notice = "Used the on-device voice."
+        let output = try self.run(["say", "hi"], client: StubAutomationClient(result: reply))
+        XCTAssertEqual(output.stdout, "")
+        XCTAssertEqual(output.stderr, "note: Used the on-device voice.\n")
     }
 
     func testSay_readsStandardInputByDefaultOrForDash() throws {
@@ -71,7 +111,8 @@ final class CLISpeechTests: XCTestCase {
 
     func testHelp_documentsSay() {
         XCTAssertTrue(CommandLineParser.usage.contains("speak say"))
-        XCTAssertTrue(CommandLineParser.usage.contains("--voice app"))
+        XCTAssertTrue(CommandLineParser.usage.contains("speak voices"))
+        XCTAssertTrue(CommandLineParser.usage.contains("--favorite"))
     }
 
     // MARK: - Running
@@ -134,7 +175,9 @@ final class CLISpeechTests: XCTestCase {
         let handler = MCPRequestHandler(client: client, version: "9.9.9")
         let message: [String: Any] = [
             "jsonrpc": "2.0", "id": 7, "method": "tools/call",
-            "params": ["name": "speak_text", "arguments": ["text": "hello", "voice": "app", "play": true]]
+            "params": ["name": "speak_text", "arguments": [
+                "text": "hello", "voice": "app", "provider": "openai", "model": "tts-1", "play": true
+            ]]
         ]
         let line = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: message), encoding: .utf8))
         let reply = try XCTUnwrap(handler.handle(line: line))
@@ -142,6 +185,8 @@ final class CLISpeechTests: XCTestCase {
         let request = try XCTUnwrap(client.sentRequests.first)
         XCTAssertEqual(request.text, "hello")
         XCTAssertEqual(request.voice, "app")
+        XCTAssertEqual(request.provider, "openai")
+        XCTAssertEqual(request.model, "tts-1")
         XCTAssertEqual(request.play, true)
     }
 }

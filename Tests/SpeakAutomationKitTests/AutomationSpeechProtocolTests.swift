@@ -55,18 +55,35 @@ final class AutomationSpeechProtocolTests: XCTestCase {
         XCTAssertEqual(self.request().resolvedTimeout, AutomationLimits.speechTimeout)
     }
 
-    func testVoiceKeywords_mapToTheirMeaning() {
-        XCTAssertEqual(AutomationSpeechVoice(wireValue: nil), .onDevice)
-        XCTAssertEqual(AutomationSpeechVoice(wireValue: "system"), .onDevice)
-        XCTAssertEqual(AutomationSpeechVoice(wireValue: "app"), .app)
-        XCTAssertEqual(AutomationSpeechVoice(wireValue: "openai/alloy"), .identifier("openai/alloy"))
+    func testSelectionKeywords_mapToTheirMeaning() {
+        XCTAssertNil(AutomationSpeechSelection(voice: "app").voice)
+        XCTAssertTrue(AutomationSpeechSelection(voice: "System").wantsOnDevice)
+        XCTAssertFalse(AutomationSpeechSelection(voice: "openai/alloy").wantsOnDevice)
+    }
+
+    func testProvider_isAcceptedOnlyForVoiceCommands() throws {
+        var speech = self.request()
+        speech.provider = "openai"
+        speech.model = "tts-1"
+        speech.favorite = "Alloy"
+        XCTAssertNoThrow(try speech.validated())
+
+        var list = AutomationRequest(command: .listVoices)
+        list.provider = "openai"
+        XCTAssertNoThrow(try list.validated())
+        list.voice = "x"
+        self.assertInvalid(list, "only a provider")
+
+        var status = AutomationRequest(command: .status)
+        status.model = "tts-1"
+        self.assertInvalid(status, "require speak_text")
     }
 
     func testPolicy_resolvesTheOutputFormatAndPlayDefault() throws {
         let path = self.directory.appendingPathComponent("Out.M4A").path
         let speech = try AutomationRequestPolicy.speech(for: self.request(voice: "app", path: path))
         XCTAssertEqual(speech.text, "Hello")
-        XCTAssertEqual(speech.voice, .app)
+        XCTAssertEqual(speech.voice, AutomationSpeechSelection())
         XCTAssertEqual(speech.output?.format, .m4a)
         XCTAssertEqual(speech.output?.path, path)
         XCTAssertFalse(speech.play)
@@ -91,11 +108,18 @@ final class AutomationSpeechProtocolTests: XCTestCase {
         XCTAssertTrue(response.ok)
         XCTAssertEqual(response.result?.voice, "recorded")
         let speech = await host.speech
-        XCTAssertEqual(speech?.voice, .app)
+        XCTAssertEqual(speech?.voice, AutomationSpeechSelection())
         XCTAssertEqual(speech?.play, true)
 
         let invalid = await AutomationCommandDispatcher.response(to: self.request(text: ""), host: host)
         XCTAssertEqual(invalid.error?.code, .invalidArgument)
+    }
+
+    func testDispatcher_listsVoicesFilteredByProvider() async throws {
+        var list = AutomationRequest(command: .listVoices)
+        list.provider = "OpenAI"
+        let response = await AutomationCommandDispatcher.response(to: list, host: SpeechRecordingHost())
+        XCTAssertEqual(response.result?.voices?.map(\.id), ["openai/alloy"])
     }
 
     func testRequestAndResult_roundTripTheNewFields() throws {
@@ -106,6 +130,8 @@ final class AutomationSpeechProtocolTests: XCTestCase {
         var result = AutomationResult()
         result.voice = "openai/alloy"
         result.path = "/tmp/a.wav"
+        result.notice = "Used the on-device voice."
+        result.voices = [AutomationVoice(id: "a", name: "A", provider: "p", providerName: "P", models: ["m"])]
         let decoded = try AutomationCoding.decoder().decode(
             AutomationResult.self, from: AutomationCoding.encoder().encode(result))
         XCTAssertEqual(decoded, result)
@@ -120,6 +146,13 @@ private actor SpeechRecordingHost: AutomationCommandHost {
     func automationTranscribeFile(at url: URL) async throws -> AutomationResult { AutomationResult() }
     func automationStartDictation() async throws -> AutomationResult { AutomationResult() }
     func automationStopDictation() async throws -> AutomationResult { AutomationResult() }
+    func automationVoices() async throws -> [AutomationVoice] {
+        [
+            AutomationVoice(id: "openai/alloy", name: "Alloy", provider: "openai", providerName: "OpenAI"),
+            AutomationVoice(id: "system/default", name: "System default", provider: "system",
+                            providerName: "macOS System", onDevice: true)
+        ]
+    }
     func automationSpeak(_ speech: AutomationSpeechRequest) async throws -> AutomationResult {
         self.speech = speech
         var result = AutomationResult()

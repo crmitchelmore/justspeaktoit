@@ -31,6 +31,10 @@ public protocol AutomationCommandHost: AnyObject, Sendable {
     /// Returns once playback has finished and the file is complete. A host
     /// without the requested voice or format throws rather than substituting.
     func automationSpeak(_ speech: AutomationSpeechRequest) async throws -> AutomationResult
+    /// Every voice `automationSpeak` can use right now, from the app's own
+    /// settings and saved keys: the selected voice, favourites, configured
+    /// cloud voices and any on-device voices.
+    func automationVoices() async throws -> [AutomationVoice]
 }
 
 /// Maps one validated automation request onto an `AutomationCommandHost`.
@@ -59,6 +63,15 @@ public enum AutomationCommandDispatcher {
                 result = try await host.automationStopDictation()
             case .speakText:
                 result = try await host.automationSpeak(AutomationRequestPolicy.speech(for: request))
+            case .listVoices:
+                var listed = AutomationResult()
+                listed.voices = try await host.automationVoices().filter { voice in
+                    request.provider.map {
+                        voice.provider.caseInsensitiveCompare($0) == .orderedSame
+                            || voice.providerName.caseInsensitiveCompare($0) == .orderedSame
+                    } ?? true
+                }
+                result = listed
             }
             return .success(id: request.id, command: request.command, result: result)
         } catch let error as AutomationError {
@@ -84,7 +97,7 @@ public enum AutomationRequestPolicy {
     /// report success for an override that never took effect. Shared so every
     /// platform keeps rejecting them until all of them apply them.
     public static func rejectUnappliedOptions(in request: AutomationRequest) throws {
-        if request.provider != nil {
+        if request.provider != nil, request.command != .speakText, request.command != .listVoices {
             throw AutomationError(
                 code: .invalidArgument,
                 message: "This app version cannot override the transcription provider per request. "

@@ -30,7 +30,7 @@ final class DesktopHostAutomationSpeechTests: XCTestCase {
     }
 
     private func speech(
-        _ voice: AutomationSpeechVoice, file: String? = nil, play: Bool = false
+        _ voice: AutomationSpeechSelection = .init(), file: String? = nil, play: Bool = false
     ) -> AutomationSpeechRequest {
         AutomationSpeechRequest(
             text: "Synthetic automation speech", voice: voice,
@@ -38,19 +38,51 @@ final class DesktopHostAutomationSpeechTests: XCTestCase {
         )
     }
 
-    func testDefaultVoice_FailsClearlyWithoutAnOnDeviceVoice() async {
+    private func assertRefused(
+        _ request: AutomationSpeechRequest, _ code: AutomationErrorCode, _ fragment: String, line: UInt = #line
+    ) async {
         do {
-            _ = try await controller.automationSpeak(speech(.onDevice, play: true))
-            XCTFail("Expected the on-device voice to be refused")
+            _ = try await controller.automationSpeak(request)
+            XCTFail("Expected a refusal", line: line)
         } catch let error as AutomationError {
-            XCTAssertEqual(error.code, .unsupportedCommand)
-            XCTAssertTrue(error.message.contains("--voice app"))
-        } catch { XCTFail("Unexpected \(error)") }
+            XCTAssertEqual(error.code, code, line: line)
+            XCTAssertTrue(error.message.contains(fragment), error.message, line: line)
+        } catch { XCTFail("Unexpected \(error)", line: line) }
+    }
+
+    func testOnDeviceVoice_IsRefusedClearlyOnThisHost() async {
+        await assertRefused(speech(.init(voice: "system"), play: true), .unsupportedCommand, "on-device")
         XCTAssertTrue(FakeSpeech.shared.events.isEmpty)
     }
 
+    func testDefaultWithoutAnyKey_ExplainsThereIsNothingToFallBackTo() async {
+        FakeLog.shared.reset()
+        await assertRefused(speech(play: true), .unsupportedCommand, "No voice is configured")
+    }
+
+    func testVoices_ListOnlyKeyedProvidersAndMarkTheSelectedVoice() async throws {
+        let voices = try await controller.automationVoices()
+        XCTAssertFalse(voices.isEmpty)
+        XCTAssertEqual(Set(voices.map(\.provider)), ["deepgram"])
+        XCTAssertEqual(voices.filter(\.selected).count, 1)
+        XCTAssertFalse(voices.contains(where: \.onDevice))
+    }
+
+    func testProviderAndModel_SelectAnotherConfiguredVoice() async throws {
+        FakeLog.shared.setKey("openai-key", name: OpenAITTSCatalog.credentialIdentifier)
+        let openai = try await controller.automationVoices().filter { $0.provider == "openai" }
+        let voice = try XCTUnwrap(openai.first { $0.models.count > 1 })
+        let model = try XCTUnwrap(voice.models.last)
+        let result = try await controller.automationSpeak(
+            speech(.init(voice: voice.id, model: model), file: "openai.wav"))
+        XCTAssertEqual(result.voice, voice.id)
+        XCTAssertEqual(result.model, model)
+        let byProvider = try await controller.automationSpeak(speech(.init(provider: "OpenAI"), file: "p.wav"))
+        XCTAssertTrue(openai.contains { $0.id == byProvider.voice })
+    }
+
     func testAppVoice_WritesTheFileWithoutPlaying() async throws {
-        let result = try await controller.automationSpeak(speech(.app, file: "out.wav"))
+        let result = try await controller.automationSpeak(speech(file: "out.wav"))
         let target = output.appendingPathComponent("out.wav")
         let wav = try Data(contentsOf: target)
         XCTAssertEqual(String(data: wav.prefix(4), encoding: .ascii), "RIFF")
@@ -62,13 +94,13 @@ final class DesktopHostAutomationSpeechTests: XCTestCase {
     }
 
     func testAppVoice_PlaysToTheEndThroughTheSharedPlayer() async throws {
-        _ = try await controller.automationSpeak(speech(.app, play: true))
+        _ = try await controller.automationSpeak(speech(play: true))
         XCTAssertEqual(FakeSpeech.shared.events, ["begin", "play", "end"])
     }
 
     func testStopInTheWindow_EndsAutomationSpeechWithAFailure() async throws {
         FakeSpeech.shared.reset(holdingSegments: true)
-        let request = speech(.app, play: true)
+        let request = speech(play: true)
         let speaking = Task { try await self.controller.automationSpeak(request) }
         for _ in 0..<200 where !FakeSpeech.shared.events.contains("play") {
             try await Task.sleep(nanoseconds: 10_000_000)
@@ -87,9 +119,9 @@ final class DesktopHostAutomationSpeechTests: XCTestCase {
 
     func testUnknownVoiceAndProtectedPath_AreRefusedBeforeSynthesis() async {
         for (request, code) in [
-            (speech(.identifier("nobody/none")), AutomationErrorCode.invalidArgument),
+            (speech(.init(voice: "nobody/none")), AutomationErrorCode.invalidArgument),
             (AutomationSpeechRequest(
-                text: "Hi", voice: .app,
+                text: "Hi", voice: .init(),
                 output: .init(path: directory.appendingPathComponent("x.wav").path, format: .wav), play: false
             ), .invalidArgument)
         ] {

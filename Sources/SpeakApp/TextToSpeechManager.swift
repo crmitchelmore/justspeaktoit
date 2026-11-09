@@ -515,10 +515,93 @@ extension TextToSpeechManager {
   /// The voice selected in Settings, after the same migration synthesis applies.
   var selectedVoiceID: String { migrateAndValidateVoiceID(appSettings.defaultTTSVoice) }
 
+  /// Voices `speak say` can use now, read from the app's settings and keys:
+  /// on-device voices, then every voice of a provider whose key is saved.
+  /// `refresh` asks providers for account voices (for `speak voices`);
+  /// otherwise the offline catalogue and last listing keep speaking fast.
+  /// `including` keeps an account voice ID the offline catalogue cannot name.
+  func automationVoices(refresh: Bool, including requested: String? = nil) async -> [AutomationVoice] {
+    var configured: Set<TTSProvider> = [.system]
+    for provider in TTSProvider.allCases where provider != .system && clients[provider] != nil {
+      if await hasAPIKey(for: provider) { configured.insert(provider) }
+    }
+    let listed = refresh
+      ? await availableVoices()
+      : VoiceCatalog.allVoices + voiceListing.lastKnown.values.flatMap { $0 }
+    var rows = Self.onDeviceAutomationVoices()
+    var seen = Set(rows.map(\.id))
+    for voice in listed where voice.provider != .system && configured.contains(voice.provider) {
+      guard seen.insert(voice.id).inserted else { continue }
+      rows.append(automationVoice(id: voice.id, name: voice.name, provider: voice.provider))
+    }
+    let selected = selectedVoiceID
+    for identifier in [selected, requested].compactMap({ $0 }) where !seen.contains(identifier)
+      && TTSProvider.knownVoiceIDPrefixes.contains(where: { identifier.hasPrefix($0) }) {
+      let provider = TTSProvider.from(voiceID: identifier)
+      guard configured.contains(provider) else { continue }
+      seen.insert(identifier)
+      rows.append(automationVoice(id: identifier, name: identifier, provider: provider))
+    }
+    let favorites = Set(appSettings.ttsFavoriteVoices)
+    return rows.map { row in
+      var row = row
+      row.selected = row.id == selected
+      row.favorite = favorites.contains(row.id)
+      return row
+    }
+  }
+
+  private static func onDeviceAutomationVoices() -> [AutomationVoice] {
+    let provider = TTSProvider.system
+    let systemDefault = AutomationVoice(
+      id: onDeviceVoiceID, name: "System default", provider: provider.rawValue,
+      providerName: provider.displayName, onDevice: true
+    )
+    return [systemDefault] + AVSpeechSynthesisVoice.speechVoices().map { voice in
+      AutomationVoice(
+        id: "system/\(voice.identifier)", name: voice.name, provider: provider.rawValue,
+        providerName: provider.displayName, onDevice: true
+      )
+    }
+  }
+
+  private func automationVoice(id: String, name: String, provider: TTSProvider) -> AutomationVoice {
+    let (models, model) = automationModels(voiceID: id, provider: provider)
+    return AutomationVoice(
+      id: id, name: name, provider: provider.rawValue, providerName: provider.displayName,
+      models: models, model: model, onDevice: provider == .system
+    )
+  }
+
+  /// The Mac expresses a model as quality (OpenAI, ElevenLabs) or a model
+  /// setting (Mistral); these are listed with the shared catalogue's IDs.
+  private func automationModels(voiceID: String, provider: TTSProvider) -> ([String], String?) {
+    let quality = appSettings.ttsQuality
+    switch provider {
+    case .openai:
+      guard let voice = OpenAITTSCatalog.voice(forID: voiceID) else { return ([], nil) }
+      let models = OpenAITTSCatalog.models.filter(voice.supports)
+      let current = models.first { $0.quality == quality } ?? models.first
+      return (models.map(\.desktopModelIdentifier), current?.desktopModelIdentifier)
+    case .elevenlabs:
+      var models: [String] = []
+      for model in TTSQuality.allCases.map({ ElevenLabsTTSModels.model(for: $0).desktopModelIdentifier })
+      where !models.contains(model) { models.append(model) }
+      return (models, ElevenLabsTTSModels.model(for: quality).desktopModelIdentifier)
+    case .mistral:
+      let models = MistralTTSCatalog.models.map(\.desktopModelIdentifier)
+      return (models, appSettings.mistralTTSModel.desktopModelIdentifier)
+    default:
+      return ([], nil)
+    }
+  }
+
   /// Synthesizes for `speak say` with the app's clients, keys, voice settings,
   /// pronunciation and usage ledger, but none of the window's playback state,
   /// auto-play or recordings copy. The caller owns the returned file.
-  func synthesizeForAutomation(text: String, voice: String, format: AudioFormat) async throws -> TTSResult {
+  func synthesizeForAutomation(
+    text: String, voice: String, model: String?, format: AudioFormat
+  ) async throws -> TTSResult {
     guard TTSProvider.knownVoiceIDPrefixes.contains(where: { voice.hasPrefix($0) }) else {
       throw TTSError.invalidVoice(voice)
     }
@@ -527,10 +610,30 @@ extension TextToSpeechManager {
     if provider.requiresAPIKey, !(await hasAPIKey(for: provider)) { throw TTSError.apiKeyMissing(provider) }
     var settings = synthesisSettings(useSSML: nil)
     settings.format = format
+    if let model { Self.apply(model: model, provider: provider, to: &settings) }
     let processed = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
     let result = try await client.synthesize(text: processed, voice: voice, settings: settings)
     usageHistory.append(result)
     saveUsageHistory()
     return result
+  }
+
+  private static func apply(model: String, provider: TTSProvider, to settings: inout TTSSettings) {
+    switch provider {
+    case .openai:
+      if let match = OpenAITTSCatalog.models.first(where: { $0.desktopModelIdentifier == model }) {
+        settings.quality = match.quality
+      }
+    case .elevenlabs:
+      if let quality = TTSQuality.allCases.first(where: {
+        ElevenLabsTTSModels.model(for: $0).desktopModelIdentifier == model
+      }) { settings.quality = quality }
+    case .mistral:
+      if let match = MistralTTSCatalog.models.first(where: { $0.desktopModelIdentifier == model }) {
+        settings.mistralModel = match
+      }
+    default:
+      break
+    }
   }
 }

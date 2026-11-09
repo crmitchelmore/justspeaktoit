@@ -36,6 +36,10 @@ final class WindowsAutomationHost: AutomationCommandHost, @unchecked Sendable {
     func automationSpeak(_ speech: AutomationSpeechRequest) async throws -> AutomationResult {
         try await controller.automationSpeak(speech)
     }
+
+    func automationVoices() async throws -> [AutomationVoice] {
+        try await controller.automationVoices()
+    }
 }
 
 extension WindowsAppController {

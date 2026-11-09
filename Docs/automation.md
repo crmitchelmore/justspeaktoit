@@ -22,6 +22,7 @@ directly between them:
 | transcribe | Transcribe Audio File | `speak transcribe <file>` | `transcribe_file` |
 | history | Get Last Transcription | `speak history` | `get_history` |
 | say | — | `speak say <text>` | `speak_text` |
+| voices | — | `speak voices` | `list_voices` |
 | polish | Polish Text | — | — |
 
 ## Named local capture await (qualification pending)
@@ -326,7 +327,9 @@ speak await --capture-id <uuid> [--since-id <uuid>] [--timeout <seconds>] [--jso
 speak listen [--json]
 speak stop [--json]
 speak history [--last <n>] [--json]
-speak say [<text>... | -f <file> | -] [--voice <id>] [-o <file>] [--play] [--json] [--timeout <seconds>]
+speak say [<text>... | -f <file> | -] [-o <file>] [--play] [--json] [--timeout <seconds>]
+          [--voice <id|name>] [--provider <id>] [--model <id>] [--favorite <name>]
+speak voices [--provider <id>] [--json]
 speak status [--json]
 speak mcp
 speak --help | --version
@@ -341,18 +344,33 @@ credentials and no provider code; it sends the text and the app synthesizes it.
 - **Text** comes from the arguments, from `-f <file>` (UTF-8), or from standard
   input when neither is given (or with `-`). Use `--` before text that starts
   with a dash. Up to 100,000 characters.
-- **Voice**: without `--voice`, the Mac uses its on-device system voice for your
-  language — no API key and no network. `--voice app` uses the voice selected
-  in the app's Voice settings; `--voice <id>` names any voice the app offers,
-  such as `openai/alloy` or `system/Daniel` on the Mac. Cloud voices need their
-  key saved in the app.
+- **Voice**: by default `say` uses the voice and model selected in the app's
+  Voice settings. When that voice's provider has no saved key (or nothing is
+  selected), the Mac falls back to its on-device system voice — no key, no
+  network — and prints a `note:` on stderr. To choose another of the app's
+  voices:
+  - `--voice <id|name>` — a voice ID or display name (`openai/alloy`, `Daniel`).
+    `--voice system` forces the on-device voice.
+  - `--provider <id>` — a provider ID or name (`openai`, `ElevenLabs`); alone it
+    uses that provider's selected, favourite or first voice.
+  - `--model <id>` — a model the voice offers (`openai/tts-1-hd` or `tts-1-hd`).
+  - `--favorite <name>` — a voice saved as a favourite in the app.
+
+  Matching ignores case, an ID wins over a name, and a name shared by several
+  voices is refused rather than guessed. Only voices the app can use now are
+  eligible: cloud voices need their key saved in the app, which reads its own
+  settings and Keychain/credential store, so the CLI never sees a key.
+- **Listing**: `speak voices` prints those voices, marking the selected voice
+  `*` and favourites `+`, with each voice's models and the default one.
+  `--json` returns `data.voices` with `id`, `name`, `provider`, `providerName`,
+  `models`, `model`, `selected`, `favorite` and `onDevice`.
 - **Output**: with no `-o`, the speech plays aloud and the command returns when
   it finishes. `-o <file>` writes `.wav`, `.mp3` or `.m4a` (chosen by the
   extension) without playing; add `--play` to do both. An existing file is
   replaced only once the new audio is complete.
 - **Platforms**: the Windows and Linux apps have no on-device voice yet, so
-  `speak say` without `--voice` fails with `unsupported_command` there rather
-  than spend cloud credit; pass `--voice app` or a voice ID. They encode MP3
+  with no configured voice `speak say` fails with `unsupported_command` there
+  rather than guessing a paid voice; `--voice system` fails the same way. They encode MP3
   and M4A with the same native encoders as Voice export; a format the host
   cannot encode fails before anything is synthesized. The Mac
   cannot encode MP3 from its system voice, so ask for `.wav` or `.m4a` with it.
@@ -387,7 +405,8 @@ Read a file aloud, or save a greeting with the app's selected voice:
 ```bash
 speak say -f notes.txt
 echo "Build finished" | speak say
-speak say "Hello and welcome." --voice app -o greeting.m4a
+speak say "Hello and welcome." --provider openai --model tts-1-hd -o greeting.m4a
+speak voices --provider elevenlabs
 ```
 
 Fail a script cleanly when the app is closed:
@@ -481,7 +500,8 @@ of the client's PATH (replace `<you>` with your user name, or use
 | `stop_dictation` | — | Transcript of the finished session |
 | `status` | — | App state and active local capture identity, when present |
 | `await_transcript` | `capture_id` (required), `since_id`, `timeout_seconds` (>0–600; default 60) | Exact successful local capture and frozen History entry |
-| `speak_text` | `text` (required), `voice`, `path`, `play`, `timeout_seconds` | Voice used and the file written, once playback has finished |
+| `speak_text` | `text` (required), `voice`, `provider`, `model`, `favorite`, `path`, `play`, `timeout_seconds` | Voice and model used and the file written, once playback has finished |
+| `list_voices` | `provider` | Voices `speak_text` can use, with models, selected and favourite flags |
 
 Every tool also returns `structuredContent` with the same fields as the CLI's
 `--json` `data` object.

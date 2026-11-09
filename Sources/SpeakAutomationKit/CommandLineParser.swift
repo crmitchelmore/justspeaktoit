@@ -33,6 +33,9 @@ public struct CLIPlan: Equatable {
     public var text: String?
     public var voice: String?
     public var play: Bool?
+    public var provider: String?
+    public var model: String?
+    public var favorite: String?
 
     public init(
         command: AutomationCommand,
@@ -70,6 +73,9 @@ public struct CLIPlan: Equatable {
         request.text = self.text
         request.voice = self.voice
         request.play = self.play
+        request.provider = self.provider
+        request.model = self.model
+        request.favorite = self.favorite
         return request
     }
 }
@@ -96,7 +102,9 @@ public enum CommandLineParser {
       speak listen [--json]
       speak stop [--json]
       speak history [--last <n>] [--json]
-      speak say [<text>... | -f <file> | -] [--voice <id>] [-o <file>] [--play] [--json]
+      speak say [<text>... | -f <file> | -] [-o <file>] [--play] [--json]
+                [--voice <id|name>] [--provider <id>] [--model <id>] [--favorite <name>]
+      speak voices [--provider <id>] [--json]
       speak status [--json]
       speak mcp
       speak --help | --version
@@ -109,11 +117,12 @@ public enum CommandLineParser {
       history      Print the most recent transcriptions (default 10).
       say          Speak text aloud, or save it as audio with -o (.wav, .mp3 or .m4a).
                    Text comes from the arguments, -f <file>, or standard input.
-                   The default is the on-device voice on macOS (no API key);
-                   Windows and Linux have none, so pass --voice there.
-                   --voice app uses the app's selected voice and --voice <id>
-                   names one of its voices; cloud voices use the keys saved in
-                   the app. -o writes without playing unless --play is given.
+                   Uses the voice and model selected in the app, or the on-device
+                   voice when the app has none configured. --voice, --provider,
+                   --model and --favorite choose another of the app's voices;
+                   --voice system forces the on-device voice. -o writes without
+                   playing unless --play is given.
+      voices       List the voices say can use: * selected, + favourite.
       status       Report whether the app is reachable and dictating.
       mcp          Run a stdio MCP server exposing the same commands as tools.
 
@@ -142,7 +151,8 @@ public enum CommandLineParser {
         "listen": (.startDictation, [.json]),
         "stop": (.stopDictation, [.json]),
         "history": (.history, [.json, .last]),
-        "status": (.status, [.json])
+        "status": (.status, [.json]),
+        "voices": (.listVoices, [.json, .provider])
     ]
 
     /// Verbs with their own argument grammar.
@@ -216,6 +226,9 @@ public enum CommandLineParser {
         case output = "--output"
         case play = "--play"
         case file = "--file"
+        case provider = "--provider"
+        case model = "--model"
+        case favorite = "--favorite"
 
         init?(token: String) {
             switch token {
@@ -306,7 +319,7 @@ public enum CommandLineParser {
         switch option {
         case .json, .play:
             break
-        case .voice, .output, .file:
+        case .voice, .output, .file, .provider, .model, .favorite:
             try self.applySpeech(option: option, value: value, to: &plan)
         case .timeout:
             guard let seconds = TimeInterval(value), seconds > 0 else {

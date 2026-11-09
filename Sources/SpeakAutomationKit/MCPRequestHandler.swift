@@ -176,12 +176,16 @@ public struct MCPRequestHandler {
     }
 
     private static func applySpeechArguments(_ arguments: [String: Any], to request: inout AutomationRequest) throws {
-        for key in ["text", "voice"] {
+        let fields: [(String, WritableKeyPath<AutomationRequest, String?>)] = [
+            ("text", \.text), ("voice", \.voice), ("provider", \.provider), ("model", \.model),
+            ("favorite", \.favorite)
+        ]
+        for (key, field) in fields {
             guard let value = arguments[key] else { continue }
             guard let string = value as? String else {
                 throw AutomationError(code: .invalidArgument, message: "\"\(key)\" must be a string.")
             }
-            if key == "text" { request.text = string } else { request.voice = string }
+            request[keyPath: field] = string
         }
         if let play = arguments["play"] {
             guard let play = play as? Bool else {
@@ -242,7 +246,8 @@ public struct MCPRequestHandler {
     private static func summary(for result: AutomationResult, command: AutomationCommand) -> String {
         let text = CLIRunner.humanText(for: result, command: command)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty && command == .speakText ? "Spoke the text aloud." : text
+        let summary = text.isEmpty && command == .speakText ? "Spoke the text aloud." : text
+        return result.notice.map { summary + "\n" + $0 } ?? summary
     }
 
     static func toolFailure(_ error: AutomationError) -> [String: Any] {

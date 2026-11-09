@@ -51,7 +51,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             throw Self.automationSpeechError(error)
         }
         var result = AutomationResult()
-        result.voice = selection.voice.id
+        result.voice = selection.voice.favoriteIdentifier
+        result.model = selection.voice.modelID
         result.path = speech.output?.path
         return result
     }
@@ -78,7 +79,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     /// Everything that can be refused is checked before any credit is spent.
     private func prepareAutomationSpeech(_ speech: AutomationSpeechRequest) async throws -> PreparedAutomationSpeech {
         do {
-            let selection = try automationSpeechSelection(speech.voice)
+            let choice = try AutomationVoiceResolver.resolve(speech.voice, in: await automationVoices())
+            let selection = try automationSpeechSelection(choice)
             let snapshot = try VoiceOutputSourceSnapshot(source: .typedText, text: speech.text)
             let destination = try speech.output.map { try voiceExportDestination($0.path) }
             if let output = speech.output {
@@ -102,29 +104,65 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         }
     }
 
-    /// No desktop host has an on-device voice yet, so the default fails clearly
-    /// rather than spending a cloud provider's credit unasked.
-    func automationSpeechSelection(_ voice: AutomationSpeechVoice) throws -> DesktopSpeechSelection {
-        switch voice {
-        case .onDevice:
-            throw AutomationError.noOnDeviceVoice(platform: Platform.displayName)
-        case .app:
-            return try currentVoiceSelection()
-        case .identifier(let identifier):
-            var settings = voiceOutputSettings()
-            settings.modelID = nil
-            settings.voiceID = identifier
-            settings.strictVoiceSelection = true
-            let inventory = identifier.hasPrefix(MistralTTSCatalog.voiceIDPrefix)
-                ? voiceDiscovery.inventories[.mistral] : selectedVoiceAccountInventory
-            do {
-                return try settings.synthesisSelection(accountInventory: inventory)
-            } catch {
-                throw AutomationError(
-                    code: .invalidArgument,
-                    message: "Voice \"\(identifier)\" is not available: \(error.localizedDescription)"
-                )
+    /// Every catalogue voice whose provider key is saved, one row per voice
+    /// with its models, plus the selected voice. These hosts have no
+    /// on-device voice, so the default needs a configured voice.
+    package func automationVoices() async throws -> [AutomationVoice] {
+        let effects = effects
+        let catalogue = DesktopSpeechVoice.voices
+        var keyed: [String: Bool] = [:]
+        for name in Set(catalogue.map(\.apiKeyIdentifier)) {
+            let key = try? await Self.readVoiceSynthesisKey(effects: effects, name: name)
+            keyed[name] = key?.isEmpty == false
+        }
+        let selected = try? currentVoiceSelection().voice
+        let favorites = Set(voiceOutputSettings().favoriteVoices ?? [])
+        var rows: [AutomationVoice] = []
+        var index: [String: Int] = [:]
+        for voice in catalogue + [selected].compactMap({ $0 }) where keyed[voice.apiKeyIdentifier] != false {
+            let id = voice.favoriteIdentifier
+            if let position = index[id] {
+                if !rows[position].models.contains(voice.modelID) { rows[position].models.append(voice.modelID) }
+                continue
             }
+            index[id] = rows.count
+            let provider = voice.automationProvider
+            rows.append(AutomationVoice(
+                id: id, name: voice.name, provider: provider.id, providerName: provider.name,
+                models: [voice.modelID], model: voice.modelID, favorite: favorites.contains(id)
+            ))
+        }
+        if let selected, let position = index[selected.favoriteIdentifier] {
+            rows[position].selected = true
+            rows[position].model = selected.modelID
+        }
+        return rows
+    }
+
+    /// The synthesis settings for one resolved voice. The selected voice keeps
+    /// its exact saved configuration; another voice or model is resolved
+    /// strictly, never substituted.
+    func automationSpeechSelection(_ choice: AutomationVoiceChoice) throws -> DesktopSpeechSelection {
+        if choice.voice.selected, choice.model == choice.voice.model { return try currentVoiceSelection() }
+        var settings = voiceOutputSettings()
+        let inventory = choice.voice.id.hasPrefix(MistralTTSCatalog.voiceIDPrefix)
+            ? voiceDiscovery.inventories[.mistral] : selectedVoiceAccountInventory
+        do {
+            let voice = try DesktopSpeechVoice.strictlyResolved(
+                modelID: choice.model, voiceID: choice.voice.id, accountInventory: inventory)
+            settings.modelID = choice.model
+            settings.voiceID = choice.voice.id
+            settings.strictVoiceSelection = true
+            switch voice {
+            case .openai, .elevenlabs: settings.quality = voice.defaultQuality.rawValue
+            default: break
+            }
+            return try settings.synthesisSelection(accountInventory: inventory)
+        } catch {
+            throw AutomationError(
+                code: .invalidArgument,
+                message: "Voice \"\(choice.voice.id)\" is not available: \(error.localizedDescription)"
+            )
         }
     }
 

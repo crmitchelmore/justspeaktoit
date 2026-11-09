@@ -177,7 +177,10 @@ public struct CLIRunner {
             )
             return CLIOutput(stdout: Self.encode(envelope) + "\n")
         }
-        return CLIOutput(stdout: Self.humanText(for: result, command: plan.command))
+        // A notice (such as an on-device fallback) informs a person without
+        // changing what a script reads on stdout.
+        return CLIOutput(stdout: Self.humanText(for: result, command: plan.command),
+                         stderr: result.notice.map { "note: \($0)\n" } ?? "")
     }
 
     private func render(error original: AutomationError, plan: CLIPlan) -> CLIOutput {
@@ -215,6 +218,8 @@ public struct CLIRunner {
             return "Dictation started.\n"
         case .speakText:
             return result.path.map { "Saved speech to \($0).\n" } ?? ""
+        case .listVoices:
+            return Self.voiceTable(result.voices ?? [])
         case .status:
             let version = result.appVersion.map { " \($0)" } ?? ""
             let state = (result.sessionActive ?? false) ? "dictating" : "idle"
@@ -227,6 +232,22 @@ public struct CLIRunner {
                 .map { "\(formatter.string(from: $0.createdAt))  \($0.text)" }
                 .joined(separator: "\n") + "\n"
         }
+    }
+
+    /// One voice per line: markers, ID, name and provider, then its models.
+    static func voiceTable(_ voices: [AutomationVoice]) -> String {
+        guard !voices.isEmpty else { return "No usable voices. Choose one and save its key in the app.\n" }
+        let width = min(voices.map(\.id.count).max() ?? 0, 48)
+        return voices.map { voice in
+            let marks = (voice.selected ? "*" : " ") + (voice.favorite ? "+" : " ")
+            let padded = voice.id.padding(toLength: max(width, voice.id.count), withPad: " ", startingAt: 0)
+            var line = "\(marks) \(padded)  \(voice.name) (\(voice.providerName))"
+            if !voice.models.isEmpty {
+                let models = voice.models.map { $0 == voice.model ? "\($0) (default)" : $0 }
+                line += "\n      models: " + models.joined(separator: ", ")
+            }
+            return line
+        }.joined(separator: "\n") + "\n"
     }
 
     static func encode(_ envelope: CLIJSONEnvelope) -> String {

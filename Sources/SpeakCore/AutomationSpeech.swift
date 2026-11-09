@@ -1,25 +1,31 @@
 import Foundation
 
-/// Which voice a `speak_text` request asked for.
-public enum AutomationSpeechVoice: Equatable, Sendable {
-    /// The host's no-key on-device voice. The wire leaves `voice` unset.
-    case onDevice
-    /// The voice selected in the app's Voice settings.
-    case app
-    /// One explicit voice identifier, in the host's own voice catalogue.
-    case identifier(String)
+/// How a `speak_text` request chose its voice. Every field is optional: with
+/// none, the app's selected voice and model are used, falling back to an
+/// on-device voice when the app has nothing configured.
+public struct AutomationSpeechSelection: Equatable, Sendable {
+    /// A voice ID or display name, or a keyword below.
+    public var voice: String?
+    /// A provider ID (`openai`) or display name; alone, picks that provider's best voice.
+    public var provider: String?
+    /// A model ID listed by `list_voices` (`openai/tts-1-hd` or `tts-1-hd`).
+    public var model: String?
+    /// The name or ID of a voice saved as a favourite in the app.
+    public var favorite: String?
 
     /// `voice` values with a reserved meaning on the wire.
     public static let appKeyword = "app"
     public static let onDeviceKeyword = "system"
 
-    public init(wireValue: String?) {
-        switch wireValue {
-        case nil, Self.onDeviceKeyword: self = .onDevice
-        case Self.appKeyword: self = .app
-        case let identifier?: self = .identifier(identifier)
-        }
+    public init(voice: String? = nil, provider: String? = nil, model: String? = nil, favorite: String? = nil) {
+        self.voice = voice == Self.appKeyword ? nil : voice
+        self.provider = provider
+        self.model = model
+        self.favorite = favorite
     }
+
+    /// Asked for the on-device voice rather than a named one.
+    public var wantsOnDevice: Bool { self.voice?.lowercased() == Self.onDeviceKeyword }
 }
 
 /// A validated `speak_text` request: what to say, with which voice, and where
@@ -40,11 +46,11 @@ public struct AutomationSpeechRequest: Equatable, Sendable {
     }
 
     public let text: String
-    public let voice: AutomationSpeechVoice
+    public let voice: AutomationSpeechSelection
     public let output: Output?
     public let play: Bool
 
-    public init(text: String, voice: AutomationSpeechVoice, output: Output?, play: Bool) {
+    public init(text: String, voice: AutomationSpeechSelection, output: Output?, play: Bool) {
         self.text = text
         self.voice = voice
         self.output = output
@@ -58,6 +64,8 @@ extension AutomationLimits {
     public static let maxVoiceIdentifierLength = 256
     /// Deadline for speech, which covers provider latency and playback.
     public static let speechTimeout: TimeInterval = 600
+    /// Listing can ask each configured provider for its account voices.
+    public static let voiceListingTimeout: TimeInterval = 60
 }
 
 extension AutomationRequest {
@@ -66,13 +74,20 @@ extension AutomationRequest {
 
     /// Validates `speak_text`, and keeps its fields off every other command.
     func validateSpeechFields() throws {
-        guard self.command == .speakText else {
-            guard self.text == nil, self.voice == nil, self.play == nil else {
-                throw AutomationError(code: .invalidArgument, message: "text, voice and play require speak_text.")
+        switch self.command {
+        case .speakText:
+            try self.validateSpeech()
+        case .listVoices:
+            guard self.text == nil, self.voice == nil, self.play == nil, self.model == nil, self.favorite == nil,
+                  self.path == nil, self.limit == nil, self.profile == nil else {
+                throw AutomationError(code: .invalidArgument, message: "list_voices accepts only a provider.")
             }
-            return
+        default:
+            guard self.text == nil, self.voice == nil, self.play == nil, self.model == nil,
+                  self.favorite == nil else {
+                throw AutomationError(code: .invalidArgument, message: "Voice fields require speak_text.")
+            }
         }
-        try self.validateSpeech()
     }
 
     func validateSpeech() throws {
@@ -85,11 +100,13 @@ extension AutomationRequest {
                 message: "Text must be at most \(AutomationLimits.maxSpeechCharacters) characters with no NUL bytes."
             )
         }
-        if let voice = self.voice, voice.isEmpty || voice.count > AutomationLimits.maxVoiceIdentifierLength {
-            throw AutomationError(
-                code: .invalidArgument,
-                message: "voice must be 1-\(AutomationLimits.maxVoiceIdentifierLength) characters."
-            )
+        for (label, value) in [("voice", self.voice), ("model", self.model), ("favorite", self.favorite)] {
+            if let value, value.isEmpty || value.count > AutomationLimits.maxVoiceIdentifierLength {
+                throw AutomationError(
+                    code: .invalidArgument,
+                    message: "\(label) must be 1-\(AutomationLimits.maxVoiceIdentifierLength) characters."
+                )
+            }
         }
         if let path = self.path {
             guard !path.isEmpty, path.count <= AutomationLimits.maxPathLength else {
@@ -103,8 +120,10 @@ extension AutomationRequest {
         guard self.resolvedPlay || self.path != nil else {
             throw AutomationError(code: .invalidArgument, message: "speak_text must play aloud, write a file, or both.")
         }
-        guard self.limit == nil, self.profile == nil, self.provider == nil else {
-            throw AutomationError(code: .invalidArgument, message: "speak_text accepts text, voice, path and play.")
+        guard self.limit == nil, self.profile == nil else {
+            throw AutomationError(
+                code: .invalidArgument, message: "speak_text accepts text, a voice selection, path and play."
+            )
         }
     }
 }
@@ -155,19 +174,12 @@ extension AutomationRequestPolicy {
             output = .init(path: path, format: try self.speechFormat(forPath: path))
         }
         return AutomationSpeechRequest(
-            text: text, voice: AutomationSpeechVoice(wireValue: request.voice), output: output,
+            text: text,
+            voice: AutomationSpeechSelection(
+                voice: request.voice, provider: request.provider, model: request.model, favorite: request.favorite
+            ),
+            output: output,
             play: request.resolvedPlay
-        )
-    }
-}
-
-extension AutomationError {
-    /// A host with no on-device voice asked for the default voice.
-    public static func noOnDeviceVoice(platform: String) -> AutomationError {
-        AutomationError(
-            code: .unsupportedCommand,
-            message: "\(platform) has no on-device voice in Just Speak To It yet. Pass --voice app to use "
-                + "the voice selected in the app's Voice settings, or --voice <id> for a specific cloud voice."
         )
     }
 }

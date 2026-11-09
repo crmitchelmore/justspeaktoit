@@ -206,6 +206,8 @@ bool appearanceSelfTest(std::string &error) {
     if (stable && before == after && refreshed && light && forcedDark && minimumContrast >= 4.5) return true;
     error = "Windows appearance caching, refresh, explicit selection or action contrast failed.";
     return false;
+}
+
 void themeControl(HWND control) {
     if (!control) return;
     const bool useDark = dark();

@@ -1,6 +1,7 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
 #include "WindowsOnboarding.hpp"
+#include "WindowsWindowChrome.hpp"
 #include <appmodel.h>
 #include <shellapi.h>
 #include <mutex>
@@ -293,6 +294,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(panel));
     }
     if (!panel) return DefWindowProcW(window, message, wparam, lparam);
+    LRESULT themed = 0;
+    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
     switch (message) {
     case WM_CREATE: return controls(window, *panel) ? 0 : -1;
     case WM_SIZE: layout(window); return 0;

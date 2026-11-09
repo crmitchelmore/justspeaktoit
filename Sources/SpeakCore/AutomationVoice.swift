@@ -16,14 +16,12 @@ public struct AutomationVoice: Codable, Sendable, Equatable {
     public var model: String?
     /// The app's current voice. Only one entry is selected.
     public var selected: Bool
-    /// Saved as a favourite in the app.
-    public var favorite: Bool
     /// Runs on this device with no key or network.
     public var onDevice: Bool
 
     public init(
         id: String, name: String, provider: String, providerName: String, models: [String] = [],
-        model: String? = nil, selected: Bool = false, favorite: Bool = false, onDevice: Bool = false
+        model: String? = nil, selected: Bool = false, onDevice: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -32,7 +30,6 @@ public struct AutomationVoice: Codable, Sendable, Equatable {
         self.models = models
         self.model = model
         self.selected = selected
-        self.favorite = favorite
         self.onDevice = onDevice
     }
 }
@@ -60,9 +57,6 @@ public enum AutomationVoiceResolver {
                 throw notFound("No usable voices from provider \"\(provider)\". Save its key in the app.")
             }
         }
-        if let favorite = selection.favorite {
-            candidates = try self.named(favorite, in: candidates.filter(\.favorite), kind: "favourite voice")
-        }
         if selection.wantsOnDevice {
             candidates = candidates.filter(\.onDevice)
             guard !candidates.isEmpty else {
@@ -74,11 +68,17 @@ public enum AutomationVoiceResolver {
         } else if let voice = selection.voice {
             candidates = try self.named(voice, in: candidates, kind: "voice")
         }
-        let isDefault = selection.voice == nil && selection.provider == nil && selection.favorite == nil
+        if let model = selection.model, selection.voice == nil {
+            candidates = candidates.filter { self.offers($0, model: model) }
+            guard !candidates.isEmpty else {
+                throw notFound("No usable voice offers model \"\(model)\". Run `speak voices` to list them.")
+            }
+        }
+        let isDefault = selection.voice == nil && selection.provider == nil && selection.model == nil
         let fallback = isDefault && !candidates.contains(where: \.selected)
         let chosen = isDefault
             ? candidates.first(where: \.selected) ?? candidates.first(where: \.onDevice)
-            : candidates.first(where: \.selected) ?? candidates.first(where: \.favorite) ?? candidates.first
+            : candidates.first(where: \.selected) ?? candidates.first
         guard let chosen else {
             throw AutomationError(
                 code: .unsupportedCommand,
@@ -105,6 +105,10 @@ public enum AutomationVoiceResolver {
             )
         }
         return byName
+    }
+
+    private static func offers(_ voice: AutomationVoice, model: String) -> Bool {
+        voice.models.contains { matches($0, model) || matches(shortName($0), model) }
     }
 
     private static func model(_ requested: String?, for voice: AutomationVoice) throws -> String? {

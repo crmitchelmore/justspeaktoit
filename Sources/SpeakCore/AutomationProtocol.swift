@@ -113,8 +113,9 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     public var timeout: TimeInterval?
     public var captureID: String?
     public var sinceID: String?
-    /// `speak_text` only (`provider` too): see `AutomationSpeechSelection`.
-    public var text: String?, voice: String?, play: Bool?, model: String?, favorite: String?
+    /// `speak_text` only (`provider` too): see `AutomationSpeechSelection`/`Settings`.
+    public var text: String?, voice: String?, play: Bool?, model: String?, speed: Double?, pitch: Double?
+    public var quality: String?, language: String?
 
     public init(
         schemaVersion: Int = AutomationSchema.currentVersion,
@@ -255,8 +256,7 @@ public struct AutomationResult: Codable, Sendable, Equatable {
     public var entry: AutomationHistoryEntry?
     /// `speak_text`: the voice used, the file written and any `notice` worth
     /// telling a person (such as a fallback); `list_voices`: `voices`.
-    public var voice: String?, path: String?, notice: String?
-    public var voices: [AutomationVoice]?
+    public var voice: String?, path: String?, notice: String?, voices: [AutomationVoice]?
 
     public init(
         text: String? = nil,

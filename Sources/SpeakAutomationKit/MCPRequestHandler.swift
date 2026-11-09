@@ -178,7 +178,7 @@ public struct MCPRequestHandler {
     private static func applySpeechArguments(_ arguments: [String: Any], to request: inout AutomationRequest) throws {
         let fields: [(String, WritableKeyPath<AutomationRequest, String?>)] = [
             ("text", \.text), ("voice", \.voice), ("provider", \.provider), ("model", \.model),
-            ("favorite", \.favorite)
+            ("quality", \.quality), ("language", \.language)
         ]
         for (key, field) in fields {
             guard let value = arguments[key] else { continue }
@@ -186,6 +186,13 @@ public struct MCPRequestHandler {
                 throw AutomationError(code: .invalidArgument, message: "\"\(key)\" must be a string.")
             }
             request[keyPath: field] = string
+        }
+        for (key, field) in [("speed", \AutomationRequest.speed), ("pitch", \AutomationRequest.pitch)] {
+            guard let value = arguments[key] else { continue }
+            guard let number = value as? Double ?? (value as? Int).map(Double.init) else {
+                throw AutomationError(code: .invalidArgument, message: "\"\(key)\" must be a number.")
+            }
+            request[keyPath: field] = number
         }
         if let play = arguments["play"] {
             guard let play = play as? Bool else {

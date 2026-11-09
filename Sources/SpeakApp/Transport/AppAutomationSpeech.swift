@@ -19,10 +19,13 @@ extension AppAutomationHandler {
         let result: TTSResult
         do {
             result = try await self.tts.synthesizeForAutomation(
-                text: speech.text, voice: voice, model: choice.model, format: speech.output?.format ?? .macDefault
+                text: speech.text, voice: voice, model: choice.model, overrides: speech.settings,
+                format: speech.output?.format ?? .macDefault
             )
         } catch is CancellationError {
             throw CancellationError()
+        } catch let error as AutomationError {
+            throw error
         } catch {
             throw AutomationError(code: .speechFailed, message: error.localizedDescription)
         }

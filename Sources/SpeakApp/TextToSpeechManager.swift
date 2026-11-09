@@ -542,11 +542,9 @@ extension TextToSpeechManager {
       seen.insert(identifier)
       rows.append(automationVoice(id: identifier, name: identifier, provider: provider))
     }
-    let favorites = Set(appSettings.ttsFavoriteVoices)
     return rows.map { row in
       var row = row
       row.selected = row.id == selected
-      row.favorite = favorites.contains(row.id)
       return row
     }
   }
@@ -600,7 +598,7 @@ extension TextToSpeechManager {
   /// pronunciation and usage ledger, but none of the window's playback state,
   /// auto-play or recordings copy. The caller owns the returned file.
   func synthesizeForAutomation(
-    text: String, voice: String, model: String?, format: AudioFormat
+    text: String, voice: String, model: String?, overrides: AutomationSpeechSettings, format: AudioFormat
   ) async throws -> TTSResult {
     guard TTSProvider.knownVoiceIDPrefixes.contains(where: { voice.hasPrefix($0) }) else {
       throw TTSError.invalidVoice(voice)
@@ -608,8 +606,18 @@ extension TextToSpeechManager {
     let provider = TTSProvider.from(voiceID: voice)
     guard let client = clients[provider] else { throw TTSError.providerNotAvailable(provider) }
     if provider.requiresAPIKey, !(await hasAPIKey(for: provider)) { throw TTSError.apiKeyMissing(provider) }
+    // The shared catalogue knows each cloud voice's controls; the system
+    // voice applies speed and pitch itself.
+    if let shared = try? DesktopSpeechVoice.strictlyResolved(modelID: model, voiceID: voice) {
+      try overrides.validate(for: shared)
+    }
     var settings = synthesisSettings(useSSML: nil)
     settings.format = format
+    if let speed = overrides.speed { settings.speed = speed }
+    if let pitch = overrides.pitch { settings.pitch = pitch }
+    if let quality = overrides.quality { settings.quality = quality }
+    if let language = overrides.language { settings.language = language }
+    // An explicit model wins over quality where quality selects the model.
     if let model { Self.apply(model: model, provider: provider, to: &settings) }
     let processed = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
     let result = try await client.synthesize(text: processed, voice: voice, settings: settings)

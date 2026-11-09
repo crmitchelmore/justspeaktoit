@@ -117,6 +117,23 @@ final class DesktopHostAutomationSpeechTests: XCTestCase {
         XCTAssertEqual(operations, 0)
     }
 
+    func testSettingOverrides_ApplyForThisCallOnlyAndAreCheckedAgainstTheVoice() async throws {
+        let saved = await controller.voiceOutputSettings()
+        let request = AutomationSpeechRequest(
+            text: "Synthetic", voice: .init(), settings: .init(speed: 1.5),
+            output: .init(path: output.appendingPathComponent("fast.wav").path, format: .wav), play: false
+        )
+        await assertRefused(request, .invalidArgument, "does not support --speed")
+
+        let quality = AutomationSpeechRequest(
+            text: "Synthetic", voice: .init(), settings: .init(quality: .standard, language: "en_US"),
+            output: .init(path: output.appendingPathComponent("q.wav").path, format: .wav), play: false
+        )
+        _ = try await controller.automationSpeak(quality)
+        let after = await controller.voiceOutputSettings()
+        XCTAssertEqual(after, saved)
+    }
+
     func testUnknownVoiceAndProtectedPath_AreRefusedBeforeSynthesis() async {
         for (request, code) in [
             (speech(.init(voice: "nobody/none")), AutomationErrorCode.invalidArgument),

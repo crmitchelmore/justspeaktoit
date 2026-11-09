@@ -1,31 +1,121 @@
 import Foundation
 
-/// How a `speak_text` request chose its voice. Every field is optional: with
-/// none, the app's selected voice and model are used, falling back to an
-/// on-device voice when the app has nothing configured.
+/// How a `speak_text` request chose its voice. Every field is optional and
+/// overrides one app setting; with none, the app's selected voice and model
+/// are used, falling back to an on-device voice when nothing is configured.
 public struct AutomationSpeechSelection: Equatable, Sendable {
     /// A voice ID or display name, or a keyword below.
     public var voice: String?
-    /// A provider ID (`openai`) or display name; alone, picks that provider's best voice.
+    /// A provider ID (`openai`) or display name; alone, picks that provider's
+    /// selected or first voice.
     public var provider: String?
-    /// A model ID listed by `list_voices` (`openai/tts-1-hd` or `tts-1-hd`).
+    /// A model ID listed by `list_voices` (`openai/tts-1-hd` or `tts-1-hd`);
+    /// alone, picks the selected voice if it offers the model, else the first that does.
     public var model: String?
-    /// The name or ID of a voice saved as a favourite in the app.
-    public var favorite: String?
 
     /// `voice` values with a reserved meaning on the wire.
     public static let appKeyword = "app"
     public static let onDeviceKeyword = "system"
 
-    public init(voice: String? = nil, provider: String? = nil, model: String? = nil, favorite: String? = nil) {
+    public init(voice: String? = nil, provider: String? = nil, model: String? = nil) {
         self.voice = voice == Self.appKeyword ? nil : voice
         self.provider = provider
         self.model = model
-        self.favorite = favorite
     }
 
     /// Asked for the on-device voice rather than a named one.
     public var wantsOnDevice: Bool { self.voice?.lowercased() == Self.onDeviceKeyword }
+}
+
+/// Synthesis settings a `speak_text` request overrides for this call only.
+/// Nil keeps the app's saved value; nothing here is persisted.
+public struct AutomationSpeechSettings: Equatable, Sendable {
+    public var speed: Double?
+    /// Whole semitones.
+    public var pitch: Double?
+    public var quality: VoiceSynthesisQuality?
+    /// `automatic` or a language ID from the app's voice language list (`en_US`).
+    public var language: String?
+
+    public init(
+        speed: Double? = nil, pitch: Double? = nil, quality: VoiceSynthesisQuality? = nil, language: String? = nil
+    ) {
+        self.speed = speed
+        self.pitch = pitch
+        self.quality = quality
+        self.language = language
+    }
+
+    public var isEmpty: Bool { self == Self() }
+
+    /// Validates wire values against the shared ranges and catalogues.
+    public init(speed: Double?, pitch: Double?, quality: String?, language: String?) throws {
+        let speeds = VoiceSynthesisOptions.speedRange
+        if let speed, !speed.isFinite || !speeds.contains(speed) {
+            throw AutomationError(
+                code: .invalidArgument,
+                message: "speed must be between \(speeds.lowerBound) and \(speeds.upperBound) (got \(speed))."
+            )
+        }
+        let pitches = VoiceSynthesisOptions.pitchRange
+        if let pitch, !pitch.isFinite || !pitches.contains(pitch) || pitch.rounded() != pitch {
+            throw AutomationError(
+                code: .invalidArgument,
+                message: "pitch must be a whole number of semitones from \(Int(pitches.lowerBound)) "
+                    + "to \(Int(pitches.upperBound)) (got \(pitch))."
+            )
+        }
+        var parsedQuality: VoiceSynthesisQuality?
+        if let quality {
+            guard let value = VoiceSynthesisQuality(rawValue: quality.lowercased()) else {
+                let options = VoiceSynthesisQuality.allCases.map(\.rawValue).joined(separator: ", ")
+                throw AutomationError(
+                    code: .invalidArgument, message: "quality must be one of \(options) (got \"\(quality)\")."
+                )
+            }
+            parsedQuality = value
+        }
+        var parsedLanguage: String?
+        if let language {
+            var known = VoiceOutputLanguageCatalog.options.map(\.id)
+            if !known.contains(VoiceOutputLanguageCatalog.automaticIdentifier) {
+                known.insert(VoiceOutputLanguageCatalog.automaticIdentifier, at: 0)
+            }
+            // Accept en-US as well as the catalogue's en_US.
+            let wanted = language.replacingOccurrences(of: "-", with: "_")
+            guard let match = known.first(where: { $0.caseInsensitiveCompare(wanted) == .orderedSame }) else {
+                throw AutomationError(
+                    code: .invalidArgument,
+                    message: "Unknown language \"\(language)\". Use automatic or an ID such as "
+                        + known.dropFirst().prefix(4).joined(separator: ", ") + "."
+                )
+            }
+            parsedLanguage = match
+        }
+        self.init(speed: speed, pitch: pitch, quality: parsedQuality, language: parsedLanguage)
+    }
+
+    /// Refuses a speed or pitch the chosen voice cannot apply, rather than
+    /// silently ignoring it.
+    public func validate(for voice: DesktopSpeechVoice) throws {
+        let capabilities = voice.capabilities
+        if self.speed != nil, !capabilities.speed {
+            throw AutomationError(code: .invalidArgument, message: "\(voice.name) does not support --speed.")
+        }
+        if let speed, !capabilities.speedRange.contains(speed) {
+            let range = capabilities.speedRange
+            throw AutomationError(
+                code: .invalidArgument,
+                message: "\(voice.name) supports speed \(range.lowerBound)–\(range.upperBound) (got \(speed))."
+            )
+        }
+        if self.pitch != nil, !capabilities.pitch {
+            throw AutomationError(code: .invalidArgument, message: "\(voice.name) does not support --pitch.")
+        }
+        if self.quality != nil, !voice.supportsQualityControls {
+            throw AutomationError(code: .invalidArgument, message: "\(voice.name) has no quality setting.")
+        }
+    }
 }
 
 /// A validated `speak_text` request: what to say, with which voice, and where
@@ -47,10 +137,15 @@ public struct AutomationSpeechRequest: Equatable, Sendable {
 
     public let text: String
     public let voice: AutomationSpeechSelection
+    public let settings: AutomationSpeechSettings
     public let output: Output?
     public let play: Bool
 
-    public init(text: String, voice: AutomationSpeechSelection, output: Output?, play: Bool) {
+    public init(
+        text: String, voice: AutomationSpeechSelection, settings: AutomationSpeechSettings = .init(),
+        output: Output?, play: Bool
+    ) {
+        self.settings = settings
         self.text = text
         self.voice = voice
         self.output = output
@@ -78,16 +173,25 @@ extension AutomationRequest {
         case .speakText:
             try self.validateSpeech()
         case .listVoices:
-            guard self.text == nil, self.voice == nil, self.play == nil, self.model == nil, self.favorite == nil,
+            guard self.text == nil, self.voice == nil, self.play == nil, self.model == nil, !self.hasSpeechSettings,
                   self.path == nil, self.limit == nil, self.profile == nil else {
                 throw AutomationError(code: .invalidArgument, message: "list_voices accepts only a provider.")
             }
         default:
             guard self.text == nil, self.voice == nil, self.play == nil, self.model == nil,
-                  self.favorite == nil else {
+                  !self.hasSpeechSettings else {
                 throw AutomationError(code: .invalidArgument, message: "Voice fields require speak_text.")
             }
         }
+    }
+
+    private var hasSpeechSettings: Bool {
+        self.speed != nil || self.pitch != nil || self.quality != nil || self.language != nil
+    }
+
+    func speechSettings() throws -> AutomationSpeechSettings {
+        try AutomationSpeechSettings(
+            speed: self.speed, pitch: self.pitch, quality: self.quality, language: self.language)
     }
 
     func validateSpeech() throws {
@@ -100,7 +204,8 @@ extension AutomationRequest {
                 message: "Text must be at most \(AutomationLimits.maxSpeechCharacters) characters with no NUL bytes."
             )
         }
-        for (label, value) in [("voice", self.voice), ("model", self.model), ("favorite", self.favorite)] {
+        _ = try self.speechSettings()
+        for (label, value) in [("voice", self.voice), ("model", self.model), ("provider", self.provider)] {
             if let value, value.isEmpty || value.count > AutomationLimits.maxVoiceIdentifierLength {
                 throw AutomationError(
                     code: .invalidArgument,
@@ -176,8 +281,9 @@ extension AutomationRequestPolicy {
         return AutomationSpeechRequest(
             text: text,
             voice: AutomationSpeechSelection(
-                voice: request.voice, provider: request.provider, model: request.model, favorite: request.favorite
+                voice: request.voice, provider: request.provider, model: request.model
             ),
+            settings: try request.speechSettings(),
             output: output,
             play: request.resolvedPlay
         )

@@ -328,7 +328,8 @@ speak listen [--json]
 speak stop [--json]
 speak history [--last <n>] [--json]
 speak say [<text>... | -f <file> | -] [-o <file>] [--play] [--json] [--timeout <seconds>]
-          [--voice <id|name>] [--provider <id>] [--model <id>] [--favorite <name>]
+          [--provider <id>] [--model <id>] [--voice <id|name>]
+          [--speed <n>] [--pitch <semitones>] [--quality <q>] [--language <id>]
 speak voices [--provider <id>] [--json]
 speak status [--json]
 speak mcp
@@ -344,26 +345,36 @@ credentials and no provider code; it sends the text and the app synthesizes it.
 - **Text** comes from the arguments, from `-f <file>` (UTF-8), or from standard
   input when neither is given (or with `-`). Use `--` before text that starts
   with a dash. Up to 100,000 characters.
-- **Voice**: by default `say` uses the voice and model selected in the app's
-  Voice settings. When that voice's provider has no saved key (or nothing is
-  selected), the Mac falls back to its on-device system voice — no key, no
-  network — and prints a `note:` on stderr. To choose another of the app's
-  voices:
+- **Settings**: by default `say` uses the app's Voice settings — the selected
+  provider, voice and model, and its speed, pitch, quality and language. Each
+  flag overrides one of those settings for this call only (nothing is saved);
+  anything not passed keeps the app's value:
+  - `--provider <id>` — a provider ID or name (`openai`, `ElevenLabs`); alone it
+    uses that provider's selected or first voice.
+  - `--model <id>` — a model (`openai/tts-1-hd` or `tts-1-hd`); alone it uses
+    the selected voice if it offers that model, else the first voice that does.
   - `--voice <id|name>` — a voice ID or display name (`openai/alloy`, `Daniel`).
     `--voice system` forces the on-device voice.
-  - `--provider <id>` — a provider ID or name (`openai`, `ElevenLabs`); alone it
-    uses that provider's selected, favourite or first voice.
-  - `--model <id>` — a model the voice offers (`openai/tts-1-hd` or `tts-1-hd`).
-  - `--favorite <name>` — a voice saved as a favourite in the app.
+  - `--speed <n>` (1 is normal), `--pitch <semitones>` (whole numbers, −12 to
+    12), `--quality standard|high|highest` and `--language <id>` (`automatic`
+    or an ID such as `en_US`; `en-US` also works).
 
-  Matching ignores case, an ID wins over a name, and a name shared by several
-  voices is refused rather than guessed. Only voices the app can use now are
-  eligible: cloud voices need their key saved in the app, which reads its own
-  settings and Keychain/credential store, so the CLI never sees a key.
-- **Listing**: `speak voices` prints those voices, marking the selected voice
-  `*` and favourites `+`, with each voice's models and the default one.
-  `--json` returns `data.voices` with `id`, `name`, `provider`, `providerName`,
-  `models`, `model`, `selected`, `favorite` and `onDevice`.
+  Values are checked against what the chosen voice supports: an unknown voice
+  or model, a speed outside the voice's range, or pitch or quality on a voice
+  without that control fails with `invalid_argument` and says why, rather than
+  being ignored. Where quality picks the model (OpenAI, ElevenLabs), an
+  explicit `--model` wins. Voice matching ignores case, an ID wins over a name,
+  and a name shared by several voices is refused. Only voices the app can use
+  now are eligible: cloud voices need their key saved in the app, which reads
+  its own settings and credential store, so the CLI never sees a key.
+
+  When the app's own voice has no saved key (or nothing is selected) and no
+  flag chooses another, the Mac falls back to its on-device system voice — no
+  key, no network — and prints a `note:` on stderr.
+- **Listing**: `speak voices [--provider <id>]` prints the providers, voices and
+  models `say` can use, marking the app's voice `*` and each voice's default
+  model. `--json` returns `data.voices` with `id`, `name`, `provider`,
+  `providerName`, `models`, `model`, `selected` and `onDevice`.
 - **Output**: with no `-o`, the speech plays aloud and the command returns when
   it finishes. `-o <file>` writes `.wav`, `.mp3` or `.m4a` (chosen by the
   extension) without playing; add `--play` to do both. An existing file is
@@ -405,7 +416,7 @@ Read a file aloud, or save a greeting with the app's selected voice:
 ```bash
 speak say -f notes.txt
 echo "Build finished" | speak say
-speak say "Hello and welcome." --provider openai --model tts-1-hd -o greeting.m4a
+speak say "Hello and welcome." --provider openai --model tts-1-hd --speed 1.2 -o greeting.m4a
 speak voices --provider elevenlabs
 ```
 
@@ -500,8 +511,8 @@ of the client's PATH (replace `<you>` with your user name, or use
 | `stop_dictation` | — | Transcript of the finished session |
 | `status` | — | App state and active local capture identity, when present |
 | `await_transcript` | `capture_id` (required), `since_id`, `timeout_seconds` (>0–600; default 60) | Exact successful local capture and frozen History entry |
-| `speak_text` | `text` (required), `voice`, `provider`, `model`, `favorite`, `path`, `play`, `timeout_seconds` | Voice and model used and the file written, once playback has finished |
-| `list_voices` | `provider` | Voices `speak_text` can use, with models, selected and favourite flags |
+| `speak_text` | `text` (required), `provider`, `model`, `voice`, `speed`, `pitch`, `quality`, `language`, `path`, `play`, `timeout_seconds` | Voice and model used and the file written, once playback has finished |
+| `list_voices` | `provider` | Providers, voices and models `speak_text` can use, marking the app's voice |
 
 Every tool also returns `structuredContent` with the same fields as the CLI's
 `--json` `data` object.

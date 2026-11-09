@@ -239,9 +239,9 @@ public struct CLIRunner {
         guard !voices.isEmpty else { return "No usable voices. Choose one and save its key in the app.\n" }
         let width = min(voices.map(\.id.count).max() ?? 0, 48)
         return voices.map { voice in
-            let marks = (voice.selected ? "*" : " ") + (voice.favorite ? "+" : " ")
+            let mark = voice.selected ? "*" : " "
             let padded = voice.id.padding(toLength: max(width, voice.id.count), withPad: " ", startingAt: 0)
-            var line = "\(marks) \(padded)  \(voice.name) (\(voice.providerName))"
+            var line = "\(mark) \(padded)  \(voice.name) (\(voice.providerName))"
             if !voice.models.isEmpty {
                 let models = voice.models.map { $0 == voice.model ? "\($0) (default)" : $0 }
                 line += "\n      models: " + models.joined(separator: ", ")

@@ -51,12 +51,26 @@ final class CLISpeechTests: XCTestCase {
 
     func testSay_passesTheVoiceSelectionFlags() throws {
         let request = try self.plan([
-            "say", "hi", "--provider", "openai", "--model", "tts-1-hd", "--favorite", "Nova", "--voice", "alloy"
+            "say", "hi", "--provider", "openai", "--model", "tts-1-hd", "--voice", "alloy",
+            "--speed", "1.25", "--pitch=-3", "--quality", "high", "--language", "en-US"
         ]).request()
         XCTAssertEqual(request.provider, "openai")
         XCTAssertEqual(request.model, "tts-1-hd")
-        XCTAssertEqual(request.favorite, "Nova")
         XCTAssertEqual(request.voice, "alloy")
+        XCTAssertEqual(request.speed, 1.25)
+        XCTAssertEqual(request.pitch, -3)
+        XCTAssertEqual(request.quality, "high")
+        XCTAssertEqual(request.language, "en-US")
+        var complete = request
+        complete.text = "hi"
+        XCTAssertNoThrow(try complete.validated())
+    }
+
+    func testSay_rejectsBadSettingValuesBeforeContactingTheApp() {
+        for arguments in [["--speed", "fast"], ["--speed", "10"], ["--pitch", "0.5"], ["--quality", "max"],
+                          ["--language", "zz-ZZ"], ["--favorite", "Nova"]] {
+            XCTAssertThrowsError(try CommandLineParser.parse(["say", "hi"] + arguments), "\(arguments)")
+        }
     }
 
     func testVoices_listsWithMarkersAndModels() throws {
@@ -70,13 +84,13 @@ final class CLISpeechTests: XCTestCase {
             AutomationVoice(id: "openai/alloy", name: "Alloy", provider: "openai", providerName: "OpenAI",
                             models: ["openai/tts-1", "openai/tts-1-hd"], model: "openai/tts-1", selected: true),
             AutomationVoice(id: "system/default", name: "System default", provider: "system",
-                            providerName: "macOS System", favorite: true, onDevice: true)
+                            providerName: "macOS System", onDevice: true)
         ]
         let output = try self.run(["voices"], client: StubAutomationClient(result: reply))
         XCTAssertEqual(output.stdout, """
-        *  openai/alloy    Alloy (OpenAI)
+        * openai/alloy    Alloy (OpenAI)
               models: openai/tts-1 (default), openai/tts-1-hd
-         + system/default  System default (macOS System)
+          system/default  System default (macOS System)
 
         """)
     }
@@ -112,7 +126,8 @@ final class CLISpeechTests: XCTestCase {
     func testHelp_documentsSay() {
         XCTAssertTrue(CommandLineParser.usage.contains("speak say"))
         XCTAssertTrue(CommandLineParser.usage.contains("speak voices"))
-        XCTAssertTrue(CommandLineParser.usage.contains("--favorite"))
+        XCTAssertTrue(CommandLineParser.usage.contains("--speed"))
+        XCTAssertFalse(CommandLineParser.usage.contains("--favorite"))
     }
 
     // MARK: - Running

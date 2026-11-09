@@ -1,7 +1,7 @@
 import SpeakCore
 import XCTest
 
-/// How every host turns `--voice`, `--provider`, `--model` and `--favorite`
+/// How every host turns `--provider`, `--model` and `--voice`
 /// into one voice: identically, from the voices the app can use now.
 final class AutomationVoiceResolverTests: XCTestCase {
     private let onDevice = AutomationVoice(
@@ -17,7 +17,7 @@ final class AutomationVoiceResolverTests: XCTestCase {
     )
     private let nova = AutomationVoice(
         id: "openai/nova", name: "Nova", provider: "openai", providerName: "OpenAI",
-        models: ["openai/tts-1"], model: "openai/tts-1", favorite: true
+        models: ["openai/tts-1"], model: "openai/tts-1"
     )
     private let rachel = AutomationVoice(
         id: "elevenlabs/rachel", name: "Rachel", provider: "elevenlabs", providerName: "ElevenLabs",
@@ -67,15 +67,18 @@ final class AutomationVoiceResolverTests: XCTestCase {
         self.assertError(AutomationSpeechSelection(voice: "system"), in: [alloy], .unsupportedCommand, "on-device")
     }
 
-    func testProvider_prefersSelectedThenFavouriteThenFirst() throws {
-        XCTAssertEqual(try self.resolve(AutomationSpeechSelection(provider: "OpenAI")).voice.id, "openai/nova")
+    func testProvider_prefersSelectedThenFirst() throws {
+        XCTAssertEqual(try self.resolve(AutomationSpeechSelection(provider: "OpenAI")).voice.id, "openai/alloy")
         XCTAssertEqual(try self.resolve(AutomationSpeechSelection(provider: "elevenlabs")).voice.id, rachel.id)
         self.assertError(AutomationSpeechSelection(provider: "cartesia"), .invalidArgument, "Save its key")
     }
 
-    func testFavorite_choosesOnlyAmongFavourites() throws {
-        XCTAssertEqual(try self.resolve(AutomationSpeechSelection(favorite: "nova")).voice.id, "openai/nova")
-        self.assertError(AutomationSpeechSelection(favorite: "Alloy"), .invalidArgument, "favourite voice")
+    func testModelAlone_picksAVoiceThatOffersIt() throws {
+        let choice = try self.resolve(AutomationSpeechSelection(model: "tts-1-hd"))
+        XCTAssertEqual(choice.voice.id, "openai/alloy")
+        XCTAssertEqual(choice.model, "openai/tts-1-hd")
+        XCTAssertFalse(choice.isFallback)
+        self.assertError(AutomationSpeechSelection(model: "eleven_v3"), .invalidArgument, "No usable voice offers")
     }
 
     func testModel_acceptsFullOrShortIDsAndRefusesOthers() throws {
@@ -83,6 +86,6 @@ final class AutomationVoiceResolverTests: XCTestCase {
         XCTAssertEqual(
             try self.resolve(AutomationSpeechSelection(voice: "alloy", model: "tts-1-hd")).model, "openai/tts-1-hd")
         self.assertError(AutomationSpeechSelection(voice: "nova", model: "tts-1-hd"), .invalidArgument, "choose")
-        self.assertError(AutomationSpeechSelection(model: "x"), .invalidArgument, "no model choice")
+        self.assertError(AutomationSpeechSelection(voice: "rachel", model: "x"), .invalidArgument, "no model choice")
     }
 }

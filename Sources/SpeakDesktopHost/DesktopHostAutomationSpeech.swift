@@ -80,7 +80,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     private func prepareAutomationSpeech(_ speech: AutomationSpeechRequest) async throws -> PreparedAutomationSpeech {
         do {
             let choice = try AutomationVoiceResolver.resolve(speech.voice, in: await automationVoices())
-            let selection = try automationSpeechSelection(choice)
+            let selection = try automationSpeechSelection(
+                choice, overrides: speech.settings, modelRequested: speech.voice.model != nil)
             let snapshot = try VoiceOutputSourceSnapshot(source: .typedText, text: speech.text)
             let destination = try speech.output.map { try voiceExportDestination($0.path) }
             if let output = speech.output {
@@ -116,7 +117,6 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             keyed[name] = key?.isEmpty == false
         }
         let selected = try? currentVoiceSelection().voice
-        let favorites = Set(voiceOutputSettings().favoriteVoices ?? [])
         var rows: [AutomationVoice] = []
         var index: [String: Int] = [:]
         for voice in catalogue + [selected].compactMap({ $0 }) where keyed[voice.apiKeyIdentifier] != false {
@@ -129,7 +129,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             let provider = voice.automationProvider
             rows.append(AutomationVoice(
                 id: id, name: voice.name, provider: provider.id, providerName: provider.name,
-                models: [voice.modelID], model: voice.modelID, favorite: favorites.contains(id)
+                models: [voice.modelID], model: voice.modelID
             ))
         }
         if let selected, let position = index[selected.favoriteIdentifier] {
@@ -139,31 +139,49 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         return rows
     }
 
-    /// The synthesis settings for one resolved voice. The selected voice keeps
-    /// its exact saved configuration; another voice or model is resolved
-    /// strictly, never substituted.
-    func automationSpeechSelection(_ choice: AutomationVoiceChoice) throws -> DesktopSpeechSelection {
-        if choice.voice.selected, choice.model == choice.voice.model { return try currentVoiceSelection() }
+    /// The synthesis settings for one resolved voice and this call's
+    /// overrides. Unchanged, the selected voice keeps its exact saved
+    /// configuration; anything else is resolved strictly, never substituted,
+    /// and nothing is saved.
+    func automationSpeechSelection(
+        _ choice: AutomationVoiceChoice, overrides: AutomationSpeechSettings = .init(), modelRequested: Bool = false
+    ) throws -> DesktopSpeechSelection {
+        let unchanged = choice.voice.selected && choice.model == choice.voice.model
+        if unchanged, overrides.isEmpty { return try currentVoiceSelection() }
         var settings = voiceOutputSettings()
         let inventory = choice.voice.id.hasPrefix(MistralTTSCatalog.voiceIDPrefix)
             ? voiceDiscovery.inventories[.mistral] : selectedVoiceAccountInventory
+        let selection: DesktopSpeechSelection
         do {
-            let voice = try DesktopSpeechVoice.strictlyResolved(
-                modelID: choice.model, voiceID: choice.voice.id, accountInventory: inventory)
-            settings.modelID = choice.model
-            settings.voiceID = choice.voice.id
-            settings.strictVoiceSelection = true
-            switch voice {
-            case .openai, .elevenlabs: settings.quality = voice.defaultQuality.rawValue
-            default: break
+            if !unchanged {
+                let voice = try DesktopSpeechVoice.strictlyResolved(
+                    modelID: choice.model, voiceID: choice.voice.id, accountInventory: inventory)
+                settings.modelID = choice.model
+                settings.voiceID = choice.voice.id
+                settings.strictVoiceSelection = true
+                switch voice {
+                case .openai, .elevenlabs: settings.quality = voice.defaultQuality.rawValue
+                default: break
+                }
             }
-            return try settings.synthesisSelection(accountInventory: inventory)
+            try overrides.validate(for: settings.storedVoice(accountInventory: inventory))
+            if let speed = overrides.speed { settings.speed = speed }
+            if let pitch = overrides.pitch { settings.pitch = pitch }
+            if let language = overrides.language { settings.language = language }
+            // An explicit model wins where quality would otherwise pick the model.
+            if let quality = overrides.quality, !modelRequested { settings.quality = quality.rawValue }
+            selection = try settings.synthesisSelection(accountInventory: inventory)
+        } catch let error as AutomationError {
+            throw error
         } catch {
             throw AutomationError(
                 code: .invalidArgument,
-                message: "Voice \"\(choice.voice.id)\" is not available: \(error.localizedDescription)"
+                message: "Voice \"\(choice.voice.id)\" cannot be used with these settings: "
+                    + error.localizedDescription
             )
         }
+        try overrides.validate(for: selection.voice)
+        return selection
     }
 
     private func synthesizeAutomationSpeech(

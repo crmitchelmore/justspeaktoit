@@ -65,8 +65,14 @@ final class AutomationSpeechProtocolTests: XCTestCase {
         var speech = self.request()
         speech.provider = "openai"
         speech.model = "tts-1"
-        speech.favorite = "Alloy"
+        speech.speed = 1.5
+        speech.pitch = -2
+        speech.quality = "Highest"
+        speech.language = "automatic"
         XCTAssertNoThrow(try speech.validated())
+        let settings = try AutomationRequestPolicy.speech(for: speech).settings
+        XCTAssertEqual(
+            settings, AutomationSpeechSettings(speed: 1.5, pitch: -2, quality: .highest, language: "automatic"))
 
         var list = AutomationRequest(command: .listVoices)
         list.provider = "openai"
@@ -113,6 +119,32 @@ final class AutomationSpeechProtocolTests: XCTestCase {
 
         let invalid = await AutomationCommandDispatcher.response(to: self.request(text: ""), host: host)
         XCTAssertEqual(invalid.error?.code, .invalidArgument)
+    }
+
+    func testSettings_areValidatedAgainstSharedRanges() {
+        for (request, fragment) in [
+            ({ var req = self.request(); req.speed = 9; return req }(), "speed must be between"),
+            ({ var req = self.request(); req.pitch = 1.5; return req }(), "whole number"),
+            ({ var req = self.request(); req.quality = "ultra"; return req }(), "quality must be one of"),
+            ({ var req = self.request(); req.language = "klingon"; return req }(), "Unknown language")
+        ] {
+            self.assertInvalid(request, fragment)
+        }
+        var status = AutomationRequest(command: .status)
+        status.speed = 1
+        self.assertInvalid(status, "require speak_text")
+    }
+
+    func testSettings_refuseControlsTheVoiceLacks() throws {
+        let natural = try XCTUnwrap(
+            DesktopSpeechVoice.voices.first { !$0.capabilities.speed && !$0.supportsQualityControls })
+        XCTAssertThrowsError(try AutomationSpeechSettings(speed: 1.2).validate(for: natural))
+        XCTAssertThrowsError(try AutomationSpeechSettings(quality: .high).validate(for: natural))
+        let azure = try XCTUnwrap(DesktopSpeechVoice.voices.first { if case .azureNeural = $0 { true } else { false } })
+        XCTAssertNoThrow(try AutomationSpeechSettings(speed: 1.5, pitch: 2).validate(for: azure))
+        XCTAssertThrowsError(try AutomationSpeechSettings(speed: 3).validate(for: azure)) { error in
+            XCTAssertTrue((error as? AutomationError)?.message.contains("supports speed") == true)
+        }
     }
 
     func testDispatcher_listsVoicesFilteredByProvider() async throws {

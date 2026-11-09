@@ -75,7 +75,18 @@ extension MCPRequestHandler {
                     ],
                     "provider": ["type": "string", "description": "Provider ID or name from list_voices."],
                     "model": ["type": "string", "description": "Model ID from list_voices."],
-                    "favorite": ["type": "string", "description": "Name or ID of a voice saved as a favourite."],
+                    "speed": [
+                        "type": "number", "minimum": VoiceSynthesisOptions.speedRange.lowerBound,
+                        "maximum": VoiceSynthesisOptions.speedRange.upperBound,
+                        "description": "Speaking rate; 1 is normal. Checked against the voice."
+                    ],
+                    "pitch": [
+                        "type": "integer", "minimum": Int(VoiceSynthesisOptions.pitchRange.lowerBound),
+                        "maximum": Int(VoiceSynthesisOptions.pitchRange.upperBound),
+                        "description": "Semitones; only voices with pitch control accept it."
+                    ],
+                    "quality": ["type": "string", "enum": VoiceSynthesisQuality.allCases.map(\.rawValue)],
+                    "language": ["type": "string", "description": "automatic or a voice language ID, e.g. en-US."],
                     "path": ["type": "string", "description": "Audio file to write (.wav, .mp3 or .m4a)."],
                     "play": ["type": "boolean", "description": "Play aloud. Defaults to true without a path."],
                     "timeout_seconds": ["type": "number", "description": "Deadline in seconds."]
@@ -85,8 +96,8 @@ extension MCPRequestHandler {
         ],
         [
             "name": AutomationCommand.listVoices.rawValue,
-            "description": "List the voices speak_text can use: the app's selected voice, favourites, "
-                + "configured cloud voices and on-device voices, with their models.",
+            "description": "List the providers, voices and models speak_text can use: the app's selected "
+                + "voice, configured cloud voices and on-device voices.",
             "inputSchema": [
                 "type": "object",
                 "properties": ["provider": ["type": "string", "description": "Only this provider's voices."]]

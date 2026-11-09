@@ -109,3 +109,42 @@ test('the installer status reports availability without promising more than the 
   const missing = await (await serveInstaller('/alpha/windows/installer.json', {pointer: null})).response.json();
   assert.deepEqual(missing, {available: false, channel: 'beta'});
 });
+
+test('Linux Flatpak descriptors are served from the signed repository site', async () => {
+  const originalFetch = globalThis.fetch;
+  const ref = '[Flatpak Ref]\nName=com.justspeaktoit.JustSpeakToIt\nGPGKey=AAAA\n';
+  try {
+    globalThis.fetch = async url => {
+      assert.equal(url, 'https://justspeaktoit-flatpak.pages.dev/com.justspeaktoit.JustSpeakToIt.flatpakref');
+      return new Response(ref);
+    };
+    const response = await worker.fetch(new Request('https://justspeaktoit.com/linux/flatpak'), {});
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('Content-Type'), 'application/vnd.flatpak.ref');
+    assert.equal(await response.text(), ref);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Linux Flatpak descriptors fall back to the Alpha bundle until a repository is published', async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    async () => new Response('Not found', {status: 404}),
+    async () => new Response('<html>index</html>'),
+    async () => new Response('[Flatpak Repo]\nUrl=https://example.com/\n'),
+    async () => { throw new TypeError('Network unavailable'); },
+  ];
+  try {
+    for (const fake of cases) {
+      globalThis.fetch = fake;
+      for (const path of ['/linux/flatpak', '/linux/justspeaktoit.flatpakrepo']) {
+        const response = await worker.fetch(new Request(`https://justspeaktoit.com${path}`), {});
+        assert.equal(response.status, 302);
+        assert.equal(response.headers.get('Location'), '/alpha/download/linux-x86_64');
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

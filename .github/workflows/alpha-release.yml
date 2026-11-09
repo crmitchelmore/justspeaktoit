@@ -95,6 +95,17 @@ jobs:
     with:
       manifest: ${{ needs.allocate.outputs.tag }}
     secrets: inherit
+  # Publishes the qualified Linux bundle to the signed, self-hosted Flatpak
+  # repository. Without the flatpak-repo signing key it rehearses only.
+  linux-flatpak-repo:
+    needs: [allocate, desktop-qualification]
+    if: needs.allocate.outputs.tag != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/linux-flatpak-repo.yml
+    with:
+      manifest: ${{ needs.allocate.outputs.tag }}
+    secrets: inherit
   # Keeps owner-nominated testers in Public Alpha after each iOS upload. The
   # address list is read only here, behind the main-only environment.
   ios-testers:

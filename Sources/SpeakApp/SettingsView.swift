@@ -787,24 +787,11 @@ struct SettingsView: View {
       SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
-            Picker("Voice", selection: settingsBinding(\AppSettings.defaultTTSVoice)) {
-              ForEach(defaultVoicePickerOptions) { voice in
-                HStack {
-                  Text(voice.displayName)
-                  Spacer()
-                  ModelCredentialStatusView(
-                    availability: ModelCredentialResolver.availability(
-                      for: voice.id,
-                      purpose: .voiceOutput,
-                      storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers
-                    )
-                  )
-                }
-                .accessibilityElement(children: .combine)
-                .tag(voice.id)
-              }
-            }
-            .settingsMenuPicker()
+            VoicePicker(
+              voices: defaultVoicePickerOptions,
+              storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers,
+              selection: settingsBinding(\AppSettings.defaultTTSVoice)
+            )
             .speakTooltip("Choose your preferred voice for text-to-speech synthesis")
 
             OpenRouterSpeechPickerButton(selectedVoice: settingsBinding(\AppSettings.defaultTTSVoice))

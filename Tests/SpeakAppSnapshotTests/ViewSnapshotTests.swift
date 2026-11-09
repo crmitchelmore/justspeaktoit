@@ -97,7 +97,24 @@ final class ViewSnapshotTests: XCTestCase {
         try Self.assertDeterministicSnapshot(of: view, size: CGSize(width: 200, height: 120))
     }
 
-    // MARK: - Helpers
+    // MARK: - Dark appearance
+
+    /// Reference-free dark-mode guard: no opaque pixel may be near-black, which
+    /// is what fixed black text looks like on a dark window.
+    func testLatencyBadges_darkAppearanceHasNoBlackInk() throws {
+        let view = HStack(spacing: 10) {
+            LatencyBadge(tier: .instant, estimatedMs: 50)
+            LatencyBadge(tier: .slow, estimatedMs: 3000)
+            LatencyBadgeCompact(tier: .fast)
+            LatencyBadgeCompact(tier: .medium, emphasized: true)
+        }
+        .padding(16)
+
+        let image = try Self.render(view, size: CGSize(width: 420, height: 60), colorScheme: .dark)
+        XCTAssertEqual(try Self.nearBlackOpaquePixelCount(in: image), 0)
+    }
+
+        // MARK: - Helpers
 
     /// A fresh `AppSettings` backed by an empty scratch suite so host-machine
     /// defaults can never leak into rendering.
@@ -144,10 +161,14 @@ final class ViewSnapshotTests: XCTestCase {
     /// `ImageRenderer` deliberately replaces the previous off-screen `NSWindow`:
     /// window-backed rendering needs the window server for shadows and
     /// translucency, which a headless CI runner draws differently.
-    private static func render(_ view: some View, size: CGSize) throws -> NSImage {
+    private static func render(
+        _ view: some View,
+        size: CGSize,
+        colorScheme: ColorScheme = .light
+    ) throws -> NSImage {
         let renderer = ImageRenderer(
             content: view
-                .environment(\.colorScheme, .light)
+                .environment(\.colorScheme, colorScheme)
                 .frame(width: size.width, height: size.height)
         )
         renderer.scale = 1
@@ -182,5 +203,19 @@ final class ViewSnapshotTests: XCTestCase {
         let image = NSImage(size: size)
         image.addRepresentation(representation)
         return image
+    }
+
+    private static func nearBlackOpaquePixelCount(in image: NSImage) throws -> Int {
+        let bitmap = try XCTUnwrap(image.representations.first as? NSBitmapImageRep)
+        var count = 0
+        for row in 0..<bitmap.pixelsHigh {
+            for column in 0..<bitmap.pixelsWide {
+                guard let colour = bitmap.colorAt(x: column, y: row), colour.alphaComponent > 0.9 else { continue }
+                let luminance = 0.2126 * colour.redComponent + 0.7152 * colour.greenComponent
+                    + 0.0722 * colour.blueComponent
+                if luminance < 0.08 { count += 1 }
+            }
+        }
+        return count
     }
 }

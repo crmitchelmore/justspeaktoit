@@ -11,6 +11,8 @@ package struct DesktopComparisonPresentation: Sendable {
     package let selected: String
     package let judgeable: Bool
     package var sync = DesktopComparisonSyncControls()
+    /// "Save results to History": each lane of a finished round becomes a History record.
+    package var saveToHistory = false
     package var references = ""
     package var reference = ""
     package var batch = DesktopComparisonBatchControls()
@@ -322,12 +324,13 @@ extension DesktopHostController {
         }
         comparisonReference = reference?.id
         let selectedModels = await comparisons.selectedModelIDs()
+        let saveToHistory = await comparisons.savesResultsToHistory()
         playback.stop(unless: round?.id ?? UUID())
         let rows = rounds.map { "\($0.id.uuidString)\t\(DesktopHostModels.uiText($0.sample.name))" }
             .joined(separator: "\n")
         var detail = comparisonNotice + "\n\n"
             + "Choose at least two File/Batch models; Live supports two to eight on one microphone.\n"
-            + "Raw transcripts only. No insertion, post-processing or History changes.\n"
+            + comparisonHistoryNotice(saveToHistory)
         detail += comparisonBatchNotice(queued: queued)
         if let round {
             detail += await comparisonRoundDetail(round, state: state, reference: reference)
@@ -348,6 +351,7 @@ extension DesktopHostController {
             models: models, rounds: rows, detail: detail, busy: busy, recording: comparisonCapture != nil,
             selected: round?.id.uuidString ?? "", judgeable: state.judgeable,
             sync: sync.controls,
+            saveToHistory: saveToHistory,
             references: round?.entriesInBlindOrder.map {
                 "\($0.id.uuidString)\tResult \(round?.blindLabel(for: $0.id) ?? "")"
             }.joined(separator: "\n") ?? "",

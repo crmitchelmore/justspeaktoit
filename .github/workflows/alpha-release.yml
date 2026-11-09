@@ -106,3 +106,41 @@ jobs:
     with:
       manifest: ${{ needs.allocate.outputs.tag }}
     secrets: inherit
+  # Keeps owner-nominated testers in Public Alpha after each iOS upload. The
+  # address list is read only here, behind the main-only environment.
+  ios-testers:
+    needs: [allocate, ios]
+    if: needs.allocate.outputs.tag != '' && needs.ios.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: testflight-testers
+    # Same lane as the reconciler and manual tester job: enrolment writes and
+    # pending-invitation rollback must never interleave.
+    concurrency:
+      group: apple-release-observation
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      TESTFLIGHT_TESTER_EMAILS: ${{ secrets.TESTFLIGHT_TESTER_EMAILS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Mask each configured tester address
+        run: ./scripts/mask-tester-emails.sh
+      - name: Install existing Apple API key
+        env:
+          KEY_DATA: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          umask 077
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          printf '%s' "$KEY_DATA" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_S747NJ9DZY.p8"
+      - name: Ensure testers are in Public Alpha
+        run: |
+          if [ -z "$TESTFLIGHT_TESTER_EMAILS" ]; then echo 'No tester addresses configured.'; exit 0; fi
+          ruby scripts/testflight-testers.rb ensure

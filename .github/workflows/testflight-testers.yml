@@ -1,0 +1,99 @@
+name: TestFlight tester access
+# Keeps the owner-nominated addresses in TESTFLIGHT_TESTER_EMAILS in the iOS
+# Alpha "Public Alpha" external group. The repository is public: addresses are
+# masked before use and the script logs only counts and Apple states.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/testflight-testers.yml
+      - scripts/testflight-testers.rb
+      - scripts/tests/testflight_testers_test.rb
+      - scripts/release-apple.rb
+      - scripts/mask-tester-emails.sh
+  workflow_dispatch:
+    inputs:
+      release_if_stale:
+        description: Start a hosted iOS Alpha release when there is no recent valid build
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test tester access without secrets
+        run: ruby scripts/tests/testflight_testers_test.rb
+  testers:
+    if: github.event_name == 'workflow_dispatch'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: testflight-testers
+    permissions:
+      contents: write
+      actions: write
+    # Shares the reconciler's lane so beta review submission is never raced.
+    concurrency:
+      group: apple-release-observation
+      queue: max
+      cancel-in-progress: false
+    env:
+      APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      TESTFLIGHT_TESTER_EMAILS: ${{ secrets.TESTFLIGHT_TESTER_EMAILS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - name: Mask each configured tester address
+        run: ./scripts/mask-tester-emails.sh
+      - name: Install existing Apple API key
+        env:
+          KEY_DATA: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          umask 077
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          printf '%s' "$KEY_DATA" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_S747NJ9DZY.p8"
+      - name: Ensure testers are in Public Alpha
+        run: ruby scripts/testflight-testers.rb ensure
+      - name: Fetch only the immutable release ledger
+        run: >-
+          git fetch --no-tags --depth=1 origin
+          '+refs/tags/alpha-build-*:refs/tags/alpha-build-*'
+          '+refs/tags/stable-candidate-*:refs/tags/stable-candidate-*'
+      # Assigns processed Alpha builds and submits them for beta review. Older
+      # ledger entries may need separate attention; verification below is the gate.
+      - name: Reconcile Alpha builds and beta review
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ruby scripts/reconcile-apple-releases.rb
+      - name: Read latest iOS Alpha build
+        id: status
+        run: ruby scripts/testflight-testers.rb status
+      - name: Start a hosted iOS Alpha release when no recent build exists
+        if: steps.status.outputs.recent != 'true' && inputs.release_if_stale
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push \
+            --status success --limit 1 --json headSha --jq '.[0].headSha')
+          test -n "$source"
+          active=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow alpha-release.yml --limit 20 \
+            --json status --jq '[.[] | select(.status != "completed")] | length')
+          if [ "$active" -gt 0 ]; then
+            echo "An Alpha release is already running; rerun this workflow after TestFlight processing."
+            exit 1
+          fi
+          gh workflow run alpha-release.yml --repo "$GITHUB_REPOSITORY" --ref main -f source="$source" -f rebuild=true
+          echo "Started an Alpha release for $source; rerun this workflow after TestFlight processing."
+          exit 1
+      - name: Send invitations now that a build may be testable
+        run: ruby scripts/testflight-testers.rb ensure
+      - name: Verify membership, invitation and build state
+        run: ruby scripts/testflight-testers.rb verify

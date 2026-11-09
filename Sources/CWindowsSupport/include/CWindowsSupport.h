@@ -170,6 +170,8 @@ int jsti_comparison_present_batch(const char *models, const char *rounds, const 
                                  const char *selected, int busy, int recording, int judgeable,
                                  int sync_enabled, int sync_available, const char *references, const char *reference,
                                  const char *batch_round, int batch_remaining, int can_next);
+/* "Save results to History" opt-in state; toggling it emits comparison action 129 (index 0/1). */
+int jsti_comparison_set_save_history(int enabled);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
 /* Pre-run only: opt in to passive Escape observation while recording/working.

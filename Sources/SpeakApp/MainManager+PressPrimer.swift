@@ -86,6 +86,9 @@ final class KeyPressPrimerRuntime {
     case .pressed:
       lastKeyDownUptime = event.uptime
       primer.pressBegan(at: event.uptime)
+      // The hold or second tap that starts a session comes 200-500 ms later;
+      // query TCC now so the capture start can reuse the answer (#611).
+      owner?.permissionsManager.refresh(.microphone)
     case .released:
       primer.pressEnded(at: event.uptime)
     case .reset:

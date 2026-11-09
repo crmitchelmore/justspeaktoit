@@ -82,6 +82,11 @@ final class PermissionsManager: ObservableObject {
   private var lifecycleObservers: [NSObjectProtocol] = []
   private lazy var settingsGuide = PermissionSettingsGuide()
   private let guidePresenter: ((PermissionType) -> Void)?
+  /// Monotonic time of each type's last system query, so a status refreshed
+  /// moments ago (at hotkey key-down) can stand in for another query.
+  fileprivate var refreshedUptime: [PermissionType: TimeInterval] = [:]
+  /// Monotonic clock for `refreshedUptime`; replaced in tests.
+  var uptime: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
 
   init(
     statusProvider: @escaping (PermissionType) -> PermissionStatus = PermissionsManager.systemStatus,
@@ -126,6 +131,7 @@ final class PermissionsManager: ObservableObject {
 
   func refresh(_ type: PermissionType) {
     let status = computeStatus(for: type)
+    refreshedUptime[type] = uptime()
     record(status, for: type)
     if status != .notDetermined, requestIssues[type] != nil {
       requestIssues[type] = nil
@@ -371,4 +377,17 @@ extension PermissionsManager {
       + RunningAppIdentity.current.accessibilityRecoveryInstructions
   }
 
+}
+
+extension PermissionsManager {
+  /// Queries the system only when the cached status is older than `maxAge`
+  /// seconds. Each microphone TCC query costs 15-35 ms, so the hotkey path
+  /// refreshes at key-down and the capture start reuses that answer (#611).
+  func refresh(_ type: PermissionType, ifOlderThan maxAge: TimeInterval) {
+    if let refreshed = refreshedUptime[type], statuses[type] != nil {
+      let age = uptime() - refreshed
+      if age >= 0, age <= maxAge { return }
+    }
+    refresh(type)
+  }
 }

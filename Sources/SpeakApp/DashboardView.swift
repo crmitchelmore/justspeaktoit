@@ -653,7 +653,7 @@ struct DashboardView: View {
     case .gemini: return .blue
     case .mistral: return .indigo
     case .speechmatics: return .cyan
-    case .xai: return .black
+    case .xai: return .primary
     case .system: return .gray
     }
   }

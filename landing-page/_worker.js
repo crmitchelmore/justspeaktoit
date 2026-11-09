@@ -59,6 +59,40 @@ const windowsInstallerRoutes = {
   } : {available: false, channel: 'beta'}, {headers: {'Cache-Control': 'public, max-age=30'}}),
 };
 
+// The signed Linux Flatpak repository lives on its own static Pages project,
+// published by linux-flatpak-repo.yml. These stable URLs serve its install
+// descriptors; until a repository is published they fall back to the
+// single-file Alpha bundle so the Linux CTA never breaks.
+const flatpakSite = 'https://justspeaktoit-flatpak.pages.dev';
+const flatpakRoutes = {
+  '/linux/flatpak': {file: 'com.justspeaktoit.JustSpeakToIt.flatpakref', header: '[Flatpak Ref]',
+    type: 'application/vnd.flatpak.ref'},
+  '/linux/justspeaktoit.flatpakrepo': {file: 'justspeaktoit.flatpakrepo', header: '[Flatpak Repo]',
+    type: 'application/vnd.flatpak.repo'},
+};
+
+async function flatpakDescriptor({file, header, type}) {
+  try {
+    const response = await fetch(`${flatpakSite}/${file}`, {cf: {cacheTtl: 60}});
+    if (response.ok) {
+      const body = await response.text();
+      if (body.length <= 16384 && body.startsWith(`${header}\n`) && body.includes('\nGPGKey=')) {
+        return new Response(body, {headers: {
+          'Content-Type': type,
+          'Content-Disposition': `attachment; filename="${file}"`,
+          'Cache-Control': 'public, max-age=60',
+          'X-Content-Type-Options': 'nosniff',
+        }});
+      }
+    }
+  } catch {
+    // Fall through to the bundle.
+  }
+  return new Response(null, {status: 302, headers: {
+    Location: '/alpha/download/linux-x86_64', 'Cache-Control': 'public, max-age=30',
+  }});
+}
+
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
@@ -73,6 +107,7 @@ export default {
       '/alpha/download/windows-arm64': 'JustSpeakToIt-windows-arm64-developer.zip',
       '/alpha/download/linux-x86_64': 'JustSpeakToIt-linux-x86_64.flatpak',
     };
+    if (Object.hasOwn(flatpakRoutes, path)) return flatpakDescriptor(flatpakRoutes[path]);
     if (Object.hasOwn(windowsInstallerRoutes, path)) {
       const installer = await windowsInstaller();
       return windowsInstallerRoutes[path](installer, new URL(request.url));

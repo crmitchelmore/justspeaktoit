@@ -55,7 +55,8 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   const swift = jobBodies['core-journey-e2e'];
   const ui = jobBodies['core-journey-fixture-ui'];
   assert.match(swift, /^\s+timeout-minutes: 40$/m);
-  assert.match(ui, /^\s+timeout-minutes: 42$/m);
+  assert.match(ui, /^\s+timeout-minutes: 47$/m);
+  assert.match(ui, /timeout-minutes: 11\n\s+run: python3 scripts\/run-core-journey-stages.py ui --phase setup/);
   assert.match(swift, /timeout-minutes: 17\n\s+run: scripts\/run-core-journey-e2e.sh --phase build/);
   assert.match(swift, /timeout-minutes: 10\n\s+run: python3 scripts\/with-test-keychain.py bash scripts\/run-core-journey-e2e.sh --phase test/);
   assert.ok(swift.indexOf('--phase build') < swift.indexOf('--phase test'));
@@ -74,7 +75,7 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   assert.match(ui, /include-hidden-files: true/);
   assert.match(ui, /path: \|\n\s+\.artifacts\/core-journey-fixture-ui\n\s+!\.artifacts\/core-journey-fixture-ui\/DerivedData/);
   assert.match(journeyStages, /BUILD_BUDGET = 900/);
-  assert.match(journeyStages, /SETUP_BUDGET = 300/);
+  assert.match(journeyStages, /SETUP_BUDGET = 600/);
   assert.match(journeyStages, /RUNTIME_BUDGET = \{"swift": 480, "ui": 600\}/);
   assert.match(journeyStages, /RECEIPT_BUDGET = 60/);
   assert.match(journeyStages, /"swift", "build", "--build-tests", "--enable-code-coverage"/);
@@ -264,7 +265,8 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   const products = jobBodies['build-ios-test-products'];
   assert.match(products, /^\s+runs-on: macos-latest$/m);
   assert.match(products, /^\s+timeout-minutes: 30$/m);
-  assert.match(products, /TUIST_IOS_KEYBOARD=1 tuist generate/);
+  assert.match(products, /TUIST_IOS_KEYBOARD=1 scripts\/retry-network.sh tuist generate/);
+  assert.match(products, /scripts\/retry-network.sh xcodebuild -resolvePackageDependencies/);
   assert.match(products, /xcodebuild build-for-testing/);
   assert.match(products, /-only-testing:SpeakiOSTests/);
   assert.match(products, /-only-testing:SpeakiOSUITests/);
@@ -281,7 +283,7 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(devices, /Build Keyboard Extension, hand-off shape/);
   assert.match(devices, /Build Keyboard Extension, direct-capture shape/);
   assert.match(devices, /Build watchOS App \(feature-flagged\)/);
-  assert.match(devices, /TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate/);
+  assert.match(devices, /TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 scripts\/retry-network.sh tuist generate/);
   assert.match(devices, /-scheme JustSpeakWatchApp/);
   assert.match(devices, /-destination generic\/platform=watchOS/);
   assert.match(devices, /-scheme SpeakiOS/);
@@ -538,4 +540,21 @@ test('launched-app UI shards in CI match every shard the verifier requires', () 
   assert.match(ui, /fail-fast: false/);
   assert.match(ui, /CORE_JOURNEY_UI_SHARD: \$\{\{ matrix\.shard \}\}/);
   assert.match(ui, /name: core-journey-fixture-ui-\$\{\{ matrix\.shard \}\}-\$\{\{ github\.run_attempt \}\}/);
+});
+
+test('network-bound package resolution and Tuist generation retry before Apple builds', () => {
+  const retry = 'scripts/retry-network.sh';
+  for (const id of ['build-macos', 'release-validation', 'build-ios-swiftpm']) {
+    const body = jobBodies[id];
+    const resolve = body.indexOf(`run: ${retry} swift package resolve`);
+    assert.ok(resolve > 0, `${id}: resolve with retries`);
+    assert.ok(resolve < body.search(/run: (?:SWIFT_FLAGS=.*make build|python3 scripts\/with-test-keychain\.py swift test -c release|swift build --disable-dependency-cache --target SpeakiOSLib)/),
+      `${id}: resolution must precede the build`);
+  }
+  for (const id of ['build-ios-test-products', 'build-ios-keyboard']) {
+    const body = jobBodies[id];
+    assert.doesNotMatch(body.replaceAll(`${retry} tuist generate`, ''), /tuist generate/, `${id}: every generate retries`);
+    assert.equal((body.match(/xcodebuild -resolvePackageDependencies/g) || []).length,
+      (body.match(/tuist generate/g) || []).length, `${id}: resolve after each generate`);
+  }
 });

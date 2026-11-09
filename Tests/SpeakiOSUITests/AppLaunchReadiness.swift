@@ -38,7 +38,7 @@ extension XCUIApplication {
                 throw AppLaunchTimeout()
             }
             facts.observe(.skipAttempted, true)
-            finish.tap()
+            Self.tapUntilDismissed(finish)
         }
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             facts.reset([.finishExists, .readyExists, .readyHittable])
@@ -52,6 +52,20 @@ extension XCUIApplication {
             facts.emitFailure(.finalReady)
             XCTFail("The app's root control was not reachable after the first-run check")
             throw AppLaunchTimeout()
+        }
+    }
+}
+
+extension XCUIApplication {
+    // A tap during the sheet's settle can be dropped, leaving Skip on screen
+    // (run 42604632491). Re-tap a still-present Skip, at most twice.
+    fileprivate static func tapUntilDismissed(_ finish: XCUIElement) {
+        finish.tap()
+        for _ in 0..<2 {
+            let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !finish.exists }, object: nil)
+            guard XCTWaiter.wait(for: [dismissed], timeout: 5) != .completed,
+                  finish.exists, finish.isHittable else { return }
+            finish.tap()
         }
     }
 }

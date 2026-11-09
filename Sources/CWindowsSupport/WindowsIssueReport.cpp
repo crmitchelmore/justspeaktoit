@@ -1,5 +1,6 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
+#include "WindowsWindowChrome.hpp"
 #include <commdlg.h>
 #include <shellapi.h>
 #include <objbase.h>
@@ -245,6 +246,8 @@ LRESULT formMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
         form->state->window = window;
     }
     if (!form) return DefWindowProcW(window, message, wparam, lparam);
+    LRESULT themed = 0;
+    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
     switch (message) {
     case WM_CREATE: {
         const auto add = [&](const wchar_t *type, const wchar_t *text, DWORD style, int id) {

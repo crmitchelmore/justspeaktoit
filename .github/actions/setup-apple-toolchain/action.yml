@@ -33,12 +33,16 @@ runs:
     - name: Install Tuist
       if: inputs.install-tuist == 'true'
       shell: bash
-      # GitHub release downloads intermittently return 5xx; retry with backoff.
+      # Hosted runners install the pinned, checksum-verified release through the
+      # GitHub asset API: the release download URL behind `brew install tuist`
+      # returned 504 on every request. The token is read-only and only reaches
+      # api.github.com, to avoid the shared hosted-runner rate limit.
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
-        retry() { for delay in 5 15 0; do "$@" && return 0; [ "$delay" = 0 ] && return 1; echo "Retrying in ${delay}s: $*" >&2; sleep "$delay"; done; }
         if [ "${RUNNER_ENVIRONMENT:-}" = "self-hosted" ]; then
           command -v tuist >/dev/null || { echo "::error::Preinstall Tuist on the reviewed native runner"; exit 1; }
           tuist version
         else
-          retry brew install tuist
+          scripts/install-tuist.sh >/dev/null
         fi

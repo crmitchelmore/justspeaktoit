@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -95,14 +95,20 @@ test('actual validation rejects ambiguous or executable input before tool change
   }
   const directory = mkdtempSync(join(tmpdir(), 'apple-toolchain-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const log = join(directory, 'brew-call');
-  writeFileSync(join(directory, 'brew'), '#!/bin/sh\nprintf "%s\\n" "$*" > "$BREW_CALL"\n', { mode: 0o755 });
+  const log = join(directory, 'install-call');
+  writeFileSync(join(directory, 'brew'), '#!/bin/sh\nexit 99\n', { mode: 0o755 });
+  mkdirSync(join(directory, 'scripts'));
+  writeFileSync(join(directory, 'scripts', 'install-tuist.sh'),
+    '#!/bin/sh\nprintf "%s" "${GITHUB_TOKEN:-}" > "$INSTALL_CALL"\necho /pinned/tuist\n', { mode: 0o755 });
   const install = composite.find(step => step.name === 'Install Tuist');
   const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', install.command], {
-    env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, BREW_CALL: log, RUNNER_ENVIRONMENT: 'github-hosted' }, encoding: 'utf8',
+    cwd: directory, encoding: 'utf8',
+    env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, INSTALL_CALL: log,
+      GITHUB_TOKEN: 'synthetic-token', RUNNER_ENVIRONMENT: 'github-hosted' },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(readFileSync(log, 'utf8'), 'install tuist\n');
+  assert.equal(readFileSync(log, 'utf8'), 'synthetic-token', 'hosted setup uses the pinned installer, not Homebrew');
+  assert.doesNotMatch(install.command, /brew install tuist/);
 });
 
 test('native setup requires preinstalled Tuist and never invokes Homebrew', t => {

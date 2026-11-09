@@ -55,6 +55,14 @@ struct CompareModelsScoreboardView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(score.modelDisplayName)
                     Text(score.providerDisplayName).font(.caption).foregroundStyle(.secondary)
+                    if let failure = score.latestFailure {
+                        Text(failure)
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                            .lineLimit(2)
+                            .help(failure)
+                            .accessibilityLabel("Last failure: \(failure)")
+                    }
                 }
             }
             .width(min: 160)
@@ -64,7 +72,12 @@ struct CompareModelsScoreboardView: View {
                 Text(score.meanRank.map { String(format: "%.2f", $0) } ?? "–")
             }
             .width(80)
-            TableColumn("Failures") { score in Text("\(score.failures)") }.width(70)
+            TableColumn("Failures") { score in
+                Text("\(score.failures)")
+                    .foregroundStyle(score.failures > 0 ? Color.red : Color.primary)
+                    .help(score.latestFailure.map { "Last failure: \($0)" } ?? "")
+            }
+            .width(70)
             TableColumn("First partial") { score in
                 Text(score.meanTimeToFirstPartialMs.map(SessionLatencyMetrics.formattedMilliseconds) ?? "–")
             }

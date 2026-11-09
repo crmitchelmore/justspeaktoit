@@ -82,6 +82,11 @@ jobs:
 
       # Keep dependency fetches in this workspace: the shared SwiftPM repository
       # cache can reference a missing directory. Retain the compiled .build cache.
+      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
+      # release assets, which intermittently return 5xx; resolve with retries first.
+      - name: Resolve Swift packages
+        run: scripts/retry-network.sh swift package resolve --disable-dependency-cache
+
       - name: Build
         # Match the Test (Debug) step flag. A plain debug build here produces a
         # cached .build that the coverage-enabled swift test below cannot reuse
@@ -473,7 +478,8 @@ jobs:
     # The former 600s job spent ~505s preparing before UI tests. Setup now has a
     # separate 300s command budget; build has 900s; actual UI tests keep 600s.
     # Each product/source receipt is separately bounded to 60s, not hidden setup.
-    timeout-minutes: 42
+    # Setup's retried package resolution may take 11 minutes; tests keep 12.
+    timeout-minutes: 47
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
@@ -481,7 +487,7 @@ jobs:
         timeout-minutes: 2
 
       - name: Prepare Tuist and macOS project
-        timeout-minutes: 6
+        timeout-minutes: 11
         run: python3 scripts/run-core-journey-stages.py ui --phase setup
 
       - name: Build launched fixture test products
@@ -526,6 +532,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-release-
 
+      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
+      # release assets, which intermittently return 5xx; resolve with retries first.
+      - name: Resolve Swift packages
+        run: scripts/retry-network.sh swift package resolve
+
       - name: Test (Release)
         run: python3 scripts/with-test-keychain.py swift test -c release
 
@@ -540,6 +551,10 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
+      # release assets, which intermittently return 5xx; resolve with retries first.
+      - name: Resolve Swift packages
+        run: scripts/retry-network.sh swift package resolve --disable-dependency-cache
       - name: Build iOS Library
         run: swift build --disable-dependency-cache --target SpeakiOSLib
 
@@ -563,7 +578,9 @@ jobs:
       - name: Build complete simulator test products without booting a simulator
         run: |
           set -o pipefail
-          TUIST_IOS_KEYBOARD=1 tuist generate --no-open
+          TUIST_IOS_KEYBOARD=1 scripts/retry-network.sh tuist generate --no-open
+          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
+            -workspace "Just Speak to It.xcworkspace" -scheme SpeakiOS
           xcodebuild build-for-testing \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakiOS \
@@ -757,7 +774,9 @@ jobs:
           TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
         run: |
           set -o pipefail
-          tuist generate --no-open
+          scripts/retry-network.sh tuist generate --no-open
+          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
+            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakKeyboard
           xcodebuild build \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme JustSpeakKeyboard \
@@ -778,7 +797,9 @@ jobs:
           TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "1"
         run: |
           set -o pipefail
-          tuist generate --no-open
+          scripts/retry-network.sh tuist generate --no-open
+          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
+            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakKeyboard
           xcodebuild build \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme JustSpeakKeyboard \
@@ -793,7 +814,9 @@ jobs:
         # The containing iOS build also verifies watch companion embedding.
         run: |
           set -o pipefail
-          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate --no-open
+          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 scripts/retry-network.sh tuist generate --no-open
+          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
+            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakWatchApp
           xcodebuild build \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme JustSpeakWatchApp \
@@ -890,6 +913,12 @@ jobs:
       # Stable version selection and publication remain explicit decisions.
       - name: Test public API compatibility fixtures
         run: python3 -B -m unittest discover -s scripts/tests -p test_api_compatibility.py -v
+
+      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
+      # release assets, which return 5xx (run 42573814973). Resolve with retries
+      # first so the diagnosis reuses the shared SwiftPM artefact cache.
+      - name: Resolve Swift packages
+        run: scripts/retry-network.sh swift package resolve
 
       - name: Diagnose breaking public API changes
         env:

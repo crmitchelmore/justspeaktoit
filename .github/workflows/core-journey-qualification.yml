@@ -25,7 +25,7 @@ jobs:
        github.event.pull_request.head.repo.full_name == github.repository)
     # Same hosted image as the required Core Journey Fixture UI gate.
     runs-on: macos-latest
-    timeout-minutes: 90
+    timeout-minutes: 95
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +39,7 @@ jobs:
         timeout-minutes: 2
 
       - name: Prepare Tuist and macOS project
-        timeout-minutes: 6
+        timeout-minutes: 11
         run: python3 scripts/run-core-journey-stages.py ui --phase setup
 
       - name: Build launched fixture test products

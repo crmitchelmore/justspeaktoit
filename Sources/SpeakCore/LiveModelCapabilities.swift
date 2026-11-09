@@ -160,7 +160,7 @@ extension ModelCatalog {
         "modulate/velma-2-stt-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
-        "soniox/stt-rt-v5-streaming": LiveModelCapabilities(
+        "soniox/stt-rt-v6-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             supportsLanguageHint: true
         ),

@@ -9,17 +9,17 @@ final class SonioxAsyncTranscriptionProviderTests: XCTestCase {
   func testModelCatalogBatchTranscription_includesSonioxAsyncV5() {
     let ids = ModelCatalog.batchTranscription.map(\.id)
 
-    XCTAssertTrue(ids.contains("soniox/stt-async-v5"))
+    XCTAssertTrue(ids.contains("soniox/stt-async-v6"))
   }
 
   func testProviderRegistry_routesSonioxAsyncToSonioxProvider() async {
-    let provider = await TranscriptionProviderRegistry.shared.provider(forModel: "soniox/stt-async-v5")
+    let provider = await TranscriptionProviderRegistry.shared.provider(forModel: "soniox/stt-async-v6")
 
     XCTAssertEqual(provider?.metadata.id, "soniox")
   }
 
   func testProviderRegistry_stillRoutesSonioxLiveToSonioxProvider() async {
-    let provider = await TranscriptionProviderRegistry.shared.provider(forModel: "soniox/stt-rt-v5-streaming")
+    let provider = await TranscriptionProviderRegistry.shared.provider(forModel: "soniox/stt-rt-v6-streaming")
 
     XCTAssertEqual(provider?.metadata.id, "soniox")
   }
@@ -40,7 +40,7 @@ final class SonioxAsyncTranscriptionProviderTests: XCTestCase {
     let result = try await provider.transcribeFile(
       at: try makeAudioFile(),
       apiKey: "test-soniox-key",
-      model: "soniox/stt-async-v5",
+      model: "soniox/stt-async-v6",
       language: "en_GB"
     )
 
@@ -55,7 +55,7 @@ final class SonioxAsyncTranscriptionProviderTests: XCTestCase {
     ])
     let capturedBody = await requestObserver.bodyString(forPath: "/v1/transcriptions")
     let createBody = try XCTUnwrap(capturedBody)
-    XCTAssertTrue(createBody.contains(#""model":"stt-async-v5""#))
+    XCTAssertTrue(createBody.contains(#""model":"stt-async-v6""#))
     XCTAssertTrue(createBody.contains(#""file_id":"file-1""#))
     XCTAssertTrue(createBody.contains(#""language_hints":["en"]"#))
     XCTAssertTrue(createBody.contains(#""enable_speaker_diarization":true"#))
@@ -101,7 +101,7 @@ final class SonioxAsyncTranscriptionProviderTests: XCTestCase {
       _ = try await provider.transcribeFile(
         at: try makeAudioFile(),
         apiKey: "test-soniox-key",
-        model: "soniox/stt-async-v5",
+        model: "soniox/stt-async-v6",
         language: nil
       )
       XCTFail("Expected failed Soniox job to throw")

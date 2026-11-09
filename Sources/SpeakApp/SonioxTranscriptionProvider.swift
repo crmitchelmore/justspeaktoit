@@ -67,7 +67,7 @@ protocol SonioxFinalizationDelegate: AnyObject {
 
 // MARK: - Provider
 
-// Soniox v5 supports real-time streaming and asynchronous batch transcription.
+// Soniox v6 supports real-time streaming and asynchronous batch transcription.
 struct SonioxTranscriptionProvider: TranscriptionProvider {
     private let client: SonioxBatchClient
     var metadata: TranscriptionProviderMetadata { client.metadata }
@@ -152,7 +152,7 @@ final class SonioxLiveTranscriber: @unchecked Sendable {
 
     init(
         apiKey: String,
-        model: String = "stt-rt-v5",
+        model: String = "stt-rt-v6",
         language: String? = nil,
         sampleRate: Int = 16000,
         session: URLSession = .shared

@@ -33,7 +33,7 @@ final class ComparisonLaneFinishTests: XCTestCase {
     }
 
     func testFinishBudgetOutlastsTheClientsOwnEightSecondDeadline() {
-        XCTAssertGreaterThan(ComparisonLiveLane.finishBudget(for: "soniox/stt-rt-v5-streaming"), .seconds(8))
+        XCTAssertGreaterThan(ComparisonLiveLane.finishBudget(for: "soniox/stt-rt-v6-streaming"), .seconds(8))
     }
 
     func testRefusedLoopbackAzureEndpointNamesTheLocalProxy() {

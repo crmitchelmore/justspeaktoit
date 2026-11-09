@@ -153,11 +153,12 @@ final class GroqGeminiTTSTransportTests: XCTestCase {
         XCTAssertEqual(recorded.value(forHTTPHeaderField: "x-goog-api-key"), "AIza-test")
 
         let body = try TTSTransportStub.body(of: recorded)
-        XCTAssertEqual(body["model"] as? String, "gemini-3.1-flash-tts-preview")
+        XCTAssertEqual(body["model"] as? String, "gemini-3.8-flash-lite-tts")
         XCTAssertEqual(body["input"] as? String, "Hello there")
 
         let responseFormat = try XCTUnwrap(body["response_format"] as? [String: Any])
         XCTAssertEqual(responseFormat["type"] as? String, "audio")
+        XCTAssertEqual(responseFormat["mime_type"] as? String, "audio/l16")
         XCTAssertEqual(responseFormat["sample_rate"] as? Int, 24_000)
 
         let generation = try XCTUnwrap(body["generation_config"] as? [String: Any])
@@ -175,7 +176,7 @@ final class GroqGeminiTTSTransportTests: XCTestCase {
 
     func testGeminiCatalogue_shipsTheThirtyDocumentedVoicesAndOneRunnableModel() {
         XCTAssertEqual(GeminiTTSCatalog.voices.count, 30)
-        XCTAssertEqual(GeminiTTSCatalog.models.map(\.rawValue), ["gemini-3.1-flash-tts-preview"])
+        XCTAssertEqual(GeminiTTSCatalog.models.map(\.rawValue), ["gemini-3.8-flash-lite-tts"])
         // A stored lower-cased name still resolves; an unknown one falls back.
         XCTAssertEqual(GeminiTTSCatalog.resolvedVoice(forID: "google/kore").id, "Kore")
         XCTAssertEqual(

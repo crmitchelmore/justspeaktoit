@@ -159,7 +159,6 @@ sessions:
           - "Steps: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/cloudkit-shared-container.md"
         steps:
           - "Identifiers \u203a com.justspeaktoit.ios \u203a iCloud \u203a Configure: also tick iCloud.com.justspeaktoit; do the same for com.justspeaktoit.ios.alpha with iCloud.com.justspeaktoit.alpha."
-          - "Regenerate the iOS App Store profiles for both App IDs, and update the IOS_APPSTORE_PROFILE secret if it holds one."
           - "In CloudKit Console, deploy the Development schema of iCloud.com.justspeaktoit and .alpha to Production if any iPhone record type is missing."
           - "Set the repository variable IOS_SHARED_CLOUD_CONTAINER to 1."
         expected: "The next Alpha iOS build signs and uploads with both containers. Then run iphone-shared-icloud-container."
@@ -242,6 +241,20 @@ sessions:
           - "Press \u2318F, type \"openai\" and choose the OpenAI API key result."
           - "Turn on VoiceOver, press \u2318F, type \"mic\" and move through the results."
         expected: "Each choice opens the right Settings page, scrolls to the card and briefly outlines it (App Behaviour, Keyboard \u203a Activation, then the OpenAI key card). VoiceOver reads each result as its title and page with a hint, and the outline is not announced."
+        final_gate: true
+      - id: "mac-record-button-follows-hotkey"
+        issues:
+          - 1407
+        title: "Main window record button follows a recording started elsewhere"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the fix for #1407"
+        steps:
+          - "Close the main window, start a recording with your recording shortcut and say a made-up sentence."
+          - "Open the main window from the menu bar icon and look at the top-right toolbar button and the Dashboard record button."
+          - "Click the toolbar Stop button."
+          - "Start another recording from the menu bar's Start Recording item while the window is open, then stop it with the Dashboard button."
+        expected: "Both buttons show Stop (red) as soon as the window opens mid-recording and switch the moment a recording starts or ends from anywhere. Each Stop ends the recording, which is transcribed and appears in History; the buttons then return to Record."
         final_gate: true
   - id: "iphone"
     device: "iPhone"

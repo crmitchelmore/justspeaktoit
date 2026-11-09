@@ -142,6 +142,7 @@ struct CompareModelsColumnView: View {
             if let error = entry.errorDescription, text.isEmpty {
                 Text(isRevealed ? error : "This model could not transcribe the recording.")
                     .font(.caption).foregroundStyle(.red)
+                    .textSelection(.enabled)
             } else if text.isEmpty {
                 Text(controller.phase == .streaming ? "Listening…" : "Transcribing…")
                     .foregroundStyle(.tertiary)
@@ -151,6 +152,10 @@ struct CompareModelsColumnView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
+            if isRevealed, let error = entry.errorDescription, !text.isEmpty {
+                // Partial text arrived but the model still failed; say why.
+                Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+            }
             if isRevealed { metrics }
             if controller.phase == .judging {
                 rankPicker

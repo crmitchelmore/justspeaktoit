@@ -28,7 +28,7 @@ jobs:
     name: Capture Mac app
     # Hosted ARM has the UI automation entitlement used by the core journey suites.
     runs-on: macos-latest
-    timeout-minutes: 50
+    timeout-minutes: 56
     env:
       CAPTURE: ${{ github.workspace }}/.artifacts/site-media
     steps:
@@ -37,12 +37,19 @@ jobs:
         with:
           persist-credentials: false
 
+      # Binary targets download from GitHub release assets, which return 5xx
+      # (run 42583769755); generate and resolve with bounded retries into the
+      # build's DerivedData so the build reuses the artefacts.
       - name: Prepare Tuist and macOS project
-        timeout-minutes: 8
+        timeout-minutes: 14
         run: |
           brew install ffmpeg
           scripts/install-tuist.sh >> "$GITHUB_PATH"
-          PATH="$(tail -1 "$GITHUB_PATH"):$PATH" tuist generate --no-open
+          tuist_dir="$(tail -1 "$GITHUB_PATH")"
+          export PATH="$tuist_dir:$PATH"
+          scripts/retry-network.sh tuist generate --no-open
+          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -workspace "Just Speak to It.xcworkspace" \
+            -scheme SpeakApp -derivedDataPath "$RUNNER_TEMP/DerivedData" -skipPackagePluginValidation
 
       - name: Build app, fixture and capture suite
         timeout-minutes: 20
@@ -115,7 +122,7 @@ jobs:
   capture-ios:
     name: Capture iPhone app (Simulator)
     runs-on: macos-latest
-    timeout-minutes: 50
+    timeout-minutes: 56
     env:
       CAPTURE: ${{ github.workspace }}/.artifacts/site-media-ios
     steps:
@@ -130,10 +137,12 @@ jobs:
           install-tuist: "true"
 
       - name: Build app and capture suite for the Simulator
-        timeout-minutes: 25
+        timeout-minutes: 31
         run: |
           set -o pipefail
-          tuist generate --no-open
+          scripts/retry-network.sh tuist generate --no-open
+          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -workspace "Just Speak to It.xcworkspace" \
+            -scheme SpeakiOS -skipPackagePluginValidation
           xcodebuild build-for-testing -workspace "Just Speak to It.xcworkspace" -scheme SpeakiOS \
             -destination "generic/platform=iOS Simulator" -only-testing:SpeakiOSUITests/SiteMediaCaptureUITests \
             -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" -skipPackagePluginValidation -quiet

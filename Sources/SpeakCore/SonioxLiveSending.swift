@@ -27,7 +27,9 @@ extension SonioxLiveClient {
             payload = .finalize
         case .endOfStream:
             guard active.configSent else { return }
-            message = .binary(Data())
+            // Soniox ends a stream only on an empty *text* frame; an empty
+            // binary frame is an empty audio chunk and never yields `finished`.
+            message = .text("")
             payload = .endOfStream
             // The receive callback may run before the send completion. Mark
             // hand-off now; `finished` remains the success authority.

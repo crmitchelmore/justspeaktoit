@@ -5,17 +5,36 @@ import argparse
 import json
 from pathlib import Path
 import subprocess
+import sys
+import time
 import uuid
 
+# Cold hosted runners can take over 60s to start CoreSimulatorService, so the
+# first inventory read timed out with no tests run (runs 42501577925,
+# 42525826657). Only this read-only query is retried; create/delete are not,
+# because a timed-out mutation may still have taken effect.
+LIST_TIMEOUTS = (120, 120, 180)
+LIST_RETRY_DELAY = 5
 
-def run(*arguments):
+
+def run(*arguments, timeout=60):
     return subprocess.run(["xcrun", "simctl", *arguments], check=True, capture_output=True,
-                          text=True, timeout=60).stdout.strip()
+                          text=True, timeout=timeout).stdout.strip()
 
 
 def devices(available=True):
     arguments = ("list", "devices", "available", "-j") if available else ("list", "devices", "-j")
-    return json.loads(run(*arguments))["devices"]
+    for attempt, timeout in enumerate(LIST_TIMEOUTS, start=1):
+        try:
+            output = run(*arguments, timeout=timeout)
+            break
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            if attempt == len(LIST_TIMEOUTS):
+                raise
+            print(f"simctl list attempt {attempt} failed ({type(error).__name__}); retrying",
+                  file=sys.stderr)
+            time.sleep(LIST_RETRY_DELAY)
+    return json.loads(output)["devices"]
 
 
 def selected_configuration(inventory):

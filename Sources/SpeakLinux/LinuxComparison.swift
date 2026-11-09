@@ -14,6 +14,9 @@ extension LinuxHostPlatform {
             presentation.references, presentation.reference,
             presentation.batch.roundID, Int32(presentation.batch.remaining), presentation.batch.canNext ? 1 : 0
         )
-        if result != 0 { update("Comparison window is no longer open; results remain saved.") }
+        guard result == 0, jsti_comparison_set_save_history(presentation.saveToHistory ? 1 : 0) == 0 else {
+            update("Comparison window is no longer open; results remain saved.")
+            return
+        }
     }
 }

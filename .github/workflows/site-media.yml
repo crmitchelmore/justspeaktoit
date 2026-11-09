@@ -40,8 +40,9 @@ jobs:
       - name: Prepare Tuist and macOS project
         timeout-minutes: 8
         run: |
-          brew install tuist ffmpeg
-          tuist generate --no-open
+          brew install ffmpeg
+          scripts/install-tuist.sh >> "$GITHUB_PATH"
+          PATH="$(tail -1 "$GITHUB_PATH"):$PATH" tuist generate --no-open
 
       - name: Build app, fixture and capture suite
         timeout-minutes: 20

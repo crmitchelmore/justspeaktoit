@@ -1,5 +1,6 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
+#include "WindowsWindowChrome.hpp"
 #include <cmath>
 #include <cstring>
 #include <iomanip>
@@ -99,6 +100,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
     }
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
+    LRESULT themed = 0;
+    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
     if (message == WM_CREATE) {
         dialog->dpi = GetDpiForWindow(window);
         auto add = [&](const wchar_t *type, const wchar_t *label, DWORD style, int id,

@@ -7,6 +7,8 @@ public actor DesktopComparisonStore {
         var revisions: [UUID: ModelComparisonRevision] = [:]
         var acknowledgements: [UUID: Date] = [:]
         var selectedModelIDs: Set<String>?
+        /// Opt-in: each lane of a finished round is also written to History.
+        var saveResultsToHistory: Bool?
     }
     private var document: Document
     private var executing: Set<UUID> = []
@@ -41,6 +43,14 @@ public actor DesktopComparisonStore {
     }
 
     public func selectedModelIDs() -> Set<String> { document.selectedModelIDs ?? [] }
+
+    public func savesResultsToHistory() -> Bool { document.saveResultsToHistory ?? false }
+
+    public func setSavesResultsToHistory(_ enabled: Bool) throws {
+        var next = document
+        next.saveResultsToHistory = enabled
+        try commit(next)
+    }
 
     public func selectModels(_ identifiers: Set<String>, replacing available: Set<String>) throws {
         guard identifiers.isSubset(of: available) else {

@@ -13,8 +13,9 @@ final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
     func testRealWatchdogTickPreservesTimeoutThroughCancelledSessionAndIntentJournal() async throws {
         let run = try StartupDiagnosticRun()
         addTeardownBlock { @MainActor in await run.cleanUp() }
-        run.start(entry: StartupEntry(origin: .startIntent, observedAt: Date().addingTimeInterval(-61)))
+        run.start(entry: StartupEntry(origin: .startIntent))
         guard await self.completed(run.session.entered, timeout: 2) else { return }
+        self.expireStartDeadline(run)
         guard await self.completed(run.done, timeout: 4) else { return }
         XCTAssertTrue(run.error is CancellationError, "Cleanup cancellation still propagates to the caller")
         guard case .startTimedOut = run.service.lastSessionError as? iOSTranscriptionError else {
@@ -44,8 +45,9 @@ final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
         let run = try StartupDiagnosticRun()
         run.session.returnsNormallyOnCancel = true
         addTeardownBlock { @MainActor in await run.cleanUp() }
-        run.start(entry: StartupEntry(origin: .startIntent, observedAt: Date().addingTimeInterval(-61)))
+        run.start(entry: StartupEntry(origin: .startIntent))
         guard await self.completed(run.session.entered, timeout: 2) else { return }
+        self.expireStartDeadline(run)
         guard await self.completed(run.done, timeout: 4) else { return }
         XCTAssertTrue(run.error is CancellationError)
         XCTAssertEqual(run.activity.codes, ["start_timeout"])
@@ -82,8 +84,9 @@ final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
             await run.cleanUp()
             run.ownership.release(owner)
         }
-        run.start(entry: StartupEntry(origin: .startIntent, observedAt: Date().addingTimeInterval(-61)))
+        run.start(entry: StartupEntry(origin: .startIntent))
         guard await self.completed(run.session.entered, timeout: 2) else { return }
+        self.expireStartDeadline(run)
         guard await self.completed(run.done, timeout: 4) else { return }
         XCTAssertTrue(run.ownership.isOwned)
         XCTAssertTrue(run.activity.codes.isEmpty)
@@ -105,6 +108,15 @@ final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
         XCTAssertEqual(run.activity.codes, ["start_no_audio"])
         XCTAssertEqual(run.harness.defaults.string(forKey: "captureHealth.lastOutcome.v1"), "noInput")
         XCTAssertEqual(CaptureOutcomeJournal.lastFailureCode(defaults: run.harness.defaults), "start_no_audio")
+    }
+
+    // A stale entry (observedAt 61s ago) let the real one-second tick trip
+    // before the held session was entered whenever pre-session startup was
+    // slow (run 42604632491). Expire the start deadline only once the session
+    // holds, through the same monitor seam the no-input fixture uses; the real
+    // tick, trip and cancellation path still run unchanged.
+    private func expireStartDeadline(_ run: StartupDiagnosticRun) {
+        run.service.watchdog = CaptureWatchdogMonitor(CaptureWatchdogBudget(startDeadline: 0))
     }
 
     private func completed(_ receipt: XCTestExpectation, timeout: TimeInterval) async -> Bool {

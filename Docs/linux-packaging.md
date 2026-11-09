@@ -1,6 +1,7 @@
 # Linux Flatpak qualification
 
-The Flatpak is a developer preview, not a Flathub or Stable release. The
+The Flatpak is a developer preview, not a Flathub or Stable release; it is
+distributed from the project's own signed repository (see below). The
 `Linux Flatpak` workflow builds repository-owned pull requests and main when
 package inputs change, and supports manual dispatch. It targets x86-64 with
 the GNOME 50 SDK/runtime and the freedesktop 25.08 Swift 6 extension. Its pinned
@@ -113,56 +114,83 @@ com.justspeaktoit.JustSpeakToIt` starts it; `flatpak uninstall
 com.justspeaktoit.JustSpeakToIt` removes it (add `--delete-data` to remove its
 data too).
 
-**Updates are manual for now.** A single-file bundle has no update source, so
-`flatpak update` and the software centres do not see new builds; installing a
-newer bundle over the old one keeps the app's data. The bundle carries no
-signature of its own beyond the HTTPS download from GitHub Releases.
+The single-file bundle has no update source, so `flatpak update` and the
+software centres do not see new builds from it; installing a newer bundle over
+the old one keeps the app's data. It remains the fallback download.
 
-**Recommended next step: Flathub.** Flathub is the established route for
-signed, automatically updated Flatpaks, and the software centres on most
-distributions already list it, so it gives the "open, install, update" path
-without a bespoke repository or signing key. The project already uses the
-Flathub runtime, SDK extension and `flatpak-builder-lint manifest`. Submission
-is free but needs the owner, because it creates a public listing and a
-maintainer account ([requirements](https://docs.flathub.org/docs/for-app-authors/requirements),
-[submission](https://docs.flathub.org/docs/for-app-authors/submission),
-[verification](https://docs.flathub.org/docs/for-app-authors/verification)):
+### Signed Flatpak repository (automatic updates)
 
-1. Write, by hand, a submission manifest that builds from a tagged `git`
-   source of this repository instead of the local `type: dir` source, with
-   the same pinned SwiftPM sources. Flathub's
-   [generative AI policy](https://docs.flathub.org/docs/for-app-authors/requirements#generative-ai-policy)
-   bars AI-generated or AI-assisted content in Flathub manifests, and bars
-   AI agents from opening or writing the submission pull request, its
-   description or replies. The manifest in this repository was produced with
-   agent help, so it is a technical reference only, not the submission.
-2. Add Linux screenshots (hosted at stable URLs) and a release entry per
-   version to the metainfo; run `flatpak-builder-lint appstream` and
-   `flatpak-builder-lint repo` on a built repo.
-3. Sign in to GitHub as the owner (2FA required) and open the submission
-   pull request to `flathub/flathub` against the `new-pr` branch, titled
-   "Add com.justspeaktoit.JustSpeakToIt" (this accepts Flathub's terms).
-   Disclose which parts of the app were AI-generated and roughly how much,
-   justify each `finish-args` permission, and answer reviewers personally.
-   Accept the maintainer invitation within a week of approval.
-4. After acceptance, verify the app id's domain by publishing the token
-   Flathub gives at `https://justspeaktoit.com/.well-known/org.flathub.VerifiedApps.txt`.
-5. Point the website CTA at `https://flathub.org/apps/com.justspeaktoit.JustSpeakToIt`.
+The recommended install is the project's own GPG-signed Flatpak repository:
 
-Eligibility does not depend on the owner's country and submission is free.
-The app id's domain (`justspeaktoit.com`) is owner-controlled and the
-project is MIT-licensed and upstream, so it meets the id, licence and
-conflicting-submission rules. Acceptance is at the volunteer reviewers'
-discretion, with no fixed timescale; they also weigh development history and
-the extent of AI-generated code.
+```sh
+flatpak install --user https://justspeaktoit.com/linux/flatpak
+```
 
-Flathub then builds, signs and serves updates. Network, audio, display and
-portal permissions in `finish-args` will be reviewed; `--talk-name` for the
-status notifier and `--device=dri` are common and documented above.
+(or open that `.flatpakref` in GNOME Software or KDE Discover). This adds the
+`justspeaktoit` remote with its signing key pinned, pulls the GNOME 50 runtime
+from Flathub, and from then on `flatpak update` and the software centres pick
+up each new qualified Alpha. Someone who installed the single-file bundle runs
+the same command once to switch to the updating remote; their data is kept.
+`https://justspeaktoit.com/linux/justspeaktoit.flatpakrepo` adds just the
+remote. Both URLs fall back to the single-file bundle until a repository has
+been published.
 
-A self-hosted OSTree repository with a `.flatpakref` would also give updates,
-but needs a GPG signing key, hosting and repository maintenance owned by the
-project, so it is not used.
+[`linux-flatpak-repo.yml`](../.github/workflows/linux-flatpak-repo.yml) runs
+after desktop qualification in every Alpha. It imports that Alpha's qualified
+bundle (the same bytes the installed checks passed) into a fresh
+`archive-z2` OSTree repository, signs the commit and summary, writes the
+descriptors, checks the Cloudflare Pages limits (20,000 files, 25 MiB each),
+and verifies that the signed remote lists the app and that an unrelated key is
+refused. It then deploys the static site to the Cloudflare Pages project
+`justspeaktoit-flatpak` (`https://justspeaktoit-flatpak.pages.dev/repo/`),
+reusing the site's existing `CLOUDFLARE_API_TOKEN`. It never replaces a newer
+published Alpha with an older one. Clients need only the newest commit, so
+each publication is a fresh single-commit repository. Without the signing key,
+and on pull requests, it rehearses the whole route with a throwaway key and
+publishes nothing.
+
+**Why not Flathub, Snap or AppImage (#1219).** Flathub's
+[generative AI policy](https://docs.flathub.org/docs/for-app-authors/requirements#generative-ai-policy)
+bars agent-written manifests and submissions, so it cannot be automated. The
+Snap Store would need a second packaging of the Swift/GTK app, store
+registration and review of the interfaces a dictation app needs. An AppImage
+would have to bundle GTK 4 and a separate updater. The self-hosted repository
+reuses the qualified Flatpak unchanged, keeps sandboxing and gives native
+updates; its costs are a signing key and a static site.
+
+#### Owner setup (once)
+
+1. On a trusted machine, create the signing key and keep an offline backup of
+   it: rotating it later forces every user to reinstall.
+
+   ```sh
+   export GNUPGHOME="$(mktemp -d)"
+   gpg --batch --passphrase '' --quick-gen-key \
+     "Just Speak to It Flatpak <flatpak@justspeaktoit.com>" ed25519 sign never
+   gpg --armor --export-secret-keys > justspeaktoit-flatpak-signing.asc
+   ```
+
+2. Create the `flatpak-repo` environment limited to `main` and store the key
+   in it (never as a repository secret):
+
+   ```sh
+   gh api -X PUT repos/crmitchelmore/justspeaktoit/environments/flatpak-repo \
+     -F 'deployment_branch_policy[protected_branches]=false' \
+     -F 'deployment_branch_policy[custom_branch_policies]=true'
+   gh api -X POST repos/crmitchelmore/justspeaktoit/environments/flatpak-repo/deployment-branch-policies \
+     -f name=main -f type=branch
+   gh secret set FLATPAK_GPG_PRIVATE_KEY --env flatpak-repo < justspeaktoit-flatpak-signing.asc
+   ```
+
+   Then move `justspeaktoit-flatpak-signing.asc` to the offline backup and
+   delete the working copy.
+
+3. Run the **Linux Flatpak repository** workflow on `main` with the newest
+   `alpha-build-N` tag that has a Linux bundle (or wait for the next Alpha).
+   The first run creates the Pages project. If the `justspeaktoit-flatpak`
+   Pages name is unavailable, set the repository variables
+   `FLATPAK_PAGES_PROJECT`, `FLATPAK_REPO_URL` and `FLATPAK_CHANNEL_URL`, and
+   update `flatpakSite` in `landing-page/_worker.js`.
 
 ## Shared Swift runtime staging
 

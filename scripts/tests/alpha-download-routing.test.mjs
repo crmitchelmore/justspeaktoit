@@ -20,9 +20,9 @@ test('Alpha cannot redirect to Stable or untrusted pointer targets',async t=>{
  assert.equal((await worker.fetch(new Request('https://justspeaktoit.com/alpha/appcast.xml'),{})).status,503);
 });
 
-test('deployment invokes the Worker only for Alpha paths',()=>{
+test('deployment invokes the Worker only for Alpha and Linux Flatpak paths',()=>{
  const routes=JSON.parse(readFileSync(new URL('../../landing-page/_routes.json',import.meta.url),'utf8'));
- assert.deepEqual(routes,{version:1,include:['/alpha/*'],exclude:[]});
+ assert.deepEqual(routes,{version:1,include:['/alpha/*','/linux/*'],exclude:[]});
 });
 
 for (const body of ['null', '{broken', '42', '[]']) {

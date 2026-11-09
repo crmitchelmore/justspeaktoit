@@ -36,6 +36,22 @@ against Stable identifiers.
 Do not commit certificates, private keys, decoded profiles, or base64 profile
 contents.
 
+## Provisioning profiles
+
+`release-ios.yml` fetches the app, widget and keyboard App Store profiles at
+build time with `scripts/ensure-ios-app-store-profile.rb`. For each App ID it
+reuses any ACTIVE App Store profile that includes the imported distribution
+certificate (matched by serial) and carries the required App Group and iCloud
+containers. Otherwise it deletes its own profile (`<bundle id> App Store
+<serial suffix>`) if present and creates it again, which picks up the App ID's
+current capabilities; it never deletes profiles it did not name. The stored
+profile secrets are used only when that fetch fails, for example for an older
+frozen source without the script. The job summary lists each profile's source,
+iCloud containers and App Groups.
+
+To regenerate and check both trains' profiles outside a release, run the
+**Apple App IDs and profiles** workflow (`apple-profiles.yml`).
+
 ## Verify an authorised iOS release
 
 1. Identify the existing authorised manifest tag and retain its source SHA,
@@ -64,6 +80,23 @@ contents.
 An upload or green workflow is not proof that Apple processed, distributed, or
 physically verified the build.
 
+## Named Alpha testers
+
+Owner-nominated testers live only in the `TESTFLIGHT_TESTER_EMAILS` secret
+(comma-separated) of the main-only `testflight-testers` environment; the
+repository is public, so never commit or log an address. Only jobs in that
+environment read it, and they log counts and Apple states only.
+
+- After a successful iOS Alpha upload, `alpha-release.yml`'s `ios-testers` job
+  adds the testers to the external **Public Alpha** group and sends invitations.
+  An invitation Apple refuses because no build is testable yet stays pending.
+- **TestFlight tester access** (`testflight-testers.yml`, manual from `main`)
+  repeats that, runs the Apple reconciler (assignment and beta review), and
+  verifies membership, invitation and that the newest valid build is in or
+  waiting for beta review, or testable and assigned to Public Alpha. When no
+  recent valid build exists it starts a hosted iOS Alpha rebuild (unless one is
+  already running) and fails; rerun it after TestFlight processing.
+
 ## Repair a keyboard App Group profile
 
 Use this sequence when the workflow reports that the keyboard profile does not
@@ -75,13 +108,13 @@ mismatch.
 2. In Apple Developer **Certificates, Identifiers & Profiles**, open that exact
    keyboard identifier. Enable App Groups, associate the exact selected
    `IOS_APP_GROUP`, save, and confirm the association.
-3. Edit or regenerate the matching train's App Store profile. Enabling the
-   capability alone does not update an existing profile's entitlement.
-4. Replace the matching GitHub secret only if CI uses an explicit profile:
-   `ALPHA_IOS_KEYBOARD_APPSTORE_PROFILE` for Alpha or
-   `IOS_KEYBOARD_APPSTORE_PROFILE` for Stable. If the secret is absent, the
-   workflow may reuse or create its validated portal profile; it still fails
-   closed unless the profile contains the expected group.
+3. Run the **Apple App IDs and profiles** workflow, or retry the release: both
+   replace a profile that lacks the group, since enabling the capability alone
+   does not update an existing profile's entitlement. The workflow also checks
+   the app's profile, so an unrelated app-profile problem fails it first.
+4. The stored `ALPHA_IOS_KEYBOARD_APPSTORE_PROFILE` and
+   `IOS_KEYBOARD_APPSTORE_PROFILE` secrets are only a fallback; the workflow
+   still fails closed unless the profile contains the expected group.
 5. Retry through the release controller for the same authorised manifest or its
    documented rebuild path. Record the new workflow and build allocation.
 

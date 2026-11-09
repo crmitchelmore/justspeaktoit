@@ -176,6 +176,50 @@ final class DeepgramPortableLifecycleTests: XCTestCase {
         XCTAssertTrue(fixture.client.preroll.isEmpty)
     }
 
+    /// Flux `CloseStream` never emits `EndOfTurn` or Metadata: Deepgram
+    /// documents the last `Update` as the final text of the open turn.
+    func testFluxFinishKeepsTheOpenTurnWhenTheServerClosesWithoutEndOfTurn() async {
+        let fixture = DeepgramFixture(model: "flux-general-en")
+        fixture.start()
+        let socket = fixture.factory.sockets[0]
+        socket.open()
+        socket.emit(Self.flux("EndOfTurn", "Hello there."))
+        socket.emit(Self.flux("Update", "How are"))
+        let closeSent = expectation(description: "CloseStream sent")
+        socket.onCloseSent = { closeSent.fulfill() }
+        let finish = Task { await fixture.client.finishAndWait() }
+        await fulfillment(of: [closeSent], timeout: 2)
+        XCTAssertEqual(socket.textMessages, [#"{"type":"CloseStream"}"#])
+        socket.completeSend()
+        XCTAssertTrue(fixture.clock.drain().contains { $0.seconds == 3 }, "Flux gets longer to close itself")
+        socket.emit(Self.flux("Update", "How are you?"))
+        socket.closeFromServer()
+        let transcript = await finish.value
+        XCTAssertEqual(transcript, "Hello there. How are you?")
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+    }
+
+    func testFluxEndOfTurnClearsTheOpenTurnSoItIsNotRepeated() async {
+        let fixture = DeepgramFixture(model: "flux-general-en")
+        fixture.start()
+        let socket = fixture.factory.sockets[0]
+        socket.open()
+        socket.emit(Self.flux("Update", "Done"))
+        socket.emit(Self.flux("EndOfTurn", "Done."))
+        let closeSent = expectation(description: "CloseStream sent")
+        socket.onCloseSent = { closeSent.fulfill() }
+        let finish = Task { await fixture.client.finishAndWait() }
+        await fulfillment(of: [closeSent], timeout: 2)
+        socket.completeSend()
+        socket.closeFromServer()
+        let transcript = await finish.value
+        XCTAssertEqual(transcript, "Done.")
+    }
+
+    private static func flux(_ event: String, _ text: String) -> String {
+        #"{"type":"TurnInfo","event":""# + event + #"","turn_index":0,"transcript":""# + text + #""}"#
+    }
+
     private static func final(_ text: String) -> String {
         #"{"is_final":true,"channel":{"alternatives":[{"transcript":""# + text + #""}]}}"#
     }
@@ -187,10 +231,10 @@ private final class DeepgramFixture: @unchecked Sendable {
     let events = FakeSocketEvents()
     let client: DeepgramLiveClient
 
-    init(key: String = "test-key") {
+    init(key: String = "test-key", model: String = "nova-3") {
         let factory = factory
         let clock = clock
-        client = DeepgramLiveClient(apiKey: key, makeConnection: { factory.make($0) },
+        client = DeepgramLiveClient(apiKey: key, model: model, makeConnection: { factory.make($0) },
                                     schedule: { clock.schedule($0, action: $1) })
     }
 
@@ -258,6 +302,10 @@ private final class FakeStreamingSocket: StreamingWebSocketConnection, @unchecke
     func emit(_ text: String) {
         let callback = lock.withLock { let callback = receiver; receiver = nil; return callback }
         callback?(.success(.text(text)))
+    }
+    func closeFromServer() {
+        let callback = lock.withLock { let callback = receiver; receiver = nil; return callback }
+        callback?(.failure(URLError(.networkConnectionLost)))
     }
     func cancel() { lock.withLock { cancellations += 1 } }
 }

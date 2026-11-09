@@ -18,7 +18,7 @@ constexpr int deleteID = 740;
 constexpr int syncID = 741, syncNowID = 742;
 constexpr int referenceID = 743, allID = 744, noneID = 745, referenceLabelID = 746;
 constexpr int exportScopeID = 747, exportLabelID = 748, copyJSONID = 749, copyMarkdownID = 750;
-constexpr int nextFileID = 751;
+constexpr int nextFileID = 751, saveHistoryID = 752;
 struct Row { std::string id; std::wstring name; bool live = false, selected = false; };
 struct Presentation {
     std::string models, rounds, detail, selected;
@@ -28,6 +28,7 @@ struct Presentation {
     std::string batchRound;
     int batchRemaining = 0;
     bool canNext = false;
+    bool saveHistory = false;
 };
 std::mutex mutex;
 Presentation pending;
@@ -165,12 +166,13 @@ void present(HWND window, Dialog &dialog) {
     SendDlgItemMessageW(window, syncID, BM_SETCHECK, next.syncEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
     EnableWindow(GetDlgItem(window, syncID), next.syncAvailable);
     EnableWindow(GetDlgItem(window, syncNowID), next.syncAvailable && next.syncEnabled);
+    SendDlgItemMessageW(window, saveHistoryID, BM_SETCHECK, next.saveHistory ? BST_CHECKED : BST_UNCHECKED, 0);
     dialog.shown = std::move(next);
     dialog.suppress = false;
 }
 void layout(HWND window, Dialog &dialog) {
     RECT client{}; GetClientRect(window, &client);
-    const int height = std::max(static_cast<int>(client.bottom), scale(window, 740));
+    const int height = std::max(static_cast<int>(client.bottom), scale(window, 780));
     const int width = std::max(static_cast<int>(client.right), scale(window, 640));
     dialog.scroll = std::clamp(dialog.scroll, 0, height - static_cast<int>(client.bottom));
     SCROLLINFO info{}; info.cbSize = sizeof(info); info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
@@ -201,6 +203,7 @@ void layout(HWND window, Dialog &dialog) {
     move(deleteID, 16, 585, 240, 32);
     move(nextFileID, 16, 632, 240, 30);
     move(syncID, 16, 686, 420, 32); move(syncNowID, 450, 686, 160, 32);
+    move(saveHistoryID, 16, 728, 594, 32);
     const HFONT font = jsti::chrome::font(jsti::chrome::Font::body, GetDpiForWindow(window));
     for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
 }
@@ -322,7 +325,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             && add(nextFileID, L"BUTTON", L"&Next file", BS_PUSHBUTTON | WS_TABSTOP)
             && add(syncID, L"BUTTON", L"Sync comparison transcripts and rankings with &iCloud",
                    BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP)
-            && add(syncNowID, L"BUTTON", L"S&ync now / retry", BS_PUSHBUTTON | WS_TABSTOP);
+            && add(syncNowID, L"BUTTON", L"S&ync now / retry", BS_PUSHBUTTON | WS_TABSTOP)
+            && add(saveHistoryID, L"BUTTON", L"Save results to &History (one item per model, including failures)",
+                   BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP);
         if (!okay) return -1;
         SendDlgItemMessageW(window, detailID, EM_SETLIMITTEXT, 0x7ffffffe, 0);
         SendDlgItemMessageW(window, modeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"File / multi-sample Batch"));
@@ -406,6 +411,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case stopAudioID: emit(*dialog, 109); break;
         case syncID: emit(*dialog, 121, {}, SendDlgItemMessageW(window, syncID, BM_GETCHECK, 0, 0) == BST_CHECKED); break;
         case syncNowID: emit(*dialog, 122); break;
+        case saveHistoryID:
+            emit(*dialog, 129, {}, SendDlgItemMessageW(window, saveHistoryID, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            break;
         case deleteID: {
             const auto selected = dialog->shown.selected;
             if (!selected.empty() && MessageBoxW(window,
@@ -432,6 +440,13 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         HBRUSH brush = CreateSolidBrush(jsti::chrome::palette().window);
         FillRect(reinterpret_cast<HDC>(wparam), &client, brush); DeleteObject(brush); return 1;
     }
+    case WM_SETTINGCHANGE:
+        if (lparam && jsti::chrome::appearance() == 0 &&
+            wcscmp(reinterpret_cast<const wchar_t *>(lparam), L"ImmersiveColorSet") == 0) {
+            jsti::chrome::themeWindow(window);
+            RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+        }
+        break;
     case WM_CLOSE: emit(*dialog, 123); DestroyWindow(window); return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
@@ -454,9 +469,17 @@ extern "C" int jsti_comparison_present_batch(const char *models, const char *rou
     if (!models || !rounds || !detail || !selected || !references || !reference || !batch_round
         || batch_remaining < 0) return -1;
     std::lock_guard<std::mutex> lock(mutex);
+    const bool saveHistory = pending.saveHistory;
     pending = {models, rounds, detail, selected, busy != 0, recording != 0, judgeable != 0,
                sync_enabled != 0, sync_available != 0, references, reference,
                batch_round, batch_remaining, can_next != 0};
+    pending.saveHistory = saveHistory;
+    return activeWindow && PostMessageW(activeWindow, presentMessage, 0, 0) ? 0 : -1;
+}
+
+extern "C" int jsti_comparison_set_save_history(int enabled) {
+    std::lock_guard<std::mutex> lock(mutex);
+    pending.saveHistory = enabled != 0;
     return activeWindow && PostMessageW(activeWindow, presentMessage, 0, 0) ? 0 : -1;
 }
 
@@ -474,6 +497,7 @@ void jsti_show_comparison(HWND owner, JSTIWindowCallback callback, void *context
         work.top + (work.bottom - work.top - height) / 2, width, height, owner, nullptr, type.hInstance, &dialog);
     if (!window) { MessageBoxW(owner, L"Could not create Compare Models.", L"Comparison", MB_OK); return; }
     { std::lock_guard<std::mutex> lock(mutex); activeWindow = window; }
+    jsti::chrome::themeWindow(window);
     EnableWindow(owner, FALSE); ShowWindow(window, SW_SHOW);
     emit(dialog, 100);
     MSG message{};
@@ -554,6 +578,15 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
         require(IsWindowEnabled(GetDlgItem(window, syncNowID)), "Comparison sync retry remains disabled.");
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(syncNowID, BN_CLICKED), 0);
         require(check.event == 122, "Comparison sync retry lost its action.");
+        require(SendDlgItemMessageW(window, saveHistoryID, BM_GETCHECK, 0, 0) == BST_UNCHECKED,
+                "Save results to History is not off by default.");
+        SendDlgItemMessageW(window, saveHistoryID, BM_SETCHECK, BST_CHECKED, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(saveHistoryID, BN_CLICKED), 0);
+        require(check.event == 129 && check.index == 1, "Save results to History lost its opt-in.");
+        { std::lock_guard<std::mutex> lock(mutex); pending.saveHistory = true; }
+        present(window, *dialog);
+        require(SendDlgItemMessageW(window, saveHistoryID, BM_GETCHECK, 0, 0) == BST_CHECKED,
+                "Save results to History did not show the saved preference.");
         confirmDeletion(*dialog, "a-stale-round");
         require(check.event != 120, "A stale delete confirmation was admitted.");
         confirmDeletion(*dialog, dialog->shown.selected);
@@ -561,6 +594,7 @@ bool jsti_comparison_self_test(HWND owner, std::string &error, const std::string
         require(text(window, detailID).find("test/") == std::string::npos, "Blind result reveals model identities.");
         auto snapshot = [&](const char *name) {
             if (check.directory.empty()) return;
+            jsti::chrome::themeWindow(window);
             char failure[512]{};
             const auto path = check.directory + "\\" + name;
             if (jsti_owned_window_save_snapshot(window, path.c_str(), failure, sizeof failure) != 0)

@@ -68,6 +68,15 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   private var launchRestoreWaiters: [CheckedContinuation<Void, Never>] = []
   private var signInContinuation: CheckedContinuation<ASAuthorization, Error>?
 
+  /// Direct-download (Developer ID) builds cannot use native Sign in with
+  /// Apple, so they use Apple's web flow; App Store builds stay native.
+  var usesWebSignIn = DistributionChannel.current.paidBillingChannel == .stripeCheckout
+  /// Presents Apple's web sign-in and returns the relayed callback URL.
+  /// Replaced in tests, which have no browser.
+  var webAuthenticator: @MainActor (URL, String) async throws -> URL = { url, scheme in
+    try await AppleWebSignIn.authenticate(url: url, callbackScheme: scheme)
+  }
+
   /// How long a request will wait for the launch-time entitlement restore
   /// before proceeding without it. Long enough for a Keychain read and one
   /// round trip on a normal connection, short enough that a subscriber on a
@@ -281,24 +290,12 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     guard generation == self.sessions.generation else { return }
 
     let rawNonce = Self.makeRawNonce()
-    let request = ASAuthorizationAppleIDProvider().createRequest()
-    request.requestedScopes = [.fullName, .email]
-    // Apple echoes this hashed value back in the identity token; the server is
-    // given the raw nonce and re-derives the digest, which is what binds the
-    // token to this specific request.
-    request.nonce = Self.sha256Hex(rawNonce)
-
     do {
-      let authorization = try await self.performAuthorization(for: request)
+      // Apple echoes the hashed nonce back in the identity token; the server is
+      // given the raw nonce and re-derives the digest, which is what binds the
+      // token to this specific request.
+      let identityToken = try await self.appleIdentityToken(hashedNonce: Self.sha256Hex(rawNonce))
       guard generation == self.sessions.generation else { return }
-      guard
-        let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
-        let tokenData = credential.identityToken,
-        let identityToken = String(data: tokenData, encoding: .utf8)
-      else {
-        self.lastError = "Apple did not return an identity token."
-        return
-      }
 
       let session = try await self.client.signInWithApple(
         identityToken: identityToken,
@@ -310,15 +307,23 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
       else { return }
       self.isSignedIn = true
       await self.refreshEntitlement()
-    } catch is CancellationError {
-      // The user dismissed the sheet; not an error worth showing.
-    } catch let error as ASAuthorizationError where error.code == .canceled {
-      // Same.
     } catch {
       guard generation == self.sessions.generation else { return }
-      self.lastError =
-        (error as? PaidAccessError)?.errorDescription
-        ?? "Could not sign in with Apple."
+      self.lastError = Self.signInErrorMessage(error)
+    }
+  }
+
+  /// What to show for a failed sign-in; nil when the user simply dismissed it.
+  static func signInErrorMessage(_ error: Error) -> String? {
+    switch error {
+    case is CancellationError, AppleWebSignIn.CallbackError.cancelled:
+      return nil
+    case let error as ASAuthorizationError where error.code == .canceled:
+      return nil
+    case is AppleWebSignIn.CallbackError:
+      return "Apple did not return an identity token."
+    default:
+      return (error as? PaidAccessError)?.errorDescription ?? "Could not sign in with Apple."
     }
   }
 
@@ -337,6 +342,28 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     if let session = await clearing.value {
       await self.client.signOut(session: session)
     }
+  }
+
+  /// One Apple identity token for `hashedNonce`, from the native sheet or,
+  /// on direct-download builds, Apple's web flow.
+  private func appleIdentityToken(hashedNonce: String) async throws -> String {
+    if self.usesWebSignIn {
+      // `state` ties the relayed callback to this attempt.
+      let state = Self.makeRawNonce()
+      let url = AppleWebSignIn.authorizationURL(state: state, hashedNonce: hashedNonce)
+      let callback = try await self.webAuthenticator(url, AppleWebSignIn.callbackScheme)
+      return try AppleWebSignIn.identityToken(from: callback, expectedState: state)
+    }
+    let request = ASAuthorizationAppleIDProvider().createRequest()
+    request.requestedScopes = [.fullName, .email]
+    request.nonce = hashedNonce
+    let authorization = try await self.performAuthorization(for: request)
+    guard
+      let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+      let tokenData = credential.identityToken,
+      let identityToken = String(data: tokenData, encoding: .utf8)
+    else { throw AppleWebSignIn.CallbackError.failed }
+    return identityToken
   }
 
   private func performAuthorization(

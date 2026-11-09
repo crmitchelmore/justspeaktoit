@@ -319,8 +319,9 @@ void jsti_history_filters_refresh_theme() {
     }
     DeleteObject(panel->background);
     panel->background = replacement;
-    SetWindowTheme(GetDlgItem(panelWindow, modelsID),
-        jsti::chrome::dark() ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+    // Title bar, list, buttons and the errors check box, whose themed label
+    // would otherwise stay black on the dark card.
+    jsti::chrome::themeWindow(panelWindow);
     RedrawWindow(panelWindow, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
@@ -418,6 +419,8 @@ bool jsti_history_filters_self_test(HWND owner, std::string &error) {
             LOGBRUSH brush{};
             passed = passed && current && GetObjectW(current->background, sizeof(brush), &brush) &&
                 brush.lbColor == jsti::chrome::palette().card;
+            // A themed check box label ignores WM_CTLCOLORSTATIC and stays black on the dark card.
+            if (appearance == 2) passed = passed && !GetWindowTheme(GetDlgItem(panelWindow, errorsID));
         }
         jsti::chrome::setAppearance(originalAppearance);
         jsti_history_filters_refresh_theme();

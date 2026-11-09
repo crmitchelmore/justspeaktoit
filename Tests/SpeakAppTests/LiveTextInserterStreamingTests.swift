@@ -151,23 +151,69 @@ final class LiveTextInserterStreamingTests: XCTestCase {
     // MARK: - The field changing underneath the session
 
     @MainActor
-    func testDeletedStreamedTextProducesExactlyOneStandardDelivery() {
+    func testDeletedStreamedTextKeepsTheFinalOnTheClipboard() {
         let field = FakeStreamingTextField()
         let inserter = self.makeInserter(field: field)
 
         inserter.update(with: "hello")
         XCTAssertEqual(field.selectedTextWrites.count, 1)
 
-        // The user cleared the field: nothing from this session is on screen.
+        // The streamed text was confirmed on screen and is now gone. The field
+        // cannot tell a deletion from a switch to another empty note, so the
+        // final is never pasted into whatever is focused now.
         field.value = ""
         field.selection = CFRange(location: 0, length: 0)
 
-        guard case .deferred = inserter.applyPolishedFinal("Hello there.") else {
-            return XCTFail("absent streamed text must defer to the standard delivery")
+        guard case .clipboard(.capturedFieldChanged) = inserter.applyPolishedFinal("Hello there.") else {
+            return XCTFail("text that left the field must keep the final on the clipboard")
         }
         XCTAssertEqual(field.selectedTextWrites.count, 1, "finalize must not patch a vanished region")
-        XCTAssertTrue(inserter.usingClipboardFallback)
-        XCTAssertEqual(inserter.insertedText, "", "nothing is left that a delivery could duplicate")
+        XCTAssertFalse(inserter.usingClipboardFallback, "no one-shot paste may follow")
+    }
+
+    @MainActor
+    func testSwitchingToAnotherEmptyNoteMidStreamNeverPastesThere() {
+        // Issue #664: the owner clicked a second, empty note in the same app
+        // while dictating. The whole transcript must not land in that note.
+        let original = FakeStreamingTextField(value: "Note one ", selection: CFRange(location: 9, length: 0))
+        let otherNote = FakeStreamingTextField()
+        let inserter = self.makeInserter(field: original)
+        var focused = original
+        inserter.streamingFieldProvider = { focused }
+
+        inserter.update(with: "hello")
+        focused = otherNote
+        inserter.update(with: "hello there")
+        inserter.update(with: "hello there friend")
+
+        XCTAssertTrue(otherNote.selectedTextWrites.isEmpty, "streaming pauses instead of following focus")
+        guard case .clipboard(.capturedFieldChanged) = inserter.applyPolishedFinal("Hello there, friend.") else {
+            return XCTFail("the final must go to the clipboard, not the newly focused note")
+        }
+        XCTAssertEqual(otherNote.value, "")
+        XCTAssertTrue(otherNote.selectedTextWrites.isEmpty)
+        XCTAssertEqual(original.value, "Note one hello", "the original keeps its streamed words once")
+        XCTAssertFalse(inserter.usingClipboardFallback)
+    }
+
+    @MainActor
+    func testReturningToTheOriginalNoteBeforeStopFinalizesThere() {
+        let original = FakeStreamingTextField(value: "Note one ", selection: CFRange(location: 9, length: 0))
+        let otherNote = FakeStreamingTextField()
+        let inserter = self.makeInserter(field: original)
+        var focused = original
+        inserter.streamingFieldProvider = { focused }
+
+        inserter.update(with: "hello")
+        focused = otherNote
+        inserter.update(with: "hello there")
+        focused = original
+
+        guard case .applied = inserter.applyPolishedFinal("Hello there.") else {
+            return XCTFail("the original field still owns its streamed region")
+        }
+        XCTAssertEqual(original.value, "Note one Hello there.")
+        XCTAssertEqual(otherNote.value, "")
     }
 
     @MainActor

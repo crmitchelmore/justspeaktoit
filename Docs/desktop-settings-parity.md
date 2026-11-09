@@ -1268,7 +1268,10 @@ remote polish, and subsequent History selection, Copy and Export use saved
 variants without consulting the clipboard again. A transcription retry processes
 the new provider result once with a fresh clipboard snapshot, never its earlier
 expanded text. Live previews and failed live recovery text do not expand.
-Comparison results remain raw and never read the clipboard. A microphone
+Comparison results remain raw and never read the clipboard. They reach History
+only through the opt-in Compare Models switch Save results to History (off by
+default, stored with the comparisons), which adds one audio-free local record
+per model, failures included, tagged Compare Models. A microphone
 recording (including each hands-free utterance) freezes the enabled switch and
 custom phrases at Record with its other provider inputs, so settings edited
 while it records or finishes apply only to later recordings; a recording made

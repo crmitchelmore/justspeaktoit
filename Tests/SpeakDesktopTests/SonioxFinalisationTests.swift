@@ -22,8 +22,9 @@ extension SonioxPortableLifecycleTests {
         XCTAssertEqual(socket.controls.last, SonioxLiveFixture.finalize, "Finalize follows the drained audio")
         XCTAssertEqual(socket.binary.count, 1, "Finalize precedes end-of-stream")
         socket.completeSend()
-        await fixture.settle { socket.binary.count == 2 }
-        XCTAssertEqual(socket.binary.last, Data(), "The end-of-stream frame is empty")
+        await fixture.settle { socket.controls.last == "" }
+        XCTAssertEqual(socket.controls.last, "", "End-of-stream is an empty text frame")
+        XCTAssertEqual(socket.binary.count, 1, "End-of-stream is never an (empty) audio frame")
         socket.completeSend()
         // Finalised tail arrives during the silent finish, then the finished frame.
         socket.emit(Self.tokens([(text: "world.", final: true)]))
@@ -44,7 +45,7 @@ extension SonioxPortableLifecycleTests {
         fixture.client.stop()
         XCTAssertEqual(socket.controls.last, SonioxLiveFixture.finalize, "Stop finalizes before end-of-stream")
         socket.completeSend()
-        XCTAssertEqual(socket.binary.last, Data(), "Stop flushes with the end-of-stream frame")
+        XCTAssertEqual(socket.controls.last, "", "Stop flushes with the empty text end-of-stream frame")
         socket.completeSend()
         socket.emit(Self.tokens([(text: "words.", final: true)]))
         socket.emit(Self.finished())

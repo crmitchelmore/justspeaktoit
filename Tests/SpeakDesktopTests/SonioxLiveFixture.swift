@@ -52,7 +52,7 @@ final class SonioxLiveFixture: @unchecked Sendable {
     func awaitEndOfStream(on socket: AssemblyAITestSocket? = nil) async {
         let socket = socket ?? self.socket
         await completeFinalize(on: socket)
-        await settle { socket.binary.last == Data() }
+        await settle { socket.controls.last == "" }
     }
 
     func settle(_ predicate: () -> Bool) async {

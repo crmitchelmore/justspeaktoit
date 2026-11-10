@@ -206,8 +206,10 @@ jobs:
       - name: Test Linux automation staging
         run: python3 -B -m unittest discover -s scripts/tests -p test_linux_automation_staging.py
 
-      - name: Test shared core, desktop host and Linux adapters
-        run: swift test --configuration release --jobs 4 --force-resolved-versions
+      # Shared core and desktop host tests run once, in ci.yml's required
+      # "Portable Swift (Linux)" gate; this job tests only the Linux adapters.
+      - name: Test Linux adapters
+        run: swift test --configuration release --jobs 4 --force-resolved-versions --filter '^SpeakLinux'
 
       - name: Self-test, GTK window smoke test and page screenshots
         env:

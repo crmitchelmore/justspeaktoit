@@ -25,6 +25,39 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE.parent / "windows-bundle"))
 import windows_pe  # noqa: E402
+import http.client
+import time
+import urllib.error
+
+# GitHub release assets and other pinned sources intermittently return 5xx or
+# time out; an outage on 9 Nov lasted well over the old single attempt. The
+# bytes are pinned by size and SHA-256, so retrying is safe.
+NETWORK_RETRY_DELAYS = (10, 30, 60, 120)
+
+
+def download_with_retry(source, timeout, path, limit, oversize):
+    """Stream source into path, retrying transient network failures."""
+    for delay in (*NETWORK_RETRY_DELAYS, None):
+        try:
+            with urllib.request.urlopen(source, timeout=timeout) as response, path.open("wb") as output:
+                count = 0
+                while chunk := response.read(1 << 20):
+                    count += len(chunk)
+                    if count > limit:
+                        raise oversize()
+                    output.write(chunk)
+            return
+        except urllib.error.HTTPError as error:
+            if delay is None or (error.code < 500 and error.code != 429):
+                raise
+            reason = "HTTP %d" % error.code
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as error:
+            if delay is None:
+                raise
+            reason = str(error)
+        print("Download failed (%s); retrying in %ds" % (reason, delay), flush=True)
+        time.sleep(delay)
+
 
 # The Visual Studio component each developer environment needs, for vswhere.
 DEVELOPER_COMPONENTS = {"arm64": "Microsoft.VisualStudio.Component.VC.Tools.ARM64"}
@@ -76,13 +109,8 @@ def download(entry, directory):
     partial = destination.with_name(entry["name"] + ".partial")
     # sdk.lunarg.com refuses urllib's default User-Agent with 403; the bytes are pinned by SHA-256 either way.
     request = urllib.request.Request(entry["url"], headers={"User-Agent": "justspeaktoit-windows-runtime-build/1"})
-    with urllib.request.urlopen(request, timeout=300) as response, partial.open("wb") as output:
-        count = 0
-        while chunk := response.read(1 << 20):
-            count += len(chunk)
-            if count > entry["bytes"]:
-                raise RuntimeError_("download exceeded its pinned size: " + entry["name"])
-            output.write(chunk)
+    download_with_retry(request, 300, partial, entry["bytes"],
+                        lambda: RuntimeError_("download exceeded its pinned size: " + entry["name"]))
     if partial.stat().st_size != entry["bytes"] or digest(partial) != entry["sha256"]:
         partial.unlink()
         raise RuntimeError_("download does not match its pinned SHA-256: " + entry["name"])

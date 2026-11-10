@@ -1798,7 +1798,9 @@ jobs:
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-22.04"]') }}
     container:
       image: swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6
-    timeout-minutes: 10
+    # Successful hosted runs take 6-9 minutes; a 10-minute budget failed cold
+    # dispatched qualification runs.
+    timeout-minutes: 20
     steps:
       # Self-hosted Linux runs this root container against the runner's
       # persistent /__w bind mount; record its owner so it can be restored.

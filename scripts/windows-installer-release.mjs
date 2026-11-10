@@ -24,6 +24,7 @@ const json = path => JSON.parse(readFileSync(path, 'utf8'));
 export const pointerAsset = 'windows-installer-pointer.json';
 export const appInstallerAsset = 'JustSpeakToIt.appinstaller';
 export const receiptAsset = 'windows-installer.json';
+export const runtimePolicyPath = 'scripts/windows-bundle/runtime-policy.json';
 const tagPattern = /^(alpha-build|stable-candidate)-[1-9][0-9]*$/;
 
 // Mirrors windows_installer.package_version: a 12-digit YYYYMMDDhhmm build
@@ -85,7 +86,33 @@ export function rehearsalTag(command = run) {
         command('gh', ['release', 'download', 'alpha-latest', '--repo', repo, '--pattern', 'alpha-pointer.json', '--dir', scratch]);
         const {tag} = json(join(scratch, 'alpha-pointer.json'));
         if (!/^alpha-build-[1-9][0-9]*$/.test(tag ?? '')) throw Error('Invalid Alpha pointer');
-        return tag;
+        // The pointer can name an Alpha whose desktop qualification failed or
+        // has not finished, or whose bundles were assembled under an older
+        // runtime policy, which the current packaging tools reject. Rehearse
+        // the newest published Alpha that is both qualified and compatible;
+        // with none, report '' so the workflow skips the rehearsal.
+        const qualified = name => JSON.parse(command('gh', ['release', 'view', name, '--repo', repo, '--json', 'assets']))
+            .assets.some(asset => asset.name === 'desktop-qualification.json');
+        const compatible = name => {
+            try {
+                command('git', ['diff', '--quiet', `${name}^{commit}`, 'HEAD', '--', runtimePolicyPath]);
+                return true;
+            } catch {
+                return false;
+            }
+        };
+        const usable = name => qualified(name) && compatible(name);
+        if (usable(tag)) return tag;
+        const candidates = JSON.parse(command('gh', ['release', 'list', '--repo', repo, '--limit', '40',
+            '--json', 'tagName,isDraft']))
+            .filter(release => !release.isDraft && /^alpha-build-[1-9][0-9]*$/.test(release.tagName))
+            .map(release => release.tagName)
+            .sort((a, b) => Number(b.slice(12)) - Number(a.slice(12)));
+        const fallback = candidates.find(usable) ?? '';
+        console.error(fallback
+            ? `Alpha pointer ${tag} is unqualified or predates the runtime policy; rehearsing ${fallback}`
+            : `No qualified Alpha matches the current runtime policy (pointer ${tag}); skipping the rehearsal`);
+        return fallback;
     } finally {
         rmSync(scratch, {recursive: true, force: true});
     }

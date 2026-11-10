@@ -72,3 +72,14 @@ test('only the fast phase allocates before CI, and only green runs ship TestFlig
  }
  assert.match(workflow,/group: alpha-\$\{\{ github\.event_name == 'push' && 'fast' \|\| github\.run_id \}\}\n  cancel-in-progress: false/);
 });
+
+test('direct Mac Alpha skips the Release test suite; Stable keeps it',()=>{
+ const mac=readFileSync(resolve('.github/workflows/release-mac.yml'),'utf8');
+ const step=mac.split('- name: Run Tests (Release Config)')[1].split('\n      - name:')[0];
+ const condition=step.match(/^\s+if: (.*)$/m)[1];
+ const run=manifest=>new Function('steps','inputs','startsWith',`return (${condition.replace(/!startsWith/,'!startsWith')});`)(
+  {receipt:{outputs:{status:'missing'}}},{manifest},(a,b)=>a.startsWith(b));
+ assert.equal(run('alpha-build-83'),false);
+ assert.equal(run('stable-candidate-4'),true);
+ assert.match(step,/swift test -c release/);
+});

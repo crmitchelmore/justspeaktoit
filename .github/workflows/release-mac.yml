@@ -67,8 +67,12 @@ jobs:
       # exactly what the plist-identity and release-notes tests pin, so testing
       # afterwards failed every Alpha build (alpha-build-1..3) and no build ever
       # reached the alpha-latest pointer that the Sparkle Alpha feed resolves.
+      # Stable only. Alpha may be broken up to 10% of the time and main's
+      # post-merge CI runs these tests (release-validation), so an Alpha builds,
+      # signs and publishes without waiting for them; the full suite here took
+      # longer than the build and failed or was cancelled first (alpha 78-82).
       - name: Run Tests (Release Config)
-        if: steps.receipt.outputs.status != 'verified'
+        if: steps.receipt.outputs.status != 'verified' && !startsWith(inputs.manifest, 'alpha-build-')
         # Step-scoped: the packaging and CLI builds below must not compile the
         # native-CI Keychain redirect (#1360); release verification rejects it.
         env:

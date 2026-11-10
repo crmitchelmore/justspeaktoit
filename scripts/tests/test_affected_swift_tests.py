@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import unittest
 from pathlib import Path
 
@@ -56,6 +57,25 @@ class SelectionTests(unittest.TestCase):
     def test_skipped_targets_never_run_on_the_pull_request(self):
         self.assertEqual(affected.select(["Tests/SpeakDesktopTests/A.swift"], PACKAGE, {"SpeakDesktopTests"}),
                          ("none", []))
+
+
+class MainTests(unittest.TestCase):
+    def test_an_unresolvable_base_runs_every_test_target(self):
+        import contextlib, io, subprocess
+        from unittest import mock
+
+        def fake_run(command, **kwargs):
+            if command[:2] == ["git", "diff"]:
+                return subprocess.CompletedProcess(command, 128, "", "fatal: no merge base")
+            return subprocess.CompletedProcess(command, 0, json.dumps(PACKAGE), "")
+
+        out = io.StringIO()
+        with mock.patch.object(affected.subprocess, "run", fake_run), \
+                mock.patch.object(affected.sys, "argv", ["x", "origin/main", "--skip-target", "SpeakDesktopTests"]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(affected.main(), 0)
+        self.assertIn("mode=all", out.getvalue())
+        self.assertIn("skip=^(SpeakDesktopTests)\\.", out.getvalue())
 
 
 if __name__ == "__main__":

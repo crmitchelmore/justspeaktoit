@@ -85,11 +85,17 @@ def main() -> int:
     parser.add_argument("base")
     parser.add_argument("--skip-target", action="append", default=[])
     args = parser.parse_args()
-    changed = subprocess.run(["git", "diff", "--name-only", f"{args.base}...HEAD"], check=True,
-                             capture_output=True, text=True).stdout.split()
     package = json.loads(subprocess.run(["swift", "package", "dump-package"], check=True,
                                         capture_output=True, text=True).stdout)
     skip = set(args.skip_target)
+    diff = subprocess.run(["git", "diff", "--name-only", f"{args.base}...HEAD"], capture_output=True, text=True)
+    if diff.returncode != 0:
+        # No merge base (shallow or missing base): fail safe by testing everything.
+        print(f"::warning::Cannot diff against {args.base} ({diff.stderr.strip()}); running every test target",
+              file=sys.stderr)
+        changed = ["Package.swift"]
+    else:
+        changed = diff.stdout.split()
     mode, selected = select(changed, package, skip)
     print(f"mode={mode}")
     print(f"targets={' '.join(selected)}")

@@ -41,6 +41,8 @@ android {
         warningsAsErrors = false
         abortOnError = true
         checkDependencies = true
+        // Accessibility regressions fail CI (Docs/accessibility.md).
+        error += setOf("ContentDescription", "KeyboardInaccessibleWidget", "LabelFor", "ClickableViewAccessibility")
     }
 
 }

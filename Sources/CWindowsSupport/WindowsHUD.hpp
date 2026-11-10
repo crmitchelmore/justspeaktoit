@@ -15,6 +15,8 @@ bool stage(int phase, std::wstring headline, std::wstring subheadline, std::wstr
            int displayMilliseconds = 0, bool compact = false, bool expanded = false);
 // UI thread: shows the latest staged state, creating the window on first use.
 void apply();
+// UI thread: whether the HUD is on screen (and so announcing phase changes).
+bool visible();
 // UI thread: redraws after an appearance change.
 void refresh();
 // UI thread: destroys the window with the app.

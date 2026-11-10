@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -63,7 +64,7 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = actions.onBack) {
+                IconButton(onClick = actions.onBack, modifier = Modifier.testTag(AutomationIds.SETTINGS_BACK)) {
                     Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.action_back))
                 }
                 Text(

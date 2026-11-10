@@ -182,6 +182,8 @@ struct PersonalCorrectionsView: View {
         Spacer()
         Toggle("", isOn: $settings.autoCorrectionsEnabled)
           .labelsHidden()
+          .accessibilityLabel("Learn corrections automatically")
+          .accessibilityIdentifier("autoCorrectionsToggle")
       }
 
       if settings.autoCorrectionsEnabled {
@@ -311,6 +313,7 @@ struct PersonalCorrectionsView: View {
       .buttonStyle(.borderless)
       .help("Add as correction rule")
       .accessibilityLabel("Add as correction rule: \(candidate.original) to \(candidate.corrected)")
+      .accessibilityIdentifier("autoCorrectionPromote-\(candidate.id)")
 
       Button {
         Task {
@@ -327,6 +330,7 @@ struct PersonalCorrectionsView: View {
       .foregroundStyle(.secondary)
       .help("Dismiss")
       .accessibilityLabel("Dismiss candidate \(candidate.original)")
+      .accessibilityIdentifier("autoCorrectionDismiss-\(candidate.id)")
     }
   }
 

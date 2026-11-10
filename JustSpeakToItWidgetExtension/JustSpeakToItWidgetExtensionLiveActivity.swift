@@ -344,6 +344,7 @@ struct LockScreenTranscriptionView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Stop recording")
+                    .accessibilityIdentifier("liveActivityStopRecording")
                 }
             } else if let resultRow {
                 ResultRowActions(row: resultRow)

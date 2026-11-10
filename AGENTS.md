@@ -187,6 +187,7 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Keep new API surface `internal` unless exposure is required for cross-module use
 - Use `public` for types that need to be accessed from Xcode project or other modules
 - Enforce linting via `.swiftlint.yml`; rules include `explicit_self`, `implicit_return`, line-length 120/160
+- Apple UI controls need accessible names and stable identifiers; follow [Docs/accessibility.md](Docs/accessibility.md). `make lint` runs `scripts/check-apple-accessibility.py`
 
 ## Testing Guidelines
 - Tests live under `Tests/SpeakAppTests` and rely on XCTest

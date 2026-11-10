@@ -10,6 +10,18 @@ public enum RecordingServiceState: Equatable, Sendable {
     case stopping
 }
 
+extension RecordingServiceState {
+    /// What VoiceOver announces on entering this state; `nil` for transitions
+    /// the control's own label already conveys.
+    public var accessibilityAnnouncement: String? {
+        switch self {
+        case .idle, .starting: return nil
+        case .recording: return "Recording"
+        case .stopping: return "Transcribing"
+        }
+    }
+}
+
 /// The run-identity state machine behind a cancellable recording startup
 /// (issue #701).
 ///

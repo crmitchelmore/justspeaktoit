@@ -176,14 +176,14 @@ test('native pool still requires the exact reviewed source and trusted event', (
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }), fallback);
     assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo'), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
       fallback, 'forks cannot enter the native pool');
-    assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
+    // Merged main source is reviewed: it routes without a manual SHA.
+    assert.deepEqual(route(id, routingContext('push')), ['jsti-reviewed-local', 'macOS']);
+    assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }),
       ['jsti-reviewed-local', 'macOS']);
-    assert.deepEqual(route(id, routingContext('push')), fallback);
-    assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }), fallback);
+    assert.deepEqual(route(id, routingContext('push'), { JSTI_SELF_HOSTED_MAIN: 'off' }), fallback);
     assert.deepEqual(route(id, { ...routingContext('push'), ref: 'refs/heads/feature' },
       { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }), fallback);
-    assert.deepEqual(route(id, routingContext('workflow_dispatch'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
-      fallback);
+    assert.deepEqual(route(id, routingContext('workflow_dispatch')), fallback);
   }
 });
 

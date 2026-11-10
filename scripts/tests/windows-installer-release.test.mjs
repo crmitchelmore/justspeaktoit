@@ -75,8 +75,14 @@ test('the public pointer only moves to a newer manifest build', () => {
     assert.ok(!canPromote({build: '202610301700'}, {build: '202610301641'}));
 });
 
-function fakeReleases(pointer, qualified) {
+function fakeReleases(pointer, qualified, compatible = qualified) {
     return (command, args) => {
+        if (command === 'git') {
+            assert.deepEqual(args.slice(0, 2), ['diff', '--quiet']);
+            assert.equal(args.at(-1), 'scripts/windows-bundle/runtime-policy.json');
+            if (!compatible.includes(args[2].replace('^{commit}', ''))) throw Error('policy differs');
+            return '';
+        }
         assert.equal(command, 'gh');
         if (args[1] === 'download') {
             writeFileSync(join(args[args.indexOf('--dir') + 1], 'alpha-pointer.json'), JSON.stringify({tag: pointer}));
@@ -100,5 +106,11 @@ test('rehearsals use the Alpha pointer when it is qualified', () => {
 
 test('rehearsals fall back to the newest published, qualified Alpha', () => {
     assert.equal(rehearsalTag(fakeReleases('alpha-build-70', ['alpha-build-69', 'alpha-build-71'])), 'alpha-build-69');
-    assert.throws(() => rehearsalTag(fakeReleases('alpha-build-70', [])), /No qualified Alpha/);
+    assert.equal(rehearsalTag(fakeReleases('alpha-build-70', [])), '');
+});
+
+test('rehearsals skip Alphas assembled under a different runtime policy', () => {
+    assert.equal(rehearsalTag(fakeReleases('alpha-build-70', ['alpha-build-69', 'alpha-build-70'], ['alpha-build-69'])),
+        'alpha-build-69');
+    assert.equal(rehearsalTag(fakeReleases('alpha-build-70', ['alpha-build-69', 'alpha-build-70'], [])), '');
 });

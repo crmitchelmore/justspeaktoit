@@ -55,7 +55,7 @@ actor SystemTTSClient: TextToSpeechClient {
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
     // System voice doesn't require API key
-    return .success(message: "System voice requires no API key")
+    .success(message: "System voice requires no API key")
   }
 
   // MARK: - Private Helpers
@@ -118,6 +118,8 @@ actor SystemTTSClient: TextToSpeechClient {
 /// callback; cancellation stops synthesis. The writer keeps itself, and so the
 /// synthesizer, alive until the synthesizer reports it has stopped: freeing an
 /// AVSpeechSynthesizer that is still delivering callbacks crashes the process.
+/// The callbacks capture the writer strongly, which the keep-alive makes safe,
+/// rather than forming a weak reference to an object that may be freeing.
 private final class SystemSpeechFileWriter: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
   private let url: URL
   private let format: AudioFormat
@@ -126,9 +128,9 @@ private final class SystemSpeechFileWriter: NSObject, AVSpeechSynthesizerDelegat
   private var file: AVAudioFile?
   private var continuation: CheckedContinuation<Void, Error>?
   private var outcome: Result<Void, Error>?
-  private var keepAlive: SystemSpeechFileWriter?
-  /// Bounds the self-retain if the synthesizer never reports that it stopped.
-  private static let stopGrace: TimeInterval = 30
+  /// Bounds the self-retain, once the outcome is known, if the synthesizer
+  /// never reports that it stopped.
+  private let lifetime = SynthesizerKeepAlive<SystemSpeechFileWriter>(grace: 10)
 
   init(url: URL, format: AudioFormat) {
     self.url = url
@@ -143,11 +145,11 @@ private final class SystemSpeechFileWriter: NSObject, AVSpeechSynthesizerDelegat
         let settled = lock.withLock { () -> Result<Void, Error>? in
           if let outcome { return outcome }
           self.continuation = continuation
+          // Retained before any outcome can settle, so the bound always starts.
+          lifetime.retain(self)
           return nil
         }
         if let settled { continuation.resume(with: settled); return }
-        lock.withLock { keepAlive = self }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.stopGrace) { [weak self] in self?.releaseSynthesizer() }
         synthesizer.write(utterance) { [weak self] buffer in self?.append(buffer) }
       }
     } onCancel: {
@@ -188,32 +190,23 @@ private final class SystemSpeechFileWriter: NSObject, AVSpeechSynthesizerDelegat
       defer { continuation = nil }
       return (continuation, result)
     }
-    if let (continuation, result) = settled { continuation?.resume(with: result) }
+    guard let (continuation, result) = settled else { return }
+    lifetime.outcomeSettled()
+    continuation?.resume(with: result)
   }
 
   func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
     // The empty end buffer normally finishes first; this is the fallback, after
     // a grace period so a trailing buffer is not cut off.
-    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
-      self?.finish(.success(()))
-      self?.releaseSynthesizer()
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [self] in
+      finish(.success(()))
+      lifetime.synthesizerStopped()
     }
   }
 
   func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
     finish(.failure(CancellationError()))
-    releaseSynthesizer()
-  }
-
-  /// Drops the self-retain on the main queue, so the synthesizer is freed
-  /// there and never from inside one of its own callbacks.
-  private func releaseSynthesizer() {
-    let retained = lock.withLock { () -> SystemSpeechFileWriter? in
-      defer { keepAlive = nil }
-      return keepAlive
-    }
-    guard let retained else { return }
-    DispatchQueue.main.async { _ = retained }
+    lifetime.synthesizerStopped()
   }
 
   private static func settings(for format: AudioFormat, matching pcm: AVAudioFormat) -> [String: Any] {

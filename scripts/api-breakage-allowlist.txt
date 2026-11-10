@@ -66,3 +66,9 @@ API breakage: enumelement ApplicationPreferenceKey.cleanupModelDiscoveryEnabled 
 # Gemini 3.8 Flash-Lite TTS replaces the 3.1 preview before its shutdown. The
 # retired raw values stay decodable and resolve to the replacement selection.
 API breakage: enumelement GeminiTTSModel.flash38LiteTTS has been added as a new enum case
+# `speak say` text to speech adds two commands and one error code. Existing
+# cases, raw values and initializers remain; speech is a separate opt-in
+# AutomationSpeechHost protocol and repository dispatchers handle the cases.
+API breakage: enumelement AutomationCommand.speakText has been added as a new enum case
+API breakage: enumelement AutomationCommand.listVoices has been added as a new enum case
+API breakage: enumelement AutomationErrorCode.speechFailed has been added as a new enum case

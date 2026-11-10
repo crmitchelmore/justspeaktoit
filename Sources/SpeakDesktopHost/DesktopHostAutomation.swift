@@ -4,6 +4,8 @@ import SpeakDesktop
 
 package protocol DesktopHostAutomationPlatform: DesktopHostDefaultTextOutputPlatform, DesktopHostReadAloudPlatform {}
 
+extension DesktopHostController: AutomationSpeechHost where Platform: DesktopHostAutomationPlatform {}
+
 extension DesktopHostController: AutomationCommandHost where Platform: DesktopHostAutomationPlatform {
     package func automationStatus() -> AutomationResult {
         AutomationResult(sessionActive: dictationSessionID != nil)

@@ -26,19 +26,32 @@ public protocol AutomationCommandHost: AnyObject, Sendable {
     /// Stops the active session and returns its transcript. Throws
     /// `AutomationError.noDictationRunning` when nothing is recording.
     func automationStopDictation() async throws -> AutomationResult
+}
+
+/// Text to speech for `speak say`. Separate from `AutomationCommandHost` so a
+/// host opts in; the dispatcher reports `unsupported_command` for one that
+/// does not.
+public protocol AutomationSpeechHost: AutomationCommandHost {
     /// Speaks text that has passed `AutomationRequestPolicy.speech(for:)`, with
     /// the app's own voices and credentials: aloud, to the output file, or both.
     /// Returns once playback has finished and the file is complete. A host
     /// without the requested voice or format throws rather than substituting.
     func automationSpeak(_ speech: AutomationSpeechRequest) async throws -> AutomationResult
     /// Every voice `automationSpeak` can use right now, from the app's own
-    /// settings and saved keys: the selected voice, favourites, configured
-    /// cloud voices and any on-device voices.
+    /// settings and saved keys: the selected voice, configured cloud voices
+    /// and any on-device voices.
     func automationVoices() async throws -> [AutomationVoice]
 }
 
 /// Maps one validated automation request onto an `AutomationCommandHost`.
 public enum AutomationCommandDispatcher {
+    private static func speechHost(_ host: some AutomationCommandHost) throws -> any AutomationSpeechHost {
+        guard let speech = host as? any AutomationSpeechHost else {
+            throw AutomationError(code: .unsupportedCommand, message: "This app cannot speak text.")
+        }
+        return speech
+    }
+
     public static func response(
         to request: AutomationRequest,
         host: some AutomationCommandHost
@@ -62,10 +75,10 @@ public enum AutomationCommandDispatcher {
             case .stopDictation:
                 result = try await host.automationStopDictation()
             case .speakText:
-                result = try await host.automationSpeak(AutomationRequestPolicy.speech(for: request))
+                result = try await Self.speechHost(host).automationSpeak(AutomationRequestPolicy.speech(for: request))
             case .listVoices:
                 var listed = AutomationResult()
-                listed.voices = try await host.automationVoices().filter { voice in
+                listed.voices = try await Self.speechHost(host).automationVoices().filter { voice in
                     request.provider.map {
                         voice.provider.caseInsensitiveCompare($0) == .orderedSame
                             || voice.providerName.caseInsensitiveCompare($0) == .orderedSame

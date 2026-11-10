@@ -74,7 +74,11 @@ public struct CLIRunner {
     /// UTF-8 needs at most four bytes per character.
     static let maxSpeechInputBytes = AutomationLimits.maxSpeechCharacters * 4
 
-    public init(client: AutomationRequesting, version: String, textInput: CLITextInput = .standard) {
+    public init(client: AutomationRequesting, version: String) {
+        self.init(client: client, version: version, textInput: .standard)
+    }
+
+    public init(client: AutomationRequesting, version: String, textInput: CLITextInput) {
         self.client = client
         self.version = version
         self.textInput = textInput

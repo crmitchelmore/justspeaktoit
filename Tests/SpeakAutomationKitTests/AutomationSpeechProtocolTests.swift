@@ -170,7 +170,7 @@ final class AutomationSpeechProtocolTests: XCTestCase {
     }
 }
 
-private actor SpeechRecordingHost: AutomationCommandHost {
+private actor SpeechRecordingHost: AutomationSpeechHost {
     private(set) var speech: AutomationSpeechRequest?
 
     func automationStatus() async -> AutomationResult { AutomationResult() }

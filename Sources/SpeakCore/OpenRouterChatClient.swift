@@ -77,11 +77,8 @@ extension OpenRouterBranding {
     }
 }
 
-/// Portable, one-shot chat transport. Missing credentials always fail;
+/// Portable, one-shot OpenRouter chat transport. Missing credentials always fail;
 /// local cleanup is a separate, explicit product choice rather than an HTTP fallback.
-/// `native/<provider>/…` selections go to that provider's own endpoint, so the
-/// caller supplies the key `ModelCredentialResolver` names for the model; every
-/// other identifier keeps the OpenRouter route and key.
 public actor OpenRouterChatClient: ChatLLMClient {
     let apiKey: String
     let session: URLSession
@@ -126,12 +123,11 @@ public actor OpenRouterChatClient: ChatLLMClient {
             stream: nil,
             maxTokens: maxTokens
         )
-        let target = try ChatCompletionTarget.resolve(model)
-        var request = URLRequest(url: target.url)
+        var request = URLRequest(url: OpenRouterService.baseURL.appendingPathComponent("chat/completions"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        if target.isOpenRouter { branding.apply(to: &request) }
+        branding.apply(to: &request)
         request.httpBody = try JSONEncoder().encode(payload)
 
         let data: Data
@@ -197,14 +193,11 @@ struct OpenRouterChatRequest: Encodable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        let target = try ChatCompletionTarget.resolve(model)
-        try container.encode(target.model, forKey: .model)
-        if target.sendsTemperature { try container.encode(temperature, forKey: .temperature) }
+        try container.encode(CleanupModelSelection.requestModel(model), forKey: .model)
+        try container.encode(temperature, forKey: .temperature)
         try container.encode(messages, forKey: .messages)
         try container.encodeIfPresent(stream, forKey: .stream)
-        try container.encodeIfPresent(
-            maxTokens, forKey: target.usesMaxCompletionTokens ? .maxCompletionTokens : .maxTokens
-        )
+        try container.encodeIfPresent(maxTokens, forKey: .maxTokens)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -213,7 +206,6 @@ struct OpenRouterChatRequest: Encodable {
         case messages
         case stream
         case maxTokens = "max_tokens"
-        case maxCompletionTokens = "max_completion_tokens"
     }
 }
 

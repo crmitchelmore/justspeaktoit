@@ -485,11 +485,8 @@ public struct SettingsView: View {
                     }
                 }
 
-                if !settings.hasPostProcessingKey {
-                    Label(
-                        "\(settings.postProcessingKeyProviderName) API key required",
-                        systemImage: "exclamationmark.triangle"
-                    )
+                if !settings.hasOpenRouterKey {
+                    Label("OpenRouter API key required", systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -728,10 +725,7 @@ public struct SettingsView: View {
     }
 
     private var postProcessingModelName: String {
-        let model = settings.postProcessingModel
-        return ModelPickerGrouping.selectionLabel(
-            for: model, displayName: ModelCatalog.friendlyName(for: model), purpose: .postProcessing
-        )
+        ModelCatalog.friendlyName(for: settings.postProcessingModel)
     }
 
     private var usesInlineDensityLayout: Bool {

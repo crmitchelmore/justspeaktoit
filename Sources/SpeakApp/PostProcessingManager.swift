@@ -430,17 +430,17 @@ final class PostProcessingManager: ObservableObject {
       if await proxy.isPaidRoutingActive(configuredModel: resolvedModel) {
         return true
       }
-      return await Self.hasRemoteCredentials(proxy.fallback, model: resolvedModel)
+      return await Self.hasOpenRouterAccess(proxy.fallback, model: resolvedModel)
     }
 
     guard let openRouterClient = client as? OpenRouterAPIClient else {
       return true
     }
 
-    return await Self.hasRemoteCredentials(openRouterClient, model: resolvedModel)
+    return await Self.hasOpenRouterAccess(openRouterClient, model: resolvedModel)
   }
 
-  private static func hasRemoteCredentials(
+  private static func hasOpenRouterAccess(
     _ client: any PaidAccessFallbackClient,
     model: String
   ) async -> Bool {
@@ -448,7 +448,7 @@ final class PostProcessingManager: ObservableObject {
     if !requiresRemote {
       return true
     }
-    return await client.hasStoredAPIKey(forModel: model)
+    return await client.hasStoredAPIKey()
   }
 
   static func isLocalPostProcessingModel(_ model: String) -> Bool {

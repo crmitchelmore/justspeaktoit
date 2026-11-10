@@ -33,20 +33,6 @@ The optional discovery layer added alongside this refresh is documented in
 [cleanup model discovery](cleanup-model-discovery.md). The evidence below describes
 the bundled entries; discovery preserves their metadata and defaults.
 
-## Native routes and picker grouping
-
-Since #1382, `NativeTextModels` adds curated `native/<provider>/<model>` entries for
-OpenAI, Google Gemini, Groq and Mistral. They call the provider's own OpenAI-compatible
-`chat/completions` endpoint with that provider's existing key (`openai.apiKey`,
-`google.apiKey`, `groq.apiKey`, `mistral.apiKey`). OpenAI requests omit `temperature`
-and send `max_completion_tokens`. iOS lists only providers it stores keys for (not Groq).
-
-`ModelPickerGrouping` puts native and on-device models first and shows OpenRouter as
-one entry that opens its own searchable list; grouping follows the credential each model
-resolves to. Each group is alphabetical by provider (OpenRouter: vendor prefix), then by
-model name, case-insensitive and numeric-aware; tags remain badges, not ordering. The unprefixed entries below remain OpenRouter routes, so saved selections
-keep their route. The section that follows describes those OpenRouter routes.
-
 ## Runtime compatibility
 
 Cleanup uses the existing OpenRouter `/api/v1/chat/completions` route and

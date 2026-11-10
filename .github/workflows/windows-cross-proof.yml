@@ -6,7 +6,7 @@ on:
     branches: [main]
     # Pull requests run the macOS-hosted cross-compile only for Windows-owned
     # and native-dependency changes. Shared Swift changes are proven on pull
-    # requests by "Windows and Portable Swift" and here on every push to main,
+    # requests by the native "Windows ARM64" build and here on every push to main,
     # keeping this macOS job out of the shared hosted macOS queue.
     paths:
       - .gitattributes

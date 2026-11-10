@@ -9,10 +9,11 @@ bundle and a developer MSIX from the same executable and exercises them. Every
 ARM64 program it runs must be a native ARM64 image running as an ARM64
 process, not an x64 build running under Windows' x64 emulation.
 
-It runs on every relevant push to main. Pull requests run it only when its own
-bundle, packaging or runtime tooling, or a native C dependency, changes; Windows
-Swift source changes are proven
-on pull requests by the native x64 `windows.yml` workflow.
+It is the Windows proof for pull requests that touch shared or Windows source:
+the native build and tests run on every such pull request without a macOS
+runner. The macOS-assembled bundle, bundle execution and MSIX jobs run on main
+and Alpha only; `windows-cross-proof.yml` proves x64 bundle tooling on pull
+requests. The native x64 `windows.yml` workflow runs nightly.
 
 **Status — 25 October 2026.** [Native ARM64 run 40190709985](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40190709985)
 passed at `a6b5b53912af4e6024d0d65542df8dd0786005fc`, including the native

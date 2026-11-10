@@ -47,20 +47,45 @@ on:
       - .github/workflows/windows-local-runtime.yml
   pull_request:
     branches: [main]
-    # Pull requests run this native ARM64 proof (and its hosted macOS bundle
-    # job) only when its own packaging, runtime tooling or architecture-sensitive
-    # native C dependencies change. Windows Swift source changes are proven on
-    # pull requests by "Windows and Portable Swift" (native x64) and here on
-    # every push to main.
+    # The native ARM64 build and tests are the pull request Windows proof for
+    # shared and Windows source (windows.yml is nightly). They need no macOS
+    # runner; the macOS-assembled bundle jobs run on main and Alpha only, and
+    # windows-cross-proof proves x64 bundle tooling on pull requests.
     paths:
       - .gitattributes
+      - Package.swift
       - Resources/Desktop/**
+      - scripts/generate-desktop-icons.py
+      - scripts/tests/test_desktop_icons.py
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
       - Sources/CLlamaCpp/**
       - Sources/CMigrationArchive/**
       - Sources/CRecordingFileSupport/**
+      - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
+      - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
+      - Sources/CWindowsSupport/**
+      - Sources/CWindowsAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
+      - Tests/SpeakPortableTests/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
+      - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakAutomationKitTests/**
+      - Tests/SpeakTestSupport/**
+      - scripts/verify-portable-core-boundary.py
+      - scripts/websocket-loopback-probe.py
       - scripts/windows-bundle/**
+      - scripts/windows-cross/**
       - scripts/windows-local-runtime/**
       - scripts/windows-package/**
+      - Resources/AppIcon.iconset/**
       - .github/workflows/windows-arm64.yml
       - .github/workflows/windows-local-runtime.yml
   workflow_dispatch:
@@ -377,6 +402,7 @@ jobs:
 
   bundle:
     name: Assemble the self-contained ARM64 runtime bundle
+    if: github.event_name != 'pull_request'
     needs: [local-runtime, native]
     runs-on: macos-15
     timeout-minutes: 30

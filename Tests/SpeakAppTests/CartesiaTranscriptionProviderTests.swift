@@ -61,33 +61,7 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(CartesiaLiveTranscriber.apiVersion, CartesiaLiveClient.apiVersion)
   }
 
-  func testTranscriptEvent_turnUpdateProducesPartial() {
-    let json = """
-    {"type":"turn.update","results":[{"transcript":"book a table"}]}
-    """
-
-    let event = CartesiaLiveClient.transcriptEvent(from: json)
-
-    XCTAssertEqual(event?.text, "book a table")
-    XCTAssertEqual(event?.isFinal, false)
-  }
-
-  func testTranscriptEvent_turnEndProducesFinal() {
-    let json = """
-    {"type":"turn.end","results":[{"transcript":"book a table for two"}]}
-    """
-
-    let event = CartesiaLiveClient.transcriptEvent(from: json)
-
-    XCTAssertEqual(event?.text, "book a table for two")
-    XCTAssertEqual(event?.isFinal, true)
-  }
-
-  func testTranscriptEvent_ignoresEmptyTranscript() {
-    let json = #"{"type":"turn.update","results":[{"transcript":""}]}"#
-
-    XCTAssertNil(CartesiaLiveClient.transcriptEvent(from: json))
-  }
+  // Transcript event parsing is shared: CartesiaLiveClientTests in SpeakCoreTests covers it.
 
   func testValidateAPIKey_redactsAuthorizationHeaderInDebugSnapshot() async throws {
     StubURLProtocol.respond { request in

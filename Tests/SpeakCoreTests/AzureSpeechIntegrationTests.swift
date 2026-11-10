@@ -1,3 +1,6 @@
+// Opt-in: compiled only with -DJSTI_AZURE_INTEGRATION, so ordinary runs neither list
+// nor skip them (see Docs/azure-speech.md).
+#if JSTI_AZURE_INTEGRATION
 import Foundation
 import XCTest
 @testable import SpeakCore
@@ -88,3 +91,4 @@ final class AzureSpeechIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(data.count, 44)
     }
 }
+#endif

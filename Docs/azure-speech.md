@@ -342,10 +342,13 @@ Contract tests cover endpoint validation, secret-free URLs, multipart model
 selection, timing conversion, empty input, SSML escaping, MAI voice identity,
 streaming transcript ordering/deduplication and shared routing/credentials.
 
-`AzureSpeechIntegrationTests` is opt-in: supply `JSTI_AZURE_TEST_CREDENTIAL` and
-`JSTI_AZURE_TEST_WAV` only in the test process environment, then run
-`swift test --filter AzureSpeechIntegrationTests`. CI does not read Keychain or
-spend provider credits. Use synthetic audio, never personal recordings.
+`AzureSpeechIntegrationTests` is opt-in and compiled only with the
+`JSTI_AZURE_INTEGRATION` condition, so ordinary runs don't list or skip it.
+Supply `JSTI_AZURE_TEST_CREDENTIAL` and `JSTI_AZURE_TEST_WAV` only in the test
+process environment, then run
+`swift test -Xswiftc -DJSTI_AZURE_INTEGRATION --filter AzureSpeechIntegrationTests`.
+CI does not read Keychain or spend provider credits. Use synthetic audio, never
+personal recordings.
 
 The September 2026 UK South account probe returned a successful Fast Transcription
 result. The compiled shared client also transcribed the fixture, and existing

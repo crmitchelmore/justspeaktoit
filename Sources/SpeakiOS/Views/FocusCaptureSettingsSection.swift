@@ -9,7 +9,7 @@ struct FocusCaptureSettingsSection: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        Section("Focus Capture Overrides") {
+        SearchableSettingsSection("Focus Capture Overrides") {
             Text(summary)
                 .accessibilityIdentifier("focusCaptureOverrideStatus")
             Text("In Settings > Focus > Add Filter, choose Capture Overrides for Action Button, Siri and Shortcuts. "

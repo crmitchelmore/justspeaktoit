@@ -1,0 +1,68 @@
+# Settings search
+
+Settings search finds any setting, settings card, API-key slot, model picker or
+shortcut from one field, then opens its page and highlights it.
+
+- **macOS:** press ⌘F, or click the magnifying glass in the toolbar, from
+  anywhere in the main window. Type to see results and completions. Use ↑/↓ to
+  move, Return to open and Tab to accept the first completion. Recent and
+  suggested destinations appear before you type.
+- **iOS:** pull down Settings to reveal the search field. Suggestions show
+  recent and suggested destinations, then typeahead completions.
+
+## One registry
+
+`Sources/SpeakCore/SettingsSearch/` holds the single declarative index:
+
+| Type | Purpose |
+| --- | --- |
+| `SettingsSearchEntry` | One destination: stable `id`, the exact on-screen `title`, `section`, summary, `keywords` (synonyms and control labels), `settingKeys` (persisted property names) and `platforms` |
+| `SettingsSearchCatalog` | The canonical entries, page roots and suggested IDs, split by area into `SettingsSearchCatalog+*.swift` |
+| `SettingsSearchIndex` | Ranked search (title > keyword > page > summary > setting name; synonyms, inflections and small typos) plus `completions(for:)` |
+| `SettingsSearchRecents` | Recently opened entry IDs |
+
+Hosts render from the catalogue. They don't keep their own lists:
+
+- macOS `SettingsCard` and the Keyboard page's cards look themselves up by
+  title and become scroll anchors with a reveal highlight. Cards with a
+  computed heading pass `searchEntryID:`. API-key cards are indexed at runtime
+  from the provider lists the API Keys page renders
+  (`MacSettingsSearch.apiKeyEntries`).
+- iOS top-level sections use `SearchableSettingsSection("Title")`, and API-key
+  rows are indexed at runtime from `APIKeysView.entries(for:)`.
+- `SettingsTab.searchSection` and `MacSettingsSearch.sidebarItem(for:)` are
+  exhaustive switches, so a new settings page doesn't compile until it is mapped.
+
+## Adding a setting or settings view
+
+1. Add or extend an entry in the right `SettingsSearchCatalog+*.swift` file.
+   The `title` must match the card or section heading exactly. Add the property
+   name to `settingKeys` and the words people would search for to `keywords`.
+2. Mark only the platforms whose settings UI shows it.
+3. Keep `id`s stable. They key recents and accessibility identifiers.
+
+`Tests/SpeakAppTests/SettingsSearchCoverageTests.swift` fails when:
+
+- a macOS `SettingsCard(title: "…")` or `ShortcutSettingsCard(title: "…")` has no
+  macOS entry, or a card with a computed title omits `searchEntryID:`;
+- an iOS Settings section uses a plain `Section("…")` or has no iOS entry;
+- an `@Published` property of either platform's `AppSettings` isn't in some
+  entry's `settingKeys`, unless it is exempted there with a reason;
+- a `SettingsTab` has no searchable page root.
+
+`Tests/SpeakCoreTests/SettingsSearchIndexTests.swift` covers ranking, synonyms,
+typo tolerance, completions, recents and catalogue invariants (unique IDs and
+titles, and each setting key owned once per platform).
+
+## Accessibility
+
+Result rows are single accessible buttons labelled with the title and page,
+with the summary or matched keyword as the hint. Each has the identifier
+`settingsSearchResult.<entry id>`. The macOS field is `settingsSearchField`,
+the toolbar button is `settingsSearchButton`, and completions are
+`settingsSearchCompletion.<n>`. The reveal highlight is decorative and hidden
+from VoiceOver.
+
+## Other platforms
+
+Windows and Linux (#1411) and Android (#1412) will adopt the same catalogue.

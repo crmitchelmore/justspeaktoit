@@ -227,6 +227,21 @@ sessions:
           - "Open History."
         expected: "Flux and Soniox finish with a transcript and no error. Any failed lane shows its error under the reveal and in the scoreboard. History has one new item per selected model (failures show their error), each tagged Compare Models with its model, cost and latency. With the toggle off, a new round adds nothing to History."
         final_gate: true
+      - id: "mac-settings-search"
+        issues:
+          - 1410
+        title: "Settings search: find, open and highlight a setting"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes #1410"
+        steps:
+          - "From the Dashboard press \u2318F. Check Recent and Suggested appear before you type."
+          - "Type \"laun\", press Tab to accept the first suggestion, then press Return."
+          - "Press \u2318F again, type \"discard\", move with the arrow keys and press Return on Activation."
+          - "Press \u2318F, type \"openai\" and choose the OpenAI API key result."
+          - "Turn on VoiceOver, press \u2318F, type \"mic\" and move through the results."
+        expected: "Each choice opens the right Settings page, scrolls to the card and briefly outlines it (App Behaviour, Keyboard \u203a Activation, then the OpenAI key card). VoiceOver reads each result as its title and page with a hint, and the outline is not announced."
+        final_gate: true
       - id: "mac-keep-audio-on-cancel"
         issues:
           - 1406
@@ -525,6 +540,20 @@ sessions:
           - "Stop the screen recording and attach it to #1368 (or share it with the agent)."
         expected: "A recording under one minute showing both starts and stops, the Live Activity with the fictional words, and no notifications, names or personal data on screen."
         final_gate: false
+      - id: "iphone-settings-search"
+        issues:
+          - 1410
+        title: "Settings search: find and reveal a setting on iPhone"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It Alpha that includes #1410"
+        steps:
+          - "Open Settings and pull down to show Search settings; tap it and check recent and suggested destinations are listed."
+          - "Type \"live act\" and tap the Behavior result."
+          - "Search \"action button\" and tap Hardware Trigger, then search \"deepgram\" and tap the Deepgram API key result."
+          - "With VoiceOver on, search \"keyboard\" and swipe through the results."
+        expected: "Behavior and Hardware Trigger scroll into view with their rows briefly tinted; the Deepgram result opens API Keys. VoiceOver reads each result's title with its summary as a hint."
+        final_gate: true
       - id: "iphone-keep-audio-on-cancel"
         issues:
           - 1406

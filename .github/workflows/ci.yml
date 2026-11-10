@@ -13,9 +13,13 @@ on:
 permissions:
   contents: read
 
+# One run per pull request and one for main: a newer push cancels the
+# superseded in-progress run. On main the newest commit's run checks every
+# gate against a superset of the cancelled commit, and only a successful
+# run starts an Alpha. CI never runs for tags or releases.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-macos:

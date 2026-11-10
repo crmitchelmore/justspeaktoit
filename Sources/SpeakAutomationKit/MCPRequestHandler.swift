@@ -156,6 +156,7 @@ public struct MCPRequestHandler {
             }
             request.path = CommandLineParser.absolutePath(for: path)
         }
+        try Self.applySpeechArguments(arguments, to: &request)
         if let limit = arguments["limit"] {
             guard let limit = limit as? Int else {
                 throw AutomationError(code: .invalidArgument, message: "\"limit\" must be an integer.")
@@ -172,6 +173,33 @@ public struct MCPRequestHandler {
             request.timeout = timeout
         }
         return try request.validated()
+    }
+
+    private static func applySpeechArguments(_ arguments: [String: Any], to request: inout AutomationRequest) throws {
+        let fields: [(String, WritableKeyPath<AutomationRequest, String?>)] = [
+            ("text", \.text), ("voice", \.voice), ("provider", \.provider), ("model", \.model),
+            ("quality", \.quality), ("language", \.language)
+        ]
+        for (key, field) in fields {
+            guard let value = arguments[key] else { continue }
+            guard let string = value as? String else {
+                throw AutomationError(code: .invalidArgument, message: "\"\(key)\" must be a string.")
+            }
+            request[keyPath: field] = string
+        }
+        for (key, field) in [("speed", \AutomationRequest.speed), ("pitch", \AutomationRequest.pitch)] {
+            guard let value = arguments[key] else { continue }
+            guard let number = value as? Double ?? (value as? Int).map(Double.init) else {
+                throw AutomationError(code: .invalidArgument, message: "\"\(key)\" must be a number.")
+            }
+            request[keyPath: field] = number
+        }
+        if let play = arguments["play"] {
+            guard let play = play as? Bool else {
+                throw AutomationError(code: .invalidArgument, message: "\"play\" must be a boolean.")
+            }
+            request.play = play
+        }
     }
 
     private static func socketRequestID(
@@ -213,14 +241,20 @@ public struct MCPRequestHandler {
 
     static func toolResult(for result: AutomationResult, command: AutomationCommand, isError: Bool) -> [String: Any] {
         var payload: [String: Any] = [
-            "content": [["type": "text", "text": CLIRunner.humanText(for: result, command: command)
-                .trimmingCharacters(in: .whitespacesAndNewlines)]],
+            "content": [["type": "text", "text": Self.summary(for: result, command: command)]],
             "isError": isError
         ]
         if let structured = Self.structuredContent(for: result) {
             payload["structuredContent"] = structured
         }
         return payload
+    }
+
+    private static func summary(for result: AutomationResult, command: AutomationCommand) -> String {
+        let text = CLIRunner.humanText(for: result, command: command)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let summary = text.isEmpty && command == .speakText ? "Spoke the text aloud." : text
+        return result.notice.map { summary + "\n" + $0 } ?? summary
     }
 
     static func toolFailure(_ error: AutomationError) -> [String: Any] {

@@ -108,7 +108,9 @@ restore the previous saved grant. Export never transfers local approval. This
 permission is independent of Auto-Clean approval.
 
 The existing CLI grammar is reused: `speak status --json`, `speak history`,
-`speak transcribe <file>`, and `speak listen` / `speak stop`. Consult `speak --help`
+`speak transcribe <file>`, `speak listen` / `speak stop`, `speak say` and
+`speak voices` (text to speech with the app's Voice settings and saved keys;
+Linux has no on-device voice, so a voice must be configured). Consult `speak --help`
 for supported options; language flags are not invented. File transcription uses
 the selected canonical batch/profile snapshot and the normal preparation and
 inference adapters, without creating History, inserting text, reading the

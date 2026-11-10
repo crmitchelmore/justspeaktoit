@@ -37,7 +37,7 @@ final class DesktopSettingsSearchTests: XCTestCase {
     }
 
     func testEveryLinuxSettingsHeadingIsIndexed() throws {
-        let directory = repositoryRoot.appendingPathComponent("Sources/CLinuxSupport")
+        let directory = try sourceDirectory("Sources/CLinuxSupport")
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "c" }
         var missing: [String] = []
@@ -71,7 +71,7 @@ final class DesktopSettingsSearchTests: XCTestCase {
     /// Every Windows settings card (`layoutSettingsCard`), group box and dialog caption
     /// ("<Title> — Just Speak to It") must have a `.windows` catalogue entry.
     func testEveryWindowsSettingsHeadingIsIndexed() throws {
-        let directory = repositoryRoot.appendingPathComponent("Sources/CWindowsSupport")
+        let directory = try sourceDirectory("Sources/CWindowsSupport")
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "cpp" }
         var missing: [String] = []
@@ -142,9 +142,26 @@ final class DesktopSettingsSearchTests: XCTestCase {
         ]
     }()
 
-    private var repositoryRoot: URL {
-        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    /// A repository source directory. Cross-built test bundles run where the compile-time
+    /// `#filePath` does not exist (the Mac-built Windows run), so also try the working
+    /// directory and its parents, and skip when the sources are not shipped with the tests.
+    private func sourceDirectory(_ relativePath: String) throws -> URL {
+        let fromSource = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent()
+        var candidates = [fromSource]
+        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        for _ in 0..<6 {
+            candidates.append(directory)
+            directory = directory.deletingLastPathComponent()
+        }
+        for root in candidates {
+            let url = root.appendingPathComponent(relativePath, isDirectory: true)
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+                return url
+            }
+        }
+        throw XCTSkip("\(relativePath) is not available where these tests run; the source checkout runs them.")
     }
 
     private func matches(of pattern: String, in source: String) -> [String] {

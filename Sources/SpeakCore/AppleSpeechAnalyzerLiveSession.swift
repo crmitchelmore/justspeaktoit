@@ -21,6 +21,7 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
     public let audioFormat: AVAudioFormat
 
     private let analyzer: SpeechAnalyzer
+    private let setupKey: AppleSpeechAnalyzerLiveSetup.Key
     private let cancellation: SpeechAnalyzerCancellation
     private let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
     private let resultTask: Task<TranscriptionResult, Error>
@@ -48,25 +49,25 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
         onUpdate: @escaping @Sendable (AppleSpeechAnalyzerUpdate) -> Void
     ) async throws {
         try Task.checkCancellation()
-        let configuration = try await AppleSpeechAnalyzerTranscriber.makeModule(
+        let setup = try await AppleSpeechAnalyzerLiveSetup.resolve(
             engine: engine,
             localeIdentifier: localeIdentifier,
-            progressive: true,
             assetPolicy: assetPolicy
         )
         try Task.checkCancellation()
+        let configuration = setup.configuration
         let module = configuration.module
-        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(
-            compatibleWith: [module.speechModule]
-        ) else {
-            throw AppleLocalModelError.compatibleAudioFormatUnavailable
-        }
+        let format = setup.format
+        let setupKey = setup.key
 
-        try Task.checkCancellation()
         let (inputSequence, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-        let analyzer = SpeechAnalyzer(modules: [module.speechModule])
+        let analyzer = SpeechAnalyzer(
+            modules: [module.speechModule],
+            options: AppleSpeechAnalyzerLiveSetup.analyzerOptions
+        )
         let cancellation = SpeechAnalyzerCancellation(analyzer: analyzer)
         self.cancellation = cancellation
+        self.setupKey = setupKey
         self.modelIdentifier = configuration.engine.modelID
         self.audioFormat = format
         self.analyzer = analyzer
@@ -80,6 +81,9 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
         do {
             try await withTaskCancellationHandler {
                 try Task.checkCancellation()
+                // Loads the model before audio arrives; a no-op once it is retained.
+                try await analyzer.prepareToAnalyze(in: format)
+                try Task.checkCancellation()
                 try await analyzer.start(inputSequence: inputSequence)
                 try Task.checkCancellation()
             } onCancel: {
@@ -92,6 +96,9 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
             continuation.finish()
             await cancellation.finish()
             self.resultTask.cancel()
+            if !(error is CancellationError) {
+                AppleSpeechAnalyzerLiveSetup.cache.remove(setupKey)
+            }
             throw error
         }
     }
@@ -156,6 +163,9 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
         } catch {
             await cancellation.finish()
             resultTask.cancel()
+            if !(error is CancellationError) {
+                AppleSpeechAnalyzerLiveSetup.cache.remove(setupKey)
+            }
             throw error
         }
     }

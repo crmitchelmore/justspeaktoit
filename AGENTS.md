@@ -199,25 +199,42 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 
 Before opening a PR or pushing to one, run `scripts/pre-pr` (or `make pre-pr`)
 and fix every failure first. It compares your branch, including uncommitted
-files, with `origin/main` and runs only the lint, build and unit-test checks for
-the affected areas (Apple, portable/Windows, tooling and workflows, Android, the
-paid-access worker and the landing page), cheapest first. Use `--plan` to see
-the selection, `--full` to run whole affected test targets and `--fetch` to
-refresh `origin/main`.
+files, with `origin/main` and runs what the CI Gate's pull-request jobs would
+run for those files, with the same commands, so a pass predicts a green gate.
+Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
+`--full` to run every macOS unit-test target.
 
+- **Lint:** `make ci-lint`, the target ci.yml's Lint job runs. That is
+  whole-repo strict SwiftLint against the baseline, accessibility,
+  `Tooling/Package.resolved` drift and `make test-tooling`. It runs unless
+  every changed file is docs, website, Android or Workers.
+- **Portable Swift (Linux):** `scripts/ci-portable-linux.sh` in the CI image
+  (`swift:6.2.3-jammy`), via `scripts/linux-precheck`. That uses a local
+  Docker or Podman if one runs, otherwise a throwaway `precheck/**` branch run
+  on GitHub's Ubuntu runners (`.github/workflows/precheck.yml`, never macOS).
+  It starts first and runs alongside the local checks. Force a mode with
+  `--remote-linux` or `--container-linux`. `--no-linux` makes the result
+  `incomplete`, which the evidence check rejects.
+- **macOS job:** the SwiftPM build, then the unit-test targets that
+  `scripts/affected-swift-tests.py` selects, minus the targets Linux runs,
+  exactly as CI selects them. `--quick` narrows this to type-level matches,
+  which is faster but no longer CI's selection. A build that changes
+  `Package.resolved` fails, as in CI.
 - It fails closed. A required check whose tool is missing fails, and so does a
-  Swift change that runs no unit tests. Tests are chosen from the SwiftPM
-  target graph: every test file in a dependent test target that names a type
-  the changed file declares or extends, else the module's whole test target.
-  Portable-only targets (SpeakDesktopHost, SpeakDesktopSync, SpeakPortable)
-  run in the portable graph.
+  Swift change that runs no unit tests or a changed module that no test
+  target covers. `test_pre_pr` checks the routing against ci.yml's path
+  filters, so the two can't drift apart.
 - It never runs UI tests, xcodebuild, the core-journey harness or app launches,
   and Swift tests use a private file Keychain in `.build/pre-pr/`, so it is safe
   on the owner's Mac. CI still runs UI and release gates.
 - Paste `scripts/pre-pr --markdown` output (also in `.build/pre-pr/summary.md`)
   into the PR body's **Pre-PR checks** section. Keep the hidden
-  `pre-pr-summary` marker: the `Pre-PR evidence` workflow reads it and warns
-  when it is missing, failing or stale (`JSTI_REQUIRE_PRE_PR=true` enforces it).
+  `pre-pr-summary` marker. It records `head` and `tree`, the tree of the
+  checked working copy, so a run before committing still matches the pushed
+  commit if you commit exactly what was checked. The `Pre-PR evidence`
+  workflow reads it; `JSTI_REQUIRE_PRE_PR=true` enforces it.
+- `scripts/ci-metrics` reports the escape rate: the share of PR and batch CI
+  failures whose head had a passing record. The target is under 1%.
 - The machine-readable result is `.build/pre-pr/summary.json`; per-check logs
   are in `.build/pre-pr/logs/`.
 - Opt in to running it on every push with `scripts/install-pre-pr-hook`

@@ -24,7 +24,7 @@ on:
         description: Manifest tag to sign and publish (blank rehearses the current Alpha)
         type: string
   push:
-    branches-ignore: ['merge-batch/**']
+    branches-ignore: ['merge-batch/**', 'precheck/**']
     paths:
       - scripts/windows-package/**
       - scripts/windows-bundle/BundleCLI.ps1

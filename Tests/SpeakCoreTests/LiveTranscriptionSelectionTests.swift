@@ -6,7 +6,7 @@ import XCTest
 /// remote choice (Soniox) alive across local ↔ remote switches.
 final class LiveTranscriptionSelectionTests: XCTestCase {
 
-    private let soniox = "soniox/stt-rt-v5-streaming"
+    private let soniox = "soniox/stt-rt-v6-streaming"
     private let deepgram = "deepgram/nova-3-streaming"
 
     private var appleModel: String { ModelCatalog.defaultOnDeviceLiveTranscriptionModel }

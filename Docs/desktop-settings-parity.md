@@ -2690,6 +2690,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | recordingsDirectory | Partial: fenced / Partial: source only | Mac path retained, never executed. Device-local chosen folder via verified recording locations: Linux Housekeeping chooser; Windows reports unavailable while `WindowsRecordingRegistry` identity/restart integration is fenced. Existing audio never moves. See recordings folder above |
 | hotKeyActivation | Equivalent / Equivalent | Shortcuts; press/hold/double-tap/combined styles; Linux portal availability caveat |
 | cancelRecordingOnEscape | Applied (source only) / Applied (source only) | Shared default-on Boolean in Keyboard; Windows local/global and Linux main-window Escape honor it, with final Host admission and native epoch guards; explicit Cancel and Windows Voice Edit cancellation remain independent. Compiler/native qualification is NOT_RUN |
+| keepAudioOnCancel | Applied / Applied | Shared default-on Boolean in General. On: an explicitly cancelled recording keeps its audio and History record ("Recording cancelled. Audio retained.") for later retry. Off: the value is captured at Cancel/Escape time and the saved cancelled recording is removed through the History deletion path (audio and record together, cloud-delete ticket when sync is on). Owned, legacy, tail-buffer and hands-free Cancel apply it; app-close stops, startup abandonment/recovery, capture failures, transcription cancel after recording and Voice Edit always keep audio. Portable Host tests on macOS |
 | holdThreshold | Wired / Wired | Config + shared gesture machine; 0.2...1.5 s |
 | doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
 | trackedKeyIdentifiers | Equivalent source only; NOT_RUN | Keys; identifiers only, in `trackedKeyIdentifiers.json`. Saving a key from the shared editors registers its identifier and removing it unregisters it. Both desktop API Keys windows reconcile the list against the store; cancellation skips reconciliation. |
@@ -2799,6 +2800,13 @@ independent restart and idle cancellation; both native smoke fixtures exercise
 the Escape ownership/state/repeat rules. All are authored but **NOT_RUN** here.
 Compilation, exact-head native/portable qualification and physical keyboard
 acceptance remain required; this does not complete system-wide Escape parity.
+
+With `keepAudioOnCancel` off, the same explicit Cancel (button or Escape)
+deletes the cancelled recording's audio and History record through the shared
+History deletion path once the cancelled record has been saved, and reports
+"Recording cancelled. Audio discarded." A failed deletion leaves the retained
+record in place. Other stops (app close, capture failure, startup recovery) and
+transcription cancellation after recording keep their audio.
 
 ### Windows active-only system-wide Escape (source only)
 

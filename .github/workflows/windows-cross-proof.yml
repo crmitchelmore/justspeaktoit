@@ -4,34 +4,23 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
+    # Pull requests run the macOS-hosted cross-compile only for Windows-owned
+    # and native-dependency changes. Shared Swift changes are proven on pull
+    # requests by "Windows and Portable Swift" and here on every push to main,
+    # keeping this macOS job out of the shared hosted macOS queue.
     paths:
       - .gitattributes
-      - Package.swift
       - Resources/Desktop/**
       - scripts/generate-desktop-icons.py
       - scripts/tests/test_desktop_icons.py
-      - Sources/SpeakCore/**
-      - Sources/SpeakDesktop/**
       - Sources/CLlamaCpp/**
       - Sources/CMigrationArchive/**
       - Sources/CRecordingFileSupport/**
-      - Sources/SpeakDesktopHost/**
-      - Sources/SpeakDesktopSync/**
-      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
       - Sources/CWindowsAutomation/**
-      - Sources/SpeakAutomationKit/**
-      - Sources/SpeakCLI/**
-      - Tests/SpeakDesktopTests/**
-      - Tests/SpeakDesktopHostTests/**
-      - Tests/SpeakDesktopSyncTests/**
-      - Tests/SpeakSyncTests/**
-      - Tests/SpeakPortableTests/**
       - Tests/SpeakWindowsPlatformTests/**
-      - Tests/SpeakAutomationKitTests/**
-      - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
       - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**

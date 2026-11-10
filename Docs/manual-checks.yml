@@ -242,6 +242,21 @@ sessions:
           - "Turn on VoiceOver, press \u2318F, type \"mic\" and move through the results."
         expected: "Each choice opens the right Settings page, scrolls to the card and briefly outlines it (App Behaviour, Keyboard \u203a Activation, then the OpenAI key card). VoiceOver reads each result as its title and page with a hint, and the outline is not announced."
         final_gate: true
+      - id: "mac-keep-audio-on-cancel"
+        issues:
+          - 1406
+        title: "Cancelled recording: kept in History when on, gone when off"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, an Alpha build that includes #1406"
+        steps:
+          - "Settings \u203a Keyboard: check Keep audio when a recording is cancelled is on and Cancel recording with Escape is on."
+          - "Start dictating \"Keep this cancelled audio\" for about 3 seconds, then press Escape."
+          - "Open History, right-click the new cancelled entry and choose Reprocess with Current Model."
+          - "Turn Keep audio when a recording is cancelled off, dictate \"Delete this one\" for 3 seconds and press Escape."
+          - "Open History again."
+        expected: "The first cancel adds one History entry with Play Audio; reprocessing it produces \"Keep this cancelled audio\". The second cancel adds nothing to History."
+        final_gate: true
       - id: "mac-website-voiceover"
         issues:
           - 1400
@@ -538,6 +553,20 @@ sessions:
           - "Search \"action button\" and tap Hardware Trigger, then search \"deepgram\" and tap the Deepgram API key result."
           - "With VoiceOver on, search \"keyboard\" and swipe through the results."
         expected: "Behavior and Hardware Trigger scroll into view with their rows briefly tinted; the Deepgram result opens API Keys. VoiceOver reads each result's title with its summary as a hint."
+        final_gate: true
+      - id: "iphone-keep-audio-on-cancel"
+        issues:
+          - 1406
+        title: "Cancelled recording: kept in Saved Recordings when on, gone when off"
+        minutes: 4
+        core: false
+        build: "TestFlight Just Speak to It Alpha that includes #1406"
+        steps:
+          - "Settings \u203a Recordings: check Keep Audio When Cancelled is on and note the number of Saved Recordings."
+          - "Start recording, say \"Keep this cancelled audio\" for about 3 seconds, then cancel the recording."
+          - "Open Settings \u203a Recordings \u203a Saved Recordings and transcribe the newest recording."
+          - "Turn Keep Audio When Cancelled off, record 3 seconds, cancel, and open Saved Recordings again."
+        expected: "The first cancel adds one saved recording that transcribes to \"Keep this cancelled audio\". The second cancel adds no recording."
         final_gate: true
       - id: "iphone-voiceover-pass"
         issues:

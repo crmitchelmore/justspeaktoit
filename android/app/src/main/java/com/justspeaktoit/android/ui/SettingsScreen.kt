@@ -50,6 +50,7 @@ class SettingsActions(
     val onRemoveKey: (CloudProvider) -> Unit,
     val onChooseModel: (CloudModel) -> Unit,
     val onCleanupChanged: (Boolean) -> Unit,
+    val onKeepAudioOnCancelChanged: (Boolean) -> Unit,
 )
 
 @Composable
@@ -113,6 +114,26 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
             if (state.cleanupEnabled && CloudProvider.OpenRouter !in state.savedKeys) {
                 Text(stringResource(R.string.settings_cleanup_needs_key), color = MaterialTheme.colorScheme.error)
             }
+
+            HorizontalDivider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .toggleable(
+                        value = state.keepAudioOnCancel,
+                        role = Role.Switch,
+                        onValueChange = actions.onKeepAudioOnCancelChanged,
+                    ),
+            ) {
+                Text(
+                    stringResource(R.string.settings_keep_audio_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.keepAudioOnCancel, onCheckedChange = null)
+            }
+            Text(stringResource(R.string.settings_keep_audio_note), style = MaterialTheme.typography.bodyMedium)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_keys_title)

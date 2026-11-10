@@ -15,6 +15,7 @@ import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
 import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.history.AtomicHistoryFile
+import com.justspeaktoit.android.history.HistoryAudio
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
@@ -76,6 +77,10 @@ data class DictationUiState(
     val historyError: Boolean = false,
     /** Audio another app shared, waiting for the user to confirm the upload. */
     val sharedAudio: SharedAudioOffer? = null,
+    /** Cancelled Cloud recordings are kept in History for a later transcription. */
+    val keepAudioOnCancel: Boolean = AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL,
+    /** The History entry whose kept audio is being transcribed, if any. */
+    val transcribingEntryId: String? = null,
 ) {
     /** The mode a new session would use. */
     val activeMode: RecognitionMode?
@@ -109,7 +114,11 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     private val prefs = AppPreferences(application)
     private val cloud = CloudClient()
     private val cacheDir = application.cacheDir
-    private val history = HistoryStore(AtomicHistoryFile(File(application.filesDir, "history.json")))
+    private val recordingsDir = File(application.filesDir, "recordings")
+    private val history = HistoryStore(
+        AtomicHistoryFile(File(application.filesDir, "history.json")),
+        deleteAudio = { File(it).delete() },
+    )
 
     // One thread owns the history file, so writes are ordered without locks.
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -121,12 +130,19 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             cloudModel = CloudCatalog.transcriptionModel(prefs.cloudModelId),
             cleanupEnabled = prefs.cleanupEnabled,
             retention = prefs.retention,
+            keepAudioOnCancel = prefs.keepAudioOnCancel,
         ),
     )
 
     init {
         val retention = prefs.retention
-        updateHistory { history.load(retention) }
+        updateHistory {
+            history.load(retention).also { entries ->
+                // Audio no entry refers to (for example after a crash mid-save) is never shown, so delete it.
+                val stored = recordingsDir.listFiles().orEmpty().map { it.absolutePath }
+                HistoryAudio.orphans(stored, entries).forEach { File(it).delete() }
+            }
+        }
     }
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
 
@@ -318,6 +334,11 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         _state.update { it.copy(cleanupEnabled = enabled) }
     }
 
+    fun setKeepAudioOnCancel(enabled: Boolean) {
+        prefs.keepAudioOnCancel = enabled
+        _state.update { it.copy(keepAudioOnCancel = enabled) }
+    }
+
     fun saveKey(provider: CloudProvider, key: String) =
         updateKeys { secrets.write(provider.credentialId, key.trim()) }
 
@@ -379,9 +400,14 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun cancel() {
+        val current = _state.value
+        val capturing = current.dictation is DictationState.Starting || current.dictation is DictationState.Listening
+        // Only a user cancel of a Cloud capture keeps audio: other modes never produce a file.
+        val keep = current.keepAudioOnCancel && capturing &&
+            current.dictation.modeOrNull() == RecognitionMode.Cloud && recorder != null
         engine.cancel()
         work?.cancel()
-        discardRecording()
+        if (keep) keepCancelledRecording() else discardRecording()
         _state.update {
             it.copy(cleanup = if (it.cleanup == CleanupStatus.Running) CleanupStatus.None else it.cleanup)
         }
@@ -408,16 +434,18 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun updateHistory(change: () -> List<HistoryEntry>) {
-        viewModelScope.launch {
-            val (entries, failed) = withContext(historyDispatcher) {
-                try {
-                    change() to false
-                } catch (e: IOException) {
-                    history.cached to true
-                }
+        viewModelScope.launch { applyHistory(change) }
+    }
+
+    private suspend fun applyHistory(change: () -> List<HistoryEntry>) {
+        val (entries, failed) = withContext(historyDispatcher) {
+            try {
+                change() to false
+            } catch (e: IOException) {
+                history.cached to true
             }
-            _state.update { it.copy(history = entries, historyError = failed) }
         }
+        _state.update { it.copy(history = entries, historyError = failed) }
     }
 
     /** The latest session's history entry, so a later cleanup updates it rather than adding another. */
@@ -571,6 +599,111 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             }
             releaseOwnership(rec)
             _state.update { it.copy(releasingMicrophone = false) }
+        }
+    }
+
+    /** Stops capture and moves a usable recording into History as a cancelled entry. */
+    private fun keepCancelledRecording() {
+        val rec = recorder ?: return
+        val file = recording ?: return
+        val modelId = sessionModelId
+        val retention = _state.value.retention
+        _state.update { it.copy(releasingMicrophone = true) }
+        viewModelScope.launch {
+            val bytes = withContext(NonCancellable + Dispatchers.IO) { rec.stop() }
+            releaseOwnership(rec)
+            _state.update { it.copy(releasingMicrophone = false) }
+            if (bytes < MIN_AUDIO_BYTES) {
+                // Too short to contain a word, so there is nothing worth transcribing later.
+                withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+                return@launch
+            }
+            val id = UUID.randomUUID().toString()
+            updateHistory {
+                val kept = File(recordingsDir, "$id.wav")
+                if (!moveRecording(file, kept)) {
+                    file.delete()
+                    return@updateHistory history.cached
+                }
+                val entry = HistoryEntry(
+                    id = id,
+                    createdAtMs = System.currentTimeMillis(),
+                    mode = RecognitionMode.Cloud.name,
+                    model = modelId,
+                    status = HistoryStatus.Cancelled,
+                    text = "",
+                    audioPath = kept.absolutePath,
+                )
+                history.add(entry, retention)
+            }
+        }
+    }
+
+    private fun moveRecording(source: File, target: File): Boolean {
+        target.parentFile?.mkdirs()
+        if (source.renameTo(target)) return true
+        return try {
+            source.copyTo(target, overwrite = true)
+            source.delete()
+            true
+        } catch (e: IOException) {
+            target.delete()
+            false
+        }
+    }
+
+    /**
+     * Transcribes a cancelled recording kept in History with the current cloud model and saved key.
+     * Success replaces the entry with the transcript and deletes the audio; a failure keeps both.
+     */
+    fun transcribeHistoryEntry(id: String) {
+        val current = _state.value
+        if (current.dictation.isActive || current.transcribingEntryId != null) return
+        val entry = current.history.firstOrNull { it.id == id } ?: return
+        val path = entry.audioPath ?: return
+        val model = current.cloudModel
+        val language = current.languageTag
+        _state.update { it.copy(transcribingEntryId = id) }
+        viewModelScope.launch {
+            val file = File(path)
+            val updated = try {
+                if (!withContext(Dispatchers.IO) { file.isFile }) {
+                    // The audio is gone, so the entry can no longer be transcribed.
+                    entry.copy(status = HistoryStatus.Failed, failure = DictationFailure.Audio.name, audioPath = null)
+                } else {
+                    val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
+                        ?: throw CloudException(DictationFailure.MissingKey, "No key")
+                    val text = cloudCall(TRANSCRIBE_DEADLINE_MS) { call ->
+                        cloud.transcribe(model, key, file, language, call)
+                    }.trim()
+                    if (text.isEmpty()) {
+                        entry.copy(failure = DictationFailure.NoSpeech.name)
+                    } else {
+                        entry.copy(
+                            status = HistoryStatus.Completed,
+                            model = model.catalogId,
+                            text = text,
+                            failure = null,
+                            audioPath = null,
+                        )
+                    }
+                }
+            } catch (e: CloudException) {
+                entry.copy(failure = e.failure.name)
+            } catch (e: GeneralSecurityException) {
+                entry.copy(failure = DictationFailure.KeyUnavailable.name)
+            } catch (e: ProviderException) {
+                entry.copy(failure = DictationFailure.KeyUnavailable.name)
+            } catch (e: IOException) {
+                entry.copy(failure = DictationFailure.Audio.name)
+            }
+            val retention = _state.value.retention
+            // Cleared with the updated entry, so Transcribe never reappears on the stale one.
+            try {
+                applyHistory { history.replace(updated, retention) }
+            } finally {
+                _state.update { it.copy(transcribingEntryId = null) }
+            }
         }
     }
 

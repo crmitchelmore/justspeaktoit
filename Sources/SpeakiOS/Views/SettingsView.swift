@@ -621,6 +621,21 @@ public struct SettingsView: View {
                     Label("Saved Recordings", systemImage: "waveform.circle")
                 }
 
+                Toggle(isOn: $settings.keepAudioOnCancel) {
+                    Label("Keep Audio When Cancelled", systemImage: "xmark.bin")
+                }
+                .accessibilityIdentifier("keepAudioOnCancelToggle")
+
+                if !usesInlineDensityLayout {
+                    Text(
+                        settings.keepAudioOnCancel
+                            ? "Cancelled recordings stay in Saved Recordings so you can transcribe them later."
+                            : "Cancelling a recording deletes its audio."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
                 if !usesInlineDensityLayout {
                     Text(
                         "Audio is saved locally during transcription so you can replay it, "

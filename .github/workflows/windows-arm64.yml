@@ -47,36 +47,24 @@ on:
       - .github/workflows/windows-local-runtime.yml
   pull_request:
     branches: [main]
+    # Pull requests run this native ARM64 proof only for Windows-owned and
+    # native-dependency changes. Shared Swift changes are proven on pull
+    # requests by "Windows and Portable Swift" (x64 native build plus the
+    # portable checks) and here on every push to main, keeping this workflow's
+    # macOS bundle job out of the shared hosted macOS queue.
     paths:
       - .gitattributes
-      - Package.swift
       - Resources/Desktop/**
       - scripts/generate-desktop-icons.py
       - scripts/tests/test_desktop_icons.py
-      - Sources/SpeakCore/**
-      - Sources/SpeakDesktop/**
       - Sources/CLlamaCpp/**
       - Sources/CMigrationArchive/**
       - Sources/CRecordingFileSupport/**
-      - Sources/SpeakDesktopHost/**
-      - Sources/SpeakDesktopSync/**
-      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
       - Sources/CWindowsAutomation/**
-      - Sources/SpeakAutomationKit/**
-      - Sources/SpeakCLI/**
-      - Tests/SpeakPortableTests/**
-      - Tests/SpeakDesktopTests/**
-      - Tests/SpeakDesktopHostTests/**
-      - Tests/SpeakDesktopSyncTests/**
-      - Tests/SpeakSyncTests/**
       - Tests/SpeakWindowsPlatformTests/**
-      - Tests/SpeakAutomationKitTests/**
-      - Tests/SpeakTestSupport/**
-      - scripts/verify-portable-core-boundary.py
-      - scripts/websocket-loopback-probe.py
       - scripts/windows-bundle/**
       - scripts/windows-cross/**
       - scripts/windows-local-runtime/**

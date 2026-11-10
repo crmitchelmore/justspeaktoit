@@ -42,9 +42,12 @@ extension MainManager {
         activeSession = nil
     }
 
+    /// `historyRequiresAudio` records the session only when its audio was kept, so a
+    /// user cancellation never leaves a History entry without a recording behind it.
     func cleanupAfterFailure(
         message: String, preserveFile: Bool,
-        transcriptPolicy: ActiveSession.FailureTranscriptPolicy = .retainOwned
+        transcriptPolicy: ActiveSession.FailureTranscriptPolicy = .retainOwned,
+        historyRequiresAudio: Bool = false
     ) {
         lastErrorMessage = message
         hudManager.finishFailure(message: message)
@@ -65,9 +68,15 @@ extension MainManager {
         }
         if let session = activeSession { attachFailureDiagnostics(to: session) }
         Task { [failedSession = activeSession] in
+            var keptURL: URL?
             if mayTearDownCapture {
-                await audioFileManager.cancelRecording(deleteFile: !preserveFile, ifOwnedBy: .dictation)
+                keptURL = await audioFileManager.cancelRecording(deleteFile: !preserveFile, ifOwnedBy: .dictation)
             }
+            if let session = failedSession, let keptURL, session.recordingSummary == nil {
+                let elapsed = Date().timeIntervalSince(session.recordingStarted)
+                session.recordingSummary = makeRecordingSummary(from: keptURL, fallbackDuration: max(0, elapsed))
+            }
+            if historyRequiresAudio, failedSession?.recordingSummary == nil { return }
             if let session = failedSession {
                 let historyItem = session.buildHistoryItem(finalText: session.transcriptionResult?.text)
                 await historyManager.append(historyItem)

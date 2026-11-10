@@ -119,7 +119,8 @@ final class AppSettingsDefaultsKeyTests: XCTestCase {
             "transcriptClipboardLifetimeSeconds",
             "transcriptClipboardAllowsUniversalClipboard",
             "transcriptClipboardNoticeVersion",
-            "upgradeOfflineTranscriptsWhenOnline"
+            "upgradeOfflineTranscriptsWhenOnline",
+            "keepAudioOnCancel"
         ])
         let actual = AppSettings.DefaultsKey.allCases.map(\.rawValue)
         XCTAssertEqual(AppSettings.DefaultsKey.allCases.map(\.storageKey), actual)

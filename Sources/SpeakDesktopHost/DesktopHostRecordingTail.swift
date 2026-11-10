@@ -113,6 +113,6 @@ extension DesktopHostController {
         }
         record.failure = reason
         try await saveRecord(record)
-        present(record, output: nil)
+        await presentCancelledRecording(record)
     }
 }

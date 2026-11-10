@@ -56,8 +56,15 @@ final class AutomationSpeechAudioTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: mp3.path))
     }
 
+    /// Opt in with JSTI_SYSTEM_SPEECH_TEST=1. Real synthesis depends on the
+    /// host's speech services, which hosted CI runners do not reliably provide.
     func testSystemVoice_WritesCompleteWAVWithoutAnAPIKey() async throws {
-        guard !AVSpeechSynthesisVoice.speechVoices().isEmpty else { throw XCTSkip("No system voices installed") }
+        guard ProcessInfo.processInfo.environment["JSTI_SYSTEM_SPEECH_TEST"] == "1" else {
+            throw XCTSkip("Set JSTI_SYSTEM_SPEECH_TEST=1 to verify real system speech synthesis.")
+        }
+        guard AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode()) != nil else {
+            throw XCTSkip("No system voice for the current language")
+        }
         let client = SystemTTSClient()
         let result = try await withThrowingTaskGroup(of: TTSResult.self) { group in
             group.addTask {

@@ -64,6 +64,16 @@ extension SettingsView {
             "When on, Escape discards the active dictation recording, even in another app. "
               + "When off, Escape leaves recording running; stop it with your recording hotkey or the Stop button."
           )
+
+          settingsToggle(
+            "Keep audio when a recording is cancelled",
+            isOn: settingsBinding(\AppSettings.keepAudioOnCancel),
+            tint: .yellow
+          )
+          .speakTooltip(
+            "When on, a cancelled recording stays in History so you can play it or transcribe it later. "
+              + "When off, cancelling deletes the audio and adds nothing to History."
+          )
         }
       }
       .speakTooltip("Choose how the hotkey behaves when you start and stop recordings.")

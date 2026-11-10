@@ -18,7 +18,7 @@ Build cache keys and restore prefixes, including the lint tooling cache, include
 
 UI automation does not use the native pool. `Core Journey Fixture UI` and iOS simulator execution stay on hosted ARM because the registered Macs lack unattended UI automation setup. Portable iOS test products also stay hosted: the producer exports both simulator architectures with source/Xcode/SDK provenance, and the consumer verifies that exact provenance before the unchanged unit/UI selections run. Native Macs may have different Xcode versions and must not exchange those products.
 
-For an unapproved source, Debug, API compatibility and the core contract fall back to hosted Intel (`macos-26-intel`); lint, Release and iOS compilation fall back to hosted ARM (`macos-latest`). Native iOS keyboard/watch compilation requires matching installed SDKs and preinstalled Tuist. The toolchain action verifies native Tuist without installing Homebrew; hosted setup retains its Homebrew mechanism. Ubuntu lanes use the separate Linux pool described below.
+For an unapproved source, every native-eligible job falls back to hosted ARM (`macos-latest`). Hosted macOS concurrency is a per-account cap shared by Intel and ARM images, so the former Intel split (#1347) added no capacity and ran each job more slowly. Native iOS keyboard/watch compilation requires matching installed SDKs and preinstalled Tuist. The toolchain action verifies native Tuist without installing Homebrew; hosted setup retains its Homebrew mechanism. Ubuntu lanes use the separate Linux pool described below.
 
 ## Self-hosted Linux pool (Omarchy)
 

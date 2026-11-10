@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""Fast, path-aware checks to run before opening or pushing a pull request.
+
+Usage:
+    scripts/pre-pr               # check everything changed against origin/main
+    scripts/pre-pr --plan        # list the checks that would run, then exit
+    scripts/pre-pr --full        # whole affected test targets instead of matched tests
+    scripts/pre-pr --base REF    # compare against another base
+    scripts/pre-pr --fetch       # fetch origin/main first
+    scripts/pre-pr --markdown    # print the PR-body summary after the run
+
+It compares HEAD plus uncommitted and untracked files with the merge base of
+--base, selects the lint, build and unit-test checks for each affected area,
+and writes a machine-readable summary to .build/pre-pr/summary.json (and a
+Markdown copy for the PR body). The exit status is 0 only when every selected
+check passed. Advisory checks report "warn" and never fail the run.
+
+Safety: it never runs UI tests, xcodebuild, the core-journey harness, app
+launches or other foreground automation. Swift tests use a private file
+Keychain (JSTI_TEST_KEYCHAIN=1) in a separate scratch path, so the developer's
+Keychain and normal .build stay untouched.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import fnmatch
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / '.build' / 'pre-pr'
+SCHEMA_VERSION = 1
+
+# Test targets that drive real UI. They are never selected, whatever changed.
+UI_TEST_TARGETS = {'SpeakAppUITests', 'SpeakiOSUITests'}
+
+APPLE_PATTERNS = [
+    'Package.swift', 'Package.resolved', 'Project.swift', 'Tuist.swift', 'Workspace.swift',
+    'Sources/*', 'Tests/*', 'Config/*', 'Resources/*', 'SpeakiOSApp/*', 'JustSpeak*/*',
+    '.swiftlint.yml', '.swiftlint-baseline.json', '.github/actions/setup-apple-toolchain/*',
+]
+PORTABLE_PATTERNS = [
+    'Package.swift', 'Sources/SpeakCore/*', 'Sources/SpeakDesktop*', 'Sources/SpeakSync/*',
+    'Sources/SpeakAutomationKit/*', 'Sources/SpeakCLI/*', 'Sources/SpeakWindows*', 'Sources/SpeakLinux*',
+    'Sources/CWindows*', 'Sources/CLinux*', 'Tests/SpeakDesktop*', 'Tests/SpeakPortableTests/*',
+    'Tests/SpeakSyncTests/*', 'Tests/SpeakWindows*', 'Tests/SpeakLinux*', 'Tests/SpeakAutomationKitTests/*',
+]
+WINDOWS_PATTERNS = ['Sources/SpeakWindows*', 'Sources/CWindows*', 'Tests/SpeakWindows*',
+                    'scripts/typecheck-windows-swift.sh']
+TOOLING_PATTERNS = ['scripts/*', '.github/*', 'Makefile', 'Docs/manual-checks.yml', 'Tooling/Package.*']
+WORKFLOW_PATTERNS = ['.github/workflows/*', '.github/actions/*', '.github/actionlint.yaml']
+SHELL_PATTERNS = ['scripts/*.sh', '.githooks/*', 'scripts/pre-pr', 'scripts/install-pre-pr-hook']
+# Cheap static checks run first so most failures surface within seconds.
+COST = {'apple-accessibility': 0, 'portable-boundary': 0, 'actionlint': 0, 'shellcheck': 0, 'swiftlint': 1,
+        'swiftformat': 1, 'landing-tests': 1, 'tooling-tests': 2, 'apple-build': 3, 'apple-unit-tests': 4}
+
+
+def matches(path: str, patterns: list[str]) -> bool:
+    return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
+
+
+def git(*args: str, check: bool = True) -> str:
+    result = subprocess.run(['git', *args], cwd=ROOT, text=True, capture_output=True)
+    if check and result.returncode != 0:
+        raise SystemExit(f'pre-pr: git {" ".join(args)} failed: {result.stderr.strip()}')
+    return result.stdout.strip()
+
+
+def changed_files(base: str) -> tuple[str, list[str]]:
+    merge_base = git('merge-base', 'HEAD', base)
+    files = set(filter(None, git('diff', '--name-only', merge_base).splitlines()))
+    files |= set(filter(None, git('ls-files', '--others', '--exclude-standard').splitlines()))
+    return merge_base, sorted(files)
+
+
+@dataclass
+class Check:
+    id: str
+    area: str
+    title: str
+    command: list[str]
+    cwd: Path = ROOT
+    env: dict[str, str] = field(default_factory=dict)
+    advisory: bool = False
+    requires: str | None = None
+    skip_reason: str = ''
+    status: str = 'pending'
+    duration: float = 0.0
+    note: str = ''
+
+    @property
+    def log(self) -> Path:
+        return OUT / 'logs' / f'{self.id}.log'
+
+
+def swift_test_filter(files: list[str], full: bool) -> tuple[list[str], list[str]]:
+    """Return (filters, skipped UI targets) for the Swift tests a change touches."""
+    test_dirs = {p.name for p in (ROOT / 'Tests').iterdir() if p.is_dir()}
+    patterns: set[str] = set()
+    skipped: set[str] = set()
+    for path in files:
+        parts = Path(path).parts
+        if len(parts) < 3 or parts[0] not in {'Sources', 'Tests'} or not path.endswith('.swift'):
+            continue
+        module, stem = parts[1], Path(path).stem
+        if parts[0] == 'Tests':
+            if module in UI_TEST_TARGETS:
+                skipped.add(module)
+            elif module in test_dirs and module.endswith('Tests'):
+                patterns.add(module if full else f'{module}\\.{re.escape(stem)}')
+            continue
+        target = f'{module}Tests'
+        if full and target in test_dirs and target not in UI_TEST_TARGETS:
+            patterns.add(target)
+            continue
+        # Matched tests: files named after the changed source, e.g. Foo+Bar.swift -> Foo*Tests.
+        prefix = stem.split('+')[0]
+        for directory in sorted(test_dirs - UI_TEST_TARGETS):
+            for test in (ROOT / 'Tests' / directory).rglob(f'{prefix}*Tests.swift'):
+                patterns.add(f'{directory}\\.{re.escape(test.stem)}')
+    return sorted(patterns), sorted(skipped)
+
+
+def plan(files: list[str], full: bool) -> tuple[list[Check], dict[str, list[str]]]:
+    areas: dict[str, list[str]] = {}
+
+    def area(name: str, patterns: list[str]) -> list[str]:
+        hits = [f for f in files if matches(f, patterns)]
+        if hits:
+            areas[name] = hits
+        return hits
+
+    apple = area('apple', APPLE_PATTERNS)
+    portable = area('portable', PORTABLE_PATTERNS)
+    windows = area('windows', WINDOWS_PATTERNS)
+    tooling = area('tooling', TOOLING_PATTERNS)
+    workflows = area('workflows', WORKFLOW_PATTERNS)
+    shell = area('shell', SHELL_PATTERNS)
+    android = area('android', ['android/*', '.github/workflows/android.yml'])
+    worker = area('paid-access-worker', ['workers/paid-access/*'])
+    landing = area('landing-page', ['landing-page/*'])
+
+    checks: list[Check] = []
+    existing = [f for f in files if (ROOT / f).is_file()]
+    swift_files = [f for f in existing if f.endswith('.swift') and not f.startswith(('Tooling/', 'android/'))]
+    test_env = {'JSTI_TEST_KEYCHAIN_REDIRECT': '1', 'JSTI_TEST_KEYCHAIN': '1'}
+    scratch = ['--scratch-path', str(OUT / 'apple-build')]
+
+    if swift_files:
+        checks.append(Check('swiftlint', 'apple', 'SwiftLint (changed files, strict, baseline)',
+                            ['scripts/swiftlint.sh', 'lint', '--strict', '--quiet', '--force-exclude',
+                             '--baseline', '.swiftlint-baseline.json', *swift_files]))
+        checks.append(Check('swiftformat', 'apple', 'SwiftFormat lint (changed files, advisory)',
+                            ['scripts/swiftformat.sh', '--lint', '--quiet', *swift_files], advisory=True))
+    if apple:
+        checks.append(Check('apple-accessibility', 'apple', 'Apple accessibility conventions',
+                            ['python3', 'scripts/check-apple-accessibility.py']))
+        if sys.platform == 'darwin':
+            checks.append(Check('apple-build', 'apple', 'SwiftPM build incl. tests (macOS + iOS lib)',
+                                ['swift', 'build', '--build-tests', *scratch], env=test_env))
+            filters, skipped = swift_test_filter(files, full)
+            if skipped:
+                print(f'pre-pr: never runs UI test targets: {", ".join(skipped)} (CI covers them)')
+            if filters:
+                checks.append(Check('apple-unit-tests', 'apple',
+                                    f'Swift unit tests ({len(filters)} filter{"s" if len(filters) != 1 else ""})',
+                                    ['python3', 'scripts/with-test-keychain.py', 'swift', 'test', '--skip-build',
+                                     *scratch, '--filter', '|'.join(filters)], env=test_env))
+    if portable:
+        checks.append(Check('portable-boundary', 'portable', 'Portable source boundary',
+                            ['python3', 'scripts/verify-portable-core-boundary.py']))
+        checks.append(Check('portable-build', 'portable', 'Portable graph build incl. tests (Windows/Linux sources)',
+                            ['swift', 'build', '--build-tests', '--scratch-path', str(OUT / 'portable-build')],
+                            env={'SPEAK_PORTABLE_CORE': '1'}))
+    if windows:
+        checks.append(Check('windows-typecheck', 'windows', 'Windows Swift type check',
+                            ['bash', 'scripts/typecheck-windows-swift.sh'],
+                            env={'SPEAK_WINDOWS_TYPECHECK_DIR': str(OUT / 'windows-typecheck')},
+                            # The executable target links Win32 libraries under Xcode's toolchain;
+                            # CI runs this check on Linux (linux.yml) and portable-build covers macOS.
+                            skip_reason='' if sys.platform.startswith('linux') else 'Linux only; CI runs it'))
+    if tooling:
+        checks.append(Check('tooling-tests', 'tooling', 'CI, release and script tests (make test-tooling)',
+                            ['make', 'test-tooling']))
+    changed_workflows = [f for f in workflows if f.startswith('.github/workflows/') and (ROOT / f).is_file()]
+    if changed_workflows:
+        # Advisory: CI does not gate on actionlint and local versions can lag new workflow syntax.
+        checks.append(Check('actionlint', 'workflows', 'actionlint (changed workflows, advisory)',
+                            ['actionlint', *changed_workflows], requires='actionlint', advisory=True))
+    shell_files = [f for f in shell if (ROOT / f).is_file() and not f.endswith(('pre-pr', '.py'))]
+    if shell_files:
+        checks.append(Check('shellcheck', 'shell', 'ShellCheck (changed scripts, advisory)',
+                            ['shellcheck', '-S', 'warning', *shell_files],
+                            requires='shellcheck', advisory=True))
+    if android:
+        checks.append(Check('android', 'android', 'Android unit tests and lint',
+                            ['./gradlew', '--quiet', 'testDebugUnitTest', 'lintDebug'], cwd=ROOT / 'android',
+                            requires='java'))
+    if worker:
+        directory = ROOT / 'workers' / 'paid-access'
+        checks.append(Check('worker-install', 'paid-access-worker', 'npm ci',
+                            ['npm', 'ci', '--no-audit', '--no-fund'], cwd=directory, requires='npm'))
+        for script in ('typecheck', 'lint', 'test'):
+            checks.append(Check(f'worker-{script}', 'paid-access-worker', f'npm run {script}',
+                                ['npm', 'run', script], cwd=directory, requires='npm'))
+    if landing:
+        checks.append(Check('landing-tests', 'landing-page', 'Landing page tests', ['npm', 'test'],
+                            cwd=ROOT / 'landing-page', requires='npm'))
+    checks.sort(key=lambda check: COST.get(check.id, 3))
+    return checks, areas
+
+
+def dirty_tracked() -> set[str]:
+    return set(filter(None, git('diff', '--name-only', 'HEAD').splitlines()))
+
+
+def restore_side_effects(check: Check, dirty_before: set[str]) -> None:
+    """Undo tracked-file changes a check made (the portable graph deletes Package.resolved)."""
+    touched = sorted(dirty_tracked() - dirty_before)
+    if touched:
+        git('checkout', 'HEAD', '--', *touched)
+        restored = f'restored {", ".join(touched[:3])}{"…" if len(touched) > 3 else ""}'
+        check.note = f'{check.note}; {restored}' if check.note else restored
+
+
+def run(check: Check, verbose: bool) -> None:
+    if check.skip_reason:
+        check.status, check.note = 'skip', check.skip_reason
+        return
+    if check.requires and not shutil.which(check.requires):
+        check.status, check.note = 'skip', f'{check.requires} not installed'
+        return
+    check.log.parent.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', **check.env}
+    dirty_before = dirty_tracked()
+    started = time.monotonic()
+    with check.log.open('w', encoding='utf-8') as log:
+        log.write(f'$ {" ".join(check.command)}\n')
+        log.flush()
+        process = subprocess.Popen(check.command, cwd=check.cwd, env=env, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
+        assert process.stdout
+        for line in process.stdout:
+            log.write(line)
+            if verbose:
+                sys.stdout.write(f'    {line}')
+        code = process.wait()
+    check.duration = time.monotonic() - started
+    if code == 0:
+        check.status = 'pass'
+    else:
+        check.status = 'warn' if check.advisory else 'fail'
+        check.note = f'exit {code}; log {check.log.relative_to(ROOT)}'
+    restore_side_effects(check, dirty_before)
+
+
+def markdown(summary: dict) -> str:
+    icon = {'pass': '✅', 'fail': '❌', 'warn': '⚠️', 'skip': '⏭️', 'pending': '…'}
+    lines = [f'### Pre-PR checks: {summary["result"].upper()}',
+             f'`scripts/pre-pr` at `{summary["head"][:12]}`{" (dirty tree)" if summary["dirty"] else ""} '
+             f'against `{summary["base_ref"]}` ({summary["merge_base"][:12]}), '
+             f'{summary["changed_file_count"]} changed files, {summary["duration_seconds"]:.0f}s.',
+             '', '| Check | Area | Result | Time |', '|---|---|---|---|']
+    for check in summary['checks']:
+        note = f' ({check["note"]})' if check['note'] else ''
+        lines.append(f'| {check["title"]} | {check["area"]} | {icon[check["status"]]} {check["status"]}{note} '
+                     f'| {check["duration_seconds"]:.0f}s |')
+    if not summary['checks']:
+        lines.append('| (no checks apply to these paths) | | ✅ pass | 0s |')
+    lines.append('')
+    lines.append('<!-- pre-pr-summary ' + json.dumps({k: summary[k] for k in ('schema', 'head', 'result')}) + ' -->')
+    return '\n'.join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    parser.add_argument('--base', default='origin/main')
+    parser.add_argument('--fetch', action='store_true', help='fetch the base before comparing')
+    parser.add_argument('--full', action='store_true', help='run whole affected test targets')
+    parser.add_argument('--plan', action='store_true', help='print the selected checks and exit')
+    parser.add_argument('--keep-going', action='store_true', help='run every check even after a failure')
+    parser.add_argument('--markdown', action='store_true', help='print the PR-body summary when done')
+    parser.add_argument('--verbose', '-v', action='store_true', help='stream check output')
+    args = parser.parse_args()
+
+    if args.fetch and args.base.startswith('origin/'):
+        git('fetch', '--quiet', 'origin', args.base.removeprefix('origin/'))
+    merge_base, files = changed_files(args.base)
+    checks, areas = plan(files, args.full)
+    head = git('rev-parse', 'HEAD')
+    dirty = bool(git('status', '--porcelain'))
+
+    print(f'pre-pr: {len(files)} changed files against {args.base} ({merge_base[:12]})')
+    for name, hits in areas.items():
+        print(f'  {name:<20} {len(hits)} file{"s" if len(hits) != 1 else ""}')
+    if args.plan:
+        for check in checks:
+            print(f'  would run [{check.area}] {check.title}: {" ".join(check.command)[:160]}')
+        return 0
+
+    started = time.monotonic()
+    failed = False
+    for check in checks:
+        if failed and not args.keep_going and not check.advisory:
+            check.status, check.note = 'skip', 'earlier failure'
+            print(f'⏭️  [{check.area}] {check.title} — skipped after an earlier failure')
+            continue
+        print(f'▶ [{check.area}] {check.title}', flush=True)
+        run(check, args.verbose)
+        mark = {'pass': '✅', 'fail': '❌', 'warn': '⚠️', 'skip': '⏭️'}[check.status]
+        print(f'  {mark} {check.status} in {check.duration:.0f}s{" — " + check.note if check.note else ""}',
+              flush=True)
+        if check.status == 'fail':
+            failed = True
+            tail = check.log.read_text(encoding='utf-8', errors='replace').splitlines()[-40:]
+            print('\n'.join(f'    │ {line}' for line in tail))
+
+    summary = {
+        'schema': SCHEMA_VERSION,
+        'tool': 'scripts/pre-pr',
+        'generated_at': dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'),
+        'head': head, 'dirty': dirty, 'base_ref': args.base, 'merge_base': merge_base,
+        'full': args.full, 'changed_file_count': len(files), 'areas': sorted(areas),
+        'result': 'fail' if failed else 'pass',
+        'duration_seconds': round(time.monotonic() - started, 1),
+        'checks': [{'id': c.id, 'area': c.area, 'title': c.title, 'status': c.status,
+                    'advisory': c.advisory, 'duration_seconds': round(c.duration, 1), 'note': c.note,
+                    'command': c.command[:8]} for c in checks],
+    }
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
+    (OUT / 'summary.md').write_text(markdown(summary) + '\n', encoding='utf-8')
+    print(f'pre-pr: {summary["result"].upper()} in {summary["duration_seconds"]:.0f}s — '
+          f'summary in {(OUT / "summary.json").relative_to(ROOT)} and summary.md')
+    if args.markdown:
+        print(markdown(summary))
+    return 1 if failed else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

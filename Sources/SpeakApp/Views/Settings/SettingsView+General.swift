@@ -10,13 +10,14 @@ extension SettingsView {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Microphone", systemImage: "mic.circle", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
-          Picker("Preferred microphone", selection: audioInputSelectionBinding) {
-            Text("Use macOS default")
-              .tag(AudioInputDeviceManager.systemDefaultToken)
-            ForEach(audioDevices.devices) { device in
-              Text(device.displayName).tag(device.id)
-            }
-          }
+          LongListPicker(
+            title: "Preferred microphone",
+            items: [LongListChoice(id: AudioInputDeviceManager.systemDefaultToken, title: "Use macOS default")]
+              + audioDevices.devices.map { LongListChoice(id: $0.id, title: $0.displayName) },
+            id: { $0.id }, selection: audioInputSelectionBinding, searchText: { [$0.title] },
+            row: { item in
+            Text(item.title)
+          })
           .settingsMenuPicker()
           .speakTooltip("Choose a microphone for new recording sessions, or follow the macOS default.")
           .accessibilityLabel("Preferred microphone")
@@ -61,11 +62,13 @@ extension SettingsView {
             .font(.callout)
             .foregroundStyle(.secondary)
 
-          Picker("Spoken Language", selection: settingsBinding(\AppSettings.preferredLocaleIdentifier)) {
-            ForEach(TranscriptionLanguageCatalog.options) { option in
-              Text(option.displayName).tag(option.id)
-            }
-          }
+          LongListPicker(
+            title: "Spoken Language", items: TranscriptionLanguageCatalog.options,
+            id: { $0.id }, selection: settingsBinding(\AppSettings.preferredLocaleIdentifier),
+            searchText: { [$0.displayName, $0.id] },
+            row: { option in
+            Text(option.displayName)
+          })
           .settingsMenuPicker()
           .speakTooltip(
             "Automatic lets remote providers detect the language. Apple speech uses your current system locale."

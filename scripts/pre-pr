@@ -116,7 +116,9 @@ class Check:
 DECL = re.compile(r'^(?:@[\w.]+(?:\([^)\n]*\))?\s+)*(?:(?:public|package|internal|open|final|indirect|nonisolated)\s+)*'
                   r'(class|struct|enum|protocol|actor|typealias|extension)\s+([A-Za-z_]\w*)', re.M)
 TEST_TYPE = re.compile(r'^(?:@[\w.]+(?:\([^)\n]*\))?\s+)*(?:(?:public|internal|private|fileprivate|final)\s+)*'
-                       r'(?:class|struct|actor|enum)\s+([A-Za-z_]\w*)', re.M)
+                       r'(?:class|struct|actor|enum|extension)\s+([A-Za-z_]\w*)', re.M)
+# Imports and line comments name modules and prose, not the types a test exercises.
+NOT_CODE = re.compile(r'^\s*(?:@testable\s+)?import\s+.*$|//.*$', re.M)
 
 
 @dataclass
@@ -204,11 +206,12 @@ def select_tests(files: list[str], full: bool, graph: Graph, exclude: set[str] =
     def test_files(target: str) -> list[tuple[Path, str]]:
         if target not in corpus:
             directory = root / graph.targets[target]['path']
-            corpus[target] = [(p, read(p)) for p in sorted(directory.rglob('*.swift'))]
+            corpus[target] = [(p, NOT_CODE.sub('', read(p))) for p in sorted(directory.rglob('*.swift'))]
         return corpus[target]
 
     def add_file(target: str, path: Path, text: str) -> None:
-        classes.setdefault(target, set()).update(TEST_TYPE.findall(text) or [path.stem])
+        names = TEST_TYPE.findall(text) or [path.stem.split('+')[0]]
+        classes.setdefault(target, set()).update(re.escape(name) for name in names)
 
     for path in files:
         if not path.endswith('.swift') or not path.startswith(('Sources/', 'Tests/')):
@@ -223,7 +226,7 @@ def select_tests(files: list[str], full: bool, graph: Graph, exclude: set[str] =
         file = root / path
         if module in covering:  # a test file: run the types it declares
             if file.is_file():
-                add_file(module, file, read(file))
+                add_file(module, file, NOT_CODE.sub('', read(file)))
             continue
         text = read(file)
         local = {name for kind, name in DECL.findall(text) if kind != 'extension'}
@@ -460,6 +463,7 @@ def run(check: Check, verbose: bool) -> None:
             if verbose:
                 sys.stdout.write(f'    {line}')
         code = process.wait()
+        process.stdout.close()
     check.duration = time.monotonic() - started
     executed = tests_executed(check.log.read_text(encoding='utf-8', errors='replace')) if check.counts_tests else None
     if code != 0:

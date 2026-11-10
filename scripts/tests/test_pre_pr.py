@@ -117,6 +117,10 @@ class SelectionTests(unittest.TestCase):
         'Tests/AppTests/WidgetUseTests.swift': 'class WidgetUseTests: XCTestCase { let w: Widget? = nil }\n',
         'Tests/AppTests/AppViewTests.swift': 'class AppViewTests: XCTestCase {}\n',
         'Tests/OtherTests/OtherTests.swift': 'class OtherTests: XCTestCase { let w = "Widget" }\n',
+        'Sources/Core/Core.swift': 'public enum Core {}\n',
+        'Tests/CoreTests/BehaviourTests+More.swift': 'extension BehaviourTests { func testMore() {} }\n',
+        'Tests/CoreTests/ImportOnlyTests.swift': '@testable import Core\n// Core\nfinal class ImportOnlyTests {}\n',
+        'Tests/CoreTests/Plus+Cases.swift': 'func helper() {}\n',
     }
 
     def setUp(self):
@@ -153,6 +157,17 @@ class SelectionTests(unittest.TestCase):
 
     def test_changed_test_file_runs_its_declared_types(self):
         self.assertEqual(self.select(['Tests/CoreTests/GadgetCases.swift']).filters, ['CoreTests\\.(?:GadgetCases)\\b'])
+
+    def test_extension_only_test_file_runs_the_extended_type(self):
+        self.assertEqual(self.select(['Tests/CoreTests/BehaviourTests+More.swift']).filters,
+                         ['CoreTests\\.(?:BehaviourTests)\\b'])
+
+    def test_stem_fallback_is_escaped(self):
+        self.assertEqual(self.select(['Tests/CoreTests/Plus+Cases.swift']).filters, ['CoreTests\\.(?:Plus)\\b'])
+
+    def test_imports_and_comments_do_not_count_as_references(self):
+        # Core.swift declares `enum Core`; `@testable import Core` and comments must not select every test.
+        self.assertEqual(self.select(['Sources/Core/Core.swift']).filters, ['CoreTests\\.'])
 
     def test_full_mode_runs_whole_covering_targets(self):
         self.assertEqual(self.select(['Sources/Core/Helpers.swift'], full=True).filters,

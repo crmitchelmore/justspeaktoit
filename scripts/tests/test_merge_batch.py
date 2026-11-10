@@ -94,6 +94,12 @@ class EvidenceTests(unittest.TestCase):
         body = merge_batch.evidence_block(self.batch, self.records('ok', 'error'))
         self.assertEqual(evidence.evaluate(body, self.batch, 'crmitchelmore')[0], 'error')
 
+    def test_bot_members_are_exempt_as_gh_reports_them(self):
+        login = merge_batch.author_login({'login': 'app/dependabot', 'is_bot': True})
+        self.assertEqual(login, 'dependabot[bot]')
+        self.assertEqual(evidence.evaluate('', 'a' * 40, login)[0], 'ok')
+        self.assertEqual(merge_batch.author_login({'login': 'crmitchelmore', 'is_bot': False}), 'crmitchelmore')
+
     def test_marker_lists_members(self):
         body = merge_batch.evidence_block(self.batch, self.records('ok'))
         marker = json.loads(body.split('<!-- pre-pr-summary ')[1].split(' -->')[0])

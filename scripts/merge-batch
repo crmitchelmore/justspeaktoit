@@ -91,6 +91,13 @@ def rank(title: str) -> int:
     return 0
 
 
+def author_login(author: dict | None) -> str:
+    """gh reports bots as app/<slug>; the evidence check (like Actions) expects <slug>[bot]."""
+    author = author or {}
+    login = author.get('login', '')
+    return f'{login.removeprefix("app/")}[bot]' if author.get('is_bot') else login
+
+
 def required_contexts(rules: list[dict]) -> list[str]:
     """Status-check contexts the branch rules require, from GET /repos/{repo}/rules/branches/main."""
     contexts = []
@@ -238,8 +245,7 @@ def create(name: str, prs: list[str]) -> None:
                     continue
                 run(['git', 'commit', '-q', '-m', f'{title} (#{pr})', '-m', f'Batched from #{pr} at {head}.'],
                     cwd=work)
-                level, message = evidence.evaluate(info.get('body') or '', head, (info.get('author') or {})
-                                                   .get('login', ''))
+                level, message = evidence.evaluate(info.get('body') or '', head, author_login(info.get('author')))
                 records.append({'pr': int(pr), 'head': head, 'evidence': level, 'message': message})
                 included.append((int(pr), head, title))
                 closes += [f'Fixes #{issue["number"]}' for issue in info.get('closingIssuesReferences') or []]

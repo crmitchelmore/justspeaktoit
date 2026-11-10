@@ -160,7 +160,7 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
             "deepgram/nova-3-streaming",
             "elevenlabs/scribe-v2-streaming",
             "cartesia/ink-2-streaming",
-            "soniox/stt-rt-v5-streaming",
+            "soniox/stt-rt-v6-streaming",
             "modulate/velma-2-stt-streaming",
             AssemblyAIModels.universal36ProStreamingID,
             "gladia/solaria-1-streaming",

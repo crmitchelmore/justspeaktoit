@@ -41,7 +41,7 @@ final class DesktopKeywordLiveDeliveryTests: XCTestCase {
     }
 
     func testFactorySerializesSpeechmaticsAndSonioxVocabularyInProviderOwnedConfig() throws {
-        for model in ["speechmatics/enhanced-streaming", "soniox/stt-rt-v5-streaming"] {
+        for model in ["speechmatics/enhanced-streaming", "soniox/stt-rt-v6-streaming"] {
             let factory = AssemblyAISocketFactory()
             let client = try make(model, factory: factory)
             defer { client.cancel() }

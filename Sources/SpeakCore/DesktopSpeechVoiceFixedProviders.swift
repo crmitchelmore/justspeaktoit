@@ -58,7 +58,7 @@ extension DesktopSpeechVoice {
         if model == nil || model == GeminiTTSCatalog.providerIdentifier {
             selected = GeminiTTSCatalog.defaultModel
         } else {
-            guard let model, let found = GeminiTTSCatalog.model(forID: model) else {
+            guard let model, let found = GeminiTTSCatalog.selectableModel(forID: model) else {
                 throw VoiceSynthesisConfigurationError.unsupportedVoice
             }
             selected = found

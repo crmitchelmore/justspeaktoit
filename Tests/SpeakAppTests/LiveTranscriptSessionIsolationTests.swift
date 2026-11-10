@@ -103,7 +103,7 @@ final class LiveTranscriptSessionIsolationTests: XCTestCase {
       segments: [],
       confidence: nil,
       duration: 1,
-      modelIdentifier: "soniox/stt-rt-v5-streaming",
+      modelIdentifier: "soniox/stt-rt-v6-streaming",
       cost: nil,
       rawPayload: nil,
       debugInfo: nil

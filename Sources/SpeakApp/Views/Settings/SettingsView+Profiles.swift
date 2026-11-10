@@ -92,6 +92,7 @@ struct ProfilesSettingsContent: View {
       }
       .buttonStyle(.bordered)
       .accessibilityLabel("Delete profile \(profile.name)")
+      .accessibilityIdentifier("profileDelete-\(profile.id)")
     }
     .settingsControlChrome()
   }
@@ -142,6 +143,7 @@ struct ProfileAppsSection: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Remove \(bundleID)")
+            .accessibilityIdentifier("profileBundleIDRemove-\(bundleID)")
           }
           .padding(.horizontal, 10)
           .padding(.vertical, 4)

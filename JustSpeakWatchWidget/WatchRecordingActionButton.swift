@@ -27,5 +27,6 @@ struct WatchRecordingActionButton<Label: View>: View {
         .buttonStyle(.plain)
         .accessibilityLabel(Text(self.state.recordingActionLabel))
         .accessibilityHint(Text(self.state.recordingActionHint))
+        .accessibilityIdentifier("watchRecordingActionButton")
     }
 }

@@ -44,6 +44,7 @@ struct HistoryItemRow: View {
         .padding(.vertical, density.listRowVerticalPadding)
         .frame(minHeight: density.minimumListRowHeight)
         .contentShape(Rectangle())
+        // a11y-ignore: pointer shortcut for the labelled historyRowExpandButton.
         .onTapGesture {
             if max(item.transcription.count, item.postProcessedTranscription?.count ?? 0) > 150 {
                 isExpanded.toggle()

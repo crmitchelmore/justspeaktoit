@@ -11,7 +11,7 @@ final class DesktopComparisonHistoryTests: XCTestCase {
             estimatedCostUSD: Decimal(string: "0.0012")
         )
         let failed = ModelComparisonEntry(
-            modelID: "soniox/stt-rt-v5-streaming", modelDisplayName: "Soniox", providerDisplayName: "Soniox",
+            modelID: "soniox/stt-rt-v6-streaming", modelDisplayName: "Soniox", providerDisplayName: "Soniox",
             errorDescription: "The model did not finish within its time limit."
         )
         let round = ModelComparisonRound(

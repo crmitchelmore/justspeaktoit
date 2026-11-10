@@ -1260,6 +1260,11 @@ public struct ContentView: View {
                     Task { await OfflineTranscriptUpgrader.shared.run() }
                 }
             }
+            .onChange(of: coordinator.state) { _, state in
+                if let announcement = state.accessibilityAnnouncement {
+                    AccessibilityNotification.Announcement(announcement).post()
+                }
+            }
             .onChange(of: backgroundService.isRunning) { wasRunning, isRunning in
                 // A live background session just finished — surface its result
                 // instead of leaving the screen blank.

@@ -15,7 +15,7 @@ extension SonioxLiveClient {
     /// Test seam: real-time scheduling with the given bounds.
     convenience init(
         apiKey: String,
-        model: String = "stt-rt-v5",
+        model: String = "stt-rt-v6",
         language: String? = nil,
         sampleRate: Int = 16_000,
         timing: Timing,

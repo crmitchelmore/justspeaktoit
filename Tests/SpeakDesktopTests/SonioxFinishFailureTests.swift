@@ -95,12 +95,12 @@ final class SonioxFinishFailureTests: XCTestCase {
     func testAutomaticAndBlankLanguageSelectionsOmitTheHint() throws {
         for selection in [nil, "", "Automatic", "  Automatic  "] {
             let value = SonioxLiveClient.configPayload(
-                apiKey: "synthetic", model: "stt-rt-v5", language: selection, sampleRate: 16_000
+                apiKey: "synthetic", model: "stt-rt-v6", language: selection, sampleRate: 16_000
             )
             XCTAssertNil(value["language_hints"])
         }
         let value = SonioxLiveClient.configPayload(
-            apiKey: "synthetic", model: "stt-rt-v5", language: "en_GB", sampleRate: 16_000
+            apiKey: "synthetic", model: "stt-rt-v6", language: "en_GB", sampleRate: 16_000
         )
         XCTAssertEqual(value["language_hints"] as? [String], ["en"])
     }

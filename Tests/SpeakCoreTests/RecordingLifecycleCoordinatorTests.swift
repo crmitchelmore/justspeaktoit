@@ -140,3 +140,12 @@ final class RecordingLifecycleCoordinatorTests: XCTestCase {
         )
     }
 }
+
+final class RecordingServiceStateAccessibilityTests: XCTestCase {
+    func testAccessibilityAnnouncement_namesActiveStatesOnly() {
+        XCTAssertNil(RecordingServiceState.idle.accessibilityAnnouncement)
+        XCTAssertNil(RecordingServiceState.starting.accessibilityAnnouncement)
+        XCTAssertEqual(RecordingServiceState.recording.accessibilityAnnouncement, "Recording")
+        XCTAssertEqual(RecordingServiceState.stopping.accessibilityAnnouncement, "Transcribing")
+    }
+}

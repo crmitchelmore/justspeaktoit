@@ -9,12 +9,9 @@ const reviewed = readFileSync(new URL('../../.github/actionlint.yaml', import.me
   .match(/^ {4}- ([\w-]+)$/gm).map(line => line.trim().slice(2));
 const generic = new Set(['self-hosted', 'macOS', 'Linux', 'X64', 'ARM64']);
 const hosted = /^(ubuntu|macos|windows)-[\w.-]+$/;
-// ci.yml is pinned by its own owner; remove it here once it is.
-const unpinnedAllowed = new Set(['ci.yml']);
 
 test('every remote action is pinned to a full commit SHA with a version comment', () => {
   for (const [file, source] of Object.entries(workflows)) {
-    if (unpinnedAllowed.has(file)) continue;
     for (const [line] of source.matchAll(/^\s*(?:- )?uses: (?!\.\/)[^\n]+$/gm)) {
       assert.match(line, /uses: [\w.-]+\/[\w./-]+@[0-9a-f]{40} # [vV]\d[\w.-]*$/, `${file}: ${line.trim()}`);
     }

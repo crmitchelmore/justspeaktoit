@@ -339,9 +339,10 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(evidence.evaluate(body, self.head, 'crmitchelmore', tree, strict=True)[0], 'ok')
         self.assertEqual(evidence.evaluate(stale, self.head, 'crmitchelmore', 'f' * 40, strict=True)[0], 'error')
 
-    def test_bots_are_exempt(self):
-        for bot in ('dependabot[bot]', 'devin-ai-integration[bot]', 'Copilot[bot]'):
-            self.assertEqual(evidence.evaluate('', self.head, bot)[0], 'ok', bot)
+    def test_only_dependabot_is_exempt(self):
+        self.assertEqual(evidence.evaluate('', self.head, 'dependabot[bot]')[0], 'ok')
+        for agent in ('devin-ai-integration[bot]', 'Copilot[bot]', 'renovate[bot]'):
+            self.assertEqual(evidence.evaluate('', self.head, agent)[0], 'error', agent)
 
 
 if __name__ == '__main__':

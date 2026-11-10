@@ -3,7 +3,7 @@
 
 Reads PR_BODY, PR_HEAD_SHA and PR_AUTHOR from the environment. Prints a GitHub
 annotation and exits 0 unless JSTI_REQUIRE_PRE_PR is "true", in which case a
-missing or failing record exits 1. Bot authors are exempt.
+missing or failing record exits 1. Only Dependabot is exempt.
 
 JSTI_PRE_PR_STRICT=true (the ci.yml gate) also enforces, and treats a record
 for another commit as an error: the record must name PR_HEAD_SHA, or carry a
@@ -16,7 +16,8 @@ import re
 import sys
 
 MARKER = re.compile(r'<!-- pre-pr-summary (\{.*?\}) -->')
-BOTS = re.compile(r'(\[bot\]$|^dependabot|^renovate|^devin-ai-integration)', re.I)
+# Only Dependabot is exempt: other agents (Devin, Copilot) must run scripts/pre-pr.
+BOTS = re.compile(r'^dependabot', re.I)
 
 
 def evaluate(body: str, head: str, author: str, head_tree: str = '', strict: bool = False) -> tuple[str, str]:

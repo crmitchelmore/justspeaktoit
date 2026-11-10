@@ -2,7 +2,7 @@ name: Pre-PR evidence
 
 # Checks that the PR body records a passing `scripts/pre-pr` run (AGENTS.md).
 # Advisory by default; set the repository variable JSTI_REQUIRE_PRE_PR=true to
-# fail when the record is missing or failing. Bots are exempt.
+# fail when the record is missing or failing. Only Dependabot is exempt.
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened, ready_for_review]

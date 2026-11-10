@@ -26,8 +26,9 @@ const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', impo
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
   for (const name of ['ci', 'linux']) {
     const source = readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
-    assert.match(source, /^  push:\n    branches: \[main, 'merge-batch\/\*\*'\]$/m,
-      `${name}: pushes must stay limited to main and merge batches`);
+    // A batch runs ci.yml once, through its pull request, not again on push.
+    const pushes = name === 'ci' ? /^  push:\n    branches: \[main\]$/m : /^  push:\n    branches: \[main, 'merge-batch\/\*\*'\]$/m;
+    assert.match(source, pushes, `${name}: pushes must stay limited to main (and merge batches outside ci.yml)`);
     const pullRequest = source.match(/^  pull_request:[ \t]*\n((?: {4}[^\n]*\n|\n)*)/m);
     assert.ok(pullRequest, `${name}: ordinary pull-request checks must exist`);
     assert.doesNotMatch(pullRequest[1], /^\s+branches(?:-ignore)?:/m,
@@ -207,9 +208,13 @@ test('Lint and the portable Swift graph run on hosted Ubuntu, never a macOS slot
     assert.match(jobBodies[id], /^    runs-on: ubuntu-24\.04$/m, id);
   }
   assert.match(jobBodies['portable-linux'], /image: swift:6\.2\.3-jammy@sha256:/);
-  assert.match(jobBodies['portable-linux'], /swift build --build-tests/);
-  assert.match(jobBodies.lint, /make lint/);
-  assert.match(jobBodies.lint, /make test-tooling/);
+  // The same entry points scripts/pre-pr runs, so a local pass means CI passes.
+  assert.match(jobBodies['portable-linux'], /run: scripts\/ci-portable-linux\.sh\n/);
+  assert.match(jobBodies.lint, /run: make ci-lint\n/);
+  const ciLint = makefile.match(/^ci-lint:[^\n]*\n((?:\t[^\n]*\n)*)/m)?.[1] ?? '';
+  for (const command of ['$(MAKE) lint', 'git diff --exit-code Tooling/Package.resolved', '$(MAKE) test-tooling']) {
+    assert.ok(ciLint.includes(`\t${command}\n`), `make ci-lint must run ${command}`);
+  }
   assert.match(jobBodies['build-macos'], /name: Test macOS-only tooling\n\s+if: needs\.release-paths\.outputs\.full == 'true'\n\s+run: make test-tooling/);
 });
 
@@ -356,17 +361,28 @@ assert.ok(predicate, 'must test the actual workflow rejection predicate');
 // GitHub property names permit hyphens; adapt those paths for local evaluation.
 // The predicate uses only boolean/string comparisons, with no Actions-specific
 // coercions. This tests the shipped predicate against the diagnostic oracle.
-const evaluatePredicate = new Function('needs', 'github', 'always', `return (${
+const evaluatePredicate = new Function('needs', 'github', 'always', 'startsWith', `return (${
   predicate.replace(/\bneeds((?:\.[a-zA-Z0-9_-]+)+)/g, (_, path) =>
     'needs' + path.split('.').slice(1).map(key => `?.[${JSON.stringify(key)}]`).join(''))
 });`);
 
 function assessCIGates(needs, event) {
   const errors = assessOracle(needs, event);
-  assert.equal(evaluatePredicate(needs, { event_name: event }, () => true), errors.length > 0,
+  assert.equal(evaluatePredicate(needs, { event_name: event, head_ref: '' }, () => true,
+    (value, prefix) => String(value ?? '').startsWith(prefix)), errors.length > 0,
     'workflow predicate must agree with fixture expectations');
   return errors;
 }
+
+test('a merge-batch pull request must run every gate', () => {
+  const needs = Object.fromEntries(['release-paths', 'paid-access-worker', 'pre-pr-evidence', 'lint',
+    'portable-linux', 'build-macos'].map(id => [id, { result: 'success' }]));
+  needs['release-paths'].outputs = { apple: 'true', swift: 'true', ios: 'true', full: 'false' };
+  const startsWith = (value, prefix) => String(value ?? '').startsWith(prefix);
+  const run = head_ref => evaluatePredicate(needs, { event_name: 'pull_request', head_ref }, () => true, startsWith);
+  assert.equal(run('merge-batch/7'), true, 'a batch reporting full=false is rejected');
+  assert.match(jobBodies['release-paths'], /startsWith\(github\.head_ref, 'merge-batch\/'\)/, 'batches select full');
+});
 
 test('aggregate never checks out or executes repository helper code', () => {
   assert.doesNotMatch(aggregate, /uses:|run:.*scripts\/|checkout/);
@@ -383,9 +399,7 @@ test('only pull requests cancel an in-progress CI run', () => {
 });
 
 test('tooling gate delegates to the complete local discovery target', () => {
-  assert.match(workflow, /- name: SwiftLint\n\s+run: \|\n[\s\S]*?\n\s+make lint\n/);
-  assert.match(workflow, /- name: Check tooling Package\.resolved drift\n\s+run: git diff --exit-code/);
-  assert.match(workflow, /- name: Test CI and release gates\n\s+run: make test-tooling/);
+  assert.match(workflow, /- name: Lint and tooling tests \(make ci-lint\)\n\s+run: make ci-lint\n/);
   assert.match(makefile, /node --test scripts\/tests\/\*\.test\.mjs/);
   assert.match(makefile, /^\tnode --test \.github\/scripts\/dependabot-merge\.test\.mjs$/m);
   assert.match(makefile, /ruby scripts\/tests\/release_apple_test\.rb/);
@@ -587,7 +601,7 @@ test('pre-PR evidence is strict, exact-head and blocks the gate on pull requests
   assert.match(body, /JSTI_PRE_PR_STRICT: "true"/);
   assert.match(body, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(body, /git rev-parse 'HEAD\^\{tree\}'/);
-  assert.match(body, /!startsWith\(github\.head_ref, 'merge-batch\/'\)/);
+  assert.match(body, /^        if: github\.event_name == 'pull_request'$/m, 'merge-batch PRs need their combined record too');
   assert.match(body, /gh api "\$PR_URL" --jq '\.body \/\/ ""'/, 'reads the current body, not the event snapshot');
   assert.doesNotMatch(body, /continue-on-error/);
   assert.match(aggregate, /needs\.pre-pr-evidence\.result != 'success'/);
@@ -644,7 +658,7 @@ test('API compatibility diffs batches against main and main against its previous
 
 test('batch and main failures open a tracking issue from a push-only, checkout-free job', () => {
   const body = jobBodies['report-ci-failure'];
-  assert.match(body, /if: failure\(\) && !cancelled\(\) && github\.event_name == 'push'/);
+  assert.match(body, /if: failure\(\) && !cancelled\(\) && \(github\.event_name == 'push' \|\| startsWith\(github\.head_ref, 'merge-batch\/'\)\)/);
   assert.match(body, /needs: gate/);
   assert.match(body, /issues: write/);
   assert.match(body, /ci-batch-failure/);

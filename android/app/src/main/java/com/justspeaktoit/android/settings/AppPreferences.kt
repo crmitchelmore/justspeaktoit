@@ -31,10 +31,21 @@ class AppPreferences(context: Context) {
         }
         set(value) = prefs.edit { putString(KEY_RETENTION, value.name) }
 
-    private companion object {
-        const val KEY_RETENTION = "history_retention"
-        const val KEY_MODE = "chosen_mode"
-        const val KEY_CLOUD_MODEL = "cloud_model"
-        const val KEY_CLEANUP = "cleanup_enabled"
+    /**
+     * Cloud mode only: on-device and speech-service recognition never give the app an audio file,
+     * so there is nothing to keep when they are cancelled.
+     */
+    var keepAudioOnCancel: Boolean
+        get() = prefs.getBoolean(KEY_KEEP_AUDIO_ON_CANCEL, DEFAULT_KEEP_AUDIO_ON_CANCEL)
+        set(value) = prefs.edit { putBoolean(KEY_KEEP_AUDIO_ON_CANCEL, value) }
+
+    companion object {
+        /** The canonical cross-platform key, shared with the Mac, iOS, Windows and Linux apps. */
+        const val KEY_KEEP_AUDIO_ON_CANCEL = "keepAudioOnCancel"
+        const val DEFAULT_KEEP_AUDIO_ON_CANCEL = true
+        private const val KEY_RETENTION = "history_retention"
+        private const val KEY_MODE = "chosen_mode"
+        private const val KEY_CLOUD_MODEL = "cloud_model"
+        private const val KEY_CLEANUP = "cleanup_enabled"
     }
 }

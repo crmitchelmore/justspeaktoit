@@ -97,7 +97,7 @@ extension DesktopHostController {
         return outcome
     }
 
-    private func discardDeletedHistory(_ id: UUID) {
+    func discardDeletedHistory(_ id: UUID) {
         history[id] = nil
         historySearchText[id] = nil
         guard selectedHistoryID == id else { return }

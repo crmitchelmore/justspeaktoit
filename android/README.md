@@ -92,9 +92,18 @@ credential IDs and the cleanup prompt identical to the Mac app.
   automatically. Without an explicit choice, a new session uses on-device recognition when it is
   ready and otherwise the speech service, and the screen always shows which mode will be used.
   Choose a mode explicitly to pin it.
-- The app itself does not store audio, except for Cloud mode's temporary upload file below.
+- The app itself does not store audio, except for Cloud mode's temporary upload file and
+  cancelled Cloud recordings kept in History (below).
 - **Cloud** mode uploads audio to the provider chosen in Settings with your key. The
   recording is a temporary file that is deleted after the request, whether it succeeds or fails.
+- **Keep audio when a recording is cancelled** (Settings, on by default; shared key
+  `keepAudioOnCancel` with the other apps): cancelling a Cloud recording moves its audio to
+  app-private storage and adds a Cancelled History entry with a **Transcribe** action, which uses
+  the current cloud model and key. A successful transcription replaces the entry and deletes the
+  audio; deleting the entry, clearing History or retention pruning deletes it too. Recordings under
+  a quarter of a second are discarded. Off restores the old behaviour (the audio is deleted and
+  nothing is recorded). On-device and speech-service modes never give the app audio, so the
+  setting does not apply to them. Leaving the app or a capture failure still discards the audio.
 - Optional cleanup sends the final transcript text (not audio) to OpenRouter.
 - History is stored only in app-private storage (excluded from backup) and follows the
   retention chosen in History; Off saves nothing and deletes existing entries.

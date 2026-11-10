@@ -97,8 +97,13 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// test can drive the claim lifecycle without the App Group container.
     let claimStore: CaptureSafetyClaimStore
 
-    public init(claimStore: CaptureSafetyClaimStore = .shared) {
+    /// The shared `keepAudioOnCancel` setting, read at cancel time.
+    let keepsCancelledAudio: @Sendable () -> Bool
+
+    public init(claimStore: CaptureSafetyClaimStore = .shared,
+                keepsCancelledAudio: @escaping @Sendable () -> Bool = { AppSettings.storedKeepAudioOnCancel() }) {
         self.claimStore = claimStore
+        self.keepsCancelledAudio = keepsCancelledAudio
     }
 
     #if DEBUG
@@ -359,28 +364,37 @@ public final class AudioRecordingPersistence: ObservableObject {
         return info
     }
 
-    /// Cancel recording and delete the partial file.
+    /// Cancel recording. The partial file is deleted unless the user keeps
+    /// cancelled audio, in which case it stays in Saved Recordings, which lists
+    /// every file in the recordings directory, to play or transcribe later.
     public func cancelRecording() {
         let url = currentFileURL
         let claim = activeClaim
+        let startedAt = startTime
         closeWriter()
         isRecording = false
         currentFileURL = nil
         startTime = nil
         stopClaimHeartbeat()
-        // A cancelled recording deletes its own file below, so its claim has
-        // nothing left to point at. This is the only place the claim is
-        // dropped without the transcript having been delivered, and it is the
-        // one case where the user asked for the audio to go.
+        // The user cancelled, so this is not an undelivered capture to recover:
+        // its claim is dropped whether or not the audio is kept.
         if let claim {
             claimStore.forget(recording: claim)
             if lastClaim == claim { lastClaim = nil }
         }
 
-        if let url {
-            try? FileManager.default.removeItem(at: url)
-            logger.info("Cancelled and deleted: \(url.lastPathComponent)")
-        }
+        guard let url else { return }
+        let keep = Self.shouldKeepCancelledRecording(at: url, startedAt: startedAt, keepAudio: keepsCancelledAudio())
+        if !keep { try? FileManager.default.removeItem(at: url) }
+        logger.info("Cancelled and \(keep ? "kept" : "deleted"): \(url.lastPathComponent)")
+    }
+
+    /// Under half a second holds no word, so it is never worth keeping.
+    static func shouldKeepCancelledRecording(at url: URL, startedAt: Date?, keepAudio: Bool,
+                                             now: Date = Date()) -> Bool {
+        guard keepAudio, let startedAt, now.timeIntervalSince(startedAt) >= 0.5 else { return false }
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber
+        return (size?.int64Value ?? 0) > 0
     }
 }
 #endif

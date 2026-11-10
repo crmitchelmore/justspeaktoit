@@ -116,7 +116,7 @@ def spawn(*args,**kwargs):
 m.subprocess.Popen=spawn
 m.subprocess.run=lambda *args,**kwargs:Mock(stdout='[{"name":"jsti_test.monitor"}]')
 def held(*args,**kwargs):
- Path(sys.argv[2]).write_text(json.dumps(owned));time.sleep(60)
+ t=Path(sys.argv[2]+".tmp");t.write_text(json.dumps(owned));os.replace(t,sys.argv[2]);time.sleep(60)
 m.identity.wait_file=held
 os.environ["JSTI_WHISPER_TEST_AUDIO"]=sys.argv[3]
 os.environ["JSTI_LOCAL_MODEL_DIRECTORY"]=sys.argv[4]
@@ -129,7 +129,8 @@ m.run(Path("/never-executed"))
             children = []
             reaped = set()
             try:
-                deadline = time.monotonic() + 5
+                # Interpreter start-up on a loaded runner can exceed 5 s.
+                deadline = time.monotonic() + 20
                 while not ready.exists():
                     if process.poll() is not None or time.monotonic() >= deadline:
                         self.fail('The controlled fixture never reached its held peer stage')

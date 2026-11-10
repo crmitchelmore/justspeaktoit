@@ -13,6 +13,7 @@ extension AppSettings.DefaultsKey {
         case .preferredLocale: ApplicationPreferenceKey.preferredLocale.rawValue
         case .postProcessingEnabled: ApplicationPreferenceKey.postProcessingEnabled.rawValue
         case .handsFreeDictationEnabled: ApplicationPreferenceKey.handsFreeDictationEnabled.rawValue
+        case .keepAudioOnCancel: ApplicationPreferenceKey.keepAudioOnCancel.rawValue
         default: self.rawValue
         }
     }

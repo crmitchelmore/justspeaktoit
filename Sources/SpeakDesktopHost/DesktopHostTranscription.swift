@@ -169,7 +169,8 @@ extension DesktopHostController {
             voiceCommandTask?.cancel()
             postProcessingTask?.cancel()
             liveFinalisation?.cancel()
-            requestOwnedDictationStop(requestID: active.id, reason: "Recording cancelled. Audio retained.")
+            noteUserCancelledRecording(active.id)
+            requestOwnedDictationStop(requestID: active.id, reason: Self.userCancelledRecordingReason)
             return
         }
         if ownedCaptureStartup != nil {
@@ -180,7 +181,8 @@ extension DesktopHostController {
             cancellationRequested = true
             beginBusyOperation()
             defer { finishBusyOperation() }
-            await captureFailed("Recording cancelled. Audio retained.", recordingID: active.record.id)
+            noteUserCancelledRecording(active.record.id)
+            await captureFailed(Self.userCancelledRecordingReason, recordingID: active.record.id)
             return
         }
         if let inspection = migrationInspectionWorker {
@@ -210,6 +212,7 @@ extension DesktopHostController {
             return
         }
         if let runID = handsFreeRun?.id {
+            if let active = recording, active.handsFree { noteUserCancelledRecording(active.record.id) }
             Task {
                 guard self.handsFreeRun?.id == runID else { return }
                 await self.disarmHandsFree()
@@ -220,6 +223,7 @@ extension DesktopHostController {
         cancelOutput()
         guard busy else { return }
         cancellationRequested = true
+        if let tail = recordingTail { noteUserCancelledRecording(tail.recordID) }
         recordingTail?.task.cancel()
         transcriptionTask?.cancel()
         voiceCommandTask?.cancel()

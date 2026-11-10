@@ -55,9 +55,17 @@ jobs:
           SOURCE: ${{ github.event.workflow_run.head_sha || inputs.source }}
           REBUILD: ${{ inputs.rebuild || false }}
           OWNER_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           if ! node -e 'process.exit(require("./Config/ReleasePipeline.json").enabled || process.env.OWNER_VALIDATION === "true" ? 0 : 1)'; then
             echo 'Alpha remains in validation mode.'
+            exit 0
+          fi
+          # Build only the newest main commit: a CI success for a commit that
+          # main has already moved past is superseded by the newer commit's
+          # own CI run. Explicit dispatches still build any requested source.
+          if [ "$EVENT_NAME" = "workflow_run" ] && [ "$(git rev-parse HEAD)" != "$SOURCE" ]; then
+            echo "::notice::$SOURCE is no longer the newest main commit; skipping its Alpha."
             exit 0
           fi
           node scripts/release-train.mjs allocate --source "$SOURCE" --rebuild "$REBUILD"
@@ -84,8 +92,12 @@ jobs:
   # Signs, stages, clean-installs and then publishes the Windows beta
   # installer for the qualified runtime bundles. Without the Artifact Signing
   # configuration it rehearses and publishes nothing.
+  # The Alpha release stays a draft until mac-direct's publish-alpha step, and
+  # this workflow's read-only fetch token cannot see draft releases, so it
+  # waits for mac-direct (every Alpha from 8 Nov failed with "release not
+  # found" while reading desktop-qualification.json from the draft).
   windows-installer:
-    needs: [allocate, desktop-qualification]
+    needs: [allocate, desktop-qualification, mac-direct]
     if: needs.allocate.outputs.tag != ''
     permissions:
       contents: write
@@ -97,8 +109,9 @@ jobs:
     secrets: inherit
   # Publishes the qualified Linux bundle to the signed, self-hosted Flatpak
   # repository. Without the flatpak-repo signing key it rehearses only.
+  # Like windows-installer, it reads release assets with a read-only token.
   linux-flatpak-repo:
-    needs: [allocate, desktop-qualification]
+    needs: [allocate, desktop-qualification, mac-direct]
     if: needs.allocate.outputs.tag != ''
     permissions:
       contents: read

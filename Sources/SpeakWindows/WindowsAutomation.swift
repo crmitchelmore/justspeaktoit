@@ -8,7 +8,7 @@ import CWindowsSupport
 /// controller the window drives. Option rejection, file checks and error
 /// mapping are the shared `AutomationCommandDispatcher` policy, so `speak`
 /// behaves as it does against the Mac app.
-final class WindowsAutomationHost: AutomationCommandHost, @unchecked Sendable {
+final class WindowsAutomationHost: AutomationSpeechHost, @unchecked Sendable {
     private let controller: WindowsAppController
 
     init(controller: WindowsAppController) { self.controller = controller }
@@ -31,6 +31,14 @@ final class WindowsAutomationHost: AutomationCommandHost, @unchecked Sendable {
 
     func automationStopDictation() async throws -> AutomationResult {
         try await controller.automationStopDictation()
+    }
+
+    func automationSpeak(_ speech: AutomationSpeechRequest) async throws -> AutomationResult {
+        try await controller.automationSpeak(speech)
+    }
+
+    func automationVoices() async throws -> [AutomationVoice] {
+        try await controller.automationVoices()
     }
 }
 

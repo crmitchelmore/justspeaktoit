@@ -196,7 +196,7 @@ extension DesktopHostController {
                         : "Recording cancelled. Audio retained."
                 }
                 try await saveRecord(record)
-                if !closed { present(record, output: nil) }
+                if !closed { await presentCancelledRecording(record) }
             } else {
                 await notifyRecordingFeedback(requestID, handsFree: false)
                 if closed || cancellationRequested {

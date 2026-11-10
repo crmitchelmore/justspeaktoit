@@ -13,6 +13,9 @@ Brief description of the changes.
 - [ ] Existing tests pass with `make test`
 - Verification notes / screenshots / logs:
 
+## Pre-PR checks
+<!-- Paste the output of `scripts/pre-pr --markdown` (or .build/pre-pr/summary.md) here, keeping its hidden marker. -->
+
 ## Checklist
 - [ ] My code follows the project's style guidelines
 - [ ] I have updated documentation if needed

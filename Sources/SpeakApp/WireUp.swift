@@ -514,6 +514,7 @@ extension AppEnvironment {
         main: main,
         history: history,
         transcription: transcription,
+        tts: tts,
         appVersion: version ?? "unknown"
       )
     )

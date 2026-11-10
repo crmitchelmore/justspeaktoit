@@ -82,6 +82,8 @@
     <string name="settings_cleanup_title">Clean up transcripts</string>
     <string name="settings_cleanup_note">Sends the final transcript to OpenRouter to fix punctuation and spelling. Needs an OpenRouter key. If cleanup fails, the original transcript is kept.</string>
     <string name="settings_cleanup_needs_key">Add an OpenRouter key to use cleanup.</string>
+    <string name="settings_keep_audio_title">Keep audio when a recording is cancelled</string>
+    <string name="settings_keep_audio_note">Cancelled cloud recordings stay in History so you can transcribe them later.</string>
     <string name="settings_search_hint">Search settings</string>
     <string name="settings_search_clear">Clear search</string>
     <string name="settings_search_recent">Recent</string>
@@ -104,6 +106,9 @@
     <string name="history_failed">Failed: %1$s</string>
     <string name="history_save_failed">History could not be saved to storage. Recent changes are kept while the app is open and saved with the next change.</string>
     <string name="history_cleaned">Cleaned up</string>
+    <string name="history_cancelled">Cancelled. The audio is kept so you can transcribe it.</string>
+    <string name="history_transcribe_failed">Transcription failed: %1$s</string>
+    <string name="history_transcribing">Transcribing…</string>
     <string name="action_delete">Delete</string>
     <string name="action_clear_history">Clear history</string>
     <string name="clear_history_confirm">Delete all saved dictations?</string>

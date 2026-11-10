@@ -189,6 +189,7 @@ public enum ModelCredentialResolver {
 
     private static let providerDisplayNames = [
         "alibaba": "Alibaba Model Studio",
+        "anthropic": "Anthropic",
         "assemblyai": "AssemblyAI",
         "cartesia": "Cartesia",
         "deepgram": "Deepgram",
@@ -249,6 +250,8 @@ public enum ModelCredentialResolver {
         identifiers.insert(ProviderCredentialCatalogue.apiKeyIdentifier(for: "openrouter"))
         identifiers.insert(ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai.tts"))
         identifiers.insert(AzureSpeechConfiguration.credentialIdentifier)
+        // Native cleanup providers, including those with no speech route (Anthropic).
+        identifiers.formUnion(NativeTextModels.providers.map(\.credentialIdentifier))
         return identifiers
     }
 }

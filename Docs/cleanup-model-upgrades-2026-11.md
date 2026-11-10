@@ -36,10 +36,14 @@ the bundled entries; discovery preserves their metadata and defaults.
 ## Native routes and picker grouping
 
 Since #1382, `NativeTextModels` adds curated `native/<provider>/<model>` entries for
-OpenAI, Google Gemini, Groq and Mistral. They call the provider's own OpenAI-compatible
-`chat/completions` endpoint with that provider's existing key (`openai.apiKey`,
-`google.apiKey`, `groq.apiKey`, `mistral.apiKey`). OpenAI requests omit `temperature`
-and send `max_completion_tokens`. iOS lists only providers it stores keys for (not Groq).
+Anthropic, OpenAI, Google Gemini, Groq and Mistral. They call the provider's own
+OpenAI-compatible `chat/completions` endpoint with that provider's key (`anthropic.apiKey`,
+`openai.apiKey`, `google.apiKey`, `groq.apiKey`, `mistral.apiKey`). OpenAI requests omit
+`temperature` and send `max_completion_tokens`; Anthropic requests omit `temperature`,
+which Claude 4.7 and later reject below 1. `anthropic.apiKey` is a cleanup-only credential:
+it transfers between devices but is not in the CloudKit-synced set. iOS lists only
+providers it stores keys for (not Groq). Android mirrors the same catalogue and picker rule
+in `CloudCatalog.cleanupModels` and `CleanupModelPicker`, checked by `CloudParityTest`.
 
 `ModelPickerGrouping` puts native and on-device models first and shows OpenRouter as
 one entry that opens its own searchable list; grouping follows the credential each model

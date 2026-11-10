@@ -137,6 +137,9 @@ struct APIKeysView: View {
             ),
             APIKeyListEntry(
                 id: "azure", title: "Azure Speech", category: "Transcription", isStored: settings.hasAzureKey
+            ),
+            APIKeyListEntry(
+                id: "anthropic", title: "Anthropic", category: "Post-processing", isStored: settings.hasAnthropicKey
             )
         ]
     }
@@ -360,6 +363,11 @@ struct APIKeysView: View {
                 title: "Mistral", systemImage: "waveform.circle",
                 help: "Get your key from console.mistral.ai."
             )
+        case "anthropic":
+            return KeyPresentation(
+                title: "Anthropic", systemImage: "text.badge.checkmark",
+                help: "Get your key from platform.claude.com. Used for Claude cleanup models."
+            )
         default:
             return KeyPresentation(
                 title: "Gladia", systemImage: "waveform.badge.exclamationmark", help: "Get your key from gladia.io."
@@ -437,6 +445,7 @@ struct APIKeysView: View {
         case "speechmatics": settings.speechmaticsAPIKey = key
         case "revai": settings.revAIAPIKey = key
         case "mistral": settings.mistralAPIKey = key
+        case "anthropic": settings.anthropicAPIKey = key
         default: settings.gladiaAPIKey = key
         }
     }

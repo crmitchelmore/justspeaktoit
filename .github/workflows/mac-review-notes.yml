@@ -32,10 +32,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   validate:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Test notes-only API behavior without secrets
@@ -58,7 +59,7 @@ jobs:
             repair) test "$GITHUB_REF" = refs/heads/main ;;
             *) exit 1 ;;
           esac
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Validate notes-only selection before credentials

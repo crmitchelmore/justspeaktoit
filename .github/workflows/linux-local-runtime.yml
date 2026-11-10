@@ -38,7 +38,7 @@ jobs:
             sleep "$delay"
           done
 
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -51,7 +51,7 @@ jobs:
       # Windows builder's checkout helpers and pin); a change rebuilds them.
       - name: Restore a runtime built from the same pins
         id: cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: local-runtime-output
           key: whisper-runtime-linux-x86_64-${{ hashFiles('scripts/linux-local-runtime/dependencies.json', 'scripts/linux-local-runtime/build-whisper-runtime.py', 'scripts/windows-local-runtime/dependencies.json', 'scripts/windows-local-runtime/build-whisper-runtime.py') }}

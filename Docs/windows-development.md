@@ -1753,12 +1753,14 @@ to use the Development environment) before starting the app.
 [The Windows workflow](../.github/workflows/windows.yml) builds the native x64
 executable in release configuration, runs shared and Windows adapter tests,
 runs `--self-test`, then requires `--ui-smoke-test` to finish within 30 seconds.
-It also runs release tests for the portable graph on macOS and
-Linux. The actions have read-only repository permissions and require no real
+It also runs release tests for the portable graph on macOS. It runs nightly
+and when Alpha qualification dispatches it: every test it runs also runs on
+pull requests and main in the native ARM64 and Mac-built x64 workflows, and
+the portable Linux graph is tested by `ci.yml` and `linux.yml`. The actions have read-only repository permissions and require no real
 provider keys.
 
 The Windows, Windows ARM64, macOS to Windows proof and Linux workflows are
-advisory: they run on pull requests and on `main`, but they are not required
+advisory: they run on pull requests, on `main` or nightly, but they are not required
 checks in the `main` ruleset, and nothing else waits for them. Alpha releases
 follow `CI` only. A red desktop workflow is still a regression to fix, but it
 never blocks an Apple merge or release.

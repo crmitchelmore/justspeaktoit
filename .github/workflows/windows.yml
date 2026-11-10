@@ -1,91 +1,13 @@
 name: Windows and Portable Swift
 
+# Nightly and on demand only. Every test here also runs natively on ARM64
+# (windows-arm64.yml) and in the Mac-built x64 proof (windows-cross-proof.yml),
+# which own pull request and main coverage. This keeps the only Windows-hosted
+# x64 compile and the Apple URLSession loopback probes as a daily check, and
+# Alpha qualification still dispatches it on the release tag.
 on:
-  push:
-    branches: [main]
-    paths:
-      - .gitattributes
-      - Package.swift
-      - Resources/Desktop/**
-      - Resources/AppIcon.iconset/**
-      - scripts/generate-desktop-icons.py
-      - scripts/tests/test_desktop_icons.py
-      - Sources/SpeakCore/**
-      - Sources/SpeakDesktop/**
-      - Sources/CLlamaCpp/**
-      - Sources/CMigrationArchive/**
-      - Sources/CRecordingFileSupport/**
-      - Sources/SpeakDesktopHost/**
-      - Sources/SpeakDesktopSync/**
-      - Sources/SpeakSync/**
-      - Sources/SpeakWindows/**
-      - Sources/SpeakWindowsPlatform/**
-      - Sources/CWindowsSupport/**
-      - Sources/CWindowsAutomation/**
-      - Sources/SpeakAutomationKit/**
-      - Sources/SpeakCLI/**
-      - Tests/SpeakPortableTests/**
-      - Tests/SpeakDesktopTests/**
-      - Tests/SpeakDesktopHostTests/**
-      - Tests/SpeakDesktopSyncTests/**
-      - Tests/SpeakSyncTests/**
-      - Tests/SpeakWindowsPlatformTests/**
-      - Tests/SpeakAutomationKitTests/**
-      - Tests/SpeakTestSupport/**
-      - scripts/verify-portable-core-boundary.py
-      - scripts/windows-cloudkit/**
-      - scripts/websocket-loopback-probe.py
-      - scripts/modulate-opening-audio-probe.py
-      - scripts/qualify-modulate-opening-audio.py
-      - scripts/run-core-journey-e2e.py
-      - scripts/tests/test_modulate_opening_audio_probe.py
-      - scripts/windows-local-runtime/**
-      - scripts/windows-bundle/runtime-policy.json
-      - Docs/windows-development.md
-      - .github/workflows/windows.yml
-      - .github/workflows/windows-local-runtime.yml
-  pull_request:
-    paths:
-      - .gitattributes
-      - Package.swift
-      - Resources/Desktop/**
-      - Resources/AppIcon.iconset/**
-      - scripts/generate-desktop-icons.py
-      - scripts/tests/test_desktop_icons.py
-      - Sources/SpeakCore/**
-      - Sources/SpeakDesktop/**
-      - Sources/CLlamaCpp/**
-      - Sources/CMigrationArchive/**
-      - Sources/CRecordingFileSupport/**
-      - Sources/SpeakDesktopHost/**
-      - Sources/SpeakDesktopSync/**
-      - Sources/SpeakSync/**
-      - Sources/SpeakWindows/**
-      - Sources/SpeakWindowsPlatform/**
-      - Sources/CWindowsSupport/**
-      - Sources/CWindowsAutomation/**
-      - Sources/SpeakAutomationKit/**
-      - Sources/SpeakCLI/**
-      - Tests/SpeakPortableTests/**
-      - Tests/SpeakDesktopTests/**
-      - Tests/SpeakDesktopHostTests/**
-      - Tests/SpeakDesktopSyncTests/**
-      - Tests/SpeakSyncTests/**
-      - Tests/SpeakWindowsPlatformTests/**
-      - Tests/SpeakAutomationKitTests/**
-      - Tests/SpeakTestSupport/**
-      - scripts/verify-portable-core-boundary.py
-      - scripts/windows-cloudkit/**
-      - scripts/websocket-loopback-probe.py
-      - scripts/modulate-opening-audio-probe.py
-      - scripts/qualify-modulate-opening-audio.py
-      - scripts/run-core-journey-e2e.py
-      - scripts/tests/test_modulate_opening_audio_probe.py
-      - scripts/windows-local-runtime/**
-      - scripts/windows-bundle/runtime-policy.json
-      - Docs/windows-development.md
-      - .github/workflows/windows.yml
-      - .github/workflows/windows-local-runtime.yml
+  schedule:
+    - cron: '23 3 * * *'
   workflow_dispatch:
     inputs:
       owned_capture_diagnostics:
@@ -103,7 +25,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   local-runtime:
@@ -126,12 +48,12 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install pinned Swift toolchain
-        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
         with:
           source: swift.org
           swift-version: swift-6.2.3-release
@@ -142,7 +64,7 @@ jobs:
       - name: Verify portable source boundary
         run: python scripts/verify-portable-core-boundary.py
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-local-runtime
           path: local-runtime
@@ -150,7 +72,7 @@ jobs:
       # The pinned tiny model is downloaded by the app's own installer on a
       # miss and verified against its SHA-256 on every run.
       - name: Restore pinned local models
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: local-models
           key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
@@ -1716,12 +1638,12 @@ jobs:
 
   portable-macos:
     name: Portable Swift on macOS
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-15"]') }}
+    runs-on: macos-15
     timeout-minutes: 15
     env:
       SPEAK_PORTABLE_CORE: '1'
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Verify portable source boundary
@@ -1792,54 +1714,3 @@ jobs:
           name: portable-macos-source-state
           path: ${{ runner.temp }}/portable-macos-source-state
           if-no-files-found: warn
-
-  portable-linux:
-    name: Portable Swift on Linux (Swift 6.2.3)
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-22.04"]') }}
-    container:
-      image: swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6
-    # Successful hosted runs take 6-9 minutes; a 10-minute budget failed cold
-    # dispatched qualification runs.
-    timeout-minutes: 20
-    steps:
-      # Self-hosted Linux runs this root container against the runner's
-      # persistent /__w bind mount; record its owner so it can be restored.
-      - name: Record host work-tree owner
-        if: runner.environment == 'self-hosted'
-        run: stat -c '%u:%g' /__w > "$RUNNER_TEMP/jsti-host-owner"
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - name: Normalize container workspace ownership
-        # actions/checkout runs against a host bind-mount (/__w) owned by the
-        # runner host user, while this job's container runs as its image's
-        # default user. The owned capture-writer tests verify a real
-        # ownership+mode chain (not just writability) up to the checkout
-        # root, so a mismatched host-mount owner/mode trips that check as an
-        # environment artifact rather than a security finding. Align
-        # ownership and drop any group/other write bit on just the ancestor
-        # chain the checkout actually needs (not the sibling /__w/_temp,
-        # /__w/_actions mounts) instead of weakening the check.
-        run: |
-          owner="$(id -u):$(id -g)"
-          chown "$owner" /__w
-          chmod 0755 /__w
-          chown "$owner" "$(dirname "$GITHUB_WORKSPACE")"
-          chmod 0755 "$(dirname "$GITHUB_WORKSPACE")"
-          chown -R "$owner" "$GITHUB_WORKSPACE"
-          chmod 0755 "$GITHUB_WORKSPACE"
-      - name: Verify portable source boundary
-        run: python3 scripts/verify-portable-core-boundary.py
-      - name: Test portable graph with native Linux Swift
-        run: |
-          swift --version
-          swift test --configuration release --jobs 4
-
-      # Return the persistent work tree to the runner user so later host jobs
-      # (checkout, cache) can clean it; hosted runners are discarded instead.
-      - name: Restore host work-tree ownership
-        if: always() && runner.environment == 'self-hosted'
-        run: |
-          owner="$(cat "$RUNNER_TEMP/jsti-host-owner")"
-          case "$owner" in [0-9]*:[0-9]*) ;; *) echo "::error::Unknown host owner"; exit 1 ;; esac
-          chown -R "$owner" /__w

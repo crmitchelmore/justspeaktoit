@@ -24,7 +24,7 @@ const hostedFallback = () => 'macos-latest';
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
-  for (const name of ['ci', 'windows', 'linux']) {
+  for (const name of ['ci', 'linux']) {
     const source = readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
     const branches = name === 'ci' ? String.raw`\[main, 'merge-batch\/\*\*'\]` : String.raw`\[main\]`;
     assert.match(source, new RegExp(`^  push:\\n    branches: ${branches}$`, 'm'),
@@ -41,7 +41,7 @@ test('product checks cover stacked pull requests without broadening push or cred
 });
 
 test('desktop native dependency changes select every native and cross-build workflow', () => {
-  for (const name of ['windows', 'linux', 'windows-arm64', 'windows-cross-proof']) {
+  for (const name of ['linux', 'windows-arm64', 'windows-cross-proof']) {
     const source = readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
     for (const event of ['push', 'pull_request']) {
       const trigger = source.match(new RegExp(`^  ${event}:\\n((?: {4}[^\\n]*\\n|\\n)*)`, 'm'));

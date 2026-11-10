@@ -24,6 +24,7 @@ on:
         description: Manifest tag to sign and publish (blank rehearses the current Alpha)
         type: string
   push:
+    branches-ignore: ['merge-batch/**']
     paths:
       - scripts/windows-package/**
       - scripts/windows-bundle/BundleCLI.ps1
@@ -45,6 +46,7 @@ env:
 
 jobs:
   sources:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     name: Fetch the qualified x64 and ARM64 runtime bundles
     runs-on: ubuntu-latest
     timeout-minutes: 15

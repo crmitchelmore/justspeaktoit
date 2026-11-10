@@ -20,12 +20,12 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only cancel superseded PR runs; keep main/scheduled analyses intact.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Newest-only on PRs and main: a newer main push analyses a superset.
+  cancel-in-progress: true
 
 jobs:
   changes:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'merge-batch/')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -52,7 +52,7 @@ jobs:
     # A skipped job still reports a check; event-level path filters can leave
     # required checks pending. Unknown/failed path detection runs the scan.
     if: >-
-      always() && (github.event_name != 'pull_request' ||
+      always() && !startsWith(github.head_ref, 'merge-batch/') && (github.event_name != 'pull_request' ||
       needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
     runs-on: macos-15
     # CodeQL tracing slows the Swift build, so this gets more headroom than
@@ -77,14 +77,14 @@ jobs:
           xcode-version: "26.2"
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: ${{ matrix.language }}
 
       # Cache dependency sources only. Compiled objects must remain uncached so
       # CodeQL observes every compiler invocation during the traced build.
       - name: Cache Swift dependency sources
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .build/repositories
@@ -101,6 +101,6 @@ jobs:
         run: swift build --disable-automatic-resolution
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: "/language:${{ matrix.language }}"

@@ -1,7 +1,16 @@
-# Labels for self-hosted runners this repository expects. Without them
-# `actionlint` reports every custom label as unknown.
+# Self-hosted runner labels this repository may target. actionlint rejects any
+# other non-hosted label in a static `runs-on`, and
+# scripts/tests/workflow-supply-chain.test.mjs applies the same allowlist to the
+# JSON label lists inside routing expressions. Every self-hosted label set must
+# include one of the reviewed labels below, so a generic `self-hosted`/`macOS`
+# set can never land on the owner's own Mac.
 self-hosted-runner:
   labels:
+    # Reviewed native Mac pool, admitted only for an approved exact SHA
+    # (Docs/native-runner-pool.md).
+    - jsti-reviewed-local
+    # Reviewed Linux runner, admitted the same way.
+    - omarchy-local
     # The macOS runner with a provisioned iPhone attached, used by the opt-in
     # `ios-device-matrix.yml` workflow.
     - ios-device

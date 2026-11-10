@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -66,7 +67,7 @@ fun CleanupModelPickerDialog(
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = back) {
+                    IconButton(onClick = back, modifier = Modifier.testTag(AutomationIds.CLEANUP_PICKER_BACK)) {
                         Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.action_back))
                     }
                     Text(
@@ -82,7 +83,10 @@ fun CleanupModelPickerDialog(
                         onValueChange = { query = it },
                         label = { Text(stringResource(R.string.cleanup_picker_search)) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                            .testTag(AutomationIds.CLEANUP_PICKER_SEARCH),
                     )
                     val results = CleanupModelPicker.filter(openRouter, query)
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -126,6 +130,7 @@ private fun ModelRow(model: CleanupModel, isSelected: Boolean, hasKey: Boolean, 
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
+            .testTag(AutomationIds.cleanupPickerModel(model.selectionId))
             .selectable(selected = isSelected, role = Role.RadioButton, onClick = onClick)
             .padding(vertical = 8.dp),
     ) {
@@ -149,6 +154,7 @@ private fun OpenRouterRow(count: Int, selected: CleanupModel?, onOpen: () -> Uni
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
+            .testTag(AutomationIds.CLEANUP_PICKER_OPENROUTER)
             .clickable(role = Role.Button, onClick = onOpen)
             .semantics(mergeDescendants = true) {
                 contentDescription = CloudProvider.OpenRouter.displayName + ", " + detail

@@ -13,5 +13,6 @@ Follow [AGENTS.md](../AGENTS.md); it is the authoritative guide for this reposit
    failing run; if a failure is genuinely unrelated, say so in the PR body.
 3. Paste the output of `scripts/pre-pr --markdown` (also saved to
    `.build/pre-pr/summary.md`) into the PR body's **Pre-PR checks** section,
-   keeping its hidden `pre-pr-summary` marker. Re-run and update it after
-   material changes.
+   keeping its hidden `pre-pr-summary` marker. CI blocks unless the record
+   passed for the exact pushed head (or its tree), so re-run and update it
+   after every push.

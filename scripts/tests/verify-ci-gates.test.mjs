@@ -475,7 +475,7 @@ const allOutputs = value => Object.fromEntries(flags.map(flag => [flag, value]))
 const gateFlags = Object.fromEntries(Object.entries(gateJobs).flatMap(([flag, ids]) => ids.map(id => [id, flag])));
 
 function passing() {
-  return Object.fromEntries(['release-paths', 'paid-access-worker', ...Object.keys(gateFlags)]
+  return Object.fromEntries(['release-paths', 'paid-access-worker', 'pre-pr-evidence', ...Object.keys(gateFlags)]
     .map(id => [id, { result: 'success', outputs: allOutputs('true') }]));
 }
 
@@ -490,7 +490,7 @@ function pullRequest({ apple = 'true', swift = 'true' } = {}) {
 
 test('aggregate needs exactly the gate jobs and path detection', () => {
   const listed = [...aggregate.split('    permissions:')[0].matchAll(/^      - ([a-z0-9-]+)$/gm)].map(([, id]) => id).sort();
-  assert.deepEqual(listed, ['release-paths', 'paid-access-worker', ...Object.keys(gateFlags)].sort());
+  assert.deepEqual(listed, ['release-paths', 'paid-access-worker', 'pre-pr-evidence', ...Object.keys(gateFlags)].sort());
 });
 
 test('accepts all successful gates on pushes and ci:full pull requests', () => {
@@ -551,7 +551,7 @@ test('every gate job honours exactly its path-detection output', () => {
   for (const [id, flag] of Object.entries(gateFlags)) {
     const chained = id in macLanes && !['build-ios', 'core-journey-e2e'].includes(id);
     const pattern = chained
-      ? `^    if: \\$\\{\\{ !cancelled\\(\\) && needs\\.release-paths\\.outputs\\.${flag} == 'true' \\}\\}$`
+      ? `^    if: \\$\\{\\{ !cancelled\\(\\) && needs\\.${macLanes[id]}\\.result != 'skipped' && needs\\.release-paths\\.outputs\\.${flag} == 'true' \\}\\}$`
       : `^    if: needs\\.release-paths\\.outputs\\.${flag} == 'true'$`;
     assert.match(jobBodies[id], new RegExp(pattern, 'm'), id);
   }
@@ -569,6 +569,28 @@ test('full runs ask for at most four hosted macOS slots at once', () => {
   assert.deepEqual(laneHeads.sort(),
     ['build-ios-test-products', 'build-macos', 'core-journey-fixture-ui', 'release-validation']);
   assert.match(jobBodies['core-journey-fixture-ui'], /^      max-parallel: 1$/m, 'UI shards share one slot');
+});
+
+test('macOS lanes start only after the cheap Ubuntu gates pass', () => {
+  for (const id of ['build-macos', 'core-journey-fixture-ui', 'release-validation', 'build-ios-test-products']) {
+    assert.match(jobBodies[id], /^    needs: \[release-paths, lint, portable-linux, pre-pr-evidence\]$/m, id);
+    assert.doesNotMatch(jobBodies[id], /^    if: .*(?:always|cancelled)\(\)/m, `${id}: a failed cheap gate must skip it`);
+  }
+  for (const id of ['lint', 'portable-linux', 'pre-pr-evidence']) {
+    assert.match(jobBodies[id], /^    runs-on: ubuntu-[\w.]+$/m, id);
+  }
+});
+
+test('pre-PR evidence is strict, exact-head and blocks the gate on pull requests', () => {
+  const body = jobBodies['pre-pr-evidence'];
+  assert.doesNotMatch(body, /^    if:/m, 'it always reports, passing straight through on pushes');
+  assert.match(body, /JSTI_PRE_PR_STRICT: "true"/);
+  assert.match(body, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(body, /git rev-parse 'HEAD\^\{tree\}'/);
+  assert.match(body, /!startsWith\(github\.head_ref, 'merge-batch\/'\)/);
+  assert.match(body, /gh api "\$PR_URL" --jq '\.body \/\/ ""'/, 'reads the current body, not the event snapshot');
+  assert.doesNotMatch(body, /continue-on-error/);
+  assert.match(aggregate, /needs\.pre-pr-evidence\.result != 'success'/);
 });
 
 test('flaky iOS UI tests are quarantined to a bounded, non-gating step', () => {

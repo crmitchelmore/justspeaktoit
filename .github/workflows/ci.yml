@@ -30,7 +30,9 @@ jobs:
   build-macos:
     # The aggregate required-macos job owns the required branch-protection name.
     name: Build & Test (macOS Debug)
-    needs: release-paths
+    # Fail fast: no hosted macOS slot is taken until the cheap Ubuntu gates
+    # (Lint, Portable Swift (Linux), pre-PR evidence) pass.
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
     # The only macOS job on a pull request: an incremental build (restored
     # from main's cache) plus the unit tests the change can affect. Merge
     # batches and main run the whole suite and the macOS-only tooling tests.
@@ -542,7 +544,9 @@ jobs:
     # Each product/source receipt is separately bounded to 60s, not hidden setup.
     # Setup's retried package resolution may take 11 minutes; tests keep 12.
     timeout-minutes: 47
-    needs: release-paths
+    # Fail fast: no hosted macOS slot is taken until the cheap Ubuntu gates
+    # (Lint, Portable Swift (Linux), pre-PR evidence) pass.
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
     if: needs.release-paths.outputs.full == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -580,7 +584,9 @@ jobs:
     # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 45
-    needs: release-paths
+    # Fail fast: no hosted macOS slot is taken until the cheap Ubuntu gates
+    # (Lint, Portable Swift (Linux), pre-PR evidence) pass.
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
     if: needs.release-paths.outputs.full == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -616,7 +622,9 @@ jobs:
 
   build-ios-test-products:
     name: Build iOS XCTest Products
-    needs: release-paths
+    # Fail fast: no hosted macOS slot is taken until the cheap Ubuntu gates
+    # (Lint, Portable Swift (Linux), pre-PR evidence) pass.
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
     # Merge batches and main only.
     if: needs.release-paths.outputs.full == 'true'
     runs-on: macos-latest
@@ -832,7 +840,8 @@ jobs:
     needs: [release-paths, build-ios]
     # Merge batches and main only.
     # Follows the simulator job in the same macOS lane.
-    if: ${{ !cancelled() && needs.release-paths.outputs.full == 'true' }}
+    # Runs after its predecessor fails, but not when fail-fast skipped it.
+    if: ${{ !cancelled() && needs.build-ios.result != 'skipped' && needs.release-paths.outputs.full == 'true' }}
     # Renamed from "Build iOS Keyboard (direct capture)" (issue #991). It is
     # not a required status check, so the rename costs nothing, and the old
     # name had become misleading: the job now builds the *shipping* hand-off
@@ -925,6 +934,47 @@ jobs:
             -skipPackagePluginValidation \
             -quiet \
             2>&1 | tail -30
+
+  # Pull requests must carry a passing `scripts/pre-pr` record for the exact
+  # head (or its tree) in the current PR body, so a failure that pre-pr would
+  # have caught never reaches a macOS slot. Bots and merge-batch PRs (whose
+  # push run is the full gate) are exempt; pushes pass straight through. The
+  # body is re-read for up to three minutes because it is usually updated
+  # just after the push that started this run.
+  pre-pr-evidence:
+    name: Pre-PR evidence (blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: scripts/check-pre-pr-evidence.py
+          sparse-checkout-cone-mode: false
+      - name: Require a passing scripts/pre-pr record for this head
+        if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'merge-batch/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          JSTI_PRE_PR_STRICT: "true"
+        run: |
+          PR_HEAD_TREE="$(git rev-parse 'HEAD^{tree}')"
+          export PR_HEAD_TREE
+          for attempt in 1 2 3 4 5 6 7; do
+            PR_BODY="$(gh api "$PR_URL" --jq '.body // ""')" || PR_BODY=''
+            export PR_BODY
+            if python3 scripts/check-pre-pr-evidence.py; then exit 0; fi
+            [ "$attempt" -lt 7 ] && sleep 30
+          done
+          echo "::error::Run scripts/pre-pr on this commit (or its exact tree) and paste its --markdown output into the PR body."
+          exit 1
 
   lint:
     name: Lint
@@ -1034,7 +1084,8 @@ jobs:
     # Merge batches (baseline: origin/main) and main (baseline: the previous
     # main commit) only.
     # Follows Release in the same macOS lane.
-    if: ${{ !cancelled() && needs.release-paths.outputs.full == 'true' }}
+    # Runs after its predecessor fails, but not when fail-fast skipped it.
+    if: ${{ !cancelled() && needs.release-validation.result != 'skipped' && needs.release-paths.outputs.full == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1115,6 +1166,7 @@ jobs:
       - portable-linux
       - lint
       - paid-access-worker
+      - pre-pr-evidence
       - build-ios
       - build-ios-test-products
       - build-ios-keyboard
@@ -1147,6 +1199,7 @@ jobs:
           always() && (
             needs.release-paths.result != 'success' ||
             needs.paid-access-worker.result != 'success' ||
+            needs.pre-pr-evidence.result != 'success' ||
             (needs.release-paths.outputs.apple != 'true' && needs.release-paths.outputs.apple != 'false') ||
             (needs.release-paths.outputs.swift != 'true' && needs.release-paths.outputs.swift != 'false') ||
             (needs.release-paths.outputs.full != 'true' && needs.release-paths.outputs.full != 'false') ||

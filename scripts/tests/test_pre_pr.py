@@ -328,6 +328,17 @@ class EvidenceTests(unittest.TestCase):
     def test_stale_record_is_a_warning(self):
         self.assertEqual(evidence.evaluate(self.body(head='d' * 40), self.head, 'crmitchelmore')[0], 'warning')
 
+    def test_strict_mode_rejects_a_record_for_another_commit(self):
+        stale = self.body(head='d' * 40)
+        self.assertEqual(evidence.evaluate(stale, self.head, 'crmitchelmore', strict=True)[0], 'error')
+        self.assertEqual(evidence.evaluate(self.body(), self.head, 'crmitchelmore', strict=True)[0], 'ok')
+
+    def test_strict_mode_accepts_a_record_for_the_same_tree(self):
+        tree = 'e' * 40
+        body = stale = self.body(head='d' * 40).replace('"result"', f'"tree": "{tree}", "result"')
+        self.assertEqual(evidence.evaluate(body, self.head, 'crmitchelmore', tree, strict=True)[0], 'ok')
+        self.assertEqual(evidence.evaluate(stale, self.head, 'crmitchelmore', 'f' * 40, strict=True)[0], 'error')
+
     def test_bots_are_exempt(self):
         for bot in ('dependabot[bot]', 'devin-ai-integration[bot]', 'Copilot[bot]'):
             self.assertEqual(evidence.evaluate('', self.head, bot)[0], 'ok', bot)

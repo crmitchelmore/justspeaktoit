@@ -242,8 +242,10 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
   into the PR body's **Pre-PR checks** section. Keep the hidden
   `pre-pr-summary` marker. It records `head` and `tree`, the tree of the
   checked working copy, so a run before committing still matches the pushed
-  commit if you commit exactly what was checked. The `Pre-PR evidence`
-  workflow reads it; `JSTI_REQUIRE_PRE_PR=true` enforces it.
+  commit if you commit exactly what was checked. CI's `Pre-PR evidence
+  (blocking)` job fails CI Gate, before any macOS job starts, unless the newest
+  record passed for the exact PR head commit or its identical tree. Re-run it
+  after every push. Only Dependabot is exempt.
 - `scripts/ci-metrics` reports the escape rate: the share of PR and batch CI
   failures whose head had a passing record. The target is under 1%.
 - The machine-readable result is `.build/pre-pr/summary.json`; per-check logs

@@ -92,8 +92,12 @@ jobs:
   # Signs, stages, clean-installs and then publishes the Windows beta
   # installer for the qualified runtime bundles. Without the Artifact Signing
   # configuration it rehearses and publishes nothing.
+  # The Alpha release stays a draft until mac-direct's publish-alpha step, and
+  # this workflow's read-only fetch token cannot see draft releases, so it
+  # waits for mac-direct (every Alpha from 8 Nov failed with "release not
+  # found" while reading desktop-qualification.json from the draft).
   windows-installer:
-    needs: [allocate, desktop-qualification]
+    needs: [allocate, desktop-qualification, mac-direct]
     if: needs.allocate.outputs.tag != ''
     permissions:
       contents: write
@@ -105,8 +109,9 @@ jobs:
     secrets: inherit
   # Publishes the qualified Linux bundle to the signed, self-hosted Flatpak
   # repository. Without the flatpak-repo signing key it rehearses only.
+  # Like windows-installer, it reads release assets with a read-only token.
   linux-flatpak-repo:
-    needs: [allocate, desktop-qualification]
+    needs: [allocate, desktop-qualification, mac-direct]
     if: needs.allocate.outputs.tag != ''
     permissions:
       contents: read

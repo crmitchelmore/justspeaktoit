@@ -40,6 +40,39 @@ import windows_pe  # noqa: E402
 import windows_targets  # noqa: E402
 sys.path.insert(0, str(HERE.parent / "local-llm-runtime"))
 import local_llm_package  # noqa: E402
+import http.client
+import time
+import urllib.error
+
+# GitHub release assets and other pinned sources intermittently return 5xx or
+# time out; an outage on 9 Nov lasted well over the old single attempt. The
+# bytes are pinned by size and SHA-256, so retrying is safe.
+NETWORK_RETRY_DELAYS = (10, 30, 60, 120)
+
+
+def download_with_retry(source, timeout, path, limit, oversize):
+    """Stream source into path, retrying transient network failures."""
+    for delay in (*NETWORK_RETRY_DELAYS, None):
+        try:
+            with urllib.request.urlopen(source, timeout=timeout) as response, path.open("wb") as output:
+                count = 0
+                while chunk := response.read(1 << 20):
+                    count += len(chunk)
+                    if count > limit:
+                        raise oversize()
+                    output.write(chunk)
+            return
+        except urllib.error.HTTPError as error:
+            if delay is None or (error.code < 500 and error.code != 429):
+                raise
+            reason = "HTTP %d" % error.code
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as error:
+            if delay is None:
+                raise
+            reason = str(error)
+        print("Download failed (%s); retrying in %ds" % (reason, delay), flush=True)
+        time.sleep(delay)
+
 
 LOCAL_RUNTIME_PINS = HERE.parent / "windows-local-runtime" / "dependencies.json"
 APPLICATION = "SpeakWindows.exe"
@@ -297,13 +330,8 @@ def download(entry, directory):
         return destination
     temporary = destination.with_name(name + ".partial")
     print("Downloading pinned file: " + name, flush=True)
-    with urllib.request.urlopen(entry["url"], timeout=120) as response, temporary.open("wb") as output:
-        count = 0
-        while chunk := response.read(1024 * 1024):
-            count += len(chunk)
-            if count > entry["bytes"]:
-                raise BundleError("download exceeded its pinned size: " + name)
-            output.write(chunk)
+    download_with_retry(entry["url"], 120, temporary, entry["bytes"],
+                        lambda: BundleError("download exceeded its pinned size: " + name))
     if temporary.stat().st_size != entry["bytes"] or digest_file(temporary) != entry["sha256"]:
         temporary.unlink(missing_ok=True)
         raise BundleError("downloaded file checksum mismatch: " + name)

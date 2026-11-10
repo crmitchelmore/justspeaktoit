@@ -1029,7 +1029,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: required-macos
-    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       issues: write
     steps:

@@ -555,7 +555,7 @@ test('API compatibility runs on main against the previous main commit', () => {
 
 test('main failures open a tracking issue from a push-only, checkout-free job', () => {
   const body = jobBodies['report-main-failure'];
-  assert.match(body, /if: failure\(\) && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(body, /if: failure\(\) && !cancelled\(\) && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
   assert.match(body, /needs: required-macos/);
   assert.match(body, /issues: write/);
   assert.doesNotMatch(body, /checkout|scripts\//);

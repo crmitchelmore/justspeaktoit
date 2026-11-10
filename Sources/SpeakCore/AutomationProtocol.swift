@@ -48,6 +48,8 @@ public enum AutomationCommand: String, Codable, Sendable, CaseIterable {
     case stopDictation = "stop_dictation"
     case history = "get_history"
     case awaitTranscript = "await_transcript"
+    case speakText = "speak_text"
+    case listVoices = "list_voices"
 }
 
 /// Stable machine-readable failure codes.
@@ -64,6 +66,7 @@ public enum AutomationErrorCode: String, Codable, Sendable {
     case notRecording = "not_recording"
     case alreadyRecording = "already_recording"
     case transcriptionFailed = "transcription_failed"
+    case speechFailed = "speech_failed"
     case timedOut = "timed_out"
     case internalError = "internal_error"
 }
@@ -110,6 +113,9 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     public var timeout: TimeInterval?
     public var captureID: String?
     public var sinceID: String?
+    /// `speak_text` only (`provider` too): see `AutomationSpeechSelection`/`Settings`.
+    public var text: String?, voice: String?, play: Bool?, model: String?, speed: Double?, pitch: Double?
+    public var quality: String?, language: String?
 
     public init(
         schemaVersion: Int = AutomationSchema.currentVersion,
@@ -129,9 +135,12 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     /// cannot use to pin a transcription slot open indefinitely.
     public var resolvedTimeout: TimeInterval {
         if self.command == .awaitTranscript { return self.timeout ?? AutomationLimits.awaitTimeout }
-        let fallback = self.command == .transcribeFile
-            ? AutomationLimits.transcriptionTimeout
-            : AutomationLimits.defaultTimeout
+        let fallback: TimeInterval = switch self.command {
+        case .transcribeFile: AutomationLimits.transcriptionTimeout
+        case .speakText: AutomationLimits.speechTimeout
+        case .listVoices: AutomationLimits.voiceListingTimeout
+        default: AutomationLimits.defaultTimeout
+        }
         guard let timeout, timeout > 0 else { return fallback }
         return min(timeout, AutomationLimits.maxTimeout)
     }
@@ -160,6 +169,7 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
         if self.command != .awaitTranscript, self.captureID != nil || self.sinceID != nil {
             throw AutomationError(code: .invalidArgument, message: "Capture cursors require await_transcript.")
         }
+        try self.validateSpeechFields()
         switch self.command {
         case .awaitTranscript:
             try self.validateAwait()
@@ -180,7 +190,7 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
                     message: "get_history limit must be between 1 and \(AutomationLimits.maxHistoryLimit)."
                 )
             }
-        case .status, .startDictation, .stopDictation:
+        case .status, .startDictation, .stopDictation, .speakText, .listVoices:
             break
         }
         return self
@@ -244,6 +254,9 @@ public struct AutomationResult: Codable, Sendable, Equatable {
     public var entries: [AutomationHistoryEntry]?
     public var captureID: String?
     public var entry: AutomationHistoryEntry?
+    /// `speak_text`: the voice used, the file written and any `notice` worth
+    /// telling a person (such as a fallback); `list_voices`: `voices`.
+    public var voice: String?, path: String?, notice: String?, voices: [AutomationVoice]?
 
     public init(
         text: String? = nil,

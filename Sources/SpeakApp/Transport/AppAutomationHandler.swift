@@ -11,21 +11,24 @@ import SpeakCore
 /// existing session and provider pipelines so an automation session behaves
 /// exactly like a hotkey session.
 @MainActor
-final class AppAutomationHandler: AutomationCommandHandling, AutomationCommandHost {
-    private let main: MainManager
+final class AppAutomationHandler: AutomationCommandHandling, AutomationSpeechHost {
+    let main: MainManager
     private let history: HistoryManager
     private let transcription: TranscriptionManager
+    let tts: TextToSpeechManager
     private let appVersion: String
 
     init(
         main: MainManager,
         history: HistoryManager,
         transcription: TranscriptionManager,
+        tts: TextToSpeechManager,
         appVersion: String
     ) {
         self.main = main
         self.history = history
         self.transcription = transcription
+        self.tts = tts
         self.appVersion = appVersion
     }
 

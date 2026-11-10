@@ -215,7 +215,9 @@ Use the manifest and actual GitHub/App Store Connect publication receipts as
 version/baseline authority. `VERSION` is a build hint only.
 
 ### PR merge unblock checklist
-- If `gh pr merge` says “required status checks are expected” while checks look green, inspect `mergeStateStatus`; if `BEHIND`, rebase on `origin/main` and force-push with lease.
+- The `main` ruleset does not require branches to be up to date. A PR that is only `BEHIND` can merge as-is: do not rebase or merge `main` into it, because every push restarts all of its CI and takes a scarce hosted macOS slot. Update a branch from `main` only on a real conflict (`mergeStateStatus` `DIRTY`) or when a fix it needs has landed on `main`.
+- Main CI runs every gate after the merge and opens a `ci-main-failure` issue if one fails, so it catches the rare semantic conflict a stale branch misses.
+- If `gh pr merge` says “required status checks are expected” while checks look green, a required job is still queued or the run was cancelled; wait for it or re-run it rather than pushing.
 - After each push, re-check unresolved review threads (especially CodeRabbit), as new threads can be created on updated diffs and still block merge.
 - If admin merge fails with `All comments must be resolved.`, resolve the remaining review threads before retrying.
 

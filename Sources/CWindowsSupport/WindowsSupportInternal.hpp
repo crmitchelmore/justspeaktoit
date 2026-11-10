@@ -28,6 +28,14 @@
 #include <limits>
 
 namespace jsti {
+namespace accessibility {
+// UI thread: speaks `text` through UI Automation notifications (Narrator, NVDA, JAWS).
+void announce(HWND element, const std::wstring &text, bool important);
+// UI thread: checks that every shown, focusable child of `root` has a unique
+// AutomationId and an accessible name. Returns the number checked, or -1 with `failure`.
+int audit(HWND root, std::string &failure);
+} // namespace accessibility
+
 // The latest microphone frame's loudness for the recording HUD's meter: 0 at
 // or below -50 dBFS, 1 at full scale. The capture thread publishes it with one
 // relaxed atomic store per frame; the UI thread reads it while drawing.

@@ -242,6 +242,21 @@ sessions:
           - "Turn on VoiceOver, press \u2318F, type \"mic\" and move through the results."
         expected: "Each choice opens the right Settings page, scrolls to the card and briefly outlines it (App Behaviour, Keyboard \u203a Activation, then the OpenAI key card). VoiceOver reads each result as its title and page with a hint, and the outline is not announced."
         final_gate: true
+      - id: "mac-website-voiceover"
+        issues:
+          - 1400
+        title: "Website: VoiceOver and keyboard reach everything"
+        minutes: 6
+        core: false
+        build: "justspeaktoit.com after the accessibility guards PR is deployed"
+        steps:
+          - "In Safari open justspeaktoit.com, press Tab once and check that Skip to content appears; press Return."
+          - "Keep pressing Tab through the page and check that every focused link or button has a visible outline."
+          - "Turn on VoiceOver (Command-F5), open the rotor (Control-Option-U) and browse Links and Headings."
+          - "Repeat the Tab and rotor checks on /privacy, /support and /qa; on /qa mark one check Pass."
+          - "Switch macOS to the other appearance (light or dark) and glance over each page."
+        expected: "Every link, button and form control has a spoken name that says what it does, focus is always visible, the /qa progress and status changes are read aloud, and text stays readable in both appearances."
+        final_gate: false
       - id: "mac-voiceover-pass"
         issues:
           - 1399
@@ -629,3 +644,26 @@ sessions:
           - "Swipe to the new capture row."
         expected: "The button reads Start recording, then Stop recording, and the row reads its time, length and status as one item."
         final_gate: true
+  - id: "decisions"
+    device: "Decision"
+    title: "Decisions"
+    items:
+      - id: "decision-non-apple-screen-readers"
+        issues:
+          - 1400
+        title: "Where should Windows, Linux and Android screen-reader checks run?"
+        minutes: 2
+        core: false
+        question: "CI now audits names, IDs and announcements on Windows, Linux and Android. How should a real Narrator, Orca or TalkBack pass happen?"
+        context: "The /qa checklist only has Mac, iPhone and Watch sessions. Real screen-reader passes need a Windows PC, a Linux desktop and an Android phone."
+        options:
+          - id: "ci-and-reports"
+            label: "Rely on the CI audits and fix reported problems"
+            consequence: "No new owner sessions; spoken wording is checked only when a user reports a problem."
+            recommended: true
+          - id: "owner-devices"
+            label: "Add Windows, Linux and Android sessions to /qa"
+            consequence: "Adds device sessions and about 15 minutes per platform for each release that changes their UI."
+          - id: "external-tester"
+            label: "Ask an external tester who uses a screen reader"
+            consequence: "Best evidence of real use, but needs a tester and a way to share builds."

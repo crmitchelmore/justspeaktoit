@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Opt-in: install a git pre-push hook that runs scripts/pre-pr before every push.
+#
+#   scripts/install-pre-pr-hook             # install (refuses to replace a foreign hook)
+#   scripts/install-pre-pr-hook --chain     # keep an existing hook and run it first
+#   scripts/install-pre-pr-hook --uninstall # remove the hook (restores a chained one)
+#
+# The hook lives in the shared hooks directory, so every worktree of this clone
+# uses it. Skip it for one push with JSTI_SKIP_PRE_PR=1 or `git push --no-verify`.
+# Pushes that only delete branches or push tags are not checked.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+hooks="$(cd "$root" && git rev-parse --path-format=absolute --git-path hooks)"
+hook="$hooks/pre-push"
+chained="$hooks/pre-push.pre-pr-chained"
+marker='# jsti-pre-pr-hook'
+
+case "${1:-}" in
+    --uninstall)
+        if [ -f "$hook" ] && grep -q "$marker" "$hook"; then
+            rm "$hook"
+            [ -f "$chained" ] && mv "$chained" "$hook"
+            echo "Removed the pre-PR pre-push hook from $hooks"
+        else
+            echo "No pre-PR pre-push hook installed in $hooks"
+        fi
+        exit 0
+        ;;
+    --chain | "") ;;
+    *) echo "usage: $0 [--chain|--uninstall]" >&2; exit 2 ;;
+esac
+
+mkdir -p "$hooks"
+if [ -f "$hook" ] && ! grep -q "$marker" "$hook"; then
+    if [ "${1:-}" != "--chain" ]; then
+        echo "A different pre-push hook already exists at $hook." >&2
+        echo "Re-run with --chain to keep it (it runs first), or remove it." >&2
+        exit 1
+    fi
+    mv "$hook" "$chained"
+fi
+
+cat > "$hook" <<'HOOK'
+#!/usr/bin/env bash
+# jsti-pre-pr-hook: installed by scripts/install-pre-pr-hook
+set -euo pipefail
+hooks="$(dirname "$0")"
+stdin="$(cat)"
+if [ -x "$hooks/pre-push.pre-pr-chained" ]; then
+    printf '%s\n' "$stdin" | "$hooks/pre-push.pre-pr-chained" "$@"
+fi
+[ "${JSTI_SKIP_PRE_PR:-}" = "1" ] && { echo "pre-pr: skipped (JSTI_SKIP_PRE_PR=1)"; exit 0; }
+# Only branch pushes with a new tip are checked.
+needs_check=0
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+    case "$local_ref" in refs/heads/*) ;; *) continue ;; esac
+    [ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue
+    needs_check=1
+done <<< "$stdin"
+[ "$needs_check" = 1 ] || exit 0
+root="$(git rev-parse --show-toplevel)"
+if [ ! -x "$root/scripts/pre-pr" ]; then
+    echo "pre-pr: scripts/pre-pr not found on this branch; skipping"
+    exit 0
+fi
+if ! "$root/scripts/pre-pr"; then
+    echo "❌ pre-pr failed — push blocked. Fix the failures, or push with JSTI_SKIP_PRE_PR=1 to bypass." >&2
+    exit 1
+fi
+HOOK
+chmod +x "$hook"
+echo "Installed pre-push hook at $hook (runs scripts/pre-pr). Remove with: $0 --uninstall"

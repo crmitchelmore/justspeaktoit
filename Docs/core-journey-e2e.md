@@ -155,8 +155,8 @@ attached to `xcresult`. This is a full batch **clipboard-route** journey; it doe
 not claim a physical microphone, permission-denial regression, direct AX
 insertion, or native editor delivery on a runner without posting permission.
 
-The native CI job runs the UI suites as parallel `foundation` and `p0` shards
-(see below), each within the existing 42-minute job limit. The staged command budgets are 300 seconds for setup, 900 seconds for
+The native CI job runs the UI suites as `foundation` and `p0` shards, one after
+the other so the gate holds a single hosted macOS slot (see below), each within the existing 42-minute job limit. The staged command budgets are 300 seconds for setup, 900 seconds for
 build, and 600 seconds for tests, with separately bounded source/product receipts.
 `scripts/verify-core-journey-ui.py` and the active staged runner share the exact
 suite and named-case checks. Missing, skipped, failed, zero-test, or duplicated

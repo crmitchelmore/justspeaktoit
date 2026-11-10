@@ -30,3 +30,7 @@ research/
 
 # Project-local Alpha run bundle
 /dist/
+
+# Python bytecode written by tooling tests
+__pycache__/
+*.pyc

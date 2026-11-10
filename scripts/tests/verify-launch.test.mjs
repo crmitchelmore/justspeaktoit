@@ -3,7 +3,15 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
+
+// verify-launch.sh qualifies macOS app launches (ps birth times, DiagnosticReports
+// delivery); on the Linux Lint runner its timing races are not meaningful.
+// Merge batches and main run this file on macOS through make test-tooling.
+const macOnly = process.platform !== 'darwin' && 'macOS launch verifier';
+const test = (name, options, fn) => (typeof options === 'function'
+  ? nodeTest(name, { skip: macOnly }, options)
+  : nodeTest(name, { ...options, skip: options.skip || macOnly }, fn));
 import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('../verify-launch.sh', import.meta.url));

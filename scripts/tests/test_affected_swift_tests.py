@@ -1,0 +1,62 @@
+import importlib.util
+import unittest
+from pathlib import Path
+
+SCRIPT = Path(__file__).resolve().parents[1] / "affected-swift-tests.py"
+spec = importlib.util.spec_from_file_location("affected_swift_tests", SCRIPT)
+affected = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(affected)
+
+
+def target(name, kind="regular", deps=(), path=None):
+    return {"name": name, "type": kind, "path": path,
+            "dependencies": [{"byName": [dep, None]} for dep in deps]}
+
+
+PACKAGE = {"targets": [
+    target("SpeakCore"),
+    target("SpeakSync", deps=["SpeakCore"]),
+    target("SpeakApp", "executable", deps=["SpeakCore", "SpeakSync"]),
+    target("SpeakiOSLib", deps=["SpeakCore"], path="Sources/SpeakiOS"),
+    target("SpeakCoreTests", "test", deps=["SpeakCore"]),
+    target("SpeakSyncTests", "test", deps=["SpeakSync"]),
+    target("SpeakAppTests", "test", deps=["SpeakApp"]),
+    target("SpeakiOSTests", "test", deps=["SpeakiOSLib"]),
+    target("SpeakDesktopTests", "test", deps=["SpeakCore"]),
+]}
+
+
+class SelectionTests(unittest.TestCase):
+    def test_a_leaf_change_selects_only_its_dependants(self):
+        self.assertEqual(affected.select(["Sources/SpeakApp/View.swift"], PACKAGE, set()),
+                         ("filtered", ["SpeakAppTests"]))
+        self.assertEqual(affected.select(["Sources/SpeakiOS/Screen.swift"], PACKAGE, set()),
+                         ("filtered", ["SpeakiOSTests"]))
+
+    def test_a_shared_change_selects_every_transitive_dependant(self):
+        mode, selected = affected.select(["Sources/SpeakSync/Store.swift"], PACKAGE, set())
+        self.assertEqual((mode, selected), ("filtered", ["SpeakAppTests", "SpeakSyncTests"]))
+        mode, selected = affected.select(["Sources/SpeakCore/Model.swift"], PACKAGE, {"SpeakDesktopTests"})
+        self.assertEqual(selected, ["SpeakAppTests", "SpeakCoreTests", "SpeakSyncTests", "SpeakiOSTests"])
+
+    def test_a_test_file_selects_its_own_target(self):
+        self.assertEqual(affected.select(["Tests/SpeakCoreTests/ModelTests.swift"], PACKAGE, set()),
+                         ("filtered", ["SpeakCoreTests"]))
+
+    def test_manifest_support_and_unmapped_sources_select_everything(self):
+        for path in ("Package.swift", "Tests/SpeakTestSupport/Fake.swift", "Sources/Unknown/File.swift",
+                     ".github/workflows/ci.yml"):
+            mode, selected = affected.select([path], PACKAGE, {"SpeakDesktopTests"})
+            self.assertEqual(mode, "all", path)
+            self.assertNotIn("SpeakDesktopTests", selected)
+
+    def test_non_swift_changes_select_nothing(self):
+        self.assertEqual(affected.select(["Docs/readme.md", "scripts/tool.py"], PACKAGE, set()), ("none", []))
+
+    def test_skipped_targets_never_run_on_the_pull_request(self):
+        self.assertEqual(affected.select(["Tests/SpeakDesktopTests/A.swift"], PACKAGE, {"SpeakDesktopTests"}),
+                         ("none", []))
+
+
+if __name__ == "__main__":
+    unittest.main()

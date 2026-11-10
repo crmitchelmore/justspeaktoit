@@ -14,8 +14,10 @@ import hashlib
 import json
 import mmap
 from pathlib import Path
+import platform
 import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
@@ -110,15 +112,33 @@ def download(pin, directory):
     return destination
 
 
-def pinned_seven(downloads, cross=windows_targets.CROSS_PINS):
-    """The macOS 7-Zip console pinned for the cross build, extracted beside its download."""
-    lock = json.loads(Path(cross).read_text(encoding="utf-8"))
-    pin = next(item for item in lock["downloads"] if item["name"].endswith("-mac.tar.xz"))
+def seven_pin(host=None, machine=None, cross=windows_targets.CROSS_PINS, bundle=windows_targets.BUNDLE_PINS):
+    """The pinned 7-Zip console archive for this host: macOS from the cross lock, Linux from the bundle lock."""
+    host = host or sys.platform
+    machine = (machine or platform.machine()).lower()
+    if host == "darwin":
+        lock = json.loads(Path(cross).read_text(encoding="utf-8"))
+        return next(item for item in lock["downloads"] if item["name"].endswith("-mac.tar.xz"))
+    if host.startswith("linux"):
+        machine = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+        lock = json.loads(Path(bundle).read_text(encoding="utf-8"))
+        for item in lock.get("sevenZipLinux", []):
+            if item["machine"] == machine:
+                return item
+    raise PinError("no pinned 7-Zip console for %s/%s; pass --seven" % (host, machine))
+
+
+def pinned_seven(downloads, pin=None):
+    """The pinned 7-Zip console for this host, extracted beside its verified download."""
+    pin = pin or seven_pin()
     archive = download(pin, downloads)
-    target = downloads / "sevenzip"
+    target = downloads / ("sevenzip-" + pin["name"].removesuffix(".tar.xz"))
     if not (target / "7zz").exists():
         target.mkdir(exist_ok=True)
-        subprocess.run(["tar", "-xf", str(archive), "-C", str(target)], check=True)
+        with tarfile.open(archive) as bundle:
+            member = bundle.getmember("7zz")
+            bundle.extract(member, target, filter="data")
+        (target / "7zz").chmod(0o755)
     return target / "7zz"
 
 
@@ -188,7 +208,7 @@ def main(argv=None):
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--installer", type=Path, help="an already downloaded installer")
     source.add_argument("--downloads", type=Path, help="download the pinned installer (and 7-Zip) here")
-    parser.add_argument("--seven", type=Path, help="7-Zip console (default with --downloads: the pinned macOS 7-Zip)")
+    parser.add_argument("--seven", type=Path, help="7-Zip console (default with --downloads: the pinned 7-Zip for this macOS or Linux host)")
     parser.add_argument("--temporary-parent", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path, help="lock file to write")
     parser.add_argument("--runtime-output", type=Path, help="new directory that keeps the extracted runtime")

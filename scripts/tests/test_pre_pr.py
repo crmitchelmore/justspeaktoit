@@ -187,6 +187,9 @@ class SelectionTests(unittest.TestCase):
         'Tests/CoreTests/BehaviourTests+More.swift': 'extension BehaviourTests { func testMore() {} }\n',
         'Tests/CoreTests/ImportOnlyTests.swift': '@testable import Core\n// Core\nfinal class ImportOnlyTests {}\n',
         'Tests/CoreTests/Plus+Cases.swift': 'func helper() {}\n',
+        'Sources/Core/Billable.swift': 'struct Billable {}\n',
+        'Tests/CoreTests/BillableIntegrationTests.swift':
+            '#if JSTI_BILLABLE_INTEGRATION\nfinal class BillableIntegrationTests { let b = Billable() }\n#endif\n',
     }
 
     def setUp(self):
@@ -234,6 +237,11 @@ class SelectionTests(unittest.TestCase):
     def test_imports_and_comments_do_not_count_as_references(self):
         # Core.swift declares `enum Core`; `@testable import Core` and comments must not select every test.
         self.assertEqual(self.select(['Sources/Core/Core.swift']).filters, ['CoreTests\\.'])
+
+    def test_opt_in_integration_files_are_never_selected(self):
+        self.assertEqual(self.select(['Tests/CoreTests/BillableIntegrationTests.swift']).filters, [])
+        # Only an opt-in file names Billable, so its module's test target runs instead.
+        self.assertEqual(self.select(['Sources/Core/Billable.swift']).filters, ['CoreTests\\.'])
 
     def test_full_mode_runs_whole_covering_targets(self):
         self.assertEqual(self.select(['Sources/Core/Helpers.swift'], full=True).filters,

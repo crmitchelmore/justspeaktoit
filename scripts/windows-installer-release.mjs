@@ -66,12 +66,13 @@ export function windowsSources(tag, directory, command = run) {
             mkdirSync(target, {recursive: true});
             gh('run', 'download', String(runID), '--repo', repo, '--name', spec.artifact, '--dir', target);
             const evidence = json(join(target, 'bundle-evidence.json'));
-            const file = desktopDownloadFile(spec, manifest, evidence);
+            const built = receipt.runs[spec.workflow].head_sha;
+            const file = desktopDownloadFile(spec, manifest, evidence, built);
             const sha256 = createHash('sha256').update(readFileSync(join(target, file))).digest('hex');
-            verifyDesktopDownload(spec, manifest, evidence, sha256);
+            verifyDesktopDownload(spec, manifest, evidence, sha256, built);
             // The installer must hold the same bytes the developer download published.
             if (sha256 !== published.sha256) throw Error(`${spec.asset} differs from the bytes ${tag} published`);
-            sources.bundles[spec.architecture] = {workflow: spec.workflow, run: runID, artifact: spec.artifact, zip: file, sha256};
+            sources.bundles[spec.architecture] = {workflow: spec.workflow, run: runID, commit: built, artifact: spec.artifact, zip: file, sha256};
         }
         writeFileSync(join(directory, 'sources.json'), JSON.stringify(sources, null, 2) + '\n');
         return sources;

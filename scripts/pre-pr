@@ -123,6 +123,8 @@ DECL = re.compile(r'^(?:@[\w.]+(?:\([^)\n]*\))?\s+)*(?:(?:public|package|interna
                   r'(class|struct|enum|protocol|actor|typealias|extension)\s+([A-Za-z_]\w*)', re.M)
 TEST_TYPE = re.compile(r'^(?:@[\w.]+(?:\([^)\n]*\))?\s+)*(?:(?:public|internal|private|fileprivate|final)\s+)*'
                        r'(?:class|struct|actor|enum|extension)\s+([A-Za-z_]\w*)', re.M)
+# Opt-in test files are wrapped in `#if JSTI_<NAME>_INTEGRATION` and only compile on request.
+OPT_IN = re.compile(r'^#if JSTI_\w+_INTEGRATION\b', re.M)
 # Imports and line comments name modules and prose, not the types a test exercises.
 NOT_CODE = re.compile(r'^\s*(?:@testable\s+)?import\s+.*$|//.*$', re.M)
 
@@ -216,9 +218,12 @@ def select_tests(files: list[str], full: bool, graph: Graph, exclude: set[str] =
             corpus[target] = [(p, NOT_CODE.sub('', read(p))) for p in sorted(directory.rglob('*.swift'))]
         return corpus[target]
 
-    def add_file(target: str, path: Path, text: str) -> None:
+    def add_file(target: str, path: Path, text: str) -> bool:
+        if OPT_IN.search(text):  # compiled out by default, so it has no tests to run
+            return False
         names = TEST_TYPE.findall(text) or [path.stem.split('+')[0]]
         classes.setdefault(target, set()).update(re.escape(name) for name in names)
+        return True
 
     for path in files:
         if not path.endswith('.swift') or not path.startswith(('Sources/', 'Tests/')):
@@ -253,8 +258,7 @@ def select_tests(files: list[str], full: bool, graph: Graph, exclude: set[str] =
             for test_path, test_text in test_files(target):
                 named = fnmatch.fnmatchcase(test_path.name, f'{prefix}*Tests.swift')
                 if named or (mention and mention.search(test_text)):
-                    add_file(target, test_path, test_text)
-                    matched = True
+                    matched = add_file(target, test_path, test_text) or matched
         # No fallback when an excluded (already run) target covers the module: that run owns it.
         if not matched and not graph.covering(module) & set(exclude):
             own = f'{module}Tests'

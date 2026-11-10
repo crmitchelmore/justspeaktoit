@@ -22,6 +22,22 @@
       "bytes": 635789872
     }
   },
+  "sevenZipLinux": [
+    {
+      "name": "7z2603-linux-x64.tar.xz",
+      "url": "https://github.com/ip7z/7zip/releases/download/26.03/7z2603-linux-x64.tar.xz",
+      "sha256": "dc99eff5008f1ab79bd7084c68513701547a808a89502bf4133683535ab3c695",
+      "bytes": 1575072,
+      "machine": "x86_64"
+    },
+    {
+      "name": "7z2603-linux-arm64.tar.xz",
+      "url": "https://github.com/ip7z/7zip/releases/download/26.03/7z2603-linux-arm64.tar.xz",
+      "sha256": "2389ba20e4d8295e8709c20b6263b69bd1ec4972fe38a04ad7a1badbf595b996",
+      "bytes": 1328620,
+      "machine": "aarch64"
+    }
+  ],
   "licenses": [
     {
       "name": "LICENSE-swift.txt",
@@ -69,6 +85,7 @@
     "swift-runtime-lock.json authenticates every cached Swift DLL against hashes regenerated from the fully SHA-256-verified installer, SHA-512-verified rtl.msi/rtl.cab and reconstructed MSI file identities; cache-local metadata is not trusted.",
     "The ARM64 Visual C++ runtime comes from the same pinned VC_redist.x64.exe: Microsoft documents that the x64 redistributable contains both ARM64 and x64 binaries, and its Burn manifest carries packages\\VC_Runtime_arm64\\VC_Runtime_arm64.msi (Microsoft Visual C++ 2022 Arm64 Runtime 14.51.36247), installed only when Arm64_Check is ARM64. Its runtime DLLs are ARM64X images; its vcruntime140_1.dll is ARM64EC for emulated x64 programs and is never loaded by, or bundled for, a native ARM64 process.",
     "The Swift 6.2.3 ARM64 runtime comes from the official swift.org windows10-arm64 installer (rtl.msi and rtl.cab). Its SHA-256 is the value the microsoft/winget-pkgs Swift.Toolchain 6.2.3 manifest publishes for the arm64 installer; that manifest's x64 value equals the independently computed x64 pin in scripts/windows-cross/dependencies.json.",
-    "Its byte count, 635,789,872, was measured on 2026-09-23 when pin-swift-runtime.py --architecture arm64 downloaded the installer, matched that SHA-256, authenticated rtl.msi and rtl.cab against the installer manifest's SHA-512 digests with the pinned 7-Zip and wrote swift-runtime-lock-arm64.json. Downloads must now match both the SHA-256 and the exact size, and a regenerated lock must equal the committed one."
+    "Its byte count, 635,789,872, was measured on 2026-09-23 when pin-swift-runtime.py --architecture arm64 downloaded the installer, matched that SHA-256, authenticated rtl.msi and rtl.cab against the installer manifest's SHA-512 digests with the pinned 7-Zip and wrote swift-runtime-lock-arm64.json. Downloads must now match both the SHA-256 and the exact size, and a regenerated lock must equal the committed one.",
+    "The Linux 7-Zip 26.03 consoles (sevenZipLinux) are the same official ip7z release as the macOS console pinned in scripts/windows-cross/dependencies.json; their SHA-256 and sizes were measured from the official HTTPS downloads on 2026-11-10. They let the ARM64 runtime bundle assemble on a Linux runner."
   ]
 }

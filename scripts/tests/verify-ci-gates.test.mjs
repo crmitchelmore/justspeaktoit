@@ -14,12 +14,15 @@ const makefile = readFileSync(new URL('../../Makefile', import.meta.url), 'utf8'
 const aggregate = workflow.slice(workflow.indexOf('\n  required-macos:'));
 const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]+:\n|$(?![\s\S]))/gm)]
   .map(([, id, body]) => [id, body]));
-const nativeEligibleJobs = [
-  'build-macos', 'release-validation', 'api-compatibility', 'lint', 'core-journey-e2e',
-  'build-ios-swiftpm', 'build-ios-keyboard',
-];
-const armFallbackJobs = new Set(['lint', 'release-validation', 'build-ios-swiftpm', 'build-ios-keyboard']);
-const hostedFallback = (id) => (armFallbackJobs.has(id) ? 'macos-latest' : 'macos-26-intel');
+// The dedicated two-runner MacBook pool takes the Debug critical path (warm
+// .build) plus light jobs; everything else runs in parallel on hosted macOS.
+const nativeEligibleJobs = ['build-macos', 'lint', 'api-compatibility'];
+const hostedFallback = (id) => (id === 'lint' ? 'macos-latest' : 'macos-26-intel');
+const hostedMacJobs = {
+  'core-journey-e2e': 'macos-26-intel', 'release-validation': 'macos-latest',
+  'build-ios-swiftpm': 'macos-latest', 'build-ios-keyboard': 'macos-latest', 'build-ios-test-products': 'macos-latest',
+  'build-ios': 'macos-latest', 'core-journey-fixture-ui': 'macos-latest',
+};
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
@@ -110,7 +113,7 @@ test('Debug dependency resolution bypasses shared repositories in commands and r
 test('macOS Debug and Core Journey share coverage instrumentation and cache keys', () => {
   const body = jobBodies['build-macos'];
   const journey = jobBodies['core-journey-e2e'];
-  for (const pattern of [/^\s+key:\s*(.+)$/m, /restore-keys:\s*\|\s*\n\s+([^\n]+)/]) {
+  for (const pattern of [/^\s+key:\s*(\$\{\{.+)$/m, /restore-keys:\s*\|\s*\n\s+([^\n]+)/]) {
     const producer = body.match(pattern);
     const consumer = journey.match(pattern);
     assert.ok(producer && consumer, 'Debug and Core Journey must declare matching cache keys');
@@ -136,61 +139,63 @@ function route(id, github, vars = {}) {
   return new Function('github', 'vars', 'fromJSON', `return (${expression});`)(github, vars, JSON.parse);
 }
 
-function routingContext(event = 'pull_request', repository = 'crmitchelmore/justspeaktoit', number = 1200) {
+function routingContext(event = 'pull_request', repository = 'crmitchelmore/justspeaktoit', number = 1200,
+  { actor = 'crmitchelmore', author = 'crmitchelmore', triggeringActor = actor } = {}) {
   return {
     event_name: event, ref: 'refs/heads/main', sha: 'merge-sha', repository: 'crmitchelmore/justspeaktoit',
-    event: { number, pull_request: { head: { sha: 'head-sha', repo: { full_name: repository } } } },
+    actor, triggering_actor: triggeringActor,
+    event: { number, pull_request: { user: { login: author }, head: { sha: 'head-sha', repo: { full_name: repository } } } },
   };
 }
 
 test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
-  for (const id of ['build-ios', 'core-journey-fixture-ui']) {
-    assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
-  }
-  for (const id of ['build-ios-test-products']) {
-    assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
+  // Core Dictation Journey shares build-macos's Intel pool to restore its cache.
+  for (const [id, label] of Object.entries(hostedMacJobs)) {
+    assert.match(jobBodies[id], new RegExp(`^    runs-on: ${label}$`, 'm'), id);
   }
   assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
-  // Intel appears only as the hosted fallback of the native-eligible jobs.
-  assert.doesNotMatch(workflow, /runs-on: macos-26-intel/);
-  // Lint and Release stay on hosted ARM: on Intel they exceeded their job budgets.
+  // Lint stays on hosted ARM when not native: on hosted Intel it exceeded its budget.
   for (const id of nativeEligibleJobs) {
     const hosted = hostedFallback(id);
     assert.ok(jobBodies[id].includes(`|| '["${hosted}"]') }}`), id);
   }
 });
 
-test('native pool still requires the exact reviewed source and trusted event', () => {
+test('native pool admits only owner-authored same-repository sources and trusted events', () => {
+  const pool = ['jsti-reviewed-local', 'macOS'];
+  const bot = 'devin-ai-integration[bot]';
   for (const id of nativeEligibleJobs) {
     // Restore-only gates must share build-macos's hosted architecture to hit its cache.
     const fallback = [hostedFallback(id)];
-    assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
-      ['jsti-reviewed-local', 'macOS']);
+    assert.deepEqual(route(id, routingContext()), pool);
+    assert.deepEqual(route(id, routingContext('pull_request', undefined, 1200,
+      { actor: 'bravostation', author: 'bravostation' })), pool);
     assert.deepEqual(route(id, routingContext(), {
-      JSTI_NATIVE_APPROVED_SHA: 'head-sha',
       JSTI_NATIVE_RUNNER_LABELS: '["jsti-reviewed-local","macOS","X64"]',
     }), ['jsti-reviewed-local', 'macOS', 'X64']);
-    assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
-      fallback, 'PR approval must match the source head, not merge SHA');
-    assert.deepEqual(route(id, routingContext()), fallback, 'unset approval must stay hosted');
-    assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }), fallback);
-    assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo'), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
-      fallback, 'forks cannot enter the native pool');
-    assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
-      ['jsti-reviewed-local', 'macOS']);
-    assert.deepEqual(route(id, routingContext('push')), fallback);
-    assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }), fallback);
-    assert.deepEqual(route(id, { ...routingContext('push'), ref: 'refs/heads/feature' },
-      { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }), fallback);
-    assert.deepEqual(route(id, routingContext('workflow_dispatch'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
-      fallback);
+    assert.deepEqual(route(id, routingContext(), { JSTI_LOCAL_RUNNERS: 'off' }), fallback,
+      'JSTI_LOCAL_RUNNERS=off returns every job to hosted runners');
+    assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo')), fallback,
+      'forks cannot enter the native pool');
+    assert.deepEqual(route(id, routingContext('pull_request', undefined, 1200, { actor: bot, author: bot })),
+      fallback, 'bot-authored pull requests stay hosted');
+    assert.deepEqual(route(id, routingContext('pull_request', undefined, 1200, { author: bot })),
+      fallback, 'an owner push to a bot-authored pull request stays hosted');
+    assert.deepEqual(route(id, routingContext('pull_request', undefined, 1200, { actor: bot })),
+      fallback, 'a bot push to an owner pull request stays hosted');
+    assert.deepEqual(route(id, routingContext('pull_request', undefined, 1200, { triggeringActor: 'someone' })),
+      fallback, 'reruns by other actors stay hosted');
+    assert.deepEqual(route(id, routingContext('push')), pool);
+    assert.deepEqual(route(id, routingContext('push', undefined, 1200, { actor: bot })), fallback);
+    assert.deepEqual(route(id, { ...routingContext('push'), ref: 'refs/heads/feature' }), fallback);
+    for (const event of ['workflow_dispatch', 'schedule', 'pull_request_target', 'workflow_call']) {
+      assert.deepEqual(route(id, routingContext(event)), fallback, `${id}: ${event} stays hosted`);
+    }
   }
 });
 
-test('iOS SwiftPM compilation keeps its command and bounded budget when native eligible', () => {
+test('iOS SwiftPM compilation keeps its command and bounded budget on hosted ARM', () => {
   const body = jobBodies['build-ios-swiftpm'];
-  assert.deepEqual(route('build-ios-swiftpm', routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
-    ['jsti-reviewed-local', 'macOS']);
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
   // The only permitted condition is the shared Android-only skip.
@@ -198,8 +203,8 @@ test('iOS SwiftPM compilation keeps its command and bounded budget when native e
   assert.doesNotMatch(ungated, /if:|bravo-mini-local/);
 });
 
-test('UI jobs cannot be admitted to a native runner by repository variables', () => {
-  for (const id of ['build-ios', 'core-journey-fixture-ui', 'build-ios-test-products']) {
+test('long and UI jobs cannot be admitted to a native runner by repository variables', () => {
+  for (const id of Object.keys(hostedMacJobs)) {
     assert.doesNotMatch(jobBodies[id], /JSTI_NATIVE|jsti-macos-build|jsti-reviewed-local|bravo-mini-local/, id);
   }
 });
@@ -213,7 +218,9 @@ test('Tessl is on demand and preserves trusted-author secret restrictions', () =
 });
 
 test('every Apple build cache isolates architecture, host and workspace, including restore prefixes', () => {
-  const cacheLines = workflow.match(/^\s+(?:key:|restore-keys:).*(?:\n\s+\$\{\{[^\n]+)?/gm);
+  // Plain warm-build-cache keys are runner-local directories, not actions/cache keys.
+  const cacheLines = workflow.match(/^\s+(?:key:|restore-keys:).*(?:\n\s+\$\{\{[^\n]+)?/gm)
+    .filter((line) => !/^\s+key: [\w.-]+$/.test(line));
   assert.equal(cacheLines.length, 7, 'three Swift keys and restore prefixes plus the lint tooling key');
   for (const line of cacheLines) {
     assert.ok(line.includes('${{ runner.arch }}'), line);

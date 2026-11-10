@@ -116,7 +116,10 @@ jobs:
   linux-desktop:
     name: Linux desktop (GTK 4, Swift 6.2.3)
     needs: local-runtime
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-24.04"]') }}
+    # Owner-authored same-repository sources use Omarchy, whose persistent
+    # warm .build makes this otherwise cold release build incremental
+    # (Docs/native-runner-pool.md). Its admission hook must also accept the job.
+    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-24.04"]') }}
     container:
       image: swift:6.2.3-noble@sha256:6dd90eb2359663a2cde8f03e9951f488b23134b3b8fce20e9dcb6cada75dd803
     timeout-minutes: 30
@@ -131,6 +134,14 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+
+      # Self-hosted only: persistent per-runner .build and model folder.
+      - uses: ./.github/actions/warm-build-cache
+        with:
+          key: linux-desktop
+          paths: |
+            .build
+            local-models
 
       - name: Normalize container checkout ancestry
         # Native registry/capture fixtures live under the checkout's .build.
@@ -176,6 +187,7 @@ jobs:
       # The pinned tiny model is downloaded by the app's own installer on a
       # miss and verified against its SHA-256 on every run.
       - name: Restore pinned local models
+        if: runner.environment != 'self-hosted'
         uses: actions/cache@v6
         with:
           path: local-models
@@ -249,9 +261,13 @@ jobs:
 
       # Return the persistent work tree to the runner user so later host jobs
       # (checkout, cache) can clean it; hosted runners are discarded instead.
+      # The container-only warm build cache stays root-owned: its owned
+      # capture-writer fixtures require a root-owned ancestry.
       - name: Restore host work-tree ownership
         if: always() && runner.environment == 'self-hosted'
         run: |
           owner="$(cat "$RUNNER_TEMP/jsti-host-owner")"
           case "$owner" in [0-9]*:[0-9]*) ;; *) echo "::error::Unknown host owner"; exit 1 ;; esac
-          chown -R "$owner" /__w
+          chown "$owner" /__w
+          find /__w -mindepth 1 -maxdepth 1 ! -name .jsti-cache -exec chown -R "$owner" {} +
+

@@ -24,9 +24,11 @@ jobs:
     needs: release-paths
     # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
     if: needs.release-paths.outputs.apple == 'true'
-    # Route only the explicitly reviewed revision to the native pool.
-    # Every selected native runner must also admit this revision locally.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
+    # Owner-authored same-repository sources use the native MacBook, whose
+    # persistent warm .build keeps this critical-path build incremental and
+    # skips the 30-75 minute hosted macOS queue (Docs/native-runner-pool.md).
+    # Every selected native runner must also admit the job locally.
+    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 45
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).
@@ -34,6 +36,12 @@ jobs:
       JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     steps:
       - uses: actions/checkout@v7.0.1
+
+      # Self-hosted only: a persistent per-runner .build replaces actions/cache.
+      - uses: ./.github/actions/warm-build-cache
+        with:
+          key: ci-build-macos
+          paths: .build
 
       - name: Verify process-scoped Keychain isolation
         run: python3 -B -m unittest scripts.tests.test_private_test_keychain -v
@@ -72,7 +80,9 @@ jobs:
 
       # Swift build state embeds absolute paths. Scope both exact and fallback
       # keys to the architecture, stable host identity and checkout workspace.
+      # Hosted only: self-hosted runners keep a warm .build instead.
       - name: Cache Swift packages
+        if: runner.environment != 'self-hosted'
         uses: actions/cache@v6
         with:
           path: .build
@@ -414,8 +424,8 @@ jobs:
 
   core-journey-e2e:
     name: Core Dictation Journey (≤8m tests)
-    # This non-UI contract gate may use an explicitly approved native runner.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
+    # Hosted Intel, matching build-macos so its arch-scoped cache restores.
+    runs-on: macos-26-intel
     timeout-minutes: 40
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).
@@ -513,7 +523,7 @@ jobs:
   release-validation:
     name: Build & Test (Release)
     # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: macos-latest
     timeout-minutes: 45
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).
@@ -545,7 +555,7 @@ jobs:
     needs: release-paths
     # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
     if: needs.release-paths.outputs.apple == 'true'
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -754,7 +764,7 @@ jobs:
     # that scheme at all — only the direct-capture one was — so the shape users
     # actually receive had the weaker check. Both are built here now.
     name: Build iOS Keyboard
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -840,13 +850,22 @@ jobs:
     needs: release-paths
     # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
     if: needs.release-paths.outputs.apple == 'true'
-    # Hosted ARM: on Intel the tooling tests exceeded the 30-minute budget.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    # Owner-authored same-repository sources use the native MacBook (about 7
+    # minutes there; Docs/native-runner-pool.md). Otherwise hosted ARM: on
+    # hosted Intel the tooling tests exceeded the 30-minute budget.
+    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
 
+      # Self-hosted only: a persistent per-runner Tooling/.build replaces actions/cache.
+      - uses: ./.github/actions/warm-build-cache
+        with:
+          key: ci-lint
+          paths: Tooling/.build
+
       - name: Cache lint tooling
+        if: runner.environment != 'self-hosted'
         uses: actions/cache@v6
         with:
           path: Tooling/.build
@@ -865,7 +884,7 @@ jobs:
 
   paid-access-worker:
     name: Paid Access Worker
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
@@ -895,9 +914,10 @@ jobs:
 
   api-compatibility:
     name: Public API compatibility
-    # Route only the explicitly reviewed revision to the native pool.
-    # Every selected native runner must also admit this revision locally.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
+    # Owner-authored same-repository sources use the native MacBook (about 11
+    # minutes there vs 16 on hosted Intel; Docs/native-runner-pool.md).
+    # Every selected native runner must also admit the job locally.
+    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 30
     needs: release-paths
     if: github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'true'
@@ -906,6 +926,13 @@ jobs:
         with:
           # The baseline treeish must be resolvable locally.
           fetch-depth: 0
+
+      # Self-hosted only: a persistent per-runner .build keeps the current
+      # build and SwiftPM's per-revision baseline API digests warm.
+      - uses: ./.github/actions/warm-build-cache
+        with:
+          key: ci-api-compatibility
+          paths: .build
 
       # Exported library products must not lose or incompatibly change
       # public symbols without a declared migration (issue #680). A PR title

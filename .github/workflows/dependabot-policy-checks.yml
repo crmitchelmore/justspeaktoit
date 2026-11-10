@@ -6,15 +6,10 @@ permissions:
   contents: read
 jobs:
   policy:
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      # Hosted images ship Node; the self-hosted Linux runner may not.
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        if: runner.environment == 'self-hosted'
-        with:
-          node-version: '22'
       - run: node --test .github/scripts/dependabot-merge.test.mjs

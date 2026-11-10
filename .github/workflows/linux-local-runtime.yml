@@ -13,7 +13,9 @@ permissions:
 jobs:
   runtime:
     name: Build pinned whisper.cpp runtime (Linux x86-64 CPU)
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-24.04"]') }}
+    # Owner-authored same-repository sources use Omarchy, which keeps the
+    # whisper.cpp checkout and CMake build warm (Docs/native-runner-pool.md).
+    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-24.04"]') }}
     container:
       image: swift:6.2.3-noble@sha256:6dd90eb2359663a2cde8f03e9951f488b23134b3b8fce20e9dcb6cada75dd803
     timeout-minutes: 60
@@ -32,6 +34,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # Self-hosted only: a persistent whisper.cpp checkout and CMake build
+      # make each run an incremental rebuild instead of restoring the output.
+      - uses: ./.github/actions/warm-build-cache
+        with:
+          key: linux-whisper-runtime
+          paths: $RUNNER_TEMP/whisper-runtime-work
+
       - name: Check the runtime pins
         run: |
           python3 -B -m unittest discover -s scripts/linux-local-runtime -p 'test_*.py'
@@ -41,6 +50,7 @@ jobs:
       # Windows builder's checkout helpers and pin); a change rebuilds them.
       - name: Restore a runtime built from the same pins
         id: cache
+        if: runner.environment != 'self-hosted'
         uses: actions/cache@v6
         with:
           path: local-runtime-output
@@ -50,7 +60,7 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           python3 -B scripts/linux-local-runtime/build-whisper-runtime.py \
-            --output local-runtime-output --work "$RUNNER_TEMP/whisper-runtime-work" --jobs 4
+            --output local-runtime-output --work "$RUNNER_TEMP/whisper-runtime-work" --jobs "$(nproc)"
 
       - name: Show the runtime manifest
         run: cat local-runtime-output/runtime-manifest.json
@@ -65,9 +75,12 @@ jobs:
 
       # Return the persistent work tree to the runner user so later host jobs
       # (checkout, cache) can clean it; hosted runners are discarded instead.
+      # The container-only warm build cache stays root-owned: its owned
+      # capture-writer fixtures require a root-owned ancestry.
       - name: Restore host work-tree ownership
         if: always() && runner.environment == 'self-hosted'
         run: |
           owner="$(cat "$RUNNER_TEMP/jsti-host-owner")"
           case "$owner" in [0-9]*:[0-9]*) ;; *) echo "::error::Unknown host owner"; exit 1 ;; esac
-          chown -R "$owner" /__w
+          chown "$owner" /__w
+          find /__w -mindepth 1 -maxdepth 1 ! -name .jsti-cache -exec chown -R "$owner" {} +

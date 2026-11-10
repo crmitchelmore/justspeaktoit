@@ -13,6 +13,10 @@ final class CoreJourneyTargetApp: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Website captures record this window in both appearances.
+        if ProcessInfo.processInfo.environment["CORE_JOURNEY_TARGET_APPEARANCE"] == "dark" {
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
         installEditMenu()
         let field = NSTextView(frame: NSRect(x: 24, y: 48, width: 592, height: 288))
         field.isEditable = true

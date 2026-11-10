@@ -66,7 +66,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
 
     public convenience init(
         apiKey: String,
-        model: String = "stt-rt-v5",
+        model: String = "stt-rt-v6",
         language: String? = nil,
         sampleRate: Int = 16_000,
         session: URLSession = .shared
@@ -80,7 +80,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
 
     public init(
         apiKey: String,
-        model: String = "stt-rt-v5",
+        model: String = "stt-rt-v6",
         language: String? = nil,
         sampleRate: Int = 16_000,
         keywords: [String],
@@ -106,7 +106,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     /// Source-compatible overload preserved for callers predating keyword hints.
     public init(
         apiKey: String,
-        model: String = "stt-rt-v5",
+        model: String = "stt-rt-v6",
         language: String? = nil,
         sampleRate: Int = 16_000,
         makeConnection: @escaping ConnectionFactory,
@@ -132,7 +132,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     /// original initializers remain intact; every existing caller keeps 8 s.
     /// This is a deadline, not a delay on a healthy stream.
     public convenience init(
-        apiKey: String, model: String = "stt-rt-v5", language: String? = nil,
+        apiKey: String, model: String = "stt-rt-v6", language: String? = nil,
         sampleRate: Int = 16_000, session: URLSession = .shared, finishTimeout: TimeInterval
     ) {
         self.init(
@@ -143,7 +143,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     }
 
     public convenience init(
-        apiKey: String, model: String = "stt-rt-v5", language: String? = nil,
+        apiKey: String, model: String = "stt-rt-v6", language: String? = nil,
         sampleRate: Int = 16_000, makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)

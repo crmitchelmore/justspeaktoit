@@ -2,12 +2,16 @@ import Foundation
 
 /// Gemini speech-generation models reachable over the Interactions API.
 ///
-/// Google lists three TTS models on that surface. This catalogue carries the
-/// newest, which supersedes the two `gemini-2.5-*-preview-tts` entries and is
-/// the only one of the three that supports streaming; the older previews work
-/// but add a choice with no benefit attached, so they are left out until
-/// something asks for them.
+/// Only Gemini 3.8 Flash-Lite TTS is offered. Google names it the workhorse
+/// replacement for `gemini-3.1-flash-tts-preview`, which shuts down on
+/// 2026-11-17. It uses the same Interactions schema and the same thirty
+/// prebuilt voices, and it supports every explicit voice-output language Speak
+/// offers. The 3.1 preview stays a case only so existing History keeps its
+/// recorded model and price, and so a saved 3.1 choice resolves to its
+/// replacement instead of failing.
 public enum GeminiTTSModel: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
+    case flash38LiteTTS = "gemini-3.8-flash-lite-tts"
+    /// Retired: Google shuts this preview down on 2026-11-17.
     case flash31TTSPreview = "gemini-3.1-flash-tts-preview"
 
     public var id: String { rawValue }
@@ -16,25 +20,38 @@ public enum GeminiTTSModel: String, CaseIterable, Codable, Hashable, Identifiabl
 
     public var displayName: String {
         switch self {
+        case .flash38LiteTTS: "Gemini 3.8 Flash-Lite TTS"
         case .flash31TTSPreview: "Gemini 3.1 Flash TTS"
         }
     }
 
+    /// The model a saved choice of this model now synthesizes with.
+    public var current: GeminiTTSModel {
+        switch self {
+        case .flash38LiteTTS, .flash31TTSPreview: .flash38LiteTTS
+        }
+    }
+
     /// Output audio is billed per token at 25 tokens per second of speech.
-    /// `gemini-3.1-flash-tts-preview` bills audio output at $20 per million
-    /// tokens, so a second of speech costs 25 × $20 ÷ 1,000,000.
+    ///
+    /// Flash-Lite lists $6 per million audio tokens until 2026-12-31 and $12
+    /// from 2027-01-01. The estimate uses the 2027 list price throughout, so
+    /// it overstates the introductory charge rather than understating the
+    /// standing one. The retired 3.1 preview billed $20 per million.
     public var costPerSecondOfSpeech: Decimal {
         switch self {
+        case .flash38LiteTTS: Decimal(string: "0.0003") ?? 0
         case .flash31TTSPreview: Decimal(string: "0.0005") ?? 0
         }
     }
 
-    /// The submitted text is billed too, at $1 per million input tokens —
-    /// small beside the audio charge, but not zero, so it belongs in the
-    /// recorded cost rather than being dropped.
+    /// The submitted text is billed too: Flash-Lite lists $0.50 per million
+    /// input tokens until 2026-12-31 and $1 from 2027-01-01 (the 2027 price is
+    /// used, as above); the 3.1 preview billed $1. Small beside the audio
+    /// charge, but not zero, so it belongs in the recorded cost.
     public var costPerInputToken: Decimal {
         switch self {
-        case .flash31TTSPreview: Decimal(string: "0.000001") ?? 0
+        case .flash38LiteTTS, .flash31TTSPreview: Decimal(string: "0.000001") ?? 0
         }
     }
 
@@ -90,12 +107,22 @@ public enum GeminiTTSCatalog {
     /// one Google credential covers both directions.
     public static let voiceIDPrefix = "google/"
 
-    public static let defaultModel: GeminiTTSModel = .flash31TTSPreview
-    public static let models = GeminiTTSModel.allCases
+    public static let defaultModel: GeminiTTSModel = .flash38LiteTTS
+    /// Selectable models; retired cases are excluded.
+    public static let models = GeminiTTSModel.allCases.filter { $0.current == $0 }
 
+    /// The exact model `identifier` names, including retired ones, so recorded
+    /// usage keeps the model and price it was billed under. Use
+    /// ``selectableModel(forID:)`` to resolve a saved choice.
     public static func model(forID identifier: String) -> GeminiTTSModel? {
         let normalized = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return models.first { $0.rawValue == normalized || $0.desktopModelIdentifier == normalized }
+        return GeminiTTSModel.allCases.first { $0.rawValue == normalized || $0.desktopModelIdentifier == normalized }
+    }
+
+    /// The model a saved choice synthesizes with: a retired model resolves to
+    /// its documented replacement.
+    public static func selectableModel(forID identifier: String) -> GeminiTTSModel? {
+        model(forID: identifier)?.current
     }
 
     /// The thirty prebuilt voices the speech-generation guide documents.

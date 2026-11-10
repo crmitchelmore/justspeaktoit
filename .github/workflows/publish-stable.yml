@@ -21,10 +21,11 @@ jobs:
   publish:
     if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
     runs-on: macos-15
+    timeout-minutes: 60
     outputs:
       apple: ${{ steps.publish.outputs.apple }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - id: publish
@@ -46,12 +47,13 @@ jobs:
     # Only Apple surfaces whose candidate receipts verified are submitted.
     if: needs.publish.outputs.apple != '' && needs.publish.outputs.apple != '[]'
     runs-on: macos-15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         surface: ${{ fromJSON(needs.publish.outputs.apple) }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Download approved manifest

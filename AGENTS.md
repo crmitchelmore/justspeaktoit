@@ -219,6 +219,12 @@ paid-access worker and the landing page), cheapest first. Use `--plan` to see
 the selection, `--full` to run whole affected test targets and `--fetch` to
 refresh `origin/main`.
 
+- It fails closed. A required check whose tool is missing fails, and so does a
+  Swift change that runs no unit tests. Tests are chosen from the SwiftPM
+  target graph: every test file in a dependent test target that names a type
+  the changed file declares or extends, else the module's whole test target.
+  Portable-only targets (SpeakDesktopHost, SpeakDesktopSync, SpeakPortable)
+  run in the portable graph.
 - It never runs UI tests, xcodebuild, the core-journey harness or app launches,
   and Swift tests use a private file Keychain in `.build/pre-pr/`, so it is safe
   on the owner's Mac. CI still runs UI and release gates.
@@ -252,6 +258,7 @@ version/baseline authority. `VERSION` is a build hint only.
 
 ### Batch merging
 - To land several ready PRs on one CI run, use `scripts/merge-batch` (create → status → land, or split to bisect a failure); see [Docs/merge-batch.md](Docs/merge-batch.md). Batches land only through their own PR and required checks.
+- Score CI changes with `scripts/ci-metrics --days 7`: its scorecard reports PR open-to-merge, required-gate p50/p90, main failure rate and zombie runs, and it also lists the per-job critical path. Run lists and job data are cached locally, and `--since`/`--until` compare windows.
 
 ### PR merge unblock checklist
 - The `main` ruleset does not require branches to be up to date. A PR that is only `BEHIND` can merge as-is: do not rebase or merge `main` into it, because every push restarts all of its CI and takes a scarce hosted macOS slot. Update a branch from `main` only on a real conflict (`mergeStateStatus` `DIRTY`) or when a fix it needs has landed on `main`.

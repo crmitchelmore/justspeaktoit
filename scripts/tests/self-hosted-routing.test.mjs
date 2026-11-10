@@ -32,10 +32,8 @@ const linuxJobs = {
   'desktop-icons.yml': { resources: 'ubuntu-24.04' },
   'linux.yml': { 'linux-desktop': 'ubuntu-24.04' },
   'linux-local-runtime.yml': { runtime: 'ubuntu-24.04' },
-  'windows.yml': { 'portable-linux': 'ubuntu-22.04' },
 };
 const macJobs = {
-  'windows.yml': { 'portable-macos': 'macos-15' },
   'local-transcription-benchmark.yml': { 'benchmark-package': 'macos-latest' },
 };
 
@@ -93,8 +91,7 @@ test('no default routes to the owner Mac or unreviewed self-hosted labels', () =
 });
 
 test('root containers return the persistent self-hosted work tree to the runner user', () => {
-  const containerJobs = [['linux.yml', 'linux-desktop'], ['linux-local-runtime.yml', 'runtime'],
-    ['windows.yml', 'portable-linux']];
+  const containerJobs = [['linux.yml', 'linux-desktop'], ['linux-local-runtime.yml', 'runtime']];
   for (const [file, id] of containerJobs) {
     const body = jobs(workflows[file])[id];
     const steps = body.slice(body.indexOf('    steps:\n'));

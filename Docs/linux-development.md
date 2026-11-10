@@ -22,7 +22,7 @@ criterion; this document says exactly what is verified and what is not.
 | `SpeakLinux` | The executable: `LinuxHostPlatform`, events, shortcuts, `--self-test`, `--ui-smoke-test`, `--integration-test`. |
 
 The Linux targets are opt-in with `SPEAK_LINUX_TARGET=1`, like
-`SPEAK_WINDOWS_TARGET=1`, so the `portable-linux` job (which has no GTK
+`SPEAK_WINDOWS_TARGET=1`, so the portable Linux test job in `ci.yml` (which has no GTK
 packages) is unchanged.
 
 Gemini Transcribe Live, Meta Muse realtime ASR and Modulate Velma now use the

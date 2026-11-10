@@ -22,15 +22,31 @@ can't use GitHub's merge queue.
    It records each member's head SHA in a hidden
    `<!-- merge-batch-member PR SHA -->` line, and copies each member's closing
    issue references as `Fixes #N` lines.
+
+   The body also carries a `pre-pr-summary` record for the combined head SHA,
+   so `Pre-PR evidence` accepts the batch. It is built from each member's own
+   `scripts/pre-pr` record, and is `fail` if any non-bot member has none or a
+   failing one. The combined tree itself is tested by the required checks.
 2. **Test.** The batch PR is an ordinary same-repository PR, so the ruleset's
-   required checks, and every path-triggered workflow for the combined
-   change, run once on the combined tree. `scripts/merge-batch status <name>`
-   shows the runs.
-3. **Land.** `scripts/merge-batch land <name>` refuses to merge unless the
-   batch PR is `CLEAN` and every workflow run on its head has succeeded. A few
-   workflows don't count: advisory ones (Pre-PR evidence) and external ones
-   (Tessl, OpenAI API Review). Override the list with
-   `MERGE_BATCH_IGNORED_WORKFLOWS`. The command then:
+   required checks run once on the combined tree. Other path-triggered
+   workflows (Windows, Linux, Flatpak, CodeQL and similar) skip their jobs on
+   `merge-batch/*` heads: each member already ran them, and they run again on
+   main after landing. `scripts/merge-batch status <name>` shows the gate; add
+   `--wait` to block until it settles (exit 0 green, 1 red or timed out).
+3. **Land.** `scripts/merge-batch land <name>` waits for the gate, then merges
+   only if it is green and the batch PR is `CLEAN`. The gate is green when:
+   - every status check the `main` ruleset requires (currently `CI Gate`) is
+     reported on the batch head and passed (success, skipped or neutral). A
+     required check that has not registered yet counts as pending, never as a
+     pass, so a batch can't land in the seconds after a push;
+   - every other workflow run on the head has finished green or skipped.
+     Advisory workflows (Pre-PR evidence) and external ones (Tessl, OpenAI API
+     Review) don't count; override the list with `MERGE_BATCH_IGNORED_WORKFLOWS`.
+
+   `--no-wait` checks once instead. `MERGE_BATCH_TIMEOUT_MINUTES` (default
+   150) and `MERGE_BATCH_POLL_SECONDS` (default 60) tune the wait, and
+   `MERGE_BATCH_REQUIRED_CONTEXTS` (comma-separated) overrides the ruleset
+   lookup. Once the gate is green, the command:
    - squash-merges the batch with `--match-head-commit`;
    - names the batch commit after the most user-visible member type
      (`feat` > `fix` > `perf` > others);

@@ -72,7 +72,7 @@ test('journey cold preparation and actual runtime have separate finite budgets a
     assert.doesNotMatch(body, /continue-on-error:|if:.*(?:failure|cancelled)/);
     assert.match(body, /if: always\(\)\n\s+timeout-minutes: 3\n\s+uses: actions\/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7\.0\.2/);
     assert.match(body, /if-no-files-found: error/);
-    assert.match(body, /uses: actions\/checkout@v7.0.1/);
+    assert.match(body, /uses: actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\.0\.1/);
     assert.doesNotMatch(body, /ref:.*head|workflow_dispatch|retry|--skip.*test/);
   }
   assert.match(ui, /include-hidden-files: true/);
@@ -231,6 +231,15 @@ test('Tessl is on demand and preserves trusted-author secret restrictions', () =
   assert.match(tesslWorkflow, /github\.event_name == 'workflow_dispatch'/);
   assert.match(tesslWorkflow, /allowed-associations: OWNER,MEMBER,COLLABORATOR/);
   assert.doesNotMatch(tesslWorkflow, /pull_request_target/);
+});
+
+test('every remote action in ci.yml is pinned to a full commit SHA with a version comment', () => {
+  const uses = [...workflow.matchAll(/^\s+(?:- )?uses: ([^\s]+)(.*)$/gm)].filter(([, ref]) => !ref.startsWith('./'));
+  assert.ok(uses.length > 0);
+  for (const [line, ref, rest] of uses) {
+    assert.match(ref, /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/, line.trim());
+    assert.match(rest, /^ # v\d+(?:\.\d+)*$/, `${line.trim()}: needs a version comment`);
+  }
 });
 
 test('every Apple build cache isolates architecture, host and workspace, including restore prefixes', () => {
@@ -623,7 +632,7 @@ test('the legacy required name mirrors CI Gate without executing anything', () =
 
 test('pull requests restore the Swift cache without saving; main saves one entry per commit', () => {
   const body = jobBodies['build-macos'];
-  assert.match(body, /uses: actions\/cache\/restore@v6/);
+  assert.match(body, /uses: actions\/cache\/restore@[0-9a-f]{40} # v6\./);
   assert.match(body, /name: Save Swift packages \(main only\)\n\s+if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
   assert.doesNotMatch(body, /uses: actions\/cache@/);
   assert.match(body, /-swift-\$\{\{ hashFiles\('Package\.resolved'\) \}\}-\$\{\{ github\.sha \}\}/);

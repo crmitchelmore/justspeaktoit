@@ -9,7 +9,8 @@ import Foundation
 public enum SettingsSearchCatalog {
     public static let entries: [SettingsSearchEntry] =
         sectionRoots + generalEntries + transcriptionEntries + postProcessingEntries
-            + voiceEntries + keysAndShortcutEntries + aboutEntries + iOSEntries
+            + voiceEntries + keysAndShortcutEntries + aboutEntries + iOSEntries + desktopEntries
+            + androidEntries
 
     /// Entries a host shows. Hosts may append runtime entries (for example one per
     /// API-key provider) generated from the shared provider catalogue.
@@ -28,7 +29,10 @@ public enum SettingsSearchCatalog {
         "ios.transcription",
         "ios.apiKeys",
         "ios.behavior",
-        "ios.postProcessing"
+        "ios.postProcessing",
+        "desktop.apiKeys",
+        "desktop.model",
+        "desktop.shortcut"
     ]
 
     /// Looks up the entry a host heading belongs to on one platform.
@@ -38,7 +42,7 @@ public enum SettingsSearchCatalog {
 
     private static let titleLookup: [Int: [String: SettingsSearchEntry]] = {
         var lookup: [Int: [String: SettingsSearchEntry]] = [:]
-        for platform in [SettingsSearchPlatforms.macOS, .iOS, .windows, .linux] {
+        for platform in [SettingsSearchPlatforms.macOS, .iOS, .windows, .linux, .android] {
             var titles: [String: SettingsSearchEntry] = [:]
             for entry in entries where entry.platforms.contains(platform) && !entry.isSectionRoot {
                 titles[entry.title] = titles[entry.title] ?? entry
@@ -57,10 +61,16 @@ public enum SettingsSearchCatalog {
             summary: sectionSummaries[section] ?? "",
             keywords: sectionKeywords[section] ?? [],
             settingKeys: section == .corrections ? ["autoCorrectionsEnabled", "autoCorrectionsPromotionThreshold"] : [],
-            platforms: .macOS,
+            platforms: desktopPages.contains(section) ? [.macOS, .windows, .linux] : .macOS,
             isSectionRoot: true
         )
     }
+
+    /// Sections that are also pages in the Windows and Linux settings windows.
+    private static let desktopPages: Set<SettingsSearchSection> = [
+        .general, .transcription, .postProcessing, .voiceOutput, .corrections, .pronunciation, .profiles,
+        .shortcuts, .about
+    ]
 
     private static let sectionSummaries: [SettingsSearchSection: String] = [
         .general: "Microphone, language, text output, appearance, HUD, sounds and app behaviour.",

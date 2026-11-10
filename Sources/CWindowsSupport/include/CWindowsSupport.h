@@ -81,7 +81,14 @@ enum JSTIWindowEvent {
     JSTI_EVENT_ISSUE_REPORT_COPY = 152, /* ticket. */
     JSTI_EVENT_ISSUE_REPORT_SAVE = 153,
     JSTI_EVENT_ISSUE_REPORT_OPEN = 154,
-    JSTI_EVENT_ISSUE_REPORT_CLOSE = 155
+    JSTI_EVENT_ISSUE_REPORT_CLOSE = 155,
+    /* Settings search box (160-161 were unused): SETTINGS_SEARCH carries the whole
+     * query on every edit and when the empty box gains focus (answer with recent
+     * destinations); reply with jsti_window_set_settings_search_results.
+     * SETTINGS_SEARCH_OPEN: model_index is the chosen row of the last results and
+     * text its identifier; the box has already been cleared and closed. */
+    JSTI_EVENT_SETTINGS_SEARCH = 160,
+    JSTI_EVENT_SETTINGS_SEARCH_OPEN = 161
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -304,14 +311,31 @@ typedef struct JSTIInsights {
  * (`visible`, the records the search shows). Thread safe; coalesced. */
 int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);
 
-/* The window's pages, in sidebar order. */
+/* The window's pages, in sidebar order (the same order and values as Linux). */
 enum {
     JSTI_PAGE_DASHBOARD = 0, JSTI_PAGE_HISTORY, JSTI_PAGE_VOICE_OUTPUT, JSTI_PAGE_GENERAL, JSTI_PAGE_TRANSCRIPTION,
-    JSTI_PAGE_POST_PROCESSING, JSTI_PAGE_PROFILES, JSTI_PAGE_KEYBOARD, JSTI_PAGE_CLOUD_SYNC, JSTI_PAGE_ABOUT,
-    JSTI_PAGE_COUNT
+    JSTI_PAGE_POST_PROCESSING, JSTI_PAGE_CORRECTIONS, JSTI_PAGE_PRONUNCIATION, JSTI_PAGE_PROFILES,
+    JSTI_PAGE_KEYBOARD, JSTI_PAGE_CLOUD_SYNC, JSTI_PAGE_ABOUT, JSTI_PAGE_COUNT
 };
 /* Shows a JSTI_PAGE_* page, as its sidebar button does. Thread safe. */
 int jsti_window_show_page(int page);
+
+/* One settings search row. UTF-8; borrowed only during the call. */
+typedef struct {
+    const char *title;
+    const char *detail;
+    const char *identifier;
+} JSTISettingsSearchResult;
+/* Replaces the settings search results (UTF-8, at most 50) shown under the
+ * sidebar's search box; an empty set shows "No settings match" while a query is
+ * typed. Rows are read aloud as "<title>, <detail>". Strings are copied before
+ * return. Thread safe and latest-only; -1 for invalid input or no window. */
+int jsti_window_set_settings_search_results(const JSTISettingsSearchResult *results, size_t count);
+/* Opens the preferences dialog on configuration field `index`'s group, scrolls
+ * that field into view and focuses it; `index` is the field's position in the
+ * array given to jsti_window_set_configuration(_revision). Thread safe; ignored
+ * while recording or another dialog is open. -1 if out of range or unconfigured. */
+int jsti_window_reveal_configuration_field(size_t index);
 /* Window-local bindings from SpeakCore. Missing destinations are not bound.
  * Hiding hints changes presentation only. Strings are copied before return. */
 typedef struct {

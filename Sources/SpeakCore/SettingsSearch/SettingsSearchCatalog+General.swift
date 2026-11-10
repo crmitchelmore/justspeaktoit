@@ -8,7 +8,7 @@ extension SettingsSearchCatalog {
             keywords: [
                 "preferred microphone", "audio input", "input device", "headset", "airpods", "refresh microphones"
             ],
-            settingKeys: ["preferredAudioInputUID"], platforms: .macOS
+            settingKeys: ["preferredAudioInputUID"], platforms: [.macOS, .linux]
         ),
         SettingsSearchEntry(
             id: "general.language", title: "Language", section: .general, systemImage: "character.bubble",
@@ -27,9 +27,9 @@ extension SettingsSearchCatalog {
             settingKeys: [
                 "textOutputMethod", "accessibilityInsertionMode", "restoreClipboardAfterPaste", "appSwitchDelivery",
                 "streamingInsertionEnabled", "pasteRemoteTranscriptsAtCursor", "clipboardInsertionTriggers",
-                "voiceCommandsEnabled"
+                "voiceCommandsEnabled", "restoreClipboard"
             ],
-            platforms: .macOS
+            platforms: [.macOS, .linux]
         ),
         SettingsSearchEntry(
             id: "general.appBehaviour", title: "App Behaviour", section: .general, systemImage: "gearshape.2",
@@ -48,7 +48,7 @@ extension SettingsSearchCatalog {
             id: "general.appearance", title: "Appearance", section: .general, systemImage: "paintpalette",
             summary: "Light, dark or system theme and layout density.",
             keywords: ["theme", "dark mode", "light mode", "layout density", "compact", "spacing"],
-            settingKeys: ["appearance", "visualDensity"], platforms: .apple
+            settingKeys: ["appearance", "visualDensity"], platforms: [.macOS, .iOS, .linux]
         ),
         SettingsSearchEntry(
             id: "general.hud", title: "Heads-Up Display", section: .general, systemImage: "rectangle.on.rectangle",
@@ -94,7 +94,7 @@ extension SettingsSearchCatalog {
             id: "general.automation", title: "Automation", section: .general, systemImage: "terminal",
             summary: "Let the speak CLI and MCP clients control Speak.",
             keywords: ["enable automation", "mcp", "cli", "server", "scripting", "agents"],
-            settingKeys: ["enableAutomationServer"], platforms: .macOS
+            settingKeys: ["enableAutomationServer"], platforms: [.macOS, .linux]
         ),
         SettingsSearchEntry(
             id: "general.automationCLI", title: "Automation CLI", section: .general, systemImage: "terminal.fill",
@@ -106,7 +106,7 @@ extension SettingsSearchCatalog {
             id: "general.housekeeping", title: "Housekeeping", section: .general, systemImage: "tray.full",
             summary: "Where recordings are stored, and deleting them.",
             keywords: ["recordings folder", "recordings directory", "delete all recordings", "disk space", "storage"],
-            settingKeys: ["recordingsDirectory"], platforms: .macOS
+            settingKeys: ["recordingsDirectory"], platforms: [.macOS, .linux]
         ),
         SettingsSearchEntry(
             id: "general.advanced", title: "Advanced", section: .general, systemImage: "gearshape.2",

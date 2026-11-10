@@ -10,6 +10,8 @@ public struct SettingsSearchPlatforms: OptionSet, Hashable, Sendable {
     public static let iOS = SettingsSearchPlatforms(rawValue: 1 << 1)
     public static let windows = SettingsSearchPlatforms(rawValue: 1 << 2)
     public static let linux = SettingsSearchPlatforms(rawValue: 1 << 3)
+    /// Read by the Kotlin app from `android/app/src/main/assets/settings_search.json`.
+    public static let android = SettingsSearchPlatforms(rawValue: 1 << 4)
 
     public static let apple: SettingsSearchPlatforms = [.macOS, .iOS]
 }

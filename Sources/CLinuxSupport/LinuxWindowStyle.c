@@ -69,6 +69,10 @@ static const char *shared_css =
     ".jsti-statusbar { padding: 8px 16px; border-top: 1px solid alpha(currentColor, 0.16); }\n"
     ".jsti-statusbar label { font-size: 13px; }\n"
     ".jsti-empty { padding: 16px; }\n"
+    ".jsti-search-results row { border-radius: 6px; margin: 1px 6px; padding: 6px 10px; }\n"
+    ".jsti-search-title { font-weight: 700; }\n"
+    ".jsti-search-highlight { outline: 2px solid @accent_color; outline-offset: -2px;"
+    " background-color: alpha(@accent_bg_color, 0.14); }\n"
     ".jsti-about-name { font-size: 22px; font-weight: 700; }\n";
 
 void jsti_style_install(void) {

@@ -135,8 +135,31 @@ enum {
     /* Housekeeping › New recordings folder. text: chosen absolute local folder,
      * or "" to save new recordings in History again. Nothing is moved. */
     JSTI_EVENT_RECORDINGS_LOCATION = 98,
-    JSTI_EVENT_USER_ABSENT = 131 /* Outside comparison events 100-109 and 120-129. */
+    JSTI_EVENT_USER_ABSENT = 131, /* Outside comparison events 100-109 and 120-129. */
+    /* Settings search in the sidebar. text: the query as typed, reported as it
+     * changes (debounced by GtkSearchEntry) and as "" when the empty entry is
+     * focused, which asks for recent destinations. */
+    JSTI_EVENT_SETTINGS_SEARCH = 160,
+    /* index: the chosen row of the last jsti_window_set_settings_search_results. */
+    JSTI_EVENT_SETTINGS_SEARCH_OPEN = 161
 };
+
+/* One settings search result: the shared DesktopSettingsSearchSession row. */
+typedef struct JSTISettingsSearchResult {
+    const char *title;
+    const char *detail;
+    /* SettingsSearchEntry.resultAccessibilityIdentifier; the row's widget name. */
+    const char *identifier;
+} JSTISettingsSearchResult;
+/* Replaces the settings search results, in order: UTF-8, at most 50 rows of at
+ * most 4096 bytes per string. Copied before return and applied in call order
+ * with the window's other setters. Thread safe; -1 for invalid input. */
+int32_t jsti_window_set_settings_search_results(const JSTISettingsSearchResult *results, size_t count);
+/* Scrolls to, focuses and briefly highlights configuration row `index` (the
+ * jsti_window_set_configuration field index). It does not change the page:
+ * call jsti_window_show_page first. Rows hidden on this session (overlay-only
+ * preferences on Wayland) stay hidden. Thread safe; -1 when out of range. */
+int32_t jsti_window_reveal_configuration_field(size_t index);
 
 /* The argument the login item starts the app with (the shared
  * DesktopLoginItem.launchArgument): the window starts minimised. */

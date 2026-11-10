@@ -67,6 +67,13 @@ gboolean jsti_model_filters_live(void);
 gboolean jsti_model_filters_preferred_live(gboolean local);
 int32_t jsti_model_filters_self_test(char *error, size_t capacity);
 
+/* LinuxSettingsSearch.c: the sidebar's settings search. Returns the entry over
+ * a stack that shows `navigation` (the page list) or the results. Ctrl+F and
+ * Ctrl+K call jsti_settings_search_focus. Main thread. */
+struct _GtkWidget *jsti_settings_search_new(struct _GtkWidget *navigation);
+void jsti_settings_search_focus(void);
+int32_t jsti_settings_search_self_test(char *error, size_t capacity);
+
 /* The iCloud sync group (LinuxCloudSync.c): built once for the window's
  * iCloud sync page, and exercised by the window self-test. */
 struct _GtkWidget *jsti_cloud_sync_group_new(void);

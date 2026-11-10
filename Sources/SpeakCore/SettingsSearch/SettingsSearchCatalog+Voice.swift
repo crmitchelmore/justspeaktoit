@@ -66,7 +66,7 @@ extension SettingsSearchCatalog {
             id: "apiKeys.azure", title: "Azure Speech resource", section: .apiKeys, systemImage: "cloud",
             summary: "The Azure Speech endpoint or region your key belongs to.",
             keywords: ["azure", "endpoint", "region", "microsoft speech"],
-            platforms: .apple
+            platforms: [.macOS, .iOS, .windows]
         ),
         SettingsSearchEntry(
             id: "apiKeys.encryptedSync", title: "Encrypted API-Key Sync", section: .apiKeys, systemImage: "lock.icloud",

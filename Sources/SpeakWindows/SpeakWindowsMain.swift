@@ -18,6 +18,7 @@ final class WindowsEventContext {
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
     let historyPaste = DesktopHistoryPasteAdmission()
+    let settingsSearch = WindowsSettingsSearch()
     let postProcessingPicker = DesktopPostProcessingPicker()
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
     lazy var automation = WindowsAutomationSwitch(controller: controller)
@@ -224,6 +225,7 @@ private func ready(_ holder: WindowsEventContext) {
 
 private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
     if windowsHistoryManagementEvent(event, value: value, index: index, holder: holder) { return }
+    if holder.settingsSearch.handle(event, query: value, row: index) { return }
     if (70...72).contains(event) {
         return windowsVocabularyEvent(event, payload: value, kind: index, holder: holder)
     }

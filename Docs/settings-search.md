@@ -63,6 +63,36 @@ the toolbar button is `settingsSearchButton`, and completions are
 `settingsSearchCompletion.<n>`. The reveal highlight is decorative and hidden
 from VoiceOver.
 
-## Other platforms
+## Windows and Linux
 
-Windows and Linux (#1411) and Android (#1412) will adopt the same catalogue.
+`DesktopSettingsSearch` (SpeakCore) indexes every `DesktopConfiguration` field
+automatically, adds catalogue entries marked `.windows` / `.linux` for
+hand-built groups, and maps results to a `DesktopSettingsDestination` page and,
+for a preference field, the field to reveal. Each host keeps one
+`DesktopSettingsSearchSession`: the native window emits
+`JSTI_EVENT_SETTINGS_SEARCH` as the query changes and
+`JSTI_EVENT_SETTINGS_SEARCH_OPEN` when a row is chosen. Swift ranks the query,
+then calls `jsti_window_set_settings_search_results`, `jsti_window_show_page` and
+`jsti_window_reveal_configuration_field`.
+
+`Tests/SpeakDesktopTests/DesktopSettingsSearchTests.swift` fails when an
+`ApplicationPreferenceKey` isn't indexed (or exempted with a reason), or when a
+native settings heading has no entry for its platform.
+
+## Android
+
+Kotlin can't read the Swift catalogue, so `SettingsSearchAndroidExport` writes it
+(entries marked `.android`, plus the synonym groups) to
+`android/app/src/main/assets/settings_search.json`.
+`SettingsSearchAndroidExportTests` fails when that asset is stale. To regenerate
+it, run:
+
+```sh
+UPDATE_SETTINGS_SEARCH_ANDROID=1 swift test --filter SettingsSearchAndroidExportTests
+```
+
+`SettingsSearchIndex.kt` mirrors the Swift ranking rules and adds one entry per
+`CloudCatalog` model and provider key. Settings has a search field with
+completions, results, recents and scroll-to-highlight. Result rows use the test
+tag `settingsSearchResult.<id>`. `SettingsSearchCoverageTest` fails when a
+Settings heading string or an `AppPreferences` key is not indexed.

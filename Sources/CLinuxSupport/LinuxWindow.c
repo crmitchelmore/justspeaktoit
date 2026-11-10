@@ -234,6 +234,9 @@ static struct {
     JSTIConfigurationCallback callback;
     void *context;
 } configuration;
+/* Fields in the first configuration, which builds the rows; any thread. */
+static gint configuration_field_count;
+static void reveal_cancel(void);
 
 /* Read aloud: its History action and the voice picker in its own group. */
 static struct {
@@ -1175,6 +1178,19 @@ static gboolean sidebar_navigate(guint keyval, GdkModifierType modifiers, GtkWid
 
 static gboolean action_shortcut_run(gint run, const char *page, gint slot);
 
+/* Ctrl+F and Ctrl+K focus settings search from anywhere in the window. No page
+ * binds either (History filters as you type in its own entry), and they run
+ * after configured action shortcuts, so a user's own binding still wins. */
+static gboolean settings_search_key(guint keyval, GdkModifierType modifiers) {
+    GdkModifierType relevant = modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK |
+                                            GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK);
+    guint key = gdk_keyval_to_lower(keyval);
+    if (relevant != GDK_CONTROL_MASK || (key != GDK_KEY_f && key != GDK_KEY_k)) return FALSE;
+    if (adw_navigation_split_view_get_collapsed(ui.split)) adw_navigation_split_view_set_show_content(ui.split, FALSE);
+    jsti_settings_search_focus();
+    return TRUE;
+}
+
 static gboolean cancel_key(guint keyval, GdkModifierType modifiers, GtkWidget *focused, gboolean active) {
     if (keyval != GDK_KEY_Escape || !active || ui.closing || ui.suppress ||
         !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
@@ -1215,7 +1231,8 @@ static gboolean sidebar_key_pressed(GtkEventControllerKey *controller, guint key
     if (sidebar_navigate(keyval, modifiers, focused)) return TRUE;
     if (ui.closing || !gtk_window_is_active(ui.window) ||
         !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
-    return jsti_action_shortcuts_key(controller, keyval, keycode, modifiers, focused, action_shortcut_run);
+    if (jsti_action_shortcuts_key(controller, keyval, keycode, modifiers, focused, action_shortcut_run)) return TRUE;
+    return settings_search_key(keyval, modifiers);
 }
 
 static void action_key_released(GtkEventControllerKey *controller, guint keyval, guint keycode,
@@ -1286,7 +1303,7 @@ static GtkWidget *build_sidebar(void) {
     gtk_box_append(GTK_BOX(brand), name);
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), brand);
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), scroller);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), jsti_settings_search_new(scroller));
     return toolbar;
 }
 
@@ -2249,6 +2266,9 @@ static void build_window(void) {
     gtk_widget_add_css_class(GTK_WIDGET(ui.split), "jsti-root");
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(window), GTK_WIDGET(ui.split));
     show_page(JSTI_PAGE_DASHBOARD);
+    /* Start on the page list, not the search entry ahead of it, so typing and
+     * Ctrl+digit page shortcuts behave as before. */
+    gtk_window_set_focus(ui.window, GTK_WIDGET(gtk_list_box_get_selected_row(ui.sidebar)));
     refresh_actions();
 }
 
@@ -2472,6 +2492,7 @@ int32_t jsti_window_run(
     g_clear_pointer(&read_aloud.favorite_indices, g_array_unref);
     g_clear_object(&read_aloud.voices);
     g_clear_object(&read_aloud.favorite_names);
+    reveal_cancel();
     configuration.callback = NULL;
     configuration.context = NULL;
     g_clear_pointer(&configuration.revision, g_free);
@@ -4152,6 +4173,7 @@ static int32_t set_configuration(const JSTIConfigurationField *fields, size_t co
         gboolean hands_free_setting = fields[i].requires_hands_free_guard != 0;
         g_array_append_val(update->hands_free_settings, hands_free_setting);
     }
+    g_atomic_int_compare_and_exchange(&configuration_field_count, 0, (gint)count);
     return post(configuration_apply, update, configuration_update_free);
 }
 
@@ -4213,6 +4235,101 @@ int32_t jsti_window_set_configuration_field_enabled(size_t index, int32_t enable
     ConfigurationAvailabilityUpdate *update = g_new0(ConfigurationAvailabilityUpdate, 1);
     update->index = index; update->enabled = enabled;
     return post(configuration_availability_apply, update, g_free);
+}
+
+/* Settings search: the revealed row, its pending scroll and its highlight. */
+static struct {
+    GtkWidget *target;
+    guint tick;
+    guint frames;
+    guint highlight;
+} reveal;
+
+static void reveal_forget_target(void) {
+    if (reveal.target == NULL) return;
+    if (reveal.tick != 0) gtk_widget_remove_tick_callback(reveal.target, reveal.tick);
+    gtk_widget_remove_css_class(reveal.target, "jsti-search-highlight");
+    g_object_remove_weak_pointer(G_OBJECT(reveal.target), (gpointer *)&reveal.target);
+    reveal.target = NULL;
+    reveal.tick = 0;
+}
+
+static void reveal_cancel(void) {
+    if (reveal.highlight != 0) g_source_remove(reveal.highlight);
+    reveal.highlight = 0;
+    reveal_forget_target();
+    reveal.tick = 0;
+}
+
+static gboolean reveal_highlight_done(gpointer data) {
+    (void)data;
+    reveal.highlight = 0;
+    reveal_forget_target();
+    return G_SOURCE_REMOVE;
+}
+
+/* Centres the row in its page's scrolled window. */
+static void reveal_scroll(GtkWidget *row) {
+    GtkWidget *scroller = gtk_widget_get_ancestor(row, GTK_TYPE_SCROLLED_WINDOW);
+    if (scroller == NULL) return;
+    GtkWidget *viewport = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller));
+    GtkWidget *content = GTK_IS_VIEWPORT(viewport) ? gtk_viewport_get_child(GTK_VIEWPORT(viewport)) : viewport;
+    graphene_rect_t bounds;
+    if (content == NULL || !gtk_widget_compute_bounds(row, content, &bounds)) return;
+    GtkAdjustment *adjustment = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scroller));
+    double page = gtk_adjustment_get_page_size(adjustment);
+    double height = graphene_rect_get_height(&bounds);
+    gtk_adjustment_set_value(adjustment, graphene_rect_get_y(&bounds) - MAX(0.0, (page - height) / 2.0));
+}
+
+/* The page was shown by the same queue just before; wait for it to be laid out. */
+static gboolean reveal_tick(GtkWidget *row, GdkFrameClock *clock, gpointer data) {
+    (void)clock; (void)data;
+    if (++reveal.frames < 2 || gtk_widget_get_height(row) <= 0) {
+        if (reveal.frames < 120) return G_SOURCE_CONTINUE;
+        reveal.tick = 0;
+        return G_SOURCE_REMOVE;
+    }
+    reveal.tick = 0;
+    gtk_widget_grab_focus(row);
+    reveal_scroll(row);
+    return G_SOURCE_REMOVE;
+}
+
+static void configuration_reveal_apply(gpointer data) {
+    gsize index = GPOINTER_TO_SIZE(data);
+    reveal_cancel();
+    if (configuration.rows == NULL || index >= configuration.rows->len) return;
+    GtkWidget *row = g_ptr_array_index(configuration.rows, index);
+    if (!gtk_widget_get_visible(row)) return;
+    reveal.target = row;
+    g_object_add_weak_pointer(G_OBJECT(row), (gpointer *)&reveal.target);
+    gtk_widget_add_css_class(row, "jsti-search-highlight");
+    reveal.frames = 0;
+    reveal.tick = gtk_widget_add_tick_callback(row, reveal_tick, NULL, NULL);
+    reveal.highlight = g_timeout_add(2500, reveal_highlight_done, NULL);
+}
+
+int32_t jsti_window_reveal_configuration_field(size_t index) {
+    if (index >= (size_t)g_atomic_int_get(&configuration_field_count)) return -1;
+    return post(configuration_reveal_apply, GSIZE_TO_POINTER(index), NULL);
+}
+
+static gboolean configuration_reveal_self_test(void) {
+    guint count = configuration.rows->len;
+    if (jsti_window_reveal_configuration_field(count) != -1 ||
+        jsti_window_reveal_configuration_field(JSTI_MAXIMUM_CONFIGURATION_FIELDS) != -1 ||
+        jsti_window_reveal_configuration_field((size_t)-1) != -1) return FALSE;
+    guint index = count;
+    for (guint i = 0; i < count && index == count; ++i)
+        if (gtk_widget_get_visible(g_ptr_array_index(configuration.rows, i))) index = i;
+    if (index == count) return FALSE;
+    GtkWidget *row = g_ptr_array_index(configuration.rows, index);
+    configuration_reveal_apply(GSIZE_TO_POINTER(index));
+    gboolean highlighted = reveal.target == row && reveal.highlight != 0 &&
+        gtk_widget_has_css_class(row, "jsti-search-highlight");
+    reveal_cancel();
+    return highlighted && reveal.target == NULL && !gtk_widget_has_css_class(row, "jsti-search-highlight");
 }
 
 /* The locale/language field is no longer guaranteed to occupy row 0 (visual
@@ -6206,6 +6323,9 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (!audio_confirmation_ok) return fail(error, capacity, "recording audio confirmation defaults or snapshot changed");
     if (!configuration_self_test())
         return fail(error, capacity, "configuration rows did not populate and emit a complete Apply");
+    if (!configuration_reveal_self_test())
+        return fail(error, capacity, "settings search did not refuse an unknown field or highlight a known one");
+    if (jsti_settings_search_self_test(error, capacity) != 0) return -1;
     if (!text_output_self_test())
         return fail(error, capacity, "clipboard restoration did not follow the session capability and saved choice");
     const char *icon_name = gtk_window_get_icon_name(ui.window);

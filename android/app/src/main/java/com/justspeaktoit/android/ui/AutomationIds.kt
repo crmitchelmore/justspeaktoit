@@ -19,4 +19,6 @@ object AutomationIds {
     const val HISTORY_BACK = "history.back"
     const val HISTORY_CLEAR = "history.clear"
     const val SETTINGS_BACK = "settings.back"
+    const val SETTINGS_SEARCH = "settingsSearchField"
+    const val SETTINGS_SEARCH_CLEAR = "settingsSearchClear"
 }

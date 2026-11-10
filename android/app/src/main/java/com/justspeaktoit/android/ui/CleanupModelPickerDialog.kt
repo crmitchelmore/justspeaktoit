@@ -27,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -142,18 +144,22 @@ private fun ModelRow(model: CleanupModel, isSelected: Boolean, hasKey: Boolean, 
 
 @Composable
 private fun OpenRouterRow(count: Int, selected: CleanupModel?, onOpen: () -> Unit) {
+    val detail = selected?.displayName ?: stringResource(R.string.cleanup_picker_openrouter_note, count)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(role = Role.Button, onClick = onOpen)
+            .semantics(mergeDescendants = true) {
+                contentDescription = CloudProvider.OpenRouter.displayName + ", " + detail
+            }
             .padding(vertical = 12.dp),
     ) {
         RadioButton(selected = selected != null, onClick = null)
         Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
             Text(CloudProvider.OpenRouter.displayName, style = MaterialTheme.typography.bodyLarge)
             Text(
-                selected?.displayName ?: stringResource(R.string.cleanup_picker_openrouter_note, count),
+                detail,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

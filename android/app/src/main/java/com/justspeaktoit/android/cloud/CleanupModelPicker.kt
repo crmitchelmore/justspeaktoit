@@ -48,11 +48,29 @@ object CleanupModelPicker {
             val result = if (x.first().isDigit() && y.first().isDigit()) {
                 x.toBigInteger().compareTo(y.toBigInteger())
             } else {
-                collator.compare(x, y)
+                compareText(x, y, collator)
             }
             if (result != 0) return result
         }
         return left.size.compareTo(right.size)
+    }
+
+    /**
+     * Letters use the locale collator; spaces and punctuation compare by code point, because the
+     * collator ignores punctuation and would put "GPT-5.4 Mini" before "GPT-5 Mini" (Swift does not).
+     */
+    private fun compareText(a: String, b: String, collator: Collator): Int {
+        for (i in 0 until minOf(a.length, b.length)) {
+            val x = a[i]
+            val y = b[i]
+            val result = if (x.isLetter() && y.isLetter()) {
+                collator.compare(x.toString(), y.toString())
+            } else {
+                x.compareTo(y)
+            }
+            if (result != 0) return result
+        }
+        return a.length.compareTo(b.length)
     }
 
     private fun chunks(text: String): List<String> = Regex("\\d+|\\D+").findAll(text).map { it.value }.toList()

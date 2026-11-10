@@ -109,9 +109,11 @@ jobs:
         continue-on-error: true
         run: python3 scripts/collect-macos-xctest-crashes.py boundary
 
+      # One segfaulting test kills the whole xctest process; a crash with no
+      # reported test failure is re-run once and annotated (crash twice fails).
       - name: Test (Debug)
         id: debug_tests
-        run: python3 scripts/with-test-keychain.py swift test --enable-code-coverage --disable-dependency-cache
+        run: python3 scripts/with-test-keychain.py python3 scripts/retry-xctest-crash.py swift test --enable-code-coverage --disable-dependency-cache
 
       - name: Collect existing Debug XCTest crash reports
         id: debug_crash_collection

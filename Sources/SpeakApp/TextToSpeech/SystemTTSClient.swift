@@ -115,7 +115,10 @@ actor SystemTTSClient: TextToSpeechClient {
 /// Writes one utterance's buffers to an audio file and reports completion.
 ///
 /// Finishes on the synthesizer's empty end buffer, falling back to its finish
-/// callback; cancellation stops synthesis.
+/// callback; cancellation stops synthesis. The writer keeps itself (and so its
+/// synthesizer) alive until the synthesizer reports finish or cancel:
+/// releasing an AVSpeechSynthesizer while it still delivers buffers crashed
+/// the test process with SIGSEGV.
 private final class SystemSpeechFileWriter: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
   private let url: URL
   private let format: AudioFormat
@@ -124,6 +127,7 @@ private final class SystemSpeechFileWriter: NSObject, AVSpeechSynthesizerDelegat
   private var file: AVAudioFile?
   private var continuation: CheckedContinuation<Void, Error>?
   private var outcome: Result<Void, Error>?
+  private var keepAlive: SystemSpeechFileWriter?
 
   init(url: URL, format: AudioFormat) {
     self.url = url
@@ -141,6 +145,9 @@ private final class SystemSpeechFileWriter: NSObject, AVSpeechSynthesizerDelegat
           return nil
         }
         if let settled { continuation.resume(with: settled); return }
+        lock.withLock { keepAlive = self }
+        // A last resort if the synthesizer never reports finish or cancel.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 300) { [weak self] in self?.release() }
         synthesizer.write(utterance) { [weak self] buffer in self?.append(buffer) }
       }
     } onCancel: {
@@ -184,14 +191,22 @@ private final class SystemSpeechFileWriter: NSObject, AVSpeechSynthesizerDelegat
     if let (continuation, result) = settled { continuation?.resume(with: result) }
   }
 
+  private func release() {
+    lock.withLock { keepAlive = nil }
+  }
+
   func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
     // The empty end buffer normally finishes first; this is the fallback, after
     // a grace period so a trailing buffer is not cut off.
-    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.finish(.success(())) }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+      self.finish(.success(()))
+      self.release()
+    }
   }
 
   func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
     finish(.failure(CancellationError()))
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { self.release() }
   }
 
   private static func settings(for format: AudioFormat, matching pcm: AVAudioFormat) -> [String: Any] {

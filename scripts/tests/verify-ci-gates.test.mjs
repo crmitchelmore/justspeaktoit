@@ -18,8 +18,9 @@ const nativeEligibleJobs = [
   'build-macos', 'release-validation', 'api-compatibility', 'lint', 'core-journey-e2e',
   'build-ios-swiftpm', 'build-ios-keyboard',
 ];
-const armFallbackJobs = new Set(['lint', 'release-validation', 'build-ios-swiftpm', 'build-ios-keyboard']);
-const hostedFallback = (id) => (armFallbackJobs.has(id) ? 'macos-latest' : 'macos-26-intel');
+// Hosted macOS concurrency is a fixed per-account cap shared by Intel and ARM,
+// so Intel adds no capacity and only slows jobs: every hosted fallback is ARM.
+const hostedFallback = () => 'macos-latest';
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
@@ -143,7 +144,7 @@ function routingContext(event = 'pull_request', repository = 'crmitchelmore/just
   };
 }
 
-test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
+test('Apple CI routing keeps every hosted macOS job on ARM', () => {
   for (const id of ['build-ios', 'core-journey-fixture-ui']) {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
@@ -151,9 +152,7 @@ test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
   assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
-  // Intel appears only as the hosted fallback of the native-eligible jobs.
-  assert.doesNotMatch(workflow, /runs-on: macos-26-intel/);
-  // Lint and Release stay on hosted ARM: on Intel they exceeded their job budgets.
+  assert.doesNotMatch(workflow, /-intel/);
   for (const id of nativeEligibleJobs) {
     const hosted = hostedFallback(id);
     assert.ok(jobBodies[id].includes(`|| '["${hosted}"]') }}`), id);

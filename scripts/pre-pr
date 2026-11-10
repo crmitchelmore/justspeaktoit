@@ -67,6 +67,11 @@ CI_ANDROID = ['android/*', '.github/workflows/android.yml', 'Sources/SpeakCore/T
               'Sources/SpeakCore/ModelCatalog.swift', 'Sources/SpeakCore/ModelRetirements.swift',
               'Sources/SpeakCore/ProviderCredentialCatalogue.swift',
               'Sources/SpeakCore/OpenAITranscriptionModels.swift']
+# Public API compatibility: the exported library products' sources, the manifest and the gate itself.
+CI_API = ['Package.swift', 'Package.resolved', 'Sources/SpeakCore/*', 'Sources/SpeakSync/*', 'Sources/SpeakiOS/*',
+          'Sources/SpeakHotKeys/*', 'Sources/SpeakAutomationKit/*', 'Sources/SpeakWatchCore/*',
+          'scripts/check-api-compatibility.sh', 'scripts/api-breakage-allowlist.txt',
+          'scripts/ci-api-compatibility.sh']
 # Test targets the macOS job leaves to Portable Swift (Linux), as ci.yml passes them to affected-swift-tests.py.
 CI_MACOS_SKIP_TARGETS = {'SpeakDesktopTests', 'SpeakAutomationKitTests'}
 WINDOWS_PATTERNS = ['Sources/SpeakWindows*', 'Sources/CWindows*', 'Tests/SpeakWindows*',
@@ -75,7 +80,7 @@ WORKFLOW_PATTERNS = ['.github/workflows/*', '.github/actions/*', '.github/action
 SHELL_PATTERNS = ['scripts/*.sh', '.githooks/*', 'scripts/install-pre-pr-hook']
 # Cheap static checks run first so most failures surface within seconds.
 COST = {'swift-test-coverage': 0, 'actionlint': 0, 'shellcheck': 0, 'swiftformat': 1, 'landing-tests': 1,
-        'ci-lint': 2, 'apple-build': 3, 'apple-unit-tests': 4}
+        'ci-lint': 2, 'apple-build': 3, 'apple-unit-tests': 4, 'api-compatibility': 5}
 
 
 def matches(path: str, patterns: list[str]) -> bool:
@@ -309,6 +314,23 @@ def android_runs_locally() -> bool:
     return jdk and feed
 
 
+def merge_base_or(base: str) -> str:
+    """The merge base with base, or base itself when history can't tell (a shallow CI checkout)."""
+    return git('merge-base', 'HEAD', base, check=False) or base
+
+
+def pr_title_env() -> dict[str, str]:
+    """The open PR's title, whose '!' marker declares an intended API break; else commit subjects decide."""
+    if os.environ.get('PR_TITLE'):
+        return {'PR_TITLE': os.environ['PR_TITLE']}
+    try:
+        result = subprocess.run(['gh', 'pr', 'view', '--json', 'title', '--jq', '.title'], cwd=ROOT, text=True,
+                                capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    return {'PR_TITLE': result.stdout.strip()} if result.returncode == 0 and result.stdout.strip() else {}
+
+
 def ci_selects_apple(files: list[str]) -> bool:
     """ci.yml's `apple` output: some changed file lies outside docs, the website, Android and Workers."""
     return any(not matches(f, CI_NOT_APPLE) for f in files)
@@ -346,6 +368,7 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
 
     apple = area('ci-lint', hits=[f for f in files if not matches(f, CI_NOT_APPLE)])
     swift = area('swift', CI_SWIFT)
+    api = area('public-api', CI_API)
     windows = area('windows', WINDOWS_PATTERNS)
     workflows = area('workflows', WORKFLOW_PATTERNS)
     shell = area('shell', SHELL_PATTERNS)
@@ -415,6 +438,16 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
                             # The executable target links Win32 libraries under Xcode's toolchain;
                             # CI runs this check on Linux (linux.yml); Portable Swift (Linux) covers the shared graph.
                             skip_reason='' if sys.platform.startswith('linux') else 'Linux only; CI runs it'))
+    if api:
+        # The Public API compatibility job's own script, against the merge base (CI's PR baseline).
+        title = 'Public API compatibility (scripts/ci-api-compatibility.sh)'
+        if IS_MAC:
+            checks.append(Check('api-compatibility', 'public-api', title,
+                                ['bash', 'scripts/ci-api-compatibility.sh', merge_base_or(base)],
+                                env=pr_title_env(), requires='swift', forbid_drift=('Package.resolved',)))
+        else:
+            checks.append(Check('api-compatibility', 'public-api', title, [], skip_reason='macOS only',
+                                incomplete=True))
     changed_workflows = [f for f in workflows if f.startswith('.github/workflows/') and (ROOT / f).is_file()]
     if changed_workflows:
         # Advisory: CI does not gate on actionlint and local versions can lag new workflow syntax.

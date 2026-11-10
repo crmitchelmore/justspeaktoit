@@ -59,7 +59,8 @@ jobs:
       - name: Unit tests, lint and debug build
         env:
           JSTI_MAVEN_MIRROR: ${{ vars.JSTI_MAVEN_MIRROR }}
-        run: ./gradlew --stacktrace testDebugUnitTest lintDebug assembleDebug
+        # Shared with scripts/pre-pr and precheck.yml.
+        run: ../scripts/ci-android.sh
 
       - name: Upload test and lint reports
         if: ${{ !cancelled() }}

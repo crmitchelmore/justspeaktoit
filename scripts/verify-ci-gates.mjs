@@ -25,6 +25,8 @@ export function assessCIGates(needs, event) {
   requireSuccess('release-paths');
   // The Workers package is cheap, never path-skipped, and must always pass.
   requireSuccess('paid-access-worker');
+  // Pre-PR evidence always runs; it passes straight through on pushes and bots.
+  requireSuccess('pre-pr-evidence');
   const outputs = needs['release-paths']?.outputs ?? {};
   for (const flag of ['apple', 'swift', 'full']) {
     if (!['true', 'false'].includes(outputs[flag])) errors.push(`release-paths: missing or invalid ${flag} output`);

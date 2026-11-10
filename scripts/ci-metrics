@@ -32,6 +32,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import statistics
 import subprocess
 import sys
@@ -88,16 +89,18 @@ def summary(values: list[float]) -> dict:
 
 # Only the fields the report reads are cached, which keeps a month of runs to a few MB.
 RUN_FIELDS = ("id", "name", "path", "event", "status", "conclusion", "created_at", "run_started_at",
-              "updated_at", "run_attempt", "head_branch", "html_url")
+              "updated_at", "run_attempt", "head_branch", "head_sha", "html_url", "pull_requests")
 
 
 def day_runs(day: dt.date, refresh: bool = False, today: dt.date | None = None) -> list[dict]:
     """One day's runs. Settled days (older than three days, nothing still running) come from the cache."""
-    cached = CACHE / "runs" / REPO.replace("/", "__") / f"{day.isoformat()}.json"
+    cached = CACHE / "runs-v2" / REPO.replace("/", "__") / f"{day.isoformat()}.json"
     if cached.exists() and not refresh:
         return json.loads(cached.read_text())
     pages = gh_api(f"repos/{REPO}/actions/runs?per_page=100&created={day.isoformat()}", paginate=True)
     runs = [{k: run.get(k) for k in RUN_FIELDS} for page in pages for run in page.get("workflow_runs", [])]
+    for run in runs:
+        run["pull_requests"] = [pr["number"] for pr in run.get("pull_requests") or []]
     settled = day < (today or dt.date.today()) - dt.timedelta(days=3)
     if settled and all(run["status"] == "completed" for run in runs):
         cached.parent.mkdir(parents=True, exist_ok=True)
@@ -203,6 +206,65 @@ def critical_path(runs_with_jobs: list[tuple[dict, list[dict]]]) -> list[dict]:
     return sorted(table, key=lambda r: -(r["finish_p90"] or 0))
 
 
+MARKER = re.compile(r"<!-- pre-pr-summary (\{.*?\}) -->")
+
+
+def pre_pr_record(body: str) -> dict | None:
+    """The newest scripts/pre-pr marker in a PR body, as the Pre-PR evidence check reads it."""
+    records = MARKER.findall(body or "")
+    try:
+        return json.loads(records[-1]) if records else None
+    except json.JSONDecodeError:
+        return None
+
+
+def escapes(ci_runs: list[dict], pr_for, body_of, tree_of) -> dict:
+    """CI Gate failures on pull-request and merge-batch heads, split by the head's pre-pr evidence.
+
+    An escape is a failure whose PR body held a passing pre-pr record for that exact head (by commit,
+    or by `tree` when pre-pr ran before the commit). Target: under 1% of gate failures.
+    """
+    failed = [r for r in ci_runs if r.get("conclusion") == "failure" and (
+        r["event"] == "pull_request" or (r["event"] == "push" and (r.get("head_branch") or "").startswith("merge-batch/")))]
+    counts = {"gate_failures": len(failed), "escaped": 0, "no_evidence": 0, "failing_or_stale_evidence": 0}
+    listed = []
+    for run in failed:
+        number = pr_for(run)
+        record = pre_pr_record(body_of(number)) if number else None
+        if not record:
+            counts["no_evidence"] += 1
+            continue
+        same = record.get("head") == run["head_sha"] or (record.get("tree") and record["tree"] == tree_of(run["head_sha"]))
+        if record.get("result") == "pass" and same:
+            counts["escaped"] += 1
+            listed.append({"pr": number, "run": run.get("html_url"), "head": run["head_sha"][:12]})
+        else:
+            counts["failing_or_stale_evidence"] += 1
+    counts["escape_rate"] = round(counts["escaped"] / len(failed), 4) if failed else None
+    counts["escapes"] = listed
+    return counts
+
+
+def github_escapes(ci_runs: list[dict]) -> dict:
+    bodies: dict[int, str] = {}
+
+    def pr_for(run: dict) -> int | None:
+        if run.get("pull_requests"):
+            return run["pull_requests"][0]
+        if run["event"] == "push":
+            owner = REPO.split("/")[0]
+            prs = gh_api(f"repos/{REPO}/pulls?state=all&head={owner}:{run['head_branch']}&per_page=1")
+            return prs[0]["number"] if prs else None
+        return None
+
+    def body_of(number: int) -> str:
+        if number not in bodies:
+            bodies[number] = gh_api(f"repos/{REPO}/pulls/{number}").get("body") or ""
+        return bodies[number]
+
+    return escapes(ci_runs, pr_for, body_of, lambda sha: gh_api(f"repos/{REPO}/git/commits/{sha}")["tree"]["sha"])
+
+
 def compute(args: argparse.Namespace) -> dict:
     until = args.until or (dt.date.today() + dt.timedelta(days=1))
     since = args.since or (until - dt.timedelta(days=args.days))
@@ -223,6 +285,7 @@ def compute(args: argparse.Namespace) -> dict:
         stats["wall_minutes"] += minutes(ts(run.get("run_started_at")), ts(run.get("updated_at"))) or 0
 
     ci_runs = [r for r in runs if r.get("path") == CI_PATH]
+    escape = (args.escapes or github_escapes)(ci_runs)
     ci_pr = [r for r in ci_runs if r["event"] == "pull_request"]
     ci_success = [minutes(ts(r.get("run_started_at")), ts(r.get("updated_at")))
                   for r in ci_pr if r.get("conclusion") == "success"]
@@ -272,12 +335,14 @@ def compute(args: argparse.Namespace) -> dict:
             "main_failure_rate": main_failure_rate, "main_runs_judged": len(ci_main),
             "main_cancel_rate": main_cancel_rate, "ci_pr_cancel_rate": pr_cancel_rate,
             "zombie_runs": len(zombie_runs),
+            "pre_pr_escape_rate": escape["escape_rate"], "gate_failures": escape["gate_failures"],
         },
         "pr_open_to_merge_hours": open_to_merge,
         "ci_pr_success_minutes": summary(ci_success),
         "required_gate_minutes": summary(gate),
         "critical_path": critical_path(sampled_jobs),
         "zombie_runs": zombie_runs,
+        "pre_pr_escapes": escape,
         "macos_queue_minutes": summary(queue),
         "job_minutes_sampled": {k: round(v) for k, v in job_minutes.items()},
         "sampled_job_runs": len(sampled),
@@ -311,7 +376,11 @@ def render(data: dict) -> str:
              f"p90 {fmt(card['required_gate_minutes_p90'])} min",
              f"- Main CI failure rate: {rate(card['main_failure_rate'])} of {card['main_runs_judged']} decided runs; "
              f"main cancelled {rate(card['main_cancel_rate'])}; PR CI cancelled {rate(card['ci_pr_cancel_rate'])}",
-             f"- Zombie runs (unfinished after {ZOMBIE_HOURS} h): {card['zombie_runs']}", "",
+             f"- Zombie runs (unfinished after {ZOMBIE_HOURS} h): {card['zombie_runs']}",
+             f"- Pre-PR escape rate: {rate(card['pre_pr_escape_rate'])} of {card['gate_failures']} PR/batch CI "
+             f"failures had a passing scripts/pre-pr record for that head (target < 1%); "
+             f"{data['pre_pr_escapes']['no_evidence']} had none, "
+             f"{data['pre_pr_escapes']['failing_or_stale_evidence']} a failing or stale one", "",
              "| Metric | n | p50 | p90 |", "|---|---|---|---|"]
     for key, label in (("pr_open_to_merge_hours", "PR open → merge (h)"),
                        ("ci_pr_success_minutes", "CI workflow, successful PR runs (min)"),
@@ -355,6 +424,7 @@ def main() -> None:
                         help="newest completed CI runs whose jobs are fetched (default 300)")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--refresh", action="store_true", help="refetch run lists instead of using the cache")
+    parser.set_defaults(escapes=None)
     args = parser.parse_args()
     data = compute(args)
     print(json.dumps(data, indent=2) if args.json else render(data))

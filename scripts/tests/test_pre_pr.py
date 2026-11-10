@@ -2,6 +2,7 @@
 import importlib.machinery
 import importlib.util
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -30,14 +31,35 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(selected, [])
         self.assertEqual(areas, {})
 
-    def test_tooling_change_mirrors_the_ci_lint_tooling_gate(self):
-        selected, _, _ = ids(['scripts/release-train.mjs'])
-        self.assertEqual(selected, ['tooling-tests'])
+    def test_tooling_change_runs_the_ci_lint_job(self):
+        selected, _, checks = ids(['scripts/release-train.mjs'])
+        self.assertEqual(selected, ['ci-lint'])
+        self.assertEqual(checks[0].command, ['make', 'ci-lint'])
+        self.assertEqual(checks[0].forbid_drift, ('Tooling/Package.resolved',))
 
     def test_workflow_change_adds_actionlint(self):
         selected, _, _ = ids(['.github/workflows/ci.yml'])
         self.assertIn('actionlint', selected)
-        self.assertIn('tooling-tests', selected)
+        self.assertIn('ci-lint', selected)
+        self.assertNotIn('portable-linux', selected)
+
+    def test_android_runs_remotely_without_a_working_jdk_and_feed(self):
+        with mock.patch.dict(pre_pr.os.environ, {'JSTI_ANDROID_LOCAL': '0'}):
+            checks, _ = pre_pr.plan(['android/app/build.gradle.kts'], False)
+        android = {c.id: c for c in checks}['android']
+        self.assertTrue(android.background)
+        self.assertEqual(android.command[:4], ['python3', 'scripts/linux-precheck', '--job', 'android'])
+        self.assertFalse(android.advisory or android.skip_reason or android.requires)
+        with mock.patch.dict(pre_pr.os.environ, {'JSTI_ANDROID_LOCAL': '1'}):
+            checks, _ = pre_pr.plan(['android/app/build.gradle.kts'], False)
+        self.assertEqual({c.id: c for c in checks}['android'].command, ['bash', 'scripts/ci-android.sh'])
+
+    def test_macos_java_stub_is_not_a_jdk(self):
+        failing = mock.Mock(returncode=1)
+        with mock.patch.dict(pre_pr.os.environ, {'JSTI_MAVEN_MIRROR': 'https://feed'}), \
+                mock.patch.object(pre_pr.subprocess, 'run', return_value=failing):
+            pre_pr.os.environ.pop('JSTI_ANDROID_LOCAL', None)
+            self.assertFalse(pre_pr.android_runs_locally())
 
     def test_android_worker_and_landing_are_independent_areas(self):
         selected, areas, _ = ids(['android/app/build.gradle.kts', 'workers/paid-access/src/index.ts',
@@ -48,10 +70,25 @@ class PlanTests(unittest.TestCase):
         self.assertIn('landing-tests', selected)
         self.assertNotIn('apple-build', selected)
 
-    def test_shared_core_change_selects_apple_and_portable(self):
-        _, areas, _ = ids(['Sources/SpeakCore/SecureStorage.swift'])
-        self.assertIn('apple', areas)
-        self.assertIn('portable', areas)
+    def test_swift_change_runs_every_ci_gate_job_with_linux_first(self):
+        selected, areas, checks = ids(['Sources/SpeakCore/SecureStorage.swift'])
+        self.assertEqual(set(areas), {'ci-lint', 'swift'})
+        self.assertEqual(selected[0], 'portable-linux')
+        self.assertTrue(checks[0].background)
+        self.assertIn('scripts/linux-precheck', checks[0].command)
+        self.assertIn('ci-lint', selected)
+        if pre_pr.IS_MAC:
+            self.assertIn('apple-build', selected)
+            self.assertEqual({c.id: c for c in checks}['apple-build'].forbid_drift, ('Package.resolved',))
+
+    def test_linux_modes(self):
+        for mode, flag in (('remote', '--remote'), ('container', '--container')):
+            checks, _ = pre_pr.plan(['Package.swift'], False, linux=mode)
+            self.assertIn(flag, checks[0].command)
+        checks, _ = pre_pr.plan(['Package.swift'], False, linux='skip')
+        linux = {c.id: c for c in checks}['portable-linux']
+        self.assertTrue(linux.incomplete)
+        self.assertEqual(linux.skip_reason, '--no-linux')
 
     def test_no_check_drives_ui_or_launches_the_app(self):
         everything = ['Package.swift', 'Project.swift', 'Sources/SpeakApp/AppDelegate.swift',
@@ -88,6 +125,64 @@ class PlanTests(unittest.TestCase):
         text = pre_pr.markdown(summary)
         marker = text.split('<!-- pre-pr-summary ')[1].split(' -->')[0]
         self.assertEqual(json.loads(marker), {'schema': 1, 'head': 'a' * 40, 'result': 'pass'})
+        summary['tree'] = 'c' * 40
+        marker = pre_pr.markdown(summary).split('<!-- pre-pr-summary ')[1].split(' -->')[0]
+        self.assertEqual(json.loads(marker)['tree'], 'c' * 40)
+
+    def test_worktree_tree_matches_a_clean_head(self):
+        if pre_pr.git('status', '--porcelain'):
+            self.skipTest('only comparable on a clean checkout')
+        self.assertEqual(pre_pr.worktree_tree(), pre_pr.git('rev-parse', 'HEAD^{tree}'))
+
+
+class CIParityTests(unittest.TestCase):
+    """pre-pr's routing must equal ci.yml's, or a change CI tests could pass pre-pr untested."""
+
+    ci = (ROOT / '.github' / 'workflows' / 'ci.yml').read_text(encoding='utf-8')
+
+    def filter_list(self, name):
+        block = self.ci.split(f'\n            {name}:\n', 1)[1]
+        items = []
+        for line in block.splitlines():
+            line = line.strip()
+            if not line.startswith('- '):
+                if items:
+                    break
+                continue
+            items.append(line[2:].strip("'\""))
+        return items
+
+    @staticmethod
+    def glob(pattern):
+        return pattern.replace('/**', '/*').replace('**/', '')
+
+    def test_swift_paths_match_ci(self):
+        self.assertEqual(sorted(map(self.glob, self.filter_list('swift'))), sorted(pre_pr.CI_SWIFT))
+
+    def test_lint_exclusions_match_ci(self):
+        ci = [self.glob(p[1:]) for p in self.filter_list('apple') if p.startswith('!')]
+        self.assertEqual(sorted(ci), sorted(pre_pr.CI_NOT_APPLE))
+
+    def test_macos_skip_targets_match_ci(self):
+        self.assertEqual(set(re.findall(r'--skip-target (\w+)', self.ci)), pre_pr.CI_MACOS_SKIP_TARGETS)
+
+    def test_android_paths_and_command_match_android_yml(self):
+        android = (ROOT / '.github' / 'workflows' / 'android.yml').read_text(encoding='utf-8')
+        block = android.split('  pull_request:\n', 1)[1].split('\npermissions:', 1)[0]
+        paths = [line.strip()[2:] for line in block.splitlines() if line.strip().startswith('- ')]
+        self.assertEqual(sorted(map(self.glob, paths)), sorted(pre_pr.CI_ANDROID))
+        self.assertIn('run: ../scripts/ci-android.sh', android)
+        precheck = (ROOT / '.github' / 'workflows' / 'precheck.yml').read_text(encoding='utf-8')
+        self.assertIn('run: scripts/ci-android.sh', precheck)
+        for action in re.findall(r'uses: (actions/setup-java@\S+|gradle/actions/setup-gradle@\S+)', android):
+            self.assertIn(action, precheck)
+
+    def test_linux_image_is_the_ci_image(self):
+        image = re.search(r'image: (swift:[^\s]+)', self.ci.split('Portable Swift (Linux)', 1)[1]).group(1)
+        precheck = (ROOT / '.github' / 'workflows' / 'precheck.yml').read_text(encoding='utf-8')
+        self.assertIn(f'image: {image}', precheck)
+        self.assertIn(image, (ROOT / 'scripts' / 'linux-precheck').read_text(encoding='utf-8'))
+        self.assertIn('scripts/ci-portable-linux.sh', precheck)
 
 
 def fake_graph():
@@ -121,6 +216,9 @@ class SelectionTests(unittest.TestCase):
         'Tests/CoreTests/BehaviourTests+More.swift': 'extension BehaviourTests { func testMore() {} }\n',
         'Tests/CoreTests/ImportOnlyTests.swift': '@testable import Core\n// Core\nfinal class ImportOnlyTests {}\n',
         'Tests/CoreTests/Plus+Cases.swift': 'func helper() {}\n',
+        'Sources/Core/Billable.swift': 'struct Billable {}\n',
+        'Tests/CoreTests/BillableIntegrationTests.swift':
+            '#if JSTI_BILLABLE_INTEGRATION\nfinal class BillableIntegrationTests { let b = Billable() }\n#endif\n',
     }
 
     def setUp(self):
@@ -168,6 +266,11 @@ class SelectionTests(unittest.TestCase):
     def test_imports_and_comments_do_not_count_as_references(self):
         # Core.swift declares `enum Core`; `@testable import Core` and comments must not select every test.
         self.assertEqual(self.select(['Sources/Core/Core.swift']).filters, ['CoreTests\\.'])
+
+    def test_opt_in_integration_files_are_never_selected(self):
+        self.assertEqual(self.select(['Tests/CoreTests/BillableIntegrationTests.swift']).filters, [])
+        # Only an opt-in file names Billable, so its module's test target runs instead.
+        self.assertEqual(self.select(['Sources/Core/Billable.swift']).filters, ['CoreTests\\.'])
 
     def test_full_mode_runs_whole_covering_targets(self):
         self.assertEqual(self.select(['Sources/Core/Helpers.swift'], full=True).filters,
@@ -230,6 +333,13 @@ class RunTests(unittest.TestCase):
         check = self.run_check(command=['echo', 'Executed 3 tests\nTest run with 2 tests passed'], counts_tests=True)
         self.assertEqual((check.status, check.note), ('pass', '5 tests'))
 
+    def test_modifying_a_ci_checked_file_fails(self):
+        states = iter([set(), {'Package.resolved'}])
+        with mock.patch.object(pre_pr, 'dirty_tracked', lambda: next(states)):
+            check = self.run_check(forbid_drift=('Package.resolved',))
+        self.assertEqual(check.status, 'fail')
+        self.assertIn('Package.resolved', check.note)
+
     def test_counts_both_test_frameworks(self):
         log = 'Executed 4 tests\nExecuted 12 tests, with 0 failures\n✔ Test run with 7 tests in 2 suites passed'
         self.assertEqual(pre_pr.tests_executed(log), 19)
@@ -255,9 +365,21 @@ class EvidenceTests(unittest.TestCase):
     def test_stale_record_is_a_warning(self):
         self.assertEqual(evidence.evaluate(self.body(head='d' * 40), self.head, 'crmitchelmore')[0], 'warning')
 
-    def test_bots_are_exempt(self):
-        for bot in ('dependabot[bot]', 'devin-ai-integration[bot]', 'Copilot[bot]'):
-            self.assertEqual(evidence.evaluate('', self.head, bot)[0], 'ok', bot)
+    def test_strict_mode_rejects_a_record_for_another_commit(self):
+        stale = self.body(head='d' * 40)
+        self.assertEqual(evidence.evaluate(stale, self.head, 'crmitchelmore', strict=True)[0], 'error')
+        self.assertEqual(evidence.evaluate(self.body(), self.head, 'crmitchelmore', strict=True)[0], 'ok')
+
+    def test_strict_mode_accepts_a_record_for_the_same_tree(self):
+        tree = 'e' * 40
+        body = stale = self.body(head='d' * 40).replace('"result"', f'"tree": "{tree}", "result"')
+        self.assertEqual(evidence.evaluate(body, self.head, 'crmitchelmore', tree, strict=True)[0], 'ok')
+        self.assertEqual(evidence.evaluate(stale, self.head, 'crmitchelmore', 'f' * 40, strict=True)[0], 'error')
+
+    def test_only_dependabot_is_exempt(self):
+        self.assertEqual(evidence.evaluate('', self.head, 'dependabot[bot]')[0], 'ok')
+        for agent in ('devin-ai-integration[bot]', 'Copilot[bot]', 'renovate[bot]'):
+            self.assertEqual(evidence.evaluate('', self.head, agent)[0], 'error', agent)
 
 
 if __name__ == '__main__':

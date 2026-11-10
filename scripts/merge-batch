@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Bors-style batch merging for main (see Docs/merge-batch.md).
 
-  scripts/merge-batch create <name> <pr>...      squash each PR onto origin/main in order and open one batch PR
+  scripts/merge-batch create <name> <pr>...      squash each PR onto origin/main in order, run scripts/pre-pr on
+                                                 the combined tree (--skip-pre-pr to bypass), then open one batch PR
   scripts/merge-batch status <name> [--wait]     show the batch PR, its members and its gate; --wait blocks until
                                                  the required checks finish (exit 0 green, 1 red or timed out)
   scripts/merge-batch land <name> [--no-wait]    wait for the required checks, squash-merge a green batch PR,
@@ -19,7 +20,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -31,6 +31,8 @@ IGNORED_WORKFLOWS = os.environ.get('MERGE_BATCH_IGNORED_WORKFLOWS',
                                    'Tessl Code Review|Pre-PR evidence|OpenAI API Review')
 TIMEOUT_MINUTES = float(os.environ.get('MERGE_BATCH_TIMEOUT_MINUTES', '150'))
 POLL_SECONDS = float(os.environ.get('MERGE_BATCH_POLL_SECONDS', '60'))
+BATCH_WORKTREE = ROOT / '.build' / 'merge-batch' / 'worktree'
+PRE_PR_OUT = ROOT / '.build' / 'merge-batch' / 'pre-pr'
 OK_CONCLUSIONS = {'success', 'skipped', 'neutral'}
 MEMBER = re.compile(r'^<!-- merge-batch-member (\d+) ([0-9a-f]+) -->$', re.M)
 
@@ -190,14 +192,19 @@ def wait_for_gate(sha: str, required: list[str], timeout_minutes: float = TIMEOU
         sleep(poll)
 
 
-def evidence_block(batch_sha: str, records: list[dict]) -> str:
-    """A pre-pr-summary record for the combined head, built from each member's own evidence.
+def evidence_block(batch_sha: str, records: list[dict], combined: str = '') -> str:
+    """The batch's pre-pr-summary record.
 
-    The batch passes only if every member has a passing scripts/pre-pr record (or is a bot).
-    The combined tree itself is tested by the batch PR's required checks.
+    With `combined` (scripts/pre-pr's markdown for the combined tree) that real run is the record, followed
+    by each member's own evidence. Without it (--skip-pre-pr) the record is built from the members' evidence:
+    it passes only if every member has a passing scripts/pre-pr record (or is a bot).
     """
-    result = 'fail' if any(r['evidence'] == 'error' for r in records) else 'pass'
     icon = {'ok': '✅', 'warning': '⚠️', 'error': '❌'}
+    if combined:
+        rows = [f'| #{r["pr"]} | `{r["head"][:12]}` | {icon[r["evidence"]]} {r["message"]} |' for r in records]
+        return '\n'.join([combined, '', '#### Member evidence', '', '| Member | Head | Pre-PR evidence |',
+                          '|---|---|---|', *rows])
+    result = 'fail' if any(r['evidence'] == 'error' for r in records) else 'pass'
     lines = [f'### Pre-PR checks: {result.upper()}',
              f'Combined by `scripts/merge-batch` at `{batch_sha[:12]}` from each member\'s own `scripts/pre-pr` '
              'record. The required checks run on this combined tree.', '',
@@ -210,53 +217,72 @@ def evidence_block(batch_sha: str, records: list[dict]) -> str:
     return '\n'.join(lines)
 
 
-def create(name: str, prs: list[str]) -> None:
+def run_pre_pr(work: Path) -> tuple[bool, str]:
+    """scripts/pre-pr on the combined tree, as the batch's own CI will see it. Returns (passed, markdown)."""
+    env = {**os.environ, 'JSTI_PRE_PR_OUT': str(PRE_PR_OUT), 'PYTHONDONTWRITEBYTECODE': '1'}
+    print(f'merge-batch: running scripts/pre-pr on the combined tree (log {PRE_PR_OUT / "logs"})', flush=True)
+    result = subprocess.run([sys.executable, str(work / 'scripts' / 'pre-pr'), '--base', f'{REMOTE}/main',
+                             '--markdown'], cwd=work, env=env, text=True, capture_output=True)
+    print(result.stdout[-6000:], flush=True)
+    summary = PRE_PR_OUT / 'summary.md'
+    markdown = summary.read_text(encoding='utf-8').strip() if summary.exists() else ''
+    return result.returncode == 0, markdown
+
+
+def create(name: str, prs: list[str], pre_pr: bool = True) -> None:
     if not prs:
         raise BatchError('create needs at least one PR')
     evidence = load_evidence()
     branch = branch_for(name)
     run(['git', 'fetch', '-q', REMOTE, 'main'])
-    with tempfile.TemporaryDirectory() as tmp:
-        work = Path(tmp) / 'batch'
-        run(['git', 'worktree', 'add', '-q', '-B', branch, str(work), f'{REMOTE}/main'])
-        try:
-            included, skipped, closes, records, best, kind = [], [], [], [], 0, 'chore'
-            for pr in prs:
-                info = gh_json('pr', 'view', pr, '--repo', REPO, '--json',
-                               'number,state,isDraft,baseRefName,headRefOid,mergeable,title,body,author,'
-                               'closingIssuesReferences')
-                head, title = info['headRefOid'], info['title']
-                if (info['state'] != 'OPEN' or info['isDraft'] or info['baseRefName'] != 'main'
-                        or info['mergeable'] == 'CONFLICTING'):
-                    skipped.append(f'#{pr} ({info["state"]} draft={str(info["isDraft"]).lower()} '
-                                   f'base={info["baseRefName"]} {info["mergeable"]})')
-                    continue
-                run(['git', 'fetch', '-q', REMOTE, f'pull/{pr}/head'], cwd=work)
-                if run(['git', 'rev-parse', 'FETCH_HEAD'], cwd=work) != head:
-                    skipped.append(f'#{pr} (head moved)')
-                    continue
-                if subprocess.run(['git', 'merge', '-q', '--squash', head], cwd=work,
-                                  capture_output=True).returncode != 0:
-                    run(['git', 'reset', '-q', '--hard', 'HEAD'], cwd=work)
-                    skipped.append(f'#{pr} (conflicts with the batch)')
-                    continue
-                if subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=work).returncode == 0:
-                    skipped.append(f'#{pr} (no changes against main)')
-                    continue
-                run(['git', 'commit', '-q', '-m', f'{title} (#{pr})', '-m', f'Batched from #{pr} at {head}.'],
-                    cwd=work)
-                level, message = evidence.evaluate(info.get('body') or '', head, author_login(info.get('author')))
-                records.append({'pr': int(pr), 'head': head, 'evidence': level, 'message': message})
-                included.append((int(pr), head, title))
-                closes += [f'Fixes #{issue["number"]}' for issue in info.get('closingIssuesReferences') or []]
-                if rank(title) > best:
-                    best, kind = rank(title), title.split(':')[0]
-            if not included:
-                raise BatchError(f'no PR could be batched: {" ".join(skipped)}')
-            batch_sha = run(['git', 'rev-parse', 'HEAD'], cwd=work)
-            run(['git', 'push', '-q', '--force-with-lease', REMOTE, branch], cwd=work)
-        finally:
-            subprocess.run(['git', 'worktree', 'remove', '--force', str(work)], cwd=ROOT, capture_output=True)
+    combined = ''
+    # A fixed path, so SwiftPM reuses the previous batch's build products.
+    work = BATCH_WORKTREE
+    subprocess.run(['git', 'worktree', 'remove', '--force', str(work)], cwd=ROOT, capture_output=True)
+    run(['git', 'worktree', 'add', '-q', '-B', branch, str(work), f'{REMOTE}/main'])
+    try:
+        included, skipped, closes, records, best, kind = [], [], [], [], 0, 'chore'
+        for pr in prs:
+            info = gh_json('pr', 'view', pr, '--repo', REPO, '--json',
+                           'number,state,isDraft,baseRefName,headRefOid,mergeable,title,body,author,'
+                           'closingIssuesReferences')
+            head, title = info['headRefOid'], info['title']
+            if (info['state'] != 'OPEN' or info['isDraft'] or info['baseRefName'] != 'main'
+                    or info['mergeable'] == 'CONFLICTING'):
+                skipped.append(f'#{pr} ({info["state"]} draft={str(info["isDraft"]).lower()} '
+                               f'base={info["baseRefName"]} {info["mergeable"]})')
+                continue
+            run(['git', 'fetch', '-q', REMOTE, f'pull/{pr}/head'], cwd=work)
+            if run(['git', 'rev-parse', 'FETCH_HEAD'], cwd=work) != head:
+                skipped.append(f'#{pr} (head moved)')
+                continue
+            if subprocess.run(['git', 'merge', '-q', '--squash', head], cwd=work,
+                              capture_output=True).returncode != 0:
+                run(['git', 'reset', '-q', '--hard', 'HEAD'], cwd=work)
+                skipped.append(f'#{pr} (conflicts with the batch)')
+                continue
+            if subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=work).returncode == 0:
+                skipped.append(f'#{pr} (no changes against main)')
+                continue
+            run(['git', 'commit', '-q', '-m', f'{title} (#{pr})', '-m', f'Batched from #{pr} at {head}.'],
+                cwd=work)
+            level, message = evidence.evaluate(info.get('body') or '', head, author_login(info.get('author')))
+            records.append({'pr': int(pr), 'head': head, 'evidence': level, 'message': message})
+            included.append((int(pr), head, title))
+            closes += [f'Fixes #{issue["number"]}' for issue in info.get('closingIssuesReferences') or []]
+            if rank(title) > best:
+                best, kind = rank(title), title.split(':')[0]
+        if not included:
+            raise BatchError(f'no PR could be batched: {" ".join(skipped)}')
+        batch_sha = run(['git', 'rev-parse', 'HEAD'], cwd=work)
+        if pre_pr:
+            passed, combined = run_pre_pr(work)
+            if not passed:
+                raise BatchError(f'scripts/pre-pr failed on the combined tree {batch_sha[:12]}; nothing was '
+                                 f'pushed. Logs: {PRE_PR_OUT / "logs"}. Split the batch or fix the member.')
+        run(['git', 'push', '-q', '--force-with-lease', REMOTE, branch], cwd=work)
+    finally:
+        subprocess.run(['git', 'worktree', 'remove', '--force', str(work)], cwd=ROOT, capture_output=True)
 
     refs = ', '.join(f'#{pr}' for pr, _, _ in included)
     subject = f'{kind}: merge batch {name} ({refs})'
@@ -265,7 +291,7 @@ def create(name: str, prs: list[str]) -> None:
         f'on the combined tree. Land with `scripts/merge-batch land {name}` (Docs/merge-batch.md).', '',
         '## Members', *[f'- {title} (#{pr})' for pr, _, title in included], *closes, '',
         *[f'<!-- merge-batch-member {pr} {head} -->' for pr, head, _ in included], '',
-        evidence_block(batch_sha, records),
+        evidence_block(batch_sha, records, combined),
         *([f'\nNot batched: {" ".join(skipped)}'] if skipped else [])])
     failing = [f'#{r["pr"]}' for r in records if r['evidence'] == 'error']
     if failing:
@@ -359,8 +385,9 @@ def split(name: str) -> None:
 
 def main(argv: list[str]) -> int:
     command, args = (argv[0], argv[1:]) if argv else ('', [])
-    if command == 'create' and len(args) >= 2:
-        create(args[0], args[1:])
+    names = [a for a in args if a != '--skip-pre-pr']
+    if command == 'create' and len(names) >= 2:
+        create(names[0], names[1:], pre_pr='--skip-pre-pr' not in args)
     elif command == 'status' and len(args) in (1, 2) and args[1:] in ([], ['--wait']):
         return status(args[0], wait='--wait' in args)
     elif command == 'land' and len(args) in (1, 2) and args[1:] in ([], ['--no-wait']):

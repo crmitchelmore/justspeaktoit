@@ -3,7 +3,9 @@ import importlib.machinery
 import importlib.util
 import json
 import sys
+import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -105,6 +107,52 @@ class EvidenceTests(unittest.TestCase):
         marker = json.loads(body.split('<!-- pre-pr-summary ')[1].split(' -->')[0])
         self.assertEqual(marker['source'], 'merge-batch')
         self.assertEqual(marker['members'], [{'pr': 10, 'head': '0' * 40, 'evidence': 'ok'}])
+
+
+class CombinedPrePrTests(unittest.TestCase):
+    """create runs scripts/pre-pr on the combined tree and pushes nothing when it fails."""
+
+    def fake_create(self, pre_pr_passes):
+        commands = []
+
+        def fake_run(args, cwd=None, check=True):
+            commands.append(args)
+            return 'f' * 40 if args[:2] == ['git', 'rev-parse'] else ''
+
+        info = {'number': 5, 'state': 'OPEN', 'isDraft': False, 'baseRefName': 'main', 'headRefOid': 'f' * 40,
+                'mergeable': 'MERGEABLE', 'title': 'fix: x', 'body': '', 'author': {'login': 'a'},
+                'closingIssuesReferences': []}
+        codes = {'merge': 0, 'diff': 1}
+        fake_subprocess = types.SimpleNamespace(
+            run=lambda args, **_: types.SimpleNamespace(returncode=codes.get(args[1], 0)))
+        markdown = '### Pre-PR checks: PASS\n<!-- pre-pr-summary {"schema": 1, "head": "x", "result": "pass"} -->'
+        with mock.patch.object(merge_batch, 'run', fake_run), \
+                mock.patch.object(merge_batch, 'gh_json', lambda *a: [] if a[:2] == ('pr', 'list') else info), \
+                mock.patch.object(merge_batch, 'subprocess', fake_subprocess), \
+                mock.patch.object(merge_batch, 'run_pre_pr', lambda work: (pre_pr_passes, markdown)):
+            try:
+                merge_batch.create('t', ['5'])
+            except SystemExit as error:
+                return commands, error
+        return commands, None
+
+    def test_failing_combined_pre_pr_pushes_nothing(self):
+        commands, error = self.fake_create(False)
+        self.assertIn('scripts/pre-pr failed on the combined tree', str(error))
+        self.assertFalse(any('push' in c for c in commands))
+
+    def test_passing_combined_pre_pr_is_the_batch_evidence(self):
+        commands, error = self.fake_create(True)
+        self.assertIsNone(error)
+        self.assertTrue(any('push' in c for c in commands))
+        body = next(c for c in commands if c[:3] == ['gh', 'pr', 'create'])
+        self.assertIn('#### Member evidence', body[body.index('--body') + 1])
+
+    def test_combined_record_comes_first(self):
+        records = [{'pr': 1, 'head': 'a' * 40, 'evidence': 'error', 'message': 'none'}]
+        body = merge_batch.evidence_block('b' * 40, records, '### Pre-PR checks: PASS\n<!-- pre-pr-summary {} -->')
+        self.assertTrue(body.startswith('### Pre-PR checks: PASS'))
+        self.assertEqual(body.count('<!-- pre-pr-summary'), 1)
 
 
 class ParsingTests(unittest.TestCase):

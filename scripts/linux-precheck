@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Run the CI Portable Swift (Linux) job's checks before a pull request.
+
+Usage:
+    scripts/linux-precheck                 # auto: a local container if one runs, else --remote
+    scripts/linux-precheck --container     # docker or podman with the CI image
+    scripts/linux-precheck --remote        # a throwaway precheck/** branch run on GitHub's Ubuntu runners
+    scripts/linux-precheck --tree DIR      # check another worktree (merge-batch uses this)
+    scripts/linux-precheck --job android   # the Android CI job (scripts/ci-android.sh), always remote
+    scripts/linux-precheck --base REF      # merge into REF first (default origin/main), as CI's PR merge commit does
+
+Both modes run scripts/ci-portable-linux.sh, the same script ci.yml's Portable Swift (Linux)
+job runs, in the same swift:6.2.3-jammy image (override with JSTI_SWIFT_IMAGE, e.g. a registry
+mirror). --remote snapshots the working tree, including uncommitted and untracked files, as a
+commit on top of HEAD, merges it into --base exactly as GitHub builds a pull request's merge commit,
+pushes that to precheck/<user>-<sha>, waits for .github/workflows/precheck.yml and deletes the branch. It never uses macOS. A tree that predates precheck.yml or
+ci-portable-linux.sh gets this checkout's copies, so older commits can be checked too.
+Exit status 0 means the Linux job would pass.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+TOOL_ROOT = Path(__file__).resolve().parents[1]
+REPO = os.environ.get('JSTI_PRECHECK_REPO', 'crmitchelmore/justspeaktoit')
+REMOTE = os.environ.get('JSTI_PRECHECK_REMOTE', 'origin')
+IMAGE = os.environ.get('JSTI_SWIFT_IMAGE',
+                       'swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6')
+WORKFLOW = 'precheck.yml'
+OVERLAY = ('.github/workflows/precheck.yml', 'scripts/ci-portable-linux.sh', 'scripts/ci-android.sh')
+JOBS = ('portable', 'android')
+TIMEOUT_MINUTES = float(os.environ.get('JSTI_PRECHECK_TIMEOUT_MINUTES', '45'))
+
+
+def git(tree: Path, *args: str, env: dict | None = None, input_: str | None = None) -> str:
+    result = subprocess.run(['git', *args], cwd=tree, text=True, capture_output=True, input=input_,
+                            env={**os.environ, **(env or {})})
+    if result.returncode != 0:
+        raise SystemExit(f'linux-precheck: git {" ".join(args[:3])} failed: {result.stderr.strip()}')
+    return result.stdout.strip()
+
+
+def snapshot(tree: Path, overlay_root: Path = TOOL_ROOT, job: str = 'portable') -> str:
+    """A commit of the working tree (tracked, modified and untracked, minus ignored) on top of HEAD."""
+    with tempfile.TemporaryDirectory() as scratch:
+        env = {'GIT_INDEX_FILE': str(Path(scratch) / 'index')}
+        git(tree, 'read-tree', 'HEAD', env=env)
+        git(tree, 'add', '-A', '--', '.', env=env)
+        present = set(git(tree, 'ls-files', env=env).splitlines())
+        for path in OVERLAY:
+            if path in present or not (overlay_root / path).is_file():
+                continue
+            blob = git(tree, 'hash-object', '-w', str(overlay_root / path))
+            mode = '100755' if os.access(overlay_root / path, os.X_OK) else '100644'
+            git(tree, 'update-index', '--add', '--cacheinfo', f'{mode},{blob},{path}', env=env)
+        tree_id = git(tree, 'write-tree', env=env)
+    return git(tree, 'commit-tree', tree_id, '-p', 'HEAD', '-m', f'pre-pr precheck snapshot [precheck:{job}]')
+
+
+def merged_with(tree: Path, snapshot_sha: str, base: str, job: str = 'portable') -> str:
+    """The snapshot merged into the base, like the refs/pull/N/merge commit CI checks out for a pull request."""
+    result = subprocess.run(['git', 'merge-tree', '--write-tree', base, snapshot_sha], cwd=tree, text=True,
+                            capture_output=True)
+    if result.returncode != 0:
+        raise SystemExit(f'linux-precheck: the change does not merge cleanly into {base}; CI would not run either.\n'
+                         + result.stdout.strip())
+    merged_tree = result.stdout.split()[0]
+    return git(tree, 'commit-tree', merged_tree, '-p', base, '-p', snapshot_sha,
+               '-m', f'pre-pr precheck: snapshot merged into {base} [precheck:{job}]')
+
+
+def gh_json(*args: str):
+    result = subprocess.run(['gh', *args], text=True, capture_output=True)
+    if result.returncode != 0:
+        raise SystemExit(f'linux-precheck: gh {" ".join(args[:3])} failed: {result.stderr.strip()}')
+    return json.loads(result.stdout or 'null')
+
+
+def find_run(sha: str) -> dict | None:
+    # By commit, not by workflow file: the file lookup 404s until precheck.yml is on main.
+    runs = gh_json('api', f'repos/{REPO}/actions/runs?head_sha={sha}&per_page=20')
+    candidates = sorted((r for r in runs.get('workflow_runs', []) if r.get('path') == f'.github/workflows/{WORKFLOW}'),
+                        key=lambda r: r['id'], reverse=True)
+    return candidates[0] if candidates else None
+
+
+def remote(tree: Path, base: str | None = None, poll: float = 20.0, job: str = 'portable') -> int:
+    sha = snapshot(tree, job=job)
+    if base:
+        sha = merged_with(tree, sha, git(tree, 'rev-parse', base), job)
+    user = os.environ.get('USER', 'dev').lower().replace(' ', '-')
+    branch = f'precheck/{user}-{job}-{sha[:12]}'
+    git(tree, 'push', '--quiet', '--force', REMOTE, f'{sha}:refs/heads/{branch}')
+    print(f'linux-precheck: pushed {sha[:12]} to {branch}; waiting for {WORKFLOW}', flush=True)
+    try:
+        deadline = time.monotonic() + TIMEOUT_MINUTES * 60
+        run, last = None, None
+        while time.monotonic() < deadline:
+            run = find_run(sha)
+            if run and run['status'] == 'completed':
+                break
+            state = run['status'] if run else 'not registered'
+            if state != last:
+                print(f'linux-precheck: {state} {run["html_url"] if run else ""}', flush=True)
+                last = state
+            time.sleep(poll)
+        else:
+            print(f'linux-precheck: timed out after {TIMEOUT_MINUTES:.0f} min', file=sys.stderr)
+            return 1
+        print(f'linux-precheck: {run["conclusion"]} {run["html_url"]}', flush=True)
+        if run['conclusion'] == 'success':
+            return 0
+        log = subprocess.run(['gh', 'run', 'view', str(run['id']), '--repo', REPO, '--log-failed'],
+                             text=True, capture_output=True).stdout.splitlines()
+        print('\n'.join(log[-120:]))
+        return 1
+    finally:
+        subprocess.run(['git', 'push', '--quiet', REMOTE, '--delete', branch], cwd=tree, capture_output=True)
+
+
+def container_runtime() -> str | None:
+    for name in ('docker', 'podman'):
+        path = shutil.which(name)
+        if path and subprocess.run([path, 'info'], capture_output=True).returncode == 0:
+            return path
+    return None
+
+
+def container(tree: Path, runtime: str) -> int:
+    command = [runtime, 'run', '--rm', '-v', f'{tree}:/src', '-w', '/src',
+               '-e', 'JSTI_SCRATCH_PATH=/src/.build/pre-pr/linux', IMAGE, 'bash', 'scripts/ci-portable-linux.sh']
+    print('linux-precheck: ' + ' '.join(command), flush=True)
+    return subprocess.run(command).returncode
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--remote', action='store_true')
+    mode.add_argument('--container', action='store_true')
+    parser.add_argument('--tree', type=Path, default=Path.cwd())
+    parser.add_argument('--base', default='origin/main',
+                        help="test the change merged into this ref, as CI does ('' tests the branch alone)")
+    parser.add_argument('--job', choices=JOBS, default='portable',
+                        help='the CI job to run: portable (Portable Swift (Linux)) or android (always remote)')
+    args = parser.parse_args(argv)
+    tree = Path(git(args.tree, 'rev-parse', '--show-toplevel'))
+    runtime = None if args.remote or args.job == 'android' else container_runtime()
+    if args.container and not runtime:
+        print('linux-precheck: no running docker or podman', file=sys.stderr)
+        return 1
+    if runtime:
+        return container(tree, runtime)
+    return remote(tree, args.base or None, job=args.job)
+
+
+if __name__ == '__main__':
+    # pre-pr stops this on an earlier failure; exit through the finally blocks so the branch is deleted.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    sys.exit(main())

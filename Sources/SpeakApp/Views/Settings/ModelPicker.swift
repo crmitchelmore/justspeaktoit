@@ -90,139 +90,151 @@ struct ModelPicker: View {
     let options: [ModelCatalog.Option]
     let credentialPurpose: ModelCredentialPurpose
     let storedAPIKeyIdentifiers: Set<String>
+    let allowsCustom: Bool
     @Binding var selection: String
 
-    @Environment(\.dismiss) private var dismiss
-    @State private var query: String = ""
     @State private var selectedTag: ModelCatalog.Tag? = nil
+    /// Native routes are listed first; OpenRouter is one row that opens its own list.
+    @State private var isBrowsingOpenRouter = false
+
+    private var groups: ModelPickerGrouping.Groups {
+      ModelPickerGrouping.groups(options, purpose: credentialPurpose)
+    }
+
+    /// Group only when both kinds exist, so single-route pickers stay unchanged.
+    private var isGrouped: Bool {
+      !groups.direct.isEmpty && !groups.openRouter.isEmpty
+    }
+
+    private var levelOptions: [ModelCatalog.Option] {
+      guard isGrouped else { return groups.direct + groups.openRouter }
+      return isBrowsingOpenRouter ? groups.openRouter : groups.direct
+    }
 
     var body: some View {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack {
-          Text(title)
-            .font(.headline)
-          Spacer()
-          Button("Done") { dismiss() }
-            .keyboardShortcut(.cancelAction)
-        }
-
-        Picker("Filter", selection: $selectedTag) {
-          Text("All").tag(ModelCatalog.Tag?.none)
-          ForEach(ModelCatalog.Tag.allCases, id: \.self) { tag in
-            Text(tag.displayName).tag(ModelCatalog.Tag?.some(tag))
-          }
-        }
-        .pickerStyle(.segmented)
-
-        List {
-          if isShowingNoSearchResults {
-            ContentUnavailableView.search(text: trimmedQuery)
-          }
-          ForEach(filteredOptions) { option in
-            Button {
-              selection = option.id
-              dismiss()
-            } label: {
-              VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 10) {
-                  Text(option.displayName)
-                    .font(.body)
+      LongListChooserSheet(
+        title: isBrowsingOpenRouter ? ModelPickerGrouping.openRouterTitle : title,
+        items: levelOptions, id: { $0.id }, selection: $selection,
+        searchText: { [$0.displayName, $0.id, $0.description ?? ""] },
+        includes: { option in selectedTag.map { option.tags.contains($0) } ?? true },
+        controls: {
+          AnyView(HStack {
+            if isBrowsingOpenRouter {
+              Button {
+                isBrowsingOpenRouter = false
+              } label: {
+                Label("Back", systemImage: "chevron.left")
+              }
+              .accessibilityIdentifier("modelPicker.openRouter.back")
+            }
+            Picker("Filter", selection: $selectedTag) {
+              Text("All").tag(ModelCatalog.Tag?.none)
+              ForEach(ModelCatalog.Tag.allCases, id: \.self) { tag in
+                Text(tag.displayName).tag(ModelCatalog.Tag?.some(tag))
+              }
+            }.pickerStyle(.segmented)
+          })
+        },
+        clearFilters: { selectedTag = nil },
+        footer: { select in
+          AnyView(Group {
+            if isGrouped && !isBrowsingOpenRouter {
+              openRouterRow
+            }
+            if allowsCustom {
+              Divider()
+              Button {
+                select(ModelCatalog.customOptionID)
+              } label: {
+                HStack {
+                  Text("Custom…")
                   Spacer()
-                  if let contextLength = option.contextLength {
-                    Text(formatContext(contextLength))
-                      .font(.caption.monospacedDigit())
-                      .foregroundStyle(.secondary)
-                  }
-                  if let pricing = option.pricing {
-                    Text(pricing.compactDisplay)
-                      .font(.caption.monospacedDigit())
-                      .foregroundStyle(.secondary)
-                  }
                   ModelCredentialStatusView(
                     availability: ModelCredentialResolver.availability(
-                      for: option.id,
+                      for: ModelCatalog.customOptionID,
                       purpose: credentialPurpose,
                       storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
                     )
                   )
-                  ModelTagBadges(tags: option.tags, compact: true)
-                  LatencyBadgeCompact(option: option)
-                }
-
-                if let description = option.description, !description.isEmpty {
-                  Text(description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
               }
-              .padding(.vertical, 4)
+              .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-          }
-
-          Divider()
-
-          Button {
-            selection = ModelCatalog.customOptionID
-            dismiss()
-          } label: {
-            HStack {
-              Text("Custom…")
-              Spacer()
-              ModelCredentialStatusView(
-                availability: ModelCredentialResolver.availability(
-                  for: ModelCatalog.customOptionID,
-                  purpose: credentialPurpose,
-                  storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
-                )
+          })
+        },
+        row: { option in
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 10) {
+            Text(option.displayName)
+              .font(.body)
+            Spacer()
+            if let contextLength = option.contextLength {
+              Text(formatContext(contextLength))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            if let pricing = option.pricing {
+              Text(pricing.compactDisplay)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            ModelCredentialStatusView(
+              availability: ModelCredentialResolver.availability(
+                for: option.id,
+                purpose: credentialPurpose,
+                storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
               )
-            }
+            )
+            ModelTagBadges(tags: option.tags, compact: true)
+            LatencyBadgeCompact(option: option)
           }
-          .buttonStyle(.plain)
+
+          if let description = option.description, !description.isEmpty {
+            Text(description)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
-        .searchable(text: $query)
-      }
-      .padding(16)
-      .frame(minWidth: 780, minHeight: 520)
+      })
+      // A new identity per level resets the sheet's search text when drilling in or out.
+      .id(isBrowsingOpenRouter)
     }
 
-    private var trimmedQuery: String {
-      query.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// True when a search is active but matched nothing, so the sheet can say so
-    /// instead of showing a bare list with only the Custom row.
-    private var isShowingNoSearchResults: Bool {
-      !trimmedQuery.isEmpty && filteredOptions.isEmpty
-    }
-
-    private var filteredOptions: [ModelCatalog.Option] {
-      var result = options
-      if let selectedTag {
-        result = result.filter { $0.tags.contains(selectedTag) }
-      }
-      let trimmed = trimmedQuery
-      if !trimmed.isEmpty {
-        let lowered = trimmed.lowercased()
-        result = result.filter {
-          $0.displayName.lowercased().contains(lowered)
-            || $0.id.lowercased().contains(lowered)
-            || ($0.description?.lowercased().contains(lowered) ?? false)
+    private var openRouterRow: some View {
+      Button {
+        isBrowsingOpenRouter = true
+      } label: {
+        HStack(spacing: 10) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text(ModelPickerGrouping.openRouterTitle)
+              .font(.body)
+            Text(openRouterRowSubtitle)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+          ModelCredentialStatusView(
+            availability: ModelCredentialResolver.availability(
+              for: groups.openRouter[0].id,
+              purpose: credentialPurpose,
+              storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
+            )
+          )
+          Image(systemName: "chevron.right")
+            .foregroundStyle(.secondary)
         }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
       }
-      result.sort { lhs, rhs in
-        let lhsLeading = lhs.tags.contains(.leading)
-        let rhsLeading = rhs.tags.contains(.leading)
-        if lhsLeading != rhsLeading { return lhsLeading && !rhsLeading }
-        let lhsCheap = lhs.tags.contains(.cheap)
-        let rhsCheap = rhs.tags.contains(.cheap)
-        if lhsCheap != rhsCheap { return lhsCheap && !rhsCheap }
-        let lhsFast = lhs.tags.contains(.fast)
-        let rhsFast = rhs.tags.contains(.fast)
-        if lhsFast != rhsFast { return lhsFast && !rhsFast }
-        return lhs.displayName < rhs.displayName
+      .buttonStyle(.plain)
+      .accessibilityIdentifier("modelPicker.openRouter")
+    }
+
+    private var openRouterRowSubtitle: String {
+      if let selected = groups.openRouter.first(where: { $0.id == selection }) {
+        return "Selected: \(selected.displayName)"
       }
-      return result
+      return "\(groups.openRouter.count) models from many providers, with one OpenRouter key."
     }
 
     private func formatContext(_ contextLength: Int) -> String {
@@ -279,12 +291,12 @@ struct ModelPicker: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if usesDetailedChooser {
+      if usesDetailedChooser || LongListPickerPolicy.usesSheet(count: options.count) {
         Button {
           isShowingChooser = true
         } label: {
           HStack {
-            Text(selectedOption?.displayName ?? (customValue.isEmpty ? "Custom…" : customValue))
+            Text(selectedOption.map(selectionLabel) ?? (customValue.isEmpty ? "Custom…" : customValue))
             Spacer()
             ModelCredentialStatusView(availability: selectedCredentialAvailability)
             if let option = selectedOption {
@@ -310,19 +322,21 @@ struct ModelPicker: View {
             options: options,
             credentialPurpose: credentialPurpose,
             storedAPIKeyIdentifiers: storedAPIKeyIdentifiers,
+            allowsCustom: allowsCustom,
             selection: $selection
           )
         }
       } else {
         Picker(title, selection: $selection) {
-          ForEach(options) { option in
-            HStack {
-              Text(option.displayName)
-              Spacer()
-              ModelCredentialStatusView(availability: credentialAvailability(for: option.id))
+          let groups = ModelPickerGrouping.groups(options, purpose: credentialPurpose)
+          if groups.direct.isEmpty || groups.openRouter.isEmpty {
+            menuRows(groups.direct + groups.openRouter)
+          } else {
+            // Native routes first; OpenRouter routes in their own labelled group.
+            menuRows(groups.direct)
+            Section(ModelPickerGrouping.openRouterTitle) {
+              menuRows(groups.openRouter)
             }
-            .accessibilityElement(children: .combine)
-            .tag(option.id)
           }
           if allowsCustom {
             HStack {
@@ -427,8 +441,27 @@ struct ModelPicker: View {
   }
 
   /// The label VoiceOver reads as the picker's current value.
+  private func menuRows(_ rows: [ModelCatalog.Option]) -> some View {
+    ForEach(rows) { option in
+      HStack {
+        Text(option.displayName)
+        Spacer()
+        ModelCredentialStatusView(availability: credentialAvailability(for: option.id))
+      }
+      .accessibilityElement(children: .combine)
+      .tag(option.id)
+    }
+  }
+
   private var selectedDisplayName: String {
-    selectedOption?.displayName ?? (customValue.isEmpty ? "Custom" : customValue)
+    selectedOption.map(selectionLabel) ?? (customValue.isEmpty ? "Custom" : customValue)
+  }
+
+  /// "OpenRouter › Model" for OpenRouter routes, so the route is never ambiguous.
+  private func selectionLabel(_ option: ModelCatalog.Option) -> String {
+    ModelPickerGrouping.selectionLabel(
+      for: option.id, displayName: option.displayName, purpose: credentialPurpose
+    )
   }
 
   /// Stable, UI-test friendly component derived from the picker's title,

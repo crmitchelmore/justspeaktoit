@@ -32,44 +32,50 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import fnmatch
+import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / '.build' / 'pre-pr'
+OUT = Path(os.environ.get('JSTI_PRE_PR_OUT') or ROOT / '.build' / 'pre-pr')
 SCHEMA_VERSION = 1
 IS_MAC = sys.platform == 'darwin'
 
 # Test targets that drive real UI. They are never selected, whatever changed.
 UI_TEST_TARGETS = {'SpeakAppUITests', 'SpeakiOSUITests'}
 
-APPLE_PATTERNS = [
-    'Package.swift', 'Package.resolved', 'Project.swift', 'Tuist.swift', 'Workspace.swift',
-    'Sources/*', 'Tests/*', 'Config/*', 'Resources/*', 'SpeakiOSApp/*', 'JustSpeak*/*',
-    '.swiftlint.yml', '.swiftlint-baseline.json', '.github/actions/setup-apple-toolchain/*',
-]
-PORTABLE_PATTERNS = [
-    'Package.swift', 'Sources/SpeakCore/*', 'Sources/SpeakDesktop*', 'Sources/SpeakSync/*',
-    'Sources/SpeakAutomationKit/*', 'Sources/SpeakCLI/*', 'Sources/SpeakWindows*', 'Sources/SpeakLinux*',
-    'Sources/CWindows*', 'Sources/CLinux*', 'Tests/SpeakDesktop*', 'Tests/SpeakPortableTests/*',
-    'Tests/SpeakSyncTests/*', 'Tests/SpeakWindows*', 'Tests/SpeakLinux*', 'Tests/SpeakAutomationKitTests/*',
-]
+# CI parity: these mirror ci.yml's release-paths filters (test_pre_pr checks they match).
+# CI Lint and the tooling tests run unless every changed file is docs, website, Android or Workers.
+CI_NOT_APPLE = ['android/*', '.github/workflows/android.yml', 'Docs/*', '*.md', 'landing-page/*',
+                '.github/workflows/deploy-landing-page.yml', 'workers/*']
+# The macOS job and Portable Swift (Linux) run for Swift package inputs.
+CI_SWIFT = ['Package.swift', 'Package.resolved', 'Makefile', 'Sources/*', 'Tests/*', 'Config/*', 'Resources/*',
+            'scripts/affected-swift-tests.py', 'scripts/retry-network.sh', 'scripts/retry-xctest-crash.py',
+            'scripts/with-test-keychain.py', 'scripts/private-test-keychain.py',
+            'scripts/verify-portable-core-boundary.py', 'scripts/collect-macos-*.py',
+            'scripts/prepare-mac-cli-symbols.sh', 'scripts/tests/brand-assets.test.mjs']
+# android.yml's pull_request paths: the parity tests read these shared Swift definitions.
+CI_ANDROID = ['android/*', '.github/workflows/android.yml', 'Sources/SpeakCore/TranscriptCleanupPolicy.swift',
+              'Sources/SpeakCore/ModelCatalog.swift', 'Sources/SpeakCore/ModelRetirements.swift',
+              'Sources/SpeakCore/ProviderCredentialCatalogue.swift',
+              'Sources/SpeakCore/OpenAITranscriptionModels.swift']
+# Test targets the macOS job leaves to Portable Swift (Linux), as ci.yml passes them to affected-swift-tests.py.
+CI_MACOS_SKIP_TARGETS = {'SpeakDesktopTests', 'SpeakAutomationKitTests'}
 WINDOWS_PATTERNS = ['Sources/SpeakWindows*', 'Sources/CWindows*', 'Tests/SpeakWindows*',
                     'scripts/typecheck-windows-swift.sh']
-TOOLING_PATTERNS = ['scripts/*', '.github/*', 'Makefile', 'Docs/manual-checks.yml', 'Tooling/Package.*']
 WORKFLOW_PATTERNS = ['.github/workflows/*', '.github/actions/*', '.github/actionlint.yaml']
-SHELL_PATTERNS = ['scripts/*.sh', '.githooks/*', 'scripts/pre-pr', 'scripts/install-pre-pr-hook']
+SHELL_PATTERNS = ['scripts/*.sh', '.githooks/*', 'scripts/install-pre-pr-hook']
 # Cheap static checks run first so most failures surface within seconds.
-COST = {'apple-accessibility': 0, 'portable-boundary': 0, 'actionlint': 0, 'shellcheck': 0, 'swiftlint': 1,
-        'swiftformat': 1, 'landing-tests': 1, 'tooling-tests': 2, 'apple-build': 3, 'apple-unit-tests': 4,
-        'swift-test-coverage': 0, 'portable-unit-tests': 4}
+COST = {'swift-test-coverage': 0, 'actionlint': 0, 'shellcheck': 0, 'swiftformat': 1, 'landing-tests': 1,
+        'ci-lint': 2, 'apple-build': 3, 'apple-unit-tests': 4}
 
 
 def matches(path: str, patterns: list[str]) -> bool:
@@ -103,9 +109,14 @@ class Check:
     skip_reason: str = ''
     failure: str = ''          # a planning failure: the check fails without running
     counts_tests: bool = False  # fail when the run executes zero tests
+    background: bool = False    # started first and awaited last (the remote/container Linux run)
+    forbid_drift: tuple[str, ...] = ()  # tracked files the check must not modify (CI's drift checks)
+    incomplete: bool = False    # a required check deliberately not run: the result is 'incomplete'
     status: str = 'pending'
     duration: float = 0.0
     note: str = ''
+    started: float = 0.0
+    dirty_before: set = field(default_factory=set)
 
     @property
     def log(self) -> Path:
@@ -117,6 +128,8 @@ DECL = re.compile(r'^(?:@[\w.]+(?:\([^)\n]*\))?\s+)*(?:(?:public|package|interna
                   r'(class|struct|enum|protocol|actor|typealias|extension)\s+([A-Za-z_]\w*)', re.M)
 TEST_TYPE = re.compile(r'^(?:@[\w.]+(?:\([^)\n]*\))?\s+)*(?:(?:public|internal|private|fileprivate|final)\s+)*'
                        r'(?:class|struct|actor|enum|extension)\s+([A-Za-z_]\w*)', re.M)
+# Opt-in test files are wrapped in `#if JSTI_<NAME>_INTEGRATION` and only compile on request.
+OPT_IN = re.compile(r'^#if JSTI_\w+_INTEGRATION\b', re.M)
 # Imports and line comments name modules and prose, not the types a test exercises.
 NOT_CODE = re.compile(r'^\s*(?:@testable\s+)?import\s+.*$|//.*$', re.M)
 
@@ -125,6 +138,7 @@ NOT_CODE = re.compile(r'^\s*(?:@testable\s+)?import\s+.*$|//.*$', re.M)
 class Graph:
     """SwiftPM targets of one package graph, from `swift package dump-package`."""
     targets: dict[str, dict]  # name -> {'type', 'path', 'deps'}
+    dump: dict = field(default_factory=dict)
 
     @classmethod
     def from_dump(cls, dump: dict) -> 'Graph':
@@ -135,7 +149,7 @@ class Graph:
             default = 'Tests' if target['type'] == 'test' else 'Sources'
             targets[target['name']] = {'type': target['type'], 'deps': deps,
                                        'path': target.get('path') or f'{default}/{target["name"]}'}
-        return cls(targets)
+        return cls(targets, dump)
 
     def module_for(self, path: str) -> str | None:
         best = None
@@ -209,9 +223,12 @@ def select_tests(files: list[str], full: bool, graph: Graph, exclude: set[str] =
             corpus[target] = [(p, NOT_CODE.sub('', read(p))) for p in sorted(directory.rglob('*.swift'))]
         return corpus[target]
 
-    def add_file(target: str, path: Path, text: str) -> None:
+    def add_file(target: str, path: Path, text: str) -> bool:
+        if OPT_IN.search(text):  # compiled out by default, so it has no tests to run
+            return False
         names = TEST_TYPE.findall(text) or [path.stem.split('+')[0]]
         classes.setdefault(target, set()).update(re.escape(name) for name in names)
+        return True
 
     for path in files:
         if not path.endswith('.swift') or not path.startswith(('Sources/', 'Tests/')):
@@ -246,8 +263,7 @@ def select_tests(files: list[str], full: bool, graph: Graph, exclude: set[str] =
             for test_path, test_text in test_files(target):
                 named = fnmatch.fnmatchcase(test_path.name, f'{prefix}*Tests.swift')
                 if named or (mention and mention.search(test_text)):
-                    add_file(target, test_path, test_text)
-                    matched = True
+                    matched = add_file(target, test_path, test_text) or matched
         # No fallback when an excluded (already run) target covers the module: that run owns it.
         if not matched and not graph.covering(module) & set(exclude):
             own = f'{module}Tests'
@@ -280,102 +296,125 @@ def test_title(selection: Selection, kind: str = 'Swift') -> str:
     return f'{kind} unit tests ({targets})'
 
 
-def plan(files: list[str], full: bool) -> tuple[list[Check], dict[str, list[str]]]:
+def android_runs_locally() -> bool:
+    """A JDK that actually runs (macOS ships a /usr/bin/java stub) and an approved Maven feed."""
+    if os.environ.get('JSTI_ANDROID_LOCAL') in ('0', '1'):
+        return os.environ['JSTI_ANDROID_LOCAL'] == '1'
+    try:
+        jdk = subprocess.run(['java', '-version'], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        jdk = False
+    feed = bool(os.environ.get('JSTI_MAVEN_MIRROR')) or 'jsti.mavenMirror=' in read(
+        Path.home() / '.gradle' / 'gradle.properties')
+    return jdk and feed
+
+
+def ci_selects_apple(files: list[str]) -> bool:
+    """ci.yml's `apple` output: some changed file lies outside docs, the website, Android and Workers."""
+    return any(not matches(f, CI_NOT_APPLE) for f in files)
+
+
+def affected_selector():
+    spec = importlib.util.spec_from_file_location('affected_swift_tests',
+                                                  Path(__file__).resolve().parent / 'affected-swift-tests.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def ci_macos_tests(files: list[str], graph: Graph) -> Selection:
+    """The macOS job's pull-request selection: scripts/affected-swift-tests.py over the same changed files."""
+    _, selected = affected_selector().select(files, graph.dump, CI_MACOS_SKIP_TARGETS)
+    selected = [t for t in selected if t not in UI_TEST_TARGETS]
+    return Selection([f'^({"|".join(map(re.escape, selected))})\\.'], set(selected)) if selected else Selection()
+
+
+def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto', base: str = 'origin/main'
+         ) -> tuple[list[Check], dict[str, list[str]]]:
+    """Mirror the CI Gate's pull-request jobs (Lint, Portable Swift (Linux), the macOS job) for these files.
+
+    full: whole affected test targets. quick: type-level test selection instead of CI's target-level one.
+    linux: auto (container if available, else remote), container, remote, or skip (result 'incomplete').
+    """
     areas: dict[str, list[str]] = {}
 
-    def area(name: str, patterns: list[str]) -> list[str]:
-        hits = [f for f in files if matches(f, patterns)]
+    def area(name: str, patterns: list[str] | None = None, hits: list[str] | None = None) -> list[str]:
+        hits = hits if hits is not None else [f for f in files if matches(f, patterns)]
         if hits:
             areas[name] = hits
         return hits
 
-    apple = area('apple', APPLE_PATTERNS)
-    portable = area('portable', PORTABLE_PATTERNS)
+    apple = area('ci-lint', hits=[f for f in files if not matches(f, CI_NOT_APPLE)])
+    swift = area('swift', CI_SWIFT)
     windows = area('windows', WINDOWS_PATTERNS)
-    tooling = area('tooling', TOOLING_PATTERNS)
     workflows = area('workflows', WORKFLOW_PATTERNS)
     shell = area('shell', SHELL_PATTERNS)
-    android = area('android', ['android/*', '.github/workflows/android.yml'])
+    android = area('android', CI_ANDROID)
     worker = area('paid-access-worker', ['workers/paid-access/*'])
     landing = area('landing-page', ['landing-page/*'])
 
     checks: list[Check] = []
     existing = [f for f in files if (ROOT / f).is_file()]
     swift_files = [f for f in existing if f.endswith('.swift') and not f.startswith(('Tooling/', 'android/'))]
+    swift_changes = [f for f in files if f.endswith('.swift') and f.startswith(('Sources/', 'Tests/'))]
     test_env = {'JSTI_TEST_KEYCHAIN_REDIRECT': '1', 'JSTI_TEST_KEYCHAIN': '1'}
     scratch = ['--scratch-path', str(OUT / 'apple-build')]
 
-    if swift_files:
-        checks.append(Check('swiftlint', 'apple', 'SwiftLint (changed files, strict, baseline)',
-                            ['scripts/swiftlint.sh', 'lint', '--strict', '--quiet', '--force-exclude',
-                             '--baseline', '.swiftlint-baseline.json', *swift_files]))
-        checks.append(Check('swiftformat', 'apple', 'SwiftFormat lint (changed files, advisory)',
-                            ['scripts/swiftformat.sh', '--lint', '--quiet', *swift_files], advisory=True))
-    swift_changes = [f for f in files if f.endswith('.swift') and f.startswith(('Sources/', 'Tests/'))]
+    if swift:
+        # Portable Swift (Linux): the CI job's own script in the CI image, started first because it is slowest.
+        title = 'Portable Swift (Linux): scripts/ci-portable-linux.sh in swift:6.2.3-jammy'
+        if linux == 'skip':
+            checks.append(Check('portable-linux', 'swift', title, [], skip_reason='--no-linux', incomplete=True))
+        else:
+            mode = [] if linux == 'auto' else [f'--{linux}']
+            checks.append(Check('portable-linux', 'swift', title,
+                                ['python3', 'scripts/linux-precheck', *mode, '--tree', str(ROOT), '--base', base], background=True))
     if apple:
-        checks.append(Check('apple-accessibility', 'apple', 'Apple accessibility conventions',
-                            ['python3', 'scripts/check-apple-accessibility.py']))
-    apple_graph = load_graph(False) if apple and IS_MAC else None
-    apple_selection = Selection()
-    portable_graph = load_graph(True) if portable and swift_changes else None
-    if apple and not IS_MAC:
-        checks.append(Check('apple-build', 'apple', 'SwiftPM build incl. tests (macOS + iOS lib)', [],
+        # Lint: exactly the ci.yml Lint job (whole-repo strict SwiftLint, accessibility, tooling pins and tests).
+        checks.append(Check('ci-lint', 'ci-lint', 'CI Lint job (make ci-lint)', ['make', 'ci-lint'],
+                            forbid_drift=('Tooling/Package.resolved',)))
+    if swift_files:
+        checks.append(Check('swiftformat', 'ci-lint', 'SwiftFormat lint (changed files, advisory)',
+                            ['scripts/swiftformat.sh', '--lint', '--quiet', *swift_files], advisory=True))
+    if swift and not IS_MAC:
+        checks.append(Check('apple-build', 'swift', 'macOS job: SwiftPM build and unit tests', [],
                             skip_reason='macOS only; CI runs it'))
-    elif apple:
-        checks.append(Check('apple-build', 'apple', 'SwiftPM build incl. tests (macOS + iOS lib)',
-                            ['swift', 'build', '--build-tests', *scratch], env=test_env, requires='swift'))
+    elif swift:
+        checks.append(Check('apple-build', 'swift', 'macOS job: SwiftPM build incl. tests',
+                            ['swift', 'build', '--build-tests', *scratch], env=test_env, requires='swift',
+                            forbid_drift=('Package.resolved',)))
         skipped = sorted({Path(f).parts[1] for f in swift_changes if Path(f).parts[1] in UI_TEST_TARGETS})
         if skipped:
             print(f'pre-pr: never runs UI test targets: {", ".join(skipped)} (CI covers them)')
-        if apple_graph is None:
-            if swift_changes or full:
-                checks.append(Check('apple-unit-tests', 'apple', 'Swift unit tests', [],
-                                    failure='swift package dump-package failed, so no tests could be selected'))
+        graph = load_graph(False)
+        if graph is None:
+            checks.append(Check('apple-unit-tests', 'swift', 'macOS job: unit tests', [],
+                                failure='swift package dump-package failed, so no tests could be selected'))
         else:
-            apple_selection = select_tests(swift_changes, full, apple_graph)
-            if full and not swift_changes:  # manifest or configuration change: the whole non-UI suite
-                every = apple_graph.test_targets()
-                apple_selection = Selection([f'{t}\\.' for t in every], set(every))
-            if apple_selection.filters:
-                checks.append(Check('apple-unit-tests', 'apple', test_title(apple_selection),
+            if full:
+                every = [t for t in graph.test_targets() if t not in CI_MACOS_SKIP_TARGETS]
+                selection = Selection([f'^({"|".join(every)})\\.'], set(every))
+            elif quick:
+                selection = select_tests(swift_changes, False, graph, exclude=CI_MACOS_SKIP_TARGETS)
+            else:
+                selection = ci_macos_tests(files, graph)
+            if selection.filters:
+                checks.append(Check('apple-unit-tests', 'swift', test_title(selection, 'macOS job:'),
                                     ['python3', 'scripts/with-test-keychain.py', 'swift', 'test', '--skip-build',
-                                     *scratch, '--filter', '|'.join(apple_selection.filters)],
+                                     *scratch, '--filter', '|'.join(selection.filters)],
                                     env=test_env, requires='swift', counts_tests=True))
-    if portable:
-        checks.append(Check('portable-boundary', 'portable', 'Portable source boundary',
-                            ['python3', 'scripts/verify-portable-core-boundary.py']))
-        portable_scratch = ['--scratch-path', str(OUT / 'portable-build')]
-        checks.append(Check('portable-build', 'portable', 'Portable graph build incl. tests (Windows/Linux sources)',
-                            ['swift', 'build', '--build-tests', *portable_scratch],
-                            env={'SPEAK_PORTABLE_CORE': '1'}, requires='swift'))
-        if swift_changes and portable_graph is None:
-            checks.append(Check('portable-unit-tests', 'portable', 'Portable unit tests', [],
-                                failure='swift package dump-package failed for the portable graph'))
-        elif portable_graph:
-            # Test targets the Apple run already covers are not run twice.
-            portable_selection = select_tests(swift_changes, full, portable_graph,
-                                              exclude=set(apple_graph.test_targets()) if apple_graph else set())
-            if portable_selection.filters:
-                checks.append(Check('portable-unit-tests', 'portable', test_title(portable_selection, 'Portable'),
-                                    ['swift', 'test', '--skip-build', *portable_scratch,
-                                     '--filter', '|'.join(portable_selection.filters)],
-                                    env={'SPEAK_PORTABLE_CORE': '1'}, requires='swift', counts_tests=True))
-    graphs = [g for g in (apple_graph, portable_graph) if g]
-    missing = uncovered_modules(swift_changes, graphs)
-    if missing:
-        checks.append(Check('swift-test-coverage', 'apple' if apple else 'portable',
-                            'Every changed Swift module has unit tests', [],
-                            failure=f'no unit-test target covers {", ".join(missing)}; add tests for it'))
+            graphs = [g for g in (graph, load_graph(True) if swift_changes else None) if g]
+            missing = uncovered_modules(swift_changes, graphs)
+            if missing:
+                checks.append(Check('swift-test-coverage', 'swift', 'Every changed Swift module has unit tests', [],
+                                    failure=f'no unit-test target covers {", ".join(missing)}; add tests for it'))
     if windows:
         checks.append(Check('windows-typecheck', 'windows', 'Windows Swift type check',
                             ['bash', 'scripts/typecheck-windows-swift.sh'],
                             env={'SPEAK_WINDOWS_TYPECHECK_DIR': str(OUT / 'windows-typecheck')},
                             # The executable target links Win32 libraries under Xcode's toolchain;
-                            # CI runs this check on Linux (linux.yml) and portable-build covers macOS.
+                            # CI runs this check on Linux (linux.yml); Portable Swift (Linux) covers the shared graph.
                             skip_reason='' if sys.platform.startswith('linux') else 'Linux only; CI runs it'))
-    if tooling:
-        checks.append(Check('tooling-tests', 'tooling', 'CI, release and script tests (make test-tooling)',
-                            ['make', 'test-tooling']))
     changed_workflows = [f for f in workflows if f.startswith('.github/workflows/') and (ROOT / f).is_file()]
     if changed_workflows:
         # Advisory: CI does not gate on actionlint and local versions can lag new workflow syntax.
@@ -387,9 +426,16 @@ def plan(files: list[str], full: bool) -> tuple[list[Check], dict[str, list[str]
                             ['shellcheck', '-S', 'warning', *shell_files],
                             requires='shellcheck', advisory=True))
     if android:
-        checks.append(Check('android', 'android', 'Android unit tests and lint',
-                            ['./gradlew', '--quiet', 'testDebugUnitTest', 'lintDebug'], cwd=ROOT / 'android',
-                            requires='java'))
+        # The Android CI job's script. Locally only with a working JDK and an approved feed
+        # (android/settings.gradle.kts refuses public registries off GitHub-hosted runners);
+        # otherwise on a remote precheck/** branch. Never a skip.
+        title = 'Android CI job (scripts/ci-android.sh)'
+        if android_runs_locally():
+            checks.append(Check('android', 'android', title, ['bash', 'scripts/ci-android.sh']))
+        else:
+            checks.append(Check('android', 'android', f'{title}, remote',
+                                ['python3', 'scripts/linux-precheck', '--job', 'android', '--tree', str(ROOT),
+                                 '--base', base], background=True))
     if worker:
         directory = ROOT / 'workers' / 'paid-access'
         checks.append(Check('worker-install', 'paid-access-worker', 'npm ci',
@@ -400,7 +446,7 @@ def plan(files: list[str], full: bool) -> tuple[list[Check], dict[str, list[str]
     if landing:
         checks.append(Check('landing-tests', 'landing-page', 'Landing page tests', ['npm', 'test'],
                             cwd=ROOT / 'landing-page', requires='npm'))
-    checks.sort(key=lambda check: COST.get(check.id, 3))
+    checks.sort(key=lambda check: (not check.background, COST.get(check.id, 3)))
     return checks, areas
 
 
@@ -431,41 +477,46 @@ def tests_executed(log: str) -> int:
     return max(xctest, default=0) + max(testing, default=0)
 
 
-def run(check: Check, verbose: bool) -> None:
+def launch(check: Check) -> subprocess.Popen | None:
+    """Start a check with its output going to its log, or settle it at once (skip, planning failure, no tool)."""
     if check.skip_reason:
         check.status, check.note = 'skip', check.skip_reason
-        return
+        return None
     if check.failure:
         check.status, check.note = 'fail', check.failure
-        return
+        return None
     if check.requires and not shutil.which(check.requires):
         # Fail closed: a required check that cannot run is not a pass.
         check.status = 'warn' if check.advisory else 'fail'
         check.note = f'{check.requires} not installed'
-        return
+        return None
     check.log.parent.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', **check.env}
-    dirty_before = dirty_tracked()
-    started = time.monotonic()
-    with check.log.open('w', encoding='utf-8') as log:
-        log.write(f'$ {" ".join(check.command)}\n')
-        log.flush()
-        try:
-            process = subprocess.Popen(check.command, cwd=check.cwd, env=env, stdout=subprocess.PIPE,
-                                       stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
-        except OSError as error:
-            log.write(f'{error}\n')
-            check.status, check.note = ('warn' if check.advisory else 'fail'), f'cannot start: {error.strerror}'
-            return
-        assert process.stdout
-        for line in process.stdout:
-            log.write(line)
-            if verbose:
-                sys.stdout.write(f'    {line}')
-        code = process.wait()
-        process.stdout.close()
-    check.duration = time.monotonic() - started
-    executed = tests_executed(check.log.read_text(encoding='utf-8', errors='replace')) if check.counts_tests else None
+    check.dirty_before = dirty_tracked() if not check.background else set()
+    check.started = time.monotonic()
+    log = check.log.open('w', encoding='utf-8')
+    log.write(f'$ {" ".join(check.command)}\n')
+    log.flush()
+    try:
+        return subprocess.Popen(check.command, cwd=check.cwd, env=env, stdout=log, stderr=subprocess.STDOUT,
+                                text=True, stdin=subprocess.DEVNULL)
+    except OSError as error:
+        log.write(f'{error}\n')
+        check.status, check.note = ('warn' if check.advisory else 'fail'), f'cannot start: {error.strerror}'
+        return None
+    finally:
+        log.close()
+
+
+def finish(check: Check, process: subprocess.Popen | None, verbose: bool) -> None:
+    if process is None:
+        return
+    code = process.wait()
+    check.duration = time.monotonic() - check.started
+    text = check.log.read_text(encoding='utf-8', errors='replace')
+    if verbose:
+        sys.stdout.write(''.join(f'    {line}\n' for line in text.splitlines()))
+    executed = tests_executed(text) if check.counts_tests else None
     if code != 0:
         check.status = 'warn' if check.advisory else 'fail'
         check.note = f'exit {code}; log {display(check.log)}'
@@ -475,7 +526,28 @@ def run(check: Check, verbose: bool) -> None:
         check.status = 'pass'
         if executed:
             check.note = f'{executed} tests'
-    restore_side_effects(check, dirty_before)
+    if check.background:
+        return
+    drifted = sorted(set(check.forbid_drift) & (dirty_tracked() - check.dirty_before))
+    if drifted and check.status == 'pass':
+        check.status = 'fail'
+        check.note = f'modified {", ".join(drifted)} (CI fails on this drift); commit the regenerated file'
+    restore_side_effects(check, check.dirty_before)
+
+
+def run(check: Check, verbose: bool) -> None:
+    finish(check, launch(check), verbose)
+
+
+def worktree_tree() -> str:
+    """The git tree of the working tree as checked: tracked, modified and untracked (not ignored) files."""
+    with tempfile.TemporaryDirectory() as scratch:
+        env = {**os.environ, 'GIT_INDEX_FILE': str(Path(scratch) / 'index')}
+        for command in (['read-tree', 'HEAD'], ['add', '-A', '--', '.'], ['write-tree']):
+            result = subprocess.run(['git', *command], cwd=ROOT, env=env, text=True, capture_output=True)
+            if result.returncode != 0:
+                return ''
+    return result.stdout.strip()
 
 
 def markdown(summary: dict) -> str:
@@ -492,7 +564,8 @@ def markdown(summary: dict) -> str:
     if not summary['checks']:
         lines.append('| (no checks apply to these paths) | | ✅ pass | 0s |')
     lines.append('')
-    lines.append('<!-- pre-pr-summary ' + json.dumps({k: summary[k] for k in ('schema', 'head', 'result')}) + ' -->')
+    keys = ('schema', 'head', 'tree', 'result')
+    lines.append('<!-- pre-pr-summary ' + json.dumps({k: summary[k] for k in keys if k in summary}) + ' -->')
     return '\n'.join(lines)
 
 
@@ -500,7 +573,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--base', default='origin/main')
     parser.add_argument('--fetch', action='store_true', help='fetch the base before comparing')
-    parser.add_argument('--full', action='store_true', help='run whole affected test targets')
+    parser.add_argument('--full', action='store_true', help='run every macOS unit-test target CI could run')
+    parser.add_argument('--quick', action='store_true',
+                        help='type-level macOS test selection (faster, but narrower than CI)')
+    linux = parser.add_mutually_exclusive_group()
+    linux.add_argument('--remote-linux', dest='linux', action='store_const', const='remote',
+                       help='run Portable Swift (Linux) on a precheck/** branch even if a container runtime exists')
+    linux.add_argument('--container-linux', dest='linux', action='store_const', const='container',
+                       help='run Portable Swift (Linux) with local docker or podman')
+    linux.add_argument('--no-linux', dest='linux', action='store_const', const='skip',
+                       help="skip Portable Swift (Linux); the result is then 'incomplete', which CI rejects")
     parser.add_argument('--plan', action='store_true', help='print the selected checks and exit')
     parser.add_argument('--keep-going', action='store_true', help='run every check even after a failure')
     parser.add_argument('--markdown', action='store_true', help='print the PR-body summary when done')
@@ -510,8 +592,9 @@ def main() -> int:
     if args.fetch and args.base.startswith('origin/'):
         git('fetch', '--quiet', 'origin', args.base.removeprefix('origin/'))
     merge_base, files = changed_files(args.base)
-    checks, areas = plan(files, args.full)
+    checks, areas = plan(files, args.full, args.quick, args.linux or 'auto', args.base)
     head = git('rev-parse', 'HEAD')
+    tree = worktree_tree()
     dirty = bool(git('status', '--porcelain'))
 
     print(f'pre-pr: {len(files)} changed files against {args.base} ({merge_base[:12]})')
@@ -524,28 +607,52 @@ def main() -> int:
 
     started = time.monotonic()
     failed = False
+
+    def report(check: Check) -> None:
+        nonlocal failed
+        mark = {'pass': '✅', 'fail': '❌', 'warn': '⚠️', 'skip': '⏭️', 'pending': '…'}[check.status]
+        print(f'  {mark} [{check.area}] {check.title}: {check.status} in {check.duration:.0f}s'
+              f'{" — " + check.note if check.note else ""}', flush=True)
+        if check.status == 'fail':
+            failed = True
+            if check.log.exists():
+                tail = check.log.read_text(encoding='utf-8', errors='replace').splitlines()[-40:]
+                print('\n'.join(f'    │ {line}' for line in tail))
+
+    background = []
     for check in checks:
+        if check.background:
+            print(f'▶ [{check.area}] {check.title} (in the background; log {display(check.log)})', flush=True)
+            background.append((check, launch(check)))
+    for check in checks:
+        if check.background:
+            continue
         if failed and not args.keep_going and not check.advisory:
             check.status, check.note = 'skip', 'earlier failure'
             print(f'⏭️  [{check.area}] {check.title} — skipped after an earlier failure')
             continue
         print(f'▶ [{check.area}] {check.title}', flush=True)
         run(check, args.verbose)
-        mark = {'pass': '✅', 'fail': '❌', 'warn': '⚠️', 'skip': '⏭️'}[check.status]
-        print(f'  {mark} {check.status} in {check.duration:.0f}s{" — " + check.note if check.note else ""}',
-              flush=True)
-        if check.status == 'fail':
-            failed = True
-            tail = check.log.read_text(encoding='utf-8', errors='replace').splitlines()[-40:]
-            print('\n'.join(f'    │ {line}' for line in tail))
+        report(check)
+    for check, process in background:
+        if process is not None and failed and not args.keep_going:
+            process.terminate()  # linux-precheck deletes its branch on SIGTERM
+            process.wait()
+            check.status, check.note = 'skip', 'stopped after an earlier failure'
+        else:
+            if process is not None:
+                print(f'… waiting for [{check.area}] {check.title}', flush=True)
+            finish(check, process, args.verbose)
+        report(check)
+    incomplete = any(c.incomplete for c in checks)
 
     summary = {
         'schema': SCHEMA_VERSION,
         'tool': 'scripts/pre-pr',
         'generated_at': dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'),
-        'head': head, 'dirty': dirty, 'base_ref': args.base, 'merge_base': merge_base,
+        'head': head, 'tree': tree, 'dirty': dirty, 'base_ref': args.base, 'merge_base': merge_base,
         'full': args.full, 'changed_file_count': len(files), 'areas': sorted(areas),
-        'result': 'fail' if failed else 'pass',
+        'result': 'fail' if failed else 'incomplete' if incomplete else 'pass',
         'duration_seconds': round(time.monotonic() - started, 1),
         'checks': [{'id': c.id, 'area': c.area, 'title': c.title, 'status': c.status,
                     'advisory': c.advisory, 'duration_seconds': round(c.duration, 1), 'note': c.note,
@@ -555,10 +662,10 @@ def main() -> int:
     (OUT / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
     (OUT / 'summary.md').write_text(markdown(summary) + '\n', encoding='utf-8')
     print(f'pre-pr: {summary["result"].upper()} in {summary["duration_seconds"]:.0f}s — '
-          f'summary in {(OUT / "summary.json").relative_to(ROOT)} and summary.md')
+          f'summary in {display(OUT / "summary.json")} and summary.md')
     if args.markdown:
         print(markdown(summary))
-    return 1 if failed else 0
+    return 1 if failed or incomplete else 0
 
 
 if __name__ == '__main__':

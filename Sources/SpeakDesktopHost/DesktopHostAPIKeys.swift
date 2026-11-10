@@ -62,6 +62,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 use: .transcription, keyPageURL: URL(string: provider.website)
             ))
         }
+        for provider in NativeTextModels.providers {
+            sources.append(APIKeyCatalogSource(
+                identifier: provider.credentialIdentifier, providerName: provider.displayName, use: .postProcessing
+            ))
+        }
         sources.append(APIKeyCatalogSource(
             identifier: "openrouter.apiKey", providerName: "OpenRouter",
             use: .postProcessing, keyPageURL: OpenRouterService.apiKeysURL

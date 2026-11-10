@@ -61,6 +61,20 @@ class PlanTests(unittest.TestCase):
             pre_pr.os.environ.pop('JSTI_ANDROID_LOCAL', None)
             self.assertFalse(pre_pr.android_runs_locally())
 
+    def test_public_library_change_runs_the_api_compatibility_job(self):
+        with mock.patch.object(pre_pr, 'IS_MAC', True), mock.patch.object(pre_pr, 'pr_title_env', lambda: {}):
+            checks, areas = pre_pr.plan(['Sources/SpeakCore/OpenRouterAPIClient.swift'], False)
+            api = {c.id: c for c in checks}['api-compatibility']
+            self.assertEqual(api.command[:2], ['bash', 'scripts/ci-api-compatibility.sh'])
+            self.assertEqual(api.command[2], pre_pr.git('merge-base', 'HEAD', 'origin/main'))
+            self.assertIn('public-api', areas)
+            for path in ('Sources/SpeakApp/AppDelegate.swift', 'Sources/SpeakDesktop/X.swift', 'Docs/x.md'):
+                ids_ = [c.id for c in pre_pr.plan([path], False)[0]]
+                self.assertNotIn('api-compatibility', ids_, path)
+        with mock.patch.object(pre_pr, 'IS_MAC', False):
+            api = {c.id: c for c in pre_pr.plan(['Package.swift'], False)[0]}['api-compatibility']
+        self.assertTrue(api.incomplete)
+
     def test_android_worker_and_landing_are_independent_areas(self):
         selected, areas, _ = ids(['android/app/build.gradle.kts', 'workers/paid-access/src/index.ts',
                                   'landing-page/index.html'])
@@ -72,7 +86,7 @@ class PlanTests(unittest.TestCase):
 
     def test_swift_change_runs_every_ci_gate_job_with_linux_first(self):
         selected, areas, checks = ids(['Sources/SpeakCore/SecureStorage.swift'])
-        self.assertEqual(set(areas), {'ci-lint', 'swift'})
+        self.assertEqual(set(areas), {'ci-lint', 'swift', 'public-api'})
         self.assertEqual(selected[0], 'portable-linux')
         self.assertTrue(checks[0].background)
         self.assertIn('scripts/linux-precheck', checks[0].command)
@@ -176,6 +190,13 @@ class CIParityTests(unittest.TestCase):
         self.assertIn('run: scripts/ci-android.sh', precheck)
         for action in re.findall(r'uses: (actions/setup-java@\S+|gradle/actions/setup-gradle@\S+)', android):
             self.assertIn(action, precheck)
+
+    def test_api_products_match_the_gate(self):
+        gate = (ROOT / 'scripts' / 'check-api-compatibility.sh').read_text(encoding='utf-8')
+        products = set(re.search(r'PRODUCTS=\(([^)]*)\)', gate).group(1).split()) | {'SpeakWatchCore'}
+        dirs = {'SpeakiOSLib': 'SpeakiOS'}
+        for product in products:
+            self.assertIn(f'Sources/{dirs.get(product, product)}/*', pre_pr.CI_API, product)
 
     def test_linux_image_is_the_ci_image(self):
         image = re.search(r'image: (swift:[^\s]+)', self.ci.split('Portable Swift (Linux)', 1)[1]).group(1)

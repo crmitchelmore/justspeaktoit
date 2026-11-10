@@ -234,6 +234,13 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
   exactly as CI selects them. `--quick` narrows this to type-level matches,
   which is faster but no longer CI's selection. A build that changes
   `Package.resolved` fails, as in CI.
+- **Public API compatibility:** `scripts/ci-api-compatibility.sh <merge-base>`, the
+  CI job's command, whenever the exported library products' sources
+  (SpeakCore, SpeakSync, SpeakiOS, SpeakHotKeys, SpeakAutomationKit,
+  SpeakWatchCore), `Package.*` or the gate's own files change. The open PR's
+  title (`gh pr view`, or `PR_TITLE`) declares a break with `!`; without a PR,
+  a `type!:` commit subject does. macOS only; elsewhere the result is
+  `incomplete`.
 - **Android:** `scripts/ci-android.sh`, the Android job's command (android.yml runs it too).
   pre-pr runs it locally only with a working JDK and an approved Maven feed
   (`JSTI_MAVEN_MIRROR`), and otherwise on a remote `precheck/**` branch run,

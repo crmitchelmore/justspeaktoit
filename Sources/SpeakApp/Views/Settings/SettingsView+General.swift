@@ -14,10 +14,10 @@ extension SettingsView {
             title: "Preferred microphone",
             items: [LongListChoice(id: AudioInputDeviceManager.systemDefaultToken, title: "Use macOS default")]
               + audioDevices.devices.map { LongListChoice(id: $0.id, title: $0.displayName) },
-            id: { $0.id }, selection: audioInputSelectionBinding, searchText: { [$0.title] }
-          ) { item in
+            id: { $0.id }, selection: audioInputSelectionBinding, searchText: { [$0.title] },
+            row: { item in
             Text(item.title)
-          }
+          })
           .settingsMenuPicker()
           .speakTooltip("Choose a microphone for new recording sessions, or follow the macOS default.")
           .accessibilityLabel("Preferred microphone")
@@ -65,10 +65,10 @@ extension SettingsView {
           LongListPicker(
             title: "Spoken Language", items: TranscriptionLanguageCatalog.options,
             id: { $0.id }, selection: settingsBinding(\AppSettings.preferredLocaleIdentifier),
-            searchText: { [$0.displayName, $0.id] }
-          ) { option in
+            searchText: { [$0.displayName, $0.id] },
+            row: { option in
             Text(option.displayName)
-          }
+          })
           .settingsMenuPicker()
           .speakTooltip(
             "Automatic lets remote providers detect the language. Apple speech uses your current system locale."

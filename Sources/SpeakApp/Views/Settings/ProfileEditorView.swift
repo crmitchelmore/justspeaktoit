@@ -171,10 +171,10 @@ extension ProfileEditorView {
         title: "Output Language",
         items: [LongListChoice(id: "", title: "Use app setting")]
           + Self.outputLanguages.map { LongListChoice(id: $0, title: $0) },
-        id: { $0.id }, selection: $draft.outputLanguage, searchText: { [$0.title] }
-      ) { item in
+        id: { $0.id }, selection: $draft.outputLanguage, searchText: { [$0.title] },
+        row: { item in
         Text(item.title)
-      }
+      })
       .pickerStyle(.menu)
 
       Toggle("Include personal lexicon directives", isOn: $draft.includeLexiconDirectives)
@@ -190,10 +190,10 @@ extension ProfileEditorView {
         title: "Spoken Language",
         items: [LongListChoice(id: "", title: "Use app setting")]
           + TranscriptionLanguageCatalog.options.map { LongListChoice(id: $0.id, title: $0.displayName) },
-        id: { $0.id }, selection: $draft.languageIdentifier, searchText: { [$0.title, $0.id] }
-      ) { item in
+        id: { $0.id }, selection: $draft.languageIdentifier, searchText: { [$0.title, $0.id] },
+        row: { item in
         Text(item.title)
-      }
+      })
       .pickerStyle(.menu)
       .labelsHidden()
     }

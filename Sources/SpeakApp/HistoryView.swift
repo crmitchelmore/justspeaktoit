@@ -369,10 +369,10 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
             items: [LongListChoice<String?>(id: nil, title: "All Models")]
               + availableModels.map { LongListChoice<String?>(id: $0, title: ModelCatalog.friendlyName(for: $0)) },
             id: { $0.id }, selection: $selectedModelFilter, searchText: { [$0.title, $0.id ?? ""] },
-            menuDividerAfter: { $0.id == nil }
-          ) { item in
+            menuDividerAfter: { $0.id == nil },
+            row: { item in
             Text(item.title)
-          }
+          })
           .labelsHidden()
           .pickerStyle(.menu)
           .controlSize(.small)
@@ -556,10 +556,10 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
             items: [LongListChoice<String?>(id: nil, title: "All Models")]
               + availableModels.map { LongListChoice<String?>(id: $0, title: ModelCatalog.friendlyName(for: $0)) },
             id: { $0.id }, selection: $selectedModelFilter, searchText: { [$0.title, $0.id ?? ""] },
-            menuDividerAfter: { $0.id == nil }
-          ) { item in
+            menuDividerAfter: { $0.id == nil },
+            row: { item in
             Text(item.title)
-          }
+          })
           .pickerStyle(.menu)
           .fixedSize()
           .tint(.white)

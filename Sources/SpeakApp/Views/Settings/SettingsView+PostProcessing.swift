@@ -287,10 +287,10 @@ extension SettingsView {
     VStack(alignment: .leading, spacing: 8) {
       LongListPicker(
         title: "Output Language", items: Self.postProcessingOutputLanguages,
-        id: { $0 }, selection: settingsBinding(\AppSettings.postProcessingOutputLanguage), searchText: { [$0] }
-      ) { language in
+        id: { $0 }, selection: settingsBinding(\AppSettings.postProcessingOutputLanguage), searchText: { [$0] },
+        row: { language in
         Text(language)
-      }
+      })
       .settingsMenuPicker()
       .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
       .onChange(of: settings.postProcessingOutputLanguage) { _, _ in

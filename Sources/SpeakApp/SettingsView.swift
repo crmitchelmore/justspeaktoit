@@ -804,10 +804,10 @@ struct SettingsView: View {
           LongListPicker(
             title: "Language", items: VoiceOutputLanguageCatalog.options,
             id: { $0.id }, selection: settingsBinding(\AppSettings.ttsLanguageIdentifier),
-            searchText: { [$0.displayName, $0.id] }
-          ) { option in
+            searchText: { [$0.displayName, $0.id] },
+            row: { option in
             Text(option.displayName)
-          }
+          })
           .pickerStyle(.menu)
 
           if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .mistral {

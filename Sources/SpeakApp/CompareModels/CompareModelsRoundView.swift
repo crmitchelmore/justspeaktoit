@@ -34,10 +34,10 @@ struct CompareModelsRoundView: View {
                     id: { Optional($0.id) }, selection: Binding(
                     get: { controller.referenceEntryID ?? round.entriesInBlindOrder.first?.id },
                     set: { controller.referenceEntryID = $0 }
-                    ), searchText: { [round.blindLabel(for: $0.id)] }
-                ) { entry in
+                    ), searchText: { [round.blindLabel(for: $0.id)] },
+                  row: { entry in
                     Text(round.blindLabel(for: entry.id))
-                }
+                })
                 .frame(maxWidth: 200)
             }
         }
@@ -263,10 +263,10 @@ struct CompareModelsColumnView: View {
             id: { $0.id }, selection: Binding(
             get: { controller.pendingRanks[entry.id] ?? 0 },
             set: { controller.setRank($0 == 0 ? nil : $0, for: entry.id) }
-            ), searchText: { [$0.title] }
-        ) { item in
+            ), searchText: { [$0.title] },
+          row: { item in
             Text(item.title)
-        }
+        })
         .accessibilityIdentifier("compareModelsRank-\(round.blindLabel(for: entry.id))")
     }
 }

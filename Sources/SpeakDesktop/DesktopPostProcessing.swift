@@ -113,10 +113,7 @@ public enum DesktopPostProcessing { // swiftlint:disable:this type_body_length
         }
     }
 
-    /// Native provider routes first, then OpenRouter routes labelled as such.
-    public static var remoteModels: [ModelCatalog.Option] {
-        ModelPickerGrouping.flattened(CleanupModelDiscoveryStore.shared.options(), purpose: .postProcessing)
-    }
+    public static var remoteModels: [ModelCatalog.Option] { CleanupModelDiscoveryStore.shared.options() }
 
     public static var localModels: [ModelCatalog.Option] {
         ModelCatalog.postProcessing.filter { $0.id == LocalPostProcessingModel.builtInRulesModelID }
@@ -133,8 +130,7 @@ public enum DesktopPostProcessing { // swiftlint:disable:this type_body_length
         var remote = CleanupModelDiscoveryStore.shared.options(selected: selected)
         if let rememberedRemote, !remote.contains(where: { $0.id == rememberedRemote }),
            let retained = CleanupModelSelection.retainedOption(rememberedRemote) { remote.append(retained) }
-        return ModelPickerGrouping.flattened(remote, purpose: .postProcessing) + localModels
-            + DesktopLocalLLMModels.choices(selected: selected).filter {
+        return remote + localModels + DesktopLocalLLMModels.choices(selected: selected).filter {
             LocalPostProcessingModel.isDownloadedModelID($0.id)
         }
     }

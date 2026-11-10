@@ -89,9 +89,6 @@ public enum ModelRouting {
         if provider == "apple" {
             return .appleSpeech
         }
-        if let native = NativeTextModels.route(for: trimmed) {
-            return .postProcessing(provider: native.provider.id)
-        }
         if ModelCatalog.postProcessing.contains(where: { $0.id == trimmed })
             || trimmed.lowercased().hasPrefix("local/post-processing/")
             || CleanupModelSelection.modelID(from: trimmed) != nil {

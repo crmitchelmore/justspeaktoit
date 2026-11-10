@@ -240,7 +240,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             sharedState: .shared,
             historyManager: .shared,
             polishClipboard: PolishClipboard(pasteboard: SystemPolishPasteboard(clipboard: clipboard)),
-            hasPolishingKey: { settings.hasPostProcessingKey },
+            hasPolishingKey: { settings.hasOpenRouterKey },
             polish: { text, model, apiKey in
                 try await iOSPostProcessingManager.shared.polish(text: text, model: model, apiKey: apiKey)
             },
@@ -1703,7 +1703,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     ) {
         let settings = self.settings
         let model = settings.postProcessingModel
-        let apiKey = settings.postProcessingAPIKey(for: model)
+        let apiKey = settings.openRouterAPIKey
         let historyManager = self.historyManager
         let polish = self.polish
         let operation = AutomaticPolishOperation(

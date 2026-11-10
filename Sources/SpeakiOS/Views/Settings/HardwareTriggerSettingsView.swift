@@ -31,9 +31,9 @@ struct HardwareTriggerSettingsView: View {
                     .foregroundStyle(.secondary)
 
                 if settings.hardwareTriggerDestination == .clipboardAndPostProcess
-                    && !settings.hasPostProcessingKey {
+                    && !settings.hasOpenRouterKey {
                     Label(
-                        "Add a \(settings.postProcessingKeyProviderName) API key under API Keys to enable polishing. "
+                        "Add an OpenRouter API key under API Keys to enable polishing. "
                             + "Without it, polishing falls back to plain clipboard.",
                         systemImage: "exclamationmark.triangle"
                     )

@@ -505,8 +505,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         return trimmed
     }
 
-    // Curated, static set for transcript cleanup with pricing + tags: on-device, then
-    // native provider routes, then OpenRouter routes.
+    // Curated, static set for transcript cleanup (OpenRouter) with pricing + tags.
     // Pricing is based on OpenRouter's /api/v1/models at time of writing.
     public static let postProcessing: [Option] = applePostProcessingOptions + [
         Option(
@@ -516,9 +515,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 50,
             latencyTier: .instant,
             tags: [.fast, .cheap, .privacy]
-        )
-    ] + NativeTextModels.postProcessing + [
-        // OpenRouter routes. Unprefixed IDs are OpenRouter slugs; native routes use `native/`.
+        ),
+
         // GPT-6 IDs/rates verified against OpenAI docs and OpenRouter (2026-11); see
         // Docs/cleanup-model-upgrades-2026-11.md for pricing tiers and evidence.
         // No measured cleanup latency is available; retain Option's default tier.

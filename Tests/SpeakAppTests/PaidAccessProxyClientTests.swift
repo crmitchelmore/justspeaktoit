@@ -78,7 +78,7 @@ final class PaidAccessProxyClientTests: XCTestCase {
         }
 
         func requiresRemoteAccess(for model: String) async -> Bool { true }
-        func hasStoredAPIKey(forModel model: String) async -> Bool { true }
+        func hasStoredAPIKey() async -> Bool { true }
     }
 
     /// A paid client that fails the test if anything reaches it. Every case here

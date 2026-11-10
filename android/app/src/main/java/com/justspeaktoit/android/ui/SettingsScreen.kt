@@ -271,20 +271,23 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
 @Composable
 private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions) {
     var picking by remember { mutableStateOf(false) }
+    val title = stringResource(R.string.settings_cleanup_model)
+    val label = CleanupModelPicker.selectionLabel(state.cleanupModel)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(role = Role.Button) { picking = true }
+            .semantics(mergeDescendants = true) { contentDescription = "$title, $label" }
             .padding(vertical = 8.dp),
     ) {
         Text(
-            stringResource(R.string.settings_cleanup_model),
+            title,
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.weight(1f),
         )
         Text(
-            CleanupModelPicker.selectionLabel(state.cleanupModel),
+            label,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.primary,
         )

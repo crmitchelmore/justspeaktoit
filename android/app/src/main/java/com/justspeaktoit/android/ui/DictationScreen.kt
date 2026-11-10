@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -111,13 +112,21 @@ fun DictationScreen(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = actions.onShowHistory, enabled = !state.dictation.isActive) {
+                IconButton(
+                    onClick = actions.onShowHistory,
+                    enabled = !state.dictation.isActive,
+                    modifier = Modifier.testTag(AutomationIds.OPEN_HISTORY),
+                ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_history),
                         contentDescription = stringResource(R.string.history_title),
                     )
                 }
-                IconButton(onClick = actions.onShowSettings, enabled = !state.dictation.isActive) {
+                IconButton(
+                    onClick = actions.onShowSettings,
+                    enabled = !state.dictation.isActive,
+                    modifier = Modifier.testTag(AutomationIds.OPEN_SETTINGS),
+                ) {
                     Icon(
                         painter = painterResource(R.drawable.ic_settings),
                         contentDescription = stringResource(R.string.settings_title),
@@ -217,7 +226,7 @@ private fun TranscriptCard(state: DictationUiState) {
                 } else {
                     MaterialTheme.colorScheme.primary
                 },
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                modifier = Modifier.testTag(AutomationIds.STATUS).semantics { liveRegion = LiveRegionMode.Polite },
             )
             if (dictation is DictationState.Failed && text.isNotEmpty()) {
                 Text(stringResource(R.string.unfinished_label), style = MaterialTheme.typography.labelMedium)
@@ -231,6 +240,7 @@ private fun TranscriptCard(state: DictationUiState) {
                 } else {
                     MaterialTheme.colorScheme.onSurface
                 },
+                modifier = Modifier.testTag(AutomationIds.TRANSCRIPT),
             )
         }
     }
@@ -271,6 +281,7 @@ private fun RecordControls(state: DictationUiState, level: StateFlow<Float>, act
                             SolidColor(MaterialTheme.colorScheme.outline)
                         },
                     )
+                    .testTag(AutomationIds.RECORD)
                     .clickable(enabled = enabled) { if (active) actions.onStop() else actions.onRecordTapped() }
                     .semantics {
                         role = Role.Button
@@ -279,6 +290,7 @@ private fun RecordControls(state: DictationUiState, level: StateFlow<Float>, act
             ) {
                 Icon(
                     painter = painterResource(if (active) R.drawable.ic_stop else R.drawable.ic_mic),
+                    // Decorative: the enclosing button carries the Start/Stop label.
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(40.dp),
@@ -287,7 +299,9 @@ private fun RecordControls(state: DictationUiState, level: StateFlow<Float>, act
         }
         Spacer(Modifier.height(4.dp))
         if (active) {
-            TextButton(onClick = actions.onCancel) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(onClick = actions.onCancel, modifier = Modifier.testTag(AutomationIds.CANCEL)) {
+                Text(stringResource(R.string.action_cancel))
+            }
         }
     }
 }
@@ -345,21 +359,31 @@ private fun ResultActions(state: DictationUiState, snackbar: SnackbarHostState, 
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (text.isNotEmpty()) {
-            Button(onClick = {
-                if (TranscriptOutput.copy(context, text)) scope.launch { snackbar.showSnackbar(copiedMessage) }
-            }) {
+            Button(
+                onClick = {
+                    if (TranscriptOutput.copy(context, text)) scope.launch { snackbar.showSnackbar(copiedMessage) }
+                },
+                modifier = Modifier.testTag(AutomationIds.COPY),
+            ) {
                 Text(stringResource(if (final) R.string.action_copy else R.string.action_copy_unfinished))
             }
             if (final) {
-                OutlinedButton(onClick = { TranscriptOutput.share(context, text, shareTitle) }) {
+                OutlinedButton(
+                    onClick = { TranscriptOutput.share(context, text, shareTitle) },
+                    modifier = Modifier.testTag(AutomationIds.SHARE),
+                ) {
                     Text(stringResource(R.string.action_share))
                 }
             }
         }
         if (state.cleanup == CleanupStatus.Applied) {
-            TextButton(onClick = actions.onShowOriginal) { Text(stringResource(R.string.action_show_original)) }
+            TextButton(onClick = actions.onShowOriginal, modifier = Modifier.testTag(AutomationIds.SHOW_ORIGINAL)) {
+                Text(stringResource(R.string.action_show_original))
+            }
         }
-        TextButton(onClick = actions.onClear) { Text(stringResource(R.string.action_clear)) }
+        TextButton(onClick = actions.onClear, modifier = Modifier.testTag(AutomationIds.CLEAR)) {
+            Text(stringResource(R.string.action_clear))
+        }
     }
 }
 

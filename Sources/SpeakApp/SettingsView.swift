@@ -962,6 +962,8 @@ struct SettingsView: View {
                       .foregroundStyle(.secondary)
                   }
                   .buttonStyle(.plain)
+                  .accessibilityLabel("Remove \(voice.displayName) from favourites")
+                  .accessibilityIdentifier("ttsFavoriteVoiceRemove-\(voiceID)")
                 }
                 .padding(.vertical, 4)
               }
@@ -1001,6 +1003,8 @@ struct SettingsView: View {
                       .foregroundStyle(.secondary)
                   }
                   .buttonStyle(.plain)
+                  .accessibilityLabel("Remove pronunciation for \(word)")
+                  .accessibilityIdentifier("ttsPronunciationRemove-\(word)")
                 }
                 .padding(.vertical, 4)
               }

@@ -724,6 +724,7 @@ struct SSMLHelperView: View {
           dismiss()
         }
         .buttonStyle(.bordered)
+        .keyboardShortcut(.cancelAction)
 
         Spacer()
 

@@ -66,6 +66,7 @@ struct SpeakApp: App {
                             .environmentObject(environment.audioDevices)
                             .environmentObject(environment.tts)
                             .environmentObject(environment.shortcuts)
+                            .environmentObject(environment.recordingControl)
                             .onAppear {
                                 appDelegate.environment = environment
                                 environment.configureShortcutHandlers()

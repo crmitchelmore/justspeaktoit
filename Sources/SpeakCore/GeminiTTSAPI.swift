@@ -119,7 +119,9 @@ public struct GeminiTTSRequest: Equatable, Sendable {
         return [
             "model": model.rawValue,
             "input": input,
-            "response_format": ["type": "audio", "sample_rate": sampleRate],
+            // Gemini 3.8 defaults unary output to WAV; ask for the raw L16 the
+            // pipeline wraps and measures.
+            "response_format": ["type": "audio", "mime_type": "audio/l16", "sample_rate": sampleRate],
             "generation_config": ["speech_config": [speechConfig]]
         ]
     }

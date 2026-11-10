@@ -90,7 +90,9 @@ struct LongListPicker<Item, ID: Hashable, Row: View>: View {
                 .accessibilityElement(children: .combine)
             }
             .accessibilityLabel(title)
-            .accessibilityValue(items.first(where: { id($0) == selection }).map { searchText($0).first ?? title } ?? title)
+            .accessibilityValue(
+                items.first(where: { id($0) == selection }).map { searchText($0).first ?? title } ?? title
+            )
             .sheet(isPresented: $showsChooser) {
                 LongListChooserSheet(
                     title: title, items: items, id: id, selection: $selection,
@@ -139,6 +141,7 @@ struct LongListChooserSheet<Item, ID: Hashable, Row: View>: View {
                 Text(title).font(.headline)
                 Spacer()
                 Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
             }
             controls()
             List {

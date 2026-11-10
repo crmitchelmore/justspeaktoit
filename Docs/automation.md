@@ -21,6 +21,8 @@ directly between them:
 | stop | Stop Dictation | `speak stop` | `stop_dictation` |
 | transcribe | Transcribe Audio File | `speak transcribe <file>` | `transcribe_file` |
 | history | Get Last Transcription | `speak history` | `get_history` |
+| say | — | `speak say <text>` | `speak_text` |
+| voices | — | `speak voices` | `list_voices` |
 | polish | Polish Text | — | — |
 
 ## Named local capture await (qualification pending)
@@ -325,10 +327,67 @@ speak await --capture-id <uuid> [--since-id <uuid>] [--timeout <seconds>] [--jso
 speak listen [--json]
 speak stop [--json]
 speak history [--last <n>] [--json]
+speak say [<text>... | -f <file> | -] [-o <file>] [--play] [--json] [--timeout <seconds>]
+          [--provider <id>] [--model <id>] [--voice <id|name>]
+          [--speed <n>] [--pitch <semitones>] [--quality <q>] [--language <id>]
+speak voices [--provider <id>] [--json]
 speak status [--json]
 speak mcp
 speak --help | --version
 ```
+
+### Text to speech (`speak say`)
+
+`speak say` speaks text with the running app's own voices, keys,
+pronunciation dictionary and speed/pitch settings. The CLI still holds no
+credentials and no provider code; it sends the text and the app synthesizes it.
+
+- **Text** comes from the arguments, from `-f <file>` (UTF-8), or from standard
+  input when neither is given (or with `-`). Use `--` before text that starts
+  with a dash. Up to 100,000 characters.
+- **Settings**: by default `say` uses the app's Voice settings — the selected
+  provider, voice and model, and its speed, pitch, quality and language. Each
+  flag overrides one of those settings for this call only (nothing is saved);
+  anything not passed keeps the app's value:
+  - `--provider <id>` — a provider ID or name (`openai`, `ElevenLabs`); alone it
+    uses that provider's selected or first voice.
+  - `--model <id>` — a model (`openai/tts-1-hd` or `tts-1-hd`); alone it uses
+    the selected voice if it offers that model, else the first voice that does.
+  - `--voice <id|name>` — a voice ID or display name (`openai/alloy`, `Daniel`).
+    `--voice system` forces the on-device voice.
+  - `--speed <n>` (1 is normal), `--pitch <semitones>` (whole numbers, −12 to
+    12), `--quality standard|high|highest` and `--language <id>` (`automatic`
+    or an ID such as `en_US`; `en-US` also works).
+
+  Values are checked against what the chosen voice supports: an unknown voice
+  or model, a speed outside the voice's range, or pitch or quality on a voice
+  without that control fails with `invalid_argument` and says why, rather than
+  being ignored. Where quality picks the model (OpenAI, ElevenLabs), an
+  explicit `--model` wins. Voice matching ignores case, an ID wins over a name,
+  and a name shared by several voices is refused. Only voices the app can use
+  now are eligible: cloud voices need their key saved in the app, which reads
+  its own settings and credential store, so the CLI never sees a key.
+
+  When the app's own voice has no saved key (or nothing is selected) and no
+  flag chooses another, the Mac falls back to its on-device system voice — no
+  key, no network — and prints a `note:` on stderr.
+- **Listing**: `speak voices [--provider <id>]` prints the providers, voices and
+  models `say` can use, marking the app's voice `*` and each voice's default
+  model. `--json` returns `data.voices` with `id`, `name`, `provider`,
+  `providerName`, `models`, `model`, `selected` and `onDevice`.
+- **Output**: with no `-o`, the speech plays aloud and the command returns when
+  it finishes. `-o <file>` writes `.wav`, `.mp3` or `.m4a` (chosen by the
+  extension) without playing; add `--play` to do both. An existing file is
+  replaced only once the new audio is complete.
+- **Platforms**: the Windows and Linux apps have no on-device voice yet, so
+  with no configured voice `speak say` fails with `unsupported_command` there
+  rather than guessing a paid voice; `--voice system` fails the same way. They encode MP3
+  and M4A with the same native encoders as Voice export; a format the host
+  cannot encode fails before anything is synthesized. The Mac
+  cannot encode MP3 from its system voice, so ask for `.wav` or `.m4a` with it.
+- Speaking aloud is refused while dictation is recording (`already_recording`),
+  so the microphone never hears it. On Windows and Linux, Stop in the app or a
+  new recording ends the speech with `speech_failed`.
 
 ### Recipes
 
@@ -350,6 +409,15 @@ Pull the last five transcriptions as JSON:
 
 ```bash
 speak history --last 5 --json | jq -r '.data.entries[].text'
+```
+
+Read a file aloud, or save a greeting with the app's selected voice:
+
+```bash
+speak say -f notes.txt
+echo "Build finished" | speak say
+speak say "Hello and welcome." --provider openai --model tts-1-hd --speed 1.2 -o greeting.m4a
+speak voices --provider elevenlabs
 ```
 
 Fail a script cleanly when the app is closed:
@@ -400,7 +468,7 @@ are added without a bump, so pin on the version and ignore unknown keys.
 
 `app_unavailable`, `schema_mismatch`, `invalid_argument`, `unsupported_command`,
 `file_not_found`, `file_too_large`, `not_recording`, `already_recording`,
-`transcription_failed`, `timed_out`, `internal_error`.
+`transcription_failed`, `speech_failed`, `timed_out`, `internal_error`.
 
 Branch on `error.code`, not on the message text.
 
@@ -443,6 +511,8 @@ of the client's PATH (replace `<you>` with your user name, or use
 | `stop_dictation` | — | Transcript of the finished session |
 | `status` | — | App state and active local capture identity, when present |
 | `await_transcript` | `capture_id` (required), `since_id`, `timeout_seconds` (>0–600; default 60) | Exact successful local capture and frozen History entry |
+| `speak_text` | `text` (required), `provider`, `model`, `voice`, `speed`, `pitch`, `quality`, `language`, `path`, `play`, `timeout_seconds` | Voice and model used and the file written, once playback has finished |
+| `list_voices` | `provider` | Providers, voices and models `speak_text` can use, marking the app's voice |
 
 Every tool also returns `structuredContent` with the same fields as the CLI's
 `--json` `data` object.

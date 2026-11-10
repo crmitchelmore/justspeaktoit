@@ -131,8 +131,8 @@ struct ModelPicker: View {
               .buttonStyle(.plain)
             }
           })
-        }
-      ) { option in
+        },
+        row: { option in
         VStack(alignment: .leading, spacing: 4) {
           HStack(spacing: 10) {
             Text(option.displayName)
@@ -165,7 +165,7 @@ struct ModelPicker: View {
               .foregroundStyle(.secondary)
           }
         }
-      }
+      })
     }
 
     private var sortedOptions: [ModelCatalog.Option] {

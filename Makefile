@@ -52,6 +52,7 @@ test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
 	ruby scripts/tests/mac_review_notes_test.rb
 	ruby scripts/tests/apple_release_credentials_test.rb
 	ruby scripts/tests/create_ios_app_store_profile_test.rb
+	ruby scripts/tests/ensure_ios_app_store_profile_test.rb
 	ruby scripts/tests/testflight_testers_test.rb
 	python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 	python3 -B -m unittest discover -s scripts/linux-local-runtime -p 'test_*.py' -v
@@ -89,6 +90,11 @@ preflight: test-all verify ## Full pre-release check (tests + launch verificatio
 .PHONY: lint
 lint: ## Run strict SwiftLint (isolated Tooling graph) against the checked-in debt baseline
 	./scripts/swiftlint.sh lint --strict --baseline .swiftlint-baseline.json
+	python3 scripts/check-apple-accessibility.py
+
+.PHONY: lint-accessibility
+lint-accessibility: ## Check Apple SwiftUI controls have accessible names and identifiers
+	python3 scripts/check-apple-accessibility.py
 
 .PHONY: format
 format: ## Auto-fix formatting and lint violations where possible
@@ -108,9 +114,12 @@ bench: ## Run the isolated local-transcription benchmark (pass arguments with BE
 	swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark $(BENCH_ARGS)
 
 .PHONY: install-hooks
-install-hooks: ## Install git hooks for pre-push verification
-	git config core.hooksPath .githooks
-	@echo "✓ Git hooks installed (pre-push → make preflight)"
+install-hooks: ## Install the opt-in pre-push hook that runs scripts/pre-pr
+	./scripts/install-pre-pr-hook --chain
+
+.PHONY: pre-pr
+pre-pr: ## Fast path-aware lint/build/unit checks for the changes against origin/main
+	./scripts/pre-pr $(PRE_PR_ARGS)
 
 .PHONY: xcode
 xcode: ## Generate and open Xcode workspace

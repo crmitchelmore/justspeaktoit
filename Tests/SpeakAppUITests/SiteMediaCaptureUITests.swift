@@ -33,6 +33,14 @@ final class SiteMediaCaptureUITests: XCTestCase {
         app.launchEnvironment["SPEAK_CORE_JOURNEY_BATCH"] = "1"
         app.launchEnvironment["SPEAK_CORE_JOURNEY_SITE_MEDIA"] = "1"
         app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
+        // The workflow captures each website clip in light and dark appearance.
+        let appearance = ProcessInfo.processInfo.environment["SITE_MEDIA_APPEARANCE"] ?? "light"
+        app.launchEnvironment["SPEAK_CORE_JOURNEY_SITE_MEDIA_APPEARANCE"] = appearance
+        if appearance == "dark" {
+            app.launchArguments += ["-AppleInterfaceStyle", "Dark"]
+            fixture.launchArguments += ["-AppleInterfaceStyle", "Dark"]
+            fixture.launchEnvironment["CORE_JOURNEY_TARGET_APPEARANCE"] = "dark"
+        }
         addTeardownBlock {
             XCTAssertNoThrow(try self.attachMarks())
             if fixture.state != .notRunning { fixture.terminate() }

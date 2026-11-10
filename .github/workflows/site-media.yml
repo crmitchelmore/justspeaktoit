@@ -7,6 +7,11 @@ name: Site Media Capture
 # or signing. See landing-page/images/README.md.
 on:
   workflow_dispatch:
+    inputs:
+      captures_run:
+        description: Re-render from this earlier run's Mac and iPhone captures instead of capturing again
+        required: false
+        default: ""
   pull_request:
     paths:
       - .github/workflows/site-media.yml
@@ -14,6 +19,7 @@ on:
       - Sources/SpeakApp/CoreJourneySiteMediaFixture.swift
       - Tests/SpeakAppUITests/SiteMediaCaptureUITests.swift
       - Tests/SpeakiOSUITests/SiteMediaCaptureUITests.swift
+      - Tests/Fixtures/CoreJourneyTargetApp/**
 
 permissions:
   contents: read
@@ -25,10 +31,15 @@ concurrency:
 
 jobs:
   capture:
-    name: Capture Mac app
+    name: Capture Mac app (${{ matrix.appearance }})
+    if: ${{ !inputs.captures_run }}
+    strategy:
+      fail-fast: false
+      matrix:
+        appearance: [light, dark]
     # Hosted ARM has the UI automation entitlement used by the core journey suites.
     runs-on: macos-latest
-    timeout-minutes: 56
+    timeout-minutes: 65
     env:
       CAPTURE: ${{ github.workspace }}/.artifacts/site-media
     steps:
@@ -41,7 +52,7 @@ jobs:
       # (run 42583769755); generate and resolve with bounded retries into the
       # build's DerivedData so the build reuses the artefacts.
       - name: Prepare Tuist and macOS project
-        timeout-minutes: 14
+        timeout-minutes: 20
         run: |
           brew install ffmpeg
           scripts/install-tuist.sh >> "$GITHUB_PATH"
@@ -65,6 +76,13 @@ jobs:
           mkdir -p "$CAPTURE"
           swift scripts/site-media/select-display-mode.swift | tee "$CAPTURE/display-modes.txt"
           defaults write com.apple.dock autohide -bool true
+          if [ "${{ matrix.appearance }}" = dark ]; then
+            defaults write -g AppleInterfaceStyle Dark
+            # System-wide dark mode also darkens the recording HUD and menu bar; best effort.
+            perl -e 'alarm 20; exec @ARGV' osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' \
+              || echo "::warning::Could not switch the runner to dark mode"
+            perl -e 'alarm 20; exec @ARGV' osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode' || true
+          fi
           killall Dock || true
           sleep 3
           system_profiler SPDisplaysDataType | tee -a "$CAPTURE/display-modes.txt"
@@ -82,7 +100,8 @@ jobs:
         timeout-minutes: 10
         run: |
           xctestrun=$(find "$RUNNER_TEMP/DerivedData/Build/Products" -name '*.xctestrun' | head -1)
-          TEST_RUNNER_SITE_MEDIA_CAPTURE=1 xcodebuild test-without-building -xctestrun "$xctestrun" \
+          TEST_RUNNER_SITE_MEDIA_CAPTURE=1 TEST_RUNNER_SITE_MEDIA_APPEARANCE=${{ matrix.appearance }} \
+            xcodebuild test-without-building -xctestrun "$xctestrun" \
             -destination platform=macOS -only-testing:SpeakAppUITests/SiteMediaCaptureUITests \
             -resultBundlePath "$CAPTURE/SiteMedia.xcresult"
 
@@ -112,7 +131,7 @@ jobs:
         timeout-minutes: 5
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: site-media-mac-${{ github.run_attempt }}
+          name: site-media-mac-${{ matrix.appearance }}-${{ github.run_attempt }}
           path: |
             .artifacts/site-media
             !.artifacts/site-media/SiteMedia.xcresult
@@ -120,9 +139,14 @@ jobs:
           if-no-files-found: error
 
   capture-ios:
-    name: Capture iPhone app (Simulator)
+    name: Capture iPhone app (Simulator, ${{ matrix.appearance }})
+    if: ${{ !inputs.captures_run }}
+    strategy:
+      fail-fast: false
+      matrix:
+        appearance: [light, dark]
     runs-on: macos-latest
-    timeout-minutes: 56
+    timeout-minutes: 65
     env:
       CAPTURE: ${{ github.workspace }}/.artifacts/site-media-ios
     steps:
@@ -137,7 +161,7 @@ jobs:
           install-tuist: "true"
 
       - name: Build app and capture suite for the Simulator
-        timeout-minutes: 31
+        timeout-minutes: 35
         run: |
           set -o pipefail
           scripts/retry-network.sh tuist generate --no-open
@@ -158,6 +182,7 @@ jobs:
         timeout-minutes: 12
         run: |
           python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
+          xcrun simctl ui "$SIMULATOR_ID" appearance ${{ matrix.appearance }}
           xcrun simctl status_bar "$SIMULATOR_ID" override --time 9:41 --dataNetwork wifi --wifiBars 3 \
             --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
 
@@ -193,7 +218,7 @@ jobs:
         timeout-minutes: 5
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: site-media-ios-${{ github.run_attempt }}
+          name: site-media-ios-${{ matrix.appearance }}-${{ github.run_attempt }}
           path: |
             .artifacts/site-media-ios
             !.artifacts/site-media-ios/SiteMedia.xcresult
@@ -203,27 +228,37 @@ jobs:
   render:
     name: Render marketing clips
     needs: [capture, capture-ios]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (inputs.captures_run || (needs.capture.result == 'success' && needs.capture-ios.result == 'success')) }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7.0.1
         timeout-minutes: 2
         with:
           persist-credentials: false
 
-      - name: Install ffmpeg, Pillow and Inter
+      - name: Install ffmpeg, Inter, Pillow and Piper
         timeout-minutes: 8
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends ffmpeg python3-pil fonts-inter
-          ffmpeg -hide_banner -encoders | grep -E 'libx264|libsvtav1|libaom' || true
+          sudo apt-get install -y -q --no-install-recommends ffmpeg fonts-inter python3-venv
+          ffmpeg -hide_banner -encoders | grep -E 'libx264|libsvtav1|libaom|libopus' || true
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q -r scripts/site-media/requirements.txt
+
+      - name: Cache the narration voice
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/voices
+          key: piper-en_GB-cori-high-470b4dd634c9
 
       - name: Download Mac and iPhone captures
         uses: actions/download-artifact@v8
         with:
-          pattern: site-media-*-${{ github.run_attempt }}
+          pattern: site-media-*
           path: ${{ runner.temp }}/downloads
+          run-id: ${{ inputs.captures_run || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Fetch Windows and Linux page tours from hosted runs
         timeout-minutes: 5
@@ -231,15 +266,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/captures"
-          mv "$RUNNER_TEMP/downloads/site-media-mac-${{ github.run_attempt }}" "$RUNNER_TEMP/captures/mac" || true
-          mv "$RUNNER_TEMP/downloads/site-media-ios-${{ github.run_attempt }}" "$RUNNER_TEMP/captures/ios" || true
+          for source in mac ios; do
+            for appearance in light dark; do
+              # The newest attempt of a re-run wins.
+              latest=$(ls -d "$RUNNER_TEMP/downloads/site-media-$source-$appearance-"* | sort -V | tail -1)
+              mv "$latest" "$RUNNER_TEMP/captures/$source-$appearance"
+            done
+          done
           python3 scripts/site-media/fetch-desktop-tours.py "$RUNNER_TEMP/captures"
           ls -R "$RUNNER_TEMP/captures" | head -80
 
       - name: Render clips
-        timeout-minutes: 15
+        timeout-minutes: 60
         run: |
-          python3 scripts/site-media/render-clips.py "$RUNNER_TEMP/captures" .artifacts/site-clips
+          "$RUNNER_TEMP/venv/bin/python" -u scripts/site-media/render-clips.py "$RUNNER_TEMP/captures" \
+            .artifacts/site-clips --voices "$RUNNER_TEMP/voices"
           cp "$RUNNER_TEMP/captures/source.json" .artifacts/site-clips/desktop-source.json
           for clip in .artifacts/site-clips/*.mp4 .artifacts/site-clips/*.webm; do
             ffprobe -v error -show_entries format=duration,size:stream=width,height,codec_name -of compact "$clip"

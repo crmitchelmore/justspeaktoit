@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-08"
+updated: "2026-11-09"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -159,7 +159,6 @@ sessions:
           - "Steps: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/cloudkit-shared-container.md"
         steps:
           - "Identifiers \u203a com.justspeaktoit.ios \u203a iCloud \u203a Configure: also tick iCloud.com.justspeaktoit; do the same for com.justspeaktoit.ios.alpha with iCloud.com.justspeaktoit.alpha."
-          - "Regenerate the iOS App Store profiles for both App IDs, and update the IOS_APPSTORE_PROFILE secret if it holds one."
           - "In CloudKit Console, deploy the Development schema of iCloud.com.justspeaktoit and .alpha to Production if any iPhone record type is missing."
           - "Set the repository variable IOS_SHARED_CLOUD_CONTAINER to 1."
         expected: "The next Alpha iOS build signs and uploads with both containers. Then run iphone-shared-icloud-container."
@@ -223,10 +222,54 @@ sessions:
         build: "Just Speak to It for Mac, the first Alpha build that includes the fix for #1387"
         steps:
           - "Open Compare Models \u203a Streaming and turn on Save results to History."
-          - "Select Deepgram Flux (English), Soniox Real-time v5 and one Azure model, plus any working model."
+          - "Select Deepgram Flux (English), Soniox Real-time v6 and one Azure model, plus any working model."
           - "Start listening, say \"Compare these models please\", press Stop, then rank or finish the round."
           - "Open History."
         expected: "Flux and Soniox finish with a transcript and no error. Any failed lane shows its error under the reveal and in the scoreboard. History has one new item per selected model (failures show their error), each tagged Compare Models with its model, cost and latency. With the toggle off, a new round adds nothing to History."
+        final_gate: true
+      - id: "mac-website-voiceover"
+        issues:
+          - 1400
+        title: "Website: VoiceOver and keyboard reach everything"
+        minutes: 6
+        core: false
+        build: "justspeaktoit.com after the accessibility guards PR is deployed"
+        steps:
+          - "In Safari open justspeaktoit.com, press Tab once and check that Skip to content appears; press Return."
+          - "Keep pressing Tab through the page and check that every focused link or button has a visible outline."
+          - "Turn on VoiceOver (Command-F5), open the rotor (Control-Option-U) and browse Links and Headings."
+          - "Repeat the Tab and rotor checks on /privacy, /support and /qa; on /qa mark one check Pass."
+          - "Switch macOS to the other appearance (light or dark) and glance over each page."
+        expected: "Every link, button and form control has a spoken name that says what it does, focus is always visible, the /qa progress and status changes are read aloud, and text stays readable in both appearances."
+        final_gate: false
+      - id: "mac-voiceover-pass"
+        issues:
+          - 1399
+        title: "Mac: VoiceOver and keyboard reach every control"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the fix for #1399"
+        steps:
+          - "Turn on VoiceOver (Command-F5). Open the menu bar item with VoiceOver and listen to its name and state."
+          - "Open the main window and move through the sidebar and Settings with VoiceOver; listen for any button read only as \"button\" or an image name."
+          - "In Settings \u203a Voice Output open the SSML helper, and in Profiles open New Profile; press Escape in each."
+          - "Start and stop a dictation with the hot key and listen to the announcements."
+          - "Turn VoiceOver off."
+        expected: "The menu bar item reads \"Just Speak to It\" with the current state. Every control has a meaningful name, both sheets close on Escape, and recording, transcribing and errors are announced."
+        final_gate: true
+      - id: "mac-record-button-follows-hotkey"
+        issues:
+          - 1407
+        title: "Main window record button follows a recording started elsewhere"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the fix for #1407"
+        steps:
+          - "Close the main window, start a recording with your recording shortcut and say a made-up sentence."
+          - "Open the main window from the menu bar icon and look at the top-right toolbar button and the Dashboard record button."
+          - "Click the toolbar Stop button."
+          - "Start another recording from the menu bar's Start Recording item while the window is open, then stop it with the Dashboard button."
+        expected: "Both buttons show Stop (red) as soon as the window opens mid-recording and switch the moment a recording starts or ends from anywhere. Each Stop ends the recording, which is transcribed and appears in History; the buttons then return to Record."
         final_gate: true
   - id: "iphone"
     device: "iPhone"
@@ -467,6 +510,21 @@ sessions:
           - "Stop the screen recording and attach it to #1368 (or share it with the agent)."
         expected: "A recording under one minute showing both starts and stops, the Live Activity with the fictional words, and no notifications, names or personal data on screen."
         final_gate: false
+      - id: "iphone-voiceover-pass"
+        issues:
+          - 1399
+        title: "iPhone: VoiceOver and largest text reach every control"
+        minutes: 8
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes the fix for #1399"
+        steps:
+          - "Settings \u203a Accessibility: turn on VoiceOver and set Larger Text to the largest size."
+          - "In Just Speak to It swipe through the main screen, History (including the filter and trash buttons) and Settings."
+          - "Double-tap Start recording, speak a fictional sentence, then double-tap Stop recording."
+          - "Share an audio file to Just Speak to It and use a two-finger scrub on the import sheet."
+          - "Switch to the Just Speak keyboard in Notes and swipe through its keys."
+        expected: "Every control has a meaningful name and nothing is clipped. \"Recording\" and \"Transcribing\" are announced, the scrub closes the import sheet, and every keyboard key is named."
+        final_gate: true
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"
@@ -544,3 +602,39 @@ sessions:
           - "Attach the video to #1368 (or share it with the agent)."
         expected: "A clip under 30 seconds showing the Watch stop ending the iPhone recording and the new item in History, with no notifications or personal data visible."
         final_gate: false
+      - id: "watch-voiceover-pass"
+        issues:
+          - 1399
+        title: "Watch: VoiceOver reads the record button and captures"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes the fix for #1399, with the watch app installed"
+        steps:
+          - "Turn on VoiceOver on the Watch."
+          - "Open Just Speak to It, double-tap Start recording, say a fictional sentence, then double-tap Stop recording."
+          - "Swipe to the new capture row."
+        expected: "The button reads Start recording, then Stop recording, and the row reads its time, length and status as one item."
+        final_gate: true
+  - id: "decisions"
+    device: "Decision"
+    title: "Decisions"
+    items:
+      - id: "decision-non-apple-screen-readers"
+        issues:
+          - 1400
+        title: "Where should Windows, Linux and Android screen-reader checks run?"
+        minutes: 2
+        core: false
+        question: "CI now audits names, IDs and announcements on Windows, Linux and Android. How should a real Narrator, Orca or TalkBack pass happen?"
+        context: "The /qa checklist only has Mac, iPhone and Watch sessions. Real screen-reader passes need a Windows PC, a Linux desktop and an Android phone."
+        options:
+          - id: "ci-and-reports"
+            label: "Rely on the CI audits and fix reported problems"
+            consequence: "No new owner sessions; spoken wording is checked only when a user reports a problem."
+            recommended: true
+          - id: "owner-devices"
+            label: "Add Windows, Linux and Android sessions to /qa"
+            consequence: "Adds device sessions and about 15 minutes per platform for each release that changes their UI."
+          - id: "external-tester"
+            label: "Ask an external tester who uses a screen reader"
+            consequence: "Best evidence of real use, but needs a tester and a way to share builds."

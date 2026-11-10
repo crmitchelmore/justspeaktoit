@@ -35,8 +35,8 @@ struct VoicePicker: View {
                     ModelCredentialStatusView(availability: availability(voice))
                 })
             },
-            accessory: { voice in AnyView(previewButton(voice)) }
-        ) { voice in
+            accessory: { voice in AnyView(previewButton(voice)) },
+            row: { voice in
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(voice.name).font(.body)
@@ -54,7 +54,7 @@ struct VoicePicker: View {
                 Spacer()
                 ModelCredentialStatusView(availability: availability(voice))
             }
-        }
+        })
         .accessibilityValue(voices.first { $0.id == selection }?.displayName ?? selection)
     }
 
@@ -91,6 +91,7 @@ struct VoicePicker: View {
             .buttonStyle(.borderless)
             .disabled(previewDisabled)
             .accessibilityLabel("Preview \(voice.displayName)")
+            .accessibilityIdentifier("voicePicker.preview.\(voice.id)")
         }
     }
 

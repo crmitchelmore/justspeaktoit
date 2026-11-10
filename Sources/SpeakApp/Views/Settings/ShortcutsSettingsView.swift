@@ -127,7 +127,10 @@ struct ShortcutsSettingsView: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(binding.isGlobal ? Color.brandLagoon : .secondary)
                         .speakTooltip(binding.isGlobal ? "Make this shortcut app-only." : "Make this shortcut global.")
-                        .accessibilityLabel(binding.isGlobal ? "Global shortcut" : "App-only shortcut")
+                        .accessibilityLabel("Global \(action.displayName) shortcut")
+                        .accessibilityValue(binding.isGlobal ? "Global" : "App only")
+                        .accessibilityHint("Switches between a global and an app-only shortcut")
+                        .accessibilityIdentifier("shortcutGlobalToggle-\(action.rawValue)")
                     }
 
                     shortcutRecorder(for: action, binding: binding, isRecording: isRecording)

@@ -295,8 +295,9 @@ if windowsTargetBuild {
                 // for which user's process sent that callback.
                 .linkedLibrary("bcrypt"), .linkedLibrary("ws2_32"), .linkedLibrary("iphlpapi"),
                 .linkedLibrary("avrt"), .linkedLibrary("mfuuid"),
-                // BSTR/SAFEARRAY helpers used by the UI Automation insertion adapter.
-                .linkedLibrary("oleaut32"), .linkedLibrary("oleacc"),
+                // BSTR/SAFEARRAY helpers used by the UI Automation insertion adapter, and
+                // UI Automation notifications that screen readers speak.
+                .linkedLibrary("oleaut32"), .linkedLibrary("oleacc"), .linkedLibrary("uiautomationcore"),
                 // The Keyboard shortcut dialog's native hotkey control.
                 .linkedLibrary("comctl32"),
                 // The window's drawing (GDI+), dark title bar (DWM),

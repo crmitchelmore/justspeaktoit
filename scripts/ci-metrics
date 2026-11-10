@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""Recompute the CI speed and reliability baseline from the GitHub API.
+
+Usage:
+  scripts/ci-metrics                      # last 30 days
+  scripts/ci-metrics --days 7
+  scripts/ci-metrics --since 2026-11-10   # compare before/after a change
+  scripts/ci-metrics --since 2026-10-11 --until 2026-11-10 --json
+
+Requires an authenticated `gh` CLI. Job-level data (required-gate wall time,
+macOS queue time, job minutes) is fetched for at most --max-job-runs CI runs and
+cached under ~/.cache/jsti-ci-metrics, because completed jobs never change.
+
+Metrics:
+  pr_open_to_merge     created_at -> merged_at for PRs merged into main
+  ci_pr_success        wall time of successful CI pull_request runs
+  required_gate        run created -> last required check completed (PR runs)
+  macos_queue          macOS job started_at - created_at (all sampled runs)
+  workflow totals      runs, failures, cancellations, wall minutes per workflow
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import statistics
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = os.environ.get("CI_METRICS_REPO", "crmitchelmore/justspeaktoit")
+CI_PATH = ".github/workflows/ci.yml"
+REQUIRED_CHECKS = ("Build & Test (macOS)", "Build iOS Library", "Lint")
+CACHE = Path(os.environ.get("CI_METRICS_CACHE", Path.home() / ".cache" / "jsti-ci-metrics"))
+
+
+def gh_api(path: str, paginate: bool = False) -> list | dict:
+    args = ["gh", "api", "-H", "Accept: application/vnd.github+json", path]
+    if paginate:
+        args[2:2] = ["--paginate", "--slurp"]
+    for attempt in range(4):
+        result = subprocess.run(args, capture_output=True, text=True)
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        if attempt == 3:
+            sys.exit(f"gh api {path} failed: {result.stderr.strip()}")
+    raise AssertionError
+
+
+def ts(value: str | None) -> dt.datetime | None:
+    return dt.datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+
+def minutes(start: dt.datetime | None, end: dt.datetime | None) -> float | None:
+    if not start or not end:
+        return None
+    return max(0.0, (end - start).total_seconds() / 60)
+
+
+def pct(values: list[float], q: float) -> float | None:
+    values = sorted(v for v in values if v is not None)
+    if not values:
+        return None
+    if len(values) == 1:
+        return values[0]
+    return statistics.quantiles(values, n=100, method="inclusive")[int(q) - 1]
+
+
+def summary(values: list[float]) -> dict:
+    values = [v for v in values if v is not None]
+    return {"n": len(values), "p50": pct(values, 50), "p90": pct(values, 90)}
+
+
+def list_runs(since: dt.date, until: dt.date) -> list[dict]:
+    runs: list[dict] = []
+    # The runs API caps a single query at 1,000 results, so walk day by day.
+    day = since
+    while day < until:
+        pages = gh_api(f"repos/{REPO}/actions/runs?per_page=100&created={day.isoformat()}", paginate=True)
+        for page in pages:
+            runs.extend(page.get("workflow_runs", []))
+        day += dt.timedelta(days=1)
+    return runs
+
+
+def list_merged_prs(since: dt.date, until: dt.date) -> list[dict]:
+    query = f"repo:{REPO} is:pr is:merged base:main merged:{since.isoformat()}..{(until - dt.timedelta(days=1)).isoformat()}"
+    items: list[dict] = []
+    page = 1
+    while True:
+        data = gh_api(f"search/issues?per_page=100&page={page}&q={query.replace(' ', '+')}")
+        items.extend(data.get("items", []))
+        if len(data.get("items", [])) < 100 or page >= 10:
+            return items
+        page += 1
+
+
+def run_jobs(run: dict) -> list[dict]:
+    CACHE.mkdir(parents=True, exist_ok=True)
+    cached = CACHE / f"{run['id']}-{run.get('run_attempt', 1)}.json"
+    if cached.exists():
+        return json.loads(cached.read_text())
+    pages = gh_api(f"repos/{REPO}/actions/runs/{run['id']}/attempts/{run.get('run_attempt', 1)}/jobs?per_page=100",
+                   paginate=True)
+    jobs = [job for page in pages for job in page.get("jobs", [])]
+    if run.get("status") == "completed":
+        cached.write_text(json.dumps(jobs))
+    return jobs
+
+
+def workflow_label(run: dict) -> str:
+    path = run.get("path") or ""
+    if path.startswith("dynamic/"):
+        return "Dependabot updates (dynamic)"
+    return path.split("@")[0].removeprefix(".github/workflows/") or run["name"]
+
+
+def is_macos(job: dict) -> bool:
+    labels = " ".join(job.get("labels") or []).lower()
+    return "macos" in labels
+
+
+def compute(args: argparse.Namespace) -> dict:
+    until = args.until or (dt.date.today() + dt.timedelta(days=1))
+    since = args.since or (until - dt.timedelta(days=args.days))
+    runs = list_runs(since, until)
+    prs = list_merged_prs(since, until)
+
+    per_workflow: dict[str, dict] = {}
+    for run in runs:
+        stats = per_workflow.setdefault(workflow_label(run), {"runs": 0, "success": 0, "failure": 0, "cancelled": 0,
+                                                      "pr_cancelled": 0, "wall_minutes": 0.0})
+        stats["runs"] += 1
+        conclusion = run.get("conclusion") or "in_progress"
+        if conclusion in ("success", "failure", "cancelled"):
+            stats[conclusion] += 1
+        if conclusion == "cancelled" and run["event"] == "pull_request":
+            stats["pr_cancelled"] += 1
+        stats["wall_minutes"] += minutes(ts(run.get("run_started_at")), ts(run.get("updated_at"))) or 0
+
+    ci_runs = [r for r in runs if r.get("path") == CI_PATH]
+    ci_pr = [r for r in ci_runs if r["event"] == "pull_request"]
+    ci_success = [minutes(ts(r.get("run_started_at")), ts(r.get("updated_at")))
+                  for r in ci_pr if r.get("conclusion") == "success"]
+
+    gate, queue, job_minutes = [], [], {"macos": 0.0, "other": 0.0}
+    # Job data comes from CI runs only: the required gate lives there and its
+    # macOS jobs dominate the shared hosted queue.
+    sampled = sorted((r for r in ci_runs if r.get("status") == "completed"),
+                     key=lambda r: r["created_at"], reverse=True)[: args.max_job_runs]
+    for run in sampled:
+        jobs = run_jobs(run)
+        created = ts(run["created_at"])
+        for job in jobs:
+            started, completed = ts(job.get("started_at")), ts(job.get("completed_at"))
+            if job.get("conclusion") == "skipped":
+                continue
+            duration = minutes(started, completed) or 0
+            job_minutes["macos" if is_macos(job) else "other"] += duration
+            if is_macos(job):
+                queue.append(minutes(ts(job.get("created_at")), started))
+        if run["event"] == "pull_request" and run.get("conclusion") == "success":
+            required = [ts(j["completed_at"]) for j in jobs
+                        if j["name"] in REQUIRED_CHECKS and j.get("completed_at")]
+            if required:
+                gate.append(minutes(created, max(required)))
+
+    failures = sum(s["failure"] for s in per_workflow.values())
+    cancelled_pr = sum(s["pr_cancelled"] for s in per_workflow.values())
+    ci_main = [r for r in ci_runs if r["event"] == "push" and r.get("conclusion") in ("success", "failure")]
+    return {
+        "repo": REPO,
+        "window": {"since": since.isoformat(), "until": until.isoformat()},
+        "pr_open_to_merge_hours": {k: (v / 60 if isinstance(v, float) else v) for k, v in summary(
+            [minutes(ts(p["created_at"]), ts(p["pull_request"]["merged_at"])) for p in prs]).items()},
+        "ci_pr_success_minutes": summary(ci_success),
+        "required_gate_minutes": summary(gate),
+        "macos_queue_minutes": summary(queue),
+        "job_minutes_sampled": {k: round(v) for k, v in job_minutes.items()},
+        "sampled_job_runs": len(sampled),
+        "runs": len(runs),
+        "failed_runs": failures,
+        "pr_runs_cancelled": cancelled_pr,
+        "failure_rate": round(failures / len(runs), 4) if runs else None,
+        "ci_pr_runs": len(ci_pr),
+        "ci_pr_cancelled": sum(r.get("conclusion") == "cancelled" for r in ci_pr),
+        "ci_pr_failed": sum(r.get("conclusion") == "failure" for r in ci_pr),
+        "ci_main_failure_rate": (round(sum(r["conclusion"] == "failure" for r in ci_main) / len(ci_main), 4)
+                                 if ci_main else None),
+        "workflows": dict(sorted(per_workflow.items(), key=lambda kv: -kv[1]["wall_minutes"])),
+    }
+
+
+def fmt(value) -> str:
+    return "—" if value is None else (f"{value:.1f}" if isinstance(value, float) else str(value))
+
+
+def render(data: dict) -> str:
+    lines = [f"# CI metrics for {data['repo']} ({data['window']['since']} → {data['window']['until']})", "",
+             "| Metric | n | p50 | p90 |", "|---|---|---|---|"]
+    for key, label in (("pr_open_to_merge_hours", "PR open → merge (h)"),
+                       ("ci_pr_success_minutes", "CI workflow, successful PR runs (min)"),
+                       ("required_gate_minutes", "Required gate, run created → last required check (min)"),
+                       ("macos_queue_minutes", "macOS job queue (min)")):
+        row = data[key]
+        lines.append(f"| {label} | {row['n']} | {fmt(row['p50'])} | {fmt(row['p90'])} |")
+    lines += ["", f"CI PR runs: {data['ci_pr_runs']} · cancelled: {data['ci_pr_cancelled']} · "
+              f"failed: {data['ci_pr_failed']} · main push failure rate: {fmt(data['ci_main_failure_rate'])}",
+              f"Runs: {data['runs']} · failed: {data['failed_runs']} · "
+              f"PR runs cancelled: {data['pr_runs_cancelled']} · failure rate: {fmt(data['failure_rate'])}",
+              f"Job minutes over {data['sampled_job_runs']} sampled runs: macOS {data['job_minutes_sampled']['macos']}, "
+              f"other {data['job_minutes_sampled']['other']}", "",
+              "| Workflow | runs | failed | cancelled (PR) | wall min |", "|---|---|---|---|---|"]
+    for name, stats in data["workflows"].items():
+        lines.append(f"| {name} | {stats['runs']} | {stats['failure']} | {stats['cancelled']} ({stats['pr_cancelled']}) "
+                     f"| {round(stats['wall_minutes'])} |")
+    return "\n".join(lines)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--days", type=int, default=30)
+    parser.add_argument("--since", type=dt.date.fromisoformat)
+    parser.add_argument("--until", type=dt.date.fromisoformat)
+    parser.add_argument("--max-job-runs", type=int, default=300,
+                        help="newest completed CI runs whose jobs are fetched (default 300)")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    data = compute(args)
+    print(json.dumps(data, indent=2) if args.json else render(data))
+
+
+if __name__ == "__main__":
+    main()

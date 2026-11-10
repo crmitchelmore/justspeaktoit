@@ -25,11 +25,13 @@ struct ProfileEditorView: View {
           .font(.headline)
         Spacer()
         Button("Cancel") { dismiss() }
+          .keyboardShortcut(.cancelAction)
         Button("Save") {
           onSave(draft.profile(id: originalID))
           dismiss()
         }
         .buttonStyle(.borderedProminent)
+        .keyboardShortcut(.defaultAction)
         .disabled(!draft.canSave)
       }
       .padding(16)

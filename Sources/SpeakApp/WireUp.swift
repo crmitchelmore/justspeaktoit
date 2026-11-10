@@ -42,6 +42,8 @@ final class AppEnvironment: ObservableObject {
   let autoCorrectionTracker: AutoCorrectionTracker
   let profiles: DictationProfileStore
   let main: MainManager
+  /// Record-control state for the main window; see `RecordingControlModel`.
+  lazy var recordingControl = RecordingControlModel(main: main)
   let transportServer: TransportServer
   /// Local automation socket for the `speak` CLI and the bundled MCP server.
   /// Created here (not injected) because it has no dependencies of its own; its
@@ -508,6 +510,7 @@ extension AppEnvironment {
         main: main,
         history: history,
         transcription: transcription,
+        tts: tts,
         appVersion: version ?? "unknown"
       )
     )

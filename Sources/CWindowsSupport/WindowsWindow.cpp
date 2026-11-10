@@ -179,6 +179,8 @@ constexpr int shortcutID = 171;
 // Opens the native Action shortcuts dialog (WindowsActionShortcuts.cpp).
 constexpr int actionShortcutsID = 478;
 constexpr int transcriptLabelID = 92;
+// Zero-size label created just before the transcript field, so UI Automation names it "Transcript".
+constexpr int transcriptNameID = 88;
 // Read aloud emits an event; Voice… opens the native Voice output dialog.
 constexpr int readAloudID = 172;
 constexpr int voiceSettingsID = 173;
@@ -348,6 +350,8 @@ int configureSidebarShortcuts(SidebarDelivery &delivery, HWND window,
 }
 
 constexpr UINT_PTR tourTimerID = 90;
+// Recording state changes are spoken after queued HUD updates land, and only when the HUD is hidden.
+constexpr UINT_PTR announceTimerID = 91;
 // How each owner-drawn control is drawn.
 enum class Role { label, caption, status, detail, chipValue, statValue, tileValue, value, button, primary, record,
                   heroButton, nav, toggle, link };
@@ -897,7 +901,7 @@ unsigned pagesOf(int identifier) {
     if (identifier >= aboutLinkBaseID && identifier < aboutLinkBaseID + 8) return page(aboutPage);
     switch (identifier) {
     case statusID: case recordID: case importID: return all;
-    case transcriptID: case copyID: return page(dashboardPage) | page(historyPage);
+    case transcriptID: case transcriptNameID: case copyID: return page(dashboardPage) | page(historyPage);
     case transcriptLabelID: case chipSessionsID: case chipTimeID: case chipSpendID:
     case insightSessionsID: case insightTimeID: case insightAverageID: case insightSpendID:
     case setupMicrophoneID: case setupModelID: case setupShortcutID: case setupOutputID:
@@ -2146,6 +2150,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Windows permissions…", BS_PUSHBUTTON | WS_TABSTOP, permissionsID) &&
         add(L"BUTTON", L"&Troubleshooting…", BS_PUSHBUTTON | WS_TABSTOP, troubleshootingID) &&
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
+        add(L"STATIC", L"Transcript", 0, transcriptNameID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
     for (size_t i = 0; i < state.aboutLinks.size() && okay; ++i)
@@ -2172,6 +2177,7 @@ bool createControls(HWND window) {
     SendDlgItemMessageW(window, searchID, EM_SETCUEBANNER, TRUE,
                         reinterpret_cast<LPARAM>(L"Search transcripts, models and profiles"));
     SendDlgItemMessageW(window, transcriptID, EM_LIMITTEXT, 4 * 1024 * 1024, 0);
+    SetWindowPos(GetDlgItem(window, transcriptNameID), nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_NOACTIVATE);
     refreshFont(window);
     if (SendDlgItemMessageW(window, sourceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Remote (API providers)")) < 0 ||
         SendDlgItemMessageW(window, sourceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Local (on this PC)")) < 0 ||
@@ -2415,6 +2421,7 @@ void applyUpdate(HWND window) {
     if (state.displayedRecording != recording) {
         state.displayedRecording = recording;
         InvalidateRect(GetDlgItem(window, recordID), nullptr, FALSE);
+        SetTimer(window, announceTimerID, 150, nullptr);
         jsti::tray::setState(recording, state.traySummary);
     }
     for (int id : {keyID, saveID, microphoneID, profilesID}) EnableWindow(GetDlgItem(window, id), recording == 0);
@@ -2873,6 +2880,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case WM_TIMER:
         if (wparam == tourTimerID) { KillTimer(window, tourTimerID); tourStep(window); return 0; }
+        if (wparam == announceTimerID) {
+            KillTimer(window, announceTimerID);
+            if (!jsti::hud::visible())
+                jsti::accessibility::announce(GetDlgItem(window, statusID), controlText(GetDlgItem(window, statusID)), false);
+            return 0;
+        }
         if (jsti_hotkey_message(window, message, wparam)) return 0;
         break;
     case tourMessage: {
@@ -4742,7 +4755,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         RECT client{};
         GetClientRect(window, &client);
         for (HWND control : state.controls) {
-            if (!IsWindowVisible(control)) continue;
+            // The transcript's accessible-name label is zero-size by design.
+            if (!IsWindowVisible(control) || GetDlgCtrlID(control) == transcriptNameID) continue;
             RECT bounds{};
             GetWindowRect(control, &bounds);
             MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&bounds), 2);
@@ -5697,6 +5711,17 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     SetWindowPos(window, nullptr, originalBounds.left, originalBounds.top,
         originalBounds.right - originalBounds.left, originalBounds.bottom - originalBounds.top,
         SWP_NOZORDER | SWP_NOACTIVATE);
+    jsti_smoke_stage("window.accessibility.begin");
+    for (int page = 0; passed && page < pageCount; ++page) {
+        showPage(window, page);
+        std::string auditFailure;
+        const int checked = jsti::accessibility::audit(window, auditFailure);
+        if (checked <= 0) {
+            passed = false;
+            failure = checked < 0 ? auditFailure + " Page: " + std::to_string(page) + "."
+                                  : "Accessibility audit found no focusable controls on page " + std::to_string(page) + ".";
+        }
+    }
     showPage(window, originalPage);
     jsti_smoke_stage("window.final-helpers.begin");
     if (passed) passed = jsti::hud::selfTest(failure);

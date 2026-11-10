@@ -13,9 +13,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.core.content.pm.ShortcutInfoCompat
@@ -48,6 +54,7 @@ class MainActivity : ComponentActivity() {
         if (granted) viewModel.requestAutoStart()
     }
 
+    @OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -74,45 +81,48 @@ class MainActivity : ComponentActivity() {
             var screen by screenState
             JustSpeakTheme {
                 if (screen != Screen.Dictation) BackHandler { screen = Screen.Dictation }
-                when (screen) {
-                    Screen.Settings -> SettingsScreen(
-                        state = state,
-                        actions = SettingsActions(
-                            onBack = { screen = Screen.Dictation },
-                            onSaveKey = viewModel::saveKey,
-                            onRemoveKey = viewModel::removeKey,
-                            onChooseModel = viewModel::chooseCloudModel,
-                            onCleanupChanged = viewModel::setCleanupEnabled,
-                            onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
-                        ),
-                    )
-                    Screen.History -> HistoryScreen(
-                        entries = state.history,
-                        retention = state.retention,
-                        saveFailed = state.historyError,
-                        transcribe = HistoryTranscription(
-                            sessionActive = state.dictation.isActive,
-                            entryId = state.transcribingEntryId,
-                        ),
-                        actions = HistoryActions(
-                            onBack = { screen = Screen.Dictation },
-                            onRetention = viewModel::setRetention,
-                            onDelete = viewModel::deleteHistoryEntry,
-                            onClear = viewModel::clearHistory,
-                            onTranscribe = viewModel::transcribeHistoryEntry,
-                        ),
-                    )
-                    Screen.Dictation -> DictationScreen(
-                        state = state,
-                        level = viewModel.level,
-                        permission = mic,
-                        actions = actions.copy(
-                            onShowSettings = { screen = Screen.Settings },
-                            onShowHistory = { screen = Screen.History },
-                            onConfirmSharedAudio = viewModel::confirmSharedAudio,
-                            onDismissSharedAudio = viewModel::dismissSharedAudio,
-                        ),
-                    )
+                // Expose test tags as resource IDs so UiAutomator and accessibility-driven agents can find controls.
+                Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
+                    when (screen) {
+                        Screen.Settings -> SettingsScreen(
+                            state = state,
+                            actions = SettingsActions(
+                                onBack = { screen = Screen.Dictation },
+                                onSaveKey = viewModel::saveKey,
+                                onRemoveKey = viewModel::removeKey,
+                                onChooseModel = viewModel::chooseCloudModel,
+                                onCleanupChanged = viewModel::setCleanupEnabled,
+                                onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
+                            ),
+                        )
+                        Screen.History -> HistoryScreen(
+                            entries = state.history,
+                            retention = state.retention,
+                            saveFailed = state.historyError,
+                            transcribe = HistoryTranscription(
+                                sessionActive = state.dictation.isActive,
+                                entryId = state.transcribingEntryId,
+                            ),
+                            actions = HistoryActions(
+                                onBack = { screen = Screen.Dictation },
+                                onRetention = viewModel::setRetention,
+                                onDelete = viewModel::deleteHistoryEntry,
+                                onClear = viewModel::clearHistory,
+                                onTranscribe = viewModel::transcribeHistoryEntry,
+                            ),
+                        )
+                        Screen.Dictation -> DictationScreen(
+                            state = state,
+                            level = viewModel.level,
+                            permission = mic,
+                            actions = actions.copy(
+                                onShowSettings = { screen = Screen.Settings },
+                                onShowHistory = { screen = Screen.History },
+                                onConfirmSharedAudio = viewModel::confirmSharedAudio,
+                                onDismissSharedAudio = viewModel::dismissSharedAudio,
+                            ),
+                        )
+                    }
                 }
             }
         }

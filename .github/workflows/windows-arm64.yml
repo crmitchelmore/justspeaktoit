@@ -7,7 +7,7 @@ name: Windows ARM64
 # emulation; see Docs/windows-arm64.md.
 on:
   push:
-    branches: [main]
+    branches: [main, 'merge-batch/**']
     paths:
       - .gitattributes
       - Package.swift
@@ -47,38 +47,24 @@ on:
       - .github/workflows/windows-local-runtime.yml
   pull_request:
     branches: [main]
-    # The native ARM64 build and tests are the pull request Windows proof for
-    # shared and Windows source (windows.yml is nightly). They need no macOS
-    # runner; the macOS-assembled bundle jobs run on main and Alpha only, and
-    # windows-cross-proof proves x64 bundle tooling on pull requests.
+    # Pull requests build this platform only when its own sources, native
+    # dependencies, packaging or workflow change. Shared Swift is proven on
+    # pull requests by ci.yml's required Portable Swift (Linux) gate; the full
+    # path set below runs on merge-batch heads and main.
     paths:
       - .gitattributes
       - Package.swift
       - Resources/Desktop/**
       - scripts/generate-desktop-icons.py
       - scripts/tests/test_desktop_icons.py
-      - Sources/SpeakCore/**
-      - Sources/SpeakDesktop/**
       - Sources/CLlamaCpp/**
       - Sources/CMigrationArchive/**
       - Sources/CRecordingFileSupport/**
-      - Sources/SpeakDesktopHost/**
-      - Sources/SpeakDesktopSync/**
-      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
       - Sources/CWindowsAutomation/**
-      - Sources/SpeakAutomationKit/**
-      - Sources/SpeakCLI/**
-      - Tests/SpeakPortableTests/**
-      - Tests/SpeakDesktopTests/**
-      - Tests/SpeakDesktopHostTests/**
-      - Tests/SpeakDesktopSyncTests/**
-      - Tests/SpeakSyncTests/**
       - Tests/SpeakWindowsPlatformTests/**
-      - Tests/SpeakAutomationKitTests/**
-      - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py
       - scripts/websocket-loopback-probe.py
       - scripts/windows-bundle/**
@@ -94,7 +80,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

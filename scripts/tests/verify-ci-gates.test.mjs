@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { assessCIGates as assessOracle, gateJobs } from '../verify-ci-gates.mjs';
@@ -484,18 +486,18 @@ test('every tracked tooling test is discovered by make test-tooling', () => {
   }
 });
 
-const flags = ['apple', 'swift', 'api', 'full'];
+const flags = ['apple', 'swift', 'api', 'full', 'workers'];
 const allOutputs = value => Object.fromEntries(flags.map(flag => [flag, value]));
 const gateFlags = Object.fromEntries(Object.entries(gateJobs).flatMap(([flag, ids]) => ids.map(id => [id, flag])));
 
 function passing() {
-  return Object.fromEntries(['release-paths', 'paid-access-worker', 'pre-pr-evidence', ...Object.keys(gateFlags)]
+  return Object.fromEntries(['release-paths', 'pre-pr-evidence', ...Object.keys(gateFlags)]
     .map(id => [id, { result: 'success', outputs: allOutputs('true') }]));
 }
 
-function pullRequest({ apple = 'true', swift = 'true' } = {}) {
+function pullRequest({ apple = 'true', swift = 'true', workers = 'true' } = {}) {
   const needs = passing();
-  needs['release-paths'].outputs = { apple, swift, api: swift, full: 'false' };
+  needs['release-paths'].outputs = { apple, swift, api: swift, full: 'false', workers };
   for (const [id, flag] of Object.entries(gateFlags)) {
     if (needs['release-paths'].outputs[flag] === 'false') needs[id].result = 'skipped';
   }
@@ -504,7 +506,7 @@ function pullRequest({ apple = 'true', swift = 'true' } = {}) {
 
 test('aggregate needs exactly the gate jobs and path detection', () => {
   const listed = [...aggregate.split('    permissions:')[0].matchAll(/^      - ([a-z0-9-]+)$/gm)].map(([, id]) => id).sort();
-  assert.deepEqual(listed, ['release-paths', 'paid-access-worker', 'pre-pr-evidence', ...Object.keys(gateFlags)].sort());
+  assert.deepEqual(listed, ['release-paths', 'pre-pr-evidence', ...Object.keys(gateFlags)].sort());
 });
 
 test('accepts all successful gates on pushes and ci:full pull requests', () => {
@@ -523,10 +525,10 @@ for (const id of Object.keys(passing())) {
   }
 }
 
-test('a Swift pull request needs Lint, the Linux graph and one macOS job only', () => {
+test('an untrusted Swift pull request needs Lint, the Linux graph and one macOS job only', () => {
   const needs = pullRequest();
   assert.deepEqual(assessCIGates(needs, 'pull_request'), []);
-  const macos = Object.entries(gateFlags).filter(([id, flag]) => flag !== 'full' && !['lint', 'portable-linux'].includes(id));
+  const macos = Object.entries(gateFlags).filter(([id, flag]) => !['full', 'workers'].includes(flag) && !['lint', 'portable-linux'].includes(id));
   assert.deepEqual(macos.map(([id]) => id), ['build-macos']);
   for (const id of ['lint', 'build-macos', 'portable-linux']) {
     const failed = pullRequest();
@@ -535,8 +537,18 @@ test('a Swift pull request needs Lint, the Linux graph and one macOS job only', 
   }
 });
 
-test('docs, website, Android and Workers-only pull requests skip every gate', () => {
+test('docs, website, Android and Workers-only pull requests skip every gate but Workers', () => {
   assert.deepEqual(assessCIGates(pullRequest({ apple: 'false', swift: 'false' }), 'pull_request'), []);
+});
+
+test('a trusted pull request merges on its pre-pr record alone', () => {
+  const needs = pullRequest({ apple: 'false', swift: 'false', workers: 'false' });
+  assert.deepEqual(assessCIGates(needs, 'pull_request'), []);
+  needs['pre-pr-evidence'].result = 'failure';
+  assert.ok(assessCIGates(needs, 'pull_request').length > 0, 'the record stays required');
+  const main = pullRequest({ apple: 'false', swift: 'false', workers: 'false' });
+  main['release-paths'].outputs.full = 'true';
+  assert.ok(assessCIGates(main, 'push').length > 0, 'main can never skip');
 });
 
 test('non-Swift tooling pull requests run Lint only', () => {
@@ -569,7 +581,7 @@ test('every gate job honours exactly its path-detection output', () => {
       : `^    if: needs\\.release-paths\\.outputs\\.${flag} == 'true'$`;
     assert.match(jobBodies[id], new RegExp(pattern, 'm'), id);
   }
-  assert.doesNotMatch(jobBodies['paid-access-worker'], /^    if:/m, 'the Workers gate is never path-skipped');
+  assert.match(jobBodies['paid-access-worker'], /^    needs: release-paths$/m);
 });
 
 test('full runs ask for at most four hosted macOS slots at once', () => {
@@ -634,7 +646,7 @@ test('Apple path detection excludes only docs, the website, the Android app and 
     "- '**'", "- '!android/**'", "- '!.github/workflows/android.yml'", "- '!Docs/**'", "- '!**/*.md'",
     "- '!landing-page/**'", "- '!.github/workflows/deploy-landing-page.yml'", "- '!workers/**'",
   ]);
-  assert.match(body, /\{ echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "api=true"; echo "full=true"; \}/,
+  assert.match(body, /\{ echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "api=true"; echo "full=true"; echo "workers=true"; \}/,
     'pushes force every gate');
   const swiftFilter = body.match(/\n            swift:\n((?:              - '[^']+'\n)+)/)?.[1] ?? '';
   assert.ok(swiftFilter.includes("- 'Sources/**'"));
@@ -652,7 +664,7 @@ test('blocks missing path detection outputs', () => {
 
 test('API compatibility diffs batches against main and main against its previous commit', () => {
   const body = jobBodies['api-compatibility'];
-  assert.match(body, /github\.event\.before \|\| 'origin\/main'/);
+  assert.match(body, /\(github\.event\.before \|\| 'HEAD~1'\) \|\| 'origin\/main'/);
   assert.match(body, /git log --format=%s "\$BASELINE\.\.HEAD"/);
 });
 
@@ -673,9 +685,9 @@ test('pull requests that touch an API-checked library run the API gate in their 
   assert.match(jobBodies['release-paths'], /if \[ "\$API" = "true" \]; then SWIFT=true; fi/, 'API PRs get the macOS job');
 });
 
-test('batch and main failures open a tracking issue from a push-only, checkout-free job', () => {
+test('batch and main failures open a tracking issue from a main-only, checkout-free job', () => {
   const body = jobBodies['report-ci-failure'];
-  assert.match(body, /if: failure\(\) && !cancelled\(\) && \(github\.event_name == 'push' \|\| startsWith\(github\.head_ref, 'merge-batch\/'\)\)/);
+  assert.match(body, /if: failure\(\) && !cancelled\(\) && \(github\.event_name != 'pull_request' \|\| startsWith\(github\.head_ref, 'merge-batch\/'\)\)/);
   assert.match(body, /needs: gate/);
   assert.match(body, /issues: write/);
   assert.match(body, /ci-batch-failure/);
@@ -694,7 +706,7 @@ test('the legacy required name mirrors CI Gate without executing anything', () =
 test('pull requests restore the Swift cache without saving; main saves one entry per commit', () => {
   const body = jobBodies['build-macos'];
   assert.match(body, /uses: actions\/cache\/restore@[0-9a-f]{40} # v6\./);
-  assert.match(body, /name: Save Swift packages \(main only\)\n\s+if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(body, /name: Save Swift packages \(main only\)\n\s+if: github\.event_name != 'pull_request' && github\.ref == 'refs\/heads\/main'/);
   assert.doesNotMatch(body, /uses: actions\/cache@/);
   assert.match(body, /-swift-\$\{\{ hashFiles\('Package\.resolved'\) \}\}-\$\{\{ github\.sha \}\}/);
 });
@@ -729,4 +741,35 @@ test('network-bound package resolution and Tuist generation retry before Apple b
     assert.equal((body.match(/xcodebuild -resolvePackageDependencies/g) || []).length,
       (body.match(/tuist generate/g) || []).length, `${id}: resolve after each generate`);
   }
+});
+
+function selectGateOutputs(env) {
+  const script = jobBodies['release-paths'].split('- name: Select gate outputs')[1].split('        run: |\n')[1]
+    .split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
+  const dir = mkdtempSync(join(tmpdir(), 'gate-select-'));
+  const output = join(dir, 'out');
+  writeFileSync(output, '');
+  execFileSync('bash', ['-c', script], { env: { PATH: process.env.PATH, GITHUB_OUTPUT: output, ...env } });
+  return Object.fromEntries(readFileSync(output, 'utf8').trim().split('\n').map(line => line.split('=')));
+}
+
+test('a trusted pre-pr record replaces every build and test on pull requests only', () => {
+  const swiftPR = { EVENT_NAME: 'pull_request', FULL: 'false', APPLE: 'true', SWIFT: 'true', IOS: 'true', API: 'true' };
+  assert.deepEqual(selectGateOutputs({ ...swiftPR, PRE_PR_TRUSTED: 'true' }),
+    { apple: 'false', swift: 'false', ios: 'false', api: 'false', full: 'false', workers: 'false' });
+  assert.deepEqual(selectGateOutputs({ ...swiftPR, PRE_PR_TRUSTED: 'false' }),
+    { apple: 'true', swift: 'true', ios: 'true', api: 'true', full: 'false', workers: 'true' }, 'forks and Dependabot keep the CI jobs');
+  assert.deepEqual(selectGateOutputs({ ...swiftPR, FULL: 'true', PRE_PR_TRUSTED: 'true' }),
+    { apple: 'true', swift: 'true', ios: 'true', api: 'true', full: 'true', workers: 'true' }, 'ci:full and merge batches run everything');
+  for (const event of ['push', 'workflow_dispatch']) {
+    assert.equal(selectGateOutputs({ EVENT_NAME: event, PRE_PR_TRUSTED: 'false' }).full, 'true', event);
+  }
+  const trust = jobBodies['release-paths'].match(/PRE_PR_TRUSTED: (.*)/)[1];
+  assert.match(trust, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(trust, /!startsWith\(github\.event\.pull_request\.user\.login, 'dependabot'\)/);
+  assert.match(aggregate, /needs\.pre-pr-evidence\.result != 'success'/, 'the record itself stays required');
+});
+
+test('main can be re-verified by dispatch, as the auto-revert bot does', () => {
+  assert.match(workflow, /^on:\n  push:\n    branches: \[main\]\n  pull_request:\n(?:  #.*\n)*  workflow_dispatch:\n/m);
 });

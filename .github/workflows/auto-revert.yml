@@ -1,0 +1,226 @@
+name: Red main responder
+
+# Pull requests merge on their pre-pr record; main runs every build and test
+# after the merge. When main goes red (scripts/auto-revert.mjs plan):
+#
+# 1. A flake-prone failure (tests, journeys, UI) is re-run once. A
+#    deterministic one (Lint, build, Linux graph, API) is not.
+# 2. Fix forward: the attribution (suspect commits between the last green and
+#    the first red run, failed jobs, log tail) goes on the `CI failing on main`
+#    issue, labelled `agent-fix`, for an agent to open a fix PR. Fix PRs merge
+#    on their pre-pr record like any other.
+# 3. If main is still red 2 hours after it turned red, or 3 more commits have
+#    merged on top, the suspects are reverted instead, so breakages cannot
+#    stack. The revert is one commit on an auto-revert/* branch, opened as a
+#    pull request. Its required `CI Gate` check comes from the `gate` job
+#    below, dispatched on the branch; it passes only when the head is an
+#    exact `git revert` of main commits named in its trailer. The bot
+#    squash-merges it, dispatches the full main run (a token merge starts no
+#    push run), and offers each culprit back as a draft reland pull request.
+# 4. When main is green again the issue is closed.
+#
+# A 15-minute schedule applies the time limit when no run completes.
+# Kill switch: set the repository variable JSTI_AUTO_REVERT=off.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  revert:
+    if: >-
+      vars.JSTI_AUTO_REVERT != 'off' && (github.event_name == 'schedule' || (
+      github.event_name == 'workflow_run' &&
+      contains(fromJSON('["push","workflow_dispatch"]'), github.event.workflow_run.event) &&
+      github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: auto-revert
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Unit-test the planner
+        run: node --test scripts/tests/auto-revert.test.mjs
+      - name: Plan
+        id: plan
+        run: node scripts/auto-revert.mjs plan ${RUN_ID:+--run "$RUN_ID"}
+      - name: Re-run the failed jobs once (possible flake)
+        if: steps.plan.outputs.action == 'rerun'
+        env:
+          RERUN: ${{ steps.plan.outputs.run }}
+        run: gh run rerun "$RERUN" --failed
+      - name: Close the main failure issue once main is green
+        if: steps.plan.outputs.reason == 'Main CI is green.'
+        run: |
+          for number in $(gh issue list --state open --label ci-main-failure --json number --jq '.[].number'); do
+            gh issue close "$number" --comment 'Main CI is green again.'
+          done
+      - name: Ask for a fix forward
+        if: steps.plan.outputs.action == 'fix'
+        env:
+          RED_SHA: ${{ steps.plan.outputs.red_sha }}
+          RED_RUN: ${{ steps.plan.outputs.red_run }}
+          RED_RUN_ID: ${{ steps.plan.outputs.red_run_id }}
+          RED_SINCE: ${{ steps.plan.outputs.red_since }}
+          PRS: ${{ steps.plan.outputs.prs }}
+          SHAS: ${{ steps.plan.outputs.shas }}
+          FAILED: ${{ steps.plan.outputs.failed }}
+        run: |
+          set -euo pipefail
+          title='CI failing on main'
+          gh label create ci-main-failure --color B60205 --description 'CI failed after pull-request checks' 2>/dev/null || true
+          gh label create agent-fix --color 1D76DB --description 'An agent should open a fix PR' 2>/dev/null || true
+          number=$(gh issue list --state open --label ci-main-failure --json number,title \
+            --jq "map(select(.title == \"$title\"))[0].number // empty")
+          if [ -z "$number" ]; then
+            url=$(gh issue create --title "$title" --label ci-main-failure --label agent-fix --body "Main CI is red. Details below.")
+            number="${url##*/}"
+          fi
+          marker="<!-- red-main:$RED_SHA -->"
+          if gh api "repos/$GH_REPO/issues/$number/comments" --paginate --jq '.[].body' | grep -qF "$marker"; then
+            echo "::notice::Fix-forward already requested for $RED_SHA."; exit 0
+          fi
+          gh issue edit "$number" --add-label agent-fix
+          refs=$(for pr in $PRS; do printf '#%s ' "$pr"; done)
+          log=$(gh run view "$RED_RUN_ID" --log-failed 2>/dev/null | tail -n 80 | cut -c1-300 || true)
+          deadline=$(date -u -d "$RED_SINCE + 120 minutes" '+%H:%M UTC')
+          gh issue comment "$number" --body "$(printf '%s\n**Fix forward needed.** Main turned red at %s: %s\n\nFailed jobs: %s\nSuspects: %s(%s)\n\nOpen a fix PR (with a passing `scripts/pre-pr` record) that references this issue. If main is still red at %s, or 3 more commits merge first, the suspects are auto-reverted.\n\n<details><summary>Failure log (tail)</summary>\n\n```\n%s\n```\n</details>\n' \
+            "$marker" "${RED_SHA:0:12}" "$RED_RUN" "$FAILED" "$refs" "$SHAS" "$deadline" "$log")"
+          for pr in $PRS; do
+            gh pr comment "$pr" --body "Main CI turned red after this merged: $RED_RUN. Fix forward via #$number, or it will be auto-reverted at $deadline." || true
+          done
+      - name: Revert, gate and merge
+        id: revert
+        if: steps.plan.outputs.action == 'revert'
+        env:
+          SHAS: ${{ steps.plan.outputs.shas }}
+          PRS: ${{ steps.plan.outputs.prs }}
+          FAILED: ${{ steps.plan.outputs.failed }}
+          RED_SHA: ${{ steps.plan.outputs.red_sha }}
+          RUN_URL: ${{ steps.plan.outputs.red_run }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          branch="auto-revert/${RED_SHA:0:12}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "::notice::$branch already exists; another pass owns this failure."; exit 0
+          fi
+          git checkout -B "$branch" origin/main
+          for sha in $SHAS; do
+            if ! git revert --no-commit "$sha"; then
+              git revert --abort || true
+              echo "::error::Reverting $sha conflicts with main; a human must fix main."; exit 1
+            fi
+          done
+          if git diff --cached --quiet; then echo '::notice::Nothing left to revert.'; exit 0; fi
+          refs=$(for pr in $PRS; do printf '#%s ' "$pr"; done)
+          refs="${refs% }"
+          title="revert: auto-revert ${refs:-${SHAS:0:12}} after main CI failed"
+          printf '%s\n\nMain CI failed at %s: %s\nFailed jobs: %s\n\n%s %s\n' \
+            "$title" "$RED_SHA" "$RUN_URL" "$FAILED" "Auto-revert-of:" "$SHAS" > "$RUNNER_TEMP/message"
+          git commit --quiet --file "$RUNNER_TEMP/message"
+          if ! git push --quiet origin "$branch"; then
+            # The workflow token cannot push workflow-file changes.
+            echo "::error::Could not push $branch (a reverted commit edits .github/workflows?); a human must revert $SHAS."
+            exit 1
+          fi
+          head=$(git rev-parse HEAD)
+          gh label create auto-revert --color B60205 --description 'Opened by the auto-revert bot' 2>/dev/null || true
+          body=$(printf 'Main CI failed at %s: %s\n\nFailed jobs: %s\n\nThis reverts %s. Its `CI Gate` check proves the commit is an exact revert; the bot merges it and re-runs main CI.\n\n%s %s\n' \
+            "$RED_SHA" "$RUN_URL" "$FAILED" "${refs:-$SHAS}" "Auto-revert-of:" "$SHAS")
+          url=$(gh pr create --base main --head "$branch" --title "$title" --body "$body" --label auto-revert)
+          echo "pr=$url" >> "$GITHUB_OUTPUT"
+          gh workflow run auto-revert.yml --ref "$branch"
+          for _ in $(seq 1 60); do
+            sleep 15
+            state=$(gh run list --workflow auto-revert.yml --branch "$branch" --event workflow_dispatch \
+              --json headSha,status,conclusion --jq "map(select(.headSha == \"$head\"))[0] | \"\(.status) \(.conclusion)\"")
+            case "$state" in
+              'completed success') break ;;
+              completed*) echo "::error::The revert gate failed: $state"; exit 1 ;;
+            esac
+          done
+          [ "$state" = 'completed success' ] || { echo '::error::The revert gate did not finish in 15 minutes.'; exit 1; }
+          gh pr merge "$url" --squash --delete-branch --subject "$title" --body "$(cat "$RUNNER_TEMP/message" | tail -n +3)"
+          gh workflow run ci.yml --ref main
+          for number in $(gh issue list --state open --label ci-main-failure --json number --jq '.[].number'); do
+            gh issue comment "$number" --body "Main stayed red past the fix-forward limit, so $url reverted ${refs:-$SHAS}." || true
+          done
+          echo "merged=$(git ls-remote origin refs/heads/main | cut -f1)" >> "$GITHUB_OUTPUT"
+      - name: Offer each culprit back as a draft reland with the failure log
+        if: steps.revert.outputs.pr != '' && steps.revert.outcome == 'success'
+        env:
+          SHAS: ${{ steps.plan.outputs.shas }}
+          REVERT_PR: ${{ steps.revert.outputs.pr }}
+          FAILED: ${{ steps.plan.outputs.failed }}
+          RUN_URL: ${{ steps.plan.outputs.red_run }}
+          RED_RUN_ID: ${{ steps.plan.outputs.red_run_id }}
+        run: |
+          set -uo pipefail
+          git fetch --quiet origin main
+          log=$(gh run view "$RED_RUN_ID" --log-failed 2>/dev/null | tail -n 80 | cut -c1-300 || true)
+          gh label create auto-reverted --color FBCA04 --description 'Reverted from main by the auto-revert bot' 2>/dev/null || true
+          for sha in $SHAS; do
+            subject=$(git log -1 --format=%s "$sha")
+            pr=$(printf '%s' "$subject" | sed -nE 's/.*\(#([0-9]+)\)[[:space:]]*$/\1/p')
+            note=$(printf 'Main CI failed after this merged, so %s reverted it: %s\n\nFailed jobs: %s\n\n<details><summary>Failure log (tail)</summary>\n\n```\n%s\n```\n</details>\n' \
+              "$REVERT_PR" "$RUN_URL" "$FAILED" "$log")
+            reland=''
+            branch="reland/${pr:-${sha:0:12}}"
+            git checkout --quiet -B "$branch" origin/main
+            if git cherry-pick "$sha" >/dev/null 2>&1 && git push --quiet --force origin "$branch"; then
+              author=$(gh pr view "$pr" --json author --jq .author.login 2>/dev/null || true)
+              reland=$(gh pr create --draft --base main --head "$branch" \
+                --title "${subject% (#*} (reland)" \
+                --body "$(printf 'Reapplies #%s.\n\n%s\nPush a fix to this branch, run `scripts/pre-pr`, update this body with its record, then mark it ready.\n' "$pr" "$note")" \
+                ${author:+--assignee "$author"} 2>/dev/null || true)
+            else
+              git cherry-pick --abort 2>/dev/null || true
+            fi
+            if [ -n "$pr" ]; then
+              gh pr edit "$pr" --add-label auto-reverted || true
+              gh pr comment "$pr" --body "$(printf '%s\n%s' "$note" "${reland:+Reland draft with your change re-applied: $reland}")" || true
+            fi
+          done
+
+  # The required `CI Gate` for auto-revert/* pull requests: dispatched by the
+  # job above on the revert branch, so its check run lands on that commit.
+  gate:
+    name: CI Gate
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/auto-revert/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The verifier comes from main, never from the branch it judges.
+      - name: Require an exact revert of main commits
+        run: |
+          git fetch --quiet origin main
+          git config user.name ci && git config user.email ci@invalid
+          git show origin/main:scripts/auto-revert.mjs > "$RUNNER_TEMP/auto-revert.mjs"
+          node "$RUNNER_TEMP/auto-revert.mjs" verify

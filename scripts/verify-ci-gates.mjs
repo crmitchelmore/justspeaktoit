@@ -3,10 +3,14 @@ import { pathToFileURL } from 'node:url';
 // Local diagnostic/test oracle for the explicit predicate in ci.yml.
 // The protected aggregate does not execute this repository-controlled helper.
 // A skipped conditional job is acceptable only when path detection says so.
-// Docs, website, Android and Workers-only pull requests skip `apple`; Swift
-// changes run Lint, the portable Linux graph and one macOS job; every other
-// macOS gate runs only on merge batches, main and `ci:full` pull requests.
+// A pull request with a trusted pre-pr record (same repository, not
+// Dependabot) skips every build and test: they run on main after the merge.
+// Untrusted pull requests (Dependabot, forks) run the Workers package; Lint
+// unless only docs, the website, Android or Workers changed; and, for Swift
+// changes, the portable Linux graph and one macOS job. Every other macOS gate
+// runs only on merge batches, main and `ci:full` pull requests.
 export const gateJobs = {
+  workers: ['paid-access-worker'],
   apple: ['lint'],
   swift: ['build-macos', 'portable-linux'],
   full: [
@@ -23,13 +27,11 @@ export function assessCIGates(needs, event) {
     }
   };
   requireSuccess('release-paths');
-  // The Workers package is cheap, never path-skipped, and must always pass.
-  requireSuccess('paid-access-worker');
   // Pre-PR evidence always runs; it passes straight through on pushes and bots.
   requireSuccess('pre-pr-evidence');
   const outputs = needs['release-paths']?.outputs ?? {};
   // `api` selects the pull-request API step inside build-macos; it must be explicit.
-  for (const flag of ['apple', 'swift', 'api', 'full']) {
+  for (const flag of ['apple', 'swift', 'api', 'full', 'workers']) {
     if (!['true', 'false'].includes(outputs[flag])) errors.push(`release-paths: missing or invalid ${flag} output`);
   }
   if (event !== 'pull_request' && outputs.full !== 'true') errors.push('release-paths: batches and main must run every gate');

@@ -5,15 +5,24 @@ name: CI
 # - GitHub Team/Enterprise plan (paid)
 # - Self-hosted runners
 
-# Pull requests run a cheap gate: Lint and the portable SwiftPM graph on
-# Ubuntu plus ONE macOS job (incremental build + affected unit tests). The
-# merge train's `merge-batch/*` pull requests and main pushes run every gate.
+# Merge first, verify on main. A same-repository, non-Dependabot pull
+# request must carry a passing `scripts/pre-pr` record for its exact head;
+# pre-pr already ran Lint, the portable Linux graph, the affected macOS tests
+# and the API check on that tree, so CI checks only the record (seconds, no
+# build). Dependabot and fork pull requests, which carry no trusted record,
+# run Lint, the Workers package, the portable SwiftPM graph and ONE macOS job.
+# `ci:full` pull requests, `merge-batch/*` pull requests and main run every
+# gate. A red main is fixed forward, then auto-reverted (auto-revert.yml).
 # A batch is tested once, through its pull request; pushing its branch does
 # not start a second run.
 on:
   push:
     branches: [main]
   pull_request:
+  # The auto-revert bot (auto-revert.yml) merges with the workflow token,
+  # which starts no push run, so it dispatches the full main run itself.
+  # A dispatch is treated exactly like a main push.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -118,7 +127,7 @@ jobs:
         run: SWIFT_FLAGS="--enable-code-coverage --disable-dependency-cache" make build
 
       - name: Save Swift packages (main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.build.outcome == 'success'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.build.outcome == 'success'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
@@ -411,6 +420,7 @@ jobs:
       ios: ${{ steps.select.outputs.ios }}
       api: ${{ steps.select.outputs.api }}
       full: ${{ steps.select.outputs.full }}
+      workers: ${{ steps.select.outputs.workers }}
     steps:
       - name: Filter changed paths
         # No checkout needed: on pull_request events the action lists changed
@@ -485,6 +495,9 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') || startsWith(github.head_ref, 'merge-batch/') }}
+          # A record pasted by a fork or a bot is not trusted to stand in for
+          # CI; only Dependabot is exempt from the record altogether.
+          PRE_PR_TRUSTED: ${{ github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.event.pull_request.user.login, 'dependabot') }}
           APPLE: ${{ steps.apple.outputs.apple }}
           SWIFT: ${{ steps.filter.outputs.swift }}
           IOS: ${{ steps.filter.outputs.ios }}
@@ -493,11 +506,17 @@ jobs:
           if [ "$EVENT_NAME" = "pull_request" ] && [ "$FULL" != "true" ]; then
             if [ "$API" = "true" ]; then SWIFT=true; fi
             if [ "$SWIFT" = "true" ]; then APPLE=true; fi
-            { echo "apple=$APPLE"; echo "swift=$SWIFT"; echo "ios=$IOS"; echo "api=$API"; echo "full=false"; } >> "$GITHUB_OUTPUT"
+            WORKERS=true
+            # The pre-pr record (checked by pre-pr-evidence, which the gate
+            # requires) proves pre-pr's checks, the API check included, passed
+            # on this exact tree; CI does not repeat any of them before the
+            # merge. Main runs them all.
+            if [ "$PRE_PR_TRUSTED" = "true" ]; then APPLE=false; SWIFT=false; IOS=false; API=false; WORKERS=false; fi
+            { echo "apple=$APPLE"; echo "swift=$SWIFT"; echo "ios=$IOS"; echo "api=$API"; echo "full=false"; echo "workers=$WORKERS"; } >> "$GITHUB_OUTPUT"
           else
             # main push, merge-batch/* or ci:full pull request: no
             # changed-file filtering, run every gate.
-            { echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "api=true"; echo "full=true"; } >> "$GITHUB_OUTPUT"
+            { echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "api=true"; echo "full=true"; echo "workers=true"; } >> "$GITHUB_OUTPUT"
           fi
 
   # Full runs (merge batches and main) ask for at most four hosted macOS
@@ -1067,6 +1086,8 @@ jobs:
 
   paid-access-worker:
     name: Paid Access Worker
+    needs: release-paths
+    if: needs.release-paths.outputs.workers == 'true'
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-latest"]') }}
     timeout-minutes: 15
     defaults:
@@ -1133,7 +1154,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          BASELINE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.ref == 'refs/heads/main' && github.event.before || 'origin/main') }}
+          BASELINE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.ref == 'refs/heads/main' && (github.event.before || 'HEAD~1') || 'origin/main') }}
         run: |
           # A batch PR's title is generic; any breaking member subject declares the break.
           if [ "$EVENT_NAME" != "pull_request" ] || [[ "$HEAD_REF" == merge-batch/* ]]; then
@@ -1149,7 +1170,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: gate
-    if: failure() && !cancelled() && (github.event_name == 'push' || startsWith(github.head_ref, 'merge-batch/'))
+    if: failure() && !cancelled() && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'merge-batch/'))
     permissions:
       issues: write
     steps:
@@ -1166,7 +1187,7 @@ jobs:
           else
             label=ci-batch-failure; title="CI failed on $REF_NAME"
           fi
-          body="CI failed on $REF_NAME at $SHA: $RUN_URL"$'\n\n'"Pull requests run only Lint, the portable Linux graph and one macOS job; full Debug tests, the Release build, iOS, keyboard, core journeys and public API first run here. Evict or fix the culprit, then close this issue."
+          body="CI failed on $REF_NAME at $SHA: $RUN_URL"$'\n\n'"Pull requests merge on their pre-pr record; every build and test first runs in CI here. auto-revert.yml posts the suspects for a fix forward, reverts them if main stays red, and closes this issue once main is green."
           number=$(gh issue list --state open --label "$label" --search "in:title \"$title\"" --json number,title \
             --jq "map(select(.title == \"$title\"))[0].number // empty")
           if [ -n "$number" ]; then
@@ -1221,12 +1242,15 @@ jobs:
         if: >-
           always() && (
             needs.release-paths.result != 'success' ||
-            needs.paid-access-worker.result != 'success' ||
             needs.pre-pr-evidence.result != 'success' ||
             (needs.release-paths.outputs.apple != 'true' && needs.release-paths.outputs.apple != 'false') ||
             (needs.release-paths.outputs.swift != 'true' && needs.release-paths.outputs.swift != 'false') ||
             (needs.release-paths.outputs.full != 'true' && needs.release-paths.outputs.full != 'false') ||
             (needs.release-paths.outputs.api != 'true' && needs.release-paths.outputs.api != 'false') ||
+            (needs.release-paths.outputs.workers != 'true' && needs.release-paths.outputs.workers != 'false') ||
+            (needs.paid-access-worker.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.workers == 'false' &&
+              needs.paid-access-worker.result == 'skipped')) ||
             ((github.event_name != 'pull_request' || startsWith(github.head_ref, 'merge-batch/')) &&
               needs.release-paths.outputs.full != 'true') ||
             (needs.build-macos.result != 'success' && !(

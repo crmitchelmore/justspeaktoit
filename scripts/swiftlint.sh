@@ -19,6 +19,12 @@ cd "$ROOT"
 # artifact bundle into Tooling/.build/artifacts.
 swift package --package-path Tooling resolve
 
+# The Linux SwiftLint binary loads SourceKit from the Swift toolchain.
+if [ "$(uname -s)" = Linux ] && [ -z "${LINUX_SOURCEKIT_LIB_PATH:-}" ]; then
+    LINUX_SOURCEKIT_LIB_PATH="$(dirname "$(dirname "$(readlink -f "$(command -v swift)")")")/lib"
+    export LINUX_SOURCEKIT_LIB_PATH
+fi
+
 case "$(uname -s)" in
     Darwin) platform_dir="macos" ;;
     Linux) platform_dir="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" ;;

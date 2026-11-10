@@ -1,0 +1,38 @@
+# Remote half of scripts/pre-pr (scripts/linux-precheck --remote): runs the CI
+# Portable Swift (Linux) job, unchanged, on a throwaway precheck/** branch so a
+# developer without Docker gets the same Linux result before opening or pushing
+# a pull request. Ubuntu only: it never takes a macOS slot. Holds no secrets.
+name: Pre-PR Linux precheck
+
+on:
+  push:
+    branches: ['precheck/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable-linux:
+    name: Portable Swift (Linux)
+    runs-on: ubuntu-24.04
+    container:
+      image: swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Normalize container workspace ownership
+        # Same as ci.yml: the owned capture-writer tests check ownership up to the checkout root.
+        run: |
+          owner="$(id -u):$(id -g)"
+          chown "$owner" /__w "$(dirname "$GITHUB_WORKSPACE")"
+          chmod 0755 /__w "$(dirname "$GITHUB_WORKSPACE")"
+          chown -R "$owner" "$GITHUB_WORKSPACE"
+          chmod 0755 "$GITHUB_WORKSPACE"
+      - name: Build and test the portable graph
+        run: scripts/ci-portable-linux.sh

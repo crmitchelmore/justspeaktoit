@@ -92,6 +92,18 @@ lint: ## Run strict SwiftLint (isolated Tooling graph) against the checked-in de
 	./scripts/swiftlint.sh lint --strict --baseline .swiftlint-baseline.json
 	python3 scripts/check-apple-accessibility.py
 
+# CI parity: ci.yml's Lint job and scripts/pre-pr both run exactly this target.
+.PHONY: ci-lint
+ci-lint: ## Run the CI Lint job: whole-repo strict SwiftLint, accessibility, tooling pins and tooling tests
+	$(MAKE) lint
+	git diff --exit-code Tooling/Package.resolved
+	$(MAKE) test-tooling
+
+# CI parity: ci.yml's Portable Swift (Linux) job and scripts/pre-pr (via scripts/linux-precheck) run this.
+.PHONY: ci-portable-linux
+ci-portable-linux: ## Run the CI Portable Swift (Linux) job's build and tests (Linux only; see scripts/linux-precheck)
+	scripts/ci-portable-linux.sh
+
 .PHONY: lint-accessibility
 lint-accessibility: ## Check Apple SwiftUI controls have accessible names and identifiers
 	python3 scripts/check-apple-accessibility.py
@@ -118,7 +130,7 @@ install-hooks: ## Install the opt-in pre-push hook that runs scripts/pre-pr
 	./scripts/install-pre-pr-hook --chain
 
 .PHONY: pre-pr
-pre-pr: ## Fast path-aware lint/build/unit checks for the changes against origin/main
+pre-pr: ## Run what the CI Gate's pull-request jobs would run for the changes against origin/main
 	./scripts/pre-pr $(PRE_PR_ARGS)
 
 .PHONY: xcode

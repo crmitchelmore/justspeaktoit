@@ -95,6 +95,30 @@ class CriticalPathTests(unittest.TestCase):
         self.assertAlmostEqual(table['Build iOS Library']['finish_p50'], 50.0)
 
 
+class EscapeTests(unittest.TestCase):
+    def marker(self, head, result='pass', tree=None):
+        record = {'schema': 1, 'head': head, 'result': result, **({'tree': tree} if tree else {})}
+        return 'x\n<!-- pre-pr-summary ' + __import__('json').dumps(record) + ' -->'
+
+    def test_only_failures_with_passing_evidence_for_that_head_escape(self):
+        def failure(id_, sha, event='pull_request', branch='b'):
+            return {**run(id_, conclusion='failure', event=event), 'head_sha': sha, 'head_branch': branch,
+                    'pull_requests': [id_] if event == 'pull_request' else []}
+        runs = [failure(1, 'a' * 40), failure(2, 'b' * 40), failure(3, 'c' * 40), failure(4, 'd' * 40),
+                failure(5, 'e' * 40, 'push', 'merge-batch/7'), failure(6, 'f' * 40, 'push', 'main'),
+                {**run(7), 'head_sha': 'g' * 40, 'pull_requests': [7]}]
+        bodies = {1: self.marker('a' * 40), 2: self.marker('0' * 40), 3: '', 4: self.marker('0' * 40, tree='t4'),
+                  50: self.marker('e' * 40, 'fail')}
+        pr_for = lambda r: r['pull_requests'][0] if r['pull_requests'] else 50
+        result = ci_metrics.escapes(runs, pr_for, lambda n: bodies.get(n, ''), lambda sha: 't4')
+        self.assertEqual(result['gate_failures'], 5)  # main pushes and successes don't count
+        self.assertEqual(result['escaped'], 2)  # exact head, and the same tree committed afterwards
+        self.assertEqual(result['no_evidence'], 1)
+        self.assertEqual(result['failing_or_stale_evidence'], 2)
+        self.assertEqual(result['escape_rate'], 0.4)
+        self.assertEqual([e['pr'] for e in result['escapes']], [1, 4])
+
+
 class ComputeTests(unittest.TestCase):
     def test_scorecard_reports_merge_gate_and_main_rates(self):
         runs = [run(1), run(2, event='push', conclusion='failure'), run(3, event='push'),
@@ -102,7 +126,8 @@ class ComputeTests(unittest.TestCase):
         jobs = [job(name, '2026-11-01T10:05:00Z', '2026-11-01T10:40:00Z') for name in ci_metrics.REQUIRED_CHECKS]
         prs = [{'created_at': '2026-11-01T00:00:00Z', 'pull_request': {'merged_at': '2026-11-01T02:00:00Z'}}]
         args = argparse.Namespace(since=dt.date(2026, 11, 1), until=dt.date(2026, 11, 2), days=30,
-                                  max_job_runs=10, refresh=False)
+                                  max_job_runs=10, refresh=False,
+                                  escapes=lambda runs: ci_metrics.escapes(runs, lambda r: None, str, str))
         with mock.patch.object(ci_metrics, 'list_runs', lambda *a: runs), \
                 mock.patch.object(ci_metrics, 'list_merged_prs', lambda *a: prs), \
                 mock.patch.object(ci_metrics, 'list_zombies', lambda: [{'id': 9, 'workflow': 'ci.yml', 'status': 'queued', 'branch': 'b', 'age_hours': 30.0, 'url': 'u'}]), \
@@ -117,6 +142,7 @@ class ComputeTests(unittest.TestCase):
         text = ci_metrics.render(data)
         self.assertIn('Main CI failure rate: 50.0%', text)
         self.assertIn('## CI critical path', text)
+        self.assertIn('Pre-PR escape rate', text)
 
 
 if __name__ == '__main__':

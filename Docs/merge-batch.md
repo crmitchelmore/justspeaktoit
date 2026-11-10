@@ -23,10 +23,14 @@ can't use GitHub's merge queue.
    `<!-- merge-batch-member PR SHA -->` line, and copies each member's closing
    issue references as `Fixes #N` lines.
 
-   The body also carries a `pre-pr-summary` record for the combined head SHA,
-   so `Pre-PR evidence` accepts the batch. It is built from each member's own
-   `scripts/pre-pr` record, and is `fail` if any non-bot member has none or a
-   failing one. The combined tree itself is tested by the required checks.
+   Before pushing, it runs `scripts/pre-pr` on the combined tree, in a fixed
+   worktree under `.build/merge-batch/`, so build products are reused. If that
+   fails, nothing is pushed: split the batch or fix the member. Members can pass
+   alone and still break together; this run catches that. The run's own
+   `pre-pr-summary` record, for the batch head, goes into the batch PR body,
+   followed by each member's evidence. `--skip-pre-pr` bypasses it, and the
+   record is then built from the members' evidence and fails if any non-bot
+   member has none.
 2. **Test.** The batch PR is an ordinary same-repository PR, so the ruleset's
    required checks run once on the combined tree. Other path-triggered
    workflows (Windows, Linux, Flatpak, CodeQL and similar) skip their jobs on

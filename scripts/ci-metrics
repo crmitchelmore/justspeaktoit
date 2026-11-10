@@ -23,6 +23,11 @@ Metrics:
   critical_path        per CI job: queue, run time and finish offset from run creation, and
                        how often it was the last job to finish (the run's critical path end)
   zombie_runs          runs of any workflow still queued/waiting/in progress after 24 h
+  integration          ready -> merged (final head pushed with a passing pre-pr record -> merge),
+                       main red minutes (failed main run done -> next green main run done),
+                       auto-reverts, broken Alphas (own main CI failed, or it carried a commit
+                       later auto-reverted; target <= 10%) and user-facing incidents
+                       (issues labelled user-facing-incident; target 0)
   workflow totals      runs, failures, cancellations, wall minutes per workflow
 """
 
@@ -265,6 +270,103 @@ def github_escapes(ci_runs: list[dict]) -> dict:
     return escapes(ci_runs, pr_for, body_of, lambda sha: gh_api(f"repos/{REPO}/git/commits/{sha}")["tree"]["sha"])
 
 
+REVERT_TRAILER = re.compile(r"^Auto-revert-of:\s*(.+)$", re.M)
+SOURCE_LINE = re.compile(r"^Source: ([0-9a-f]{40})$", re.M)
+MAIN_EVENTS = ("push", "workflow_dispatch")
+
+
+def main_red_minutes(main_runs: list[dict], start: dt.datetime, end: dt.datetime) -> dict:
+    """Minutes main was red: from a failed main run finishing to the next green one finishing."""
+    decided = sorted((r for r in main_runs if r.get("event") in MAIN_EVENTS and r.get("head_branch", "main") == "main"
+                      and r.get("conclusion") in ("success", "failure")), key=lambda r: r["updated_at"])
+    red_since, total, episodes = None, 0.0, 0
+    for run in decided:
+        done = min(max(ts(run["updated_at"]), start), end)
+        if run["conclusion"] == "failure" and red_since is None:
+            red_since, episodes = done, episodes + 1
+        elif run["conclusion"] == "success" and red_since is not None:
+            total += minutes(red_since, done) or 0
+            red_since = None
+    if red_since is not None:
+        total += minutes(red_since, end) or 0
+    window = minutes(start, end) or 1
+    return {"minutes": round(total), "episodes": episodes, "fraction": round(total / window, 4)}
+
+
+def alpha_broken(alphas: list[dict], ci_conclusion, reverts: list[dict], is_ancestor) -> dict:
+    """An Alpha is broken when its own main CI failed or it carried a commit that was later auto-reverted."""
+    broken = []
+    for alpha in alphas:
+        source = alpha["source"]
+        reverted = any(is_ancestor(culprit, source) and not is_ancestor(revert["merge"], source)
+                       for revert in reverts for culprit in revert["culprits"])
+        if ci_conclusion(source) == "failure" or reverted:
+            broken.append(alpha["tag"])
+    return {"published": len(alphas), "broken": len(broken), "broken_tags": broken,
+            "rate": round(len(broken) / len(alphas), 4) if alphas else None}
+
+
+def integration(prs: list[dict], ci_runs: list[dict], pr_detail, alphas: list[dict], is_ancestor,
+                incidents: int, start: dt.datetime, end: dt.datetime) -> dict:
+    """Integration speed and safety: ready -> merged, main red time, auto-reverts, broken Alphas, incidents."""
+    first_pr_run: dict[str, dt.datetime] = {}
+    for run in ci_runs:
+        if run["event"] == "pull_request" and run.get("head_sha"):
+            created = ts(run["created_at"])
+            first_pr_run[run["head_sha"]] = min(created, first_pr_run.get(run["head_sha"], created))
+    ready, reverts, no_record = [], [], 0
+    for pr in prs:
+        labels = {label["name"] for label in pr.get("labels", [])}
+        detail = pr_detail(pr["number"])
+        if "auto-revert" in labels:
+            culprits = [sha for match in REVERT_TRAILER.findall(detail.get("body") or "") for sha in match.split()]
+            reverts.append({"pr": pr["number"], "merge": detail.get("merge_commit_sha"), "culprits": culprits})
+            continue
+        record = pre_pr_record(detail.get("body") or "")
+        head = (detail.get("head") or {}).get("sha")
+        if not record or record.get("result") != "pass" or head not in first_pr_run:
+            no_record += 1
+            continue
+        ready.append(minutes(first_pr_run[head], ts(pr["pull_request"]["merged_at"])))
+    latest: dict[str, dict] = {}
+    for run in ci_runs:
+        if run["event"] in MAIN_EVENTS and run.get("status") == "completed" and run.get("head_sha"):
+            if run["head_sha"] not in latest or run["created_at"] > latest[run["head_sha"]]["created_at"]:
+                latest[run["head_sha"]] = run
+    return {
+        "ready_to_merged_minutes": {**summary(ready), "without_record": no_record},
+        "main_red": main_red_minutes(ci_runs, start, end),
+        "auto_reverts": len(reverts),
+        "auto_revert_prs": [r["pr"] for r in reverts],
+        "alpha": alpha_broken(alphas, lambda sha: (latest.get(sha) or {}).get("conclusion"), reverts, is_ancestor),
+        "user_facing_incidents": incidents,
+    }
+
+
+def github_integration(prs: list[dict], ci_runs: list[dict], since: dt.date, until: dt.date) -> dict:
+    start = dt.datetime.combine(since, dt.time(), dt.timezone.utc)
+    end = min(dt.datetime.combine(until, dt.time(), dt.timezone.utc), dt.datetime.now(dt.timezone.utc))
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        details = dict(zip((p["number"] for p in prs), pool.map(lambda p: gh_api(f"repos/{REPO}/pulls/{p['number']}"), prs)))
+    alphas = []
+    for page in gh_api(f"repos/{REPO}/releases?per_page=100", paginate=True):
+        for release in page:
+            published = ts(release.get("published_at"))
+            source = SOURCE_LINE.search(release.get("body") or "")
+            if (release["tag_name"].startswith("alpha-build-") and not release.get("draft") and published
+                    and start <= published < end and source):
+                alphas.append({"tag": release["tag_name"], "source": source.group(1)})
+
+    def is_ancestor(a: str | None, b: str) -> bool:
+        return bool(a) and subprocess.run(["git", "merge-base", "--is-ancestor", a, b],
+                                          capture_output=True).returncode == 0
+
+    query = (f"repo:{REPO} is:issue label:user-facing-incident "
+             f"created:{since.isoformat()}..{(until - dt.timedelta(days=1)).isoformat()}")
+    incidents = gh_api(f"search/issues?per_page=1&q={query.replace(' ', '+')}").get("total_count", 0)
+    return integration(prs, ci_runs, details.__getitem__, alphas, is_ancestor, incidents, start, end)
+
+
 def compute(args: argparse.Namespace) -> dict:
     until = args.until or (dt.date.today() + dt.timedelta(days=1))
     since = args.since or (until - dt.timedelta(days=args.days))
@@ -286,6 +388,7 @@ def compute(args: argparse.Namespace) -> dict:
 
     ci_runs = [r for r in runs if r.get("path") == CI_PATH]
     escape = (args.escapes or github_escapes)(ci_runs)
+    flow = (getattr(args, "integration", None) or github_integration)(prs, ci_runs, since, until)
     ci_pr = [r for r in ci_runs if r["event"] == "pull_request"]
     ci_success = [minutes(ts(r.get("run_started_at")), ts(r.get("updated_at")))
                   for r in ci_pr if r.get("conclusion") == "success"]
@@ -336,7 +439,13 @@ def compute(args: argparse.Namespace) -> dict:
             "main_cancel_rate": main_cancel_rate, "ci_pr_cancel_rate": pr_cancel_rate,
             "zombie_runs": len(zombie_runs),
             "pre_pr_escape_rate": escape["escape_rate"], "gate_failures": escape["gate_failures"],
+            "ready_to_merged_minutes_p50": flow["ready_to_merged_minutes"]["p50"],
+            "ready_to_merged_minutes_p90": flow["ready_to_merged_minutes"]["p90"],
+            "main_red_minutes": flow["main_red"]["minutes"], "main_red_fraction": flow["main_red"]["fraction"],
+            "auto_reverts": flow["auto_reverts"], "alpha_broken_rate": flow["alpha"]["rate"],
+            "user_facing_incidents": flow["user_facing_incidents"],
         },
+        "integration": flow,
         "pr_open_to_merge_hours": open_to_merge,
         "ci_pr_success_minutes": summary(ci_success),
         "required_gate_minutes": summary(gate),
@@ -380,7 +489,15 @@ def render(data: dict) -> str:
              f"- Pre-PR escape rate: {rate(card['pre_pr_escape_rate'])} of {card['gate_failures']} PR/batch CI "
              f"failures had a passing scripts/pre-pr record for that head (target < 1%); "
              f"{data['pre_pr_escapes']['no_evidence']} had none, "
-             f"{data['pre_pr_escapes']['failing_or_stale_evidence']} a failing or stale one", "",
+             f"{data['pre_pr_escapes']['failing_or_stale_evidence']} a failing or stale one",
+             f"- Ready → merged: p50 {fmt(card['ready_to_merged_minutes_p50'])} min, "
+             f"p90 {fmt(card['ready_to_merged_minutes_p90'])} min "
+             f"({data['integration']['ready_to_merged_minutes']['n']} PRs; "
+             f"{data['integration']['ready_to_merged_minutes']['without_record']} without a passing pre-pr record)",
+             f"- Main red: {card['main_red_minutes']} min ({rate(card['main_red_fraction'])} of the window, "
+             f"{data['integration']['main_red']['episodes']} episodes); auto-reverts: {card['auto_reverts']}",
+             f"- Broken Alphas: {rate(card['alpha_broken_rate'])} of {data['integration']['alpha']['published']} "
+             f"published (target ≤ 10%); user-facing incidents: {card['user_facing_incidents']} (target 0)", "",
              "| Metric | n | p50 | p90 |", "|---|---|---|---|"]
     for key, label in (("pr_open_to_merge_hours", "PR open → merge (h)"),
                        ("ci_pr_success_minutes", "CI workflow, successful PR runs (min)"),
@@ -424,7 +541,7 @@ def main() -> None:
                         help="newest completed CI runs whose jobs are fetched (default 300)")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--refresh", action="store_true", help="refetch run lists instead of using the cache")
-    parser.set_defaults(escapes=None)
+    parser.set_defaults(escapes=None, integration=None)
     args = parser.parse_args()
     data = compute(args)
     print(json.dumps(data, indent=2) if args.json else render(data))

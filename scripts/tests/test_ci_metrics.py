@@ -127,7 +127,10 @@ class ComputeTests(unittest.TestCase):
         prs = [{'created_at': '2026-11-01T00:00:00Z', 'pull_request': {'merged_at': '2026-11-01T02:00:00Z'}}]
         args = argparse.Namespace(since=dt.date(2026, 11, 1), until=dt.date(2026, 11, 2), days=30,
                                   max_job_runs=10, refresh=False,
-                                  escapes=lambda runs: ci_metrics.escapes(runs, lambda r: None, str, str))
+                                  escapes=lambda runs: ci_metrics.escapes(runs, lambda r: None, str, str),
+                                  integration=lambda prs, runs, since, until: ci_metrics.integration(
+                                      [], runs, {}.get, [], lambda a, b: False, 0,
+                                      dt.datetime(2026, 11, 1, tzinfo=UTC), dt.datetime(2026, 11, 2, tzinfo=UTC)))
         with mock.patch.object(ci_metrics, 'list_runs', lambda *a: runs), \
                 mock.patch.object(ci_metrics, 'list_merged_prs', lambda *a: prs), \
                 mock.patch.object(ci_metrics, 'list_zombies', lambda: [{'id': 9, 'workflow': 'ci.yml', 'status': 'queued', 'branch': 'b', 'age_hours': 30.0, 'url': 'u'}]), \
@@ -143,6 +146,49 @@ class ComputeTests(unittest.TestCase):
         self.assertIn('Main CI failure rate: 50.0%', text)
         self.assertIn('## CI critical path', text)
         self.assertIn('Pre-PR escape rate', text)
+        self.assertIn('Broken Alphas', text)
+
+
+def main_run(id_, conclusion, done, event='push', sha=None):
+    return {'id': id_, 'event': event, 'head_branch': 'main', 'status': 'completed', 'conclusion': conclusion,
+            'created_at': done, 'updated_at': done, 'head_sha': sha or f'sha{id_}'}
+
+
+class IntegrationTests(unittest.TestCase):
+    start = dt.datetime(2026, 11, 1, tzinfo=UTC)
+    end = dt.datetime(2026, 11, 2, tzinfo=UTC)
+
+    def test_main_is_red_from_a_failure_until_the_next_green_run(self):
+        runs = [main_run(1, 'failure', '2026-11-01T10:00:00Z'), main_run(2, 'failure', '2026-11-01T10:30:00Z'),
+                main_run(3, 'cancelled', '2026-11-01T10:40:00Z'),
+                main_run(4, 'success', '2026-11-01T11:00:00Z', event='workflow_dispatch'),
+                main_run(5, 'failure', '2026-11-01T23:30:00Z')]
+        red = ci_metrics.main_red_minutes(runs, self.start, self.end)
+        self.assertEqual(red['minutes'], 90)
+        self.assertEqual(red['episodes'], 2)
+
+    def test_ready_to_merged_starts_at_the_final_head_with_a_passing_record(self):
+        record = '<!-- pre-pr-summary {"head": "h1", "result": "pass"} -->'
+        prs = [{'number': 1, 'labels': [], 'pull_request': {'merged_at': '2026-11-01T10:07:00Z'}},
+               {'number': 2, 'labels': [], 'pull_request': {'merged_at': '2026-11-01T12:00:00Z'}},
+               {'number': 3, 'labels': [{'name': 'auto-revert'}], 'pull_request': {'merged_at': '2026-11-01T13:00:00Z'}}]
+        details = {1: {'head': {'sha': 'h1'}, 'body': record}, 2: {'head': {'sha': 'h2'}, 'body': ''},
+                   3: {'merge_commit_sha': 'r3', 'body': 'x\n\nAuto-revert-of: c1 c2\n'}}
+        runs = [{'event': 'pull_request', 'head_sha': 'h1', 'created_at': '2026-11-01T10:00:00Z'},
+                {'event': 'pull_request', 'head_sha': 'h1', 'created_at': '2026-11-01T10:03:00Z'}]
+        flow = ci_metrics.integration(prs, runs, details.__getitem__, [], lambda a, b: False, 0, self.start, self.end)
+        self.assertEqual(flow['ready_to_merged_minutes']['p50'], 7.0)
+        self.assertEqual(flow['ready_to_merged_minutes']['without_record'], 1)
+        self.assertEqual(flow['auto_reverts'], 1)
+
+    def test_alpha_is_broken_by_its_own_red_ci_or_a_later_auto_revert(self):
+        alphas = [{'tag': 'alpha-build-1', 'source': 'red'}, {'tag': 'alpha-build-2', 'source': 'carries'},
+                  {'tag': 'alpha-build-3', 'source': 'fixed'}, {'tag': 'alpha-build-4', 'source': 'green'}]
+        ancestry = {('c1', 'carries'), ('c1', 'fixed'), ('r', 'fixed')}
+        result = ci_metrics.alpha_broken(alphas, {'red': 'failure', 'green': 'success'}.get,
+                                         [{'merge': 'r', 'culprits': ['c1']}], lambda a, b: (a, b) in ancestry)
+        self.assertEqual(result['broken_tags'], ['alpha-build-1', 'alpha-build-2'])
+        self.assertEqual(result['rate'], 0.5)
 
 
 if __name__ == '__main__':

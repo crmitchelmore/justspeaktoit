@@ -324,7 +324,10 @@ module IOSProfileBootstrap
         sockets.concat([client, peer])
         @socket = Net::BufferedIO.new(client, read_timeout: @read_timeout, write_timeout: @write_timeout)
         if outcome == :reset
+          # net-http 0.10+ reads the status line with readuntil, older
+          # versions with readline; reset both.
           @socket.define_singleton_method(:readline) { raise Errno::ECONNRESET }
+          @socket.define_singleton_method(:readuntil) { |*_arguments| raise Errno::ECONNRESET }
         else
           body = JSON.generate("data" => [])
           peer.write("HTTP/1.1 #{outcome} Fixture\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}")

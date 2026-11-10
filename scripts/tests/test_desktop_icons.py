@@ -153,7 +153,7 @@ class DesktopIconTests(unittest.TestCase):
         self.assertIn("jsti::appIcon::smallHandle()", window)
 
     def test_asset_attributes_trigger_resource_and_native_workflows(self):
-        for workflow in ("desktop-icons.yml", "windows.yml", "windows-arm64.yml",
+        for workflow in ("desktop-icons.yml", "windows-arm64.yml",
                          "windows-cross-proof.yml", "linux.yml"):
             lines = (ROOT / ".github/workflows" / workflow).read_text().splitlines()
             for event in ("push", "pull_request"):

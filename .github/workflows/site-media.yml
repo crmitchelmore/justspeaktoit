@@ -32,7 +32,7 @@ concurrency:
 jobs:
   capture:
     name: Capture Mac app (${{ matrix.appearance }})
-    if: ${{ !inputs.captures_run }}
+    if: ${{ !inputs.captures_run && !startsWith(github.head_ref, 'merge-batch/') }}
     strategy:
       fail-fast: false
       matrix:
@@ -43,7 +43,7 @@ jobs:
     env:
       CAPTURE: ${{ github.workspace }}/.artifacts/site-media
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 2
         with:
           persist-credentials: false
@@ -140,7 +140,7 @@ jobs:
 
   capture-ios:
     name: Capture iPhone app (Simulator, ${{ matrix.appearance }})
-    if: ${{ !inputs.captures_run }}
+    if: ${{ !inputs.captures_run && !startsWith(github.head_ref, 'merge-batch/') }}
     strategy:
       fail-fast: false
       matrix:
@@ -150,7 +150,7 @@ jobs:
     env:
       CAPTURE: ${{ github.workspace }}/.artifacts/site-media-ios
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 2
         with:
           persist-credentials: false
@@ -232,7 +232,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 2
         with:
           persist-credentials: false
@@ -247,13 +247,13 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install -q -r scripts/site-media/requirements.txt
 
       - name: Cache the narration voice
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/voices
           key: piper-en_GB-cori-high-470b4dd634c9
 
       - name: Download Mac and iPhone captures
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: site-media-*
           path: ${{ runner.temp }}/downloads

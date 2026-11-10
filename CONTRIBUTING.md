@@ -129,13 +129,17 @@ make lint
 
 ### What CI runs on a pull request
 
-Pull requests run only the macOS jobs their changed paths can affect (see the
-`release-paths` job in `.github/workflows/ci.yml`). Docs, website, Android and
-Workers-only changes skip the macOS jobs. Release-configuration tests, public
-API compatibility, the core-journey gates and iOS simulator tests for shared
-sources run on every push to `main`; a failure there opens a `ci-main-failure`
-issue. Add the `ci:full` label (then push or re-run) to run every gate before
-merge.
+A pull request runs a cheap gate (see `release-paths` in
+`.github/workflows/ci.yml`): `Lint` (SwiftLint, accessibility and tooling
+tests) and `Portable Swift (Linux)` on Ubuntu, plus one macOS job that builds
+incrementally and runs only the unit tests your change can affect
+(`scripts/affected-swift-tests.py`). Docs, website, Android and Workers-only
+changes skip all of them. Full macOS Debug and Release tests, iOS builds and
+simulator tests, keyboard and watch builds, the core journeys and public API
+compatibility run on each `merge-batch/*` head and on `main`; a failure opens
+a `ci-batch-failure` or `ci-main-failure` issue. Add the `ci:full` label (then
+push or re-run) to run every gate before merge. The required check is
+`CI Gate`.
 
 ## Getting Help
 

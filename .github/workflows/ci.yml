@@ -43,11 +43,6 @@ jobs:
       JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # A numeric 0 is falsy in `a && b || c`, which produced depth 1;
-          # the string '0' is truthy. Pull requests need main's history to
-          # find the merge base for affected-test selection.
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
       - name: Verify process-scoped Keychain isolation
         run: python3 -B -m unittest scripts.tests.test_private_test_keychain -v
@@ -155,8 +150,11 @@ jobs:
         id: affected
         if: needs.release-paths.outputs.full != 'true'
         env:
-          BASE: origin/${{ github.base_ref }}
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
+          # The checkout is the shallow PR merge commit; fetching only the base
+          # commit lets the script diff BASE..HEAD, which is exactly the PR.
+          git fetch --no-tags --depth=1 origin "$BASE" || true
           python3 scripts/affected-swift-tests.py "$BASE" \
             --skip-target SpeakDesktopTests --skip-target SpeakAutomationKitTests >> "$GITHUB_OUTPUT"
 

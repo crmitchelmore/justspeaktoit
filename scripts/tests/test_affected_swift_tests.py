@@ -78,5 +78,40 @@ class MainTests(unittest.TestCase):
         self.assertIn("skip=^(SpeakDesktopTests)\\.", out.getvalue())
 
 
+class ShallowCloneTests(unittest.TestCase):
+    def git(self, cwd, *args):
+        import subprocess
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def test_a_shallow_merge_commit_diffs_against_the_fetched_base(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as root:
+            origin = os.path.join(root, "origin")
+            os.makedirs(os.path.join(origin, "Sources/SpeakApp"))
+            self.git(root, "init", "-q", "-b", "main", origin)
+            for index in range(3):
+                with open(os.path.join(origin, "Sources/SpeakApp/Base.swift"), "a") as handle:
+                    handle.write(f"// {index}\n")
+                self.git(origin, "add", "-A")
+                self.git(origin, "commit", "-qm", f"base {index}")
+            base = self.git(origin, "rev-parse", "HEAD")
+            self.git(origin, "checkout", "-qb", "feature")
+            with open(os.path.join(origin, "Sources/SpeakApp/Feature.swift"), "w") as handle:
+                handle.write("// feature\n")
+            self.git(origin, "add", "-A")
+            self.git(origin, "commit", "-qm", "feature")
+            clone = os.path.join(root, "clone")
+            self.git(root, "clone", "-q", "--depth=1", "--branch", "feature", f"file://{origin}", clone)
+            previous = os.getcwd()
+            os.chdir(clone)
+            try:
+                self.assertIsNone(affected.changed_files(base), "unfetched base fails safe")
+                self.git(clone, "fetch", "--no-tags", "--depth=1", "origin", base)
+                self.assertEqual(affected.changed_files(base), ["Sources/SpeakApp/Feature.swift"])
+            finally:
+                os.chdir(previous)
+
+
 if __name__ == "__main__":
     unittest.main()

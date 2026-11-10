@@ -80,6 +80,24 @@ def select(changed: list[str], package: dict, skip: set[str]) -> tuple[str, list
     return ("filtered" if selected else "none"), selected
 
 
+def changed_files(base: str) -> list[str] | None:
+    """Files the change touches, or None when git cannot tell (fail safe).
+
+    Uses the three-dot merge-base diff when history allows; in a shallow
+    checkout of a PR merge commit, the two-dot diff against the base commit
+    is exactly the pull request's changes.
+    """
+    def git(*command: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *command], capture_output=True, text=True)
+
+    ranges = [f"{base}...HEAD", base] if git("merge-base", base, "HEAD").returncode == 0 else [base]
+    for revision in ranges:
+        diff = git("diff", "--name-only", revision, *(["HEAD"] if revision == base else []))
+        if diff.returncode == 0:
+            return diff.stdout.split()
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("base")
@@ -88,14 +106,10 @@ def main() -> int:
     package = json.loads(subprocess.run(["swift", "package", "dump-package"], check=True,
                                         capture_output=True, text=True).stdout)
     skip = set(args.skip_target)
-    diff = subprocess.run(["git", "diff", "--name-only", f"{args.base}...HEAD"], capture_output=True, text=True)
-    if diff.returncode != 0:
-        # No merge base (shallow or missing base): fail safe by testing everything.
-        print(f"::warning::Cannot diff against {args.base} ({diff.stderr.strip()}); running every test target",
-              file=sys.stderr)
+    changed = changed_files(args.base)
+    if changed is None:
+        print(f"::warning::Cannot diff against {args.base}; running every test target", file=sys.stderr)
         changed = ["Package.swift"]
-    else:
-        changed = diff.stdout.split()
     mode, selected = select(changed, package, skip)
     print(f"mode={mode}")
     print(f"targets={' '.join(selected)}")

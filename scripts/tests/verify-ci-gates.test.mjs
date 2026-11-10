@@ -217,6 +217,9 @@ test('Lint and the portable Swift graph run on hosted Ubuntu, never a macOS slot
 
 test('the macOS pull-request job tests only affected targets, minus those Linux proves', () => {
   const body = jobBodies['build-macos'];
+  assert.match(body, /name: Compile iOS library for the simulator\n\s+if: needs\.release-paths\.outputs\.full != 'true' && needs\.release-paths\.outputs\.ios == 'true'/);
+  assert.match(body, /xcodebuild build -scheme SpeakiOSLib -destination 'generic\/platform=iOS Simulator'/);
+  assert.doesNotMatch(body.split('Compile iOS library for the simulator')[1].split('- name:')[0], /\btest\b/);
   assert.match(body, /name: Select affected unit tests\n\s+id: affected\n\s+if: needs\.release-paths\.outputs\.full != 'true'/);
   assert.match(body, /affected-swift-tests\.py "\$BASE"[\s\\]+--skip-target SpeakDesktopTests --skip-target SpeakAutomationKitTests/);
   assert.match(body, /if: steps\.affected\.outputs\.mode != 'none'/);
@@ -536,7 +539,11 @@ test('Apple path detection excludes only docs, the website, the Android app and 
     "- '**'", "- '!android/**'", "- '!.github/workflows/android.yml'", "- '!Docs/**'", "- '!**/*.md'",
     "- '!landing-page/**'", "- '!.github/workflows/deploy-landing-page.yml'", "- '!workers/**'",
   ]);
-  assert.match(body, /\{ echo "apple=true"; echo "swift=true"; echo "full=true"; \}/, 'pushes force every gate');
+  assert.match(body, /\{ echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "full=true"; \}/,
+    'pushes force every gate');
+  const swiftFilter = body.match(/\n            swift:\n((?:              - '[^']+'\n)+)/)?.[1] ?? '';
+  assert.ok(swiftFilter.includes("- 'Sources/**'"));
+  assert.doesNotMatch(swiftFilter, /\.github\//, 'CI-only edits must not take a macOS slot; use ci:full');
   assert.match(body, /echo "full=false"/);
   assert.match(body, /contains\(github\.event\.pull_request\.labels\.\*\.name, 'ci:full'\)/,
     'a ci:full label runs every gate before merge');

@@ -119,6 +119,18 @@ jobs:
           path: .build
           key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-${{ hashFiles('Package.resolved') }}-${{ github.sha }}
 
+      # Swift PRs otherwise never compile `#if os(iOS)` code before the merge
+      # batch. Build only (no tests) the iOS library graph for the simulator
+      # when shared or iOS sources change; batches and main run the full iOS
+      # jobs instead.
+      - name: Compile iOS library for the simulator
+        if: needs.release-paths.outputs.full != 'true' && needs.release-paths.outputs.ios == 'true'
+        run: |
+          set -o pipefail
+          xcodebuild build -scheme SpeakiOSLib -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ios-compile" -skipPackagePluginValidation -quiet \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tail -40
+
       - name: Verify brand asset sizes and appearance variants
         run: node --test scripts/tests/brand-assets.test.mjs
 
@@ -372,6 +384,7 @@ jobs:
     outputs:
       apple: ${{ steps.select.outputs.apple }}
       swift: ${{ steps.select.outputs.swift }}
+      ios: ${{ steps.select.outputs.ios }}
       full: ${{ steps.select.outputs.full }}
     steps:
       - name: Filter changed paths
@@ -383,9 +396,9 @@ jobs:
         id: filter
         with:
           filters: |
+            # CI-only edits do not select the macOS job; add `ci:full` to
+            # exercise a workflow change on its pull request.
             swift:
-              - '.github/workflows/ci.yml'
-              - '.github/actions/setup-apple-toolchain/**'
               - 'Package.swift'
               - 'Package.resolved'
               - 'Makefile'
@@ -402,6 +415,12 @@ jobs:
               - 'scripts/collect-macos-*.py'
               - 'scripts/prepare-mac-cli-symbols.sh'
               - 'scripts/tests/brand-assets.test.mjs'
+            ios:
+              - 'Package.swift'
+              - 'Package.resolved'
+              - 'Sources/SpeakCore/**'
+              - 'Sources/SpeakSync/**'
+              - 'Sources/SpeakiOS/**'
 
       # True when any changed file lies outside docs, the website, the native
       # Android app (android.yml) and the Workers package (paid-access-worker
@@ -431,14 +450,15 @@ jobs:
           FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
           APPLE: ${{ steps.apple.outputs.apple }}
           SWIFT: ${{ steps.filter.outputs.swift }}
+          IOS: ${{ steps.filter.outputs.ios }}
         run: |
           if [ "$EVENT_NAME" = "pull_request" ] && [ "$FULL" != "true" ]; then
             if [ "$SWIFT" = "true" ]; then APPLE=true; fi
-            { echo "apple=$APPLE"; echo "swift=$SWIFT"; echo "full=false"; } >> "$GITHUB_OUTPUT"
+            { echo "apple=$APPLE"; echo "swift=$SWIFT"; echo "ios=$IOS"; echo "full=false"; } >> "$GITHUB_OUTPUT"
           else
             # merge-batch/* or main push (or a ci:full pull request): no
             # changed-file filtering, run every gate.
-            { echo "apple=true"; echo "swift=true"; echo "full=true"; } >> "$GITHUB_OUTPUT"
+            { echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "full=true"; } >> "$GITHUB_OUTPUT"
           fi
 
   core-journey-e2e:

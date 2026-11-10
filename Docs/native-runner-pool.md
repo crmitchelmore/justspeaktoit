@@ -1,32 +1,32 @@
 # Native runner pool
 
-The non-UI macOS CI jobs (Debug and Release tests, lint, the core-journey contract and API compatibility), the iOS SwiftPM library build, unsigned iOS keyboard/watch builds, Portable Swift on macOS and the local-transcription benchmark package can use the native pool. Hosted macOS concurrency is the CI bottleneck (Mac jobs routinely queued 30–75 minutes for a runner), so owner-authored sources use the pool by default. A job routes to the pool only when the actor and triggering actor are `crmitchelmore` or `bravostation`, and either the event is a push to `main` or it is a same-repository `pull_request` authored by one of them. Bot-authored pull requests (Devin, Copilot, Dependabot), owner pushes to them, forks and every other event keep GitHub-hosted routing. Set the repository variable `JSTI_LOCAL_RUNNERS` to `off` to return every job to hosted runners.
+Hosted macOS concurrency is the CI bottleneck: Mac jobs routinely queued 30–75 minutes for a runner. The native pool is a single serial Intel MacBook whose admission hook runs one build at a time. Routing every Mac job to it made CI slower: in run 42674488497 the Debug build, keyboard, Core Dictation Journey and Lint were still queued for it when CI was cancelled at 60 minutes. Hosted Ubuntu jobs had no queue and also finished faster than on Omarchy.
 
-The pool defaults to `["jsti-reviewed-local","macOS"]`, which selects only the reviewed bravo-mini (ARM64) and Intel MacBook (X64) runners. Never use `jsti-macos-build` as a pool label: the owner's active Mac also carries it. Set the repository variable `JSTI_NATIVE_RUNNER_LABELS` to a JSON label array (for example `["jsti-reviewed-local","macOS","X64"]`) to pin pool jobs to runners whose admission hooks accept them. Every native-routed job is architecture-neutral, so the pool spans both architectures; add `ARM64` or `X64` here only to restrict the whole pool.
+CI therefore uses hybrid routing. Only three light, cache-friendly jobs that do not depend on each other use the pool, so it runs in parallel with hosted macOS and takes slots away from that queue:
 
-Labels and variables are scheduling controls, not a security boundary: each runner must independently enforce the same actor, author, repository, event and job checks in its job-started hook before any job step runs. Self-hosted jobs execute owner-authored code unsandboxed as the runner user, so never widen the actor list to bots or outside contributors.
+| Job | Native (MacBook) | Hosted fallback |
+| --- | --- | --- |
+| `ci.yml:lint` | ~7 min | `macos-latest` (on hosted Intel the tooling tests exceeded their 30-minute budget) |
+| `ci.yml:api-compatibility` (pull requests only) | ~11 min | `macos-26-intel` (~16.5 min) |
+| `local-transcription-benchmark.yml:benchmark-package` | ~8 min | `macos-latest` |
 
-Self-hosted runners never fall back to hosted ones. If a selected runner is offline (asleep, paused or shut down), its jobs wait in the queue. Set `JSTI_LOCAL_RUNNERS=off` (or point `JSTI_NATIVE_RUNNER_LABELS`/`JSTI_LINUX_RUNNER_LABELS` at a hosted label) before taking a machine away for long, then rerun the affected workflow. A rerun of an existing job may retain its original routing.
+A PR therefore puts at most about 18 minutes of serial work on the MacBook, and a `main` push about 15 minutes, both shorter than the hosted Debug gate that runs alongside. Every other job uses a plain hosted label: Debug and Core Dictation Journey on `macos-26-intel` (the journey restores Debug's arch-scoped cache), and Release, the iOS jobs, Fixture UI and Portable Swift on macOS on `macos-latest`/`macos-15`. All Linux jobs, including Paid Access Worker, Dependabot policy, desktop icons, Linux desktop, the whisper.cpp runtime and Portable Swift on Linux, run on hosted Ubuntu. There is no self-hosted Linux routing. `scripts/tests/self-hosted-routing.test.mjs` pins this exact set. Add a job to the pool only after timing it there and updating the MacBook admission hook.
 
-Before adding a runner to a pool, configure its admission hook, verify it is online with every configured label, and retain accurate X64/ARM64 labels; never assign ARM64 to an Intel runner.
+A pool job routes natively only when the actor and triggering actor are `crmitchelmore` or `bravostation`, and either the event is a push to `main` or it is a same-repository `pull_request` authored by one of them. Bot-authored pull requests (Devin, Copilot, Dependabot), owner pushes to them, forks and every other event keep GitHub-hosted routing. Set the repository variable `JSTI_LOCAL_RUNNERS` to `off` to return every job to hosted runners.
+
+The pool defaults to `["jsti-reviewed-local","macOS"]`, which selects only reviewed runners. Never use `jsti-macos-build` as a pool label: the owner's active Mac also carries it. Set the repository variable `JSTI_NATIVE_RUNNER_LABELS` to a JSON label array (currently `["jsti-reviewed-local","macOS","X64"]`) to pin pool jobs to runners whose admission hooks accept them. The routed jobs are architecture-neutral.
+
+Labels and variables are scheduling controls, not a security boundary: each runner must independently enforce the same actor, author, repository, event and job checks in its job-started hook before any job step runs. Self-hosted jobs execute owner-authored code unsandboxed as the runner user, so never widen the actor list to bots or outside contributors. Self-hosted jobs receive no secrets.
+
+Self-hosted runners never fall back to hosted ones. If the MacBook is offline (asleep, paused or shut down), its jobs wait in the queue. Set `JSTI_LOCAL_RUNNERS=off` before taking it away for long, then rerun the affected workflow. A rerun of an existing job may retain its original routing.
+
+Before adding a runner to the pool, configure its admission hook, verify it is online with every configured label, and retain accurate X64/ARM64 labels; never assign ARM64 to an Intel runner.
 
 Build cache keys and restore prefixes, including the lint tooling cache, include `runner.arch`, a stable host identity (runner name for self-hosted machines, `hosted` for GitHub-hosted machines), and `github.workspace`. This keeps Intel/ARM object files separate and prevents absolute-path build state from crossing checkout locations.
 
-UI automation does not use the native pool. `Core Journey Fixture UI` and iOS simulator execution stay on hosted ARM because the registered Macs lack unattended UI automation setup. Portable iOS test products also stay hosted: the producer exports both simulator architectures with source/Xcode/SDK provenance, and the consumer verifies that exact provenance before the unchanged unit/UI selections run. Native Macs may have different Xcode versions and must not exchange those products.
+UI automation never uses the native pool. `Core Journey Fixture UI` and iOS simulator execution stay on hosted ARM because the registered Macs lack unattended UI automation setup. Portable iOS test products also stay hosted: the producer exports both simulator architectures with source/Xcode/SDK provenance, and the consumer verifies that exact provenance before the unchanged unit/UI selections run.
 
-For other sources, Debug, API compatibility and the core contract fall back to hosted Intel (`macos-26-intel`); lint, Release and iOS compilation fall back to hosted ARM (`macos-latest`). Native iOS keyboard/watch compilation requires matching installed SDKs and preinstalled Tuist. The toolchain action verifies native Tuist without installing Homebrew; hosted setup retains its Homebrew mechanism. Ubuntu lanes use the separate Linux pool described below.
-
-## Self-hosted Linux pool (Omarchy)
-
-The same owner-authored rule routes these Linux jobs to `vars.JSTI_LINUX_RUNNER_LABELS`, default `["self-hosted","Linux","X64","omarchy-local"]`, and otherwise to their original hosted image: Paid Access Worker; Dependabot policy checks; desktop icon invariants; Linux desktop (GTK 4); the pinned whisper.cpp runtime build; and Portable Swift on Linux. Fork PRs, `workflow_dispatch`, schedules and other events always stay hosted. Setting `JSTI_LINUX_RUNNER_LABELS` to a hosted label such as `["ubuntu-24.04"]` returns every Linux job to hosted runners without touching the Mac pool.
-
-The GTK, whisper runtime and portable Linux jobs run in their pinned Ubuntu containers, so the runner needs Docker access but no distribution packages. Those containers run as root against the runner's persistent `/__w` bind mount; each records the host owner first and restores it in a final `always()` step so later host jobs can clean the checkout. Host-level jobs need `git`, `python3` and outbound network; Node is installed by `actions/setup-node`.
-
-These stay hosted: CI and CodeQL change detection and the `Build & Test (macOS)` aggregate (Omarchy is one runner, so these short critical-path gates must not queue behind a long Linux job), the Flatpak build and retest (they require a privileged disposable container), CodeQL analysis (it selects Xcode globally), the Windows cross-compile/bundle jobs (secret-bearing on push, ARM-only LLVM), UI capture and simulator jobs, and every release, qualification and publication workflow. Self-hosted jobs receive no secrets.
-
-The laptop uses one shared build slot across repositories, nine Swift build workers and reduced process priority. Its CI menu can pause both laptop runners; pausing may cancel active jobs. These controls do not provide a hard CPU/RAM quota or sandbox untrusted code.
-
-Initial Intel evidence: Xcode 26.3 / Apple Swift 6.2.4 built Alpha `a43520a51e4b0a9dbcfd40fa5b0222645b3101f6` locally in 229 seconds. The separate pinned GitHub verification is https://github.com/crmitchelmore/justspeaktoit/actions/runs/34463783833; inspect its final result before enabling the pool. PR #1038 has merged; historical commissioning evidence does not establish current runner readiness.
+The laptop uses one shared build slot across repositories, nine Swift build workers and reduced process priority. Its CI menu can pause the runner; pausing may cancel active jobs. These controls do not provide a hard CPU/RAM quota or sandbox untrusted code.
 
 ## Keychain isolation on native and hosted runners
 

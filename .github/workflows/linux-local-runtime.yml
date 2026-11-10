@@ -13,16 +13,11 @@ permissions:
 jobs:
   runtime:
     name: Build pinned whisper.cpp runtime (Linux x86-64 CPU)
-    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-24.04"]') }}
+    runs-on: ubuntu-24.04
     container:
       image: swift:6.2.3-noble@sha256:6dd90eb2359663a2cde8f03e9951f488b23134b3b8fce20e9dcb6cada75dd803
     timeout-minutes: 60
     steps:
-      # Self-hosted Linux runs this root container against the runner's
-      # persistent /__w bind mount; record its owner so it can be restored.
-      - name: Record host work-tree owner
-        if: runner.environment == 'self-hosted'
-        run: stat -c '%u:%g' /__w > "$RUNNER_TEMP/jsti-host-owner"
       - name: Install the build tools
         run: |
           apt-get update -q
@@ -63,11 +58,3 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Return the persistent work tree to the runner user so later host jobs
-      # (checkout, cache) can clean it; hosted runners are discarded instead.
-      - name: Restore host work-tree ownership
-        if: always() && runner.environment == 'self-hosted'
-        run: |
-          owner="$(cat "$RUNNER_TEMP/jsti-host-owner")"
-          case "$owner" in [0-9]*:[0-9]*) ;; *) echo "::error::Unknown host owner"; exit 1 ;; esac
-          chown -R "$owner" /__w

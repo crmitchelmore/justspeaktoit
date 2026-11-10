@@ -24,9 +24,9 @@ jobs:
     needs: release-paths
     # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
     if: needs.release-paths.outputs.apple == 'true'
-    # Owner-authored same-repository sources use the native pool (Docs/native-runner-pool.md).
-    # Every selected native runner must also admit the job locally.
-    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
+    # Hosted: the single native MacBook serialises builds, so the long Debug
+    # gate runs in parallel on hosted Intel (Docs/native-runner-pool.md).
+    runs-on: macos-26-intel
     timeout-minutes: 45
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).
@@ -414,8 +414,8 @@ jobs:
 
   core-journey-e2e:
     name: Core Dictation Journey (≤8m tests)
-    # This non-UI contract gate may use the native pool for owner-authored sources.
-    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
+    # Hosted Intel, matching build-macos so its arch-scoped cache restores.
+    runs-on: macos-26-intel
     timeout-minutes: 40
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).
@@ -513,7 +513,7 @@ jobs:
   release-validation:
     name: Build & Test (Release)
     # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
-    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: macos-latest
     timeout-minutes: 45
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).
@@ -545,7 +545,7 @@ jobs:
     needs: release-paths
     # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
     if: needs.release-paths.outputs.apple == 'true'
-    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -754,7 +754,7 @@ jobs:
     # that scheme at all — only the direct-capture one was — so the shape users
     # actually receive had the weaker check. Both are built here now.
     name: Build iOS Keyboard
-    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
@@ -840,7 +840,9 @@ jobs:
     needs: release-paths
     # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
     if: needs.release-paths.outputs.apple == 'true'
-    # Hosted ARM: on Intel the tooling tests exceeded the 30-minute budget.
+    # Owner-authored same-repository sources use the native MacBook (about 7
+    # minutes there; Docs/native-runner-pool.md). Otherwise hosted ARM: on
+    # hosted Intel the tooling tests exceeded the 30-minute budget.
     runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
@@ -865,7 +867,7 @@ jobs:
 
   paid-access-worker:
     name: Paid Access Worker
-    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-latest"]') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
@@ -895,7 +897,8 @@ jobs:
 
   api-compatibility:
     name: Public API compatibility
-    # Owner-authored same-repository sources use the native pool (Docs/native-runner-pool.md).
+    # Owner-authored same-repository sources use the native MacBook (about 11
+    # minutes there vs 16 on hosted Intel; Docs/native-runner-pool.md).
     # Every selected native runner must also admit the job locally.
     runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 30

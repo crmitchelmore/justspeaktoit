@@ -26,19 +26,23 @@ function context(event = 'pull_request', repository = 'crmitchelmore/justspeakto
   };
 }
 
-const omarchy = ['self-hosted', 'Linux', 'X64', 'omarchy-local'];
 const reviewedMacs = ['jsti-reviewed-local', 'macOS'];
-const linuxJobs = {
-  'ci.yml': { 'paid-access-worker': 'ubuntu-latest' },
+// The pool is one serial MacBook, so only light, independent jobs use it and
+// everything else runs in parallel on hosted runners.
+const nativeJobs = {
+  'ci.yml': { lint: 'macos-latest', 'api-compatibility': 'macos-26-intel' },
+  'local-transcription-benchmark.yml': { 'benchmark-package': 'macos-latest' },
+};
+const hostedJobs = {
+  'ci.yml': {
+    'build-macos': 'macos-26-intel', 'core-journey-e2e': 'macos-26-intel', 'release-validation': 'macos-latest',
+    'build-ios-swiftpm': 'macos-latest', 'build-ios-keyboard': 'macos-latest', 'paid-access-worker': 'ubuntu-latest',
+  },
   'dependabot-policy-checks.yml': { policy: 'ubuntu-latest' },
   'desktop-icons.yml': { resources: 'ubuntu-24.04' },
   'linux.yml': { 'linux-desktop': 'ubuntu-24.04' },
   'linux-local-runtime.yml': { runtime: 'ubuntu-24.04' },
-  'windows.yml': { 'portable-linux': 'ubuntu-22.04' },
-};
-const macJobs = {
-  'windows.yml': { 'portable-macos': 'macos-15' },
-  'local-transcription-benchmark.yml': { 'benchmark-package': 'macos-latest' },
+  'windows.yml': { 'portable-macos': 'macos-15', 'portable-linux': 'ubuntu-22.04' },
 };
 
 function assertGuarded(body, pool, fallback, label) {
@@ -62,26 +66,40 @@ function assertGuarded(body, pool, fallback, label) {
   }
 }
 
-test('Linux workloads use Omarchy only for owner-authored same-repository sources', () => {
-  for (const [file, ids] of Object.entries(linuxJobs)) {
+test('only the selected light Mac jobs share the reviewed Mac pool', () => {
+  for (const [file, ids] of Object.entries(nativeJobs)) {
     const bodies = jobs(workflows[file]);
     for (const [id, fallback] of Object.entries(ids)) {
       const label = `${file}:${id}`;
-      assertGuarded(bodies[id], omarchy, fallback, label);
-      assert.deepEqual(route(bodies[id], context(), { JSTI_LINUX_RUNNER_LABELS: '["ubuntu-24.04"]' }), ['ubuntu-24.04'], `${label}: the Linux label variable is an independent kill switch`);
-      assert.deepEqual(route(bodies[id], context(), { JSTI_NATIVE_RUNNER_LABELS: '["x"]' }), omarchy, `${label}: Mac pool labels never select Linux runners`);
+      assertGuarded(bodies[id], reviewedMacs, fallback, label);
+      assert.deepEqual(route(bodies[id], context(), { JSTI_NATIVE_RUNNER_LABELS: '["jsti-reviewed-local","macOS","X64"]' }),
+        ['jsti-reviewed-local', 'macOS', 'X64'], `${label}: the pool label variable selects the runner`);
     }
   }
+  const routed = [];
+  for (const [file, source] of Object.entries(workflows)) {
+    for (const [id, body] of Object.entries(jobs(source))) {
+      if (/JSTI_NATIVE_RUNNER_LABELS/.test(body)) routed.push(`${file}:${id}`);
+    }
+  }
+  assert.deepEqual(routed.sort(), Object.entries(nativeJobs)
+    .flatMap(([file, ids]) => Object.keys(ids).map((id) => `${file}:${id}`)).sort(),
+  'adding a job to the serial MacBook needs its admission hook updated too');
 });
 
-test('additional Apple jobs share the reviewed Mac pool', () => {
-  for (const [file, ids] of Object.entries(macJobs)) {
+test('Linux and long Mac jobs run on parallel hosted runners', () => {
+  for (const [file, ids] of Object.entries(hostedJobs)) {
     const bodies = jobs(workflows[file]);
-    for (const [id, fallback] of Object.entries(ids)) assertGuarded(bodies[id], reviewedMacs, fallback, `${file}:${id}`);
+    for (const [id, label] of Object.entries(ids)) {
+      assert.match(bodies[id], new RegExp(`^    runs-on: ${label.replaceAll('.', '\\.')}$`, 'm'), `${file}:${id}`);
+    }
+  }
+  for (const [file, source] of Object.entries(workflows)) {
+    assert.doesNotMatch(source, /JSTI_LINUX_RUNNER_LABELS|omarchy-local/, `${file}: no self-hosted Linux routing`);
   }
 });
 
-test('critical-path gates stay on parallel hosted runners, not the single Omarchy runner', () => {
+test('critical-path gates stay on parallel hosted runners', () => {
   for (const [file, id] of [['ci.yml', 'release-paths'], ['ci.yml', 'required-macos'], ['codeql.yml', 'changes']]) {
     assert.match(jobs(workflows[file])[id], /^    runs-on: ubuntu-latest$/m, `${file}:${id}`);
   }
@@ -91,22 +109,6 @@ test('no default routes to the owner Mac or unreviewed self-hosted labels', () =
   for (const [file, source] of Object.entries(workflows)) {
     assert.doesNotMatch(source, /mac-mini-3/, file);
     assert.doesNotMatch(source, /'\["jsti-macos-build"/, `${file}: jsti-macos-build also labels the owner Mac`);
-  }
-});
-
-test('root containers return the persistent self-hosted work tree to the runner user', () => {
-  const containerJobs = [['linux.yml', 'linux-desktop'], ['linux-local-runtime.yml', 'runtime'],
-    ['windows.yml', 'portable-linux']];
-  for (const [file, id] of containerJobs) {
-    const body = jobs(workflows[file])[id];
-    const steps = body.slice(body.indexOf('    steps:\n'));
-    assert.match(steps, /^    steps:\n(?:      #.*\n)*      - name: Record host work-tree owner\n        if: runner\.environment == 'self-hosted'\n/,
-      `${file}:${id}: record the owner before anything runs as container root`);
-    const restore = steps.lastIndexOf('      - name: Restore host work-tree ownership');
-    assert.ok(restore > 0, `${file}:${id}: must restore ownership`);
-    assert.equal(steps.indexOf('      - ', restore + 1), -1, `${file}:${id}: restore must be the final step`);
-    assert.match(steps.slice(restore), /if: always\(\) && runner\.environment == 'self-hosted'/);
-    assert.match(steps.slice(restore), /chown -R "\$owner" \/__w/);
   }
 });
 
@@ -121,10 +123,10 @@ test('privileged, secret-bearing and UI jobs stay on disposable hosted runners',
     assert.doesNotMatch(jobs(workflows[file])[id], /JSTI_|self-hosted/, `${file}:${id}`);
   }
   for (const [file, source] of Object.entries(workflows)) {
-    if (!/JSTI_(?:NATIVE|LINUX)_RUNNER_LABELS/.test(source)) continue;
+    if (!/JSTI_NATIVE_RUNNER_LABELS/.test(source)) continue;
     assert.doesNotMatch(source, /^  pull_request_target:/m, file);
     for (const [id, body] of Object.entries(jobs(source))) {
-      if (!/JSTI_(?:NATIVE|LINUX)_RUNNER_LABELS/.test(body)) continue;
+      if (!/JSTI_NATIVE_RUNNER_LABELS/.test(body)) continue;
       assert.doesNotMatch(body, /secrets\./, `${file}:${id}: self-hosted jobs receive no secrets`);
     }
   }

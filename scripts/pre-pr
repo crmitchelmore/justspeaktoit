@@ -15,6 +15,13 @@ and writes a machine-readable summary to .build/pre-pr/summary.json (and a
 Markdown copy for the PR body). The exit status is 0 only when every selected
 check passed. Advisory checks report "warn" and never fail the run.
 
+It fails closed: a required check whose tool is missing fails, and so does a
+Swift change that runs no unit tests (no covering test target, an empty filter
+or a filter that matches nothing). Unit tests are chosen from the SwiftPM target
+graph (`swift package dump-package`): every test file, in a test target that
+depends on the changed module, that names a type the changed file declares or
+extends. Unmatched changes fall back to the module's whole test target.
+
 Safety: it never runs UI tests, xcodebuild, the core-journey harness, app
 launches or other foreground automation. Swift tests use a private file
 Keychain (JSTI_TEST_KEYCHAIN=1) in a separate scratch path, so the developer's
@@ -38,6 +45,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / '.build' / 'pre-pr'
 SCHEMA_VERSION = 1
+IS_MAC = sys.platform == 'darwin'
 
 # Test targets that drive real UI. They are never selected, whatever changed.
 UI_TEST_TARGETS = {'SpeakAppUITests', 'SpeakiOSUITests'}
@@ -60,7 +68,8 @@ WORKFLOW_PATTERNS = ['.github/workflows/*', '.github/actions/*', '.github/action
 SHELL_PATTERNS = ['scripts/*.sh', '.githooks/*', 'scripts/pre-pr', 'scripts/install-pre-pr-hook']
 # Cheap static checks run first so most failures surface within seconds.
 COST = {'apple-accessibility': 0, 'portable-boundary': 0, 'actionlint': 0, 'shellcheck': 0, 'swiftlint': 1,
-        'swiftformat': 1, 'landing-tests': 1, 'tooling-tests': 2, 'apple-build': 3, 'apple-unit-tests': 4}
+        'swiftformat': 1, 'landing-tests': 1, 'tooling-tests': 2, 'apple-build': 3, 'apple-unit-tests': 4,
+        'swift-test-coverage': 0, 'portable-unit-tests': 4}
 
 
 def matches(path: str, patterns: list[str]) -> bool:
@@ -92,6 +101,8 @@ class Check:
     advisory: bool = False
     requires: str | None = None
     skip_reason: str = ''
+    failure: str = ''          # a planning failure: the check fails without running
+    counts_tests: bool = False  # fail when the run executes zero tests
     status: str = 'pending'
     duration: float = 0.0
     note: str = ''
@@ -101,32 +112,169 @@ class Check:
         return OUT / 'logs' / f'{self.id}.log'
 
 
-def swift_test_filter(files: list[str], full: bool) -> tuple[list[str], list[str]]:
-    """Return (filters, skipped UI targets) for the Swift tests a change touches."""
-    test_dirs = {p.name for p in (ROOT / 'Tests').iterdir() if p.is_dir()}
-    patterns: set[str] = set()
-    skipped: set[str] = set()
+# Top-level declarations a test can reference. Private and fileprivate types are invisible to tests.
+DECL = re.compile(r'^(?:@[\w.]+(?:\([^)\n]*\))?\s+)*(?:(?:public|package|internal|open|final|indirect|nonisolated)\s+)*'
+                  r'(class|struct|enum|protocol|actor|typealias|extension)\s+([A-Za-z_]\w*)', re.M)
+TEST_TYPE = re.compile(r'^(?:@[\w.]+(?:\([^)\n]*\))?\s+)*(?:(?:public|internal|private|fileprivate|final)\s+)*'
+                       r'(?:class|struct|actor|enum)\s+([A-Za-z_]\w*)', re.M)
+
+
+@dataclass
+class Graph:
+    """SwiftPM targets of one package graph, from `swift package dump-package`."""
+    targets: dict[str, dict]  # name -> {'type', 'path', 'deps'}
+
+    @classmethod
+    def from_dump(cls, dump: dict) -> 'Graph':
+        targets = {}
+        for target in dump['targets']:
+            deps = [next(iter(dep.values()))[0] for dep in target.get('dependencies', [])
+                    if 'byName' in dep or 'target' in dep]
+            default = 'Tests' if target['type'] == 'test' else 'Sources'
+            targets[target['name']] = {'type': target['type'], 'deps': deps,
+                                       'path': target.get('path') or f'{default}/{target["name"]}'}
+        return cls(targets)
+
+    def module_for(self, path: str) -> str | None:
+        best = None
+        for name, target in self.targets.items():
+            prefix = target['path'].rstrip('/') + '/'
+            if path.startswith(prefix) and (best is None or len(prefix) > len(self.targets[best]['path']) + 1):
+                best = name
+        return best
+
+    def test_targets(self) -> list[str]:
+        return sorted(n for n, t in self.targets.items() if t['type'] == 'test' and n not in UI_TEST_TARGETS)
+
+    def covering(self, module: str) -> set[str]:
+        """Test targets that are, or transitively depend on, module."""
+        def reaches(name: str, seen: set[str]) -> bool:
+            if name == module:
+                return True
+            seen.add(name)
+            return any(dep not in seen and dep in self.targets and reaches(dep, seen)
+                       for dep in self.targets[name]['deps'])
+        return {test for test in self.test_targets() if reaches(test, set())}
+
+
+_GRAPHS: dict[bool, Graph | None] = {}
+
+
+def load_graph(portable: bool) -> Graph | None:
+    """The Apple (portable=False) or portable package graph, or None when SwiftPM can't evaluate it."""
+    if portable not in _GRAPHS:
+        env = {**os.environ, **({'SPEAK_PORTABLE_CORE': '1'} if portable else {})}
+        env.pop('SPEAK_WINDOWS_TARGET', None)
+        try:
+            result = subprocess.run(['swift', 'package', 'dump-package'], cwd=ROOT, env=env, text=True,
+                                    capture_output=True, timeout=300)
+            _GRAPHS[portable] = Graph.from_dump(json.loads(result.stdout)) if result.returncode == 0 else None
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            _GRAPHS[portable] = None
+    return _GRAPHS[portable]
+
+
+def read(path: Path) -> str:
+    try:
+        return path.read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return ''
+
+
+@dataclass
+class Selection:
+    filters: list[str] = field(default_factory=list)
+    targets: set[str] = field(default_factory=set)  # every test target the filters touch
+
+
+def select_tests(files: list[str], full: bool, graph: Graph, exclude: set[str] = frozenset(),
+                 root: Path = ROOT) -> Selection:
+    """Pick the unit tests a change can affect.
+
+    A changed test file runs its own test types. A changed source file runs every test file, in any
+    test target that depends on its module, that names a type the file declares or extends (or is
+    named after it, e.g. Foo+Bar.swift -> Foo*Tests). When nothing names it, the module's own test
+    target runs, or every covering target if it has none. --full runs whole covering targets.
+    """
+    whole: set[str] = set()
+    classes: dict[str, set[str]] = {}
+    selection = Selection()
+    corpus: dict[str, list[tuple[Path, str]]] = {}
+
+    def test_files(target: str) -> list[tuple[Path, str]]:
+        if target not in corpus:
+            directory = root / graph.targets[target]['path']
+            corpus[target] = [(p, read(p)) for p in sorted(directory.rglob('*.swift'))]
+        return corpus[target]
+
+    def add_file(target: str, path: Path, text: str) -> None:
+        classes.setdefault(target, set()).update(TEST_TYPE.findall(text) or [path.stem])
+
     for path in files:
-        parts = Path(path).parts
-        if len(parts) < 3 or parts[0] not in {'Sources', 'Tests'} or not path.endswith('.swift'):
+        if not path.endswith('.swift') or not path.startswith(('Sources/', 'Tests/')):
             continue
-        module, stem = parts[1], Path(path).stem
-        if parts[0] == 'Tests':
-            if module in UI_TEST_TARGETS:
-                skipped.add(module)
-            elif module in test_dirs and module.endswith('Tests'):
-                patterns.add(module if full else f'{module}\\.{re.escape(stem)}')
+        module = graph.module_for(path)
+        covering = graph.covering(module) - set(exclude) if module else set()
+        if not covering:
             continue
-        target = f'{module}Tests'
-        if full and target in test_dirs and target not in UI_TEST_TARGETS:
-            patterns.add(target)
+        if full:
+            whole |= covering
             continue
-        # Matched tests: files named after the changed source, e.g. Foo+Bar.swift -> Foo*Tests.
-        prefix = stem.split('+')[0]
-        for directory in sorted(test_dirs - UI_TEST_TARGETS):
-            for test in (ROOT / 'Tests' / directory).rglob(f'{prefix}*Tests.swift'):
-                patterns.add(f'{directory}\\.{re.escape(test.stem)}')
-    return sorted(patterns), sorted(skipped)
+        file = root / path
+        if module in covering:  # a test file: run the types it declares
+            if file.is_file():
+                add_file(module, file, read(file))
+            continue
+        text = read(file)
+        local = {name for kind, name in DECL.findall(text) if kind != 'extension'}
+        module_dir = root / graph.targets[module]['path']
+        declared_in_module = None
+        for kind, name in DECL.findall(text):
+            if kind == 'extension' and name not in local:
+                if declared_in_module is None:
+                    declared_in_module = {n for p in module_dir.rglob('*.swift')
+                                          for k, n in DECL.findall(read(p)) if k != 'extension'}
+                if name in declared_in_module:
+                    local.add(name)
+        prefix = Path(path).stem.split('+')[0]
+        mention = re.compile(r'\b(?:' + '|'.join(sorted(map(re.escape, local))) + r')\b') if local else None
+        matched = False
+        for target in sorted(covering):
+            for test_path, test_text in test_files(target):
+                named = fnmatch.fnmatchcase(test_path.name, f'{prefix}*Tests.swift')
+                if named or (mention and mention.search(test_text)):
+                    add_file(target, test_path, test_text)
+                    matched = True
+        # No fallback when an excluded (already run) target covers the module: that run owns it.
+        if not matched and not graph.covering(module) & set(exclude):
+            own = f'{module}Tests'
+            whole |= {own} if own in covering else covering
+
+    for target in sorted(whole):
+        selection.filters.append(f'{target}\\.')
+    for target, names in sorted(classes.items()):
+        if target in whole or not names:
+            continue
+        selection.filters.append(f'{target}\\.(?:{"|".join(sorted(names))})\\b')
+    selection.targets = whole | {t for t, n in classes.items() if n}
+    return selection
+
+
+def uncovered_modules(files: list[str], graphs: list[Graph]) -> list[str]:
+    """Changed modules that no runnable unit-test target covers, in any graph this host can build."""
+    missing = set()
+    for path in files:
+        if Path(path).parts[1] in UI_TEST_TARGETS:
+            continue
+        modules = {g.module_for(path) for g in graphs} - {None}
+        if modules and not any(g.covering(m) for g in graphs for m in modules if m in g.targets):
+            missing |= modules
+    return sorted(missing)
+
+
+def test_title(selection: Selection, kind: str = 'Swift') -> str:
+    targets = ', '.join(sorted(selection.targets)) or 'none'
+    return f'{kind} unit tests ({targets})'
 
 
 def plan(files: list[str], full: bool) -> tuple[list[Check], dict[str, list[str]]]:
@@ -160,26 +308,61 @@ def plan(files: list[str], full: bool) -> tuple[list[Check], dict[str, list[str]
                              '--baseline', '.swiftlint-baseline.json', *swift_files]))
         checks.append(Check('swiftformat', 'apple', 'SwiftFormat lint (changed files, advisory)',
                             ['scripts/swiftformat.sh', '--lint', '--quiet', *swift_files], advisory=True))
+    swift_changes = [f for f in files if f.endswith('.swift') and f.startswith(('Sources/', 'Tests/'))]
     if apple:
         checks.append(Check('apple-accessibility', 'apple', 'Apple accessibility conventions',
                             ['python3', 'scripts/check-apple-accessibility.py']))
-        if sys.platform == 'darwin':
-            checks.append(Check('apple-build', 'apple', 'SwiftPM build incl. tests (macOS + iOS lib)',
-                                ['swift', 'build', '--build-tests', *scratch], env=test_env))
-            filters, skipped = swift_test_filter(files, full)
-            if skipped:
-                print(f'pre-pr: never runs UI test targets: {", ".join(skipped)} (CI covers them)')
-            if filters:
-                checks.append(Check('apple-unit-tests', 'apple',
-                                    f'Swift unit tests ({len(filters)} filter{"s" if len(filters) != 1 else ""})',
+    apple_graph = load_graph(False) if apple and IS_MAC else None
+    apple_selection = Selection()
+    portable_graph = load_graph(True) if portable and swift_changes else None
+    if apple and not IS_MAC:
+        checks.append(Check('apple-build', 'apple', 'SwiftPM build incl. tests (macOS + iOS lib)', [],
+                            skip_reason='macOS only; CI runs it'))
+    elif apple:
+        checks.append(Check('apple-build', 'apple', 'SwiftPM build incl. tests (macOS + iOS lib)',
+                            ['swift', 'build', '--build-tests', *scratch], env=test_env, requires='swift'))
+        skipped = sorted({Path(f).parts[1] for f in swift_changes if Path(f).parts[1] in UI_TEST_TARGETS})
+        if skipped:
+            print(f'pre-pr: never runs UI test targets: {", ".join(skipped)} (CI covers them)')
+        if apple_graph is None:
+            if swift_changes or full:
+                checks.append(Check('apple-unit-tests', 'apple', 'Swift unit tests', [],
+                                    failure='swift package dump-package failed, so no tests could be selected'))
+        else:
+            apple_selection = select_tests(swift_changes, full, apple_graph)
+            if full and not swift_changes:  # manifest or configuration change: the whole non-UI suite
+                every = apple_graph.test_targets()
+                apple_selection = Selection([f'{t}\\.' for t in every], set(every))
+            if apple_selection.filters:
+                checks.append(Check('apple-unit-tests', 'apple', test_title(apple_selection),
                                     ['python3', 'scripts/with-test-keychain.py', 'swift', 'test', '--skip-build',
-                                     *scratch, '--filter', '|'.join(filters)], env=test_env))
+                                     *scratch, '--filter', '|'.join(apple_selection.filters)],
+                                    env=test_env, requires='swift', counts_tests=True))
     if portable:
         checks.append(Check('portable-boundary', 'portable', 'Portable source boundary',
                             ['python3', 'scripts/verify-portable-core-boundary.py']))
+        portable_scratch = ['--scratch-path', str(OUT / 'portable-build')]
         checks.append(Check('portable-build', 'portable', 'Portable graph build incl. tests (Windows/Linux sources)',
-                            ['swift', 'build', '--build-tests', '--scratch-path', str(OUT / 'portable-build')],
-                            env={'SPEAK_PORTABLE_CORE': '1'}))
+                            ['swift', 'build', '--build-tests', *portable_scratch],
+                            env={'SPEAK_PORTABLE_CORE': '1'}, requires='swift'))
+        if swift_changes and portable_graph is None:
+            checks.append(Check('portable-unit-tests', 'portable', 'Portable unit tests', [],
+                                failure='swift package dump-package failed for the portable graph'))
+        elif portable_graph:
+            # Test targets the Apple run already covers are not run twice.
+            portable_selection = select_tests(swift_changes, full, portable_graph,
+                                              exclude=set(apple_graph.test_targets()) if apple_graph else set())
+            if portable_selection.filters:
+                checks.append(Check('portable-unit-tests', 'portable', test_title(portable_selection, 'Portable'),
+                                    ['swift', 'test', '--skip-build', *portable_scratch,
+                                     '--filter', '|'.join(portable_selection.filters)],
+                                    env={'SPEAK_PORTABLE_CORE': '1'}, requires='swift', counts_tests=True))
+    graphs = [g for g in (apple_graph, portable_graph) if g]
+    missing = uncovered_modules(swift_changes, graphs)
+    if missing:
+        checks.append(Check('swift-test-coverage', 'apple' if apple else 'portable',
+                            'Every changed Swift module has unit tests', [],
+                            failure=f'no unit-test target covers {", ".join(missing)}; add tests for it'))
     if windows:
         checks.append(Check('windows-typecheck', 'windows', 'Windows Swift type check',
                             ['bash', 'scripts/typecheck-windows-swift.sh'],
@@ -231,12 +414,31 @@ def restore_side_effects(check: Check, dirty_before: set[str]) -> None:
         check.note = f'{check.note}; {restored}' if check.note else restored
 
 
+def display(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def tests_executed(log: str) -> int:
+    """Tests run according to XCTest ("Executed N tests") and Swift Testing ("Test run with N tests")."""
+    xctest = [int(n) for n in re.findall(r'Executed (\d+) tests?', log)]
+    testing = [int(n) for n in re.findall(r'Test run with (\d+) tests?', log)]
+    return max(xctest, default=0) + max(testing, default=0)
+
+
 def run(check: Check, verbose: bool) -> None:
     if check.skip_reason:
         check.status, check.note = 'skip', check.skip_reason
         return
+    if check.failure:
+        check.status, check.note = 'fail', check.failure
+        return
     if check.requires and not shutil.which(check.requires):
-        check.status, check.note = 'skip', f'{check.requires} not installed'
+        # Fail closed: a required check that cannot run is not a pass.
+        check.status = 'warn' if check.advisory else 'fail'
+        check.note = f'{check.requires} not installed'
         return
     check.log.parent.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', **check.env}
@@ -245,8 +447,13 @@ def run(check: Check, verbose: bool) -> None:
     with check.log.open('w', encoding='utf-8') as log:
         log.write(f'$ {" ".join(check.command)}\n')
         log.flush()
-        process = subprocess.Popen(check.command, cwd=check.cwd, env=env, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
+        try:
+            process = subprocess.Popen(check.command, cwd=check.cwd, env=env, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
+        except OSError as error:
+            log.write(f'{error}\n')
+            check.status, check.note = ('warn' if check.advisory else 'fail'), f'cannot start: {error.strerror}'
+            return
         assert process.stdout
         for line in process.stdout:
             log.write(line)
@@ -254,11 +461,16 @@ def run(check: Check, verbose: bool) -> None:
                 sys.stdout.write(f'    {line}')
         code = process.wait()
     check.duration = time.monotonic() - started
-    if code == 0:
-        check.status = 'pass'
-    else:
+    executed = tests_executed(check.log.read_text(encoding='utf-8', errors='replace')) if check.counts_tests else None
+    if code != 0:
         check.status = 'warn' if check.advisory else 'fail'
-        check.note = f'exit {code}; log {check.log.relative_to(ROOT)}'
+        check.note = f'exit {code}; log {display(check.log)}'
+    elif executed == 0:
+        check.status, check.note = 'fail', f'no tests matched the filter; log {display(check.log)}'
+    else:
+        check.status = 'pass'
+        if executed:
+            check.note = f'{executed} tests'
     restore_side_effects(check, dirty_before)
 
 

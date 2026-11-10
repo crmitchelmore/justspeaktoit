@@ -3,7 +3,9 @@ import importlib.machinery
 import importlib.util
 import json
 import sys
+import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -51,22 +53,6 @@ class PlanTests(unittest.TestCase):
         self.assertIn('apple', areas)
         self.assertIn('portable', areas)
 
-    def test_source_change_selects_matching_unit_tests(self):
-        filters, _ = pre_pr.swift_test_filter(['Sources/SpeakCore/SecureStorage.swift'], False)
-        self.assertTrue(filters)
-        self.assertTrue(all('SecureStorage' in f for f in filters), filters)
-
-    def test_full_mode_selects_whole_target(self):
-        filters, _ = pre_pr.swift_test_filter(['Sources/SpeakCore/SecureStorage.swift'], True)
-        self.assertEqual(filters, ['SpeakCoreTests'])
-
-    def test_ui_test_targets_are_never_selected(self):
-        changes = ['Tests/SpeakAppUITests/CoreJourneyUITests.swift', 'Tests/SpeakiOSUITests/LaunchTests.swift']
-        for full in (False, True):
-            filters, skipped = pre_pr.swift_test_filter(changes, full)
-            self.assertEqual(filters, [])
-            self.assertEqual(skipped, ['SpeakAppUITests', 'SpeakiOSUITests'])
-
     def test_no_check_drives_ui_or_launches_the_app(self):
         everything = ['Package.swift', 'Project.swift', 'Sources/SpeakApp/AppDelegate.swift',
                       'Tests/SpeakAppTests/HistoryTests.swift', 'Tests/SpeakAppUITests/X.swift',
@@ -84,7 +70,7 @@ class PlanTests(unittest.TestCase):
                     self.assertNotIn(forbidden, command, check.id)
 
     def test_swift_tests_use_the_private_keychain_and_separate_scratch(self):
-        _, _, checks = ids(['Tests/SpeakAppTests/HistoryTests.swift'])
+        _, _, checks = ids(['Tests/SpeakAppTests/AccessibilityRecoveryTests.swift'])
         by_id = {c.id: c for c in checks}
         if 'apple-unit-tests' not in by_id:
             self.skipTest('Swift unit tests are planned only on macOS')
@@ -102,6 +88,137 @@ class PlanTests(unittest.TestCase):
         text = pre_pr.markdown(summary)
         marker = text.split('<!-- pre-pr-summary ')[1].split(' -->')[0]
         self.assertEqual(json.loads(marker), {'schema': 1, 'head': 'a' * 40, 'result': 'pass'})
+
+
+def fake_graph():
+    return pre_pr.Graph.from_dump({'targets': [
+        {'name': 'Core', 'type': 'regular', 'dependencies': []},
+        {'name': 'App', 'type': 'executable', 'dependencies': [{'byName': ['Core', None]}]},
+        {'name': 'Demo', 'type': 'executable', 'dependencies': [{'byName': ['Core', None]}]},
+        {'name': 'Other', 'type': 'regular', 'dependencies': []},
+        {'name': 'CoreTests', 'type': 'test', 'dependencies': [{'byName': ['Core', None]}]},
+        {'name': 'AppTests', 'type': 'test', 'dependencies': [{'target': ['App', None]}]},
+        {'name': 'OtherTests', 'type': 'test', 'dependencies': [{'byName': ['Other', None]}]},
+    ]})
+
+
+class SelectionTests(unittest.TestCase):
+    """Unit-test selection over a fake SwiftPM graph, so no Swift toolchain is needed."""
+
+    FILES = {
+        'Sources/Core/Widget.swift': 'public struct Widget {}\nextension Gadget {}\nprivate struct Hidden {}\n',
+        'Sources/Core/Gadget.swift': 'final class Gadget {}\n',
+        'Sources/Core/Helpers.swift': 'func helper() {}\n',
+        'Sources/App/AppView.swift': 'struct AppView {}\n',
+        'Sources/Demo/main.swift': 'print(1)\n',
+        'Tests/CoreTests/BehaviourTests.swift': 'final class BehaviourTests: XCTestCase { let w = Widget() }\n',
+        'Tests/CoreTests/GadgetCases.swift': '@MainActor\nfinal class GadgetCases: XCTestCase { let g = Gadget() }\n',
+        'Tests/CoreTests/UnrelatedTests.swift': 'struct UnrelatedTests { let h = Hidden() }\n',
+        'Tests/AppTests/WidgetUseTests.swift': 'class WidgetUseTests: XCTestCase { let w: Widget? = nil }\n',
+        'Tests/AppTests/AppViewTests.swift': 'class AppViewTests: XCTestCase {}\n',
+        'Tests/OtherTests/OtherTests.swift': 'class OtherTests: XCTestCase { let w = "Widget" }\n',
+    }
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        for path, text in self.FILES.items():
+            (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / path).write_text(text)
+        self.graph = fake_graph()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def select(self, files, full=False, exclude=frozenset()):
+        return pre_pr.select_tests(files, full, self.graph, set(exclude), root=self.root)
+
+    def test_source_change_runs_every_dependent_test_that_names_its_types(self):
+        selection = self.select(['Sources/Core/Widget.swift'])
+        self.assertEqual(selection.filters, ['AppTests\\.(?:WidgetUseTests)\\b',
+                                             'CoreTests\\.(?:BehaviourTests|GadgetCases)\\b'])
+        # OtherTests mentions "Widget" but cannot import Core; private types are never matched.
+        self.assertEqual(selection.targets, {'AppTests', 'CoreTests'})
+
+    def test_unmatched_source_change_falls_back_to_the_module_test_target(self):
+        self.assertEqual(self.select(['Sources/Core/Helpers.swift']).filters, ['CoreTests\\.'])
+
+    def test_unmatched_module_without_own_target_runs_every_covering_target(self):
+        self.assertEqual(self.select(['Sources/Demo/main.swift']).filters, [])  # nothing covers Demo
+        self.assertEqual(pre_pr.uncovered_modules(['Sources/Demo/main.swift'], [self.graph]), ['Demo'])
+        self.assertEqual(pre_pr.uncovered_modules(['Sources/Core/Helpers.swift'], [self.graph]), [])
+
+    def test_name_matched_test_file_is_selected_even_without_a_reference(self):
+        self.assertEqual(self.select(['Sources/App/AppView.swift']).filters, ['AppTests\\.(?:AppViewTests)\\b'])
+
+    def test_changed_test_file_runs_its_declared_types(self):
+        self.assertEqual(self.select(['Tests/CoreTests/GadgetCases.swift']).filters, ['CoreTests\\.(?:GadgetCases)\\b'])
+
+    def test_full_mode_runs_whole_covering_targets(self):
+        self.assertEqual(self.select(['Sources/Core/Helpers.swift'], full=True).filters,
+                         ['AppTests\\.', 'CoreTests\\.'])
+
+    def test_excluded_targets_are_not_rerun_or_used_as_a_fallback(self):
+        self.assertEqual(self.select(['Sources/Core/Helpers.swift'], exclude={'CoreTests'}).filters, [])
+
+    def test_files_outside_the_graph_select_nothing(self):
+        self.assertEqual(self.select(['Sources/Windows/App.swift', 'Docs/x.md']).filters, [])
+        self.assertEqual(pre_pr.uncovered_modules(['Sources/Windows/App.swift'], [self.graph]), [])
+
+    def test_uncovered_module_adds_a_failing_check(self):
+        with mock.patch.object(pre_pr, 'IS_MAC', True), \
+                mock.patch.object(pre_pr, 'load_graph', lambda portable: None if portable else self.graph), \
+                mock.patch.object(pre_pr, 'ROOT', self.root):
+            checks, _ = pre_pr.plan(['Sources/Demo/main.swift'], False)
+        by_id = {c.id: c for c in checks}
+        self.assertIn('Demo', by_id['swift-test-coverage'].failure)
+        order = [c.id for c in checks]
+        self.assertLess(order.index('swift-test-coverage'), order.index('apple-build'), 'cheap failures run first')
+
+    def test_unreadable_graph_fails_closed(self):
+        with mock.patch.object(pre_pr, 'IS_MAC', True), mock.patch.object(pre_pr, 'load_graph', lambda _: None):
+            checks, _ = pre_pr.plan(['Sources/SpeakCore/SecureStorage.swift'], False)
+        self.assertTrue({c.id: c for c in checks}['apple-unit-tests'].failure)
+
+
+class RunTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = mock.patch.object(pre_pr, 'OUT', Path(self.tmp.name))
+        self.out.start()
+
+    def tearDown(self):
+        self.out.stop()
+        self.tmp.cleanup()
+
+    def run_check(self, **kwargs):
+        check = pre_pr.Check('x', 'tooling', 'x', kwargs.pop('command', ['true']), **kwargs)
+        with mock.patch.object(pre_pr, 'restore_side_effects', lambda *_: None):
+            pre_pr.run(check, verbose=False)
+        return check
+
+    def test_missing_required_tool_fails(self):
+        self.assertEqual(self.run_check(requires='no-such-tool-jsti').status, 'fail')
+
+    def test_missing_advisory_tool_warns(self):
+        self.assertEqual(self.run_check(requires='no-such-tool-jsti', advisory=True).status, 'warn')
+
+    def test_unstartable_command_fails(self):
+        self.assertEqual(self.run_check(command=['/no/such/binary']).status, 'fail')
+
+    def test_planning_failure_fails_without_running(self):
+        self.assertEqual(self.run_check(failure='nothing selected').status, 'fail')
+
+    def test_test_run_that_executes_nothing_fails(self):
+        check = self.run_check(command=['echo', 'Executed 0 tests, with 0 failures'], counts_tests=True)
+        self.assertEqual(check.status, 'fail')
+        check = self.run_check(command=['echo', 'Executed 3 tests\nTest run with 2 tests passed'], counts_tests=True)
+        self.assertEqual((check.status, check.note), ('pass', '5 tests'))
+
+    def test_counts_both_test_frameworks(self):
+        log = 'Executed 4 tests\nExecuted 12 tests, with 0 failures\n✔ Test run with 7 tests in 2 suites passed'
+        self.assertEqual(pre_pr.tests_executed(log), 19)
+        self.assertEqual(pre_pr.tests_executed('No matching test cases were run'), 0)
 
 
 class EvidenceTests(unittest.TestCase):

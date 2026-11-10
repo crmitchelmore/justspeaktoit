@@ -231,6 +231,11 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
   exactly as CI selects them. `--quick` narrows this to type-level matches,
   which is faster but no longer CI's selection. A build that changes
   `Package.resolved` fails, as in CI.
+- **Android:** `scripts/ci-android.sh`, the Android job's command (android.yml runs it too).
+  pre-pr runs it locally only with a working JDK and an approved Maven feed
+  (`JSTI_MAVEN_MIRROR`), and otherwise on a remote `precheck/**` branch run,
+  as for Linux. It never skips or passes as advisory. `JSTI_ANDROID_LOCAL=1`
+  or `=0` forces the choice.
 - It fails closed. A required check whose tool is missing fails, and so does a
   Swift change that runs no unit tests or a changed module that no test
   target covers. `test_pre_pr` checks the routing against ci.yml's path

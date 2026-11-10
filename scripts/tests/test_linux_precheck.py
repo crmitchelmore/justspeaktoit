@@ -52,6 +52,15 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(git(self.repo, 'status', '--porcelain', '--untracked-files=no'), 'M a.txt',
                          'the real index is untouched')
 
+    def test_the_snapshot_names_its_job_for_precheck_yml(self):
+        sha = precheck.snapshot(self.repo, job='android')
+        self.assertIn('[precheck:android]', git(self.repo, 'log', '-1', '--format=%s', sha))
+        merged = precheck.merged_with(self.repo, sha, self.base, 'android')
+        self.assertIn('[precheck:android]', git(self.repo, 'log', '-1', '--format=%s', merged))
+        workflow = (ROOT / '.github' / 'workflows' / 'precheck.yml').read_text(encoding='utf-8')
+        for job in precheck.JOBS:
+            self.assertIn(f"'[precheck:{job}]'", workflow)
+
     def test_a_tree_that_has_its_own_script_keeps_it(self):
         script = self.repo / 'scripts' / 'ci-portable-linux.sh'
         script.parent.mkdir()

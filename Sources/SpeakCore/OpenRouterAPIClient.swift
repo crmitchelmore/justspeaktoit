@@ -84,7 +84,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         apiKeyOverride: String? = nil,
         maximumInlineAudioBytes: Int64 = 50 * 1024 * 1024,
         branding: OpenRouterBranding = .platformDefault,
-        nativeAPIKeyProvider: NativeAPIKeyProvider? = nil
+        nativeAPIKeyProvider: NativeAPIKeyProvider?
     ) {
         self.apiKeyProvider = apiKeyProvider
         self.session = session
@@ -94,13 +94,31 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         self.branding = branding
     }
 
+    /// OpenRouter only: native selections report a missing provider key.
+    public init(
+        apiKeyProvider: @escaping APIKeyProvider,
+        session: URLSession = .shared,
+        apiKeyOverride: String? = nil,
+        maximumInlineAudioBytes: Int64 = 50 * 1024 * 1024,
+        branding: OpenRouterBranding = .platformDefault
+    ) {
+        self.init(
+            apiKeyProvider: apiKeyProvider,
+            session: session,
+            apiKeyOverride: apiKeyOverride,
+            maximumInlineAudioBytes: maximumInlineAudioBytes,
+            branding: branding,
+            nativeAPIKeyProvider: nil
+        )
+    }
+
     /// Convenience initialiser for call sites that already hold the key.
     public init(
         apiKey: String,
         session: URLSession = .shared,
         maximumInlineAudioBytes: Int64 = 50 * 1024 * 1024,
         branding: OpenRouterBranding = .platformDefault,
-        nativeAPIKeyProvider: NativeAPIKeyProvider? = nil
+        nativeAPIKeyProvider: NativeAPIKeyProvider?
     ) {
         self.init(
             apiKeyProvider: { apiKey },
@@ -108,6 +126,22 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
             maximumInlineAudioBytes: maximumInlineAudioBytes,
             branding: branding,
             nativeAPIKeyProvider: nativeAPIKeyProvider
+        )
+    }
+
+    /// Convenience initialiser for OpenRouter-only call sites that already hold the key.
+    public init(
+        apiKey: String,
+        session: URLSession = .shared,
+        maximumInlineAudioBytes: Int64 = 50 * 1024 * 1024,
+        branding: OpenRouterBranding = .platformDefault
+    ) {
+        self.init(
+            apiKey: apiKey,
+            session: session,
+            maximumInlineAudioBytes: maximumInlineAudioBytes,
+            branding: branding,
+            nativeAPIKeyProvider: nil
         )
     }
 

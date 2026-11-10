@@ -33,6 +33,7 @@ import com.justspeaktoit.android.ui.DictationActions
 import com.justspeaktoit.android.ui.DictationScreen
 import com.justspeaktoit.android.ui.HistoryActions
 import com.justspeaktoit.android.ui.HistoryScreen
+import com.justspeaktoit.android.ui.HistoryTranscription
 import com.justspeaktoit.android.ui.MicPermission
 import com.justspeaktoit.android.ui.SettingsActions
 import com.justspeaktoit.android.ui.SettingsScreen

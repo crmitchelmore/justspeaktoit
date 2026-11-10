@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { matchesGlob } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { assessCIGates as assessOracle } from '../verify-ci-gates.mjs';
@@ -19,10 +20,13 @@ const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+)
 const nativeEligibleJobs = ['build-macos', 'lint', 'api-compatibility'];
 const hostedFallback = (id) => (id === 'lint' ? 'macos-latest' : 'macos-26-intel');
 const hostedMacJobs = {
-  'core-journey-e2e': 'macos-26-intel', 'release-validation': 'macos-latest',
-  'build-ios-swiftpm': 'macos-latest', 'build-ios-keyboard': 'macos-latest', 'build-ios-test-products': 'macos-latest',
+  'release-validation': 'macos-latest', 'build-ios-keyboard': 'macos-latest',
   'build-ios': 'macos-latest', 'core-journey-fixture-ui': 'macos-latest',
 };
+// Core Dictation Journey runs inside build-macos, after its coverage tests.
+const debugBody = jobBodies['build-macos'];
+const journeySteps = debugBody.slice(debugBody.indexOf('- name: Build core journey test products'),
+  debugBody.indexOf('- name: Build SpeakCore (App Store flavour)'));
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
@@ -55,9 +59,10 @@ test('desktop native dependency changes select every native and cross-build work
 });
 
 test('journey cold preparation and actual runtime have separate finite budgets and always-uploaded evidence', () => {
-  const swift = jobBodies['core-journey-e2e'];
+  const swift = journeySteps;
   const ui = jobBodies['core-journey-fixture-ui'];
-  assert.match(swift, /^\s+timeout-minutes: 40$/m);
+  assert.ok(swift.length > 0, 'the journey gate must run inside build-macos');
+  assert.match(debugBody, /^    timeout-minutes: 60$/m);
   assert.match(ui, /^\s+timeout-minutes: 47$/m);
   assert.match(ui, /timeout-minutes: 11\n\s+run: python3 scripts\/run-core-journey-stages.py ui --phase setup/);
   assert.match(swift, /timeout-minutes: 17\n\s+run: scripts\/run-core-journey-e2e.sh --phase build/);
@@ -68,13 +73,16 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   }
   assert.ok(ui.indexOf('--phase setup') < ui.indexOf('--phase build'));
   assert.ok(ui.indexOf('--phase build') < ui.indexOf('--phase test'));
+  // The journey evidence uploads whenever its build phase started.
+  assert.match(swift, /id: journey_build\n\s+timeout-minutes: 17\n/);
+  assert.match(swift, /if: always\(\) && steps\.journey_build\.outcome != 'skipped'\n\s+timeout-minutes: 3\n\s+uses: actions\/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7\.0\.2/);
+  assert.match(ui, /if: always\(\)\n\s+timeout-minutes: 3\n\s+uses: actions\/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7\.0\.2/);
   for (const body of [swift, ui]) {
     assert.doesNotMatch(body, /continue-on-error:|if:.*(?:failure|cancelled)/);
-    assert.match(body, /if: always\(\)\n\s+timeout-minutes: 3\n\s+uses: actions\/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7\.0\.2/);
     assert.match(body, /if-no-files-found: error/);
-    assert.match(body, /uses: actions\/checkout@v7.0.1/);
     assert.doesNotMatch(body, /ref:.*head|workflow_dispatch|retry|--skip.*test/);
   }
+  for (const body of [debugBody, ui]) assert.match(body, /uses: actions\/checkout@v7.0.1/);
   assert.match(ui, /include-hidden-files: true/);
   assert.match(ui, /path: \|\n\s+\.artifacts\/core-journey-fixture-ui\n\s+!\.artifacts\/core-journey-fixture-ui\/DerivedData/);
   assert.match(journeyStages, /BUILD_BUDGET = 900/);
@@ -106,26 +114,23 @@ test('Debug dependency resolution bypasses shared repositories in commands and r
   }
   assert.equal((body.match(/"--disable-dependency-cache"/g) ?? []).length, 2,
     'both recorded History argv values must describe the actual diagnostic');
-  assert.match(body, /^    timeout-minutes: 45$/m);
+  assert.match(body, /^    timeout-minutes: 60$/m);
   assert.doesNotMatch(body, /swift package (?:reset|clean)|rm -rf.*\.build/);
 });
 
-test('macOS Debug and Core Journey share coverage instrumentation and cache keys', () => {
-  const body = jobBodies['build-macos'];
-  const journey = jobBodies['core-journey-e2e'];
-  for (const pattern of [/^\s+key:\s*(\$\{\{.+)$/m, /restore-keys:\s*\|\s*\n\s+([^\n]+)/]) {
-    const producer = body.match(pattern);
-    const consumer = journey.match(pattern);
-    assert.ok(producer && consumer, 'Debug and Core Journey must declare matching cache keys');
-    assert.equal(consumer[1].trim(), producer[1].trim());
-  }
-  assert.match(body, /^\s+timeout-minutes: 45$/m);
+test('macOS Debug and Core Journey share one coverage-instrumented build', () => {
+  const body = debugBody;
+  assert.equal(jobBodies['core-journey-e2e'], undefined, 'no second macOS job rebuilds the Debug graph');
+  assert.ok(body.indexOf('name: Test (Debug)') < body.indexOf('name: Build core journey test products'),
+    'the journey verifies products Test (Debug) already compiled');
+  assert.match(body, /^\s+timeout-minutes: 60$/m);
   assert.match(body, /name: Build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS="--enable-code-coverage --disable-dependency-cache" make build/);
   assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage --disable-dependency-cache/);
   assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),
     'Build must run before Test (Debug) so the coverage-enabled cache is already warm');
-  assert.ok(body.indexOf('name: Test (Debug)') < body.indexOf('name: Build SpeakCore (App Store flavour)'),
-    'App Store flavour rebuild must stay after tests, not before');
+  assert.ok(body.indexOf('name: Upload core journey stage diagnostics') < body.indexOf('name: Build SpeakCore (App Store flavour)'),
+    'App Store flavour rebuild must stay after every coverage test, not before');
+  assert.match(body, /name: Build SpeakCore \(App Store flavour\)\n(?:\s+#[^\n]*\n)*\s+if: github\.event_name == 'push'\n/);
   assert.doesNotMatch(body, /\n\s+run: make build\n/, 'Build step must not regress to an uninstrumented build');
   // Non-test steps unaffected: still a real build, no dropped checks.
   assert.match(body, /name: Verify brand asset sizes and appearance variants/);
@@ -194,13 +199,13 @@ test('native pool admits only owner-authored same-repository sources and trusted
   }
 });
 
-test('iOS SwiftPM compilation keeps its command and bounded budget on hosted ARM', () => {
-  const body = jobBodies['build-ios-swiftpm'];
-  assert.match(body, /^\s+timeout-minutes: 30$/m);
-  assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
-  // The only permitted condition is the shared Android-only skip.
-  const ungated = body.replace("    if: needs.release-paths.outputs.apple == 'true'\n", '');
-  assert.doesNotMatch(ungated, /if:|bravo-mini-local/);
+test('the macOS Debug package build compiles the iOS library', () => {
+  // A separate SwiftPM job compiled only this target; Debug builds and tests it.
+  const manifest = readFileSync(new URL('../../Package.swift', import.meta.url), 'utf8');
+  assert.match(manifest, /name: "SpeakiOSLib",\n\s+dependencies: \[[^\]]*\],\n\s+path: "Sources\/SpeakiOS"/);
+  assert.match(manifest, /\.testTarget\(\n\s+name: "SpeakiOSTests",\n\s+dependencies: \["SpeakiOSLib"/);
+  assert.equal(jobBodies['build-ios-swiftpm'], undefined);
+  assert.match(debugBody, /run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage/);
 });
 
 test('long and UI jobs cannot be admitted to a native runner by repository variables', () => {
@@ -221,7 +226,7 @@ test('every Apple build cache isolates architecture, host and workspace, includi
   // Plain warm-build-cache keys are runner-local directories, not actions/cache keys.
   const cacheLines = workflow.match(/^\s+(?:key:|restore-keys:).*(?:\n\s+\$\{\{[^\n]+)?/gm)
     .filter((line) => !/^\s+key: [\w.-]+$/.test(line));
-  assert.equal(cacheLines.length, 7, 'three Swift keys and restore prefixes plus the lint tooling key');
+  assert.equal(cacheLines.length, 5, 'Debug and Release Swift keys and restore prefixes plus the lint tooling key');
   for (const line of cacheLines) {
     assert.ok(line.includes('${{ runner.arch }}'), line);
     assert.ok(line.includes("${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}"), line);
@@ -251,8 +256,11 @@ print(json.dumps(owned.selected_configuration(json.loads(sys.argv[2]))))
 
 test('iOS workloads are partitioned without extending budgets or dropping tests', () => {
   const body = jobBodies['build-ios'];
-  assert.match(body, /^\s+timeout-minutes: 30$/m);
-  assert.ok(body.indexOf('Create owned iOS Simulator') < body.indexOf('- name: Prepare iOS Simulator'));
+  assert.match(body, /^\s+timeout-minutes: 45$/m);
+  assert.equal(jobBodies['build-ios-test-products'], undefined, 'products build in the testing job');
+  assert.ok(body.indexOf('Create owned iOS Simulator') < body.indexOf('- name: Build simulator test products'),
+    'products build for the owned simulator only');
+  assert.ok(body.indexOf('- name: Build simulator test products') < body.indexOf('- name: Prepare iOS Simulator'));
   assert.match(body, /python3 scripts\/prepare-ios-ci\.py "\$SIMULATOR_ID"/);
   assert.match(simulatorPreparation, /python3 scripts\/owned-ios-ci-simulator\.py create/);
   assert.match(simulatorPreparation, /--receipt "\$RUNNER_TEMP\/owned-ios-simulator\.json" --github-env "\$GITHUB_ENV"/);
@@ -263,27 +271,18 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.doesNotMatch(iosPreparation, /"swift"/);
   assert.doesNotMatch(iosPreparation, /"tuist"/);
   assert.match(iosPreparation, /boot.wait\(timeout=600\)/);
+  assert.match(body, /^\s+runs-on: macos-latest$/m);
+  assert.match(body, /TUIST_IOS_KEYBOARD=1 scripts\/retry-network.sh tuist generate/);
+  assert.match(body, /scripts\/retry-network.sh xcodebuild -resolvePackageDependencies/);
+  assert.match(body, /xcodebuild build-for-testing/);
+  assert.match(body, /-destination "platform=iOS Simulator,id=\$SIMULATOR_ID"/);
   assert.match(body, /xcodebuild test-without-building/);
-  assert.match(body, /needs: \[release-paths, build-ios-test-products\]/);
-  assert.match(body, /artifact-ids: \$\{\{ needs.build-ios-test-products.outputs.artifact-id \}\}/);
-  assert.match(body, /scripts\/ios-test-products.py unpack/);
-  assert.match(body, /-testProductsPath "\$RUNNER_TEMP\/ios-test-products\/SpeakiOS.xctestproducts"/);
+  assert.equal((body.match(/-testProductsPath "\$RUNNER_TEMP\/SpeakiOS.xctestproducts"/g) ?? []).length, 2,
+    'tests run the exact products this job built');
+  assert.equal((body.match(/-only-testing:SpeakiOSTests/g) ?? []).length, 2);
+  assert.equal((body.match(/-only-testing:SpeakiOSUITests/g) ?? []).length, 2);
+  assert.doesNotMatch(body, /bravo-mini-local|jsti-macos-build|download-artifact/);
   assert.match(body, /name: Upload complete iOS XCTest log separately\n\s+if: always\(\)/);
-  const products = jobBodies['build-ios-test-products'];
-  assert.match(products, /^\s+runs-on: macos-latest$/m);
-  assert.match(products, /^\s+timeout-minutes: 30$/m);
-  assert.match(products, /TUIST_IOS_KEYBOARD=1 scripts\/retry-network.sh tuist generate/);
-  assert.match(products, /scripts\/retry-network.sh xcodebuild -resolvePackageDependencies/);
-  assert.match(products, /xcodebuild build-for-testing/);
-  assert.match(products, /-only-testing:SpeakiOSTests/);
-  assert.match(products, /-only-testing:SpeakiOSUITests/);
-  assert.match(products, /ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO/);
-  assert.match(products, /scripts\/ios-test-products.py pack/);
-  assert.doesNotMatch(products, /simctl|bravo-mini-local|jsti-macos-build/);
-  assert.match(aggregate, /^\s+- build-ios-test-products$/m);
-  assert.match(aggregate, /needs\.build-ios-test-products\.result != 'success'/);
-  assert.match(body, /-only-testing:SpeakiOSTests/);
-  assert.match(body, /-only-testing:SpeakiOSUITests/);
   assert.match(body, /verify-ios-test-evidence\.py/);
   const devices = jobBodies['build-ios-keyboard'];
   assert.match(devices, /^\s+timeout-minutes: 30$/m);
@@ -295,8 +294,10 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(devices, /-destination generic\/platform=watchOS/);
   assert.match(devices, /-scheme SpeakiOS/);
   assert.match(devices, /-destination generic\/platform=iOS/);
-  assert.match(aggregate, /^\s+- build-ios-swiftpm$/m);
-  assert.match(aggregate, /needs\.build-ios-swiftpm\.result != 'success'/);
+  for (const id of ['build-ios', 'build-ios-keyboard']) {
+    assert.match(aggregate, new RegExp(`^\\s+- ${id}$`, 'm'));
+    assert.match(aggregate, new RegExp(`needs\\.${id}\\.result != 'success'`));
+  }
 });
 
 test('iOS selection prefers an available Pro before starting preparation', () => {
@@ -437,12 +438,22 @@ test('every tracked tooling test is discovered by make test-tooling', () => {
   }
 });
 
+// Each path flag and the gates it may skip on pull requests (api-compatibility
+// is pull-request-only and handled separately).
+const gateFlags = {
+  apple: ['lint'],
+  'apple-swift': ['build-macos', 'build-ios'],
+  release: ['release-validation'],
+  'fixture-ui': ['core-journey-fixture-ui'],
+  keyboard: ['build-ios-keyboard'],
+};
+const allTrue = () => Object.fromEntries(Object.keys(gateFlags).map(flag => [flag, 'true']));
+
 function passing() {
   return Object.fromEntries([
-    'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
-    'release-paths', 'release-validation', 'core-journey-e2e',
-    'core-journey-fixture-ui', 'api-compatibility',
-  ].map(id => [id, { result: 'success', outputs: { package: 'true', 'core-journey': 'true', apple: 'true' } }]));
+    'build-macos', 'build-ios', 'build-ios-keyboard', 'lint',
+    'release-paths', 'release-validation', 'core-journey-fixture-ui', 'api-compatibility',
+  ].map(id => [id, { result: 'success', outputs: allTrue() }]));
 }
 
 test('accepts all successful pull-request gates', () => {
@@ -461,27 +472,53 @@ for (const id of Object.keys(passing())) {
 
 test('permits only path-excluded PR gates to skip', () => {
   const needs = passing();
-  needs['release-paths'].outputs = { package: 'false', 'core-journey': 'false', apple: 'true' };
-  for (const id of ['release-validation', 'core-journey-e2e', 'core-journey-fixture-ui']) {
+  needs['release-paths'].outputs = { ...allTrue(), release: 'false', 'fixture-ui': 'false', keyboard: 'false' };
+  for (const id of ['release-validation', 'core-journey-fixture-ui', 'build-ios-keyboard']) {
     needs[id].result = 'skipped';
   }
   assert.deepEqual(assessCIGates(needs, 'pull_request'), []);
   assert.ok(assessCIGates(needs, 'push').length > 0, 'main cannot skip gates');
-  needs['core-journey-e2e'].result = 'failure';
+  needs['core-journey-fixture-ui'].result = 'failure';
   assert.ok(assessCIGates(needs, 'pull_request').length > 0);
 });
 
+test('each heavy gate still runs, and must pass, when its own inputs change', () => {
+  for (const [flag, ids] of Object.entries(gateFlags)) {
+    for (const id of ids) {
+      const needs = passing();
+      needs[id].result = 'skipped';
+      assert.ok(assessCIGates(needs, 'pull_request').length > 0, `${id} cannot skip when ${flag} is true`);
+      needs['release-paths'].outputs[flag] = 'false';
+      if (flag !== 'apple-swift') assert.deepEqual(assessCIGates(needs, 'pull_request'), [], `${id} may skip`);
+      needs['release-paths'].outputs[flag] = 'invalid';
+      assert.ok(assessCIGates(needs, 'pull_request').length > 0, `${flag} must be true or false`);
+    }
+  }
+});
+
+test('docs, site and Linux/Windows-only pull requests skip Swift gates but keep Lint', () => {
+  const needs = passing();
+  needs['release-paths'].outputs = {
+    apple: 'true', 'apple-swift': 'false', release: 'false', 'fixture-ui': 'false', keyboard: 'false',
+  };
+  for (const id of ['build-macos', 'build-ios', 'release-validation', 'core-journey-fixture-ui',
+    'build-ios-keyboard', 'api-compatibility']) {
+    needs[id].result = 'skipped';
+  }
+  assert.deepEqual(assessCIGates(needs, 'pull_request'), []);
+  needs.lint.result = 'skipped';
+  assert.ok(assessCIGates(needs, 'pull_request').length > 0, 'Lint still gates non-Android changes');
+});
+
 const appleJobs = [
-  'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
-  'api-compatibility',
+  'build-macos', 'build-ios', 'build-ios-keyboard', 'lint', 'api-compatibility',
+  'release-validation', 'core-journey-fixture-ui',
 ];
 
 function androidOnly() {
   const needs = passing();
-  needs['release-paths'].outputs = { package: 'false', 'core-journey': 'false', apple: 'false' };
-  for (const id of [...appleJobs, 'release-validation', 'core-journey-e2e', 'core-journey-fixture-ui']) {
-    needs[id].result = 'skipped';
-  }
+  needs['release-paths'].outputs = Object.fromEntries(Object.keys(gateFlags).map(flag => [flag, 'false']));
+  for (const id of appleJobs) needs[id].result = 'skipped';
   return needs;
 }
 
@@ -492,7 +529,7 @@ test('Android-only pull requests may skip every Apple gate', () => {
 test('Apple gates still run, and must pass, whenever anything outside the Android app changes', () => {
   for (const id of appleJobs) {
     const needs = androidOnly();
-    needs['release-paths'].outputs.apple = 'true';
+    needs['release-paths'].outputs = allTrue();
     for (const other of appleJobs) needs[other].result = 'success';
     needs[id].result = 'skipped';
     assert.ok(assessCIGates(needs, 'pull_request').length > 0, `${id} cannot skip for Apple changes`);
@@ -516,9 +553,37 @@ test('Apple path detection excludes only the Android app and its own workflow an
   ]);
   assert.match(body, /# Push to main: no changed-file filtering, run every gate\.\n\s+\{\n(?:\s+echo "[a-z-]+=true"\n)*\s+echo "apple=true"\n/,
     'pushes must force Apple gates on');
-  for (const id of appleJobs) {
-    assert.match(jobBodies[id], /if: .*needs\.release-paths\.outputs\.apple == 'true'/, `${id} must honour the gate`);
+  const pushOutputs = body.slice(body.indexOf('# Push to main'));
+  for (const flag of Object.keys(gateFlags)) {
+    assert.match(pushOutputs, new RegExp(`echo "${flag}=true"`), `pushes force ${flag}`);
+    assert.match(body, new RegExp(`^      ${flag}: \\$\\{\\{ steps\\.select\\.outputs\\.${flag} \\}\\}$`, 'm'));
   }
+  for (const [flag, ids] of Object.entries({ ...gateFlags, 'apple-swift': [...gateFlags['apple-swift'], 'api-compatibility'] })) {
+    for (const id of ids) {
+      assert.match(jobBodies[id], new RegExp(`if: .*needs\\.release-paths\\.outputs\\.${flag} == 'true'`), `${id} must honour ${flag}`);
+    }
+  }
+});
+
+test('Apple Swift path detection keeps every repository file Apple tests read', () => {
+  const body = jobBodies['release-paths'];
+  const exclusions = body.match(/apple-swift:\n((?:\s+- '[^']+'\n)+)/)[1].trim().split('\n')
+    .map(line => line.trim().slice(3, -1)).filter(pattern => pattern.startsWith('!')).map(pattern => pattern.slice(1));
+  const reads = body.match(/apple-swift-reads:\n((?:\s+- '[^']+'\n)+)/)[1].trim().split('\n')
+    .map(line => line.trim().slice(3, -1));
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const tracked = execFileSync('git', ['ls-files', '-z', 'Tests', 'Sources'], { cwd: root, encoding: 'utf8' })
+    .split('\0').filter(path => path.endsWith('.swift'));
+  const isExcluded = path => exclusions.some(pattern => matchesGlob(path, pattern));
+  for (const file of tracked.filter(path => !isExcluded(path))) {
+    const source = readFileSync(`${root}/${file}`, 'utf8');
+    for (const [, path] of source.matchAll(/"((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+)"/g)) {
+      if (isExcluded(path)) assert.ok(reads.includes(path), `${file} reads ${path}; add it to apple-swift-reads`);
+    }
+  }
+  assert.ok(isExcluded('Sources/SpeakLinuxPlatform/Example.swift'));
+  assert.ok(!isExcluded('Sources/SpeakCore/Example.swift'));
+  assert.ok(!isExcluded('.github/workflows/ci.yml'));
 });
 
 test('blocks missing path detection outputs', () => {
@@ -551,14 +616,14 @@ test('launched-app UI shards in CI match every shard the verifier requires', () 
 
 test('network-bound package resolution and Tuist generation retry before Apple builds', () => {
   const retry = 'scripts/retry-network.sh';
-  for (const id of ['build-macos', 'release-validation', 'build-ios-swiftpm']) {
+  for (const id of ['build-macos', 'release-validation']) {
     const body = jobBodies[id];
     const resolve = body.indexOf(`run: ${retry} swift package resolve`);
     assert.ok(resolve > 0, `${id}: resolve with retries`);
-    assert.ok(resolve < body.search(/run: (?:SWIFT_FLAGS=.*make build|python3 scripts\/with-test-keychain\.py swift test -c release|swift build --disable-dependency-cache --target SpeakiOSLib)/),
+    assert.ok(resolve < body.search(/run: (?:SWIFT_FLAGS=.*make build|python3 scripts\/with-test-keychain\.py swift test -c release)/),
       `${id}: resolution must precede the build`);
   }
-  for (const id of ['build-ios-test-products', 'build-ios-keyboard']) {
+  for (const id of ['build-ios', 'build-ios-keyboard']) {
     const body = jobBodies[id];
     assert.doesNotMatch(body.replaceAll(`${retry} tuist generate`, ''), /tuist generate/, `${id}: every generate retries`);
     assert.equal((body.match(/xcodebuild -resolvePackageDependencies/g) || []).length,

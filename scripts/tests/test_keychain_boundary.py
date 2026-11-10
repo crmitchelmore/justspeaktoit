@@ -29,7 +29,7 @@ class KeychainBoundaryTests(unittest.TestCase):
 
     def test_test_redirect_is_scoped_to_ci_test_commands(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
-        for job in ('build-macos', 'core-journey-e2e', 'release-validation'):
+        for job in ('build-macos', 'release-validation'):
             body = re.split(r'\n  [a-z0-9-]+:\n', workflow.split(f'\n  {job}:\n', 1)[1], maxsplit=1)[0]
             self.assertIn('JSTI_TEST_KEYCHAIN_REDIRECT: "1"', body, job)
         release = (ROOT / '.github/workflows/release-mac.yml').read_text()

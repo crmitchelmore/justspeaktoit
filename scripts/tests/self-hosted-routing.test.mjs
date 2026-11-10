@@ -47,12 +47,12 @@ const linuxJobs = {
   'linux-local-runtime.yml': { runtime: 'ubuntu-24.04' },
   'windows.yml': { 'portable-linux': 'ubuntu-22.04' },
 };
-// iOS, keyboard, Release and journey jobs stay hosted so they run in parallel;
+// iOS, keyboard and Release jobs stay hosted so they run in parallel;
 // tiny Linux jobs gain nothing from a warm cache.
 const hostedJobs = {
   'ci.yml': {
-    'core-journey-e2e': 'macos-26-intel', 'release-validation': 'macos-latest',
-    'build-ios-swiftpm': 'macos-latest', 'build-ios-keyboard': 'macos-latest', 'paid-access-worker': 'ubuntu-latest',
+    'release-validation': 'macos-latest', 'build-ios': 'macos-latest',
+    'build-ios-keyboard': 'macos-latest', 'paid-access-worker': 'ubuntu-latest',
   },
   'dependabot-policy-checks.yml': { policy: 'ubuntu-latest' },
   'desktop-icons.yml': { resources: 'ubuntu-24.04' },
@@ -227,7 +227,7 @@ test('warm cache rejects keys and paths that could escape its directory', () => 
 });
 
 test('critical-path gates stay on parallel hosted runners', () => {
-  for (const [file, id] of [['ci.yml', 'release-paths'], ['ci.yml', 'required-macos'], ['codeql.yml', 'changes']]) {
+  for (const [file, id] of [['ci.yml', 'release-paths'], ['ci.yml', 'required-macos']]) {
     assert.match(jobs(workflows[file])[id], /^    runs-on: ubuntu-latest$/m, `${file}:${id}`);
   }
 });

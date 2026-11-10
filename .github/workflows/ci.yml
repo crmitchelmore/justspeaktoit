@@ -22,14 +22,18 @@ jobs:
     # The aggregate required-macos job owns the required branch-protection name.
     name: Build & Test (macOS Debug)
     needs: release-paths
-    # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
-    if: needs.release-paths.outputs.apple == 'true'
-    # Owner-authored same-repository sources use the native MacBook, whose
-    # persistent warm .build keeps this critical-path build incremental and
-    # skips the 30-75 minute hosted macOS queue (Docs/native-runner-pool.md).
-    # Every selected native runner must also admit the job locally.
+    # Pull requests that change no Apple-built Swift source, test, resource or
+    # build input (Android, Linux/Windows-only code, docs, site, workers) skip
+    # it; a skipped job still satisfies a required check.
+    if: needs.release-paths.outputs.apple-swift == 'true'
+    # Owner-authored same-repository sources use the dedicated MacBook pool,
+    # whose persistent warm .build keeps this critical-path build incremental
+    # and skips the 30-75 minute hosted macOS queue (Docs/native-runner-pool.md).
+    # Every selected native runner must also admit the job locally. It also
+    # runs the Core Dictation Journey gate against its own warm coverage build
+    # instead of a second macOS job restoring the same cache.
     runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).
     env:
@@ -295,11 +299,37 @@ jobs:
       # running both configurations serially in one job doubled its wall time.
       # release-mac.yml re-runs them post-tag as defence in depth.
 
+      # Core Dictation Journey (≤8m tests). Formerly a separate macOS job that
+      # restored this job's cache and rebuilt the same coverage graph; here its
+      # build phase only verifies the products Test (Debug) already compiled.
+      # Cold compile keeps its own finite 900s command budget so the journey
+      # runtime keeps its original 480s budget, independent of build time.
+      - name: Build core journey test products
+        id: journey_build
+        timeout-minutes: 17
+        run: scripts/run-core-journey-e2e.sh --phase build
+
+      - name: Run prepared core journey gate
+        timeout-minutes: 10
+        run: python3 scripts/with-test-keychain.py bash scripts/run-core-journey-e2e.sh --phase test
+
+      - name: Upload core journey stage diagnostics
+        if: always() && steps.journey_build.outcome != 'skipped'
+        timeout-minutes: 3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: core-journey-e2e-${{ github.run_attempt }}
+          path: .artifacts/core-journey-e2e
+          if-no-files-found: error
+
       - name: Build SpeakCore (App Store flavour)
         # SpeakCore has no package dependencies, so this cheaply compiles the
         # `#if APP_STORE` branches that only the Mac App Store build exercises.
         # Runs after the test steps because the extra -Xswiftc flag invalidates
-        # the shared debug build cache for the targets it rebuilds.
+        # the shared debug build cache for the targets it rebuilds. Main only:
+        # it has never failed a pull request, and release-mac.yml builds the
+        # App Store flavour again before any release.
+        if: github.event_name == 'push'
         run: swift build --disable-dependency-cache -Xswiftc -DAPP_STORE --target SpeakCore
 
       - name: Report Coverage
@@ -318,31 +348,28 @@ jobs:
             fi
           fi
 
-  # Pre-merge Release-configuration gate (#694). A Release-only compile,
-  # optimisation, or test failure must fail the PR that introduces it — the
-  # post-tag run in release-mac.yml is defence in depth, not the first gate.
-  # Cost controls for 10x-billed macOS runners:
-  # - a cheap ubuntu job skips the macOS leg for docs-only changes (a skipped
-  #   job still satisfies a required check, so the gate can be marked required)
-  # - the workflow-level concurrency group cancels superseded runs
-  # - a release-specific .build cache avoids cold dependency builds
-  # - path filtering on pull_request skips the expensive legs for changes that
-  #   cannot affect them.
+  # Path selection for the pull-request fast tier.
+  # Cost controls for 10x-billed, concurrency-capped macOS runners:
+  # - this cheap ubuntu job decides which macOS legs a pull request needs (a
+  #   skipped job still satisfies a required check, so gates stay required)
+  # - the workflow-level concurrency group cancels superseded PR runs
+  # - heavy legs that have never caught a regression the always-on legs missed
+  #   (Release configuration, launched-app fixture UI, keyboard/watch device
+  #   builds) run on PRs only when their own inputs change, and always on main
   #
-  # On push to main the filter is skipped and every output is 'true', so the
-  # release, core-journey and fixture-UI gates actually run on main. They used
-  # to be skipped there (the whole job was `if: pull_request`), which meant a
-  # merge queue collision, a direct push, or a merge whose result differs from
-  # the PR head reached the release tag ungated (the superseded-run cancellation
-  # in the concurrency group above can also cancel a PR's last run).
+  # On push to main the filter is skipped and every output is 'true', so every
+  # gate runs there. Release-configuration failures must still fail before a tag
+  # (#694): release-mac.yml re-runs them post-tag as defence in depth.
   release-paths:
     name: Detect Release-Relevant Changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      package: ${{ steps.select.outputs.package }}
-      core-journey: ${{ steps.select.outputs.core-journey }}
       apple: ${{ steps.select.outputs.apple }}
+      apple-swift: ${{ steps.select.outputs.apple-swift }}
+      release: ${{ steps.select.outputs.release }}
+      fixture-ui: ${{ steps.select.outputs.fixture-ui }}
+      keyboard: ${{ steps.select.outputs.keyboard }}
     steps:
       - name: Filter changed paths
         # No checkout needed: on pull_request events the action lists changed
@@ -353,35 +380,50 @@ jobs:
         id: filter
         with:
           filters: |
-            package:
+            release:
               - 'Package.swift'
               - 'Package.resolved'
-              - 'Sources/**'
-              - 'Tests/**'
               - 'Config/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup-apple-toolchain/**'
-            core-journey:
+            fixture-ui:
               - 'Project.swift'
+              - 'Tuist.swift'
+              - 'Workspace.swift'
               - 'Package.swift'
               - 'Package.resolved'
-              - 'Sources/SpeakApp/**'
-              - 'Sources/SpeakCore/**'
               - 'Sources/SpeakHotKeys/**'
               - 'Tests/Fixtures/CoreJourneyTargetApp/**'
               - 'Tests/SpeakAppUITests/**'
-              - 'Tests/SpeakAppTests/**'
-              - 'Tests/SpeakCoreTests/**'
-              - 'Tests/SpeakHotKeysTests/**'
-              - 'scripts/run-core-journey-e2e.sh'
-              - 'scripts/run-core-journey-e2e.py'
               - 'scripts/run-core-journey-stages.py'
               - 'scripts/verify-core-journey-ui.py'
-              - 'scripts/tests/test_core_journey_gate.py'
               - 'scripts/tests/test_core_journey_stages.py'
               - 'scripts/tests/verify-ci-gates.test.mjs'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup-apple-toolchain/**'
+            keyboard:
+              - 'Project.swift'
+              - 'Tuist.swift'
+              - 'Workspace.swift'
+              - 'Package.swift'
+              - 'Package.resolved'
+              - 'Config/**'
+              - 'JustSpeakKeyboard/**'
+              - 'JustSpeakShare/**'
+              - 'JustSpeakToItWidgetExtension/**'
+              - 'JustSpeakWatch/**'
+              - 'JustSpeakWatchShared/**'
+              - 'JustSpeakWatchWidget/**'
+              - 'SpeakiOSApp/**'
+              - 'Sources/SpeakiOS/**'
+              - 'Sources/SpeakWatchCore/**'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/setup-apple-toolchain/**'
+            # Repository files that Apple Swift tests read although their
+            # directories are otherwise excluded from apple-swift below.
+            apple-swift-reads:
+              - 'Docs/analytics-plan.md'
+              - 'landing-page/_redirects'
 
       # True when any changed file lies outside the native Android app, whose
       # own workflow (android.yml) builds and tests it. A file matches only if
@@ -399,77 +441,79 @@ jobs:
               - '!.github/workflows/android.yml'
               - '!Docs/android-*.md'
 
+      # True when any changed file can reach the macOS/iOS Swift build or
+      # tests. Excluded: paths the Apple package graph never compiles or reads
+      # (Package.swift builds the portable, Linux and Windows targets only for
+      # those platforms) and workflows/scripts for other platforms. Lint keeps
+      # the broader apple gate because its tooling tests read all of these.
+      - name: Filter Apple Swift paths
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: swift
+        with:
+          predicate-quantifier: every
+          filters: |
+            apple-swift:
+              - '**'
+              - '!android/**'
+              - '!Docs/**'
+              - '!*.md'
+              - '!landing-page/**'
+              - '!workers/**'
+              - '!packaging/**'
+              - '!Sources/SpeakLinux*/**'
+              - '!Sources/CLinux*/**'
+              - '!Sources/SpeakWindows*/**'
+              - '!Sources/CWindows*/**'
+              - '!Sources/SpeakDesktopHost/**'
+              - '!Sources/SpeakDesktopSync/**'
+              - '!Tests/SpeakLinux*/**'
+              - '!Tests/SpeakWindows*/**'
+              - '!Tests/SpeakDesktopHostTests/**'
+              - '!Tests/SpeakDesktopSyncTests/**'
+              - '!Tests/SpeakPortableTests/**'
+              - '!scripts/linux*'
+              - '!scripts/linux*/**'
+              - '!scripts/windows*'
+              - '!scripts/windows*/**'
+              - '!.github/workflows/android.yml'
+              - '!.github/workflows/linux*.yml'
+              - '!.github/workflows/windows*.yml'
+              - '!.github/workflows/desktop-icons.yml'
+              - '!.github/workflows/deploy-landing-page.yml'
+              - '!.github/workflows/site-media.yml'
+
       - name: Select gate outputs
         id: select
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PACKAGE: ${{ steps.filter.outputs.package }}
-          CORE_JOURNEY: ${{ steps.filter.outputs.core-journey }}
           APPLE: ${{ steps.apple.outputs.apple }}
+          APPLE_SWIFT: ${{ steps.swift.outputs.apple-swift }}
+          APPLE_SWIFT_READS: ${{ steps.filter.outputs.apple-swift-reads }}
+          RELEASE: ${{ steps.filter.outputs.release }}
+          FIXTURE_UI: ${{ steps.filter.outputs.fixture-ui }}
+          KEYBOARD: ${{ steps.filter.outputs.keyboard }}
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
+            swift=false
+            if [ "$APPLE_SWIFT" = "true" ] || [ "$APPLE_SWIFT_READS" = "true" ]; then swift=true; fi
             {
-              echo "package=$PACKAGE"
-              echo "core-journey=$CORE_JOURNEY"
               echo "apple=$APPLE"
+              echo "apple-swift=$swift"
+              echo "release=$RELEASE"
+              echo "fixture-ui=$FIXTURE_UI"
+              echo "keyboard=$KEYBOARD"
             } >> "$GITHUB_OUTPUT"
           else
             # Push to main: no changed-file filtering, run every gate.
             {
-              echo "package=true"
-              echo "core-journey=true"
+              echo "apple-swift=true"
+              echo "release=true"
+              echo "fixture-ui=true"
+              echo "keyboard=true"
               echo "apple=true"
             } >> "$GITHUB_OUTPUT"
           fi
-
-  core-journey-e2e:
-    name: Core Dictation Journey (≤8m tests)
-    # Hosted Intel, matching build-macos so its arch-scoped cache restores.
-    runs-on: macos-26-intel
-    timeout-minutes: 40
-    # Compiles the native-CI Keychain redirect into these test builds only;
-    # distribution builds never set it (#1360).
-    env:
-      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
-    needs: release-paths
-    if: needs.release-paths.outputs.core-journey == 'true'
-    steps:
-      - uses: actions/checkout@v7.0.1
-        timeout-minutes: 2
-
-      # Debug CI populates the shared cache. This gate only restores; uploading
-      # gigabytes afterwards would only lengthen it. The hosted runner matches
-      # build-macos's (macos-26-intel) because the key is architecture-scoped.
-      # Both Swift stage commands retain Debug's coverage instrumentation;
-      # plain build flags would invalidate the restored compilation graph.
-      # Hosted restores of the multi-gigabyte cache have exceeded 3 minutes.
-      - name: Restore Swift packages
-        timeout-minutes: 5
-        uses: actions/cache/restore@v6
-        with:
-          path: .build
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-${{ hashFiles('Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
-
-      # Cold compile has its own finite 900s command budget so the journey
-      # runtime keeps its original 480s budget, independent of build time.
-      - name: Build core journey test products
-        timeout-minutes: 17
-        run: scripts/run-core-journey-e2e.sh --phase build
-
-      - name: Run prepared core journey gate
-        timeout-minutes: 10
-        run: python3 scripts/with-test-keychain.py bash scripts/run-core-journey-e2e.sh --phase test
-
-      - name: Upload stage diagnostics
-        if: always()
-        timeout-minutes: 3
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: core-journey-e2e-${{ github.run_attempt }}
-          path: .artifacts/core-journey-e2e
-          if-no-files-found: error
 
   core-journey-fixture-ui:
     name: Core Journey Fixture UI (${{ matrix.shard }})
@@ -491,7 +535,9 @@ jobs:
     # Setup's retried package resolution may take 11 minutes; tests keep 12.
     timeout-minutes: 47
     needs: release-paths
-    if: needs.release-paths.outputs.core-journey == 'true'
+    # Pull requests run it only when the fixture, UI tests, hotkeys or project
+    # inputs change: 0 product regressions in 135 runs (11 infra, 1 timeout).
+    if: needs.release-paths.outputs.fixture-ui == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
         timeout-minutes: 2
@@ -530,7 +576,9 @@ jobs:
     env:
       JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     needs: release-paths
-    if: needs.release-paths.outputs.package == 'true'
+    # Pull requests run it only for package/configuration changes: it never
+    # caught a failure that Debug or main did not (4 timing flakes in ~215 runs).
+    if: needs.release-paths.outputs.release == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -550,42 +598,35 @@ jobs:
       - name: Test (Release)
         run: python3 scripts/with-test-keychain.py swift test -c release
 
-  build-ios-swiftpm:
-    name: Build iOS Library (SwiftPM)
-    needs: release-paths
-    # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
-    if: needs.release-paths.outputs.apple == 'true'
+  build-ios:
+    name: Build iOS Library
+    # Builds and tests the iOS app in one job: the former separate products job
+    # cost a second queued macOS slot plus an artifact round trip. Simulator and
+    # UI execution remain on hosted ARM; native Macs are not configured for
+    # unattended UI automation and Intel execution was unstable.
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    needs: release-paths
+    if: needs.release-paths.outputs.apple-swift == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
-      # release assets, which intermittently return 5xx; resolve with retries first.
-      - name: Resolve Swift packages
-        run: scripts/retry-network.sh swift package resolve --disable-dependency-cache
-      - name: Build iOS Library
-        run: swift build --disable-dependency-cache --target SpeakiOSLib
 
-  build-ios-test-products:
-    name: Build iOS XCTest Products
-    needs: release-paths
-    # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
-    if: needs.release-paths.outputs.apple == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 30
-    outputs:
-      artifact-id: ${{ steps.products.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
       - name: Set up Apple toolchain
         uses: ./.github/actions/setup-apple-toolchain
         with:
           install-tuist: "true"
-      - name: Build complete simulator test products without booting a simulator
+
+      - name: Create owned iOS Simulator matching the selected configuration
+        run: |
+          python3 scripts/owned-ios-ci-simulator.py create \
+            --receipt "$RUNNER_TEMP/owned-ios-simulator.json" --github-env "$GITHUB_ENV" \
+            --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
+
+      # Compile only for the owned simulator's architecture; the old
+      # cross-runner artifact needed both arm64 and x86_64 slices.
+      - name: Build simulator test products
         run: |
           set -o pipefail
           TUIST_IOS_KEYBOARD=1 scripts/retry-network.sh tuist generate --no-open
@@ -594,63 +635,12 @@ jobs:
           xcodebuild build-for-testing \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakiOS \
-            -destination "generic/platform=iOS Simulator" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -only-testing:SpeakiOSTests \
             -only-testing:SpeakiOSUITests \
-            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
             -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" \
             -skipPackagePluginValidation \
             2>&1 | tee "$RUNNER_TEMP/ios-build-tests.log" | tail -50
-          python3 scripts/ios-test-products.py pack \
-            "$RUNNER_TEMP/SpeakiOS.xctestproducts" "$RUNNER_TEMP/ios-test-products.tar.gz"
-      - name: Upload immutable test products
-        id: products
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ios-test-products-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-test-products.tar.gz
-          retention-days: 7
-          if-no-files-found: error
-      - name: Upload simulator compilation log
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ios-build-tests-log-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-build-tests.log
-          retention-days: 7
-          if-no-files-found: error
-
-  build-ios:
-    name: Build iOS Library
-    # Simulator and UI execution remain on hosted ARM; native Macs are not
-    # configured for unattended UI automation and Intel execution was unstable.
-    runs-on: macos-latest
-    timeout-minutes: 30
-    needs: [release-paths, build-ios-test-products]
-    if: needs.release-paths.outputs.apple == 'true'
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Download exact-source test products
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ needs.build-ios-test-products.outputs.artifact-id }}
-          path: ${{ runner.temp }}/ios-test-products-download
-          merge-multiple: true
-
-      - name: Verify and restore iOS test products
-        run: |
-          python3 scripts/ios-test-products.py unpack \
-            "$RUNNER_TEMP/ios-test-products-download/ios-test-products.tar.gz" \
-            "$RUNNER_TEMP/ios-test-products"
-
-      - name: Create owned iOS Simulator matching the selected configuration
-        run: |
-          python3 scripts/owned-ios-ci-simulator.py create \
-            --receipt "$RUNNER_TEMP/owned-ios-simulator.json" --github-env "$GITHUB_ENV" \
-            --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
 
       - name: Prepare iOS Simulator
         run: python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
@@ -664,7 +654,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild test-without-building \
-            -testProductsPath "$RUNNER_TEMP/ios-test-products/SpeakiOS.xctestproducts" \
+            -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -only-testing:SpeakiOSTests \
             -only-testing:SpeakiOSUITests \
@@ -744,14 +734,16 @@ jobs:
           name: ios-tests-log-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/ios-tests.log
+            ${{ runner.temp }}/ios-build-tests.log
             ${{ runner.temp }}/owned-ios-simulator.json
           retention-days: 7
-          if-no-files-found: error
+          if-no-files-found: warn
 
   build-ios-keyboard:
     needs: release-paths
-    # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
-    if: needs.release-paths.outputs.apple == 'true'
+    # Pull requests run it only when extension, watch, iOS app or project inputs
+    # change (0 product failures in 216 runs; 14 infra). Always runs on main.
+    if: needs.release-paths.outputs.keyboard == 'true'
     # Renamed from "Build iOS Keyboard (direct capture)" (issue #991). It is
     # not a required status check, so the rename costs nothing, and the old
     # name had become misleading: the job now builds the *shipping* hand-off
@@ -920,7 +912,7 @@ jobs:
     runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 30
     needs: release-paths
-    if: github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'true'
+    if: github.event_name == 'pull_request' && needs.release-paths.outputs.apple-swift == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -962,13 +954,10 @@ jobs:
     needs:
       - build-macos
       - build-ios
-      - build-ios-swiftpm
-      - build-ios-test-products
       - build-ios-keyboard
       - lint
       - release-paths
       - release-validation
-      - core-journey-e2e
       - core-journey-fixture-ui
       - api-compatibility
     # Evaluate GitHub's job results directly. This aggregate never checks out
@@ -980,37 +969,30 @@ jobs:
           always() && (
             needs.release-paths.result != 'success' ||
             (needs.release-paths.outputs.apple != 'true' && needs.release-paths.outputs.apple != 'false') ||
-            (needs.release-paths.outputs.package != 'true' && needs.release-paths.outputs.package != 'false') ||
-            (needs.release-paths.outputs.core-journey != 'true' && needs.release-paths.outputs.core-journey != 'false') ||
+            (needs.release-paths.outputs.apple-swift != 'true' && needs.release-paths.outputs.apple-swift != 'false') ||
+            (needs.release-paths.outputs.release != 'true' && needs.release-paths.outputs.release != 'false') ||
+            (needs.release-paths.outputs.fixture-ui != 'true' && needs.release-paths.outputs.fixture-ui != 'false') ||
+            (needs.release-paths.outputs.keyboard != 'true' && needs.release-paths.outputs.keyboard != 'false') ||
             (needs.build-macos.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
+              github.event_name == 'pull_request' && needs.release-paths.outputs.apple-swift == 'false' &&
               needs.build-macos.result == 'skipped')) ||
             (needs.build-ios.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
+              github.event_name == 'pull_request' && needs.release-paths.outputs.apple-swift == 'false' &&
               needs.build-ios.result == 'skipped')) ||
-            (needs.build-ios-swiftpm.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
-              needs.build-ios-swiftpm.result == 'skipped')) ||
-            (needs.build-ios-test-products.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
-              needs.build-ios-test-products.result == 'skipped')) ||
-            (needs.build-ios-keyboard.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
-              needs.build-ios-keyboard.result == 'skipped')) ||
             (needs.lint.result != 'success' && !(
               github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
               needs.lint.result == 'skipped')) ||
+            (needs.build-ios-keyboard.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.keyboard == 'false' &&
+              needs.build-ios-keyboard.result == 'skipped')) ||
             (needs.release-validation.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.package == 'false' &&
+              github.event_name == 'pull_request' && needs.release-paths.outputs.release == 'false' &&
               needs.release-validation.result == 'skipped')) ||
-            (needs.core-journey-e2e.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.core-journey == 'false' &&
-              needs.core-journey-e2e.result == 'skipped')) ||
             (needs.core-journey-fixture-ui.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.core-journey == 'false' &&
+              github.event_name == 'pull_request' && needs.release-paths.outputs.fixture-ui == 'false' &&
               needs.core-journey-fixture-ui.result == 'skipped')) ||
             (needs.api-compatibility.result != 'success' && !(
-              (github.event_name != 'pull_request' || needs.release-paths.outputs.apple == 'false') &&
+              (github.event_name != 'pull_request' || needs.release-paths.outputs.apple-swift == 'false') &&
               needs.api-compatibility.result == 'skipped'))
           )
         env:

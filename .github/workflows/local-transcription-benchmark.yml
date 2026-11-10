@@ -13,16 +13,14 @@ on:
       - "Package.resolved"
       - "Sources/SpeakCore/**"
       - "scripts/verify-checksums.sh"
+  # Pull requests run it only when the benchmark package itself changes:
+  # SpeakCore/package changes never broke it in 179 PR runs (6 failures, all
+  # infrastructure). Main still builds it after every relevant merge.
   pull_request:
     branches: [main]
     paths:
       - ".github/workflows/local-transcription-benchmark.yml"
       - "Benchmarks/LocalTranscription/**"
-      - "Docs/TRANSCRIBE_CPP_ASSESSMENT.md"
-      - "Makefile"
-      - "Package.swift"
-      - "Package.resolved"
-      - "Sources/SpeakCore/**"
       - "scripts/verify-checksums.sh"
 
 permissions:

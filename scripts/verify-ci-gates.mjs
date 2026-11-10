@@ -13,12 +13,14 @@ export function assessCIGates(needs, event) {
   requireSuccess('release-paths');
   const outputs = needs['release-paths']?.outputs ?? {};
   for (const [flag, ids] of [
-    // Apple jobs skip only for pull requests that change nothing outside the Android app.
-    ['apple', [
-      'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
-    ]],
-    ['package', ['release-validation']],
-    ['core-journey', ['core-journey-e2e', 'core-journey-fixture-ui']],
+    // Lint skips only for pull requests that change nothing outside the Android app.
+    ['apple', ['lint']],
+    // Swift build/test gates also skip for docs, site and Linux/Windows-only changes.
+    ['apple-swift', ['build-macos', 'build-ios']],
+    // Fast-tier pull requests run these heavy legs only when their inputs change.
+    ['release', ['release-validation']],
+    ['fixture-ui', ['core-journey-fixture-ui']],
+    ['keyboard', ['build-ios-keyboard']],
   ]) {
     if (!['true', 'false'].includes(outputs[flag])) {
       errors.push(`release-paths: missing or invalid ${flag} output`);
@@ -29,7 +31,7 @@ export function assessCIGates(needs, event) {
       if (required || needs[id]?.result !== 'skipped') requireSuccess(id);
     }
   }
-  const apiSkipAllowed = event !== 'pull_request' || outputs.apple === 'false';
+  const apiSkipAllowed = event !== 'pull_request' || outputs['apple-swift'] === 'false';
   if (!apiSkipAllowed || needs['api-compatibility']?.result !== 'skipped') {
     requireSuccess('api-compatibility');
   }

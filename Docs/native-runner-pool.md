@@ -2,7 +2,7 @@
 
 Hosted macOS concurrency is the CI bottleneck: Mac jobs routinely queued 30–75 minutes for a runner. Two owner machines are dedicated CI hosts: an Intel MacBook Pro (i9-8950HK, 32 GB) and the Omarchy Linux laptop (8 cores, 15 GB). Each runs two runners. Their CPUs are no faster than hosted runners, so a cold build there gains nothing. They win by having no queue and by keeping each job's build directory warm between runs, so SwiftPM and CMake builds are incremental.
 
-CI therefore uses hybrid routing. The Debug critical path and cache-friendly build jobs use the dedicated pools. iOS, keyboard, Release, Fixture UI and Core Journey stay on hosted macOS so they run in parallel:
+CI therefore uses hybrid routing. The Debug critical path and cache-friendly build jobs use the dedicated pools. iOS, keyboard, Release and Fixture UI stay on hosted macOS so they run in parallel:
 
 | Job | Pool | Hosted fallback |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ CI therefore uses hybrid routing. The Debug critical path and cache-friendly bui
 | `linux-local-runtime.yml:runtime` (whisper.cpp, called by `linux.yml:local-runtime`) | Omarchy | `ubuntu-24.04` |
 | `windows.yml:portable-linux` | Omarchy | `ubuntu-22.04` |
 
-Every other job uses a plain hosted label: Core Dictation Journey on `macos-26-intel`, and Release, the iOS jobs, Fixture UI on `macos-latest`. Tiny Linux jobs (Paid Access Worker, Dependabot policy, desktop icons) stay on hosted Ubuntu because they have nothing to cache. `scripts/tests/self-hosted-routing.test.mjs` pins both pool sets exactly. Add a job to a pool only after updating that machine's admission hook.
+Every other job uses a plain hosted label: Release, Build iOS Library (simulator build-for-testing plus tests in one job), the keyboard and Fixture UI on `macos-latest`. Debug also runs the Core Dictation Journey gate on its own warm build products. On pull requests, Release, keyboard and Fixture UI run only when their paths change, and every Swift gate except Lint is skipped for changes that cannot affect the Apple Swift build (docs, site, Linux/Windows/Android-only sources); `main` pushes run everything. Tiny Linux jobs (Paid Access Worker, Dependabot policy, desktop icons) stay on hosted Ubuntu because they have nothing to cache. `scripts/tests/self-hosted-routing.test.mjs` pins both pool sets exactly. Add a job to a pool only after updating that machine's admission hook.
 
 A pool job routes natively only when the actor and triggering actor are `crmitchelmore` or `bravostation`, and either the event is a push to `main` or it is a same-repository `pull_request` authored by one of them. Bot-authored pull requests (Devin, Copilot, Dependabot), owner pushes to them, forks and every other event keep GitHub-hosted routing. Set the repository variable `JSTI_LOCAL_RUNNERS` to `off` to return every job to hosted runners.
 

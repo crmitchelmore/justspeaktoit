@@ -1,47 +1,31 @@
 name: "CodeQL"
 
+# The Swift scan holds a hosted macOS slot for ~30-40 minutes. It is not a
+# required check and its pull-request runs never failed on a finding (94 runs:
+# 12 setup failures, 33 cancelled), so it scans main after merge, weekly, and
+# on demand instead of competing with the pull-request CI tier.
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+    paths:
+      - 'Sources/**'
+      - 'Package.swift'
+      - 'Package.resolved'
+      - 'Resources/**'
+      - '.github/workflows/codeql.yml'
+      - '.github/actions/setup-apple-toolchain/**'
   schedule:
     - cron: '30 5 * * 1' # Weekly on Monday at 5:30 UTC
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only cancel superseded PR runs; keep main/scheduled analyses intact.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Superseded main scans are redundant: the newest commit is scanned in full.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
-  changes:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pull-requests: read
-    outputs:
-      swift: ${{ steps.paths.outputs.swift }}
-    steps:
-      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        id: paths
-        with:
-          filters: |
-            swift:
-              - 'Sources/**'
-              - 'Package.swift'
-              - 'Package.resolved'
-              - 'Resources/**'
-              - '.github/workflows/codeql.yml'
-              - '.github/actions/setup-apple-toolchain/**'
   analyze:
     name: Analyze
-    needs: changes
-    # A skipped job still reports a check; event-level path filters can leave
-    # required checks pending. Unknown/failed path detection runs the scan.
-    if: >-
-      always() && (github.event_name != 'pull_request' ||
-      needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
     runs-on: macos-15
     # CodeQL tracing slows the Swift build, so this gets more headroom than
     # the plain CI build jobs.

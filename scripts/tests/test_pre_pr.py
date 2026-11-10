@@ -43,6 +43,24 @@ class PlanTests(unittest.TestCase):
         self.assertIn('ci-lint', selected)
         self.assertNotIn('portable-linux', selected)
 
+    def test_android_runs_remotely_without_a_working_jdk_and_feed(self):
+        with mock.patch.dict(pre_pr.os.environ, {'JSTI_ANDROID_LOCAL': '0'}):
+            checks, _ = pre_pr.plan(['android/app/build.gradle.kts'], False)
+        android = {c.id: c for c in checks}['android']
+        self.assertTrue(android.background)
+        self.assertEqual(android.command[:4], ['python3', 'scripts/linux-precheck', '--job', 'android'])
+        self.assertFalse(android.advisory or android.skip_reason or android.requires)
+        with mock.patch.dict(pre_pr.os.environ, {'JSTI_ANDROID_LOCAL': '1'}):
+            checks, _ = pre_pr.plan(['android/app/build.gradle.kts'], False)
+        self.assertEqual({c.id: c for c in checks}['android'].command, ['bash', 'scripts/ci-android.sh'])
+
+    def test_macos_java_stub_is_not_a_jdk(self):
+        failing = mock.Mock(returncode=1)
+        with mock.patch.dict(pre_pr.os.environ, {'JSTI_MAVEN_MIRROR': 'https://feed'}), \
+                mock.patch.object(pre_pr.subprocess, 'run', return_value=failing):
+            pre_pr.os.environ.pop('JSTI_ANDROID_LOCAL', None)
+            self.assertFalse(pre_pr.android_runs_locally())
+
     def test_android_worker_and_landing_are_independent_areas(self):
         selected, areas, _ = ids(['android/app/build.gradle.kts', 'workers/paid-access/src/index.ts',
                                   'landing-page/index.html'])
@@ -147,6 +165,17 @@ class CIParityTests(unittest.TestCase):
 
     def test_macos_skip_targets_match_ci(self):
         self.assertEqual(set(re.findall(r'--skip-target (\w+)', self.ci)), pre_pr.CI_MACOS_SKIP_TARGETS)
+
+    def test_android_paths_and_command_match_android_yml(self):
+        android = (ROOT / '.github' / 'workflows' / 'android.yml').read_text(encoding='utf-8')
+        block = android.split('  pull_request:\n', 1)[1].split('\npermissions:', 1)[0]
+        paths = [line.strip()[2:] for line in block.splitlines() if line.strip().startswith('- ')]
+        self.assertEqual(sorted(map(self.glob, paths)), sorted(pre_pr.CI_ANDROID))
+        self.assertIn('run: ../scripts/ci-android.sh', android)
+        precheck = (ROOT / '.github' / 'workflows' / 'precheck.yml').read_text(encoding='utf-8')
+        self.assertIn('run: scripts/ci-android.sh', precheck)
+        for action in re.findall(r'uses: (actions/setup-java@\S+|gradle/actions/setup-gradle@\S+)', android):
+            self.assertIn(action, precheck)
 
     def test_linux_image_is_the_ci_image(self):
         image = re.search(r'image: (swift:[^\s]+)', self.ci.split('Portable Swift (Linux)', 1)[1]).group(1)

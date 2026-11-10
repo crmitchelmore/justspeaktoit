@@ -62,6 +62,11 @@ CI_SWIFT = ['Package.swift', 'Package.resolved', 'Makefile', 'Sources/*', 'Tests
             'scripts/with-test-keychain.py', 'scripts/private-test-keychain.py',
             'scripts/verify-portable-core-boundary.py', 'scripts/collect-macos-*.py',
             'scripts/prepare-mac-cli-symbols.sh', 'scripts/tests/brand-assets.test.mjs']
+# android.yml's pull_request paths: the parity tests read these shared Swift definitions.
+CI_ANDROID = ['android/*', '.github/workflows/android.yml', 'Sources/SpeakCore/TranscriptCleanupPolicy.swift',
+              'Sources/SpeakCore/ModelCatalog.swift', 'Sources/SpeakCore/ModelRetirements.swift',
+              'Sources/SpeakCore/ProviderCredentialCatalogue.swift',
+              'Sources/SpeakCore/OpenAITranscriptionModels.swift']
 # Test targets the macOS job leaves to Portable Swift (Linux), as ci.yml passes them to affected-swift-tests.py.
 CI_MACOS_SKIP_TARGETS = {'SpeakDesktopTests', 'SpeakAutomationKitTests'}
 WINDOWS_PATTERNS = ['Sources/SpeakWindows*', 'Sources/CWindows*', 'Tests/SpeakWindows*',
@@ -291,6 +296,19 @@ def test_title(selection: Selection, kind: str = 'Swift') -> str:
     return f'{kind} unit tests ({targets})'
 
 
+def android_runs_locally() -> bool:
+    """A JDK that actually runs (macOS ships a /usr/bin/java stub) and an approved Maven feed."""
+    if os.environ.get('JSTI_ANDROID_LOCAL') in ('0', '1'):
+        return os.environ['JSTI_ANDROID_LOCAL'] == '1'
+    try:
+        jdk = subprocess.run(['java', '-version'], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        jdk = False
+    feed = bool(os.environ.get('JSTI_MAVEN_MIRROR')) or 'jsti.mavenMirror=' in read(
+        Path.home() / '.gradle' / 'gradle.properties')
+    return jdk and feed
+
+
 def ci_selects_apple(files: list[str]) -> bool:
     """ci.yml's `apple` output: some changed file lies outside docs, the website, Android and Workers."""
     return any(not matches(f, CI_NOT_APPLE) for f in files)
@@ -331,7 +349,7 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
     windows = area('windows', WINDOWS_PATTERNS)
     workflows = area('workflows', WORKFLOW_PATTERNS)
     shell = area('shell', SHELL_PATTERNS)
-    android = area('android', ['android/*', '.github/workflows/android.yml'])
+    android = area('android', CI_ANDROID)
     worker = area('paid-access-worker', ['workers/paid-access/*'])
     landing = area('landing-page', ['landing-page/*'])
 
@@ -408,9 +426,16 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
                             ['shellcheck', '-S', 'warning', *shell_files],
                             requires='shellcheck', advisory=True))
     if android:
-        checks.append(Check('android', 'android', 'Android unit tests and lint',
-                            ['./gradlew', '--quiet', 'testDebugUnitTest', 'lintDebug'], cwd=ROOT / 'android',
-                            requires='java'))
+        # The Android CI job's script. Locally only with a working JDK and an approved feed
+        # (android/settings.gradle.kts refuses public registries off GitHub-hosted runners);
+        # otherwise on a remote precheck/** branch. Never a skip.
+        title = 'Android CI job (scripts/ci-android.sh)'
+        if android_runs_locally():
+            checks.append(Check('android', 'android', title, ['bash', 'scripts/ci-android.sh']))
+        else:
+            checks.append(Check('android', 'android', f'{title}, remote',
+                                ['python3', 'scripts/linux-precheck', '--job', 'android', '--tree', str(ROOT),
+                                 '--base', base], background=True))
     if worker:
         directory = ROOT / 'workers' / 'paid-access'
         checks.append(Check('worker-install', 'paid-access-worker', 'npm ci',

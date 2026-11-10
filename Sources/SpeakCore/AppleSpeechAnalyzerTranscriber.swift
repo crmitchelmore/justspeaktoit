@@ -8,7 +8,7 @@ import Speech
 
 /// The SpeechAnalyzer module a `apple/local/...` analyzer model id maps onto.
 @available(macOS 26.0, iOS 26.0, *)
-public enum AppleSpeechAnalyzerEngine: Sendable, Equatable {
+public enum AppleSpeechAnalyzerEngine: Sendable, Hashable {
     /// `SpeechTranscriber` — Apple's highest-accuracy long-form module;
     /// requires an Apple Intelligence-capable device.
     case speechTranscriber
@@ -101,7 +101,9 @@ struct AppleSpeechAnalyzerModuleResult: Sendable {
 struct AppleSpeechAnalyzerModuleConfiguration: Sendable {
     let engine: AppleSpeechAnalyzerEngine
     let module: AppleSpeechAnalyzerModule
-    let localeIdentifier: String
+    let locale: Locale
+
+    var localeIdentifier: String { locale.identifier }
 }
 
 enum AppleSpeechAnalyzerRouting {
@@ -223,35 +225,48 @@ public enum AppleSpeechAnalyzerTranscriber {
         }
 
         try Task.checkCancellation()
-        let resolvedEngine = AppleSpeechAnalyzerEngine(modelID: route.modelID)
-        switch resolvedEngine {
-        case .speechTranscriber:
-            let transcriber = SpeechTranscriber(
-                locale: route.value,
-                preset: progressive
-                    ? .timeIndexedProgressiveTranscription
-                    : .timeIndexedTranscriptionWithAlternatives
-            )
-            return AppleSpeechAnalyzerModuleConfiguration(
-                engine: resolvedEngine,
-                module: .speech(transcriber),
-                localeIdentifier: route.value.identifier
-            )
+        return makeConfiguration(
+            engine: AppleSpeechAnalyzerEngine(modelID: route.modelID),
+            locale: route.value,
+            progressive: progressive
+        )
+    }
 
+    /// Builds a fresh module for an already-resolved engine and supported locale.
+    /// A module belongs to one analyzer, so each session needs its own.
+    static func makeConfiguration(
+        engine: AppleSpeechAnalyzerEngine,
+        locale: Locale,
+        progressive: Bool
+    ) -> AppleSpeechAnalyzerModuleConfiguration {
+        let module: AppleSpeechAnalyzerModule
+        switch engine {
+        case .speechTranscriber:
+            module = .speech(
+                SpeechTranscriber(locale: locale, preset: speechTranscriberPreset(progressive: progressive))
+            )
         case .dictationTranscriber:
-            // The progressive preset lacks time indexing; add it so segment
-            // ordering and durations match the SpeechTranscriber presets.
-            var preset: DictationTranscriber.Preset = progressive
-                ? .progressiveLongDictation
-                : .timeIndexedLongDictation
-            preset.attributeOptions.insert(.audioTimeRange)
-            let transcriber = DictationTranscriber(locale: route.value, preset: preset)
-            return AppleSpeechAnalyzerModuleConfiguration(
-                engine: resolvedEngine,
-                module: .dictation(transcriber),
-                localeIdentifier: route.value.identifier
+            module = .dictation(
+                DictationTranscriber(locale: locale, preset: dictationTranscriberPreset(progressive: progressive))
             )
         }
+        return AppleSpeechAnalyzerModuleConfiguration(engine: engine, module: module, locale: locale)
+    }
+
+    /// The progressive preset reports volatile results and biases towards fast
+    /// results, so live first words are not held back for accuracy.
+    static func speechTranscriberPreset(progressive: Bool) -> SpeechTranscriber.Preset {
+        progressive ? .timeIndexedProgressiveTranscription : .timeIndexedTranscriptionWithAlternatives
+    }
+
+    static func dictationTranscriberPreset(progressive: Bool) -> DictationTranscriber.Preset {
+        // The progressive preset lacks time indexing; add it so segment
+        // ordering and durations match the SpeechTranscriber presets.
+        var preset: DictationTranscriber.Preset = progressive
+            ? .progressiveLongDictation
+            : .timeIndexedLongDictation
+        preset.attributeOptions.insert(.audioTimeRange)
+        return preset
     }
 
     static func ensureAssets(

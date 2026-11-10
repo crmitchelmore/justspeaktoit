@@ -138,7 +138,8 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
           inputNode.removeTap(onBus: 0)
         }
         for buffer in preRollBuffers { sendAudio(buffer) }
-        try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+        // ~21 ms at 48 kHz, as the legacy Apple Speech path, so the first words are not held for 85 ms.
+        try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
           sendAudio(buffer)
         }
       }

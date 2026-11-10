@@ -244,5 +244,6 @@ private struct ShortcutSettingsCard<Content: View>: View {
         ) {
             content
         }
+        .settingsSearchAnchor(title: title)
     }
 }

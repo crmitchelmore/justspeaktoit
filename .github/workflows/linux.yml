@@ -129,7 +129,7 @@ jobs:
       - name: Record host work-tree owner
         if: runner.environment == 'self-hosted'
         run: stat -c '%u:%g' /__w > "$RUNNER_TEMP/jsti-host-owner"
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -169,7 +169,7 @@ jobs:
 
       # The pinned whisper.cpp runtime, its JFK sample and a cached model
       # folder, so the on-device tests run the real runtime instead of skipping.
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: linux-local-runtime
           path: local-runtime
@@ -177,7 +177,7 @@ jobs:
       # The pinned tiny model is downloaded by the app's own installer on a
       # miss and verified against its SHA-256 on every run.
       - name: Restore pinned local models
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: local-models
           key: local-models-linux-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}

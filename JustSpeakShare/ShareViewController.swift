@@ -169,7 +169,18 @@ final class ShareViewController: UIViewController {
             self.statusLabel.text = message
             self.dismissButton.setTitle(isSuccess ? "Done" : "Close", for: .normal)
             self.dismissButton.isHidden = false
+            UIAccessibility.post(notification: .screenChanged, argument: self.statusLabel)
         }
+    }
+
+    /// VoiceOver's two-finger scrub (and a hardware Escape key) closes the sheet.
+    override func accessibilityPerformEscape() -> Bool {
+        if hasFinished {
+            dismissTapped()
+        } else {
+            cancelTapped()
+        }
+        return true
     }
 
     @objc private func cancelTapped() {
@@ -197,16 +208,25 @@ final class ShareViewController: UIViewController {
         statusLabel.textAlignment = .center
         statusLabel.font = .preferredFont(forTextStyle: .body)
         statusLabel.adjustsFontForContentSizeCategory = true
+        statusLabel.accessibilityIdentifier = "shareImportStatus"
+        statusLabel.accessibilityTraits.insert(.updatesFrequently)
+        spinner.accessibilityLabel = "Copying"
 
         spinner.startAnimating()
 
         dismissButton.setTitle("Done", for: .normal)
         dismissButton.isHidden = true
         dismissButton.addTarget(self, action: #selector(dismissTapped), for: .touchUpInside)
+        dismissButton.accessibilityIdentifier = "shareImportDismiss"
 
         let cancelButton = UIButton(type: .system)
         cancelButton.setTitle("Cancel", for: .normal)
         cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        cancelButton.accessibilityIdentifier = "shareImportCancel"
+        for button in [dismissButton, cancelButton] {
+            button.titleLabel?.font = .preferredFont(forTextStyle: .body)
+            button.titleLabel?.adjustsFontForContentSizeCategory = true
+        }
 
         let stack = UIStackView(arrangedSubviews: [spinner, statusLabel, dismissButton, cancelButton])
         stack.axis = .vertical

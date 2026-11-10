@@ -1,22 +1,22 @@
 WEBVTT
 
-00:00:00.000 --> 00:00:02.533
-Just Speak to It for Linux, in beta. Sample data: fictional History and fixed test text.
+00:00:00.000 --> 00:00:05.900
+Just Speak to It is now on Linux, in beta. Everything here is sample data.
 
-00:00:02.533 --> 00:00:05.533
-A native GTK 4 app with the same dashboard
+00:00:05.900 --> 00:00:09.933
+A native GTK app, with the same dashboard.
 
-00:00:05.533 --> 00:00:08.533
-Start dictation with a global shortcut
+00:00:09.933 --> 00:00:14.200
+Start dictating from any app with a global shortcut.
 
-00:00:08.533 --> 00:00:11.533
-A small overlay shows the words as you speak
+00:00:14.200 --> 00:00:17.433
+A small overlay shows the words as you speak.
 
-00:00:11.533 --> 00:00:14.067
-Stop, and the text is pasted into the original window
+00:00:17.433 --> 00:00:21.533
+Stop, and the text is pasted into the original window.
 
-00:00:14.067 --> 00:00:17.067
-Use on-device whisper.cpp models or your own provider key
+00:00:21.533 --> 00:00:27.133
+Settings cover your microphone, how text is inserted, and more.
 
-00:00:17.067 --> 00:00:19.600
-Linux beta. Download at justspeaktoit.com
+00:00:27.133 --> 00:00:31.267
+Download the Linux beta at justspeaktoit.com.

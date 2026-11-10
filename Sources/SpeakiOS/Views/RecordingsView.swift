@@ -254,6 +254,7 @@ struct RecordingRow: View {
             .accessibilityLabel(
                 isPlaying ? "Stop playback" : "Play recording"
             )
+            .accessibilityIdentifier("recordingPlayButton-\(recording.id)")
 
             if usesInlineDensityLayout {
                 HStack(spacing: 4) {

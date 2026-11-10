@@ -151,3 +151,36 @@ local runtimes:
 
 Existing Distil v3 / v3 Turbo choices are unchanged. Upstream benchmark claims
 are not app measurements. Revisit when Argmax publishes a v3.5 Core ML export.
+
+## Weekly check: 9 November 2026
+
+Rechecked against first-party pages. AssemblyAI, ElevenLabs, OpenAI, Deepgram,
+Groq, Mistral, Azure and OpenRouter (`openai/gpt-audio`, `gpt-audio-mini`) need
+no change.
+
+- **Soniox v6.** [Soniox](https://docs.soniox.com/stt/models) released
+  `stt-rt-v6` and `stt-async-v6` on 3 November and removes v5 on 15 December
+  2026, after which it routes v5 requests to v6 itself. Soniox states v6 is
+  fully API-compatible (only the model name changes), and
+  [pricing](https://soniox.com/pricing) is unchanged. The catalogue now offers
+  v6, and saved v3, v4 and v5 selections move to v6 in their own mode. v5
+  pricing stays for history. Output formatting changes: spoken dictation
+  commands ("period", "new line", "scratch that") come back as words, and
+  prices and alphanumeric codes are written closer to how they were spoken
+  ("15 dollars and 20 cents", no inserted hyphens in codes). The app does not
+  apply spoken commands to transcripts, so these words reach the output (or
+  post-processing, when enabled) as text.
+- **Gemini TTS 3.8 Flash-Lite.** Google shuts down
+  `gemini-3.1-flash-tts-preview` on 17 November 2026 and names
+  [`gemini-3.8-flash-lite-tts`](https://aistudio.google.com/docs/models/gemini-3.8-flash-lite-tts.md)
+  as its replacement. It has the same 30 voices and Interactions request, and
+  covers all 18 explicit app languages. The app sends only single-speaker plain
+  text, which 3.8 reads verbatim. Saved 3.1 selections resolve to Flash-Lite
+  (`GeminiTTSModel.selectableModel(forID:)`); the 3.1 ID still resolves for
+  history and keeps its price. Requests now declare `audio/l16` output. The
+  estimate uses the 2027 list price ($12/M audio tokens, $1/M text tokens),
+  not the introductory price that runs to 31 December 2026.
+
+Carried blockers are unchanged: Distil-Whisper v3.5 still has no published
+WhisperKit/Core ML export; Realtime TTS, local Nemotron 3.5 and Voxtral 3 are
+not live- or device-accepted.

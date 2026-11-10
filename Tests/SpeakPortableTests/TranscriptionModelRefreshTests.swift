@@ -66,15 +66,18 @@ final class TranscriptionModelRefreshTests: XCTestCase {
     }
 
     func testDocumentedSonioxRetirementsMigrateWithoutResettingCustomModels() {
-        for version in [3, 4] {
+        for version in [3, 4, 5] {
             XCTAssertEqual(
                 ModelCatalog.normalizedBatchTranscriptionModel("soniox/stt-async-v\(version)"),
-                "soniox/stt-async-v5"
+                "soniox/stt-async-v6"
             )
             XCTAssertEqual(
                 ModelCatalog.normalizedLiveTranscriptionModel("soniox/stt-rt-v\(version)-streaming"),
-                "soniox/stt-rt-v5-streaming"
+                "soniox/stt-rt-v6-streaming"
             )
+        }
+        for model in ["soniox/stt-rt-v5-streaming", "soniox/stt-rt-v6-streaming"] {
+            XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: model), Decimal(string: "0.12")! / 60)
         }
         XCTAssertEqual(ModelCatalog.normalizedBatchTranscriptionModel("soniox/custom"), "soniox/custom")
         XCTAssertEqual(

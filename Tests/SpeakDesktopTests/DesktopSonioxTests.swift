@@ -32,7 +32,7 @@ final class DesktopSonioxTests: XCTestCase {
             }
             if request.httpMethod == "POST", request.url?.path == "/v1/transcriptions" {
                 let body = try JSONSerialization.jsonObject(with: StubURLProtocol.body(of: request)) as? [String: Any]
-                XCTAssertEqual(body?["model"] as? String, "stt-async-v5")
+                XCTAssertEqual(body?["model"] as? String, "stt-async-v6")
                 XCTAssertEqual(body?["file_id"] as? String, "file-1")
                 XCTAssertEqual(body?["language_hints"] as? [String], ["en"])
                 XCTAssertEqual(body?["enable_speaker_diarization"] as? Bool, true)
@@ -188,7 +188,7 @@ final class DesktopSonioxTests: XCTestCase {
         let multipart = DesktopMultipartFixture()
         defer { multipart.remove() }
         let audio = try fixture()
-        for model in ["soniox/stt-rt-v5-streaming", "soniox/unknown"] {
+        for model in ["soniox/stt-rt-v6-streaming", "soniox/unknown"] {
             XCTAssertNil(DesktopTranscription.provider(for: model))
             do {
                 _ = try await makeClient(multipart).transcribeFile(

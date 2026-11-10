@@ -173,6 +173,7 @@ struct PronunciationDictionaryView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
+                .accessibilityIdentifier("pronunciationClearSearch")
             }
         }
         .padding(density.isCompact ? 5 : 8)
@@ -564,6 +565,7 @@ struct PronunciationEntryFormView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
@@ -671,6 +673,8 @@ struct QuickAddPronunciationView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+                .accessibilityIdentifier("pronunciationQuickAddClose")
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -695,6 +699,7 @@ struct QuickAddPronunciationView: View {
                     dismiss()
                 }
                 .buttonStyle(.bordered)
+                .keyboardShortcut(.cancelAction)
 
                 Spacer()
 
@@ -703,6 +708,7 @@ struct QuickAddPronunciationView: View {
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
                 .disabled(pronunciation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }

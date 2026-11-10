@@ -268,6 +268,8 @@ extension SettingsView {
       }
       .buttonStyle(.plain)
       .foregroundStyle(.blue)
+      .accessibilityLabel("Open \(name) website")
+      .accessibilityIdentifier("aboutDependencyLink-\(name)")
     }
   }
 }

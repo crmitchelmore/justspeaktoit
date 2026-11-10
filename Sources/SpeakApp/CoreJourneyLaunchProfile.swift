@@ -130,6 +130,9 @@ final class CoreJourneyLaunchProfile {
                 preconditionFailure("Could not seed site media History: \(error)")
             }
             settings.showHUDDuringSessions = true
+            if let appearance = CoreJourneySiteMediaFixture.requestedAppearance {
+                settings.appearance = appearance
+            }
         }
     }
 

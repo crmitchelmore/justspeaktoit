@@ -20,7 +20,7 @@ final class DesktopLiveLanguageTests: XCTestCase {
     func testCanonicalHintsAreConservativeAndProjectionRequiresHostForwarding() {
         let supportedIDs = [
             supported, "deepgram/flux-general-multi-streaming", SpeechmaticsRealtime.liveCatalogID,
-            "elevenlabs/scribe-v2-streaming", "soniox/stt-rt-v5-streaming", XAISpeechToText.liveCatalogID,
+            "elevenlabs/scribe-v2-streaming", "soniox/stt-rt-v6-streaming", XAISpeechToText.liveCatalogID,
             "openai/gpt-realtime-whisper-streaming", "openai/gpt-4o-mini-transcribe-streaming",
             "openai/gpt-4o-transcribe-streaming", OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID,
             "gladia/solaria-1-streaming", RevAIStreaming.liveCatalogID

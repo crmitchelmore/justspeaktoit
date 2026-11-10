@@ -9,6 +9,13 @@ enum CoreJourneySiteMediaFixture {
     nonisolated static let environmentKey = "SPEAK_CORE_JOURNEY_SITE_MEDIA"
     nonisolated static let transcript = "Remind me to send the revised launch notes to the team before Friday."
 
+    nonisolated static let appearanceKey = "SPEAK_CORE_JOURNEY_SITE_MEDIA_APPEARANCE"
+
+    /// Light or dark capture for the website's matching video variants; nil keeps the default.
+    nonisolated static var requestedAppearance: AppSettings.Appearance? {
+        ProcessInfo.processInfo.environment[appearanceKey].flatMap(AppSettings.Appearance.init(rawValue:))
+    }
+
     nonisolated static var isRequested: Bool {
         ProcessInfo.processInfo.environment[environmentKey] == "1"
     }

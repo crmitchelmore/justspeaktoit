@@ -127,6 +127,8 @@ struct CompareModelsRoundRow: View {
             }
             .buttonStyle(.borderless)
             .help("Delete this round")
+            .accessibilityLabel("Delete this round")
+            .accessibilityIdentifier("compareModelsDeleteRound-\(round.id)")
         }
     }
 

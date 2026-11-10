@@ -85,7 +85,20 @@ export function rehearsalTag(command = run) {
         command('gh', ['release', 'download', 'alpha-latest', '--repo', repo, '--pattern', 'alpha-pointer.json', '--dir', scratch]);
         const {tag} = json(join(scratch, 'alpha-pointer.json'));
         if (!/^alpha-build-[1-9][0-9]*$/.test(tag ?? '')) throw Error('Invalid Alpha pointer');
-        return tag;
+        // The pointer can name an Alpha whose desktop qualification failed or
+        // has not finished; rehearse the newest published Alpha that has one.
+        const qualified = name => JSON.parse(command('gh', ['release', 'view', name, '--repo', repo, '--json', 'assets']))
+            .assets.some(asset => asset.name === 'desktop-qualification.json');
+        if (qualified(tag)) return tag;
+        const candidates = JSON.parse(command('gh', ['release', 'list', '--repo', repo, '--limit', '40',
+            '--json', 'tagName,isDraft']))
+            .filter(release => !release.isDraft && /^alpha-build-[1-9][0-9]*$/.test(release.tagName))
+            .map(release => release.tagName)
+            .sort((a, b) => Number(b.slice(12)) - Number(a.slice(12)));
+        const fallback = candidates.find(qualified);
+        if (!fallback) throw Error(`No qualified Alpha to rehearse (pointer ${tag} has no desktop-qualification.json)`);
+        console.error(`Alpha pointer ${tag} has no desktop qualification; rehearsing ${fallback}`);
+        return fallback;
     } finally {
         rmSync(scratch, {recursive: true, force: true});
     }

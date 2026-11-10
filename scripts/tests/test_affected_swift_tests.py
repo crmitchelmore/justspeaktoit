@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import unittest
 from pathlib import Path
 
@@ -56,6 +57,60 @@ class SelectionTests(unittest.TestCase):
     def test_skipped_targets_never_run_on_the_pull_request(self):
         self.assertEqual(affected.select(["Tests/SpeakDesktopTests/A.swift"], PACKAGE, {"SpeakDesktopTests"}),
                          ("none", []))
+
+
+class MainTests(unittest.TestCase):
+    def test_an_unresolvable_base_runs_every_test_target(self):
+        import contextlib, io, subprocess
+        from unittest import mock
+
+        def fake_run(command, **kwargs):
+            if command[:2] == ["git", "diff"]:
+                return subprocess.CompletedProcess(command, 128, "", "fatal: no merge base")
+            return subprocess.CompletedProcess(command, 0, json.dumps(PACKAGE), "")
+
+        out = io.StringIO()
+        with mock.patch.object(affected.subprocess, "run", fake_run), \
+                mock.patch.object(affected.sys, "argv", ["x", "origin/main", "--skip-target", "SpeakDesktopTests"]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(affected.main(), 0)
+        self.assertIn("mode=all", out.getvalue())
+        self.assertIn("skip=^(SpeakDesktopTests)\\.", out.getvalue())
+
+
+class ShallowCloneTests(unittest.TestCase):
+    def git(self, cwd, *args):
+        import subprocess
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def test_a_shallow_merge_commit_diffs_against_the_fetched_base(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as root:
+            origin = os.path.join(root, "origin")
+            os.makedirs(os.path.join(origin, "Sources/SpeakApp"))
+            self.git(root, "init", "-q", "-b", "main", origin)
+            for index in range(3):
+                with open(os.path.join(origin, "Sources/SpeakApp/Base.swift"), "a") as handle:
+                    handle.write(f"// {index}\n")
+                self.git(origin, "add", "-A")
+                self.git(origin, "commit", "-qm", f"base {index}")
+            base = self.git(origin, "rev-parse", "HEAD")
+            self.git(origin, "checkout", "-qb", "feature")
+            with open(os.path.join(origin, "Sources/SpeakApp/Feature.swift"), "w") as handle:
+                handle.write("// feature\n")
+            self.git(origin, "add", "-A")
+            self.git(origin, "commit", "-qm", "feature")
+            clone = os.path.join(root, "clone")
+            self.git(root, "clone", "-q", "--depth=1", "--branch", "feature", f"file://{origin}", clone)
+            previous = os.getcwd()
+            os.chdir(clone)
+            try:
+                self.assertIsNone(affected.changed_files(base), "unfetched base fails safe")
+                self.git(clone, "fetch", "--no-tags", "--depth=1", "origin", base)
+                self.assertEqual(affected.changed_files(base), ["Sources/SpeakApp/Feature.swift"])
+            finally:
+                os.chdir(previous)
 
 
 if __name__ == "__main__":

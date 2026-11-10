@@ -221,7 +221,8 @@ test('the macOS pull-request job tests only affected targets, minus those Linux 
   assert.match(body, /name: Select affected unit tests\n\s+id: affected\n\s+if: needs\.release-paths\.outputs\.full != 'true'/);
   assert.match(body, /affected-swift-tests\.py "\$BASE"[\s\\]+--skip-target SpeakDesktopTests --skip-target SpeakAutomationKitTests/);
   assert.match(body, /if: steps\.affected\.outputs\.mode != 'none'/);
-  assert.match(body, /fetch-depth: \$\{\{ github\.event_name == 'pull_request' && 0 \|\| 1 \}\}/);
+  assert.match(body, /BASE: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.match(body, /git fetch --no-tags --depth=1 origin "\$BASE" \|\| true/);
 });
 
 test('Tessl is on demand and preserves trusted-author secret restrictions', () => {

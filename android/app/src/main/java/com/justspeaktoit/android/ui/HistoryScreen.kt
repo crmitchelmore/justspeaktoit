@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -60,7 +61,7 @@ fun HistoryScreen(entries: List<HistoryEntry>, retention: Retention, saveFailed:
         ) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = actions.onBack) {
+                    IconButton(onClick = actions.onBack, modifier = Modifier.testTag(AutomationIds.HISTORY_BACK)) {
                         Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.action_back))
                     }
                     Text(
@@ -70,7 +71,10 @@ fun HistoryScreen(entries: List<HistoryEntry>, retention: Retention, saveFailed:
                         modifier = Modifier.weight(1f),
                     )
                     if (entries.isNotEmpty()) {
-                        TextButton(onClick = { confirmClear = true }) {
+                        TextButton(
+                            onClick = { confirmClear = true },
+                            modifier = Modifier.testTag(AutomationIds.HISTORY_CLEAR),
+                        ) {
                             Text(stringResource(R.string.action_clear_history))
                         }
                     }

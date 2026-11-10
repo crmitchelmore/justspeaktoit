@@ -7,10 +7,12 @@ name: CI
 
 # Pull requests run a cheap gate: Lint and the portable SwiftPM graph on
 # Ubuntu plus ONE macOS job (incremental build + affected unit tests). The
-# merge train's `merge-batch/*` heads and main run every gate.
+# merge train's `merge-batch/*` pull requests and main pushes run every gate.
+# A batch is tested once, through its pull request; pushing its branch does
+# not start a second run.
 on:
   push:
-    branches: [main, 'merge-batch/**']
+    branches: [main]
   pull_request:
 
 permissions:
@@ -30,7 +32,9 @@ jobs:
   build-macos:
     # The aggregate required-macos job owns the required branch-protection name.
     name: Build & Test (macOS Debug)
-    needs: release-paths
+    # Fail fast: no hosted macOS slot is taken until the cheap Ubuntu gates
+    # (Lint, Portable Swift (Linux), pre-PR evidence) pass.
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
     # The only macOS job on a pull request: an incremental build (restored
     # from main's cache) plus the unit tests the change can affect. Merge
     # batches and main run the whole suite and the macOS-only tooling tests.
@@ -450,7 +454,7 @@ jobs:
         id: select
         env:
           EVENT_NAME: ${{ github.event_name }}
-          FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+          FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') || startsWith(github.head_ref, 'merge-batch/') }}
           APPLE: ${{ steps.apple.outputs.apple }}
           SWIFT: ${{ steps.filter.outputs.swift }}
           IOS: ${{ steps.filter.outputs.ios }}
@@ -459,7 +463,7 @@ jobs:
             if [ "$SWIFT" = "true" ]; then APPLE=true; fi
             { echo "apple=$APPLE"; echo "swift=$SWIFT"; echo "ios=$IOS"; echo "full=false"; } >> "$GITHUB_OUTPUT"
           else
-            # merge-batch/* or main push (or a ci:full pull request): no
+            # main push, merge-batch/* or ci:full pull request: no
             # changed-file filtering, run every gate.
             { echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "full=true"; } >> "$GITHUB_OUTPUT"
           fi
@@ -542,7 +546,9 @@ jobs:
     # Each product/source receipt is separately bounded to 60s, not hidden setup.
     # Setup's retried package resolution may take 11 minutes; tests keep 12.
     timeout-minutes: 47
-    needs: release-paths
+    # Fail fast: no hosted macOS slot is taken until the cheap Ubuntu gates
+    # (Lint, Portable Swift (Linux), pre-PR evidence) pass.
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
     if: needs.release-paths.outputs.full == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -580,7 +586,9 @@ jobs:
     # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 45
-    needs: release-paths
+    # Fail fast: no hosted macOS slot is taken until the cheap Ubuntu gates
+    # (Lint, Portable Swift (Linux), pre-PR evidence) pass.
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
     if: needs.release-paths.outputs.full == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -616,7 +624,9 @@ jobs:
 
   build-ios-test-products:
     name: Build iOS XCTest Products
-    needs: release-paths
+    # Fail fast: no hosted macOS slot is taken until the cheap Ubuntu gates
+    # (Lint, Portable Swift (Linux), pre-PR evidence) pass.
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
     # Merge batches and main only.
     if: needs.release-paths.outputs.full == 'true'
     runs-on: macos-latest
@@ -832,7 +842,8 @@ jobs:
     needs: [release-paths, build-ios]
     # Merge batches and main only.
     # Follows the simulator job in the same macOS lane.
-    if: ${{ !cancelled() && needs.release-paths.outputs.full == 'true' }}
+    # Runs after its predecessor fails, but not when fail-fast skipped it.
+    if: ${{ !cancelled() && needs.build-ios.result != 'skipped' && needs.release-paths.outputs.full == 'true' }}
     # Renamed from "Build iOS Keyboard (direct capture)" (issue #991). It is
     # not a required status check, so the rename costs nothing, and the old
     # name had become misleading: the job now builds the *shipping* hand-off
@@ -926,6 +937,48 @@ jobs:
             -quiet \
             2>&1 | tail -30
 
+  # Pull requests must carry a passing `scripts/pre-pr` record for the exact
+  # head (or its tree) in the current PR body, so a failure that pre-pr would
+  # have caught never reaches a macOS slot. Only Dependabot is exempt; a
+  # merge-batch PR carries a combined record for its head. Pushes pass
+  # straight through. The
+  # body is re-read for up to three minutes because it is usually updated
+  # just after the push that started this run.
+  pre-pr-evidence:
+    name: Pre-PR evidence (blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: scripts/check-pre-pr-evidence.py
+          sparse-checkout-cone-mode: false
+      - name: Require a passing scripts/pre-pr record for this head
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          JSTI_PRE_PR_STRICT: "true"
+        run: |
+          PR_HEAD_TREE="$(git rev-parse 'HEAD^{tree}')"
+          export PR_HEAD_TREE
+          for attempt in 1 2 3 4 5 6 7; do
+            PR_BODY="$(gh api "$PR_URL" --jq '.body // ""')" || PR_BODY=''
+            export PR_BODY
+            if python3 scripts/check-pre-pr-evidence.py; then exit 0; fi
+            [ "$attempt" -lt 7 ] && sleep 30
+          done
+          echo "::error::Run scripts/pre-pr on this commit (or its exact tree) and paste its --markdown output into the PR body."
+          exit 1
+
   lint:
     name: Lint
     needs: release-paths
@@ -946,20 +999,11 @@ jobs:
           path: Tooling/.build
           key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-tooling-${{ hashFiles('Tooling/Package.resolved') }}
 
-      # SwiftLint resolves through the isolated Tooling/ graph so app/test
-      # dependency changes cannot downgrade the linter (issue #677).
-      - name: SwiftLint
-        run: |
-          # The Linux SwiftLint binary loads SourceKit from the Swift toolchain.
-          LINUX_SOURCEKIT_LIB_PATH="$(dirname "$(dirname "$(readlink -f "$(command -v swift)")")")/lib"
-          export LINUX_SOURCEKIT_LIB_PATH
-          make lint
-
-      - name: Check tooling Package.resolved drift
-        run: git diff --exit-code Tooling/Package.resolved
-
-      - name: Test CI and release gates
-        run: make test-tooling
+      # The same target scripts/pre-pr runs, so a local pass means this passes:
+      # strict SwiftLint (isolated Tooling/ graph, issue #677), accessibility,
+      # tooling Package.resolved drift and the tooling tests.
+      - name: Lint and tooling tests (make ci-lint)
+        run: make ci-lint
 
   # The portable SwiftPM graph (SpeakCore portable kernel, SpeakSync,
   # SpeakDesktop*, SpeakAutomationKit, CLI and Linux adapters) builds and
@@ -985,14 +1029,9 @@ jobs:
           chmod 0755 /__w "$(dirname "$GITHUB_WORKSPACE")"
           chown -R "$owner" "$GITHUB_WORKSPACE"
           chmod 0755 "$GITHUB_WORKSPACE"
-      - name: Verify portable source boundary
-        run: python3 scripts/verify-portable-core-boundary.py
-      - name: Build and test the portable graph
-        run: |
-          swift --version
-          scripts/retry-network.sh swift package resolve
-          swift build --build-tests --jobs 4
-          swift test --skip-build
+      # Shared with scripts/pre-pr and precheck.yml, so they cannot drift.
+      - name: Verify the boundary, then build and test the portable graph
+        run: scripts/ci-portable-linux.sh
 
   paid-access-worker:
     name: Paid Access Worker
@@ -1034,7 +1073,8 @@ jobs:
     # Merge batches (baseline: origin/main) and main (baseline: the previous
     # main commit) only.
     # Follows Release in the same macOS lane.
-    if: ${{ !cancelled() && needs.release-paths.outputs.full == 'true' }}
+    # Runs after its predecessor fails, but not when fail-fast skipped it.
+    if: ${{ !cancelled() && needs.release-validation.result != 'skipped' && needs.release-paths.outputs.full == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1059,10 +1099,12 @@ jobs:
       - name: Diagnose breaking public API changes
         env:
           EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           BASELINE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.ref == 'refs/heads/main' && github.event.before || 'origin/main') }}
         run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
+          # A batch PR's title is generic; any breaking member subject declares the break.
+          if [ "$EVENT_NAME" != "pull_request" ] || [[ "$HEAD_REF" == merge-batch/* ]]; then
             PR_TITLE=$(git log --format=%s "$BASELINE..HEAD" | grep -E '^[a-z]+(\([^)]*\))?!:' | head -n 1 || true)
           fi
           PR_TITLE="$PR_TITLE" bash scripts/check-api-compatibility.sh "$BASELINE"
@@ -1075,7 +1117,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: gate
-    if: failure() && !cancelled() && github.event_name == 'push'
+    if: failure() && !cancelled() && (github.event_name == 'push' || startsWith(github.head_ref, 'merge-batch/'))
     permissions:
       issues: write
     steps:
@@ -1084,8 +1126,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SHA: ${{ github.sha }}
-          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
           if [ "$REF_NAME" = "main" ]; then
             label=ci-main-failure; title="CI failing on main"
@@ -1115,6 +1157,7 @@ jobs:
       - portable-linux
       - lint
       - paid-access-worker
+      - pre-pr-evidence
       - build-ios
       - build-ios-test-products
       - build-ios-keyboard
@@ -1147,10 +1190,12 @@ jobs:
           always() && (
             needs.release-paths.result != 'success' ||
             needs.paid-access-worker.result != 'success' ||
+            needs.pre-pr-evidence.result != 'success' ||
             (needs.release-paths.outputs.apple != 'true' && needs.release-paths.outputs.apple != 'false') ||
             (needs.release-paths.outputs.swift != 'true' && needs.release-paths.outputs.swift != 'false') ||
             (needs.release-paths.outputs.full != 'true' && needs.release-paths.outputs.full != 'false') ||
-            (github.event_name != 'pull_request' && needs.release-paths.outputs.full != 'true') ||
+            ((github.event_name != 'pull_request' || startsWith(github.head_ref, 'merge-batch/')) &&
+              needs.release-paths.outputs.full != 'true') ||
             (needs.build-macos.result != 'success' && !(
               github.event_name == 'pull_request' && needs.release-paths.outputs.swift == 'false' &&
               needs.build-macos.result == 'skipped')) ||

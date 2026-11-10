@@ -33,6 +33,7 @@ import com.justspeaktoit.android.ui.DictationActions
 import com.justspeaktoit.android.ui.DictationScreen
 import com.justspeaktoit.android.ui.HistoryActions
 import com.justspeaktoit.android.ui.HistoryScreen
+import com.justspeaktoit.android.ui.HistoryTranscription
 import com.justspeaktoit.android.ui.MicPermission
 import com.justspeaktoit.android.ui.SettingsActions
 import com.justspeaktoit.android.ui.SettingsScreen
@@ -92,17 +93,23 @@ class MainActivity : ComponentActivity() {
                                 onRemoveKey = viewModel::removeKey,
                                 onChooseModel = viewModel::chooseCloudModel,
                                 onCleanupChanged = viewModel::setCleanupEnabled,
+                                onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
                             ),
                         )
                         Screen.History -> HistoryScreen(
                             entries = state.history,
                             retention = state.retention,
                             saveFailed = state.historyError,
+                            transcribe = HistoryTranscription(
+                                sessionActive = state.dictation.isActive,
+                                entryId = state.transcribingEntryId,
+                            ),
                             actions = HistoryActions(
                                 onBack = { screen = Screen.Dictation },
                                 onRetention = viewModel::setRetention,
                                 onDelete = viewModel::deleteHistoryEntry,
                                 onClear = viewModel::clearHistory,
+                                onTranscribe = viewModel::transcribeHistoryEntry,
                             ),
                         )
                         Screen.Dictation -> DictationScreen(

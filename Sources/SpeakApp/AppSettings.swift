@@ -572,6 +572,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(cancelRecordingOnEscape, key: .cancelRecordingOnEscape) }
   }
 
+  /// Whether a cancelled recording's audio stays in History to transcribe later.
+  @Published var keepAudioOnCancel: Bool {
+    didSet { store(keepAudioOnCancel, key: .keepAudioOnCancel) }
+  }
+
   @Published var showHUDDuringSessions: Bool {
     didSet { store(showHUDDuringSessions, key: .showHUD) }
   }
@@ -1206,6 +1211,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     cancelRecordingOnEscape =
       defaults.object(forKey: DefaultsKey.cancelRecordingOnEscape.rawValue) as? Bool
       ?? SpeechDefaults.cancelRecordingOnEscape
+    keepAudioOnCancel =
+      defaults.object(forKey: DefaultsKey.keepAudioOnCancel.rawValue) as? Bool
+      ?? SpeechDefaults.keepAudioOnCancel
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? SpeechDefaults.showHUD
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? SpeechDefaults.liveTranscriptHUD
@@ -1454,6 +1462,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     self.restoreClipboardAfterPaste = restored.restoreClipboardAfterPaste
     self.appSwitchDelivery = restored.appSwitchDelivery
     self.cancelRecordingOnEscape = restored.cancelRecordingOnEscape
+    self.keepAudioOnCancel = restored.keepAudioOnCancel
     self.showHUDDuringSessions = restored.showHUDDuringSessions
     self.showLiveTranscriptInHUD = restored.showLiveTranscriptInHUD
   }

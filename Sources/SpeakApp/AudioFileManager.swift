@@ -651,13 +651,15 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
 
   /// Cancels the active recording. When `expectedOwner` is given, a recording
   /// owned by another flow is left untouched: each flow may only cancel what
-  /// it started (issue #673).
+  /// it started (issue #673). Returns the kept file when `deleteFile` is false
+  /// and a non-empty recording existed.
+  @discardableResult
   func cancelRecording(
     deleteFile: Bool = true,
     ifOwnedBy expectedOwner: AudioRecordingOwner? = nil
-  ) async {
+  ) async -> URL? {
     if let expectedOwner, let currentOwner = currentRecordingOwner, currentOwner != expectedOwner {
-      return
+      return nil
     }
     if let captureSource {
       let owner = currentRecordingOwner
@@ -672,10 +674,11 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
       await captureSource.cancel(deleteFile: deleteFile)
       if deleteFile, let url { try? FileManager.default.removeItem(at: url) }
       if url != nil, let owner, owner != .dictation { lifecycleHandler?(.auxiliaryEnded) }
-      return
+      return deleteFile ? nil : Self.keptRecording(at: url)
     }
     let session = activeInputSession
     let owner = currentRecordingOwner
+    var keptURL: URL?
 
     if let recorder {
       let url = self.currentRecordingURL ?? recorder.url
@@ -687,6 +690,8 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
       currentRecordingURL = nil
       if deleteFile {
         try? FileManager.default.removeItem(at: url)
+      } else {
+        keptURL = Self.keptRecording(at: url)
       }
     }
 
@@ -698,6 +703,18 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     if let owner, owner != .dictation {
       self.lifecycleHandler?(.auxiliaryEnded)
     }
+    return keptURL
+  }
+
+  /// A cancelled recording worth keeping; an empty file holds no speech, so it is removed.
+  nonisolated static func keptRecording(at url: URL?) -> URL? {
+    guard let url else { return nil }
+    let size = ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0
+    guard size > 0 else {
+      try? FileManager.default.removeItem(at: url)
+      return nil
+    }
+    return url
   }
 
   /// Metadata-only listing for recording management. Listed durations are zero;

@@ -111,6 +111,7 @@ public final class AppSettings: ObservableObject {
         case transcriptUniversalClipboard = "transcriptClipboardAllowsUniversalClipboard"
         case transcriptClipboardNoticeVersion
         case upgradeOfflineTranscriptsWhenOnline
+        case keepAudioOnCancel
     }
 
     public static let shared = AppSettings()
@@ -410,6 +411,17 @@ public final class AppSettings: ObservableObject {
                 forKey: DefaultsKey.upgradeOfflineTranscriptsWhenOnline.storageKey
             )
         }
+    }
+
+    /// Whether a cancelled recording's audio stays in Saved Recordings to transcribe later.
+    @Published public var keepAudioOnCancel: Bool {
+        didSet { defaults.set(keepAudioOnCancel, forKey: DefaultsKey.keepAudioOnCancel.storageKey) }
+    }
+
+    /// Read where no settings object is in reach, such as the recorder's cancel path.
+    nonisolated public static func storedKeepAudioOnCancel(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: ApplicationPreferenceKey.keepAudioOnCancel.rawValue) as? Bool
+            ?? SpeechDefaults.keepAudioOnCancel
     }
 
     @Published public var liveActivitiesEnabled: Bool {
@@ -712,6 +724,7 @@ public final class AppSettings: ObservableObject {
             forKey: DefaultsKey.upgradeOfflineTranscriptsWhenOnline.storageKey
         )
         self.liveActivitiesEnabled = liveActivities
+        self.keepAudioOnCancel = Self.storedKeepAudioOnCancel(in: defaults)
         self.transcriptClipboardLifetime = clipboardPolicy.lifetime
         self.transcriptAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard
         self.transcriptClipboardNoticeVersion = clipboardNoticeVersion

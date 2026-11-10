@@ -157,4 +157,83 @@ class HistoryTest {
         assertTrue(store.add(entry("b", 0), Retention.Off).isEmpty())
         assertNull(file.text)
     }
+
+    private fun kept(id: String, ageDays: Long) =
+        entry(id, ageDays, HistoryStatus.Cancelled).copy(text = "", audioPath = "/rec/$id.wav")
+
+    @Test
+    fun testCodec_roundTripsCancelledEntryWithAudio() {
+        val entries = listOf(kept("a", 0), entry("b", 1))
+        val decoded = HistoryCodec.decode(HistoryCodec.encode(entries))
+        assertEquals(entries, decoded)
+        assertEquals("/rec/a.wav", decoded.first().audioPath)
+        assertNull(decoded.last().audioPath)
+    }
+
+    @Test
+    fun testCodec_readsFilesWrittenBeforeAudioWasKept() {
+        val old = """{"version":1,"entries":[{"id":"a","createdAtMs":5,"mode":"Cloud","model":null,""" +
+            """"status":"Completed","text":"hi","failure":null,"cleanedUp":false}]}"""
+        val entry = HistoryCodec.decode(old).single()
+        assertNull(entry.audioPath)
+        assertEquals(HistoryStatus.Completed, entry.status)
+    }
+
+    @Test
+    fun testStore_removeAndClearDeleteKeptAudio() {
+        val deleted = mutableListOf<String>()
+        val store = HistoryStore(MemoryFile(), deleteAudio = { deleted += it }) { now }
+        store.add(kept("a", 0), Retention.Month)
+        store.add(kept("b", 0).copy(createdAtMs = now + 1), Retention.Month)
+        store.add(entry("c", 0).copy(createdAtMs = now + 2), Retention.Month)
+        assertTrue(deleted.isEmpty())
+        store.remove("a", Retention.Month)
+        assertEquals(listOf("/rec/a.wav"), deleted)
+        store.clear()
+        assertEquals(listOf("/rec/a.wav", "/rec/b.wav"), deleted)
+    }
+
+    @Test
+    fun testStore_replaceWithoutAudioDeletesIt() {
+        val deleted = mutableListOf<String>()
+        val store = HistoryStore(MemoryFile(), deleteAudio = { deleted += it }) { now }
+        store.add(kept("a", 0), Retention.Month)
+        store.replace(kept("a", 0).copy(failure = "Network"), Retention.Month)
+        assertTrue(deleted.isEmpty())
+        store.replace(kept("a", 0).copy(status = HistoryStatus.Completed, text = "Hi", audioPath = null), Retention.Month)
+        assertEquals(listOf("/rec/a.wav"), deleted)
+    }
+
+    @Test
+    fun testStore_pruningDeletesKeptAudio() {
+        val deleted = mutableListOf<String>()
+        val file = MemoryFile(HistoryCodec.encode(listOf(kept("new", 1), kept("old", 60))))
+        val store = HistoryStore(file, deleteAudio = { deleted += it }) { now }
+        assertEquals(listOf("new"), store.load(Retention.Month).map { it.id })
+        assertEquals(listOf("/rec/old.wav"), deleted)
+        store.load(Retention.Off)
+        assertEquals(listOf("/rec/old.wav", "/rec/new.wav"), deleted)
+        // With retention Off a newly cancelled recording is not kept, so its audio goes too.
+        store.add(kept("c", 0), Retention.Off)
+        assertEquals("/rec/c.wav", deleted.last())
+    }
+
+    @Test
+    fun testStore_failedWriteStillDeletesRemovedAudio() {
+        val deleted = mutableListOf<String>()
+        val file = MemoryFile()
+        val store = HistoryStore(file, deleteAudio = { deleted += it }) { now }
+        store.add(kept("a", 0), Retention.Month)
+        store.add(entry("b", 0).copy(createdAtMs = now + 1), Retention.Month)
+        file.failWrites = true
+        assertThrows(java.io.IOException::class.java) { store.remove("a", Retention.Month) }
+        assertEquals(listOf("/rec/a.wav"), deleted)
+        assertEquals(listOf("b"), store.cached.map { it.id })
+    }
+
+    @Test
+    fun testAudio_orphansAreFilesNoEntryRefersTo() {
+        val entries = listOf(kept("a", 0), entry("b", 0))
+        assertEquals(listOf("/rec/x.wav"), HistoryAudio.orphans(listOf("/rec/a.wav", "/rec/x.wav"), entries))
+    }
 }

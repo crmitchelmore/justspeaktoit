@@ -14,6 +14,9 @@ public enum SpeechDefaults {
     public static let recordingTailDuration = 0.5
     public static let voiceCommandsEnabled = true
     public static let cancelRecordingOnEscape = true
+    /// Keep a cancelled recording's audio in History so it can be transcribed later.
+    /// On by default: cancelling (often by accident, with Escape) should never lose speech.
+    public static let keepAudioOnCancel = true
     public static let clipboardInsertionTriggers = ""
     public static let showHUD = true
     public static let liveTranscriptHUD = true

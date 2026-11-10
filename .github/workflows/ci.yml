@@ -24,9 +24,11 @@ jobs:
     needs: release-paths
     # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
     if: needs.release-paths.outputs.apple == 'true'
-    # Hosted: the single native MacBook serialises builds, so the long Debug
-    # gate runs in parallel on hosted Intel (Docs/native-runner-pool.md).
-    runs-on: macos-26-intel
+    # Owner-authored same-repository sources use the native MacBook, whose
+    # persistent warm .build keeps this critical-path build incremental and
+    # skips the 30-75 minute hosted macOS queue (Docs/native-runner-pool.md).
+    # Every selected native runner must also admit the job locally.
+    runs-on: ${{ fromJSON((vars.JSTI_LOCAL_RUNNERS != 'off' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && (github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.user.login == 'crmitchelmore' || github.event.pull_request.user.login == 'bravostation')))) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
     timeout-minutes: 45
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).
@@ -34,6 +36,12 @@ jobs:
       JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     steps:
       - uses: actions/checkout@v7.0.1
+
+      # Self-hosted only: a persistent per-runner .build replaces actions/cache.
+      - uses: ./.github/actions/warm-build-cache
+        with:
+          key: ci-build-macos
+          paths: .build
 
       - name: Verify process-scoped Keychain isolation
         run: python3 -B -m unittest scripts.tests.test_private_test_keychain -v
@@ -72,7 +80,9 @@ jobs:
 
       # Swift build state embeds absolute paths. Scope both exact and fallback
       # keys to the architecture, stable host identity and checkout workspace.
+      # Hosted only: self-hosted runners keep a warm .build instead.
       - name: Cache Swift packages
+        if: runner.environment != 'self-hosted'
         uses: actions/cache@v6
         with:
           path: .build
@@ -848,7 +858,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
+      # Self-hosted only: a persistent per-runner Tooling/.build replaces actions/cache.
+      - uses: ./.github/actions/warm-build-cache
+        with:
+          key: ci-lint
+          paths: Tooling/.build
+
       - name: Cache lint tooling
+        if: runner.environment != 'self-hosted'
         uses: actions/cache@v6
         with:
           path: Tooling/.build
@@ -909,6 +926,13 @@ jobs:
         with:
           # The baseline treeish must be resolvable locally.
           fetch-depth: 0
+
+      # Self-hosted only: a persistent per-runner .build keeps the current
+      # build and SwiftPM's per-revision baseline API digests warm.
+      - uses: ./.github/actions/warm-build-cache
+        with:
+          key: ci-api-compatibility
+          paths: .build
 
       # Exported library products must not lose or incompatibly change
       # public symbols without a declared migration (issue #680). A PR title

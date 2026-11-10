@@ -14,12 +14,12 @@ const makefile = readFileSync(new URL('../../Makefile', import.meta.url), 'utf8'
 const aggregate = workflow.slice(workflow.indexOf('\n  required-macos:'));
 const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]+:\n|$(?![\s\S]))/gm)]
   .map(([, id, body]) => [id, body]));
-// The native pool is one serial MacBook: only these light, independent jobs
-// use it so it runs alongside hosted macOS instead of becoming the bottleneck.
-const nativeEligibleJobs = ['lint', 'api-compatibility'];
+// The dedicated two-runner MacBook pool takes the Debug critical path (warm
+// .build) plus light jobs; everything else runs in parallel on hosted macOS.
+const nativeEligibleJobs = ['build-macos', 'lint', 'api-compatibility'];
 const hostedFallback = (id) => (id === 'lint' ? 'macos-latest' : 'macos-26-intel');
 const hostedMacJobs = {
-  'build-macos': 'macos-26-intel', 'core-journey-e2e': 'macos-26-intel', 'release-validation': 'macos-latest',
+  'core-journey-e2e': 'macos-26-intel', 'release-validation': 'macos-latest',
   'build-ios-swiftpm': 'macos-latest', 'build-ios-keyboard': 'macos-latest', 'build-ios-test-products': 'macos-latest',
   'build-ios': 'macos-latest', 'core-journey-fixture-ui': 'macos-latest',
 };
@@ -113,7 +113,7 @@ test('Debug dependency resolution bypasses shared repositories in commands and r
 test('macOS Debug and Core Journey share coverage instrumentation and cache keys', () => {
   const body = jobBodies['build-macos'];
   const journey = jobBodies['core-journey-e2e'];
-  for (const pattern of [/^\s+key:\s*(.+)$/m, /restore-keys:\s*\|\s*\n\s+([^\n]+)/]) {
+  for (const pattern of [/^\s+key:\s*(\$\{\{.+)$/m, /restore-keys:\s*\|\s*\n\s+([^\n]+)/]) {
     const producer = body.match(pattern);
     const consumer = journey.match(pattern);
     assert.ok(producer && consumer, 'Debug and Core Journey must declare matching cache keys');
@@ -218,7 +218,9 @@ test('Tessl is on demand and preserves trusted-author secret restrictions', () =
 });
 
 test('every Apple build cache isolates architecture, host and workspace, including restore prefixes', () => {
-  const cacheLines = workflow.match(/^\s+(?:key:|restore-keys:).*(?:\n\s+\$\{\{[^\n]+)?/gm);
+  // Plain warm-build-cache keys are runner-local directories, not actions/cache keys.
+  const cacheLines = workflow.match(/^\s+(?:key:|restore-keys:).*(?:\n\s+\$\{\{[^\n]+)?/gm)
+    .filter((line) => !/^\s+key: [\w.-]+$/.test(line));
   assert.equal(cacheLines.length, 7, 'three Swift keys and restore prefixes plus the lint tooling key');
   for (const line of cacheLines) {
     assert.ok(line.includes('${{ runner.arch }}'), line);

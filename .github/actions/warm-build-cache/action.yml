@@ -1,0 +1,80 @@
+name: Warm self-hosted build cache
+description: >-
+  On self-hosted runners only, replaces build-output directories with symlinks
+  into a persistent per-runner, per-job directory under the runner's _work
+  folder, so SwiftPM and CMake builds stay incremental between jobs. GitHub-hosted
+  runners are untouched and keep using actions/cache (Docs/native-runner-pool.md).
+inputs:
+  key:
+    description: Job cache key (letters, digits, '.', '_' and '-'). The runner name is prepended.
+    required: true
+  paths:
+    description: >-
+      Newline-separated build directories, relative to the checkout or starting
+      with a literal `$RUNNER_TEMP/`, expanded inside the job (container) itself.
+    required: true
+  max-gb:
+    description: Wipe the job cache before use when it exceeds this many GiB.
+    required: false
+    default: '25'
+runs:
+  using: composite
+  steps:
+    # The script is inline: $GITHUB_ACTION_PATH names the host path inside job
+    # containers. Must run after actions/checkout, whose clean deletes only the
+    # untracked symlinks, never the cache they point at.
+    - name: Link build directories to the persistent runner cache
+      if: runner.environment == 'self-hosted'
+      shell: bash
+      env:
+        JSTI_CACHE_KEY: ${{ inputs.key }}
+        JSTI_CACHE_PATHS: ${{ inputs.paths }}
+        JSTI_CACHE_MAX_GB: ${{ inputs.max-gb }}
+        JSTI_RUNNER_NAME: ${{ runner.name }}
+      run: |
+        set -euo pipefail
+        sanitize() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'; }
+        case "$JSTI_CACHE_KEY" in ''|.*|*[!A-Za-z0-9._-]*) echo "::error::Invalid warm cache key"; exit 1 ;; esac
+        case "$JSTI_CACHE_MAX_GB" in ''|*[!0-9]*) echo "::error::Invalid warm cache size limit"; exit 1 ;; esac
+        runner_id="$(sanitize "${JSTI_RUNNER_NAME:?}")"
+        # <_work>/<repo>/<repo> is the checkout; inside job containers _work is /__w.
+        work="$(cd "$GITHUB_WORKSPACE/../.." && pwd -P)"
+        root="$work/.jsti-cache"
+        # Two runners share each machine: the runner name keeps concurrent jobs apart.
+        cache="$root/$runner_id/$JSTI_CACHE_KEY"
+        umask 022
+        mkdir -p "$cache"
+        # Capture-writer tests reject group/other-writable or foreign-owned ancestors.
+        for directory in "$root" "$root/$runner_id" "$cache"; do
+          if [ "$(id -u)" -eq 0 ]; then chown "$(id -u):$(id -g)" "$directory"; fi
+          chmod go-w "$directory"
+        done
+        size_kb="$(du -sk "$cache" | cut -f1)"
+        if [ "$size_kb" -gt $((JSTI_CACHE_MAX_GB * 1024 * 1024)) ]; then
+          echo "::warning::Warm cache $runner_id/$JSTI_CACHE_KEY is ${size_kb} KiB (limit ${JSTI_CACHE_MAX_GB} GiB); wiping it"
+          rm -rf "$cache"
+          mkdir -p "$cache"
+        fi
+        touch "$cache/.jsti-last-used"
+        exclude="$GITHUB_WORKSPACE/.git/info/exclude"
+        while IFS= read -r path; do
+          path="$(printf '%s' "$path" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          [ -n "$path" ] || continue
+          case "/$path/" in */../*|*/./*|//) echo "::error::Invalid warm cache path: $path"; exit 1 ;; esac
+          # shellcheck disable=SC2016 # matches the literal prefix, expanded below
+          case "$path" in
+            '$RUNNER_TEMP/'?*) link="${RUNNER_TEMP:?}/${path#\$RUNNER_TEMP/}" ;;
+            /*|'$'*) echo "::error::Warm cache paths are checkout-relative or under \$RUNNER_TEMP: $path"; exit 1 ;;
+            *) link="$GITHUB_WORKSPACE/$path"
+               # A symlink never matches a directory-only ignore such as `.build/`.
+               if [ -d "$(dirname "$exclude")" ] && ! grep -qxF "/$path" "$exclude" 2>/dev/null; then
+                 printf '/%s\n' "$path" >> "$exclude"
+               fi ;;
+          esac
+          target="$cache/$(sanitize "${path#\$}")"
+          mkdir -p "$target"
+          rm -rf "$link"
+          mkdir -p "$(dirname "$link")"
+          ln -s "$target" "$link"
+          echo "$path -> $target ($(du -sh "$target" | cut -f1))"
+        done <<< "$JSTI_CACHE_PATHS"

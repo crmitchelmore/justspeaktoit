@@ -40,6 +40,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Self-hosted only: keep the benchmark package build warm. The root
+      # shipping-graph build below stays cold on purpose (isolation check).
+      - uses: ./.github/actions/warm-build-cache
+        with:
+          key: benchmark-package
+          paths: $RUNNER_TEMP/benchmark-build
+
       # Source caches speed repeated resolution without restoring compiled
       # objects into the clean shipping-graph isolation check below.
       # Hosted only: on reviewed native Macs this home-directory cache is the

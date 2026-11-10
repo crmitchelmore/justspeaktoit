@@ -169,8 +169,11 @@ final class DesktopPOSIXCaptureWriterTests: XCTestCase {
     }
 
     private func makeRoot() throws -> URL {
+        // The writer opens every ancestor with O_NOFOLLOW; self-hosted CI links
+        // .build to a persistent cache, so start from its real path.
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent(".build", isDirectory: true)
+            .resolvingSymlinksInPath()
             .appendingPathComponent("owned-capture-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])

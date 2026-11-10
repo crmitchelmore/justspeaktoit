@@ -26,9 +26,8 @@ const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', impo
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
   for (const name of ['ci', 'linux']) {
     const source = readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
-    const branches = name === 'ci' ? String.raw`\[main, 'merge-batch\/\*\*'\]` : String.raw`\[main\]`;
-    assert.match(source, new RegExp(`^  push:\\n    branches: ${branches}$`, 'm'),
-      `${name}: pushes must stay limited to main (and CI's merge batches)`);
+    assert.match(source, /^  push:\n    branches: \[main, 'merge-batch\/\*\*'\]$/m,
+      `${name}: pushes must stay limited to main and merge batches`);
     const pullRequest = source.match(/^  pull_request:[ \t]*\n((?: {4}[^\n]*\n|\n)*)/m);
     assert.ok(pullRequest, `${name}: ordinary pull-request checks must exist`);
     assert.doesNotMatch(pullRequest[1], /^\s+branches(?:-ignore)?:/m,

@@ -12,7 +12,8 @@ on:
 permissions: {}
 concurrency:
   group: openai-api-review-${{ github.event.pull_request.number || inputs.pr-number }}
-  cancel-in-progress: false
+  # A new head supersedes an older head's pending review; dispatches finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 jobs:
   review:
     # Manual runs must use the trusted main workflow and script, never a branch copy.

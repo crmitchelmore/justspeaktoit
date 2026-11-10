@@ -29,7 +29,8 @@ permissions:
   contents: read
 concurrency:
   group: mac-review-notes-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || 'dispatch' }}
-  cancel-in-progress: false
+  # Superseded pull request validation is cancelled; a dispatch repair never is.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   validate:
     if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}

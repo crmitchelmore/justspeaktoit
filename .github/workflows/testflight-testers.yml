@@ -18,6 +18,10 @@ on:
         default: true
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   validate:
     if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}

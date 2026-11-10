@@ -2,7 +2,7 @@ name: Linux Desktop
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'merge-batch/**']
     paths:
       - .gitattributes
       - Package.swift
@@ -52,6 +52,10 @@ on:
       - .github/workflows/linux.yml
       - .github/workflows/linux-local-runtime.yml
   pull_request:
+    # Pull requests build this platform only when its own sources, native
+    # dependencies, packaging or workflow change. Shared Swift is proven on
+    # pull requests by ci.yml's required Portable Swift (Linux) gate; the full
+    # path set below runs on merge-batch heads and main.
     paths:
       - .gitattributes
       - Package.swift
@@ -64,33 +68,21 @@ on:
       - scripts/tests/test_linux_accessibility.py
       - Sources/CLinuxAutomation/**
       - Sources/SpeakLinuxAutomation/**
+      - Tests/SpeakLinuxAutomationTests/**
+      # The Linux app stages the automation kit and CLI.
       - Sources/SpeakAutomationKit/**
       - Sources/SpeakCLI/**
-      - Tests/SpeakLinuxAutomationTests/**
       - Tests/SpeakAutomationKitTests/**
-      - Sources/SpeakCore/**
-      - Sources/SpeakDesktop/**
       - Sources/CLlamaCpp/**
       - Sources/CMigrationArchive/**
       - Sources/CRecordingFileSupport/**
-      - Sources/SpeakDesktopHost/**
-      - Sources/SpeakDesktopSync/**
-      - Sources/SpeakSync/**
       - Sources/SpeakLinux/**
       - Sources/SpeakLinuxPlatform/**
       - Sources/SpeakLinuxWebSocket/**
       - Sources/CLinuxSupport/**
       - Sources/CLinuxSystem/**
-      - Sources/SpeakWindows/**
-      - Sources/SpeakWindowsPlatform/**
-      - Tests/SpeakDesktopHostTests/**
-      - Tests/SpeakDesktopSyncTests/**
-      - Tests/SpeakSyncTests/**
-      - Tests/SpeakTestSupport/**
       - Tests/SpeakLinuxPlatformTests/**
       - Tests/SpeakLinuxWebSocketTests/**
-      - Tests/SpeakDesktopTests/**
-      - Tests/SpeakPortableTests/**
       - scripts/linux-*
       - scripts/linux-local-runtime/**
       - scripts/windows-local-runtime/**
@@ -106,7 +98,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

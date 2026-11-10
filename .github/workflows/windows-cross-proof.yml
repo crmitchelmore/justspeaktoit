@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    # Pull requests run the macOS-hosted cross-compile only for Windows-owned
-    # and native-dependency changes. Shared Swift changes are proven on pull
-    # requests by the native "Windows ARM64" build and here on every push to main,
-    # keeping this macOS job out of the shared hosted macOS queue.
+    # Pull requests build this platform only when its own sources, native
+    # dependencies, packaging or workflow change. Shared Swift is proven on
+    # pull requests by ci.yml's required Portable Swift (Linux) gate; the full
+    # path set below runs on merge-batch heads and main.
     paths:
       - .gitattributes
+      - Package.swift
       - Resources/Desktop/**
       - scripts/generate-desktop-icons.py
       - scripts/tests/test_desktop_icons.py
@@ -30,7 +31,7 @@ on:
       - .github/workflows/windows-cross-proof.yml
       - .github/workflows/windows-local-runtime.yml
   push:
-    branches: [main]
+    branches: [main, 'merge-batch/**']
     paths:
       - .gitattributes
       - Package.swift
@@ -72,7 +73,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

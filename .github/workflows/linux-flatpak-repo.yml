@@ -31,7 +31,7 @@ permissions:
   contents: read
 concurrency:
   group: linux-flatpak-repo-${{ inputs.manifest && 'publish' || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   APP_ID: com.justspeaktoit.JustSpeakToIt
   PAGES_PROJECT: ${{ vars.FLATPAK_PAGES_PROJECT || 'justspeaktoit-flatpak' }}

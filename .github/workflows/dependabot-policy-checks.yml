@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   policy:
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-latest"]') }}

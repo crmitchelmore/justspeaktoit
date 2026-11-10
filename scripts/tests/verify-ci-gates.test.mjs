@@ -118,7 +118,7 @@ test('macOS Debug and Core Journey share coverage instrumentation and cache keys
   }
   assert.match(body, /^\s+timeout-minutes: 45$/m);
   assert.match(body, /name: Build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS="--enable-code-coverage --disable-dependency-cache" make build/);
-  assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage --disable-dependency-cache/);
+  assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py python3 scripts\/retry-xctest-crash.py swift test --enable-code-coverage --disable-dependency-cache/);
   assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),
     'Build must run before Test (Debug) so the coverage-enabled cache is already warm');
   assert.ok(body.indexOf('name: Test (Debug)') < body.indexOf('name: Build SpeakCore (App Store flavour)'),

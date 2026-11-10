@@ -10,6 +10,8 @@ public struct NativeTextProvider: Sendable, Hashable {
     public let sendsTemperature: Bool
     /// OpenAI names the output limit `max_completion_tokens`; the others accept `max_tokens`.
     public let usesMaxCompletionTokens: Bool
+    /// Output limit sent when the caller sets none. Anthropic rejects requests without one.
+    public var defaultMaxTokens: Int?
 
     public var credentialIdentifier: String { ProviderCredentialCatalogue.apiKeyIdentifier(for: id) }
 }
@@ -27,7 +29,7 @@ public enum NativeTextModels {
     public static let anthropic = NativeTextProvider(
         id: "anthropic", displayName: "Anthropic",
         chatCompletionsURL: URL(string: "https://api.anthropic.com/v1/chat/completions")!,
-        sendsTemperature: false, usesMaxCompletionTokens: false
+        sendsTemperature: false, usesMaxCompletionTokens: false, defaultMaxTokens: 8_192
     )
     public static let openAI = NativeTextProvider(
         id: "openai", displayName: "OpenAI",
@@ -129,6 +131,7 @@ struct ChatCompletionTarget: Equatable {
     let model: String
     let sendsTemperature: Bool
     let usesMaxCompletionTokens: Bool
+    var defaultMaxTokens: Int?
     let isOpenRouter: Bool
 
     static func resolve(_ selection: String) throws -> ChatCompletionTarget {
@@ -136,13 +139,14 @@ struct ChatCompletionTarget: Equatable {
             return .init(
                 url: route.provider.chatCompletionsURL, model: route.model,
                 sendsTemperature: route.provider.sendsTemperature,
-                usesMaxCompletionTokens: route.provider.usesMaxCompletionTokens, isOpenRouter: false
+                usesMaxCompletionTokens: route.provider.usesMaxCompletionTokens,
+                defaultMaxTokens: route.provider.defaultMaxTokens, isOpenRouter: false
             )
         }
         return .init(
             url: OpenRouterService.baseURL.appendingPathComponent("chat/completions"),
             model: try CleanupModelSelection.requestModel(selection),
-            sendsTemperature: true, usesMaxCompletionTokens: false, isOpenRouter: true
+            sendsTemperature: true, usesMaxCompletionTokens: false, defaultMaxTokens: nil, isOpenRouter: true
         )
     }
 }

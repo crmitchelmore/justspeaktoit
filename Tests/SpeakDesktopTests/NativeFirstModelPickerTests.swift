@@ -92,6 +92,14 @@ final class NativeFirstModelPickerTests: XCTestCase {
         )
         XCTAssertEqual(object["model"] as? String, "claude-haiku-4-5")
         XCTAssertNil(object["temperature"], "Claude 4.7 and later reject a temperature below 1")
+        XCTAssertEqual(object["max_tokens"] as? Int, 8_192, "Anthropic rejects requests without an output limit")
+        let openRouter = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(OpenRouterChatRequest(
+                model: "anthropic/claude-haiku-4.5", temperature: 0.2,
+                messages: [.init(role: "user", content: "fixture")], stream: nil, maxTokens: nil
+            ))) as? [String: Any]
+        )
+        XCTAssertNil(openRouter["max_tokens"], "Other routes keep their unlimited default")
         // The Anthropic key is a known, transferable credential with a key guide.
         XCTAssertTrue(ModelCredentialResolver.allKnownAPIKeyIdentifiers.contains("anthropic.apiKey"))
         XCTAssertFalse(ProviderCredentialCatalogue.cloudKitSyncable.contains("anthropic.apiKey"))

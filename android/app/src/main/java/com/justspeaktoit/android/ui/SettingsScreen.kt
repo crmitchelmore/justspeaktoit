@@ -277,6 +277,7 @@ private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
+            .testTag(AutomationIds.SETTINGS_CLEANUP_MODEL)
             .clickable(role = Role.Button) { picking = true }
             .semantics(mergeDescendants = true) { contentDescription = "$title, $label" }
             .padding(vertical = 8.dp),

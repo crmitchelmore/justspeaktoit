@@ -64,7 +64,7 @@ class CloudClient(
 
     /** Sends cleanup to the model's own route: its native provider, or OpenRouter. */
     fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String {
-        val json = CloudWire.cleanupBody(model.apiName, transcript).toByteArray()
+        val json = CloudWire.cleanupBody(model.apiName, transcript, CloudWire.cleanupMaxTokens(model)).toByteArray()
         val url = CloudWire.cleanupUrl(model)
         val body = post(url, apiKey, "application/json", call) { conn ->
             conn.setFixedLengthStreamingMode(json.size)

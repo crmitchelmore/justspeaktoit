@@ -203,7 +203,8 @@ struct OpenRouterChatRequest: Encodable {
         try container.encode(messages, forKey: .messages)
         try container.encodeIfPresent(stream, forKey: .stream)
         try container.encodeIfPresent(
-            maxTokens, forKey: target.usesMaxCompletionTokens ? .maxCompletionTokens : .maxTokens
+            maxTokens ?? target.defaultMaxTokens,
+            forKey: target.usesMaxCompletionTokens ? .maxCompletionTokens : .maxTokens
         )
     }
 

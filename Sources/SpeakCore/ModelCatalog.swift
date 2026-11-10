@@ -60,10 +60,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "AssemblyAI's flagship real-time model with native code switching across 32 languages.",
             estimatedLatencyMs: 250, latencyTier: .fast),
         Option(
-            id: "soniox/stt-rt-v5-streaming",
-            displayName: "Soniox Real-time v5 (Streaming)",
-            description: "Soniox v5 real-time WebSocket STT with reinvented speaker separation, "
-                + "faster semantic endpointing, and improved multilingual recognition across 60+ languages.",
+            id: "soniox/stt-rt-v6-streaming",
+            displayName: "Soniox Real-time v6 (Streaming)",
+            description: "Soniox v6 real-time WebSocket STT with speaker diarization, stronger "
+                + "multilingual recognition and faster dictation across 60+ languages.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
             id: MetaMuseVoiceTranscribe.liveCatalogID,
@@ -225,9 +225,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             latencyTier: .fast,
             tags: [.fast, .leading]),
         Option(
-            id: "soniox/stt-async-v5",
-            displayName: "Soniox Async v5",
-            description: "Soniox v5 asynchronous batch STT with speaker diarization and language identification.",
+            id: "soniox/stt-async-v6",
+            displayName: "Soniox Async v6",
+            description: "Soniox v6 asynchronous batch STT with speaker diarization and language identification.",
             estimatedLatencyMs: 1200, latencyTier: .medium),
         Option(
             id: GeminiTranscribeModels.batchCatalogID,
@@ -369,8 +369,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         AssemblyAIModels.legacyUniversal3BatchIDs.map { ($0, AssemblyAIModels.universal35ProBatchID) }
             + legacyElevenLabsBatchIDs.map { ($0, elevenLabsScribeV2BatchID) }
             + [("openai/gpt-4o-audio-preview-2024-12-17", "openai/gpt-audio"),
-               ("soniox/stt-async-v3", "soniox/stt-async-v5"),
-               ("soniox/stt-async-v4", "soniox/stt-async-v5")],
+               ("soniox/stt-async-v3", "soniox/stt-async-v6"),
+               ("soniox/stt-async-v4", "soniox/stt-async-v6"),
+               ("soniox/stt-async-v5", "soniox/stt-async-v6")],
         uniquingKeysWith: { first, _ in first }
     )
 
@@ -380,8 +381,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     static let liveTranscriptionSuccessors: [String: String] = Dictionary(
         AssemblyAIModels.legacyUniversal3StreamingIDs.map { ($0, AssemblyAIModels.universal36ProStreamingID) }
             + [("deepgram/nova-2-streaming", "deepgram/nova-3-streaming"),
-               ("soniox/stt-rt-v3-streaming", "soniox/stt-rt-v5-streaming"),
-               ("soniox/stt-rt-v4-streaming", "soniox/stt-rt-v5-streaming")],
+               ("soniox/stt-rt-v3-streaming", "soniox/stt-rt-v6-streaming"),
+               ("soniox/stt-rt-v4-streaming", "soniox/stt-rt-v6-streaming"),
+               ("soniox/stt-rt-v5-streaming", "soniox/stt-rt-v6-streaming")],
         uniquingKeysWith: { first, _ in first }
     )
 

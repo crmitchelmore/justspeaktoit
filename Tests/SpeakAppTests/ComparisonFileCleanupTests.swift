@@ -25,7 +25,7 @@ final class ComparisonFileCleanupTests: XCTestCase {
 
     func testSonioxDeadlineDeletesOnlyAcceptedJobAndFile() async throws {
         try await assertDeadlineCleanup(
-            model: "soniox/stt-async-v5",
+            model: "soniox/stt-async-v6",
             expectedDeletes: ["/v1/transcriptions/job-owned", "/v1/files/file-owned"],
             expectedWork: ["POST /v1/files", "POST /v1/transcriptions", "GET /v1/transcriptions/job-owned"]
         )

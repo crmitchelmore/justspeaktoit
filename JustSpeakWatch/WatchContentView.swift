@@ -16,6 +16,7 @@ struct WatchContentView: View {
                             .font(.footnote)
                             .foregroundStyle(.red)
                             .multilineTextAlignment(.center)
+                            .accessibilityIdentifier("watchRecordingError")
                     }
                     capturesList
                 }
@@ -32,7 +33,8 @@ struct WatchContentView: View {
         } label: {
             VStack(spacing: 6) {
                 Image(systemName: recorder.isRecording ? "stop.fill" : "mic.fill")
-                    .font(.system(size: 36, weight: .bold))
+                    .font(.largeTitle.bold())
+                    .accessibilityHidden(true)
                 if let startedAt = recorder.startedAt {
                     ElapsedTimeText(since: startedAt)
                         .font(.system(.body, design: .monospaced))
@@ -46,6 +48,8 @@ struct WatchContentView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(recorder.isRecording ? .red : .accentColor)
+        .accessibilityLabel(recorder.isRecording ? "Stop recording" : "Start recording")
+        .accessibilityIdentifier("watchRecordButton")
         .primaryActionGestureShortcut()
     }
 
@@ -111,6 +115,12 @@ struct WatchCaptureRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            Text("Capture at \(capture.createdAt.formatted(date: .omitted, time: .shortened)), \(durationLabel)")
+        )
+        .accessibilityValue(statusLabel)
+        .accessibilityIdentifier("watchCaptureRow-\(capture.id)")
     }
 
     private var durationLabel: String {

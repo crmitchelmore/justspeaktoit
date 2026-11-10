@@ -85,3 +85,20 @@ test('HDR wordmarks are narrowly gated and retain readable fallbacks', async () 
   assert.deepEqual([...supports.matchAll(/([^{}]+)\{/g)].map(match => match[1].trim()),
     ['.brand-wordmark', '.brand-wordmark::selection']);
 });
+
+test('every clip on the page ships narrated light and dark variants with posters and captions', async () => {
+  const html = await readFile(path.join(source, 'index.html'), 'utf8');
+  const names = [...html.matchAll(/data-clip="([a-z]+)"/g)].map(match => match[1]);
+  assert.ok(names.length >= 4, 'The hero and at least three feature clips are on the page');
+  for (const name of names) {
+    for (const variant of ['light', 'dark']) {
+      for (const suffix of ['.mp4', '.webm', '-poster.webp']) {
+        await readFile(path.join(source, 'images/clips', `${name}-${variant}${suffix}`));
+      }
+      assert.ok(html.includes(`/images/clips/${name}-${variant}.webm`), `${name} offers its ${variant} WebM`);
+    }
+    assert.match(await readFile(path.join(source, 'images/clips', `${name}.en.vtt`), 'utf8'), /^WEBVTT/);
+  }
+  const videos = html.match(/<video class="clip-video"[^>]*>/g);
+  assert.ok(videos.every(tag => tag.includes('preload="none"') && !/\bautoplay\b/.test(tag)), 'Clips never preload or autoplay');
+});

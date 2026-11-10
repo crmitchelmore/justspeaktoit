@@ -139,6 +139,19 @@ final class DesktopGeminiConfigurationTests: DeepgramSpeechStubTestCase {
         XCTAssertTrue(VoiceOutputLanguagePreference.title(for: nil).contains("unavailable"))
     }
 
+    func testRetiredPreviewSelection_ResolvesToReplacementWhileHistoryKeepsItsPrice() throws {
+        let retired = GeminiTTSModel.flash31TTSPreview
+        XCTAssertFalse(GeminiTTSCatalog.models.contains(retired))
+        XCTAssertEqual(GeminiTTSCatalog.model(forID: retired.desktopModelIdentifier), retired)
+        XCTAssertEqual(GeminiTTSCatalog.selectableModel(forID: retired.rawValue), .flash38LiteTTS)
+        XCTAssertEqual(retired.costPerSecondOfSpeech, Decimal(string: "0.0005"))
+        let voice = GeminiTTSCatalog.defaultVoice
+        for identifier in [retired.rawValue, retired.desktopModelIdentifier] {
+            let resolved = try DesktopSpeechVoice.resolved(modelID: identifier, voiceID: voice.providerVoiceID)
+            XCTAssertEqual(resolved, .gemini(voice, model: .flash38LiteTTS))
+        }
+    }
+
     func testUnknownModelsLanguagesAndUnsupportedOptions_RefuseBeforeCredentialOrTransport() async throws {
         let voice = DesktopSpeechVoice.gemini(GeminiTTSCatalog.defaultVoice)
         for identifier in ["gemini-2.5-flash-preview-tts", "google/future-tts", "gemini-3.5-transcribe"] {

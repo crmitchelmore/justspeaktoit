@@ -341,6 +341,8 @@ public struct PostProcessingView: View {
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(.green)
+                            .accessibilityLabel("Use polished text")
+                            .accessibilityIdentifier("postProcessingUseResult")
                         }
                     }
                     

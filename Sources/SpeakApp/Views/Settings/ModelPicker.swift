@@ -128,6 +128,7 @@ struct ModelPicker: View {
             .font(.headline)
           Spacer()
           Button("Done") { dismiss() }
+            .keyboardShortcut(.cancelAction)
         }
 
         Picker("Filter", selection: $selectedTag) {

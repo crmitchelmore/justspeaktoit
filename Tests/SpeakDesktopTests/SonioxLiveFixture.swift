@@ -9,7 +9,7 @@ final class SonioxLiveFixture: @unchecked Sendable {
     let events = AssemblyAITestEvents()
     let client: SonioxLiveClient
 
-    init(key: String = "synthetic", model: String = "stt-rt-v5", language: String? = nil, sampleRate: Int = 16_000) {
+    init(key: String = "synthetic", model: String = "stt-rt-v6", language: String? = nil, sampleRate: Int = 16_000) {
         let factory = factory, clock = clock
         client = SonioxLiveClient(
             apiKey: key, model: model, language: language, sampleRate: sampleRate,

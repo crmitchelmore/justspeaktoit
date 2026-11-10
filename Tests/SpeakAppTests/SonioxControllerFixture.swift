@@ -70,7 +70,7 @@ final class SonioxControllerFixture {
     init(language: String? = nil) {
         let socket = self.socket, clock = self.clock
         let client = SonioxLiveClient(
-            apiKey: "synthetic", model: "stt-rt-v5", language: language,
+            apiKey: "synthetic", model: "stt-rt-v6", language: language,
             makeConnection: { _ in socket }, schedule: { clock.schedule($0, $1) },
             finishTimeout: SonioxControllerClient.finishTimeout
         )

@@ -20,11 +20,13 @@ The PNG screenshot files below show native app UI, not HTML reproductions or gen
 
 ## Marketing clips (`clips/`)
 
-Seven silent, captioned clips: `hero` (Mac), `corrections`, `history`,
-`models`, `iphone`, `windows` (beta) and `linux` (beta). Each has an H.264
-`.mp4`, an AV1 `.webm`, a WebVTT `.en.vtt` caption track and a WebP poster.
-`manifest.json` lists durations, sizes and alt text; `desktop-source.json`
-names the exact Windows and Linux runs used.
+Seven narrated, captioned clips: `hero` (Mac), `corrections`, `history`,
+`models`, `iphone`, `windows` (beta) and `linux` (beta), each in a `-light`
+and a `-dark` variant. Each variant has an H.264/AAC `.mp4`, an AV1/Opus
+`.webm` and a WebP poster; both variants share one timeline, so they share one
+WebVTT `.en.vtt` caption track and one narration. `manifest.json` lists
+durations, sizes and alt text; `desktop-source.json` names the exact Windows
+and Linux runs used.
 
 They are rendered by `scripts/site-media/render-clips.py` in the `render` job
 of `.github/workflows/site-media.yml`, only from footage captured on
@@ -34,37 +36,49 @@ GitHub-hosted runners, never the owner's machine:
   `Tests/SpeakAppUITests/SiteMediaCaptureUITests.swift` with the same fixture:
   the shortcut double-tap is sent by the test driver, the audio is a synthetic
   clip, a test fixture returns fixed text, and Clipboard output mode is used
-  because the runner cannot grant Accessibility. It also tours Corrections
-  (three fictional rules), Transcription and Post-processing. Scenes are cut at the test's marks and cropped 1:1 to the
-  window frames it records; frames are never enlarged or retouched.
-- iPhone: full-screen screenshots of the Debug app in an owned Simulator,
-  saved by `Tests/SpeakiOSUITests/SiteMediaCaptureUITests.swift` at each step
-  and shown as unretouched stills. (`simctl io recordVideo` writes
-  variable-frame-rate video that drifts 9-17 s from the test clock, so it
-  cannot be cut reliably.) The Simulator transcript hook returns fixed
-  fictional text instead of a microphone and transcriber, and the captions
-  say so.
+  because the runner cannot grant Accessibility. It also tours Transcription,
+  Post-processing and Corrections (three fictional rules). Scenes are cut at
+  the test's marks and cropped 1:1 to the window frames it records; frames are
+  never enlarged or retouched. The capture runs twice, with the app's
+  Appearance set to Light and to Dark.
+- iPhone: full-screen screenshots of the Debug app in an owned Simulator, set
+  to light and then dark appearance, saved by
+  `Tests/SpeakiOSUITests/SiteMediaCaptureUITests.swift` at each step and shown
+  as unretouched stills. (`simctl io recordVideo` writes variable-frame-rate
+  video that drifts 9-17 s from the test clock, so it cannot be cut reliably.)
+  The Simulator transcript hook returns fixed fictional text instead of a
+  microphone and transcriber, and the narration says so.
 - Windows and Linux: unretouched page screenshots from the native apps'
   `--ui-screenshots` tours in `windows.yml` and `linux.yml` (sample History),
   fetched from the newest successful `main` run whose job ran on a hosted
-  runner by `scripts/site-media/fetch-desktop-tours.py`. Light-theme Windows
-  pages are skipped because the off-screen capture renders them washed out.
+  runner by `scripts/site-media/fetch-desktop-tours.py`. Each variant uses the
+  tour's light or dark page; the recording overlay is dark in both, as in the
+  apps. Where a tour has no light recording page, the light variant shows the
+  Keyboard (shortcut) page instead.
 
-Title cards and the platform badge are the only additions; there is no audio,
-voiceover or music. Physical iPhone Action Button, Live Activity and Apple
-Watch shots need the owner and are tracked in the /qa checklist (#1368).
+Title cards, the platform badge and narration are the only additions; there is
+no music. Narration is the caption text spoken by the Piper TTS voice
+`en_GB-cori-high` (Piper is GPL-3.0 and runs only in CI; the voice was trained
+on public-domain LibriVox recordings, see its model card in
+`rhasspy/piper-voices`). The model is pinned by SHA-256 and its two noise
+generators are seeded, so the same text renders the same audio. Physical
+iPhone Action Button, Live Activity and Apple Watch shots need the owner and
+are tracked in the /qa checklist (#1368).
 
 To regenerate for a release: run the Site Media Capture workflow, download its
 `site-clips-*` artifact and copy the files into `clips/`. Locally,
-`python3 scripts/site-media/render-clips.py <captures> <output>` re-renders
-from downloaded capture artifacts (needs ffmpeg and Pillow).
+`python3 scripts/site-media/render-clips.py <captures> <output> --voices <dir>`
+re-renders from downloaded capture artifacts (needs ffmpeg and
+`scripts/site-media/requirements.txt`).
 
-The page loads no clip data until someone presses play (`preload="none"`), and
-`clips.js` defers below-the-fold posters until they near the viewport. Measured
-for the 8 November 2026 render: the first view loads only the 21 KB hero
-poster and the 0.9 KB script (the previous demo poster was 32 KB); the other six
-posters add 157 KB as they are scrolled to, replacing the 465 KB iPhone PNG that
-was previously lazy-loaded; each clip costs 150-420 KB only when played.
+The page loads no clip data until someone presses play (`preload="none"`).
+`clips.js` serves the variant matching the visitor's `prefers-color-scheme`,
+switches it live (keeping the playback position) when the scheme changes, and
+defers each poster until its clip nears the viewport; without JavaScript the
+`<source media>` queries pick the variant. Initial page weight is only the visible posters (all 7
+posters are about 170 KiB per appearance); a played clip costs about
+0.3–0.5 MiB as AV1 WebM, or a little more as the H.264 MP4 fallback. Each
+appearance totals about 2.6 MiB of WebM across all seven clips.
 
 Earlier captures that showed the developer's own usage and dictation
 (app-dashboard.png, app-history.png) and superseded captures were removed.

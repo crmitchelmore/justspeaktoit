@@ -6,7 +6,7 @@ final class SonioxLiveLanguageTests: XCTestCase {
     func testInitialConfig_explicitLocaleAddsLanguageHint() {
         let payload = SonioxLiveTranscriber.initialConfigPayload(
             apiKey: "test-key",
-            model: "stt-rt-v5",
+            model: "stt-rt-v6",
             language: "fr_FR",
             sampleRate: 16_000
         )
@@ -17,7 +17,7 @@ final class SonioxLiveLanguageTests: XCTestCase {
     func testInitialConfig_automaticOmitsLanguageHint() {
         let payload = SonioxLiveTranscriber.initialConfigPayload(
             apiKey: "test-key",
-            model: "stt-rt-v5",
+            model: "stt-rt-v6",
             language: nil,
             sampleRate: 16_000
         )

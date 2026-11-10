@@ -3,7 +3,15 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
+
+// verify-launch.sh qualifies macOS app launches (ps birth times, DiagnosticReports
+// delivery); on the Linux Lint runner its timing races are not meaningful.
+// Merge batches and main run this file on macOS through make test-tooling.
+const macOnly = process.platform !== 'darwin' && 'macOS launch verifier';
+const test = (name, options, fn) => (typeof options === 'function'
+  ? nodeTest(name, { skip: macOnly }, options)
+  : nodeTest(name, { ...options, skip: options.skip || macOnly }, fn));
 import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('../verify-launch.sh', import.meta.url));
@@ -125,11 +133,7 @@ test('rejects a crashed candidate despite another matching process being alive',
   assert.doesNotMatch(readFileSync(result.logCalls, 'utf8'), /--last/);
 });
 
-// macOS crash-report delivery; Linux lint runners raced the collector. The
-// batch and main macOS job runs it through make test-tooling.
-test('retains only fresh crash reports belonging to the failed Alpha child', {
-  skip: process.platform !== 'darwin' && 'macOS DiagnosticReports collector',
-}, t => {
+test('retains only fresh crash reports belonging to the failed Alpha child', t => {
   const result = fixture(t, `
 reports="$HOME/Library/Logs/DiagnosticReports"
 python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToItAlpha-own.ips"

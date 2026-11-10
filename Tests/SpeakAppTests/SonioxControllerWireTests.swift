@@ -34,7 +34,7 @@ final class SonioxControllerWireTests: XCTestCase {
             let json = try XCTUnwrap(fixture.socket.controls.first)
             let data = try XCTUnwrap(json.data(using: .utf8))
             let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-            XCTAssertEqual(payload["model"] as? String, "stt-rt-v5")
+            XCTAssertEqual(payload["model"] as? String, "stt-rt-v6")
             XCTAssertEqual(payload["sample_rate"] as? Int, 16_000)
             XCTAssertEqual(payload["num_channels"] as? Int, 1)
             if language == nil {

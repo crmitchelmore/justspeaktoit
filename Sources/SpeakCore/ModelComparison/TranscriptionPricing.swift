@@ -99,7 +99,10 @@ public enum TranscriptionPricing {
         "thinkingmachines/inkling:free": .zero,
         "thinkingmachines/inkling-small:free": .zero,
         // Paid audio-chat routes are token-billed: no per-minute estimate without usage.
-        // Soniox: $0.10/hr async, $0.12/hr real-time.
+        // Soniox: $0.10/hr async, $0.12/hr real-time (unchanged from v5).
+        // History recorded under v5 keeps its estimate.
+        "soniox/stt-async-v6": perHour("0.10"),
+        "soniox/stt-rt-v6-streaming": perHour("0.12"),
         "soniox/stt-async-v5": perHour("0.10"),
         "soniox/stt-rt-v5-streaming": perHour("0.12"),
         // Groq Whisper large-v3-turbo: $0.04 per audio hour.

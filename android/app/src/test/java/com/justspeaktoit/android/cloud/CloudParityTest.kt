@@ -50,7 +50,10 @@ class CloudParityTest {
     fun testCredentialIds_followMacConvention() {
         val catalogue = RepoSources.speakCore("ProviderCredentialCatalogue.swift")
         assertTrue(catalogue.contains("return \"\\(providerID).apiKey\""))
-        assertEquals(listOf("openai.apiKey", "groq.apiKey", "openrouter.apiKey"), CloudProvider.entries.map { it.credentialId })
+        assertEquals(
+            listOf("openai.apiKey", "groq.apiKey", "openrouter.apiKey", "anthropic.apiKey", "google.apiKey", "mistral.apiKey"),
+            CloudProvider.entries.map { it.credentialId },
+        )
     }
 
     @Test
@@ -87,6 +90,42 @@ class CloudParityTest {
         val retiring = Regex("id: \"([^\"]+)\", mode: \\.batch").findAll(retirements).map { it.groupValues[1] }.toSet()
         val expected = (direct + groq).toSet() - retiring - ANDROID_EXCLUSIONS.keys
         assertEquals(expected, CloudCatalog.transcriptionModels.map { it.catalogId }.toSet())
+    }
+
+    @Test
+    fun testNativeCleanupModels_matchNativeTextModels() {
+        val swift = RepoSources.speakCore("NativeTextModels.swift")
+        val providerIds = Regex("static let (\\w+) = NativeTextProvider\\(\\s*id: \"([^\"]+)\"")
+            .findAll(swift).associate { it.groupValues[1] to it.groupValues[2] }
+        val expected = Regex("option\\((\\w+), \"([^\"]+)\", \"([^\"]+)\"").findAll(swift).map {
+            Triple("native/${providerIds.getValue(it.groupValues[1])}/${it.groupValues[2]}", it.groupValues[3], it.groupValues[2])
+        }.toList()
+        assertTrue("No native models parsed", expected.isNotEmpty())
+        val android = CloudCatalog.cleanupModels.filterNot { it.isOpenRouter }
+            .map { Triple(it.selectionId, it.displayName, it.apiName) }
+        assertEquals(expected.toSet(), android.toSet())
+    }
+
+    @Test
+    fun testNativeCleanupEndpoints_matchNativeTextModels() {
+        val swift = RepoSources.speakCore("NativeTextModels.swift")
+        val urls = Regex("id: \"([^\"]+)\", displayName: \"[^\"]+\",\\s*chatCompletionsURL: URL\\(string: \"([^\"]+)\"\\)")
+            .findAll(swift).associate { it.groupValues[1] to it.groupValues[2] }
+        CloudCatalog.cleanupModels.filterNot { it.isOpenRouter }.map { it.provider }.distinct().forEach { provider ->
+            assertEquals(provider.id, urls[provider.id], "${provider.baseUrl}/chat/completions")
+        }
+    }
+
+    @Test
+    fun testOpenRouterCleanupModels_matchModelCatalogue() {
+        val catalog = RepoSources.speakCore("ModelCatalog.swift")
+        val section = catalog.substringAfter("NativeTextModels.postProcessing + [")
+            .substringBefore("public static let localTranscription")
+        val expected = Regex("id: \"([^\"]+)\",\\s*displayName: \"([^\"]+)\"").findAll(section)
+            .map { it.groupValues[1] to it.groupValues[2] }.toSet()
+        assertTrue("No OpenRouter cleanup models parsed", expected.isNotEmpty())
+        val android = CloudCatalog.cleanupModels.filter { it.isOpenRouter }.map { it.selectionId to it.displayName }.toSet()
+        assertEquals(expected, android)
     }
 
     private fun swiftStringConstants(swift: String): Map<String, String> =

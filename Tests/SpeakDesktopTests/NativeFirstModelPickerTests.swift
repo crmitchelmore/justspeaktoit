@@ -76,6 +76,36 @@ final class NativeFirstModelPickerTests: XCTestCase {
         XCTAssertEqual(openRouter.model, "openai/gpt-6-luna")
     }
 
+    func testAnthropicRouteUsesItsOwnKeyAndOmitsTemperature() throws {
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(for: "native/anthropic/claude-sonnet-4-6", purpose: .postProcessing),
+            .apiKey(identifier: "anthropic.apiKey", providerName: "Anthropic")
+        )
+        let target = try ChatCompletionTarget.resolve("native/anthropic/claude-haiku-4-5")
+        XCTAssertEqual(target.url.absoluteString, "https://api.anthropic.com/v1/chat/completions")
+        let request = OpenRouterChatRequest(
+            model: "native/anthropic/claude-haiku-4-5", temperature: 0.2,
+            messages: [.init(role: "user", content: "fixture")], stream: true, maxTokens: nil
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        )
+        XCTAssertEqual(object["model"] as? String, "claude-haiku-4-5")
+        XCTAssertNil(object["temperature"], "Claude 4.7 and later reject a temperature below 1")
+        XCTAssertEqual(object["max_tokens"] as? Int, 8_192, "Anthropic rejects requests without an output limit")
+        let openRouter = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(OpenRouterChatRequest(
+                model: "anthropic/claude-haiku-4.5", temperature: 0.2,
+                messages: [.init(role: "user", content: "fixture")], stream: nil, maxTokens: nil
+            ))) as? [String: Any]
+        )
+        XCTAssertNil(openRouter["max_tokens"], "Other routes keep their unlimited default")
+        // The Anthropic key is a known, transferable credential with a key guide.
+        XCTAssertTrue(ModelCredentialResolver.allKnownAPIKeyIdentifiers.contains("anthropic.apiKey"))
+        XCTAssertFalse(ProviderCredentialCatalogue.cloudKitSyncable.contains("anthropic.apiKey"))
+        XCTAssertEqual(APIKeyGuidance.guides.filter { $0.identifiers.contains("anthropic.apiKey") }.count, 1)
+    }
+
     func testChatClientSendsNativeSelectionToTheProviderEndpoint() async throws {
         let reply = Data(#"{"choices":[{"index":0,"finish_reason":"stop","message":{"content":"Done."}}]}"#.utf8)
         StubURLProtocol.handler = { .ok(reply, url: $0.url!) }
@@ -157,9 +187,9 @@ final class NativeFirstModelPickerTests: XCTestCase {
         }
         XCTAssertEqual(
             groups.direct.map { ModelPickerGrouping.providerName(for: $0.id, purpose: .postProcessing) }.uniqued(),
-            ["Google Gemini", "Groq", "Mistral", "OpenAI"]
+            ["Anthropic", "Google Gemini", "Groq", "Mistral", "OpenAI"]
         )
-        XCTAssertEqual(groups.direct.first?.id, "native/google/gemini-2.5-flash")
+        XCTAssertEqual(groups.direct.first?.id, "native/anthropic/claude-haiku-4-5")
     }
 
     func testOpenRouterGroupSortsByVendorPrefix() {
@@ -223,7 +253,7 @@ final class NativeFirstModelPickerTests: XCTestCase {
             return XCTFail("OpenRouter entries are not labelled")
         }
         XCTAssertTrue(flat[..<firstOpenRouter].allSatisfy { NativeTextModels.isNative($0.id) })
-        XCTAssertEqual(DesktopPostProcessing.remoteModels.first?.id, "native/google/gemini-2.5-flash")
+        XCTAssertEqual(DesktopPostProcessing.remoteModels.first?.id, "native/anthropic/claude-haiku-4-5")
     }
 
     func testSearchMatchesNameIdentifierAndDescription() {

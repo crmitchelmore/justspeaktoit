@@ -125,7 +125,11 @@ test('rejects a crashed candidate despite another matching process being alive',
   assert.doesNotMatch(readFileSync(result.logCalls, 'utf8'), /--last/);
 });
 
-test('retains only fresh crash reports belonging to the failed Alpha child', t => {
+// macOS crash-report delivery; Linux lint runners raced the collector. The
+// batch and main macOS job runs it through make test-tooling.
+test('retains only fresh crash reports belonging to the failed Alpha child', {
+  skip: process.platform !== 'darwin' && 'macOS DiagnosticReports collector',
+}, t => {
   const result = fixture(t, `
 reports="$HOME/Library/Logs/DiagnosticReports"
 python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToItAlpha-own.ips"

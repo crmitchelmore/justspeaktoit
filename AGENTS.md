@@ -236,6 +236,9 @@ Keep candidate source, versions and note hashes frozen while Alpha continues.
 Use the manifest and actual GitHub/App Store Connect publication receipts as
 version/baseline authority. `VERSION` is a build hint only.
 
+### Batch merging
+- To land several ready PRs on one CI run, use `scripts/merge-batch` (create → status → land, or split to bisect a failure); see [Docs/merge-batch.md](Docs/merge-batch.md). Batches land only through their own PR and required checks.
+
 ### PR merge unblock checklist
 - The `main` ruleset does not require branches to be up to date. A PR that is only `BEHIND` can merge as-is: do not rebase or merge `main` into it, because every push restarts all of its CI and takes a scarce hosted macOS slot. Update a branch from `main` only on a real conflict (`mergeStateStatus` `DIRTY`) or when a fix it needs has landed on `main`.
 - Main CI runs every gate after the merge and opens a `ci-main-failure` issue if one fails, so it catches the rare semantic conflict a stale branch misses.

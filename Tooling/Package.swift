@@ -18,6 +18,6 @@ let package = Package(
     name: "SpeakTooling",
     dependencies: [
         .package(url: "https://github.com/realm/SwiftLint.git", from: "0.65.0"),
-        .package(url: "https://github.com/nicklockwood/SwiftFormat.git", exact: "0.64.5")
+        .package(url: "https://github.com/nicklockwood/SwiftFormat.git", exact: "0.64.6")
     ]
 )

@@ -314,6 +314,11 @@ def android_runs_locally() -> bool:
     return jdk and feed
 
 
+def merge_base_or(base: str) -> str:
+    """The merge base with base, or base itself when history can't tell (a shallow CI checkout)."""
+    return git('merge-base', 'HEAD', base, check=False) or base
+
+
 def pr_title_env() -> dict[str, str]:
     """The open PR's title, whose '!' marker declares an intended API break; else commit subjects decide."""
     if os.environ.get('PR_TITLE'):
@@ -438,7 +443,7 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
         title = 'Public API compatibility (scripts/ci-api-compatibility.sh)'
         if IS_MAC:
             checks.append(Check('api-compatibility', 'public-api', title,
-                                ['bash', 'scripts/ci-api-compatibility.sh', git('merge-base', 'HEAD', base)],
+                                ['bash', 'scripts/ci-api-compatibility.sh', merge_base_or(base)],
                                 env=pr_title_env(), requires='swift', forbid_drift=('Package.resolved',)))
         else:
             checks.append(Check('api-compatibility', 'public-api', title, [], skip_reason='macOS only',

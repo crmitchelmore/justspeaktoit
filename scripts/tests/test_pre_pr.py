@@ -66,7 +66,7 @@ class PlanTests(unittest.TestCase):
             checks, areas = pre_pr.plan(['Sources/SpeakCore/OpenRouterAPIClient.swift'], False)
             api = {c.id: c for c in checks}['api-compatibility']
             self.assertEqual(api.command[:2], ['bash', 'scripts/ci-api-compatibility.sh'])
-            self.assertEqual(api.command[2], pre_pr.git('merge-base', 'HEAD', 'origin/main'))
+            self.assertEqual(api.command[2], pre_pr.merge_base_or('origin/main'))
             self.assertIn('public-api', areas)
             for path in ('Sources/SpeakApp/AppDelegate.swift', 'Sources/SpeakDesktop/X.swift', 'Docs/x.md'):
                 ids_ = [c.id for c in pre_pr.plan([path], False)[0]]
@@ -190,6 +190,12 @@ class CIParityTests(unittest.TestCase):
         self.assertIn('run: scripts/ci-android.sh', precheck)
         for action in re.findall(r'uses: (actions/setup-java@\S+|gradle/actions/setup-gradle@\S+)', android):
             self.assertIn(action, precheck)
+
+    def test_plan_needs_no_history(self):
+        # CI's Lint job runs these tests in a shallow checkout without origin/main.
+        with mock.patch.object(pre_pr, 'IS_MAC', True), mock.patch.object(pre_pr, 'pr_title_env', lambda: {}):
+            checks, _ = pre_pr.plan(['Package.swift'], False, base='no-such-ref/main')
+        self.assertEqual({c.id: c for c in checks}['api-compatibility'].command[2], 'no-such-ref/main')
 
     def test_api_products_match_the_gate(self):
         gate = (ROOT / 'scripts' / 'check-api-compatibility.sh').read_text(encoding='utf-8')

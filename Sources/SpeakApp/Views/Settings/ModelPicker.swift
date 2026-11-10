@@ -90,126 +90,86 @@ struct ModelPicker: View {
     let options: [ModelCatalog.Option]
     let credentialPurpose: ModelCredentialPurpose
     let storedAPIKeyIdentifiers: Set<String>
+    let allowsCustom: Bool
     @Binding var selection: String
 
-    @Environment(\.dismiss) private var dismiss
-    @State private var query: String = ""
     @State private var selectedTag: ModelCatalog.Tag? = nil
 
     var body: some View {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack {
-          Text(title)
-            .font(.headline)
-          Spacer()
-          Button("Done") { dismiss() }
-            .keyboardShortcut(.cancelAction)
-        }
-
-        Picker("Filter", selection: $selectedTag) {
-          Text("All").tag(ModelCatalog.Tag?.none)
-          ForEach(ModelCatalog.Tag.allCases, id: \.self) { tag in
-            Text(tag.displayName).tag(ModelCatalog.Tag?.some(tag))
-          }
-        }
-        .pickerStyle(.segmented)
-
-        List {
-          if isShowingNoSearchResults {
-            ContentUnavailableView.search(text: trimmedQuery)
-          }
-          ForEach(filteredOptions) { option in
-            Button {
-              selection = option.id
-              dismiss()
-            } label: {
-              VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 10) {
-                  Text(option.displayName)
-                    .font(.body)
+      LongListChooserSheet(
+        title: title, items: sortedOptions, id: { $0.id }, selection: $selection,
+        searchText: { [$0.displayName, $0.id, $0.description ?? ""] },
+        includes: { option in selectedTag.map { option.tags.contains($0) } ?? true },
+        controls: {
+          AnyView(Picker("Filter", selection: $selectedTag) {
+            Text("All").tag(ModelCatalog.Tag?.none)
+            ForEach(ModelCatalog.Tag.allCases, id: \.self) { tag in
+              Text(tag.displayName).tag(ModelCatalog.Tag?.some(tag))
+            }
+          }.pickerStyle(.segmented))
+        },
+        clearFilters: { selectedTag = nil },
+        footer: { select in
+          AnyView(Group {
+            if allowsCustom {
+              Divider()
+              Button {
+                select(ModelCatalog.customOptionID)
+              } label: {
+                HStack {
+                  Text("Custom…")
                   Spacer()
-                  if let contextLength = option.contextLength {
-                    Text(formatContext(contextLength))
-                      .font(.caption.monospacedDigit())
-                      .foregroundStyle(.secondary)
-                  }
-                  if let pricing = option.pricing {
-                    Text(pricing.compactDisplay)
-                      .font(.caption.monospacedDigit())
-                      .foregroundStyle(.secondary)
-                  }
                   ModelCredentialStatusView(
                     availability: ModelCredentialResolver.availability(
-                      for: option.id,
+                      for: ModelCatalog.customOptionID,
                       purpose: credentialPurpose,
                       storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
                     )
                   )
-                  ModelTagBadges(tags: option.tags, compact: true)
-                  LatencyBadgeCompact(option: option)
-                }
-
-                if let description = option.description, !description.isEmpty {
-                  Text(description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
               }
-              .padding(.vertical, 4)
+              .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-          }
-
-          Divider()
-
-          Button {
-            selection = ModelCatalog.customOptionID
-            dismiss()
-          } label: {
-            HStack {
-              Text("Custom…")
-              Spacer()
-              ModelCredentialStatusView(
-                availability: ModelCredentialResolver.availability(
-                  for: ModelCatalog.customOptionID,
-                  purpose: credentialPurpose,
-                  storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
-                )
+          })
+        },
+        row: { option in
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 10) {
+            Text(option.displayName)
+              .font(.body)
+            Spacer()
+            if let contextLength = option.contextLength {
+              Text(formatContext(contextLength))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            if let pricing = option.pricing {
+              Text(pricing.compactDisplay)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            ModelCredentialStatusView(
+              availability: ModelCredentialResolver.availability(
+                for: option.id,
+                purpose: credentialPurpose,
+                storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
               )
-            }
+            )
+            ModelTagBadges(tags: option.tags, compact: true)
+            LatencyBadgeCompact(option: option)
           }
-          .buttonStyle(.plain)
+
+          if let description = option.description, !description.isEmpty {
+            Text(description)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
-        .searchable(text: $query)
-      }
-      .padding(16)
-      .frame(minWidth: 780, minHeight: 520)
+      })
     }
 
-    private var trimmedQuery: String {
-      query.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// True when a search is active but matched nothing, so the sheet can say so
-    /// instead of showing a bare list with only the Custom row.
-    private var isShowingNoSearchResults: Bool {
-      !trimmedQuery.isEmpty && filteredOptions.isEmpty
-    }
-
-    private var filteredOptions: [ModelCatalog.Option] {
+    private var sortedOptions: [ModelCatalog.Option] {
       var result = options
-      if let selectedTag {
-        result = result.filter { $0.tags.contains(selectedTag) }
-      }
-      let trimmed = trimmedQuery
-      if !trimmed.isEmpty {
-        let lowered = trimmed.lowercased()
-        result = result.filter {
-          $0.displayName.lowercased().contains(lowered)
-            || $0.id.lowercased().contains(lowered)
-            || ($0.description?.lowercased().contains(lowered) ?? false)
-        }
-      }
       result.sort { lhs, rhs in
         let lhsLeading = lhs.tags.contains(.leading)
         let rhsLeading = rhs.tags.contains(.leading)
@@ -279,7 +239,7 @@ struct ModelPicker: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if usesDetailedChooser {
+      if usesDetailedChooser || LongListPickerPolicy.usesSheet(count: options.count) {
         Button {
           isShowingChooser = true
         } label: {
@@ -310,6 +270,7 @@ struct ModelPicker: View {
             options: options,
             credentialPurpose: credentialPurpose,
             storedAPIKeyIdentifiers: storedAPIKeyIdentifiers,
+            allowsCustom: allowsCustom,
             selection: $selection
           )
         }

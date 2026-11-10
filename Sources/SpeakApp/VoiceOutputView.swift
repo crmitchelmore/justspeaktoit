@@ -370,24 +370,13 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
               .foregroundStyle(.secondary)
           }
         } else {
-          Picker("Voice", selection: $selectedVoice) {
-            ForEach(VoiceCatalog.includingSelection(selectedVoice, in: availableVoices)) { voice in
-              HStack {
-                Text(voice.displayName)
-                Spacer()
-                ModelCredentialStatusView(
-                  availability: ModelCredentialResolver.availability(
-                    for: voice.id,
-                    purpose: .voiceOutput,
-                    storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers
-                  )
-                )
-              }
-              .accessibilityElement(children: .combine)
-              .tag(voice.id)
-            }
-          }
-          .labelsHidden()
+          VoicePicker(
+            voices: VoiceCatalog.includingSelection(selectedVoice, in: availableVoices),
+            storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers,
+            selection: $selectedVoice,
+            preview: { voiceID in Task { await tts.previewVoice(voiceID) } },
+            previewDisabled: tts.isSynthesizing
+          )
 
           OpenRouterSpeechPickerButton(selectedVoice: $selectedVoice)
 

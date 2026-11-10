@@ -364,12 +364,14 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         }
 
         if !availableModels.isEmpty {
-          Picker("Model", selection: $selectedModelFilter) {
-            Text("All Models").tag(String?.none)
-            Divider()
-            ForEach(availableModels, id: \.self) { model in
-              Text(ModelCatalog.friendlyName(for: model)).tag(String?.some(model))
-            }
+          LongListPicker(
+            title: "Model",
+            items: [LongListChoice<String?>(id: nil, title: "All Models")]
+              + availableModels.map { LongListChoice<String?>(id: $0, title: ModelCatalog.friendlyName(for: $0)) },
+            id: { $0.id }, selection: $selectedModelFilter, searchText: { [$0.title, $0.id ?? ""] },
+            menuDividerAfter: { $0.id == nil }
+          ) { item in
+            Text(item.title)
           }
           .labelsHidden()
           .pickerStyle(.menu)
@@ -549,12 +551,14 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
         }
 
         if !availableModels.isEmpty {
-          Picker("Model", selection: $selectedModelFilter) {
-            Text("All Models").tag(String?.none)
-            Divider()
-            ForEach(availableModels, id: \.self) { model in
-              Text(ModelCatalog.friendlyName(for: model)).tag(String?.some(model))
-            }
+          LongListPicker(
+            title: "Model",
+            items: [LongListChoice<String?>(id: nil, title: "All Models")]
+              + availableModels.map { LongListChoice<String?>(id: $0, title: ModelCatalog.friendlyName(for: $0)) },
+            id: { $0.id }, selection: $selectedModelFilter, searchText: { [$0.title, $0.id ?? ""] },
+            menuDividerAfter: { $0.id == nil }
+          ) { item in
+            Text(item.title)
           }
           .pickerStyle(.menu)
           .fixedSize()

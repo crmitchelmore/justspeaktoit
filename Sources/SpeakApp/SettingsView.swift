@@ -824,24 +824,11 @@ struct SettingsView: View {
       SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
-            Picker("Voice", selection: settingsBinding(\AppSettings.defaultTTSVoice)) {
-              ForEach(defaultVoicePickerOptions) { voice in
-                HStack {
-                  Text(voice.displayName)
-                  Spacer()
-                  ModelCredentialStatusView(
-                    availability: ModelCredentialResolver.availability(
-                      for: voice.id,
-                      purpose: .voiceOutput,
-                      storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers
-                    )
-                  )
-                }
-                .accessibilityElement(children: .combine)
-                .tag(voice.id)
-              }
-            }
-            .settingsMenuPicker()
+            VoicePicker(
+              voices: defaultVoicePickerOptions,
+              storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers,
+              selection: settingsBinding(\AppSettings.defaultTTSVoice)
+            )
             .speakTooltip("Choose your preferred voice for text-to-speech synthesis")
 
             OpenRouterSpeechPickerButton(selectedVoice: settingsBinding(\AppSettings.defaultTTSVoice))
@@ -851,10 +838,12 @@ struct SettingsView: View {
               .foregroundStyle(.secondary)
           }
 
-          Picker("Language", selection: settingsBinding(\AppSettings.ttsLanguageIdentifier)) {
-            ForEach(VoiceOutputLanguageCatalog.options) { option in
-              Text(option.displayName).tag(option.id)
-            }
+          LongListPicker(
+            title: "Language", items: VoiceOutputLanguageCatalog.options,
+            id: { $0.id }, selection: settingsBinding(\AppSettings.ttsLanguageIdentifier),
+            searchText: { [$0.displayName, $0.id] }
+          ) { option in
+            Text(option.displayName)
           }
           .pickerStyle(.menu)
 

@@ -167,11 +167,13 @@ extension ProfileEditorView {
           .foregroundStyle(.secondary)
       }
 
-      Picker("Output Language", selection: $draft.outputLanguage) {
-        Text("Use app setting").tag("")
-        ForEach(Self.outputLanguages, id: \.self) { language in
-          Text(language).tag(language)
-        }
+      LongListPicker(
+        title: "Output Language",
+        items: [LongListChoice(id: "", title: "Use app setting")]
+          + Self.outputLanguages.map { LongListChoice(id: $0, title: $0) },
+        id: { $0.id }, selection: $draft.outputLanguage, searchText: { [$0.title] }
+      ) { item in
+        Text(item.title)
       }
       .pickerStyle(.menu)
 
@@ -184,11 +186,13 @@ extension ProfileEditorView {
     VStack(alignment: .leading, spacing: 8) {
       Text("Spoken Language")
         .font(.subheadline.weight(.semibold))
-      Picker("Spoken Language", selection: $draft.languageIdentifier) {
-        Text("Use app setting").tag("")
-        ForEach(TranscriptionLanguageCatalog.options) { option in
-          Text(option.displayName).tag(option.id)
-        }
+      LongListPicker(
+        title: "Spoken Language",
+        items: [LongListChoice(id: "", title: "Use app setting")]
+          + TranscriptionLanguageCatalog.options.map { LongListChoice(id: $0.id, title: $0.displayName) },
+        id: { $0.id }, selection: $draft.languageIdentifier, searchText: { [$0.title, $0.id] }
+      ) { item in
+        Text(item.title)
       }
       .pickerStyle(.menu)
       .labelsHidden()

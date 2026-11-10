@@ -1111,10 +1111,12 @@ extension SettingsView {
         systemImage: "checklist",
         tint: .orange
       ) {
-        Picker("Available local streaming candidates", selection: $selectedRecommendedStreamingSourceID) {
-          ForEach(LocalModelManager.recommendedStreamingModelSources) { source in
-            Text("\(source.modelName) (\(localStreamingSizeLabel(for: source)))").tag(source.id)
-          }
+        LongListPicker(
+          title: "Available local streaming candidates", items: LocalModelManager.recommendedStreamingModelSources,
+          id: { $0.id }, selection: $selectedRecommendedStreamingSourceID,
+          searchText: { [$0.modelName, $0.id] }
+        ) { source in
+          Text("\(source.modelName) (\(localStreamingSizeLabel(for: source)))")
         }
         .labelsHidden()
         .settingsMenuPicker()

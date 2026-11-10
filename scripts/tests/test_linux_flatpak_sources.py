@@ -297,7 +297,7 @@ class BuildRecordLifecycleTests(unittest.TestCase):
     def test_actual_blob_with_parent_looking_bytes_is_not_commit_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             subprocess.run(['git', 'init', '--bare', '-q', directory], check=True)
-            git = ['git', '-C', directory]
+            git = ['git', f'--git-dir={directory}']  # bare repos need explicit --git-dir (safe.bareRepository)
             content = 'parent ' + self.base + '\nparent ' + self.source + '\n\nnot a commit'
             blob = subprocess.check_output([*git, 'hash-object', '-w', '--stdin'], input=content, text=True).strip()
             self.assertEqual(subprocess.check_output([*git, 'cat-file', '-p', blob], text=True), content)

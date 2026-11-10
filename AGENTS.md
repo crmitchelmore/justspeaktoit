@@ -192,8 +192,30 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 ## Testing Guidelines
 - Tests live under `Tests/SpeakAppTests` and rely on XCTest
 - Name specs `test<Behaviour>_<Expectation>()` to mirror scenarios
-- Run `make test` locally before PRs
+- Run `scripts/pre-pr` locally before PRs (see Pre-PR Checks); `make test` runs the whole suite
 - iOS testing requires device/simulator via Xcode
+
+## Pre-PR Checks (mandatory for agents)
+
+Before opening a PR or pushing to one, run `scripts/pre-pr` (or `make pre-pr`)
+and fix every failure first. It compares your branch, including uncommitted
+files, with `origin/main` and runs only the lint, build and unit-test checks for
+the affected areas (Apple, portable/Windows, tooling and workflows, Android, the
+paid-access worker and the landing page), cheapest first. Use `--plan` to see
+the selection, `--full` to run whole affected test targets and `--fetch` to
+refresh `origin/main`.
+
+- It never runs UI tests, xcodebuild, the core-journey harness or app launches,
+  and Swift tests use a private file Keychain in `.build/pre-pr/`, so it is safe
+  on the owner's Mac. CI still runs UI and release gates.
+- Paste `scripts/pre-pr --markdown` output (also in `.build/pre-pr/summary.md`)
+  into the PR body's **Pre-PR checks** section. Keep the hidden
+  `pre-pr-summary` marker: the `Pre-PR evidence` workflow reads it and warns
+  when it is missing, failing or stale (`JSTI_REQUIRE_PRE_PR=true` enforces it).
+- The machine-readable result is `.build/pre-pr/summary.json`; per-check logs
+  are in `.build/pre-pr/logs/`.
+- Opt in to running it on every push with `scripts/install-pre-pr-hook`
+  (`make install-hooks`). Bypass once with `JSTI_SKIP_PRE_PR=1`.
 
 ## Commit & Pull Request Guidelines
 - **Never use `git add -A` or `git add .`** — always stage specific files (`git add <path>`) to avoid committing other agents' work

@@ -114,9 +114,12 @@ bench: ## Run the isolated local-transcription benchmark (pass arguments with BE
 	swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark $(BENCH_ARGS)
 
 .PHONY: install-hooks
-install-hooks: ## Install git hooks for pre-push verification
-	git config core.hooksPath .githooks
-	@echo "✓ Git hooks installed (pre-push → make preflight)"
+install-hooks: ## Install the opt-in pre-push hook that runs scripts/pre-pr
+	./scripts/install-pre-pr-hook --chain
+
+.PHONY: pre-pr
+pre-pr: ## Fast path-aware lint/build/unit checks for the changes against origin/main
+	./scripts/pre-pr $(PRE_PR_ARGS)
 
 .PHONY: xcode
 xcode: ## Generate and open Xcode workspace

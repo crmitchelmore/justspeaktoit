@@ -130,7 +130,7 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = actions.onBack) {
+                IconButton(onClick = actions.onBack, modifier = Modifier.testTag(AutomationIds.SETTINGS_BACK)) {
                     Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.action_back))
                 }
                 Text(
@@ -235,10 +235,16 @@ private fun SettingsSearchField(query: String, onQueryChange: (String) -> Unit) 
         value = query,
         onValueChange = onQueryChange,
         label = { Text(stringResource(R.string.settings_search_hint)) },
-        leadingIcon = { Icon(painterResource(R.drawable.ic_search), contentDescription = null) },
+        leadingIcon = {
+            // Decorative: the field's label already says "Search settings".
+            Icon(painterResource(R.drawable.ic_search), contentDescription = null)
+        },
         trailingIcon = {
             if (query.isNotEmpty()) {
-                IconButton(onClick = { onQueryChange("") }) {
+                IconButton(
+                    onClick = { onQueryChange("") },
+                    modifier = Modifier.testTag(AutomationIds.SETTINGS_SEARCH_CLEAR),
+                ) {
                     Icon(painterResource(R.drawable.ic_close), stringResource(R.string.settings_search_clear))
                 }
             }
@@ -246,7 +252,7 @@ private fun SettingsSearchField(query: String, onQueryChange: (String) -> Unit) 
         singleLine = true,
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("settingsSearchField"),
+            .testTag(AutomationIds.SETTINGS_SEARCH),
     )
 }
 

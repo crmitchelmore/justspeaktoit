@@ -142,6 +142,7 @@ typedef struct UI {
     GtkButton *copy;
     GtkDropDown *version;
     gint32 state;
+    guint state_announcement; /* Idle source that speaks a state change when the HUD is hidden */
     gchar *tray_summary; /* Sessions, Recording Time and Spend for the status notifier */
     /* History */
     GtkSearchEntry *search;
@@ -1056,6 +1057,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     g_clear_object(&ui.backup_chooser);
     if (ui.location_chooser != NULL) g_cancellable_cancel(ui.location_chooser);
     g_clear_object(&ui.location_chooser);
+    g_clear_handle_id(&ui.state_announcement, g_source_remove);
     jsti_hud_destroy();
     jsti_tray_stop();
     emit(JSTI_EVENT_CLOSING, "", 0);
@@ -2209,6 +2211,7 @@ static void build_window(void) {
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), GTK_WIDGET(ui.title));
     ui.import_button = GTK_BUTTON(gtk_button_new_from_icon_name("document-open-symbolic"));
     gtk_widget_set_tooltip_text(GTK_WIDGET(ui.import_button), "Import audio…");
+    gtk_accessible_update_property(GTK_ACCESSIBLE(ui.import_button), GTK_ACCESSIBLE_PROPERTY_LABEL, "Import audio", -1);
     g_signal_connect(ui.import_button, "clicked", G_CALLBACK(on_import), NULL);
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), GTK_WIDGET(ui.import_button));
     ui.header_record = GTK_BUTTON(gtk_button_new());
@@ -2223,7 +2226,9 @@ static void build_window(void) {
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(content), GTK_WIDGET(ui.pages));
     GtkWidget *statusbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(statusbar, "jsti-statusbar");
-    ui.status = GTK_LABEL(gtk_label_new("Starting…"));
+    /* The status role lets screen readers and agents find the app's current state. */
+    ui.status = GTK_LABEL(g_object_new(GTK_TYPE_LABEL, "label", "Starting…",
+                                       "accessible-role", GTK_ACCESSIBLE_ROLE_STATUS, NULL));
     gtk_label_set_wrap(ui.status, TRUE);
     gtk_label_set_xalign(ui.status, 0);
     gtk_label_set_selectable(ui.status, TRUE);
@@ -2608,8 +2613,20 @@ static void update_free(gpointer pointer) {
     g_free(update);
 }
 
+/* Runs after queued HUD updates, so it speaks only when the HUD is not announcing the same change. */
+static gboolean announce_state(gpointer unused) {
+    (void)unused;
+    ui.state_announcement = 0;
+    const char *text = gtk_label_get_text(ui.status);
+    if (jsti_hud_card() == NULL && text != NULL && text[0] != '\0')
+        gtk_accessible_announce(GTK_ACCESSIBLE(ui.window), text, GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+    return G_SOURCE_REMOVE;
+}
+
 static void update_apply(gpointer pointer) {
     Update *update = pointer;
+    if (update->state >= 0 && update->state != ui.state && ui.state_announcement == 0)
+        ui.state_announcement = g_idle_add_full(G_PRIORITY_LOW, announce_state, NULL, NULL);
     if (update->status != NULL) gtk_label_set_text(ui.status, update->status);
     if (update->has_transcript) {
         cleanup_visible = FALSE;
@@ -6470,6 +6487,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.selected_id != NULL || gtk_widget_get_sensitive(GTK_WIDGET(ui.copy))) {
         return fail(error, capacity, "clearing History left record actions enabled");
     }
+    if (gtk_accessible_get_accessible_role(GTK_ACCESSIBLE(ui.status)) != GTK_ACCESSIBLE_ROLE_STATUS)
+        return fail(error, capacity, "the window status lost its accessible status role");
     if (jsti_hud_self_test(error, capacity) != 0) return -1;
     if (jsti_comparison_self_test(ui.window, error, capacity) != 0) return -1;
     return jsti_tray_self_test(error, capacity);

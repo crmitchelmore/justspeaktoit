@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Stable resource IDs for the dictation keyboard, used by UI automation and accessibility services. -->
+<resources>
+    <item name="keyboard_status" type="id" />
+    <item name="keyboard_mic" type="id" />
+    <item name="keyboard_switch" type="id" />
+    <item name="keyboard_delete" type="id" />
+    <item name="keyboard_enter" type="id" />
+</resources>

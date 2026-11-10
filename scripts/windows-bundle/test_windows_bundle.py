@@ -6,6 +6,7 @@ import io
 import json
 import math
 import pathlib
+import re
 import struct
 import tempfile
 import unittest
@@ -416,6 +417,17 @@ class ClosureTests(unittest.TestCase):
             self.assertIn(category, ("application", BUILD.SWIFT_RUNTIME, BUILD.MICROSOFT_RUNTIME))
             return graph[name]
         return read_imports
+
+    def test_windows_support_link_libraries_are_allowed_system_modules(self):
+        # Import libraries the native target links become PE imports; the bundle refuses unknown ones.
+        package = (HERE.parents[1] / "Package.swift").read_text(encoding="utf-8")
+        target = package[package.index('name: "CWindowsSupport"'):]
+        target = target[:target.index(".target(")] if ".target(" in target else target
+        static_only = {"uuid", "mfuuid"}
+        linked = set(re.findall(r'linkedLibrary\("(\w+)"', target)) - static_only
+        self.assertTrue(linked)
+        for library in sorted(linked):
+            self.assertIn(library.lower() + ".dll", self.policy.system, library)
 
     def test_closure_includes_delay_and_transitive_dependencies_once(self):
         closure = BUILD.resolve_closure("SpeakWindows.exe", self.read(self.GRAPH), self.policy)

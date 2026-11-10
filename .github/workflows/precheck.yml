@@ -2,7 +2,7 @@
 # own script on a throwaway precheck/** branch, so a developer without Docker, a
 # JDK or an approved Maven feed gets the same result before opening or pushing a
 # pull request. The snapshot commit's message names the job: [precheck:portable]
-# or [precheck:android]. Ubuntu only: it never takes a macOS slot. No secrets.
+# or [precheck:android] or [precheck:lint]. Ubuntu only: it never takes a macOS slot. No secrets.
 name: Pre-PR Linux precheck
 
 on:
@@ -38,6 +38,24 @@ jobs:
           chmod 0755 "$GITHUB_WORKSPACE"
       - name: Build and test the portable graph
         run: scripts/ci-portable-linux.sh
+
+  lint:
+    name: Lint
+    if: contains(github.event.head_commit.message, '[precheck:lint]')
+    # Same host and command as ci.yml's Lint job: tooling tests behave differently off macOS.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cache lint tooling
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: Tooling/.build
+          key: ${{ runner.os }}-${{ runner.arch }}-hosted-${{ github.workspace }}-tooling-${{ hashFiles('Tooling/Package.resolved') }}
+      - name: Lint and tooling tests (make ci-lint)
+        run: make ci-lint
 
   android:
     name: Build & Test (Android)

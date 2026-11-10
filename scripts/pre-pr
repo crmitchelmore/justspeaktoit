@@ -396,6 +396,14 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
         # Lint: exactly the ci.yml Lint job (whole-repo strict SwiftLint, accessibility, tooling pins and tests).
         checks.append(Check('ci-lint', 'ci-lint', 'CI Lint job (make ci-lint)', ['make', 'ci-lint'],
                             forbid_drift=('Tooling/Package.resolved',)))
+        if not sys.platform.startswith('linux') and linux != 'skip':
+            # CI runs Lint on Ubuntu, where Apple-only tooling tests skip and others behave differently.
+            checks.append(Check('ci-lint-linux', 'ci-lint', 'CI Lint job on Ubuntu (make ci-lint), remote',
+                                ['python3', 'scripts/linux-precheck', '--job', 'lint', '--tree', str(ROOT),
+                                 '--base', base], background=True))
+        elif linux == 'skip' and not sys.platform.startswith('linux'):
+            checks.append(Check('ci-lint-linux', 'ci-lint', 'CI Lint job on Ubuntu (make ci-lint)', [],
+                                skip_reason='--no-linux', incomplete=True))
     if swift_files:
         checks.append(Check('swiftformat', 'ci-lint', 'SwiftFormat lint (changed files, advisory)',
                             ['scripts/swiftformat.sh', '--lint', '--quiet', *swift_files], advisory=True))

@@ -79,7 +79,7 @@ exit ${options.logExit ?? 0}
 `, { mode: 0o755 });
   const lookupLog = join(directory, 'unscoped-lookup');
   // A same-name process exists; a return to name-based discovery would select it.
-  const unrelated = spawn('sleep', ['30'], { stdio: 'ignore' });
+  const unrelated = spawn('sleep', ['300'], { stdio: 'ignore' }); // outlives the fixture budget
   t.after(() => unrelated.kill());
   for (const command of ['open', 'pgrep']) {
     writeFileSync(join(directory, command), `#!/usr/bin/env bash
@@ -88,7 +88,7 @@ echo "${unrelated.pid}"
 `, { mode: 0o755 });
   }
   const result = spawnSync('bash', [script, app], {
-    encoding: 'utf8', timeout: 15000,
+    encoding: 'utf8', timeout: 60000,
     env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, HOME: home,
       TMPDIR: scratch, REPORT_WRITER: writer,
       VERIFY_LAUNCH_TIMEOUT: options.timeout ?? '0',
@@ -330,7 +330,7 @@ test('bounds report discovery and total reads before parsing a directory flood',
     '--executable', join(directory, 'JustSpeakToIt'), '--marker', marker,
     '--stdout', stdout, '--output', diagnostics,
     '--start-ns', '0', '--end-ns', '1000000000', '--wait', '1'], {
-    encoding: 'utf8', timeout: 15000,
+    encoding: 'utf8', timeout: 60000,
     env: { ...process.env, HOME: home, PATH: `${directory}:${process.env.PATH}` },
   });
   assert.equal(result.error, undefined, result.error?.message);

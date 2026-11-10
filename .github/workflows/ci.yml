@@ -16,13 +16,15 @@ on:
 permissions:
   contents: read
 
-# One run per pull request and one for main: a newer push cancels the
-# superseded in-progress run. On main the newest commit's run checks every
-# gate against a superset of the cancelled commit, and only a successful
-# run starts an Alpha. CI never runs for tags or releases.
+# One run per ref. On a pull request a newer push cancels the superseded
+# run. On main and merge batches an in-progress run always finishes: with
+# steady merges, cancelling meant no main run ever completed. GitHub keeps at
+# most one waiting run per group, so a newer push replaces an older waiting
+# one and main verifies the newest commit next. Only a successful main run
+# starts an Alpha. CI never runs for tags or releases.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-macos:
@@ -1121,8 +1123,24 @@ jobs:
       - api-compatibility
     # Evaluate GitHub's job results directly. This aggregate never checks out
     # or executes a PR-controlled helper; workflow edits still require review.
-    permissions: {}
+    # actions: write only lets it cancel its own run (below).
+    permissions:
+      actions: write
     steps:
+      # A cancelled run is not a failed one: end this check as cancelled so
+      # it neither reads as a red main nor counts as passing. If the cancel
+      # call fails, the gate still fails closed.
+      - name: Report a cancelled run as cancelled
+        if: >-
+          cancelled() || (contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: /repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/force-cancel
+        run: |
+          echo '::notice::CI was cancelled before every gate finished; this check reports cancelled.'
+          if gh api -X POST "$RUN_URL" >/dev/null; then sleep 120; fi
+          echo '::error::Could not cancel this run; failing closed.'
+          exit 1
       - name: Reject unsuccessful CI gates
         if: >-
           always() && (

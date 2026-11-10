@@ -369,9 +369,17 @@ function assessCIGates(needs, event) {
 }
 
 test('aggregate never checks out or executes repository helper code', () => {
-  assert.doesNotMatch(aggregate, /uses:|run:.*scripts\//);
-  assert.match(aggregate, /permissions: \{\}/);
+  assert.doesNotMatch(aggregate, /uses:|run:.*scripts\/|checkout/);
+  // The gate may only cancel its own run; the legacy mirror needs nothing.
+  assert.match(aggregate, /    permissions:\n      actions: write\n    steps:/);
+  assert.match(aggregate, /\/actions\/runs\/\$\{\{ github\.run_id \}\}\/force-cancel/);
+  assert.match(aggregate, /Could not cancel this run; failing closed\.'\n\s+exit 1/);
   assert.match(aggregate, /exit 1/);
+});
+
+test('only pull requests cancel an in-progress CI run', () => {
+  assert.match(workflow, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
+    'main and merge-batch runs must finish so main is ever verified');
 });
 
 test('tooling gate delegates to the complete local discovery target', () => {

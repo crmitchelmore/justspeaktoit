@@ -55,9 +55,17 @@ jobs:
           SOURCE: ${{ github.event.workflow_run.head_sha || inputs.source }}
           REBUILD: ${{ inputs.rebuild || false }}
           OWNER_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           if ! node -e 'process.exit(require("./Config/ReleasePipeline.json").enabled || process.env.OWNER_VALIDATION === "true" ? 0 : 1)'; then
             echo 'Alpha remains in validation mode.'
+            exit 0
+          fi
+          # Build only the newest main commit: a CI success for a commit that
+          # main has already moved past is superseded by the newer commit's
+          # own CI run. Explicit dispatches still build any requested source.
+          if [ "$EVENT_NAME" = "workflow_run" ] && [ "$(git rev-parse HEAD)" != "$SOURCE" ]; then
+            echo "::notice::$SOURCE is no longer the newest main commit; skipping its Alpha."
             exit 0
           fi
           node scripts/release-train.mjs allocate --source "$SOURCE" --rebuild "$REBUILD"

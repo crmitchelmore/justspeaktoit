@@ -285,11 +285,12 @@ extension SettingsView {
   /// Output-language picker shared by local and remote post-processing.
   private var outputLanguageSection: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Picker("Output Language", selection: settingsBinding(\AppSettings.postProcessingOutputLanguage)) {
-        ForEach(Self.postProcessingOutputLanguages, id: \.self) { language in
-          Text(language).tag(language)
-        }
-      }
+      LongListPicker(
+        title: "Output Language", items: Self.postProcessingOutputLanguages,
+        id: { $0 }, selection: settingsBinding(\AppSettings.postProcessingOutputLanguage), searchText: { [$0] },
+        row: { language in
+        Text(language)
+      })
       .settingsMenuPicker()
       .speakTooltip("Let Speak know which language you want your polished transcript delivered in.")
       .onChange(of: settings.postProcessingOutputLanguage) { _, _ in

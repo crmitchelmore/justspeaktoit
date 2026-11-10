@@ -90,10 +90,9 @@ struct ModelPicker: View {
     let options: [ModelCatalog.Option]
     let credentialPurpose: ModelCredentialPurpose
     let storedAPIKeyIdentifiers: Set<String>
+    let allowsCustom: Bool
     @Binding var selection: String
 
-    @Environment(\.dismiss) private var dismiss
-    @State private var query: String = ""
     @State private var selectedTag: ModelCatalog.Tag? = nil
     /// Native routes are listed first; OpenRouter is one row that opens its own list.
     @State private var isBrowsingOpenRouter = false
@@ -113,112 +112,97 @@ struct ModelPicker: View {
     }
 
     var body: some View {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack {
-          if isBrowsingOpenRouter {
-            Button {
-              isBrowsingOpenRouter = false
-              query = ""
-            } label: {
-              Label("Back", systemImage: "chevron.left")
+      LongListChooserSheet(
+        title: isBrowsingOpenRouter ? ModelPickerGrouping.openRouterTitle : title,
+        items: levelOptions, id: { $0.id }, selection: $selection,
+        searchText: { [$0.displayName, $0.id, $0.description ?? ""] },
+        includes: { option in selectedTag.map { option.tags.contains($0) } ?? true },
+        controls: {
+          AnyView(HStack {
+            if isBrowsingOpenRouter {
+              Button {
+                isBrowsingOpenRouter = false
+              } label: {
+                Label("Back", systemImage: "chevron.left")
+              }
+              .accessibilityIdentifier("modelPicker.openRouter.back")
             }
-            .accessibilityIdentifier("modelPicker.openRouter.back")
-          }
-          Text(isBrowsingOpenRouter ? ModelPickerGrouping.openRouterTitle : title)
-            .font(.headline)
-          Spacer()
-          Button("Done") { dismiss() }
-            .keyboardShortcut(.cancelAction)
-        }
-
-        Picker("Filter", selection: $selectedTag) {
-          Text("All").tag(ModelCatalog.Tag?.none)
-          ForEach(ModelCatalog.Tag.allCases, id: \.self) { tag in
-            Text(tag.displayName).tag(ModelCatalog.Tag?.some(tag))
-          }
-        }
-        .pickerStyle(.segmented)
-
-        List {
-          if isShowingNoSearchResults {
-            ContentUnavailableView.search(text: trimmedQuery)
-          }
-          ForEach(filteredOptions) { option in
-            Button {
-              selection = option.id
-              dismiss()
-            } label: {
-              VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 10) {
-                  Text(option.displayName)
-                    .font(.body)
+            Picker("Filter", selection: $selectedTag) {
+              Text("All").tag(ModelCatalog.Tag?.none)
+              ForEach(ModelCatalog.Tag.allCases, id: \.self) { tag in
+                Text(tag.displayName).tag(ModelCatalog.Tag?.some(tag))
+              }
+            }.pickerStyle(.segmented)
+          })
+        },
+        clearFilters: { selectedTag = nil },
+        footer: { select in
+          AnyView(Group {
+            if isGrouped && !isBrowsingOpenRouter {
+              openRouterRow
+            }
+            if allowsCustom {
+              Divider()
+              Button {
+                select(ModelCatalog.customOptionID)
+              } label: {
+                HStack {
+                  Text("Custom…")
                   Spacer()
-                  if let contextLength = option.contextLength {
-                    Text(formatContext(contextLength))
-                      .font(.caption.monospacedDigit())
-                      .foregroundStyle(.secondary)
-                  }
-                  if let pricing = option.pricing {
-                    Text(pricing.compactDisplay)
-                      .font(.caption.monospacedDigit())
-                      .foregroundStyle(.secondary)
-                  }
                   ModelCredentialStatusView(
                     availability: ModelCredentialResolver.availability(
-                      for: option.id,
+                      for: ModelCatalog.customOptionID,
                       purpose: credentialPurpose,
                       storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
                     )
                   )
-                  ModelTagBadges(tags: option.tags, compact: true)
-                  LatencyBadgeCompact(option: option)
-                }
-
-                if let description = option.description, !description.isEmpty {
-                  Text(description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
               }
-              .padding(.vertical, 4)
+              .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-          }
-
-          if isGrouped && !isBrowsingOpenRouter {
-            openRouterRow
-          }
-
-          Divider()
-
-          Button {
-            selection = ModelCatalog.customOptionID
-            dismiss()
-          } label: {
-            HStack {
-              Text("Custom…")
-              Spacer()
-              ModelCredentialStatusView(
-                availability: ModelCredentialResolver.availability(
-                  for: ModelCatalog.customOptionID,
-                  purpose: credentialPurpose,
-                  storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
-                )
+          })
+        },
+        row: { option in
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 10) {
+            Text(option.displayName)
+              .font(.body)
+            Spacer()
+            if let contextLength = option.contextLength {
+              Text(formatContext(contextLength))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            if let pricing = option.pricing {
+              Text(pricing.compactDisplay)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            ModelCredentialStatusView(
+              availability: ModelCredentialResolver.availability(
+                for: option.id,
+                purpose: credentialPurpose,
+                storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
               )
-            }
+            )
+            ModelTagBadges(tags: option.tags, compact: true)
+            LatencyBadgeCompact(option: option)
           }
-          .buttonStyle(.plain)
+
+          if let description = option.description, !description.isEmpty {
+            Text(description)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
-        .searchable(text: $query)
-      }
-      .padding(16)
-      .frame(minWidth: 780, minHeight: 520)
+      })
+      // A new identity per level resets the sheet's search text when drilling in or out.
+      .id(isBrowsingOpenRouter)
     }
 
     private var openRouterRow: some View {
       Button {
         isBrowsingOpenRouter = true
-        query = ""
       } label: {
         HStack(spacing: 10) {
           VStack(alignment: .leading, spacing: 4) {
@@ -251,34 +235,6 @@ struct ModelPicker: View {
         return "Selected: \(selected.displayName)"
       }
       return "\(groups.openRouter.count) models from many providers, with one OpenRouter key."
-    }
-
-    private var trimmedQuery: String {
-      query.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// True when a search is active but matched nothing, so the sheet can say so
-    /// instead of showing a bare list with only the Custom row.
-    private var isShowingNoSearchResults: Bool {
-      !trimmedQuery.isEmpty && filteredOptions.isEmpty
-    }
-
-    private var filteredOptions: [ModelCatalog.Option] {
-      var result = levelOptions
-      if let selectedTag {
-        result = result.filter { $0.tags.contains(selectedTag) }
-      }
-      let trimmed = trimmedQuery
-      if !trimmed.isEmpty {
-        let lowered = trimmed.lowercased()
-        result = result.filter {
-          $0.displayName.lowercased().contains(lowered)
-            || $0.id.lowercased().contains(lowered)
-            || ($0.description?.lowercased().contains(lowered) ?? false)
-        }
-      }
-      // Already alphabetical by provider, then model (ModelPickerGrouping).
-      return result
     }
 
     private func formatContext(_ contextLength: Int) -> String {
@@ -335,7 +291,7 @@ struct ModelPicker: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if usesDetailedChooser {
+      if usesDetailedChooser || LongListPickerPolicy.usesSheet(count: options.count) {
         Button {
           isShowingChooser = true
         } label: {
@@ -366,6 +322,7 @@ struct ModelPicker: View {
             options: options,
             credentialPurpose: credentialPurpose,
             storedAPIKeyIdentifiers: storedAPIKeyIdentifiers,
+            allowsCustom: allowsCustom,
             selection: $selection
           )
         }

@@ -10,12 +10,12 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Only cancel superseded PR runs; keep main/scheduled analyses intact.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Newest-only on PRs and main: a newer main push analyses a superset.
+  cancel-in-progress: true
 
 jobs:
   changes:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'merge-batch/')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -42,7 +42,7 @@ jobs:
     # A skipped job still reports a check; event-level path filters can leave
     # required checks pending. Unknown/failed path detection runs the scan.
     if: >-
-      always() && (github.event_name != 'pull_request' ||
+      always() && !startsWith(github.head_ref, 'merge-batch/') && (github.event_name != 'pull_request' ||
       needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
     runs-on: macos-15
     # CodeQL tracing slows the Swift build, so this gets more headroom than

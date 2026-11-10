@@ -21,6 +21,7 @@ jobs:
   publish:
     if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
     runs-on: macos-15
+    timeout-minutes: 60
     outputs:
       apple: ${{ steps.publish.outputs.apple }}
     steps:
@@ -46,6 +47,7 @@ jobs:
     # Only Apple surfaces whose candidate receipts verified are submitted.
     if: needs.publish.outputs.apple != '' && needs.publish.outputs.apple != '[]'
     runs-on: macos-15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

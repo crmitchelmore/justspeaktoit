@@ -47,29 +47,20 @@ on:
       - .github/workflows/windows-local-runtime.yml
   pull_request:
     branches: [main]
-    # Pull requests run this native ARM64 proof only for Windows-owned and
-    # native-dependency changes. Shared Swift changes are proven on pull
-    # requests by "Windows and Portable Swift" (x64 native build plus the
-    # portable checks) and here on every push to main, keeping this workflow's
-    # macOS bundle job out of the shared hosted macOS queue.
+    # Pull requests run this native ARM64 proof (and its hosted macOS bundle
+    # job) only when its own packaging, runtime tooling or architecture-sensitive
+    # native C dependencies change. Windows Swift source changes are proven on
+    # pull requests by "Windows and Portable Swift" (native x64) and here on
+    # every push to main.
     paths:
       - .gitattributes
       - Resources/Desktop/**
-      - scripts/generate-desktop-icons.py
-      - scripts/tests/test_desktop_icons.py
       - Sources/CLlamaCpp/**
       - Sources/CMigrationArchive/**
       - Sources/CRecordingFileSupport/**
-      - Sources/SpeakWindows/**
-      - Sources/SpeakWindowsPlatform/**
-      - Sources/CWindowsSupport/**
-      - Sources/CWindowsAutomation/**
-      - Tests/SpeakWindowsPlatformTests/**
       - scripts/windows-bundle/**
-      - scripts/windows-cross/**
       - scripts/windows-local-runtime/**
       - scripts/windows-package/**
-      - Resources/AppIcon.iconset/**
       - .github/workflows/windows-arm64.yml
       - .github/workflows/windows-local-runtime.yml
   workflow_dispatch:
@@ -79,10 +70,11 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   local-runtime:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     uses: ./.github/workflows/windows-local-runtime.yml
     with:
       architecture: arm64

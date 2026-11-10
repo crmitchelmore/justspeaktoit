@@ -26,6 +26,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

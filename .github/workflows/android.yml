@@ -27,11 +27,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     name: Build & Test (Android)
     # Must stay GitHub-hosted: settings.gradle.kts allows public registries only on hosted runners.
     runs-on: ubuntu-24.04

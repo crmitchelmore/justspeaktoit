@@ -103,10 +103,11 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   local-runtime:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     uses: ./.github/workflows/windows-local-runtime.yml
 
   windows:
@@ -1715,6 +1716,7 @@ jobs:
           retention-days: 14
 
   portable-macos:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     name: Portable Swift on macOS
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-15"]') }}
     timeout-minutes: 15
@@ -1794,6 +1796,7 @@ jobs:
           if-no-files-found: warn
 
   portable-linux:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     name: Portable Swift on Linux (Swift 6.2.3)
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-22.04"]') }}
     container:

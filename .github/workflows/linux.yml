@@ -107,10 +107,11 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   local-runtime:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     uses: ./.github/workflows/linux-local-runtime.yml
 
   linux-desktop:

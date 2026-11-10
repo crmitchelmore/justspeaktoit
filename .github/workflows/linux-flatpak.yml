@@ -3,7 +3,7 @@ name: Linux Flatpak
 on:
   push:
     branches: [main]
-    paths: &paths
+    paths:
       - Package.swift
       - LICENSE
       - .gitattributes
@@ -30,8 +30,16 @@ on:
       - scripts/migration/migration_dependency.py
       - scripts/windows-local-runtime/dependencies.json
       - .github/workflows/linux-flatpak.yml
+  # Pull requests build the Flatpak only when its own packaging changes;
+  # "Linux Desktop" proves shared and Linux source on pull requests, and every
+  # push to main still builds the full Flatpak.
   pull_request:
-    paths: *paths
+    paths:
+      - packaging/linux/**
+      - scripts/linux-flatpak-checks.sh
+      - scripts/linux-flatpak-qualification.py
+      - scripts/tests/test_linux_flatpak_sources.py
+      - .github/workflows/linux-flatpak.yml
   workflow_dispatch:
     inputs:
       qualification_run_id:
@@ -48,14 +56,14 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   flatpak:
     name: Flatpak build, bundle and installed runtime
     # Bubblewrap/Flatpak require a privileged disposable hosted container.
     # Only repository-owned branches may execute in that context.
-    if: inputs.qualification_run_id == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: inputs.qualification_run_id == '' && !startsWith(github.head_ref, 'merge-batch/') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50@sha256:1de59efef01a946d9f28f1ec3458bf6f61dcee3507d7fecdd473f8134da4ec77

@@ -23,9 +23,10 @@ can't use GitHub's merge queue.
    `<!-- merge-batch-member PR SHA -->` line, and copies each member's closing
    issue references as `Fixes #N` lines.
 2. **Test.** The batch PR is an ordinary same-repository PR, so the ruleset's
-   required checks, and every path-triggered workflow for the combined
-   change, run once on the combined tree. `scripts/merge-batch status <name>`
-   shows the runs.
+   required checks run once on the combined tree. Other path-triggered
+   workflows (Windows, Linux, Flatpak, CodeQL and similar) skip their jobs on
+   `merge-batch/*` heads: each member already ran them, and they run again on
+   main after landing. `scripts/merge-batch status <name>` shows the runs.
 3. **Land.** `scripts/merge-batch land <name>` refuses to merge unless the
    batch PR is `CLEAN` and every workflow run on its head has succeeded. A few
    workflows don't count: advisory ones (Pre-PR evidence) and external ones

@@ -32,7 +32,7 @@ concurrency:
 jobs:
   capture:
     name: Capture Mac app (${{ matrix.appearance }})
-    if: ${{ !inputs.captures_run }}
+    if: ${{ !inputs.captures_run && !startsWith(github.head_ref, 'merge-batch/') }}
     strategy:
       fail-fast: false
       matrix:
@@ -140,7 +140,7 @@ jobs:
 
   capture-ios:
     name: Capture iPhone app (Simulator, ${{ matrix.appearance }})
-    if: ${{ !inputs.captures_run }}
+    if: ${{ !inputs.captures_run && !startsWith(github.head_ref, 'merge-batch/') }}
     strategy:
       fail-fast: false
       matrix:

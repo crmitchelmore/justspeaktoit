@@ -73,12 +73,13 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   # The pinned whisper.cpp DLLs are built with MSVC on Windows (or restored
   # from cache) and bundled beside the Mac-built executable.
   local-runtime:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     uses: ./.github/workflows/windows-local-runtime.yml
 
   compile:

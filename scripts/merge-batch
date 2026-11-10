@@ -1,176 +1,377 @@
-#!/usr/bin/env bash
-# Bors-style batch merging for main (see Docs/merge-batch.md).
-#
-#   scripts/merge-batch create <name> <pr>...   squash each PR onto origin/main in order and open one batch PR
-#   scripts/merge-batch status <name>           show the batch PR, its members and its workflow runs
-#   scripts/merge-batch land <name>             squash-merge a green batch PR, then close its members with a link
-#   scripts/merge-batch split <name>            close a failing batch and open <name>a / <name>b from its halves
-#
-# The ruleset (squash-only, linear history, required checks) still applies: the batch is an ordinary
-# same-repository PR, so its required checks run once on the combined tree before anything lands.
-set -euo pipefail
+#!/usr/bin/env python3
+"""Bors-style batch merging for main (see Docs/merge-batch.md).
 
-REPO="${MERGE_BATCH_REPO:-crmitchelmore/justspeaktoit}"
-REMOTE="${MERGE_BATCH_REMOTE:-origin}"
+  scripts/merge-batch create <name> <pr>...      squash each PR onto origin/main in order and open one batch PR
+  scripts/merge-batch status <name> [--wait]     show the batch PR, its members and its gate; --wait blocks until
+                                                 the required checks finish (exit 0 green, 1 red or timed out)
+  scripts/merge-batch land <name> [--no-wait]    wait for the required checks, squash-merge a green batch PR,
+                                                 then close its members with a link
+  scripts/merge-batch split <name>               close a failing batch and open <name>a / <name>b from its halves
+
+The ruleset (squash-only, linear history, required checks) still applies: the batch is an ordinary
+same-repository PR, so its required checks run once on the combined tree before anything lands.
+"""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+REPO = os.environ.get('MERGE_BATCH_REPO', 'crmitchelmore/justspeaktoit')
+REMOTE = os.environ.get('MERGE_BATCH_REMOTE', 'origin')
 # Advisory or external workflows that never block a batch.
-IGNORED_WORKFLOWS="${MERGE_BATCH_IGNORED_WORKFLOWS:-Tessl Code Review|Pre-PR evidence|OpenAI API Review}"
+IGNORED_WORKFLOWS = os.environ.get('MERGE_BATCH_IGNORED_WORKFLOWS',
+                                   'Tessl Code Review|Pre-PR evidence|OpenAI API Review')
+TIMEOUT_MINUTES = float(os.environ.get('MERGE_BATCH_TIMEOUT_MINUTES', '150'))
+POLL_SECONDS = float(os.environ.get('MERGE_BATCH_POLL_SECONDS', '60'))
+OK_CONCLUSIONS = {'success', 'skipped', 'neutral'}
+MEMBER = re.compile(r'^<!-- merge-batch-member (\d+) ([0-9a-f]+) -->$', re.M)
 
-WORKTREES=""
-cleanup() { local dir; for dir in $WORKTREES; do git worktree remove --force "$dir" >/dev/null 2>&1 || true; done; }
-trap cleanup EXIT
-die() { echo "merge-batch: $*" >&2; exit 1; }
-branch_for() { echo "merge-batch/$1"; }
 
-batch_pr() {
-    gh pr list --repo "$REPO" --head "$(branch_for "$1")" --state all --json number,state \
-        --jq 'map(select(.state=="OPEN")) + map(select(.state!="OPEN")) | .[0].number // empty'
-}
+class BatchError(SystemExit):
+    def __init__(self, message: str):
+        super().__init__(f'merge-batch: {message}')
 
-# Members are recorded in the batch PR body as `<!-- merge-batch-member PR SHA -->` lines.
-members() {
-    gh pr view "$1" --repo "$REPO" --json body --jq '.body' |
-        sed -n 's/^<!-- merge-batch-member \([0-9]*\) \([0-9a-f]*\) -->$/\1 \2/p'
-}
 
-# Conventional type ranking for the batch subject: the most user-visible change wins.
-rank() {
-    case "$1" in
-        feat*) echo 5 ;; fix*) echo 4 ;; perf*) echo 3 ;; refactor*|build*) echo 2 ;; ci*|test*|chore*) echo 1 ;; *) echo 0 ;;
-    esac
-}
+def run(args: list[str], cwd: Path | None = None, check: bool = True) -> str:
+    result = subprocess.run(args, cwd=cwd or ROOT, text=True, capture_output=True)
+    if check and result.returncode != 0:
+        raise BatchError(f'{" ".join(args[:4])} failed: {result.stderr.strip() or result.stdout.strip()}')
+    return result.stdout.strip()
 
-create() {
-    local name="$1"; shift
-    [ $# -gt 0 ] || die "create needs at least one PR"
-    local branch; branch="$(branch_for "$name")"
-    local work; work="$(mktemp -d)"
-    WORKTREES="$WORKTREES $work"
 
-    git fetch -q "$REMOTE" main
-    git worktree add -q -B "$branch" "$work" "$REMOTE/main"
+def gh_json(*args: str):
+    return json.loads(run(['gh', *args]) or 'null')
 
-    local included="" skipped="" titles="" closes="" markers="" best=0 type="chore"
-    local pr state draft base head title mergeable issues
-    for pr in "$@"; do
-        IFS=$'\t' read -r state draft base head mergeable title < <(gh pr view "$pr" --repo "$REPO" \
-            --json state,isDraft,baseRefName,headRefOid,mergeable,title \
-            --jq '[.state, .isDraft, .baseRefName, .headRefOid, .mergeable, .title] | @tsv')
-        if [ "$state" != OPEN ] || [ "$draft" = true ] || [ "$base" != main ] || [ "$mergeable" = CONFLICTING ]; then
-            skipped="$skipped #$pr ($state draft=$draft base=$base $mergeable)"; continue
-        fi
-        git -C "$work" fetch -q "$REMOTE" "pull/$pr/head"
-        [ "$(git -C "$work" rev-parse FETCH_HEAD)" = "$head" ] || { skipped="$skipped #$pr (head moved)"; continue; }
-        if ! git -C "$work" merge -q --squash "$head" >/dev/null 2>&1; then
-            git -C "$work" reset -q --hard HEAD
-            skipped="$skipped #$pr (conflicts with the batch)"; continue
-        fi
-        if git -C "$work" diff --cached --quiet; then
-            skipped="$skipped #$pr (no changes against main)"; continue
-        fi
-        git -C "$work" commit -q -m "$title (#$pr)" -m "Batched from #$pr at $head."
-        included="$included $pr"
-        titles="$titles
-- $title (#$pr)"
-        markers="$markers
-<!-- merge-batch-member $pr $head -->"
-        issues="$(gh pr view "$pr" --repo "$REPO" --json closingIssuesReferences --jq '[.closingIssuesReferences[].number] | map("Fixes #\(.)") | join("\n")')"
-        [ -n "$issues" ] && closes="$closes
-$issues"
-        if [ "$(rank "$title")" -gt "$best" ]; then best="$(rank "$title")"; type="${title%%:*}"; fi
-    done
-    [ -n "$included" ] || die "no PR could be batched:$skipped"
 
-    git -C "$work" push -q --force-with-lease "$REMOTE" "$branch"
+def api(path: str, paginate: bool = False):
+    if paginate:
+        pages = gh_json('api', '--paginate', '--slurp', path)
+        return pages
+    return gh_json('api', path)
 
-    local refs; refs="$(echo "$included" | sed 's/ \([0-9]*\)/#\1, /g; s/, $//')"
-    local subject="$type: merge batch $name (${refs# })"
-    local body
-    body="Bors-style batch: each member is squashed onto main in order, and this PR's required checks run once on the combined tree. Land with \`scripts/merge-batch land $name\` (Docs/merge-batch.md).
 
-## Members
-$titles
-$closes
-$markers"
-    [ -n "$skipped" ] && body="$body
+def load_evidence():
+    spec = importlib.util.spec_from_file_location('pre_pr_evidence', ROOT / 'scripts' / 'check-pre-pr-evidence.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-Not batched:$skipped"
 
-    local existing; existing="$(gh pr list --repo "$REPO" --head "$branch" --state open --json number --jq '.[0].number // empty')"
-    if [ -n "$existing" ]; then
-        gh pr edit "$existing" --repo "$REPO" --title "$subject" --body "$body" >/dev/null
-        echo "updated batch PR #$existing ($branch):${included}"
-    else
-        gh pr create --repo "$REPO" --base main --head "$branch" --title "$subject" --body "$body"
-    fi
-    [ -z "$skipped" ] || echo "not batched:$skipped"
-}
+def branch_for(name: str) -> str:
+    return f'merge-batch/{name}'
 
-status() {
-    local pr; pr="$(batch_pr "$1")"; [ -n "$pr" ] || die "no batch PR for $(branch_for "$1")"
-    gh pr view "$pr" --repo "$REPO" --json number,state,mergeStateStatus,headRefOid \
-        --jq '"batch #\(.number) \(.state) \(.mergeStateStatus) head \(.headRefOid)"'
-    echo "members:"; members "$pr" | sed 's/^/  #/'
-    local head; head="$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq .headRefOid)"
-    gh api "repos/$REPO/actions/runs?head_sha=$head&per_page=100" \
-        --jq '.workflow_runs[] | "  \(.status)\t\(.conclusion // "-")\t\(.name)\t\(.html_url)"' | awk -F'\t' '!seen[$3]++'
-}
 
-# Prints blocking workflow runs (latest attempt per workflow) for a head SHA.
-blocking_runs() {
-    gh api "repos/$REPO/actions/runs?head_sha=$1&per_page=100" \
-        --jq '.workflow_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "-")"' |
-        awk -F'\t' '!seen[$1]++' | grep -Ev "^($IGNORED_WORKFLOWS)	" |
-        awk -F'\t' '$2 != "completed" || ($3 != "success" && $3 != "skipped" && $3 != "neutral")' || true
-}
+def batch_pr(name: str) -> int:
+    prs = gh_json('pr', 'list', '--repo', REPO, '--head', branch_for(name), '--state', 'all',
+                  '--json', 'number,state')
+    prs.sort(key=lambda pr: pr['state'] != 'OPEN')
+    if not prs:
+        raise BatchError(f'no batch PR for {branch_for(name)}')
+    return prs[0]['number']
 
-land() {
-    local pr; pr="$(batch_pr "$1")"; [ -n "$pr" ] || die "no batch PR for $(branch_for "$1")"
-    local state merge head subject
-    IFS=$'\t' read -r state merge head subject < <(gh pr view "$pr" --repo "$REPO" \
-        --json state,mergeStateStatus,headRefOid,title --jq '[.state, .mergeStateStatus, .headRefOid, .title] | @tsv')
-    [ "$state" = OPEN ] || die "batch #$pr is $state"
-    [ "$merge" = CLEAN ] || die "batch #$pr is $merge, not CLEAN"
-    local blocking; blocking="$(blocking_runs "$head")"
-    [ -z "$blocking" ] || die "batch #$pr has unfinished or failing runs:
-$blocking"
 
-    local body; body="$(git log --format='- %s' --reverse "$REMOTE/main..$head" 2>/dev/null || true)"
-    [ -n "$body" ] || body="$(gh api "repos/$REPO/pulls/$pr/commits" --paginate --jq '.[] | "- " + (.commit.message | split("\n")[0])')"
-    gh pr merge "$pr" --repo "$REPO" --squash --match-head-commit "$head" --subject "$subject (#$pr)" --body "$body"
-    local sha; sha="$(gh pr view "$pr" --repo "$REPO" --json mergeCommit --jq .mergeCommit.oid)"
-    echo "landed batch #$pr as $sha"
+def members(body: str) -> list[tuple[int, str]]:
+    return [(int(pr), sha) for pr, sha in MEMBER.findall(body or '')]
 
-    local member recorded current mstate
-    while read -r member recorded; do
-        IFS=$'\t' read -r mstate current < <(gh pr view "$member" --repo "$REPO" --json state,headRefOid --jq '[.state, .headRefOid] | @tsv')
-        if [ "$mstate" != OPEN ]; then echo "  #$member already $mstate"; continue; fi
-        if [ "$current" != "$recorded" ]; then
-            gh pr comment "$member" --repo "$REPO" --body "Batch #$pr landed this PR's ${recorded:0:8} as $sha, but the branch has moved to ${current:0:8} since. Leaving it open for the newer commits." >/dev/null
-            echo "  #$member left open (head moved)"; continue
-        fi
-        gh pr close "$member" --repo "$REPO" --comment "Landed on main in batch #$pr as $sha (squashed from ${recorded:0:8})." >/dev/null
-        echo "  #$member closed"
-    done < <(members "$pr")
-}
 
-split() {
-    local pr; pr="$(batch_pr "$1")"; [ -n "$pr" ] || die "no batch PR for $(branch_for "$1")"
-    local list; list="$(members "$pr" | awk '{print $1}')"
-    local count; count="$(echo "$list" | wc -l | tr -d ' ')"
-    [ "$count" -gt 1 ] || die "batch #$pr has one member; return it to its author"
-    local half=$(((count + 1) / 2))
-    gh pr close "$pr" --repo "$REPO" --comment "Splitting into $(branch_for "${1}a") and $(branch_for "${1}b") to find the failure." >/dev/null
-    # shellcheck disable=SC2046
-    create "${1}a" $(echo "$list" | head -n "$half")
-    # shellcheck disable=SC2046
-    create "${1}b" $(echo "$list" | tail -n +"$((half + 1))")
-}
+def rank(title: str) -> int:
+    """Conventional type ranking for the batch subject: the most user-visible change wins."""
+    for prefix, score in (('feat', 5), ('fix', 4), ('perf', 3), ('refactor', 2), ('build', 2),
+                          ('ci', 1), ('test', 1), ('chore', 1)):
+        if title.startswith(prefix):
+            return score
+    return 0
 
-command="${1:-}"; shift || true
-case "$command" in
-    create) [ $# -ge 2 ] || die "usage: merge-batch create <name> <pr>..."; create "$@" ;;
-    status) [ $# -eq 1 ] || die "usage: merge-batch status <name>"; status "$1" ;;
-    land) [ $# -eq 1 ] || die "usage: merge-batch land <name>"; land "$1" ;;
-    split) [ $# -eq 1 ] || die "usage: merge-batch split <name>"; split "$1" ;;
-    *) sed -n '2,10p' "$0"; exit 64 ;;
-esac
+
+def author_login(author: dict | None) -> str:
+    """gh reports bots as app/<slug>; the evidence check (like Actions) expects <slug>[bot]."""
+    author = author or {}
+    login = author.get('login', '')
+    return f'{login.removeprefix("app/")}[bot]' if author.get('is_bot') else login
+
+
+def required_contexts(rules: list[dict]) -> list[str]:
+    """Status-check contexts the branch rules require, from GET /repos/{repo}/rules/branches/main."""
+    contexts = []
+    for rule in rules or []:
+        if rule.get('type') == 'required_status_checks':
+            contexts += [c['context'] for c in rule.get('parameters', {}).get('required_status_checks', [])]
+    return sorted(set(contexts))
+
+
+def fetch_required_contexts() -> list[str]:
+    override = os.environ.get('MERGE_BATCH_REQUIRED_CONTEXTS')
+    if override:
+        return [c.strip() for c in override.split(',') if c.strip()]
+    contexts = required_contexts(api(f'repos/{REPO}/rules/branches/main'))
+    if not contexts:
+        raise BatchError('the main ruleset requires no status checks; refusing to treat the batch as tested')
+    return contexts
+
+
+def latest(items: list[dict], key: str, order: str) -> dict[str, dict]:
+    """The newest item per name (re-runs and re-requests replace earlier ones)."""
+    newest: dict[str, dict] = {}
+    for item in sorted(items, key=lambda i: (i.get(order) or '', i.get('id') or 0)):
+        newest[item[key]] = item
+    return newest
+
+
+def evaluate_gate(required: list[str], check_runs: list[dict], statuses: list[dict],
+                  workflow_runs: list[dict], ignored: str = IGNORED_WORKFLOWS) -> tuple[str, list[str]]:
+    """Return (success|pending|failure, report lines) for a head SHA.
+
+    Every required context must be reported and green: a context that has not registered yet is
+    pending, never a pass, which closes the race right after a push. Any other non-ignored workflow
+    run on the head must also finish green.
+    """
+    lines, states = [], []
+    checks = latest(check_runs, 'name', 'started_at')
+    commit_statuses = latest(statuses, 'context', 'updated_at')
+    for context in required:
+        if context in checks:
+            run_ = checks[context]
+            if run_.get('status') != 'completed':
+                state, detail = 'pending', run_.get('status')
+            elif run_.get('conclusion') in OK_CONCLUSIONS:
+                state, detail = 'success', run_.get('conclusion')
+            else:
+                state, detail = 'failure', run_.get('conclusion')
+        elif context in commit_statuses:
+            detail = commit_statuses[context].get('state')
+            state = {'success': 'success', 'pending': 'pending'}.get(detail, 'failure')
+        else:
+            state, detail = 'pending', 'not reported yet'
+        states.append(state)
+        lines.append(f'  required  {state:<8} {context} ({detail})')
+    skip = re.compile(f'^(?:{ignored})$') if ignored else None
+    for name, wf in sorted(latest(workflow_runs, 'name', 'created_at').items()):
+        if skip and skip.match(name):
+            continue
+        if wf.get('status') != 'completed':
+            state = 'pending'
+        else:
+            state = 'success' if wf.get('conclusion') in OK_CONCLUSIONS else 'failure'
+        states.append(state)
+        lines.append(f'  workflow  {state:<8} {name} ({wf.get("conclusion") or wf.get("status")}) {wf.get("html_url", "")}')
+    overall = 'failure' if 'failure' in states else 'pending' if 'pending' in states or not required else 'success'
+    return overall, lines
+
+
+def gate(sha: str, required: list[str]) -> tuple[str, list[str]]:
+    check_runs = [r for page in api(f'repos/{REPO}/commits/{sha}/check-runs?per_page=100', paginate=True)
+                  for r in page.get('check_runs', [])]
+    statuses = api(f'repos/{REPO}/commits/{sha}/status').get('statuses', [])
+    workflow_runs = [r for page in api(f'repos/{REPO}/actions/runs?head_sha={sha}&per_page=100', paginate=True)
+                     for r in page.get('workflow_runs', [])]
+    return evaluate_gate(required, check_runs, statuses, workflow_runs)
+
+
+def wait_for_gate(sha: str, required: list[str], timeout_minutes: float = TIMEOUT_MINUTES,
+                  poll: float = POLL_SECONDS, probe=None, sleep=time.sleep) -> tuple[str, list[str]]:
+    probe = probe or gate
+    deadline = time.monotonic() + timeout_minutes * 60
+    last = None
+    while True:
+        state, lines = probe(sha, required)
+        if lines != last:
+            print(f'gate {state} at {sha[:12]}:', *lines, sep='\n', flush=True)
+            last = lines
+        if state != 'pending' or time.monotonic() >= deadline:
+            return state, lines
+        sleep(poll)
+
+
+def evidence_block(batch_sha: str, records: list[dict]) -> str:
+    """A pre-pr-summary record for the combined head, built from each member's own evidence.
+
+    The batch passes only if every member has a passing scripts/pre-pr record (or is a bot).
+    The combined tree itself is tested by the batch PR's required checks.
+    """
+    result = 'fail' if any(r['evidence'] == 'error' for r in records) else 'pass'
+    icon = {'ok': '✅', 'warning': '⚠️', 'error': '❌'}
+    lines = [f'### Pre-PR checks: {result.upper()}',
+             f'Combined by `scripts/merge-batch` at `{batch_sha[:12]}` from each member\'s own `scripts/pre-pr` '
+             'record. The required checks run on this combined tree.', '',
+             '| Member | Head | Pre-PR evidence |', '|---|---|---|']
+    for record in records:
+        lines.append(f'| #{record["pr"]} | `{record["head"][:12]}` | {icon[record["evidence"]]} {record["message"]} |')
+    marker = {'schema': 1, 'head': batch_sha, 'result': result, 'source': 'merge-batch',
+              'members': [{'pr': r['pr'], 'head': r['head'], 'evidence': r['evidence']} for r in records]}
+    lines += ['', f'<!-- pre-pr-summary {json.dumps(marker, separators=(",", ":"))} -->']
+    return '\n'.join(lines)
+
+
+def create(name: str, prs: list[str]) -> None:
+    if not prs:
+        raise BatchError('create needs at least one PR')
+    evidence = load_evidence()
+    branch = branch_for(name)
+    run(['git', 'fetch', '-q', REMOTE, 'main'])
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp) / 'batch'
+        run(['git', 'worktree', 'add', '-q', '-B', branch, str(work), f'{REMOTE}/main'])
+        try:
+            included, skipped, closes, records, best, kind = [], [], [], [], 0, 'chore'
+            for pr in prs:
+                info = gh_json('pr', 'view', pr, '--repo', REPO, '--json',
+                               'number,state,isDraft,baseRefName,headRefOid,mergeable,title,body,author,'
+                               'closingIssuesReferences')
+                head, title = info['headRefOid'], info['title']
+                if (info['state'] != 'OPEN' or info['isDraft'] or info['baseRefName'] != 'main'
+                        or info['mergeable'] == 'CONFLICTING'):
+                    skipped.append(f'#{pr} ({info["state"]} draft={str(info["isDraft"]).lower()} '
+                                   f'base={info["baseRefName"]} {info["mergeable"]})')
+                    continue
+                run(['git', 'fetch', '-q', REMOTE, f'pull/{pr}/head'], cwd=work)
+                if run(['git', 'rev-parse', 'FETCH_HEAD'], cwd=work) != head:
+                    skipped.append(f'#{pr} (head moved)')
+                    continue
+                if subprocess.run(['git', 'merge', '-q', '--squash', head], cwd=work,
+                                  capture_output=True).returncode != 0:
+                    run(['git', 'reset', '-q', '--hard', 'HEAD'], cwd=work)
+                    skipped.append(f'#{pr} (conflicts with the batch)')
+                    continue
+                if subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=work).returncode == 0:
+                    skipped.append(f'#{pr} (no changes against main)')
+                    continue
+                run(['git', 'commit', '-q', '-m', f'{title} (#{pr})', '-m', f'Batched from #{pr} at {head}.'],
+                    cwd=work)
+                level, message = evidence.evaluate(info.get('body') or '', head, author_login(info.get('author')))
+                records.append({'pr': int(pr), 'head': head, 'evidence': level, 'message': message})
+                included.append((int(pr), head, title))
+                closes += [f'Fixes #{issue["number"]}' for issue in info.get('closingIssuesReferences') or []]
+                if rank(title) > best:
+                    best, kind = rank(title), title.split(':')[0]
+            if not included:
+                raise BatchError(f'no PR could be batched: {" ".join(skipped)}')
+            batch_sha = run(['git', 'rev-parse', 'HEAD'], cwd=work)
+            run(['git', 'push', '-q', '--force-with-lease', REMOTE, branch], cwd=work)
+        finally:
+            subprocess.run(['git', 'worktree', 'remove', '--force', str(work)], cwd=ROOT, capture_output=True)
+
+    refs = ', '.join(f'#{pr}' for pr, _, _ in included)
+    subject = f'{kind}: merge batch {name} ({refs})'
+    body = '\n'.join([
+        'Bors-style batch: each member is squashed onto main in order, and this PR\'s required checks run once '
+        f'on the combined tree. Land with `scripts/merge-batch land {name}` (Docs/merge-batch.md).', '',
+        '## Members', *[f'- {title} (#{pr})' for pr, _, title in included], *closes, '',
+        *[f'<!-- merge-batch-member {pr} {head} -->' for pr, head, _ in included], '',
+        evidence_block(batch_sha, records),
+        *([f'\nNot batched: {" ".join(skipped)}'] if skipped else [])])
+    failing = [f'#{r["pr"]}' for r in records if r['evidence'] == 'error']
+    if failing:
+        print(f'warning: no passing scripts/pre-pr record on {", ".join(failing)}; the batch evidence is FAIL',
+              file=sys.stderr)
+    existing = gh_json('pr', 'list', '--repo', REPO, '--head', branch, '--state', 'open', '--json', 'number')
+    if existing:
+        run(['gh', 'pr', 'edit', str(existing[0]['number']), '--repo', REPO, '--title', subject, '--body', body])
+        print(f'updated batch PR #{existing[0]["number"]} ({branch}): {refs}')
+    else:
+        print(run(['gh', 'pr', 'create', '--repo', REPO, '--base', 'main', '--head', branch,
+                   '--title', subject, '--body', body]))
+    if skipped:
+        print(f'not batched: {" ".join(skipped)}')
+
+
+def view(pr: int) -> dict:
+    return gh_json('pr', 'view', str(pr), '--repo', REPO, '--json',
+                   'number,state,mergeStateStatus,headRefOid,title,body,mergeCommit')
+
+
+def status(name: str, wait: bool) -> int:
+    pr = batch_pr(name)
+    info = view(pr)
+    print(f'batch #{pr} {info["state"]} {info["mergeStateStatus"]} head {info["headRefOid"]}')
+    print('members:', *[f'  #{m} {sha[:12]}' for m, sha in members(info['body'])], sep='\n')
+    required = fetch_required_contexts()
+    if wait:
+        state, _ = wait_for_gate(info['headRefOid'], required)
+    else:
+        state, lines = gate(info['headRefOid'], required)
+        print(f'gate {state}:', *lines, sep='\n')
+    return 0 if state == 'success' or (not wait and state == 'pending') else 1
+
+
+def land(name: str, wait: bool) -> None:
+    pr = batch_pr(name)
+    info = view(pr)
+    if info['state'] != 'OPEN':
+        raise BatchError(f'batch #{pr} is {info["state"]}')
+    head = info['headRefOid']
+    required = fetch_required_contexts()
+    state, lines = wait_for_gate(head, required) if wait else gate(head, required)
+    if state != 'success':
+        raise BatchError(f'batch #{pr} gate is {state}:\n' + '\n'.join(lines))
+    # mergeStateStatus is computed lazily and lags the last check by a few seconds.
+    for _ in range(10):
+        info = view(pr)
+        if info['headRefOid'] != head:
+            raise BatchError(f'batch #{pr} head moved to {info["headRefOid"][:12]} while waiting')
+        if info['mergeStateStatus'] not in ('UNKNOWN', 'BLOCKED'):
+            break
+        time.sleep(min(POLL_SECONDS, 15))
+    if info['mergeStateStatus'] != 'CLEAN':
+        raise BatchError(f'batch #{pr} is {info["mergeStateStatus"]}, not CLEAN')
+
+    log = run(['git', 'log', '--format=- %s', '--reverse', f'{REMOTE}/main..{head}'], check=False)
+    if not log:
+        commits = [c for page in api(f'repos/{REPO}/pulls/{pr}/commits?per_page=100', paginate=True) for c in page]
+        log = '\n'.join('- ' + c['commit']['message'].split('\n')[0] for c in commits)
+    run(['gh', 'pr', 'merge', str(pr), '--repo', REPO, '--squash', '--match-head-commit', head,
+         '--subject', f'{info["title"]} (#{pr})', '--body', log])
+    sha = (view(pr).get('mergeCommit') or {}).get('oid', '?')
+    print(f'landed batch #{pr} as {sha}')
+    for member, recorded in members(info['body']):
+        current = gh_json('pr', 'view', str(member), '--repo', REPO, '--json', 'state,headRefOid')
+        if current['state'] != 'OPEN':
+            print(f'  #{member} already {current["state"]}')
+        elif current['headRefOid'] != recorded:
+            run(['gh', 'pr', 'comment', str(member), '--repo', REPO, '--body',
+                 f'Batch #{pr} landed this PR\'s {recorded[:8]} as {sha}, but the branch has moved to '
+                 f'{current["headRefOid"][:8]} since. Leaving it open for the newer commits.'])
+            print(f'  #{member} left open (head moved)')
+        else:
+            run(['gh', 'pr', 'close', str(member), '--repo', REPO, '--comment',
+                 f'Landed on main in batch #{pr} as {sha} (squashed from {recorded[:8]}).'])
+            print(f'  #{member} closed')
+
+
+def split(name: str) -> None:
+    pr = batch_pr(name)
+    listed = [str(m) for m, _ in members(view(pr)['body'])]
+    if len(listed) < 2:
+        raise BatchError(f'batch #{pr} has one member; return it to its author')
+    half = (len(listed) + 1) // 2
+    run(['gh', 'pr', 'close', str(pr), '--repo', REPO, '--comment',
+         f'Splitting into {branch_for(name + "a")} and {branch_for(name + "b")} to find the failure.'])
+    create(f'{name}a', listed[:half])
+    create(f'{name}b', listed[half:])
+
+
+def main(argv: list[str]) -> int:
+    command, args = (argv[0], argv[1:]) if argv else ('', [])
+    if command == 'create' and len(args) >= 2:
+        create(args[0], args[1:])
+    elif command == 'status' and len(args) in (1, 2) and args[1:] in ([], ['--wait']):
+        return status(args[0], wait='--wait' in args)
+    elif command == 'land' and len(args) in (1, 2) and args[1:] in ([], ['--no-wait']):
+        land(args[0], wait='--no-wait' not in args)
+    elif command == 'split' and len(args) == 1:
+        split(args[0])
+    else:
+        print(__doc__.split('\n\n')[1], file=sys.stderr)
+        return 64
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

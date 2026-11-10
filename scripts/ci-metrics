@@ -3,19 +3,26 @@
 
 Usage:
   scripts/ci-metrics                      # last 30 days
-  scripts/ci-metrics --days 7
+  scripts/ci-metrics --days 7             # the per-round scorecard window
   scripts/ci-metrics --since 2026-11-10   # compare before/after a change
-  scripts/ci-metrics --since 2026-10-11 --until 2026-11-10 --json
+  scripts/ci-metrics --since 2026-10-11 --until 2026-11-10 --json   # --until is exclusive
+  scripts/ci-metrics --refresh            # ignore the cached run lists
 
-Requires an authenticated `gh` CLI. Job-level data (required-gate wall time,
-macOS queue time, job minutes) is fetched for at most --max-job-runs CI runs and
-cached under ~/.cache/jsti-ci-metrics, because completed jobs never change.
+Requires an authenticated `gh` CLI. Results are cached under ~/.cache/jsti-ci-metrics
+(override with CI_METRICS_CACHE): job lists of completed runs, and the run list of
+each day older than three days once every run that day has completed. A repeat
+report therefore only fetches recent days.
 
 Metrics:
+  scorecard            PR open -> merge, required gate p50/p90, main failure and
+                       cancellation rates, zombie count: the numbers to score a round by
   pr_open_to_merge     created_at -> merged_at for PRs merged into main
   ci_pr_success        wall time of successful CI pull_request runs
-  required_gate        run created -> last required check completed (PR runs)
-  macos_queue          macOS job started_at - created_at (all sampled runs)
+  required_gate        run created -> last required check completed (successful PR runs)
+  macos_queue          macOS job started_at - created_at (sampled jobs that got a runner)
+  critical_path        per CI job: queue, run time and finish offset from run creation, and
+                       how often it was the last job to finish (the run's critical path end)
+  zombie_runs          runs of any workflow still queued/waiting/in progress after 24 h
   workflow totals      runs, failures, cancellations, wall minutes per workflow
 """
 
@@ -28,12 +35,17 @@ import os
 import statistics
 import subprocess
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 REPO = os.environ.get("CI_METRICS_REPO", "crmitchelmore/justspeaktoit")
 CI_PATH = ".github/workflows/ci.yml"
-REQUIRED_CHECKS = ("Build & Test (macOS)", "Build iOS Library", "Lint")
+# The main ruleset requires only "CI Gate" since 10 Nov 2026; the older contexts keep history comparable.
+REQUIRED_CHECKS = ("CI Gate", "Build & Test (macOS)", "Build iOS Library", "Lint")
 CACHE = Path(os.environ.get("CI_METRICS_CACHE", Path.home() / ".cache" / "jsti-ci-metrics"))
+ZOMBIE_HOURS = 24
+ACTIVE_STATUSES = ("queued", "waiting", "pending", "requested", "in_progress")
 
 
 def gh_api(path: str, paginate: bool = False) -> list | dict:
@@ -46,6 +58,7 @@ def gh_api(path: str, paginate: bool = False) -> list | dict:
             return json.loads(result.stdout)
         if attempt == 3:
             sys.exit(f"gh api {path} failed: {result.stderr.strip()}")
+        time.sleep(2 ** attempt)
     raise AssertionError
 
 
@@ -73,16 +86,52 @@ def summary(values: list[float]) -> dict:
     return {"n": len(values), "p50": pct(values, 50), "p90": pct(values, 90)}
 
 
-def list_runs(since: dt.date, until: dt.date) -> list[dict]:
-    runs: list[dict] = []
-    # The runs API caps a single query at 1,000 results, so walk day by day.
-    day = since
-    while day < until:
-        pages = gh_api(f"repos/{REPO}/actions/runs?per_page=100&created={day.isoformat()}", paginate=True)
-        for page in pages:
-            runs.extend(page.get("workflow_runs", []))
-        day += dt.timedelta(days=1)
+# Only the fields the report reads are cached, which keeps a month of runs to a few MB.
+RUN_FIELDS = ("id", "name", "path", "event", "status", "conclusion", "created_at", "run_started_at",
+              "updated_at", "run_attempt", "head_branch", "html_url")
+
+
+def day_runs(day: dt.date, refresh: bool = False, today: dt.date | None = None) -> list[dict]:
+    """One day's runs. Settled days (older than three days, nothing still running) come from the cache."""
+    cached = CACHE / "runs" / REPO.replace("/", "__") / f"{day.isoformat()}.json"
+    if cached.exists() and not refresh:
+        return json.loads(cached.read_text())
+    pages = gh_api(f"repos/{REPO}/actions/runs?per_page=100&created={day.isoformat()}", paginate=True)
+    runs = [{k: run.get(k) for k in RUN_FIELDS} for page in pages for run in page.get("workflow_runs", [])]
+    settled = day < (today or dt.date.today()) - dt.timedelta(days=3)
+    if settled and all(run["status"] == "completed" for run in runs):
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_text(json.dumps(runs))
     return runs
+
+
+def list_runs(since: dt.date, until: dt.date, refresh: bool = False) -> list[dict]:
+    # The runs API caps a single query at 1,000 results, so walk day by day.
+    days = [since + dt.timedelta(days=n) for n in range((until - since).days)]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return [run for runs in pool.map(lambda d: day_runs(d, refresh), days) for run in runs]
+
+
+def list_zombies(now: dt.datetime | None = None) -> list[dict]:
+    """Runs of any workflow, of any age, still not finished ZOMBIE_HOURS after creation."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    found: dict[int, dict] = {}
+    for status in ACTIVE_STATUSES:
+        for page in gh_api(f"repos/{REPO}/actions/runs?per_page=100&status={status}", paginate=True):
+            for run in page.get("workflow_runs", []):
+                found[run["id"]] = run
+    return zombies(found.values(), now)
+
+
+def zombies(runs, now: dt.datetime) -> list[dict]:
+    out = []
+    for run in runs:
+        age = (now - ts(run["created_at"])).total_seconds() / 3600
+        if run.get("status") in ACTIVE_STATUSES and age > ZOMBIE_HOURS:
+            out.append({"id": run["id"], "workflow": workflow_label(run), "status": run["status"],
+                        "branch": run.get("head_branch"), "event": run.get("event"),
+                        "age_hours": round(age, 1), "url": run.get("html_url")})
+    return sorted(out, key=lambda z: -z["age_hours"])
 
 
 def list_merged_prs(since: dt.date, until: dt.date) -> list[dict]:
@@ -122,11 +171,44 @@ def is_macos(job: dict) -> bool:
     return "macos" in labels
 
 
+def ran(job: dict) -> bool:
+    """A job that got a runner. Cancelled-before-start jobs carry synthetic start times."""
+    return job.get("conclusion") != "skipped" and bool(job.get("runner_name") or job.get("runner_id"))
+
+
+def critical_path(runs_with_jobs: list[tuple[dict, list[dict]]]) -> list[dict]:
+    """Per CI job name: queue, run time and finish offset from run creation (minutes), and how often
+    it was the last substantive job to finish, i.e. the end of that run's critical path."""
+    per: dict[str, dict] = {}
+    for run, jobs in runs_with_jobs:
+        created = ts(run["created_at"])
+        finished = [j for j in jobs if ran(j) and j.get("completed_at")]
+        if not finished:
+            continue
+        # Aggregate gate jobs finish last but run for seconds; the path ends at the last real work.
+        work = [j for j in finished if (minutes(ts(j.get("started_at")), ts(j["completed_at"])) or 0) >= 1] or finished
+        last = max(work, key=lambda j: j["completed_at"])["name"]
+        for job in finished:
+            started, completed = ts(job.get("started_at")), ts(job["completed_at"])
+            row = per.setdefault(job["name"], {"queue": [], "run": [], "finish": [], "last": 0})
+            row["queue"].append(minutes(ts(job.get("created_at")), started))
+            row["run"].append(minutes(started, completed))
+            row["finish"].append(minutes(created, completed))
+            row["last"] += job["name"] == last
+    table = [{"job": name, "n": len(row["finish"]), "last_to_finish": row["last"],
+              "queue_p50": pct(row["queue"], 50), "queue_p90": pct(row["queue"], 90),
+              "run_p50": pct(row["run"], 50), "run_p90": pct(row["run"], 90),
+              "finish_p50": pct(row["finish"], 50), "finish_p90": pct(row["finish"], 90)}
+             for name, row in per.items()]
+    return sorted(table, key=lambda r: -(r["finish_p90"] or 0))
+
+
 def compute(args: argparse.Namespace) -> dict:
     until = args.until or (dt.date.today() + dt.timedelta(days=1))
     since = args.since or (until - dt.timedelta(days=args.days))
-    runs = list_runs(since, until)
+    runs = list_runs(since, until, args.refresh)
     prs = list_merged_prs(since, until)
+    zombie_runs = list_zombies()
 
     per_workflow: dict[str, dict] = {}
     for run in runs:
@@ -150,12 +232,13 @@ def compute(args: argparse.Namespace) -> dict:
     # macOS jobs dominate the shared hosted queue.
     sampled = sorted((r for r in ci_runs if r.get("status") == "completed"),
                      key=lambda r: r["created_at"], reverse=True)[: args.max_job_runs]
-    for run in sampled:
-        jobs = run_jobs(run)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        sampled_jobs = list(zip(sampled, pool.map(run_jobs, sampled)))
+    for run, jobs in sampled_jobs:
         created = ts(run["created_at"])
         for job in jobs:
             started, completed = ts(job.get("started_at")), ts(job.get("completed_at"))
-            if job.get("conclusion") == "skipped":
+            if not ran(job):
                 continue
             duration = minutes(started, completed) or 0
             job_minutes["macos" if is_macos(job) else "other"] += duration
@@ -169,14 +252,32 @@ def compute(args: argparse.Namespace) -> dict:
 
     failures = sum(s["failure"] for s in per_workflow.values())
     cancelled_pr = sum(s["pr_cancelled"] for s in per_workflow.values())
-    ci_main = [r for r in ci_runs if r["event"] == "push" and r.get("conclusion") in ("success", "failure")]
+    ci_main_all = [r for r in ci_runs if r["event"] == "push" and r.get("status") == "completed"]
+    ci_main = [r for r in ci_main_all if r.get("conclusion") in ("success", "failure")]
+    open_to_merge = {k: (v / 60 if isinstance(v, float) else v) for k, v in summary(
+        [minutes(ts(p["created_at"]), ts(p["pull_request"]["merged_at"])) for p in prs]).items()}
+    main_failure_rate = (round(sum(r["conclusion"] == "failure" for r in ci_main) / len(ci_main), 4)
+                         if ci_main else None)
+    main_cancel_rate = (round(sum(r.get("conclusion") == "cancelled" for r in ci_main_all) / len(ci_main_all), 4)
+                        if ci_main_all else None)
+    pr_cancel_rate = (round(sum(r.get("conclusion") == "cancelled" for r in ci_pr) / len(ci_pr), 4)
+                      if ci_pr else None)
     return {
         "repo": REPO,
         "window": {"since": since.isoformat(), "until": until.isoformat()},
-        "pr_open_to_merge_hours": {k: (v / 60 if isinstance(v, float) else v) for k, v in summary(
-            [minutes(ts(p["created_at"]), ts(p["pull_request"]["merged_at"])) for p in prs]).items()},
+        "scorecard": {
+            "pr_open_to_merge_hours_p50": open_to_merge["p50"], "pr_open_to_merge_hours_p90": open_to_merge["p90"],
+            "merged_prs": open_to_merge["n"],
+            "required_gate_minutes_p50": pct(gate, 50), "required_gate_minutes_p90": pct(gate, 90),
+            "main_failure_rate": main_failure_rate, "main_runs_judged": len(ci_main),
+            "main_cancel_rate": main_cancel_rate, "ci_pr_cancel_rate": pr_cancel_rate,
+            "zombie_runs": len(zombie_runs),
+        },
+        "pr_open_to_merge_hours": open_to_merge,
         "ci_pr_success_minutes": summary(ci_success),
         "required_gate_minutes": summary(gate),
+        "critical_path": critical_path(sampled_jobs),
+        "zombie_runs": zombie_runs,
         "macos_queue_minutes": summary(queue),
         "job_minutes_sampled": {k: round(v) for k, v in job_minutes.items()},
         "sampled_job_runs": len(sampled),
@@ -187,8 +288,7 @@ def compute(args: argparse.Namespace) -> dict:
         "ci_pr_runs": len(ci_pr),
         "ci_pr_cancelled": sum(r.get("conclusion") == "cancelled" for r in ci_pr),
         "ci_pr_failed": sum(r.get("conclusion") == "failure" for r in ci_pr),
-        "ci_main_failure_rate": (round(sum(r["conclusion"] == "failure" for r in ci_main) / len(ci_main), 4)
-                                 if ci_main else None),
+        "ci_main_failure_rate": main_failure_rate,
         "workflows": dict(sorted(per_workflow.items(), key=lambda kv: -kv[1]["wall_minutes"])),
     }
 
@@ -197,8 +297,21 @@ def fmt(value) -> str:
     return "—" if value is None else (f"{value:.1f}" if isinstance(value, float) else str(value))
 
 
+def rate(value) -> str:
+    return "—" if value is None else f"{value * 100:.1f}%"
+
+
 def render(data: dict) -> str:
-    lines = [f"# CI metrics for {data['repo']} ({data['window']['since']} → {data['window']['until']})", "",
+    card = data["scorecard"]
+    lines = [f"# CI metrics for {data['repo']} ({data['window']['since']} → {data['window']['until']}, exclusive)", "",
+             "## Scorecard", "",
+             f"- PR open → merge: p50 {fmt(card['pr_open_to_merge_hours_p50'])} h, "
+             f"p90 {fmt(card['pr_open_to_merge_hours_p90'])} h ({card['merged_prs']} merged PRs)",
+             f"- Required gate: p50 {fmt(card['required_gate_minutes_p50'])} min, "
+             f"p90 {fmt(card['required_gate_minutes_p90'])} min",
+             f"- Main CI failure rate: {rate(card['main_failure_rate'])} of {card['main_runs_judged']} decided runs; "
+             f"main cancelled {rate(card['main_cancel_rate'])}; PR CI cancelled {rate(card['ci_pr_cancel_rate'])}",
+             f"- Zombie runs (unfinished after {ZOMBIE_HOURS} h): {card['zombie_runs']}", "",
              "| Metric | n | p50 | p90 |", "|---|---|---|---|"]
     for key, label in (("pr_open_to_merge_hours", "PR open → merge (h)"),
                        ("ci_pr_success_minutes", "CI workflow, successful PR runs (min)"),
@@ -207,15 +320,29 @@ def render(data: dict) -> str:
         row = data[key]
         lines.append(f"| {label} | {row['n']} | {fmt(row['p50'])} | {fmt(row['p90'])} |")
     lines += ["", f"CI PR runs: {data['ci_pr_runs']} · cancelled: {data['ci_pr_cancelled']} · "
-              f"failed: {data['ci_pr_failed']} · main push failure rate: {fmt(data['ci_main_failure_rate'])}",
+              f"failed: {data['ci_pr_failed']} · main push failure rate: {rate(data['ci_main_failure_rate'])}",
               f"Runs: {data['runs']} · failed: {data['failed_runs']} · "
-              f"PR runs cancelled: {data['pr_runs_cancelled']} · failure rate: {fmt(data['failure_rate'])}",
+              f"PR runs cancelled: {data['pr_runs_cancelled']} · failure rate: {rate(data['failure_rate'])}",
               f"Job minutes over {data['sampled_job_runs']} sampled runs: macOS {data['job_minutes_sampled']['macos']}, "
               f"other {data['job_minutes_sampled']['other']}", "",
               "| Workflow | runs | failed | cancelled (PR) | wall min |", "|---|---|---|---|---|"]
     for name, stats in data["workflows"].items():
         lines.append(f"| {name} | {stats['runs']} | {stats['failure']} | {stats['cancelled']} ({stats['pr_cancelled']}) "
                      f"| {round(stats['wall_minutes'])} |")
+    lines += ["", f"## CI critical path ({data['sampled_job_runs']} sampled runs, slowest finish first)", "",
+              "| Job | n | last to finish | queue p50/p90 | run p50/p90 | finish p50/p90 (min) |",
+              "|---|---|---|---|---|---|"]
+    for row in data["critical_path"][:15]:
+        lines.append(f"| {row['job']} | {row['n']} | {row['last_to_finish']} | {fmt(row['queue_p50'])}/"
+                     f"{fmt(row['queue_p90'])} | {fmt(row['run_p50'])}/{fmt(row['run_p90'])} | "
+                     f"{fmt(row['finish_p50'])}/{fmt(row['finish_p90'])} |")
+    lines += ["", f"## Zombie runs ({len(data['zombie_runs'])})", ""]
+    if data["zombie_runs"]:
+        lines += ["| Workflow | status | branch | age (h) | run |", "|---|---|---|---|---|"]
+        lines += [f"| {z['workflow']} | {z['status']} | {z['branch']} | {z['age_hours']} | {z['url']} |"
+                  for z in data["zombie_runs"]]
+    else:
+        lines.append("None.")
     return "\n".join(lines)
 
 
@@ -227,6 +354,7 @@ def main() -> None:
     parser.add_argument("--max-job-runs", type=int, default=300,
                         help="newest completed CI runs whose jobs are fetched (default 300)")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--refresh", action="store_true", help="refetch run lists instead of using the cache")
     args = parser.parse_args()
     data = compute(args)
     print(json.dumps(data, indent=2) if args.json else render(data))

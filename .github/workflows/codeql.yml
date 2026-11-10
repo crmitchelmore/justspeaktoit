@@ -27,11 +27,13 @@ jobs:
         id: paths
         with:
           filters: |
+            # Pull requests analyse only changes to how the scan is built.
+            # Every push to main and the weekly schedule analyse all Swift
+            # sources, so a source-only pull request no longer holds a
+            # hosted macOS runner for ~40 minutes on the shared queue.
             swift:
-              - 'Sources/**'
               - 'Package.swift'
               - 'Package.resolved'
-              - 'Resources/**'
               - '.github/workflows/codeql.yml'
               - '.github/actions/setup-apple-toolchain/**'
   analyze:
@@ -81,14 +83,9 @@ jobs:
           key: codeql-${{ runner.os }}-${{ runner.arch }}-sources-${{ hashFiles('Package.resolved') }}
           restore-keys: codeql-${{ runner.os }}-${{ runner.arch }}-sources-
 
+      # GitHub release-asset 5xx outages outlast short fixed retries.
       - name: Resolve pinned dependencies with bounded network retries
-        shell: bash
-        run: |
-          for attempt in 1 2 3; do
-            if swift package resolve --force-resolved-versions; then exit 0; fi
-            if [ "$attempt" -eq 3 ]; then exit 1; fi
-            sleep "$((attempt * 5))"
-          done
+        run: scripts/retry-network.sh swift package resolve --force-resolved-versions
 
       - name: Build
         run: swift build --disable-automatic-resolution

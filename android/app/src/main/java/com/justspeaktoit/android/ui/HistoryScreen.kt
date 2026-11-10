@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -47,10 +48,22 @@ class HistoryActions(
     val onRetention: (Retention) -> Unit,
     val onDelete: (String) -> Unit,
     val onClear: () -> Unit,
+    val onTranscribe: (String) -> Unit,
 )
 
+/** Whether kept audio can be transcribed now, and which entry is being transcribed. */
+data class HistoryTranscription(val sessionActive: Boolean = false, val entryId: String? = null) {
+    val available: Boolean get() = !sessionActive && entryId == null
+}
+
 @Composable
-fun HistoryScreen(entries: List<HistoryEntry>, retention: Retention, saveFailed: Boolean, actions: HistoryActions) {
+fun HistoryScreen(
+    entries: List<HistoryEntry>,
+    retention: Retention,
+    saveFailed: Boolean,
+    transcribe: HistoryTranscription,
+    actions: HistoryActions,
+) {
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     Scaffold { padding ->
         LazyColumn(
@@ -60,7 +73,7 @@ fun HistoryScreen(entries: List<HistoryEntry>, retention: Retention, saveFailed:
         ) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = actions.onBack) {
+                    IconButton(onClick = actions.onBack, modifier = Modifier.testTag(AutomationIds.HISTORY_BACK)) {
                         Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.action_back))
                     }
                     Text(
@@ -70,7 +83,10 @@ fun HistoryScreen(entries: List<HistoryEntry>, retention: Retention, saveFailed:
                         modifier = Modifier.weight(1f),
                     )
                     if (entries.isNotEmpty()) {
-                        TextButton(onClick = { confirmClear = true }) {
+                        TextButton(
+                            onClick = { confirmClear = true },
+                            modifier = Modifier.testTag(AutomationIds.HISTORY_CLEAR),
+                        ) {
                             Text(stringResource(R.string.action_clear_history))
                         }
                     }
@@ -99,7 +115,7 @@ fun HistoryScreen(entries: List<HistoryEntry>, retention: Retention, saveFailed:
                     )
                 }
             }
-            items(entries, key = { it.id }) { entry -> HistoryCard(entry, actions) }
+            items(entries, key = { it.id }) { entry -> HistoryCard(entry, transcribe, actions) }
         }
     }
     if (confirmClear) {
@@ -147,7 +163,7 @@ private fun RetentionPicker(retention: Retention, onRetention: (Retention) -> Un
 }
 
 @Composable
-private fun HistoryCard(entry: HistoryEntry, actions: HistoryActions) {
+private fun HistoryCard(entry: HistoryEntry, transcribe: HistoryTranscription, actions: HistoryActions) {
     val context = LocalContext.current
     val shareTitle = stringResource(R.string.share_title)
     val failed = entry.status == HistoryStatus.Failed
@@ -173,10 +189,27 @@ private fun HistoryCard(entry: HistoryEntry, actions: HistoryActions) {
                     Text(stringResource(R.string.unfinished_label), style = MaterialTheme.typography.labelSmall)
                 }
             }
+            if (entry.status == HistoryStatus.Cancelled) {
+                Text(stringResource(R.string.history_cancelled), style = MaterialTheme.typography.labelMedium)
+                val reason = DictationFailure.entries.firstOrNull { it.name == entry.failure }
+                if (reason != null) {
+                    Text(
+                        stringResource(R.string.history_transcribe_failed, stringResource(reason.message())),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
             if (entry.text.isNotEmpty()) {
                 Text(entry.text, style = MaterialTheme.typography.bodyLarge)
             }
             Row {
+                if (entry.audioPath != null) {
+                    val running = transcribe.entryId == entry.id
+                    TextButton(onClick = { actions.onTranscribe(entry.id) }, enabled = transcribe.available) {
+                        Text(stringResource(if (running) R.string.history_transcribing else R.string.action_transcribe))
+                    }
+                }
                 if (entry.text.isNotEmpty()) {
                     TextButton(onClick = { TranscriptOutput.copy(context, entry.text) }) {
                         Text(stringResource(if (failed) R.string.action_copy_unfinished else R.string.action_copy))

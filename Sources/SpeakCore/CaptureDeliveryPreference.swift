@@ -29,13 +29,18 @@ public enum CaptureDeliveryPreference {
               defaultValue: AnyCodable(.double(defaultHistoryFlushInterval))),
         .init(key: ApplicationPreferenceKey.cancelRecordingOnEscape.rawValue,
               title: "Cancel recording with Escape", group: "Keyboard", kind: .boolean,
-              defaultValue: AnyCodable(.bool(SpeechDefaults.cancelRecordingOnEscape)))
+              defaultValue: AnyCodable(.bool(SpeechDefaults.cancelRecordingOnEscape))),
+        .init(key: ApplicationPreferenceKey.keepAudioOnCancel.rawValue,
+              title: "Keep audio when a recording is cancelled (shown in History to transcribe later)",
+              group: "General", kind: .boolean,
+              defaultValue: AnyCodable(.bool(SpeechDefaults.keepAudioOnCancel)))
     ]
     public static let keys = Set(fields.map(\.key))
 }
 
 extension DesktopConfiguration {
     public var cancelRecordingOnEscape: Bool { enabled(ApplicationPreferenceKey.cancelRecordingOnEscape.rawValue) }
+    public var keepAudioOnCancel: Bool { enabled(ApplicationPreferenceKey.keepAudioOnCancel.rawValue) }
     public var audioPreWarmingEnabled: Bool { enabled(ApplicationPreferenceKey.audioPreWarmingEnabled.rawValue) }
     public var warmMicrophoneOnKeyPress: Bool { enabled(ApplicationPreferenceKey.warmMicrophoneOnKeyPress.rawValue) }
     public var pasteRemoteTranscriptsAtCursor: Bool {

@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -49,6 +50,7 @@ class SettingsActions(
     val onRemoveKey: (CloudProvider) -> Unit,
     val onChooseModel: (CloudModel) -> Unit,
     val onCleanupChanged: (Boolean) -> Unit,
+    val onKeepAudioOnCancelChanged: (Boolean) -> Unit,
 )
 
 @Composable
@@ -63,7 +65,7 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = actions.onBack) {
+                IconButton(onClick = actions.onBack, modifier = Modifier.testTag(AutomationIds.SETTINGS_BACK)) {
                     Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.action_back))
                 }
                 Text(
@@ -112,6 +114,26 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
             if (state.cleanupEnabled && CloudProvider.OpenRouter !in state.savedKeys) {
                 Text(stringResource(R.string.settings_cleanup_needs_key), color = MaterialTheme.colorScheme.error)
             }
+
+            HorizontalDivider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .toggleable(
+                        value = state.keepAudioOnCancel,
+                        role = Role.Switch,
+                        onValueChange = actions.onKeepAudioOnCancelChanged,
+                    ),
+            ) {
+                Text(
+                    stringResource(R.string.settings_keep_audio_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.keepAudioOnCancel, onCheckedChange = null)
+            }
+            Text(stringResource(R.string.settings_keep_audio_note), style = MaterialTheme.typography.bodyMedium)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_keys_title)

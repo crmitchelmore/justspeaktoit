@@ -12,8 +12,10 @@ final class BatchCleanupTransport: @unchecked Sendable {
 
     init(session: URLSession) {
         configuration = session.configuration
-        configuration.timeoutIntervalForRequest = 10
-        configuration.timeoutIntervalForResource = 10
+        // Above the 10 s exchange deadline in `send`, so the deadline always
+        // decides first; equal values raced and surfaced URLError.timedOut.
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 15
         delegate = session.delegate
         queue = session.delegateQueue
     }

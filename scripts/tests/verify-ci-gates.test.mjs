@@ -18,8 +18,9 @@ const nativeEligibleJobs = [
   'build-macos', 'release-validation', 'api-compatibility', 'lint', 'core-journey-e2e',
   'build-ios-swiftpm', 'build-ios-keyboard',
 ];
-const armFallbackJobs = new Set(['lint', 'release-validation', 'build-ios-swiftpm', 'build-ios-keyboard']);
-const hostedFallback = (id) => (armFallbackJobs.has(id) ? 'macos-latest' : 'macos-26-intel');
+// Hosted macOS concurrency is a fixed per-account cap shared by Intel and ARM,
+// so Intel adds no capacity and only slows jobs: every hosted fallback is ARM.
+const hostedFallback = () => 'macos-latest';
 const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
 
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
@@ -95,9 +96,9 @@ test('Debug dependency resolution bypasses shared repositories in commands and r
   const body = jobBodies['build-macos'];
   const commandLines = body.split('\n').filter((line) => !line.trimStart().startsWith('#'));
   const commands = commandLines.flatMap((line) => line.match(/\bswift (?:build|test) [^\n]+/g) ?? []);
-  // make build receives the same option through SWIFT_FLAGS; the five direct
+  // make build receives the same option through SWIFT_FLAGS; the four direct
   // invocations include tests, isolated diagnostics and coverage path queries.
-  assert.equal(commands.length, 5);
+  assert.equal(commands.length, 4);
   for (const command of commands) {
     assert.ok(command.includes('--disable-dependency-cache'), command);
   }
@@ -117,12 +118,14 @@ test('macOS Debug and Core Journey share coverage instrumentation and cache keys
     assert.equal(consumer[1].trim(), producer[1].trim());
   }
   assert.match(body, /^\s+timeout-minutes: 45$/m);
-  assert.match(body, /name: Build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS="--enable-code-coverage --disable-dependency-cache" make build/);
-  assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py swift test --enable-code-coverage --disable-dependency-cache/);
+  assert.match(body, /name: Build\n\s+id: build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS="--enable-code-coverage --disable-dependency-cache" make build/);
+  assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?\s+run: python3 scripts\/with-test-keychain.py python3 scripts\/retry-xctest-crash.py swift test --enable-code-coverage --disable-dependency-cache/);
   assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),
     'Build must run before Test (Debug) so the coverage-enabled cache is already warm');
-  assert.ok(body.indexOf('name: Test (Debug)') < body.indexOf('name: Build SpeakCore (App Store flavour)'),
-    'App Store flavour rebuild must stay after tests, not before');
+  assert.doesNotMatch(body, /-DAPP_STORE/,
+    'the App Store flavour compile invalidates the Debug cache, so it runs in build-ios-swiftpm');
+  assert.match(jobBodies['build-ios-swiftpm'],
+    /name: Build SpeakCore \(App Store flavour\)\n(?:\s+#[^\n]*\n)*\s+run: swift build --disable-dependency-cache -Xswiftc -DAPP_STORE --target SpeakCore/);
   assert.doesNotMatch(body, /\n\s+run: make build\n/, 'Build step must not regress to an uninstrumented build');
   // Non-test steps unaffected: still a real build, no dropped checks.
   assert.match(body, /name: Verify brand asset sizes and appearance variants/);
@@ -143,7 +146,7 @@ function routingContext(event = 'pull_request', repository = 'crmitchelmore/just
   };
 }
 
-test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
+test('Apple CI routing keeps every hosted macOS job on ARM', () => {
   for (const id of ['build-ios', 'core-journey-fixture-ui']) {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
@@ -151,9 +154,7 @@ test('Apple CI routing splits hosted jobs across ARM and Intel pools', () => {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
   assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
-  // Intel appears only as the hosted fallback of the native-eligible jobs.
-  assert.doesNotMatch(workflow, /runs-on: macos-26-intel/);
-  // Lint and Release stay on hosted ARM: on Intel they exceeded their job budgets.
+  assert.doesNotMatch(workflow, /-intel/);
   for (const id of nativeEligibleJobs) {
     const hosted = hostedFallback(id);
     assert.ok(jobBodies[id].includes(`|| '["${hosted}"]') }}`), id);
@@ -193,8 +194,8 @@ test('iOS SwiftPM compilation keeps its command and bounded budget when native e
     ['jsti-reviewed-local', 'macOS']);
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
-  // The only permitted condition is the shared Android-only skip.
-  const ungated = body.replace("    if: needs.release-paths.outputs.apple == 'true'\n", '');
+  // The only permitted condition is the shared Swift-change skip.
+  const ungated = body.replace("    if: needs.release-paths.outputs.swift == 'true'\n", '');
   assert.doesNotMatch(ungated, /if:|bravo-mini-local/);
 });
 
@@ -214,7 +215,8 @@ test('Tessl is on demand and preserves trusted-author secret restrictions', () =
 
 test('every Apple build cache isolates architecture, host and workspace, including restore prefixes', () => {
   const cacheLines = workflow.match(/^\s+(?:key:|restore-keys:).*(?:\n\s+\$\{\{[^\n]+)?/gm);
-  assert.equal(cacheLines.length, 7, 'three Swift keys and restore prefixes plus the lint tooling key');
+  assert.equal(cacheLines.length, 8,
+    'Debug restore/save, journey restore and release Swift keys with restore prefixes, plus the lint tooling key');
   for (const line of cacheLines) {
     assert.ok(line.includes('${{ runner.arch }}'), line);
     assert.ok(line.includes("${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}"), line);
@@ -430,12 +432,15 @@ test('every tracked tooling test is discovered by make test-tooling', () => {
   }
 });
 
+const flags = ['package', 'core-journey', 'apple', 'swift', 'ios', 'ios-runtime'];
+const allOutputs = value => Object.fromEntries(flags.map(flag => [flag, value]));
+
 function passing() {
   return Object.fromEntries([
     'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
     'release-paths', 'release-validation', 'core-journey-e2e',
     'core-journey-fixture-ui', 'api-compatibility',
-  ].map(id => [id, { result: 'success', outputs: { package: 'true', 'core-journey': 'true', apple: 'true' } }]));
+  ].map(id => [id, { result: 'success', outputs: allOutputs('true') }]));
 }
 
 test('accepts all successful pull-request gates', () => {
@@ -454,8 +459,9 @@ for (const id of Object.keys(passing())) {
 
 test('permits only path-excluded PR gates to skip', () => {
   const needs = passing();
-  needs['release-paths'].outputs = { package: 'false', 'core-journey': 'false', apple: 'true' };
-  for (const id of ['release-validation', 'core-journey-e2e', 'core-journey-fixture-ui']) {
+  needs['release-paths'].outputs = { ...allOutputs('false'), apple: 'true', swift: 'true' };
+  for (const id of ['release-validation', 'api-compatibility', 'core-journey-e2e', 'core-journey-fixture-ui',
+    'build-ios-test-products', 'build-ios', 'build-ios-keyboard']) {
     needs[id].result = 'skipped';
   }
   assert.deepEqual(assessCIGates(needs, 'pull_request'), []);
@@ -471,24 +477,40 @@ const appleJobs = [
 
 function androidOnly() {
   const needs = passing();
-  needs['release-paths'].outputs = { package: 'false', 'core-journey': 'false', apple: 'false' };
+  needs['release-paths'].outputs = allOutputs('false');
   for (const id of [...appleJobs, 'release-validation', 'core-journey-e2e', 'core-journey-fixture-ui']) {
     needs[id].result = 'skipped';
   }
   return needs;
 }
 
-test('Android-only pull requests may skip every Apple gate', () => {
+test('docs, website, Android and Workers-only pull requests may skip every Apple gate', () => {
   assert.deepEqual(assessCIGates(androidOnly(), 'pull_request'), []);
 });
 
-test('Apple gates still run, and must pass, whenever anything outside the Android app changes', () => {
-  for (const id of appleJobs) {
+const gateFlags = {
+  lint: 'apple', 'build-macos': 'swift', 'build-ios-swiftpm': 'swift', 'build-ios-test-products': 'ios',
+  'build-ios': 'ios-runtime', 'build-ios-keyboard': 'ios-runtime', 'release-validation': 'package',
+  'api-compatibility': 'package', 'core-journey-e2e': 'core-journey', 'core-journey-fixture-ui': 'core-journey',
+};
+
+test('each gate still runs, and must pass, whenever its own paths change', () => {
+  for (const [id, flag] of Object.entries(gateFlags)) {
     const needs = androidOnly();
-    needs['release-paths'].outputs.apple = 'true';
-    for (const other of appleJobs) needs[other].result = 'success';
+    needs['release-paths'].outputs[flag] = 'true';
+    for (const [other, otherFlag] of Object.entries(gateFlags)) {
+      if (otherFlag === flag) needs[other].result = 'success';
+    }
     needs[id].result = 'skipped';
-    assert.ok(assessCIGates(needs, 'pull_request').length > 0, `${id} cannot skip for Apple changes`);
+    assert.ok(assessCIGates(needs, 'pull_request').length > 0, `${id} cannot skip when ${flag} changed`);
+    needs[id].result = 'success';
+    assert.deepEqual(assessCIGates(needs, 'pull_request'), [], `${id}: only ${flag} selects it`);
+  }
+});
+
+test('every gate job honours exactly its path-detection output', () => {
+  for (const [id, flag] of Object.entries(gateFlags)) {
+    assert.match(jobBodies[id], new RegExp(`^    if: needs\\.release-paths\\.outputs\\.${flag} == 'true'$`, 'm'), id);
   }
 });
 
@@ -499,19 +521,20 @@ test('Android-only skips never apply to main or to failed Apple jobs', () => {
   assert.ok(assessCIGates(needs, 'pull_request').length > 0, 'a job that ran must succeed');
 });
 
-test('Apple path detection excludes only the Android app and its own workflow and docs', () => {
+test('Apple path detection excludes only docs, the website, the Android app and Workers', () => {
   const body = jobBodies['release-paths'];
   const filter = body.match(
     /id: apple\n\s+with:\n\s+predicate-quantifier: every\n\s+filters: \|\n\s+apple:\n((?:\s+- '[^']+'\n)+)/);
   assert.ok(filter, 'apple filter must use the every-pattern quantifier');
   assert.deepEqual(filter[1].trim().split('\n').map(line => line.trim()), [
-    "- '**'", "- '!android/**'", "- '!.github/workflows/android.yml'", "- '!Docs/android-*.md'",
+    "- '**'", "- '!android/**'", "- '!.github/workflows/android.yml'", "- '!Docs/**'", "- '!**/*.md'",
+    "- '!landing-page/**'", "- '!.github/workflows/deploy-landing-page.yml'", "- '!workers/**'",
   ]);
-  assert.match(body, /# Push to main: no changed-file filtering, run every gate\.\n\s+\{\n(?:\s+echo "[a-z-]+=true"\n)*\s+echo "apple=true"\n/,
-    'pushes must force Apple gates on');
-  for (const id of appleJobs) {
-    assert.match(jobBodies[id], /if: .*needs\.release-paths\.outputs\.apple == 'true'/, `${id} must honour the gate`);
+  for (const flag of flags) {
+    assert.ok(body.includes(`echo "${flag}=true"`), `pushes must force ${flag} on`);
   }
+  assert.match(body, /contains\(github\.event\.pull_request\.labels\.\*\.name, 'ci:full'\)/,
+    'a ci:full label runs every gate before merge');
 });
 
 test('blocks missing path detection outputs', () => {
@@ -520,11 +543,29 @@ test('blocks missing path detection outputs', () => {
   assert.ok(assessCIGates(needs, 'pull_request').length > 0);
 });
 
-test('permits API compatibility skip only on main push', () => {
+test('API compatibility runs on main against the previous main commit', () => {
   const needs = passing();
   needs['api-compatibility'].result = 'skipped';
-  assert.deepEqual(assessCIGates(needs, 'push'), []);
-  assert.ok(assessCIGates(needs, 'pull_request').length > 0);
+  assert.ok(assessCIGates(needs, 'push').length > 0, 'main cannot skip API compatibility');
+  const body = jobBodies['api-compatibility'];
+  assert.match(body, /github\.event\.before/);
+  assert.match(body, /github\.event\.head_commit\.message/);
+});
+
+test('main failures open a tracking issue from a push-only, checkout-free job', () => {
+  const body = jobBodies['report-main-failure'];
+  assert.match(body, /if: failure\(\) && !cancelled\(\) && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(body, /needs: required-macos/);
+  assert.match(body, /issues: write/);
+  assert.doesNotMatch(body, /checkout|scripts\//);
+});
+
+test('pull requests restore the Swift cache without saving; main saves one entry per commit', () => {
+  const body = jobBodies['build-macos'];
+  assert.match(body, /uses: actions\/cache\/restore@v6/);
+  assert.match(body, /name: Save Swift packages \(main only\)\n\s+if: github\.event_name == 'push'/);
+  assert.doesNotMatch(body, /uses: actions\/cache@/);
+  assert.match(body, /-swift-\$\{\{ hashFiles\('Package\.resolved'\) \}\}-\$\{\{ github\.sha \}\}/);
 });
 
 test('launched-app UI shards in CI match every shard the verifier requires', () => {

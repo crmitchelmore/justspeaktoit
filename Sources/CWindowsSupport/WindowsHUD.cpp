@@ -492,14 +492,16 @@ void apply() {
     } else {
         SetTimer(window, tickTimer, tickMilliseconds, nullptr);
     }
-    // Screen readers read the window's name; announce each new phase.
+    // The window's name is the current phase; screen readers announce each new phase.
     const std::wstring name = shown.subheadline.empty() ? shown.headline : shown.headline + L". " + shown.subheadline;
     SetWindowTextW(window, name.c_str());
     render();
     SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
-    if (newPhase) NotifyWinEvent(EVENT_SYSTEM_ALERT, window, OBJID_WINDOW, CHILDID_SELF);
+    if (newPhase) jsti::accessibility::announce(window, name, shown.phase == failure);
 }
+
+bool visible() { return window && IsWindowVisible(window); }
 
 void refresh() {
     if (window && IsWindowVisible(window)) render();

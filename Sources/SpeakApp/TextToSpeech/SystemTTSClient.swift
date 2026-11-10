@@ -1,7 +1,6 @@
 import SpeakCore
 import Foundation
 import AVFoundation
-import AppKit
 
 actor SystemTTSClient: TextToSpeechClient {
   let provider: TTSProvider = .system
@@ -9,10 +8,12 @@ actor SystemTTSClient: TextToSpeechClient {
   func synthesize(text: String, voice: String, settings: TTSSettings) async throws -> TTSResult {
     let voiceID = voice.replacingOccurrences(of: "system/", with: "")
 
-    // Find the system voice
-    let systemVoice = AVSpeechSynthesisVoice.speechVoices().first { voice in
-      voice.identifier.contains(voiceID) || voice.name.lowercased().contains(voiceID.lowercased())
-    } ?? AVSpeechSynthesisVoice(language: "en-US")
+    // "default" (and an empty identifier) is the system voice for the user's language.
+    let systemVoice = voiceID.isEmpty || voiceID == "default"
+      ? AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())
+      : AVSpeechSynthesisVoice.speechVoices().first { voice in
+        voice.identifier.contains(voiceID) || voice.name.lowercased().contains(voiceID.lowercased())
+      } ?? AVSpeechSynthesisVoice(language: "en-US")
 
     let utterance = AVSpeechUtterance(string: text)
     utterance.voice = systemVoice
@@ -59,33 +60,21 @@ actor SystemTTSClient: TextToSpeechClient {
 
   // MARK: - Private Helpers
 
-  private func synthesizeToFile(utterance: AVSpeechUtterance, format: AudioFormat) async throws
-    -> URL
-  {
-    // For macOS system TTS, we'll use a simplified approach
-    // We'll synthesize to a temporary file and return it
-    let tempDir = FileManager.default.temporaryDirectory
-    let filename = "tts_\(UUID().uuidString).\(format.fileExtension)"
-    let fileURL = tempDir.appendingPathComponent(filename)
-
-    // Use NSSpeechSynthesizer for macOS
-    return try await withCheckedThrowingContinuation { continuation in
-      let voiceIdentifier = utterance.voice?.identifier
-      let voiceName = voiceIdentifier.map { NSSpeechSynthesizer.VoiceName(rawValue: $0) }
-      let synthesizer = NSSpeechSynthesizer(voice: voiceName)
-
-      // Start writing to URL
-      if synthesizer?.startSpeaking(utterance.speechString, to: fileURL) == true {
-        // Wait for completion - this is a simple timeout approach
-        DispatchQueue.global().asyncAfter(
-          deadline: .now() + Double(utterance.speechString.count) / 15.0 + 1.0
-        ) {
-          continuation.resume(returning: fileURL)
-        }
-      } else {
-        continuation.resume(throwing: TTSError.synthesisFailure("Failed to start synthesis"))
-      }
+  /// Renders the utterance with AVSpeechSynthesizer and returns the file once
+  /// the last buffer is written. AVFoundation has no MP3 encoder, so an MP3
+  /// request is written as AAC (`.m4a`) and named for what it contains.
+  private func synthesizeToFile(utterance: AVSpeechUtterance, format: AudioFormat) async throws -> URL {
+    let fileFormat: AudioFormat = format == .mp3 ? .m4a : format
+    let fileURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("tts_\(UUID().uuidString).\(fileFormat.fileExtension)")
+    let writer = SystemSpeechFileWriter(url: fileURL, format: fileFormat)
+    do {
+      try await writer.write(utterance)
+    } catch {
+      try? FileManager.default.removeItem(at: fileURL)
+      throw error
     }
+    return fileURL
   }
 
   private func getAudioDuration(url: URL) async throws -> TimeInterval {
@@ -120,5 +109,126 @@ actor SystemTTSClient: TextToSpeechClient {
     }
 
     return traits
+  }
+}
+
+/// Writes one utterance's buffers to an audio file and reports completion.
+///
+/// Finishes on the synthesizer's empty end buffer, falling back to its finish
+/// callback; cancellation stops synthesis. The writer keeps itself, and so the
+/// synthesizer, alive until the synthesizer reports it has stopped: freeing an
+/// AVSpeechSynthesizer that is still delivering callbacks crashes the process.
+private final class SystemSpeechFileWriter: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+  private let url: URL
+  private let format: AudioFormat
+  private let synthesizer = AVSpeechSynthesizer()
+  private let lock = NSLock()
+  private var file: AVAudioFile?
+  private var continuation: CheckedContinuation<Void, Error>?
+  private var outcome: Result<Void, Error>?
+  private var keepAlive: SystemSpeechFileWriter?
+  /// Bounds the self-retain if the synthesizer never reports that it stopped.
+  private static let stopGrace: TimeInterval = 30
+
+  init(url: URL, format: AudioFormat) {
+    self.url = url
+    self.format = format
+    super.init()
+    synthesizer.delegate = self
+  }
+
+  func write(_ utterance: AVSpeechUtterance) async throws {
+    try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        let settled = lock.withLock { () -> Result<Void, Error>? in
+          if let outcome { return outcome }
+          self.continuation = continuation
+          return nil
+        }
+        if let settled { continuation.resume(with: settled); return }
+        lock.withLock { keepAlive = self }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.stopGrace) { [weak self] in self?.releaseSynthesizer() }
+        synthesizer.write(utterance) { [weak self] buffer in self?.append(buffer) }
+      }
+    } onCancel: {
+      self.finish(.failure(CancellationError()))
+      self.synthesizer.stopSpeaking(at: .immediate)
+    }
+  }
+
+  private func append(_ buffer: AVAudioBuffer) {
+    guard let pcm = buffer as? AVAudioPCMBuffer else { return }
+    guard pcm.frameLength > 0 else { finish(.success(())); return }
+    do {
+      try lock.withLock {
+        guard outcome == nil else { return }
+        if file == nil {
+          file = try AVAudioFile(
+            forWriting: url, settings: Self.settings(for: format, matching: pcm.format),
+            commonFormat: pcm.format.commonFormat, interleaved: pcm.format.isInterleaved
+          )
+        }
+        try file?.write(from: pcm)
+      }
+    } catch {
+      finish(.failure(TTSError.synthesisFailure("Could not write system speech: \(error.localizedDescription)")))
+      synthesizer.stopSpeaking(at: .immediate)
+    }
+  }
+
+  private func finish(_ result: Result<Void, Error>) {
+    let settled = lock.withLock { () -> (CheckedContinuation<Void, Error>?, Result<Void, Error>)? in
+      guard outcome == nil else { return nil }
+      var result = result
+      if case .success = result, file == nil {
+        result = .failure(TTSError.synthesisFailure("The system voice produced no audio"))
+      }
+      outcome = result
+      file = nil  // Releasing the file closes it before anyone reads it.
+      defer { continuation = nil }
+      return (continuation, result)
+    }
+    if let (continuation, result) = settled { continuation?.resume(with: result) }
+  }
+
+  func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+    // The empty end buffer normally finishes first; this is the fallback, after
+    // a grace period so a trailing buffer is not cut off.
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      self?.finish(.success(()))
+      self?.releaseSynthesizer()
+    }
+  }
+
+  func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+    finish(.failure(CancellationError()))
+    releaseSynthesizer()
+  }
+
+  /// Drops the self-retain on the main queue, so the synthesizer is freed
+  /// there and never from inside one of its own callbacks.
+  private func releaseSynthesizer() {
+    let retained = lock.withLock { () -> SystemSpeechFileWriter? in
+      defer { keepAlive = nil }
+      return keepAlive
+    }
+    guard let retained else { return }
+    DispatchQueue.main.async { _ = retained }
+  }
+
+  private static func settings(for format: AudioFormat, matching pcm: AVAudioFormat) -> [String: Any] {
+    var settings: [String: Any] = [
+      AVSampleRateKey: pcm.sampleRate, AVNumberOfChannelsKey: pcm.channelCount
+    ]
+    switch format {
+    case .wav:
+      settings[AVFormatIDKey] = kAudioFormatLinearPCM
+      settings[AVLinearPCMBitDepthKey] = 16
+      settings[AVLinearPCMIsFloatKey] = false
+      settings[AVLinearPCMIsBigEndianKey] = false
+    case .m4a, .mp3:
+      settings[AVFormatIDKey] = kAudioFormatMPEG4AAC
+    }
+    return settings
   }
 }

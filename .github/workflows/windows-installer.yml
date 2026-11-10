@@ -70,6 +70,14 @@ jobs:
           MANIFEST: ${{ inputs.manifest }}
         run: |
           if [ -n "$MANIFEST" ]; then mode=publish; tag="$MANIFEST"; else mode=rehearse; tag=$(node scripts/windows-installer-release.mjs rehearsal-tag); fi
+          if [ -z "$tag" ]; then
+            # No published Alpha has qualified bundles built under this
+            # revision's runtime policy, so there is nothing valid to package.
+            echo "::notice::No qualified Alpha matches the current runtime policy; skipping the installer rehearsal."
+            { echo "tag="; echo "mode=skip"; } >> "$GITHUB_OUTPUT"
+            mkdir -p sources && echo '{}' > sources/skipped.json
+            exit 0
+          fi
           node scripts/windows-installer-release.mjs sources "$tag" sources > /dev/null
           {
             echo "tag=$tag"; echo "mode=$mode"
@@ -86,6 +94,7 @@ jobs:
   rehearse:
     name: Rehearse install, upgrade and uninstall (${{ matrix.architecture }})
     needs: sources
+    if: ${{ needs.sources.outputs.mode != 'skip' }}
     strategy:
       fail-fast: false
       matrix:

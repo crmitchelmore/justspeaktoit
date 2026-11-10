@@ -127,6 +127,16 @@ make lint
 - Ensure CI passes before requesting review
 - Reference related issues in the PR description
 
+### What CI runs on a pull request
+
+Pull requests run only the macOS jobs their changed paths can affect (see the
+`release-paths` job in `.github/workflows/ci.yml`). Docs, website, Android and
+Workers-only changes skip the macOS jobs. Release-configuration tests, public
+API compatibility, the core-journey gates and iOS simulator tests for shared
+sources run on every push to `main`; a failure there opens a `ci-main-failure`
+issue. Add the `ci:full` label (then push or re-run) to run every gate before
+merge.
+
 ## Getting Help
 
 - Open a [Discussion](https://github.com/chrismitchelmore/just-speak-to-it/discussions) for questions

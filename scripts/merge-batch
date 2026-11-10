@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# Bors-style batch merging for main (see Docs/merge-batch.md).
+#
+#   scripts/merge-batch create <name> <pr>...   squash each PR onto origin/main in order and open one batch PR
+#   scripts/merge-batch status <name>           show the batch PR, its members and its workflow runs
+#   scripts/merge-batch land <name>             squash-merge a green batch PR, then close its members with a link
+#   scripts/merge-batch split <name>            close a failing batch and open <name>a / <name>b from its halves
+#
+# The ruleset (squash-only, linear history, required checks) still applies: the batch is an ordinary
+# same-repository PR, so its required checks run once on the combined tree before anything lands.
+set -euo pipefail
+
+REPO="${MERGE_BATCH_REPO:-crmitchelmore/justspeaktoit}"
+REMOTE="${MERGE_BATCH_REMOTE:-origin}"
+# Advisory or external workflows that never block a batch.
+IGNORED_WORKFLOWS="${MERGE_BATCH_IGNORED_WORKFLOWS:-Tessl Code Review|Pre-PR evidence|OpenAI API Review}"
+
+WORKTREES=""
+cleanup() { local dir; for dir in $WORKTREES; do git worktree remove --force "$dir" >/dev/null 2>&1 || true; done; }
+trap cleanup EXIT
+die() { echo "merge-batch: $*" >&2; exit 1; }
+branch_for() { echo "merge-batch/$1"; }
+
+batch_pr() {
+    gh pr list --repo "$REPO" --head "$(branch_for "$1")" --state all --json number,state \
+        --jq 'map(select(.state=="OPEN")) + map(select(.state!="OPEN")) | .[0].number // empty'
+}
+
+# Members are recorded in the batch PR body as `<!-- merge-batch-member PR SHA -->` lines.
+members() {
+    gh pr view "$1" --repo "$REPO" --json body --jq '.body' |
+        sed -n 's/^<!-- merge-batch-member \([0-9]*\) \([0-9a-f]*\) -->$/\1 \2/p'
+}
+
+# Conventional type ranking for the batch subject: the most user-visible change wins.
+rank() {
+    case "$1" in
+        feat*) echo 5 ;; fix*) echo 4 ;; perf*) echo 3 ;; refactor*|build*) echo 2 ;; ci*|test*|chore*) echo 1 ;; *) echo 0 ;;
+    esac
+}
+
+create() {
+    local name="$1"; shift
+    [ $# -gt 0 ] || die "create needs at least one PR"
+    local branch; branch="$(branch_for "$name")"
+    local work; work="$(mktemp -d)"
+    WORKTREES="$WORKTREES $work"
+
+    git fetch -q "$REMOTE" main
+    git worktree add -q -B "$branch" "$work" "$REMOTE/main"
+
+    local included="" skipped="" titles="" closes="" markers="" best=0 type="chore"
+    local pr state draft base head title mergeable issues
+    for pr in "$@"; do
+        IFS=$'\t' read -r state draft base head mergeable title < <(gh pr view "$pr" --repo "$REPO" \
+            --json state,isDraft,baseRefName,headRefOid,mergeable,title \
+            --jq '[.state, .isDraft, .baseRefName, .headRefOid, .mergeable, .title] | @tsv')
+        if [ "$state" != OPEN ] || [ "$draft" = true ] || [ "$base" != main ] || [ "$mergeable" = CONFLICTING ]; then
+            skipped="$skipped #$pr ($state draft=$draft base=$base $mergeable)"; continue
+        fi
+        git -C "$work" fetch -q "$REMOTE" "pull/$pr/head"
+        [ "$(git -C "$work" rev-parse FETCH_HEAD)" = "$head" ] || { skipped="$skipped #$pr (head moved)"; continue; }
+        if ! git -C "$work" merge -q --squash "$head" >/dev/null 2>&1; then
+            git -C "$work" reset -q --hard HEAD
+            skipped="$skipped #$pr (conflicts with the batch)"; continue
+        fi
+        if git -C "$work" diff --cached --quiet; then
+            skipped="$skipped #$pr (no changes against main)"; continue
+        fi
+        git -C "$work" commit -q -m "$title (#$pr)" -m "Batched from #$pr at $head."
+        included="$included $pr"
+        titles="$titles
+- $title (#$pr)"
+        markers="$markers
+<!-- merge-batch-member $pr $head -->"
+        issues="$(gh pr view "$pr" --repo "$REPO" --json closingIssuesReferences --jq '[.closingIssuesReferences[].number] | map("Fixes #\(.)") | join("\n")')"
+        [ -n "$issues" ] && closes="$closes
+$issues"
+        if [ "$(rank "$title")" -gt "$best" ]; then best="$(rank "$title")"; type="${title%%:*}"; fi
+    done
+    [ -n "$included" ] || die "no PR could be batched:$skipped"
+
+    git -C "$work" push -q --force-with-lease "$REMOTE" "$branch"
+
+    local refs; refs="$(echo "$included" | sed 's/ \([0-9]*\)/#\1, /g; s/, $//')"
+    local subject="$type: merge batch $name (${refs# })"
+    local body
+    body="Bors-style batch: each member is squashed onto main in order, and this PR's required checks run once on the combined tree. Land with \`scripts/merge-batch land $name\` (Docs/merge-batch.md).
+
+## Members
+$titles
+$closes
+$markers"
+    [ -n "$skipped" ] && body="$body
+
+Not batched:$skipped"
+
+    local existing; existing="$(gh pr list --repo "$REPO" --head "$branch" --state open --json number --jq '.[0].number // empty')"
+    if [ -n "$existing" ]; then
+        gh pr edit "$existing" --repo "$REPO" --title "$subject" --body "$body" >/dev/null
+        echo "updated batch PR #$existing ($branch):${included}"
+    else
+        gh pr create --repo "$REPO" --base main --head "$branch" --title "$subject" --body "$body"
+    fi
+    [ -z "$skipped" ] || echo "not batched:$skipped"
+}
+
+status() {
+    local pr; pr="$(batch_pr "$1")"; [ -n "$pr" ] || die "no batch PR for $(branch_for "$1")"
+    gh pr view "$pr" --repo "$REPO" --json number,state,mergeStateStatus,headRefOid \
+        --jq '"batch #\(.number) \(.state) \(.mergeStateStatus) head \(.headRefOid)"'
+    echo "members:"; members "$pr" | sed 's/^/  #/'
+    local head; head="$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq .headRefOid)"
+    gh api "repos/$REPO/actions/runs?head_sha=$head&per_page=100" \
+        --jq '.workflow_runs[] | "  \(.status)\t\(.conclusion // "-")\t\(.name)\t\(.html_url)"' | awk -F'\t' '!seen[$3]++'
+}
+
+# Prints blocking workflow runs (latest attempt per workflow) for a head SHA.
+blocking_runs() {
+    gh api "repos/$REPO/actions/runs?head_sha=$1&per_page=100" \
+        --jq '.workflow_runs[] | "\(.name)\t\(.status)\t\(.conclusion // "-")"' |
+        awk -F'\t' '!seen[$1]++' | grep -Ev "^($IGNORED_WORKFLOWS)	" |
+        awk -F'\t' '$2 != "completed" || ($3 != "success" && $3 != "skipped" && $3 != "neutral")' || true
+}
+
+land() {
+    local pr; pr="$(batch_pr "$1")"; [ -n "$pr" ] || die "no batch PR for $(branch_for "$1")"
+    local state merge head subject
+    IFS=$'\t' read -r state merge head subject < <(gh pr view "$pr" --repo "$REPO" \
+        --json state,mergeStateStatus,headRefOid,title --jq '[.state, .mergeStateStatus, .headRefOid, .title] | @tsv')
+    [ "$state" = OPEN ] || die "batch #$pr is $state"
+    [ "$merge" = CLEAN ] || die "batch #$pr is $merge, not CLEAN"
+    local blocking; blocking="$(blocking_runs "$head")"
+    [ -z "$blocking" ] || die "batch #$pr has unfinished or failing runs:
+$blocking"
+
+    local body; body="$(git log --format='- %s' --reverse "$REMOTE/main..$head" 2>/dev/null || true)"
+    [ -n "$body" ] || body="$(gh api "repos/$REPO/pulls/$pr/commits" --paginate --jq '.[] | "- " + (.commit.message | split("\n")[0])')"
+    gh pr merge "$pr" --repo "$REPO" --squash --match-head-commit "$head" --subject "$subject (#$pr)" --body "$body"
+    local sha; sha="$(gh pr view "$pr" --repo "$REPO" --json mergeCommit --jq .mergeCommit.oid)"
+    echo "landed batch #$pr as $sha"
+
+    local member recorded current mstate
+    while read -r member recorded; do
+        IFS=$'\t' read -r mstate current < <(gh pr view "$member" --repo "$REPO" --json state,headRefOid --jq '[.state, .headRefOid] | @tsv')
+        if [ "$mstate" != OPEN ]; then echo "  #$member already $mstate"; continue; fi
+        if [ "$current" != "$recorded" ]; then
+            gh pr comment "$member" --repo "$REPO" --body "Batch #$pr landed this PR's ${recorded:0:8} as $sha, but the branch has moved to ${current:0:8} since. Leaving it open for the newer commits." >/dev/null
+            echo "  #$member left open (head moved)"; continue
+        fi
+        gh pr close "$member" --repo "$REPO" --comment "Landed on main in batch #$pr as $sha (squashed from ${recorded:0:8})." >/dev/null
+        echo "  #$member closed"
+    done < <(members "$pr")
+}
+
+split() {
+    local pr; pr="$(batch_pr "$1")"; [ -n "$pr" ] || die "no batch PR for $(branch_for "$1")"
+    local list; list="$(members "$pr" | awk '{print $1}')"
+    local count; count="$(echo "$list" | wc -l | tr -d ' ')"
+    [ "$count" -gt 1 ] || die "batch #$pr has one member; return it to its author"
+    local half=$(((count + 1) / 2))
+    gh pr close "$pr" --repo "$REPO" --comment "Splitting into $(branch_for "${1}a") and $(branch_for "${1}b") to find the failure." >/dev/null
+    # shellcheck disable=SC2046
+    create "${1}a" $(echo "$list" | head -n "$half")
+    # shellcheck disable=SC2046
+    create "${1}b" $(echo "$list" | tail -n +"$((half + 1))")
+}
+
+command="${1:-}"; shift || true
+case "$command" in
+    create) [ $# -ge 2 ] || die "usage: merge-batch create <name> <pr>..."; create "$@" ;;
+    status) [ $# -eq 1 ] || die "usage: merge-batch status <name>"; status "$1" ;;
+    land) [ $# -eq 1 ] || die "usage: merge-batch land <name>"; land "$1" ;;
+    split) [ $# -eq 1 ] || die "usage: merge-batch split <name>"; split "$1" ;;
+    *) sed -n '2,10p' "$0"; exit 64 ;;
+esac

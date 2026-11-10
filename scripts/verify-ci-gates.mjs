@@ -13,11 +13,12 @@ export function assessCIGates(needs, event) {
   requireSuccess('release-paths');
   const outputs = needs['release-paths']?.outputs ?? {};
   for (const [flag, ids] of [
-    // Apple jobs skip only for pull requests that change nothing outside the Android app.
-    ['apple', [
-      'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
-    ]],
-    ['package', ['release-validation']],
+    // Docs, website, Android and Workers-only pull requests skip Apple jobs.
+    ['apple', ['lint']],
+    ['swift', ['build-macos', 'build-ios-swiftpm']],
+    ['ios', ['build-ios-test-products']],
+    ['ios-runtime', ['build-ios', 'build-ios-keyboard']],
+    ['package', ['release-validation', 'api-compatibility']],
     ['core-journey', ['core-journey-e2e', 'core-journey-fixture-ui']],
   ]) {
     if (!['true', 'false'].includes(outputs[flag])) {
@@ -28,10 +29,6 @@ export function assessCIGates(needs, event) {
     for (const id of ids) {
       if (required || needs[id]?.result !== 'skipped') requireSuccess(id);
     }
-  }
-  const apiSkipAllowed = event !== 'pull_request' || outputs.apple === 'false';
-  if (!apiSkipAllowed || needs['api-compatibility']?.result !== 'skipped') {
-    requireSuccess('api-compatibility');
   }
   return errors;
 }

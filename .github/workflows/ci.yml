@@ -42,7 +42,8 @@ jobs:
     # Route only the explicitly reviewed revision to the native pool.
     # Every selected native runner must also admit this revision locally.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
-    timeout-minutes: 45
+    # 45 minutes plus the bounded 12-minute API diagnosis on API-affecting PRs.
+    timeout-minutes: 57
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).
     env:
@@ -177,6 +178,22 @@ jobs:
           if [ -n "$TEST_FILTER" ]; then args+=(--filter "$TEST_FILTER"); fi
           if [ -n "$TEST_SKIP" ]; then args+=(--skip "$TEST_SKIP"); fi
           python3 scripts/with-test-keychain.py python3 scripts/retry-xctest-crash.py swift test --enable-code-coverage --disable-dependency-cache "${args[@]}"
+
+      # Pull requests that touch an API-checked library or the manifest run
+      # the public API gate here, in their single macOS job, instead of first
+      # meeting it on main (#1383 removed public initialisers and broke main).
+      # Full runs use the api-compatibility job; both call
+      # scripts/check-api-compatibility.sh.
+      - name: Public API compatibility (pull request)
+        if: ${{ !cancelled() && needs.release-paths.outputs.full != 'true' && needs.release-paths.outputs.api == 'true' }}
+        timeout-minutes: 12
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASELINE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASELINE" || true
+          python3 -B -m unittest discover -s scripts/tests -p test_api_compatibility.py
+          bash scripts/check-api-compatibility.sh "$BASELINE"
 
       # Tooling tests that need Apple tools (Keychain, xcrun, Apple Swift)
       # skip on the Ubuntu Lint job; batches and main run them here.
@@ -392,6 +409,7 @@ jobs:
       apple: ${{ steps.select.outputs.apple }}
       swift: ${{ steps.select.outputs.swift }}
       ios: ${{ steps.select.outputs.ios }}
+      api: ${{ steps.select.outputs.api }}
       full: ${{ steps.select.outputs.full }}
     steps:
       - name: Filter changed paths
@@ -422,6 +440,18 @@ jobs:
               - 'scripts/collect-macos-*.py'
               - 'scripts/prepare-mac-cli-symbols.sh'
               - 'scripts/tests/brand-assets.test.mjs'
+            # Sources of the API-checked library products (scripts/check-api-compatibility.sh).
+            api:
+              - 'Package.swift'
+              - 'Package.resolved'
+              - 'Sources/SpeakCore/**'
+              - 'Sources/SpeakSync/**'
+              - 'Sources/SpeakiOS/**'
+              - 'Sources/SpeakHotKeys/**'
+              - 'Sources/SpeakAutomationKit/**'
+              - 'Sources/SpeakWatchCore/**'
+              - 'scripts/check-api-compatibility.sh'
+              - 'scripts/api-breakage-allowlist.txt'
             ios:
               - 'Package.swift'
               - 'Package.resolved'
@@ -458,14 +488,16 @@ jobs:
           APPLE: ${{ steps.apple.outputs.apple }}
           SWIFT: ${{ steps.filter.outputs.swift }}
           IOS: ${{ steps.filter.outputs.ios }}
+          API: ${{ steps.filter.outputs.api }}
         run: |
           if [ "$EVENT_NAME" = "pull_request" ] && [ "$FULL" != "true" ]; then
+            if [ "$API" = "true" ]; then SWIFT=true; fi
             if [ "$SWIFT" = "true" ]; then APPLE=true; fi
-            { echo "apple=$APPLE"; echo "swift=$SWIFT"; echo "ios=$IOS"; echo "full=false"; } >> "$GITHUB_OUTPUT"
+            { echo "apple=$APPLE"; echo "swift=$SWIFT"; echo "ios=$IOS"; echo "api=$API"; echo "full=false"; } >> "$GITHUB_OUTPUT"
           else
             # main push, merge-batch/* or ci:full pull request: no
             # changed-file filtering, run every gate.
-            { echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "full=true"; } >> "$GITHUB_OUTPUT"
+            { echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "api=true"; echo "full=true"; } >> "$GITHUB_OUTPUT"
           fi
 
   # Full runs (merge batches and main) ask for at most four hosted macOS
@@ -1194,6 +1226,7 @@ jobs:
             (needs.release-paths.outputs.apple != 'true' && needs.release-paths.outputs.apple != 'false') ||
             (needs.release-paths.outputs.swift != 'true' && needs.release-paths.outputs.swift != 'false') ||
             (needs.release-paths.outputs.full != 'true' && needs.release-paths.outputs.full != 'false') ||
+            (needs.release-paths.outputs.api != 'true' && needs.release-paths.outputs.api != 'false') ||
             ((github.event_name != 'pull_request' || startsWith(github.head_ref, 'merge-batch/')) &&
               needs.release-paths.outputs.full != 'true') ||
             (needs.build-macos.result != 'success' && !(

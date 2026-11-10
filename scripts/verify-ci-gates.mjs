@@ -28,7 +28,8 @@ export function assessCIGates(needs, event) {
   // Pre-PR evidence always runs; it passes straight through on pushes and bots.
   requireSuccess('pre-pr-evidence');
   const outputs = needs['release-paths']?.outputs ?? {};
-  for (const flag of ['apple', 'swift', 'full']) {
+  // `api` selects the pull-request API step inside build-macos; it must be explicit.
+  for (const flag of ['apple', 'swift', 'api', 'full']) {
     if (!['true', 'false'].includes(outputs[flag])) errors.push(`release-paths: missing or invalid ${flag} output`);
   }
   if (event !== 'pull_request' && outputs.full !== 'true') errors.push('release-paths: batches and main must run every gate');

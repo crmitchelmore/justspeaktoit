@@ -103,7 +103,7 @@ test('Debug dependency resolution bypasses shared repositories in commands and r
   }
   assert.equal((body.match(/"--disable-dependency-cache"/g) ?? []).length, 2,
     'both recorded History argv values must describe the actual diagnostic');
-  assert.match(body, /^    timeout-minutes: 45$/m);
+  assert.match(body, /^    timeout-minutes: 57$/m);
   assert.doesNotMatch(body, /swift package (?:reset|clean)|rm -rf.*\.build/);
 });
 
@@ -116,7 +116,7 @@ test('macOS Debug and Core Journey share coverage instrumentation and cache keys
     assert.ok(producer && consumer, 'Debug and Core Journey must declare matching cache keys');
     assert.equal(consumer[1].trim(), producer[1].trim());
   }
-  assert.match(body, /^\s+timeout-minutes: 45$/m);
+  assert.match(body, /^\s+timeout-minutes: 57$/m);
   assert.match(body, /name: Build\n\s+id: build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS="--enable-code-coverage --disable-dependency-cache" make build/);
   assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?[\s\S]*?python3 scripts\/with-test-keychain.py python3 scripts\/retry-xctest-crash.py swift test --enable-code-coverage --disable-dependency-cache "\$\{args\[@\]\}"/);
   assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),
@@ -484,7 +484,7 @@ test('every tracked tooling test is discovered by make test-tooling', () => {
   }
 });
 
-const flags = ['apple', 'swift', 'full'];
+const flags = ['apple', 'swift', 'api', 'full'];
 const allOutputs = value => Object.fromEntries(flags.map(flag => [flag, value]));
 const gateFlags = Object.fromEntries(Object.entries(gateJobs).flatMap(([flag, ids]) => ids.map(id => [id, flag])));
 
@@ -495,7 +495,7 @@ function passing() {
 
 function pullRequest({ apple = 'true', swift = 'true' } = {}) {
   const needs = passing();
-  needs['release-paths'].outputs = { apple, swift, full: 'false' };
+  needs['release-paths'].outputs = { apple, swift, api: swift, full: 'false' };
   for (const [id, flag] of Object.entries(gateFlags)) {
     if (needs['release-paths'].outputs[flag] === 'false') needs[id].result = 'skipped';
   }
@@ -634,7 +634,7 @@ test('Apple path detection excludes only docs, the website, the Android app and 
     "- '**'", "- '!android/**'", "- '!.github/workflows/android.yml'", "- '!Docs/**'", "- '!**/*.md'",
     "- '!landing-page/**'", "- '!.github/workflows/deploy-landing-page.yml'", "- '!workers/**'",
   ]);
-  assert.match(body, /\{ echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "full=true"; \}/,
+  assert.match(body, /\{ echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "api=true"; echo "full=true"; \}/,
     'pushes force every gate');
   const swiftFilter = body.match(/\n            swift:\n((?:              - '[^']+'\n)+)/)?.[1] ?? '';
   assert.ok(swiftFilter.includes("- 'Sources/**'"));
@@ -654,6 +654,23 @@ test('API compatibility diffs batches against main and main against its previous
   const body = jobBodies['api-compatibility'];
   assert.match(body, /github\.event\.before \|\| 'origin\/main'/);
   assert.match(body, /git log --format=%s "\$BASELINE\.\.HEAD"/);
+});
+
+test('pull requests that touch an API-checked library run the API gate in their macOS job', () => {
+  const step = jobBodies['build-macos'].split('- name: Public API compatibility (pull request)')[1]?.split('\n      - name:')[0];
+  assert.ok(step, 'build-macos must carry the pull-request API step, not a second macOS slot');
+  assert.match(step, /if: \$\{\{ !cancelled\(\) && needs\.release-paths\.outputs\.full != 'true' && needs\.release-paths\.outputs\.api == 'true' \}\}/);
+  assert.match(step, /timeout-minutes: 12/);
+  assert.match(step, /BASELINE: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.match(step, /bash scripts\/check-api-compatibility\.sh "\$BASELINE"/, 'same script as the full-run job');
+  assert.match(step, /test_api_compatibility\.py/);
+  assert.doesNotMatch(step, /continue-on-error/);
+  const filter = jobBodies['release-paths'].match(/\n            api:\n((?:              - '[^']+'\n)+)/)?.[1] ?? '';
+  for (const path of ['Package.swift', 'Package.resolved', 'Sources/SpeakCore/**', 'Sources/SpeakSync/**',
+    'Sources/SpeakiOS/**', 'Sources/SpeakHotKeys/**', 'Sources/SpeakAutomationKit/**', 'Sources/SpeakWatchCore/**']) {
+    assert.ok(filter.includes(`- '${path}'`), `api filter must include ${path}`);
+  }
+  assert.match(jobBodies['release-paths'], /if \[ "\$API" = "true" \]; then SWIFT=true; fi/, 'API PRs get the macOS job');
 });
 
 test('batch and main failures open a tracking issue from a push-only, checkout-free job', () => {

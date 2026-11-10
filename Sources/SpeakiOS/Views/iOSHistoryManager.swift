@@ -376,8 +376,10 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
 
     public func reprocess(_ item: iOSHistoryItem) async {
         let settings = AppSettings.shared
-        guard settings.hasOpenRouterKey else {
-            await setErrorAndWait("Add an OpenRouter API key in Settings to reprocess.", for: item.id)
+        guard settings.hasPostProcessingKey else {
+            await setErrorAndWait(
+                "Add a \(settings.postProcessingKeyProviderName) API key in Settings to reprocess.", for: item.id
+            )
             return
         }
         guard !reprocessingIDs.contains(item.id) else { return }
@@ -385,7 +387,8 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         defer { reprocessingIDs.remove(item.id) }
         do {
             let polished = try await iOSPostProcessingManager.shared.polish(
-                text: item.transcription, model: settings.postProcessingModel, apiKey: settings.openRouterAPIKey
+                text: item.transcription, model: settings.postProcessingModel,
+                apiKey: settings.postProcessingAPIKey(for: settings.postProcessingModel)
             )
             try Task.checkCancellation()
             await setPostProcessedAndWait(polished, for: item.id)

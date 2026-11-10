@@ -577,7 +577,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         if postProcessingModel == AppleLocalModels.foundationModelID {
             return AppleFoundationModelPolisher.isAvailable
         }
-        return settings.hasOpenRouterKey
+        return settings.hasPostProcessingKey(for: postProcessingModel)
     }
 
     private func polish(_ transcript: String, with profile: KeyboardDictationProfileOption) async throws -> String {
@@ -585,7 +585,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         let response = try await iOSPostProcessingManager.shared.polish(
             text: transcript,
             model: model,
-            apiKey: AppSettings.shared.openRouterAPIKey
+            apiKey: AppSettings.shared.postProcessingAPIKey(for: model)
         )
         let polished = response.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !polished.isEmpty else { throw PostProcessingError.emptyResult }

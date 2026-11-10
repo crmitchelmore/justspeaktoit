@@ -1,6 +1,17 @@
 name: Alpha Release
-run-name: Alpha ${{ github.event.workflow_run.head_sha || inputs.source || 'reconciliation' }}
+run-name: Alpha ${{ github.event.workflow_run.head_sha || inputs.source || (github.event_name == 'push' && github.sha) || 'reconciliation' }}
+# Two phases per main commit. Alpha may be broken up to 10% of the time, but
+# TestFlight, Windows installers and the Flatpak repository may not:
+# - fast (push): as soon as a commit lands, build and publish the direct Mac
+#   Alpha (with its CLI) and qualify the desktop bundles. Only the newest
+#   push builds: one fast run at a time, and a newer push replaces a waiting
+#   one. publish-alpha still refuses a source whose main CI already failed.
+# - green (successful main CI, or a dispatch that release-train.mjs checks
+#   against main CI): everything else ships, TestFlight included; the Mac
+#   and desktop jobs are no-ops when the fast phase already delivered them.
 on:
+  push:
+    branches: [main]
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -19,6 +30,9 @@ on:
 permissions:
   contents: write
   actions: write
+concurrency:
+  group: alpha-${{ github.event_name == 'push' && 'fast' || github.run_id }}
+  cancel-in-progress: false
 jobs:
   allocate:
     if: >-
@@ -34,6 +48,7 @@ jobs:
       cancel-in-progress: false
     outputs:
       tag: ${{ steps.allocate.outputs.tag }}
+      green: ${{ github.event_name != 'push' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,10 +65,11 @@ jobs:
         run: node scripts/release-train.mjs reconcile
       - name: Allocate immutable Alpha manifest
         id: allocate
-        if: github.event_name == 'workflow_run' || inputs.source != ''
+        if: github.event_name == 'workflow_run' || github.event_name == 'push' || inputs.source != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE: ${{ github.event.workflow_run.head_sha || inputs.source }}
+          REPO: ${{ github.repository }}
+          SOURCE: ${{ github.event.workflow_run.head_sha || inputs.source || github.sha }}
           REBUILD: ${{ inputs.rebuild || false }}
           OWNER_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner }}
           EVENT_NAME: ${{ github.event_name }}
@@ -62,14 +78,26 @@ jobs:
             echo 'Alpha remains in validation mode.'
             exit 0
           fi
-          # Build only the newest main commit: a CI success for a commit that
-          # main has already moved past is superseded by the newer commit's
-          # own CI run. Explicit dispatches still build any requested source.
-          if [ "$EVENT_NAME" = "workflow_run" ] && [ "$(git rev-parse HEAD)" != "$SOURCE" ]; then
+          # Fast phase: build only the newest main commit; a newer push
+          # supersedes it. Green phase: main moves on while the full suite
+          # runs, so build unless a newer main commit is already green.
+          # Explicit dispatches still build any requested source.
+          if [ "$EVENT_NAME" = "push" ] && [ "$(git rev-parse HEAD)" != "$SOURCE" ]; then
             echo "::notice::$SOURCE is no longer the newest main commit; skipping its Alpha."
             exit 0
           fi
-          node scripts/release-train.mjs allocate --source "$SOURCE" --rebuild "$REBUILD"
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            for green in $(gh api "repos/$REPO/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=30" --jq '.workflow_runs[].head_sha'); do
+              if [ "$green" != "$SOURCE" ] && git merge-base --is-ancestor "$SOURCE" "$green" 2>/dev/null; then
+                echo "::notice::Newer main commit $green is already green; skipping $SOURCE."
+                exit 0
+              fi
+            done
+          fi
+          # Only the fast phase may allocate before main CI has passed.
+          REQUIRE_CI=true
+          [ "$EVENT_NAME" = "push" ] && REQUIRE_CI=false
+          node scripts/release-train.mjs allocate --source "$SOURCE" --rebuild "$REBUILD" --require-ci "$REQUIRE_CI"
   mac-direct:
     needs: allocate
     if: needs.allocate.outputs.tag != ''
@@ -77,9 +105,10 @@ jobs:
     with:
       manifest: ${{ needs.allocate.outputs.tag }}
     secrets: inherit
+  # TestFlight ships only a source whose full main CI passed.
   ios:
     needs: allocate
-    if: needs.allocate.outputs.tag != ''
+    if: needs.allocate.outputs.tag != '' && needs.allocate.outputs.green == 'true'
     uses: ./.github/workflows/release-ios.yml
     with:
       manifest: ${{ needs.allocate.outputs.tag }}
@@ -99,7 +128,7 @@ jobs:
   # found" while reading desktop-qualification.json from the draft).
   windows-installer:
     needs: [allocate, desktop-qualification, mac-direct]
-    if: needs.allocate.outputs.tag != ''
+    if: needs.allocate.outputs.tag != '' && needs.allocate.outputs.green == 'true'
     permissions:
       contents: write
       actions: read
@@ -113,7 +142,7 @@ jobs:
   # Like windows-installer, it reads release assets with a read-only token.
   linux-flatpak-repo:
     needs: [allocate, desktop-qualification, mac-direct]
-    if: needs.allocate.outputs.tag != ''
+    if: needs.allocate.outputs.tag != '' && needs.allocate.outputs.green == 'true'
     permissions:
       contents: read
     uses: ./.github/workflows/linux-flatpak-repo.yml

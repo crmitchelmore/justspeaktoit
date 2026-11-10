@@ -40,6 +40,14 @@ function ci(source) {
     if(!latest || latest.conclusion !== 'success' || latest.status !== 'completed' || latest.head_repository.full_name !== repo) throw Error(`No successful main CI for ${source}`);
     return {id:latest.id,attempt:latest.run_attempt,url:latest.html_url};
 }
+// Alpha may ship before main CI finishes, but never once it has failed.
+function ciNotFailed(source) {
+    if(!/^[a-f0-9]{40}$/.test(source)) throw Error('Full source SHA required');
+    git('merge-base','--is-ancestor',source,'origin/main');
+    const runs=api(`repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${source}&event=push&branch=main&per_page=100`).workflow_runs;
+    const latest=runs.sort((a,b)=>b.run_number-a.run_number)[0];
+    if(latest?.status === 'completed' && latest.conclusion === 'failure') throw Error(`Main CI failed for ${source}: ${latest.html_url}`);
+}
 function baseline(all, surface) {
     // Only a public non-prerelease receipt advances an Apple boundary. A
     // candidate, upload or review submission never counts as publication.
@@ -67,7 +75,9 @@ if(command === 'allocate' || command === 'prepare') {
     const selected=publicationSurfaces({train, ...(scope === undefined ? {} : {publicationScope:scope})});
     const alpha=train === 'stable' ? manifestFor(required('alpha')) : null;
     const source=alpha?.source ?? required('source');
-    const proof=ci(source);
+    // Only the Alpha fast phase may allocate before main CI passes; Stable
+    // and every other path need the full green main run.
+    const proof=train === 'alpha' && option('require-ci','true') === 'false' ? (ciNotFailed(source), null) : ci(source);
     if(alpha) {
         if(alpha.train !== 'alpha') throw Error('Select an Alpha build');
         const release=all.find(r=>r.tag_name===alpha.tag);
@@ -127,6 +137,8 @@ if(command === 'allocate' || command === 'prepare') {
     if(!surfaces.includes(surface)) throw Error('Invalid surface');
     if(!publicationSurfaces(manifest).includes(surface)) throw Error('Worker surface is outside the approved publication scope');
     if(git('rev-parse','HEAD') !== manifest.source) throw Error('Worker checked out wrong source');
+    // TestFlight and every Stable surface ship only a fully green main source.
+    if(manifest.train === 'stable' || surface === 'ios') ci(manifest.source);
     if(digest(readFileSync('Package.resolved','utf8').trim()) !== manifest.dependenciesHash) throw Error('Dependency lock does not match tested source');
     const config=json('Sources/SpeakCore/Resources/ReleaseTrains.json')[manifest.train];
     const item=manifest.surfaces[surface];
@@ -176,7 +188,7 @@ if(command === 'allocate' || command === 'prepare') {
     upload(manifest.tag,`${surface}-receipt.json`,receipt,true);
 } else if(command === 'publish-alpha') {
     const manifest=manifestFor(required('tag')); if(manifest.train !== 'alpha') throw Error('Alpha only');
-    ci(manifest.source);
+    ciNotFailed(manifest.source);
     const receiptAsset=releases().find(r=>r.tag_name===manifest.tag)?.assets.find(a=>a.name==='mac-direct-receipt.json');
     if(!receiptAsset) throw Error('No verified direct Alpha receipt');
     const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${receiptAsset.id}`,'-H','Accept: application/octet-stream'));

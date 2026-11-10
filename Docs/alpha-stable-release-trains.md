@@ -81,9 +81,24 @@ build, or establish live vault/API access; those require separate verification.
 
 ## Alpha
 
-Every successful main push CI allocates an immutable annotated
-`alpha-build-N` tag containing a manifest. Independent workers build direct Mac
-and iOS from that exact source. Allocation is idempotent; manual
+Alpha runs in two phases per main commit. Alpha may be broken up to 10% of
+the time; TestFlight, Windows installers, the Flatpak repository and Stable may
+not.
+
+- **Fast (push to main):** the newest pushed commit allocates an immutable
+  annotated `alpha-build-N` tag containing a manifest, then builds and publishes
+  the direct Mac Alpha (and its CLI) and qualifies the desktop bundles without
+  waiting for the full main suite. One fast run at a time; a newer push replaces
+  a waiting one. `publish-alpha` still refuses a source whose main CI has failed.
+- **Green (successful main push CI):** the same manifest (allocation is
+  idempotent per source) ships iOS to TestFlight, the Windows installer and the
+  Flatpak repository; the Mac and desktop jobs are no-ops when the fast phase
+  already delivered them. A green source is skipped only when a newer main
+  commit is already green. `release-train.mjs configure` refuses iOS and every
+  Stable surface unless the source's main CI passed, and `scripts/ci-metrics`
+  reports the broken-Alpha rate.
+
+Independent workers build direct Mac and iOS from that exact source. Allocation is idempotent; manual
 `rebuild` creates a new build number for an expired or invalid Apple upload.
 Hourly reconciliation retries missing deliveries, dispatching at most three
 sources per pass and checking every page of active runs to avoid duplicate

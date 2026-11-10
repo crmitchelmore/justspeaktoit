@@ -274,17 +274,13 @@ if(command === 'allocate' || command === 'prepare') {
     const pointer=pointerAsset ? JSON.parse(gh('api',`repos/${repo}/releases/assets/${pointerAsset.id}`,'-H','Accept: application/octet-stream')) : null;
     const allocated=new Map(existing.filter(r=>r.tag_name.startsWith('alpha-build-')).sort((a,b)=>Number(a.tag_name.split('-').at(-1))-Number(b.tag_name.split('-').at(-1))).map(r=>[git('rev-parse',`${r.tag_name}^{commit}`),r]));
     const active=JSON.parse(gh('api','--paginate','--slurp',`repos/${repo}/actions/workflows/alpha-release.yml/runs?per_page=100`)).flatMap(p=>p.workflow_runs).filter(r=>r.status !== 'completed');
-    // Bound catch-up work; undispatched sources remain in the successful-CI ledger.
-    let dispatched=0;
-    const dispatchLimit=3;
-    const seen=new Set();
-    // Newest successful main sources carry release repairs; do not starve them
-    // behind permanently failing historical manifests. Older sources remain queued.
+    // Alpha builds only the newest successful main source: each build holds
+    // the shared hosted macOS queue for hours, and a newer build supersedes
+    // every older one. Older sources are never caught up; an explicit
+    // workflow_dispatch with a source still builds any commit on demand.
     for(const r of runs.sort((a,b)=>b.run_number-a.run_number)) {
         try {git('merge-base','--is-ancestor',adoption,r.head_sha);} catch {continue;}
-        if(seen.has(r.head_sha)) continue;
-        seen.add(r.head_sha);
-        if(active.some(a=>a.display_title === `Alpha ${r.head_sha}`)) continue;
+        if(active.some(a=>a.display_title === `Alpha ${r.head_sha}`)) break;
         const allocatedRelease=allocated.get(r.head_sha);
         if(allocatedRelease) {
             const allocatedManifest=manifestFor(allocatedRelease.tag_name);
@@ -309,15 +305,11 @@ if(command === 'allocate' || command === 'prepare') {
             // Newer successful sources remain eligible and do not lose a slot.
             if(invalidAppleUpload) {
                 console.log(`${allocatedRelease.tag_name}: invalid Apple upload requires an explicit new build attempt.`);
-                continue;
+                break;
             }
-            if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) continue;
-        }
-        if(dispatched >= dispatchLimit) {
-            console.log('Alpha reconciliation dispatch limit reached; remaining sources retained for the next pass.');
-            break;
+            if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) break;
         }
         gh('workflow','run','alpha-release.yml','--repo',repo,'--ref','main','-f',`source=${r.head_sha}`);
-        dispatched++;
+        break;
     }
 } else { throw Error(`Unknown command ${command}`); }

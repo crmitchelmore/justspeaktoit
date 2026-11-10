@@ -461,6 +461,11 @@ jobs:
             { echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "full=true"; } >> "$GITHUB_OUTPUT"
           fi
 
+  # Full runs (merge batches and main) ask for at most four hosted macOS
+  # slots at once, leaving one for other workflows, by chaining jobs into
+  # lanes: Debug -> journey; Release -> API -> iOS SwiftPM; iOS products ->
+  # simulator -> keyboard and watch; the two UI shards one after the other.
+  # Other later jobs in a lane still run when an earlier one fails.
   core-journey-e2e:
     name: Core Dictation Journey (≤8m tests)
     # This non-UI contract gate may use an explicitly approved native runner.
@@ -470,7 +475,9 @@ jobs:
     # distribution builds never set it (#1360).
     env:
       JSTI_TEST_KEYCHAIN_REDIRECT: "1"
-    needs: release-paths
+    # Follows Debug so it restores the exact build state Debug just saved;
+    # it is skipped (and CI Gate fails) when Debug fails.
+    needs: [release-paths, build-macos]
     if: needs.release-paths.outputs.full == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
@@ -520,6 +527,8 @@ jobs:
     # list in scripts/verify-core-journey-ui.py assigns every suite exactly once.
     strategy:
       fail-fast: false
+      # One shard at a time, so the UI gate holds a single macOS slot.
+      max-parallel: 1
       matrix:
         shard: [foundation, p0]
     env:
@@ -595,9 +604,10 @@ jobs:
 
   build-ios-swiftpm:
     name: Build iOS Library (SwiftPM)
-    needs: release-paths
+    needs: [release-paths, api-compatibility]
     # Merge batches and main only; pull requests compile through build-macos.
-    if: needs.release-paths.outputs.full == 'true'
+    # Follows API compatibility in the same macOS lane.
+    if: ${{ !cancelled() && needs.release-paths.outputs.full == 'true' }}
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
@@ -675,11 +685,17 @@ jobs:
     # Simulator and UI execution remain on hosted ARM; native Macs are not
     # configured for unattended UI automation and Intel execution was unstable.
     runs-on: macos-latest
-    timeout-minutes: 30
+    # 30 minutes for the gated run plus the bounded 5-minute quarantine step.
+    timeout-minutes: 35
     needs: [release-paths, build-ios-test-products]
     # Merge batches and main only. A skipped job still satisfies the legacy
     # required check of this name.
     if: needs.release-paths.outputs.full == 'true'
+    env:
+      # Space-separated XCTest identifiers that flake on hosted simulators.
+      # They are skipped by the gated run and re-run below without gating.
+      # Fix tracked in the issue labelled ci-flaky-test.
+      IOS_UI_QUARANTINE: SpeakiOSUITests/ActionButtonSettingsUITests/testActionButtonDestinationCanBeConfigured
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -715,14 +731,39 @@ jobs:
         # names a failed test without the assertion that failed (issue #793).
         run: |
           set -o pipefail
+          skip_args=()
+          for test_id in $IOS_UI_QUARANTINE; do skip_args+=("-skip-testing:$test_id"); done
           xcodebuild test-without-building \
             -testProductsPath "$RUNNER_TEMP/ios-test-products/SpeakiOS.xctestproducts" \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -only-testing:SpeakiOSTests \
             -only-testing:SpeakiOSUITests \
+            "${skip_args[@]}" \
             -resultBundlePath "$RUNNER_TEMP/SpeakiOS.xcresult" \
             -skipPackagePluginValidation \
             2>&1 | tee "$RUNNER_TEMP/ios-tests.log" | tail -50
+
+      # Quarantined tests still run on the same simulator, so their signal is
+      # kept without a second macOS slot, but a failure only warns. Remove an
+      # entry from IOS_UI_QUARANTINE once its fix passes here repeatedly.
+      - name: Run quarantined iOS UI tests (non-gating)
+        if: ${{ !cancelled() && env.IOS_UI_QUARANTINE != '' }}
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          only_args=()
+          for test_id in $IOS_UI_QUARANTINE; do only_args+=("-only-testing:$test_id"); done
+          if ! xcodebuild test-without-building \
+            -testProductsPath "$RUNNER_TEMP/ios-test-products/SpeakiOS.xctestproducts" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            "${only_args[@]}" \
+            -resultBundlePath "$RUNNER_TEMP/SpeakiOS-quarantine.xcresult" \
+            -skipPackagePluginValidation \
+            > "$RUNNER_TEMP/ios-quarantine.log" 2>&1; then
+            tail -40 "$RUNNER_TEMP/ios-quarantine.log"
+            echo "::warning::A quarantined iOS UI test failed (non-gating): $IOS_UI_QUARANTINE"
+            exit 1
+          fi
 
       - name: Label these results as simulator, not device
         if: ${{ always() }}
@@ -796,14 +837,16 @@ jobs:
           name: ios-tests-log-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/ios-tests.log
+            ${{ runner.temp }}/ios-quarantine.log
             ${{ runner.temp }}/owned-ios-simulator.json
           retention-days: 7
           if-no-files-found: error
 
   build-ios-keyboard:
-    needs: release-paths
+    needs: [release-paths, build-ios]
     # Merge batches and main only.
-    if: needs.release-paths.outputs.full == 'true'
+    # Follows the simulator job in the same macOS lane.
+    if: ${{ !cancelled() && needs.release-paths.outputs.full == 'true' }}
     # Renamed from "Build iOS Keyboard (direct capture)" (issue #991). It is
     # not a required status check, so the rename costs nothing, and the old
     # name had become misleading: the job now builds the *shipping* hand-off
@@ -1001,10 +1044,11 @@ jobs:
     # Every selected native runner must also admit this revision locally.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
-    needs: release-paths
+    needs: [release-paths, release-validation]
     # Merge batches (baseline: origin/main) and main (baseline: the previous
     # main commit) only.
-    if: needs.release-paths.outputs.full == 'true'
+    # Follows Release in the same macOS lane.
+    if: ${{ !cancelled() && needs.release-paths.outputs.full == 'true' }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -1084,6 +1128,7 @@ jobs:
       - build-macos
       - portable-linux
       - lint
+      - paid-access-worker
       - build-ios
       - build-ios-swiftpm
       - build-ios-test-products
@@ -1100,6 +1145,7 @@ jobs:
         if: >-
           always() && (
             needs.release-paths.result != 'success' ||
+            needs.paid-access-worker.result != 'success' ||
             (needs.release-paths.outputs.apple != 'true' && needs.release-paths.outputs.apple != 'false') ||
             (needs.release-paths.outputs.swift != 'true' && needs.release-paths.outputs.swift != 'false') ||
             (needs.release-paths.outputs.full != 'true' && needs.release-paths.outputs.full != 'false') ||

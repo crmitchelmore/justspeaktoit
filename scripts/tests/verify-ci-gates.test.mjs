@@ -194,7 +194,7 @@ test('iOS SwiftPM compilation keeps its command and bounded budget when native e
   assert.match(body, /^\s+timeout-minutes: 30$/m);
   assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
   // The only permitted condition is the shared Swift-change skip.
-  const ungated = body.replace("    if: needs.release-paths.outputs.full == 'true'\n", '');
+  const ungated = body.replace("    if: ${{ !cancelled() && needs.release-paths.outputs.full == 'true' }}\n", '');
   assert.doesNotMatch(ungated, /if:|bravo-mini-local/);
 });
 
@@ -269,7 +269,8 @@ print(json.dumps(owned.selected_configuration(json.loads(sys.argv[2]))))
 
 test('iOS workloads are partitioned without extending budgets or dropping tests', () => {
   const body = jobBodies['build-ios'];
-  assert.match(body, /^\s+timeout-minutes: 30$/m);
+  // 30 minutes for the gated run plus the bounded 5-minute quarantine step.
+  assert.match(body, /^\s+timeout-minutes: 35$/m);
   assert.ok(body.indexOf('Create owned iOS Simulator') < body.indexOf('- name: Prepare iOS Simulator'));
   assert.match(body, /python3 scripts\/prepare-ios-ci\.py "\$SIMULATOR_ID"/);
   assert.match(simulatorPreparation, /python3 scripts\/owned-ios-ci-simulator\.py create/);
@@ -460,7 +461,7 @@ const allOutputs = value => Object.fromEntries(flags.map(flag => [flag, value]))
 const gateFlags = Object.fromEntries(Object.entries(gateJobs).flatMap(([flag, ids]) => ids.map(id => [id, flag])));
 
 function passing() {
-  return Object.fromEntries(['release-paths', ...Object.keys(gateFlags)]
+  return Object.fromEntries(['release-paths', 'paid-access-worker', ...Object.keys(gateFlags)]
     .map(id => [id, { result: 'success', outputs: allOutputs('true') }]));
 }
 
@@ -475,7 +476,7 @@ function pullRequest({ apple = 'true', swift = 'true' } = {}) {
 
 test('aggregate needs exactly the gate jobs and path detection', () => {
   const listed = [...aggregate.split('    permissions:')[0].matchAll(/^      - ([a-z0-9-]+)$/gm)].map(([, id]) => id).sort();
-  assert.deepEqual(listed, ['release-paths', ...Object.keys(gateFlags)].sort());
+  assert.deepEqual(listed, ['release-paths', 'paid-access-worker', ...Object.keys(gateFlags)].sort());
 });
 
 test('accepts all successful gates on pushes and ci:full pull requests', () => {
@@ -524,10 +525,54 @@ test('merge batches and main may never skip a gate or report full=false', () => 
   assert.ok(assessCIGates(needs, 'push').length > 0);
 });
 
+// Full runs chain macOS jobs into lanes; a chained job still runs after its
+// predecessor fails, so it is gated on !cancelled() plus its own output.
+const macLanes = {
+  'core-journey-e2e': 'build-macos', 'api-compatibility': 'release-validation',
+  'build-ios-swiftpm': 'api-compatibility', 'build-ios': 'build-ios-test-products',
+  'build-ios-keyboard': 'build-ios',
+};
+
 test('every gate job honours exactly its path-detection output', () => {
   for (const [id, flag] of Object.entries(gateFlags)) {
-    assert.match(jobBodies[id], new RegExp(`^    if: needs\\.release-paths\\.outputs\\.${flag} == 'true'$`, 'm'), id);
+    const chained = id in macLanes && !['build-ios', 'core-journey-e2e'].includes(id);
+    const pattern = chained
+      ? `^    if: \\$\\{\\{ !cancelled\\(\\) && needs\\.release-paths\\.outputs\\.${flag} == 'true' \\}\\}$`
+      : `^    if: needs\\.release-paths\\.outputs\\.${flag} == 'true'$`;
+    assert.match(jobBodies[id], new RegExp(pattern, 'm'), id);
   }
+  assert.doesNotMatch(jobBodies['paid-access-worker'], /^    if:/m, 'the Workers gate is never path-skipped');
+});
+
+test('full runs ask for at most four hosted macOS slots at once', () => {
+  for (const [id, after] of Object.entries(macLanes)) {
+    assert.match(jobBodies[id], new RegExp(`^    needs: \\[release-paths, ${after}\\]$`, 'm'), id);
+  }
+  const macJobs = Object.entries(jobBodies)
+    .filter(([, body]) => /^    runs-on: (?:macos-latest|\$\{\{ fromJSON\(.*'\["macos-latest"\]'\) \}\})$/m.test(body))
+    .map(([id]) => id);
+  const laneHeads = macJobs.filter(id => !(id in macLanes));
+  assert.deepEqual(laneHeads.sort(),
+    ['build-ios-test-products', 'build-macos', 'core-journey-fixture-ui', 'release-validation']);
+  assert.match(jobBodies['core-journey-fixture-ui'], /^      max-parallel: 1$/m, 'UI shards share one slot');
+});
+
+test('flaky iOS UI tests are quarantined to a bounded, non-gating step', () => {
+  const body = jobBodies['build-ios'];
+  const quarantine = body.match(/^      IOS_UI_QUARANTINE: (.+)$/m)?.[1];
+  assert.ok(quarantine, 'the quarantine list is declared once on the job');
+  for (const id of quarantine.split(' ')) {
+    assert.match(id, /^SpeakiOSUITests\/[A-Za-z]+UITests\/test\w+$/, 'only individual UI tests are quarantined');
+    assert.doesNotMatch(id, /SettingsCredentialUITests/, 'required evidence suites cannot be quarantined');
+  }
+  const gated = body.split('- name: Test iOS App and Action Button Settings')[1].split('\n      - name:')[0];
+  assert.match(gated, /-skip-testing:\$test_id/);
+  assert.doesNotMatch(gated, /continue-on-error/);
+  const step = body.split('- name: Run quarantined iOS UI tests (non-gating)')[1].split('\n      - name:')[0];
+  assert.match(step, /continue-on-error: true/);
+  assert.match(step, /timeout-minutes: 5/);
+  assert.match(step, /-only-testing:\$test_id/);
+  assert.doesNotMatch(step, /ios-tests\.log|SpeakiOS\.xcresult"/, 'quarantine output never feeds gated evidence');
 });
 
 test('Apple path detection excludes only docs, the website, the Android app and Workers', () => {

@@ -13,16 +13,15 @@ on:
       - "Package.resolved"
       - "Sources/SpeakCore/**"
       - "scripts/verify-checksums.sh"
+  # Pull requests benchmark only benchmark changes; SpeakCore and package
+  # changes are benchmarked on every push to main, keeping this macOS job out
+  # of the shared hosted macOS queue for ordinary product pull requests.
   pull_request:
     branches: [main]
     paths:
       - ".github/workflows/local-transcription-benchmark.yml"
       - "Benchmarks/LocalTranscription/**"
       - "Docs/TRANSCRIBE_CPP_ASSESSMENT.md"
-      - "Makefile"
-      - "Package.swift"
-      - "Package.resolved"
-      - "Sources/SpeakCore/**"
       - "scripts/verify-checksums.sh"
 
 permissions:
@@ -53,7 +52,7 @@ jobs:
           restore-keys: benchmark-${{ runner.os }}-${{ runner.arch }}-sources-
 
       - name: Verify package resolution and CTranscribe checksum
-        run: make verify-checksums
+        run: scripts/retry-network.sh make verify-checksums
 
       # verify-checksums resolves both graphs, so neither lockfile may change.
       - name: Check root and benchmark Package.resolved drift

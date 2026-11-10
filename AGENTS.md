@@ -214,6 +214,9 @@ Keep candidate source, versions and note hashes frozen while Alpha continues.
 Use the manifest and actual GitHub/App Store Connect publication receipts as
 version/baseline authority. `VERSION` is a build hint only.
 
+### Batch merging
+- To land several ready PRs on one CI run, use `scripts/merge-batch` (create → status → land, or split to bisect a failure); see [Docs/merge-batch.md](Docs/merge-batch.md). Batches land only through their own PR and required checks.
+
 ### PR merge unblock checklist
 - If `gh pr merge` says “required status checks are expected” while checks look green, inspect `mergeStateStatus`; if `BEHIND`, rebase on `origin/main` and force-push with lease.
 - After each push, re-check unresolved review threads (especially CodeRabbit), as new threads can be created on updated diffs and still block merge.

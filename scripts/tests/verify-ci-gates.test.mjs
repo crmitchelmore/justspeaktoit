@@ -16,7 +16,7 @@ const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+)
   .map(([, id, body]) => [id, body]));
 const nativeEligibleJobs = [
   'build-macos', 'release-validation', 'api-compatibility', 'core-journey-e2e',
-  'build-ios-swiftpm', 'build-ios-keyboard',
+  'build-ios-keyboard',
 ];
 // Hosted macOS concurrency is a fixed per-account cap shared by Intel and ARM,
 // so Intel adds no capacity and only slows jobs: every hosted fallback is ARM.
@@ -122,9 +122,9 @@ test('macOS Debug and Core Journey share coverage instrumentation and cache keys
   assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),
     'Build must run before Test (Debug) so the coverage-enabled cache is already warm');
   assert.doesNotMatch(body, /-DAPP_STORE/,
-    'the App Store flavour compile invalidates the Debug cache, so it runs in build-ios-swiftpm');
-  assert.match(jobBodies['build-ios-swiftpm'],
-    /name: Build SpeakCore \(App Store flavour\)\n(?:\s+#[^\n]*\n)*\s+run: swift build --disable-dependency-cache -Xswiftc -DAPP_STORE --target SpeakCore/);
+    'the App Store flavour compile invalidates the Debug cache, so it runs in release-validation');
+  assert.match(jobBodies['release-validation'],
+    /name: Build SpeakCore \(App Store flavour\)\n(?:\s+#[^\n]*\n)*\s+run: >-\n\s+swift build --scratch-path "\$RUNNER_TEMP\/app-store-flavour"\n\s+-Xswiftc -DAPP_STORE --target SpeakCore/);
   assert.doesNotMatch(body, /\n\s+run: make build\n/, 'Build step must not regress to an uninstrumented build');
   // Non-test steps unaffected: still a real build, no dropped checks.
   assert.match(body, /name: Verify brand asset sizes and appearance variants/);
@@ -187,15 +187,14 @@ test('native pool still requires the exact reviewed source and trusted event', (
   }
 });
 
-test('iOS SwiftPM compilation keeps its command and bounded budget when native eligible', () => {
-  const body = jobBodies['build-ios-swiftpm'];
-  assert.deepEqual(route('build-ios-swiftpm', routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
-    ['jsti-reviewed-local', 'macOS']);
-  assert.match(body, /^\s+timeout-minutes: 30$/m);
-  assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
-  // The only permitted condition is the shared Swift-change skip.
-  const ungated = body.replace("    if: ${{ !cancelled() && needs.release-paths.outputs.full == 'true' }}\n", '');
-  assert.doesNotMatch(ungated, /if:|bravo-mini-local/);
+test('full runs compile Release without repeating the Debug test suite', () => {
+  const body = jobBodies['release-validation'];
+  assert.match(body, /^    name: Build \(Release\)$/m);
+  assert.match(body, /run: swift build -c release\n/);
+  assert.doesNotMatch(body, /swift test|JSTI_TEST_KEYCHAIN_REDIRECT/,
+    'Release tests repeat Debug; release-mac.yml still runs them for published builds');
+  assert.doesNotMatch(workflow, /build-ios-swiftpm|--target SpeakiOSLib/,
+    'a host-only SpeakiOSLib build compiles almost no iOS code; real iOS compiles cover it');
 });
 
 test('UI jobs cannot be admitted to a native runner by repository variables', () => {
@@ -314,8 +313,6 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(devices, /-destination generic\/platform=watchOS/);
   assert.match(devices, /-scheme SpeakiOS/);
   assert.match(devices, /-destination generic\/platform=iOS/);
-  assert.match(aggregate, /^\s+- build-ios-swiftpm$/m);
-  assert.match(aggregate, /needs\.build-ios-swiftpm\.result != 'success'/);
 });
 
 test('iOS selection prefers an available Pro before starting preparation', () => {
@@ -529,7 +526,7 @@ test('merge batches and main may never skip a gate or report full=false', () => 
 // predecessor fails, so it is gated on !cancelled() plus its own output.
 const macLanes = {
   'core-journey-e2e': 'build-macos', 'api-compatibility': 'release-validation',
-  'build-ios-swiftpm': 'api-compatibility', 'build-ios': 'build-ios-test-products',
+  'build-ios': 'build-ios-test-products',
   'build-ios-keyboard': 'build-ios',
 };
 
@@ -649,11 +646,11 @@ test('launched-app UI shards in CI match every shard the verifier requires', () 
 
 test('network-bound package resolution and Tuist generation retry before Apple builds', () => {
   const retry = 'scripts/retry-network.sh';
-  for (const id of ['build-macos', 'release-validation', 'build-ios-swiftpm']) {
+  for (const id of ['build-macos', 'release-validation']) {
     const body = jobBodies[id];
     const resolve = body.indexOf(`run: ${retry} swift package resolve`);
     assert.ok(resolve > 0, `${id}: resolve with retries`);
-    assert.ok(resolve < body.search(/run: (?:SWIFT_FLAGS=.*make build|python3 scripts\/with-test-keychain\.py swift test -c release|swift build --disable-dependency-cache --target SpeakiOSLib)/),
+    assert.ok(resolve < body.search(/run: (?:SWIFT_FLAGS=.*make build|swift build -c release)/),
       `${id}: resolution must precede the build`);
   }
   for (const id of ['build-ios-test-products', 'build-ios-keyboard']) {

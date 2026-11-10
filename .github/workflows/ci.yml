@@ -373,7 +373,7 @@ jobs:
   # portable SwiftPM graph run on Ubuntu. Outputs:
   # - apple: Lint + tooling tests (anything outside docs, site, Android, Workers)
   # - swift: portable Linux graph and the macOS fast job (Swift package inputs)
-  # - full:  every macOS gate (full Debug and Release tests, iOS library, test
+  # - full:  every macOS gate (full Debug tests, Release build, test
   #          products, simulator tests, keyboard and watch, core journeys,
   #          public API). True on merge-batch/* and main pushes, where a failure
   #          opens an issue (report-ci-failure), and for a `ci:full` label.
@@ -463,7 +463,7 @@ jobs:
 
   # Full runs (merge batches and main) ask for at most four hosted macOS
   # slots at once, leaving one for other workflows, by chaining jobs into
-  # lanes: Debug -> journey; Release -> API -> iOS SwiftPM; iOS products ->
+  # lanes: Debug -> journey; Release build -> API; iOS products ->
   # simulator -> keyboard and watch; the two UI shards one after the other.
   # Other later jobs in a lane still run when an earlier one fails.
   core-journey-e2e:
@@ -570,18 +570,19 @@ jobs:
           if-no-files-found: error
 
   release-validation:
-    name: Build & Test (Release)
+    name: Build (Release)
+    # Release-configuration compile only. Its tests were the same 6,055 cases
+    # build-macos runs in Debug, so they are not repeated here; release-mac.yml
+    # still runs the Release tests for every published build.
     # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
     runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 45
-    # Compiles the native-CI Keychain redirect into these test builds only;
-    # distribution builds never set it (#1360).
-    env:
-      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
     needs: release-paths
     if: needs.release-paths.outputs.full == 'true'
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
 
       # Saved once per main commit (see build-macos); a key fixed to the
       # Package.resolved hash never refreshes, so builds grew colder over time.
@@ -599,34 +600,16 @@ jobs:
       - name: Resolve Swift packages
         run: scripts/retry-network.sh swift package resolve
 
-      - name: Test (Release)
-        run: python3 scripts/with-test-keychain.py swift test -c release
-
-  build-ios-swiftpm:
-    name: Build iOS Library (SwiftPM)
-    needs: [release-paths, api-compatibility]
-    # Merge batches and main only; pull requests compile through build-macos.
-    # Follows API compatibility in the same macOS lane.
-    if: ${{ !cancelled() && needs.release-paths.outputs.full == 'true' }}
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
-      # release assets, which intermittently return 5xx; resolve with retries first.
-      - name: Resolve Swift packages
-        run: scripts/retry-network.sh swift package resolve --disable-dependency-cache
-      - name: Build iOS Library
-        run: swift build --disable-dependency-cache --target SpeakiOSLib
+      - name: Build (Release)
+        run: swift build -c release
 
       - name: Build SpeakCore (App Store flavour)
         # SpeakCore has no package dependencies, so this cheaply compiles the
         # `#if APP_STORE` branches that only the Mac App Store build exercises.
-        # It runs here, in parallel with the Debug tests, because the extra
-        # -Xswiftc flag invalidates the Debug build cache for SpeakCore.
-        run: swift build --disable-dependency-cache -Xswiftc -DAPP_STORE --target SpeakCore
+        # A separate scratch path keeps the flag out of the cached .build.
+        run: >-
+          swift build --scratch-path "$RUNNER_TEMP/app-store-flavour"
+          -Xswiftc -DAPP_STORE --target SpeakCore
 
   build-ios-test-products:
     name: Build iOS XCTest Products
@@ -1106,7 +1089,7 @@ jobs:
           else
             label=ci-batch-failure; title="CI failed on $REF_NAME"
           fi
-          body="CI failed on $REF_NAME at $SHA: $RUN_URL"$'\n\n'"Pull requests run only Lint, the portable Linux graph and one macOS job; full Debug and Release tests, iOS, keyboard, core journeys and public API first run here. Evict or fix the culprit, then close this issue."
+          body="CI failed on $REF_NAME at $SHA: $RUN_URL"$'\n\n'"Pull requests run only Lint, the portable Linux graph and one macOS job; full Debug tests, the Release build, iOS, keyboard, core journeys and public API first run here. Evict or fix the culprit, then close this issue."
           number=$(gh issue list --state open --label "$label" --search "in:title \"$title\"" --json number,title \
             --jq "map(select(.title == \"$title\"))[0].number // empty")
           if [ -n "$number" ]; then
@@ -1130,7 +1113,6 @@ jobs:
       - lint
       - paid-access-worker
       - build-ios
-      - build-ios-swiftpm
       - build-ios-test-products
       - build-ios-keyboard
       - release-validation
@@ -1162,9 +1144,6 @@ jobs:
             (needs.build-ios.result != 'success' && !(
               github.event_name == 'pull_request' && needs.release-paths.outputs.full == 'false' &&
               needs.build-ios.result == 'skipped')) ||
-            (needs.build-ios-swiftpm.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.full == 'false' &&
-              needs.build-ios-swiftpm.result == 'skipped')) ||
             (needs.build-ios-test-products.result != 'success' && !(
               github.event_name == 'pull_request' && needs.release-paths.outputs.full == 'false' &&
               needs.build-ios-test-products.result == 'skipped')) ||

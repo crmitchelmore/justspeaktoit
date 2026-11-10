@@ -10,7 +10,7 @@ export const gateJobs = {
   apple: ['lint'],
   swift: ['build-macos', 'portable-linux'],
   full: [
-    'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'release-validation',
+    'build-ios', 'build-ios-test-products', 'build-ios-keyboard', 'release-validation',
     'core-journey-e2e', 'core-journey-fixture-ui', 'api-compatibility',
   ],
 };

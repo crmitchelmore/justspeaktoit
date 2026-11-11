@@ -46,7 +46,7 @@ struct VoiceOutputAudioSessionLease {
         case .playAndRecord, .multiRoute:
             return nil
         case .record:
-            throw OpenRouterIOSVoiceOutputError.recordingInProgress
+            throw VoiceOutputPlaybackError.recordingInProgress
         default:
             let installed = Configuration(category: .playback, mode: .spokenAudio, options: [.mixWithOthers])
             try access.install(installed)

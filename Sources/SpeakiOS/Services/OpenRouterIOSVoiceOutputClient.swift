@@ -163,16 +163,15 @@ public final class OpenRouterIOSVoiceOutputClient: ObservableObject {
     private func playAudio(at url: URL, operation identifier: UUID, speed: Double) async throws {
         let operation = VoiceOutputAudioPlayback()
         playback = operation
-        try operation.start(at: url, speed: speed)
-        isSpeaking = true
-        while !operation.isFinished {
-            try await Task.sleep(for: .milliseconds(30))
-            guard operationID == identifier else { throw CancellationError() }
-            try operation.checkProgress()
+        do {
+            try operation.start(.file(url), rate: VoiceOutputAudioPlayback.playbackRate(for: speed))
+            isSpeaking = true
+            try await operation.waitForCompletion()
+        } catch let failure as VoiceOutputPlaybackError {
+            throw OpenRouterIOSVoiceOutputError(failure)
         }
         try Task.checkCancellation()
         guard operationID == identifier else { throw CancellationError() }
-        try operation.checkCompletion()
     }
 }
 
@@ -182,6 +181,14 @@ public enum OpenRouterIOSVoiceOutputError: LocalizedError {
     case playbackFailed
     case interrupted
     case recordingInProgress
+
+    init(_ playback: VoiceOutputPlaybackError) {
+        switch playback {
+        case .playbackFailed: self = .playbackFailed
+        case .interrupted: self = .interrupted
+        case .recordingInProgress: self = .recordingInProgress
+        }
+    }
 
     public var errorDescription: String? {
         switch self {

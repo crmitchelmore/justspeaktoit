@@ -66,6 +66,7 @@ final class OpenRouterIOSProgressivePlayback {
             return identifier
         } catch {
             stop(session: identifier)
+            if let refusal = error as? VoiceOutputPlaybackError { throw OpenRouterIOSVoiceOutputError(refusal) }
             if error is CancellationError || error is OpenRouterIOSVoiceOutputError { throw error }
             throw SetupFailure.unavailable
         }

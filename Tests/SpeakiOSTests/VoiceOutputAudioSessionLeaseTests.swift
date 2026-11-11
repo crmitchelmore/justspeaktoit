@@ -11,7 +11,7 @@ final class VoiceOutputAudioSessionLeaseTests: XCTestCase {
             let state = LeaseConfigurationFixture(category: category)
             if category == .record {
                 XCTAssertThrowsError(try VoiceOutputAudioSessionLease.acquire(using: state.access)) {
-                    guard case OpenRouterIOSVoiceOutputError.recordingInProgress = $0 else {
+                    guard case VoiceOutputPlaybackError.recordingInProgress = $0 else {
                         return XCTFail("Recording must refuse playback")
                     }
                 }

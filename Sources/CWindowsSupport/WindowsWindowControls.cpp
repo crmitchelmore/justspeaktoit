@@ -1,7 +1,23 @@
 // Window controls: creation, the dashboard transcript, cleanup preview and the update pump.
 #include "WindowsWindowInternal.hpp"
+#include "WindowsWindowAboutPage.hpp"
+#include "WindowsWindowBackup.hpp"
+#include "WindowsWindowDashboardPage.hpp"
+#include "WindowsWindowGeneralPage.hpp"
+#include "WindowsWindowHistoryPage.hpp"
+#include "WindowsWindowModelsPage.hpp"
 
 namespace jsti_window {
+namespace {
+// The streaming cleanup preview, under its own mutex.
+struct CleanupPreview {
+    std::mutex mutex;
+    uint64_t ticket = 0;
+    bool active = false, changed = false;
+    std::wstring text;
+};
+CleanupPreview cleanupPreview;
+} // namespace
 
 void retireCleanupPreview() {
     std::lock_guard<std::mutex> lock(cleanupPreview.mutex);
@@ -19,19 +35,12 @@ void applyCleanupPreview(HWND window) {
         (state.page != dashboardPage && state.page != historyPage)) return;
     SetDlgItemTextW(window, transcriptID, cleanupPreview.text.c_str());
     SetDlgItemTextW(window, statusID, L"Streaming cleanup preview. The original is saved in History.");
-    state.history.historyPresentationReady = false;
+    historyView().historyPresentationReady = false;
     EnableWindow(GetDlgItem(window, copyID), FALSE);
 }
 
 void emit(HWND window, int event, const char *text) {
     if (state.callback) state.callback(event, text, selection(window), state.context);
-}
-
-// The CLI and MCP setup dialog shows and changes the same automation state as
-// General's switch: the host's last report, and the same toggle event.
-bool automationShownEnabled() {
-    std::lock_guard<std::mutex> lock(state.mutex);
-    return state.general.automationEnabled;
 }
 
 void requestAutomationToggle(HWND window) {
@@ -40,8 +49,8 @@ void requestAutomationToggle(HWND window) {
 
 std::string selectedMicrophone(HWND window) {
     const LRESULT index = SendDlgItemMessageW(window, microphoneID, CB_GETCURSEL, 0, 0);
-    if (index == CB_ERR || static_cast<size_t>(index) >= state.models.microphones.size()) return {};
-    return state.models.microphones[static_cast<size_t>(index)].id;
+    if (index == CB_ERR || static_cast<size_t>(index) >= modelsState().microphones.size()) return {};
+    return modelsState().microphones[static_cast<size_t>(index)].id;
 }
 
 void emitRecording(HWND window) {
@@ -192,7 +201,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Inspect backup...", BS_PUSHBUTTON | WS_TABSTOP, backupInspectID) &&
         add(L"BUTTON", L"Restore backup...", BS_PUSHBUTTON | WS_TABSTOP, backupRestoreID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
-        add(L"STATIC", state.about.aboutDetails.c_str(), 0, aboutDetailsID) &&
+        add(L"STATIC", aboutState().aboutDetails.c_str(), 0, aboutDetailsID) &&
         add(L"BUTTON", L"Ru&n setup again…", BS_PUSHBUTTON | WS_TABSTOP, setupGuideID) &&
         add(L"BUTTON", L"&Windows permissions…", BS_PUSHBUTTON | WS_TABSTOP, permissionsID) &&
         add(L"BUTTON", L"&Troubleshooting…", BS_PUSHBUTTON | WS_TABSTOP, troubleshootingID) &&
@@ -200,8 +209,8 @@ bool createControls(HWND window) {
         add(L"STATIC", L"Transcript", 0, transcriptNameID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
-    for (size_t i = 0; i < state.about.aboutLinks.size() && okay; ++i)
-        okay = add(L"BUTTON", state.about.aboutLinks[i].title.c_str(), BS_PUSHBUTTON | WS_TABSTOP,
+    for (size_t i = 0; i < aboutState().aboutLinks.size() && okay; ++i)
+        okay = add(L"BUTTON", aboutState().aboutLinks[i].title.c_str(), BS_PUSHBUTTON | WS_TABSTOP,
             aboutLinkBaseID + static_cast<int>(i));
     SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
     for (int identifier : {chipSessionsID, chipTimeID, chipSpendID, insightSessionsID, insightTimeID, insightAverageID,
@@ -211,12 +220,12 @@ bool createControls(HWND window) {
     }
     okay = okay && add(L"STATIC", L"Ready. Choose a model and save its API key to begin.", 0, statusID);
     LRESULT selectedDevice = 0;
-    for (size_t i = 0; i < state.models.microphones.size(); ++i) {
-        const auto &device = state.models.microphones[i];
+    for (size_t i = 0; i < modelsState().microphones.size(); ++i) {
+        const auto &device = modelsState().microphones[i];
         const LRESULT added = SendDlgItemMessageW(window, microphoneID, CB_ADDSTRING, 0,
             reinterpret_cast<LPARAM>(device.name.c_str()));
         if (added == CB_ERR || added == CB_ERRSPACE) return false;
-        if (device.id == state.models.microphoneSelection) selectedDevice = static_cast<LRESULT>(i);
+        if (device.id == modelsState().microphoneSelection) selectedDevice = static_cast<LRESULT>(i);
     }
     SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, selectedDevice, 0);
     SendDlgItemMessageW(window, keyID, EM_LIMITTEXT, 2048, 0);
@@ -249,10 +258,10 @@ bool createControls(HWND window) {
     bool refreshing;
     {
         std::lock_guard<std::mutex> lock(state.mutex);
-        modelStatus = state.models.modelStatus;
-        refreshing = state.models.modelsRefreshing;
+        modelStatus = modelsState().modelStatus;
+        refreshing = modelsState().modelsRefreshing;
     }
-    state.models.remoteModelStatus = modelStatus;
+    modelsState().remoteModelStatus = modelStatus;
     updateSourceControls(window);
     EnableWindow(GetDlgItem(window, modelRefreshID), !refreshing);
     applyTheme(window);
@@ -271,16 +280,10 @@ void updateSettingsButtons(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, azureID), recording == 0 && jsti_azure_resource_available());
     EnableWindow(GetDlgItem(window, automationSettingsID), recording == 0);
     EnableWindow(GetDlgItem(window, apiKeysID), recording == 0 && jsti_api_keys_available());
-    bool automation, loginPending;
-    int login;
-    std::wstring loginDetail;
-    {
-        std::lock_guard<std::mutex> lock(state.mutex);
-        automation = state.general.automationEnabled;
-        login = state.general.loginItem;
-        loginPending = state.general.loginItemPending;
-        loginDetail = state.general.loginItemDetail;
-    }
+    const GeneralSettings general = generalSettings();
+    const bool automation = general.automationEnabled, loginPending = general.loginItemPending;
+    const int login = general.loginItem;
+    const std::wstring &loginDetail = general.loginItemDetail;
     auto show = [&](int identifier, bool on) {
         HWND toggle = GetDlgItem(window, identifier);
         if ((GetWindowLongPtrW(toggle, GWLP_USERDATA) != 0) == on) return;
@@ -294,10 +297,7 @@ void updateSettingsButtons(HWND window, int recording) {
     const bool decided = login == jsti::login::offBySystem || login == jsti::login::onBySystem ||
                          login == jsti::login::unavailable;
     std::wstring note = decided ? loginDetail : std::wstring();
-    if (note != state.general.loginItemNote) {
-        state.general.loginItemNote.swap(note);
-        if (state.page == generalPage) layout(window);
-    }
+    if (replaceLoginItemNote(std::move(note)) && state.page == generalPage) layout(window);
 }
 
 // History totals from jsti_window_set_insights, shown only when they change.
@@ -305,9 +305,7 @@ void applyInsights(HWND window) {
     std::wstring values[2][5];
     {
         std::lock_guard<std::mutex> lock(state.mutex);
-        if (!state.dashboard.insightsChanged) return;
-        state.dashboard.insightsChanged = false;
-        for (int group = 0; group < 2; ++group) for (int index = 0; index < 5; ++index) values[group][index] = state.dashboard.insights[group][index];
+        if (!takeDashboardInsights(values)) return;
     }
     const std::pair<int, const std::wstring *> targets[] = {
         {chipSessionsID, &values[0][0]}, {chipTimeID, &values[0][2]}, {chipSpendID, &values[0][4]},
@@ -346,47 +344,43 @@ void applyUpdate(HWND window) {
     HistoryPresentation presentation;
     {
         std::lock_guard<std::mutex> lock(state.mutex);
-        status.swap(state.dashboard.status); transcript.swap(state.dashboard.transcript);
-        migrationReport.swap(state.history.migrationReport);
-        presentationChanged = state.history.presentationChanged;
-        if (presentationChanged) presentation = std::move(state.history.pendingPresentation);
-        state.history.presentationChanged = false;
-        playbackChanged = state.history.playbackChanged;
-        playbackRecord = state.history.pendingPlaybackRecord;
-        playback = state.history.pendingPlaybackState;
-        playbackText = state.history.pendingPlaybackText;
-        state.history.playbackChanged = false;
-        modelsChanged = state.models.modelsChanged;
-        modelsRefreshing = state.models.modelsRefreshing;
-        if (modelsChanged) { models = std::move(state.models.pendingModels); modelStatus = state.models.modelStatus; }
-        state.models.modelsChanged = false;
-        localModelPreferencesChanged = state.models.localModelPreferencesChanged;
-        std::copy(std::begin(state.models.pendingLocalModelPreferences), std::end(state.models.pendingLocalModelPreferences),
+        DashboardUpdate dashboard = takeDashboardUpdate();
+        status.swap(dashboard.status); transcript.swap(dashboard.transcript);
+        statusChanged = dashboard.statusChanged; transcriptChanged = dashboard.transcriptChanged;
+        migrationReport = takeMigrationReport();
+        HistoryUpdate staged = takeHistoryUpdate();
+        presentationChanged = staged.presentationChanged;
+        if (presentationChanged) presentation = std::move(staged.presentation);
+        playbackChanged = staged.playbackChanged;
+        playbackRecord = std::move(staged.playbackRecord);
+        playback = staged.playback;
+        playbackText = std::move(staged.playbackText);
+        modelsChanged = modelsState().modelsChanged;
+        modelsRefreshing = modelsState().modelsRefreshing;
+        if (modelsChanged) { models = std::move(modelsState().pendingModels); modelStatus = modelsState().modelStatus; }
+        modelsState().modelsChanged = false;
+        localModelPreferencesChanged = modelsState().localModelPreferencesChanged;
+        std::copy(std::begin(modelsState().pendingLocalModelPreferences), std::end(modelsState().pendingLocalModelPreferences),
                   localModelPreferences);
-        std::fill(std::begin(state.models.pendingLocalModelPreferences), std::end(state.models.pendingLocalModelPreferences), -1);
-        state.models.localModelPreferencesChanged = false;
-        statusChanged = state.dashboard.statusChanged; transcriptChanged = state.dashboard.transcriptChanged;
-        state.dashboard.statusChanged = false; state.dashboard.transcriptChanged = false;
-        historyChanged = state.history.historyChanged;
+        std::fill(std::begin(modelsState().pendingLocalModelPreferences), std::end(modelsState().pendingLocalModelPreferences), -1);
+        modelsState().localModelPreferencesChanged = false;
+        historyChanged = staged.rowsChanged;
         if (historyChanged) {
-            history = std::move(state.history.pendingHistory);
-            explicitHistorySelection = state.history.historySelectionProvided &&
-                state.history.pendingHistoryRevision == state.history.historyInteractionRevision;
-            historySelection = explicitHistorySelection ? state.history.pendingHistorySelection : state.history.selectedHistoryID;
-            state.history.historyChanged = false;
+            history = std::move(staged.rows);
+            explicitHistorySelection = staged.explicitSelection;
+            historySelection = std::move(staged.selection);
         }
-        variantChanged = state.history.variantChanged;
-        variantRecord = state.history.pendingVariantRecord;
-        variant = state.history.pendingVariant;
-        variantSwitchable = state.history.pendingVariantSwitchable;
-        state.history.variantChanged = false;
+        variantChanged = staged.variantChanged;
+        variantRecord = std::move(staged.variantRecord);
+        variant = staged.variant;
+        variantSwitchable = staged.variantSwitchable;
         state.posted = false;
         recording = state.recording;
-        microphonesChanged = state.models.microphonesChanged && recording == 0;
+        microphonesChanged = modelsState().microphonesChanged && recording == 0;
         if (microphonesChanged) {
-            microphones = std::move(state.models.pendingMicrophones);
-            microphoneError = state.models.microphoneError;
-            state.models.microphonesChanged = false;
+            microphones = std::move(modelsState().pendingMicrophones);
+            microphoneError = modelsState().microphoneError;
+            modelsState().microphonesChanged = false;
         }
     }
     if (microphonesChanged) {
@@ -398,15 +392,15 @@ void applyUpdate(HWND window) {
     }
     if (modelsChanged) {
         if (!applyModelRows(window, models)) modelStatus = L"Could not display refreshed models. Previous selection retained.";
-        state.models.remoteModelStatus = modelStatus;
+        modelsState().remoteModelStatus = modelStatus;
         EnableWindow(GetDlgItem(window, modelRefreshID), !modelsRefreshing);
     }
     if (localModelPreferencesChanged) {
         for (int i = 0; i < 2; ++i) {
             const int index = localModelPreferences[i], mode = i + 2;
-            if (index < 0 || state.models.activeMode == mode) continue;
-            if (static_cast<size_t>(index) < state.models.modelModes.size() && state.models.modelModes[index] == mode)
-                state.models.preferredModels[mode] = index;
+            if (index < 0 || modelsState().activeMode == mode) continue;
+            if (static_cast<size_t>(index) < modelsState().modelModes.size() && modelsState().modelModes[index] == mode)
+                modelsState().preferredModels[mode] = index;
             else {
                 status = L"Saved Local model choice is unavailable. Reopen the app before switching modes.";
                 statusChanged = true;
@@ -447,23 +441,23 @@ void applyUpdate(HWND window) {
         const LRESULT oldTop = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
         SendMessageW(list, WM_SETREDRAW, FALSE, 0);
         SendMessageW(list, LB_RESETCONTENT, 0, 0);
-        state.history.displayedHistory = std::move(history);
-        state.history.historyMoreRequested = false;
+        historyView().displayedHistory = std::move(history);
+        historyView().historyMoreRequested = false;
         LRESULT selectedIndex = LB_ERR;
         bool failed = false;
-        for (size_t i = 0; i < state.history.displayedHistory.size(); ++i) {
-            const auto &entry = state.history.displayedHistory[i];
+        for (size_t i = 0; i < historyView().displayedHistory.size(); ++i) {
+            const auto &entry = historyView().displayedHistory[i];
             const LRESULT added = SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(entry.title.c_str()));
             if (added == LB_ERR || added == LB_ERRSPACE) { failed = true; break; }
             if (entry.id == historySelection) selectedIndex = static_cast<LRESULT>(i);
         }
         if (failed) {
             SendMessageW(list, LB_RESETCONTENT, 0, 0);
-            state.history.displayedHistory.clear();
+            historyView().displayedHistory.clear();
             selectedIndex = LB_ERR;
         }
         SendMessageW(list, LB_SETCURSEL, static_cast<WPARAM>(selectedIndex), 0);
-        if (oldTop > 0 && static_cast<size_t>(oldTop) < state.history.displayedHistory.size()) {
+        if (oldTop > 0 && static_cast<size_t>(oldTop) < historyView().displayedHistory.size()) {
             SendMessageW(list, LB_SETTOPINDEX, static_cast<WPARAM>(oldTop), 0);
         }
         SendMessageW(list, WM_SETREDRAW, TRUE, 0);
@@ -472,8 +466,8 @@ void applyUpdate(HWND window) {
         bool selectionChanged;
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            selectionChanged = nowSelected != state.history.selectedHistoryID;
-            state.history.selectedHistoryID = nowSelected;
+            selectionChanged = nowSelected != selectedHistoryRecord();
+            setSelectedHistoryRecord(nowSelected);
         }
         // A different (or no) record is displayed: its version and playback
         // are unknown until the host reports them, so never keep the previous record's.
@@ -494,21 +488,21 @@ void applyUpdate(HWND window) {
     // A report for a record the user has since left is stale; the new row's
     // version stays unknown until its own report arrives.
     if (variantChanged && variantRecord == selectedHistory(window) &&
-        (state.history.requestedVariant < 0 || state.history.requestedVariant == variant)) {
+        (historyView().requestedVariant < 0 || historyView().requestedVariant == variant)) {
         applyVariant(window, variant, variantSwitchable, recording);
     }
     // Untagged text belongs to active capture or a result outside the History
     // selection. Saved-record text uses the atomic, identity-checked path below.
     if (transcriptChanged && (recording != 0 || selectedHistory(window).empty())) {
         SetDlgItemTextW(window, transcriptID, transcript.c_str());
-        state.history.historyPresentationReady = selectedHistory(window).empty();
+        historyView().historyPresentationReady = selectedHistory(window).empty();
     }
     if (presentationChanged && presentation.record == selectedHistory(window) &&
-        (state.history.requestedVariant < 0 || state.history.requestedVariant == presentation.variant)) {
+        (historyView().requestedVariant < 0 || historyView().requestedVariant == presentation.variant)) {
         SetDlgItemTextW(window, transcriptID, presentation.transcript.c_str());
         SetDlgItemTextW(window, statusID, presentation.status.c_str());
-        state.history.historyPresentationReady = presentation.variant >= 0;
-        state.history.requestedVariant = presentation.variant;
+        historyView().historyPresentationReady = presentation.variant >= 0;
+        historyView().requestedVariant = presentation.variant;
         applyVariant(window, presentation.variant, presentation.switchable, recording);
     }
     if (playbackChanged) {

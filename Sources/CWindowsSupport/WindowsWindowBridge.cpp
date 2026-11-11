@@ -1,5 +1,6 @@
 // The jsti_window_* C ABI that stages host updates for the UI thread.
 #include "WindowsWindowInternal.hpp"
+#include "WindowsWindowDashboardPage.hpp"
 
 // Shortcut events from WindowsHotKey.cpp, on the UI thread. A press-to-toggle
 // press behaves exactly like the former fixed shortcut; gesture presses carry
@@ -18,28 +19,6 @@ void jsti_window_hotkey_event(HWND window, int event) {
     case JSTI_EVENT_HOTKEY_DEADLINE: emit(window, event); break;
     default: break;
     }
-}
-
-int jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count) {
-    if (!details || !links || count == 0 || count > 8 || std::strlen(details) > 4096) return -1;
-    std::wstring information;
-    if (!jsti::wide(details, information) || information.empty()) return -1;
-    std::vector<AboutLink> copied;
-    for (size_t i = 0; i < count; ++i) {
-        AboutLink link;
-        if (!links[i].title || !links[i].url || std::strlen(links[i].title) > 128 ||
-            std::strlen(links[i].url) > 2048 || !jsti::wide(links[i].title, link.title) ||
-            !jsti::wide(links[i].url, link.url) || link.title.empty() ||
-            link.title.find_first_of(L"\r\n\t") != std::wstring::npos ||
-            link.url.compare(0, 8, L"https://") != 0 || link.url.size() <= 8 ||
-            link.url.find_first_of(L" \r\n\t") != std::wstring::npos) return -1;
-        copied.push_back(std::move(link));
-    }
-    std::lock_guard<std::mutex> lock(state.mutex);
-    if (state.running) return -1;
-    state.about.aboutDetails = std::move(information);
-    state.about.aboutLinks = std::move(copied);
-    return 0;
 }
 
 // Action shortcuts from WindowsActionShortcuts.cpp, on the UI thread. Each runs
@@ -87,25 +66,6 @@ void jsti_window_action_command(HWND window, int run, const char *page) {
     }
 }
 
-int jsti_window_set_automation(int enabled) {
-    if (enabled != 0 && enabled != 1) return -1;
-    std::lock_guard<std::mutex> lock(state.mutex);
-    state.general.automationEnabled = enabled == 1;
-    if (state.window && !state.posted) state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
-    return 0;
-}
-
-int jsti_window_set_login_item(int value, const char *detail) {
-    std::wstring note;
-    if (value < jsti::login::off || value > jsti::login::unavailable || !jsti::wide(detail, note)) return -1;
-    std::lock_guard<std::mutex> lock(state.mutex);
-    state.general.loginItem = value;
-    state.general.loginItemPending = false;
-    state.general.loginItemDetail.swap(note);
-    if (state.window && !state.posted) state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
-    return 0;
-}
-
 int jsti_window_recording_state() {
     std::lock_guard<std::mutex> lock(state.mutex);
     return state.recording;
@@ -146,8 +106,8 @@ int jsti_window_update(const char *status, const char *transcript, int recording
         recording < -1 || recording > 2) return -1;
     std::lock_guard<std::mutex> lock(state.mutex);
     if (!state.window) return -1;
-    if (status) { state.dashboard.status = std::move(wideStatus); state.dashboard.statusChanged = true; }
-    if (transcript) { state.dashboard.transcript = std::move(wideTranscript); state.dashboard.transcriptChanged = true; }
+    if (status) stageDashboardStatus(std::move(wideStatus));
+    if (transcript) stageDashboardTranscript(std::move(wideTranscript));
     if (recording >= 0) {
         state.recording = recording;
         jsti::globalEscape::publish(recording);
@@ -186,33 +146,6 @@ void jsti_window_request_permissions(void) {
 void jsti_window_request_api_keys(void) {
     std::lock_guard<std::mutex> lock(state.mutex);
     if (state.window) PostMessageW(state.window, apiKeysMessage, 0, 0);
-}
-
-int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible) {
-    if (!all || !visible) return -1;
-    try {
-        std::wstring values[2][5];
-        const JSTIInsights *groups[2] = {all, visible};
-        for (int group = 0; group < 2; ++group) {
-            const char *fields[5] = {groups[group]->sessions, groups[group]->errors, groups[group]->recording_time,
-                                     groups[group]->average_length, groups[group]->spend};
-            for (int index = 0; index < 5; ++index) {
-                if (!fields[index] || !jsti::wide(fields[index], values[group][index]) ||
-                    values[group][index].size() > 64) return -1;
-            }
-        }
-        std::lock_guard<std::mutex> lock(state.mutex);
-        if (!state.window) return -1;
-        for (int group = 0; group < 2; ++group) {
-            for (int index = 0; index < 5; ++index) state.dashboard.insights[group][index] = std::move(values[group][index]);
-        }
-        state.dashboard.insightsChanged = true;
-        if (!state.posted) {
-            state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
-            if (!state.posted) return -1;
-        }
-        return 0;
-    } catch (const std::exception &) { return -1; }
 }
 
 int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text,

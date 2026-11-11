@@ -2,6 +2,14 @@
 #include "WindowsWindowInternal.hpp"
 
 namespace jsti_window {
+namespace {
+// The screenshot tour's progress (UI thread). Only this file reads or writes it.
+struct TourState {
+    std::wstring directory;
+    int step = -1;
+};
+TourState tour;
+} // namespace
 
 // The screenshot tour: every page, then the dashboard and History in dark
 // mode, then recording/HUD states, the light/dark filter editors, the
@@ -82,21 +90,29 @@ void tourShow(HWND window, int step) {
     SetTimer(window, tourTimerID, 700, nullptr);
 }
 
+bool tourBegin(HWND window, const std::wstring &directory) {
+    if (tour.step >= 0) return false;
+    tour.directory = directory;
+    tour.step = 0;
+    tourShow(window, 0);
+    return true;
+}
+
 void tourStep(HWND window) {
-    if (state.tour.tourStep < 0 || state.tour.tourStep >= tourSteps) return;
+    if (tour.step < 0 || tour.step >= tourSteps) return;
     char name[64];
-    snprintf(name, sizeof name, "%02d-%s.bmp", state.tour.tourStep + 1, tourName(state.tour.tourStep).c_str());
-    const std::string path = jsti::utf8(state.tour.tourDirectory) + "\\" + name;
+    snprintf(name, sizeof name, "%02d-%s.bmp", tour.step + 1, tourName(tour.step).c_str());
+    const std::string path = jsti::utf8(tour.directory) + "\\" + name;
     char error[512] = {};
     std::string hudError;
     std::wstring widePath;
-    if (state.tour.tourStep == tourHistoryFilters || state.tour.tourStep == tourDarkHistoryFilters) {
+    if (tour.step == tourHistoryFilters || tour.step == tourDarkHistoryFilters) {
         HWND filters = jsti_history_filters_window();
         if (jsti_owned_window_save_snapshot(filters, path.c_str(), error, sizeof error) != 0) {
             emit(window, JSTI_EVENT_ERROR, error);
         }
         if (filters) DestroyWindow(filters);
-    } else if (state.tour.tourStep >= tourHUDRecording && state.tour.tourStep <= tourCompactCompleted) {
+    } else if (tour.step >= tourHUDRecording && tour.step <= tourCompactCompleted) {
         // The HUD is its own layered window; it is drawn straight to the file.
         if (!jsti::wide(path.c_str(), widePath) || !jsti::hud::saveSnapshot(widePath, hudError)) {
             emit(window, JSTI_EVENT_ERROR, hudError.empty() ? "The HUD snapshot path is invalid." : hudError.c_str());
@@ -104,11 +120,11 @@ void tourStep(HWND window) {
     } else if (jsti_window_save_snapshot(path.c_str(), error, sizeof error) != 0) {
         emit(window, JSTI_EVENT_ERROR, error);
     }
-    ++state.tour.tourStep;
-    if (state.tour.tourStep < tourSteps) tourShow(window, state.tour.tourStep);
+    ++tour.step;
+    if (tour.step < tourSteps) tourShow(window, tour.step);
     else {
         std::string comparisonError;
-        if (!jsti_comparison_self_test(window, comparisonError, jsti::utf8(state.tour.tourDirectory)))
+        if (!jsti_comparison_self_test(window, comparisonError, jsti::utf8(tour.directory)))
             emit(window, JSTI_EVENT_ERROR, comparisonError.c_str());
         PostMessageW(window, WM_CLOSE, 0, 0);
     }

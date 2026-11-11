@@ -1,5 +1,16 @@
 /* Main-thread posting: setters queue updates that are applied in call order on the GTK thread. */
 #include "LinuxWindowInternal.h"
+#include "LinuxWindowDashboardPage.h"
+#include "LinuxWindowHistoryPage.h"
+
+/* The post queue: updates staged before the loop runs wait in `early_posts`;
+ * `window_closed` refuses new ones. Guarded by `post_lock`. */
+static gint loop_running;
+static GMutex post_lock;
+static gboolean window_closed;
+static GQueue early_posts = G_QUEUE_INIT;
+
+gboolean jsti_window_loop_running(void) { return g_atomic_int_get(&loop_running) != 0; }
 
 typedef struct Pending {
     apply_fn apply;
@@ -91,7 +102,7 @@ static void update_free(gpointer pointer) {
 static gboolean announce_state(gpointer unused) {
     (void)unused;
     ui.state_announcement = 0;
-    const char *text = gtk_label_get_text(ui.dashboard.status);
+    const char *text = gtk_label_get_text(dashboard_page()->status);
     if (jsti_hud_card() == NULL && text != NULL && text[0] != '\0')
         gtk_accessible_announce(GTK_ACCESSIBLE(ui.window), text, GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
     return G_SOURCE_REMOVE;
@@ -101,12 +112,12 @@ void update_apply(gpointer pointer) {
     Update *update = pointer;
     if (update->state >= 0 && update->state != ui.state && ui.state_announcement == 0)
         ui.state_announcement = g_idle_add_full(G_PRIORITY_LOW, announce_state, NULL, NULL);
-    if (update->status != NULL) gtk_label_set_text(ui.dashboard.status, update->status);
+    if (update->status != NULL) gtk_label_set_text(dashboard_page()->status, update->status);
     if (update->has_transcript) {
         cleanup_preview.visible = FALSE;
         set_transcript(update->transcript);
         /* Global text is not bound to a record. */
-        g_clear_pointer(&ui.history_page.presented_id, g_free);
+        g_clear_pointer(&history_page()->presented_id, g_free);
     }
     if (update->state >= 0) ui.state = update->state;
     refresh_actions();
@@ -121,10 +132,10 @@ void cleanup_preview_apply(gpointer pointer) {
         (ui.page == JSTI_PAGE_DASHBOARD || ui.page == JSTI_PAGE_HISTORY)) {
         set_transcript(cleanup_preview.text);
         cleanup_preview.visible = TRUE;
-        gtk_label_set_text(ui.dashboard.status, "Streaming cleanup preview. The original is saved in History.");
-        g_clear_pointer(&ui.history_page.presented_id, g_free);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard.copy), FALSE);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard.dashboard_copy), FALSE);
+        gtk_label_set_text(dashboard_page()->status, "Streaming cleanup preview. The original is saved in History.");
+        g_clear_pointer(&history_page()->presented_id, g_free);
+        gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->copy), FALSE);
+        gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), FALSE);
     }
     g_clear_pointer(&cleanup_preview.text, g_free);
     g_mutex_unlock(&cleanup_preview.lock);

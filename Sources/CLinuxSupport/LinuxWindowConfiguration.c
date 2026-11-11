@@ -1,5 +1,9 @@
 /* Dictation preferences: the configuration form, its updates and settings-search reveal. */
 #include "LinuxWindowInternal.h"
+#include "LinuxWindowDashboardPage.h"
+
+/* Configuration fields the host described, fixed by the first description. */
+static gint configuration_field_count;
 
 typedef struct ConfigurationUpdate {
     GPtrArray *titles, *values, *groups, *recovered, *choices;
@@ -13,7 +17,7 @@ typedef struct ConfigurationUpdate {
 } ConfigurationUpdate;
 
 static void configuration_problem(const char *message) {
-    gtk_label_set_text(ui.dashboard.status, message);
+    gtk_label_set_text(dashboard_page()->status, message);
 }
 
 static void configuration_submit(gint32 action, const char *const *values, gsize count) {

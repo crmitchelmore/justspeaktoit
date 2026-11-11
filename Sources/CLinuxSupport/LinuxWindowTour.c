@@ -1,5 +1,7 @@
 /* Window snapshots and the screenshot tour. */
 #include "LinuxWindowInternal.h"
+#include "LinuxWindowHistoryPage.h"
+#include "LinuxWindowOutputPage.h"
 
 /* ------------------------------------------------------ screenshot tour */
 
@@ -66,7 +68,7 @@ static void tour_show(Tour *tour) {
         adw_style_manager_set_color_scheme(adw_style_manager_get_default(),
             tour->step == TOUR_HISTORY_FILTERS ? ADW_COLOR_SCHEME_FORCE_LIGHT : ADW_COLOR_SCHEME_FORCE_DARK);
         show_page(JSTI_PAGE_HISTORY);
-        gtk_menu_button_popup(GTK_MENU_BUTTON(ui.history_page.history_filters));
+        gtk_menu_button_popup(GTK_MENU_BUTTON(history_page()->history_filters));
     } else if (tour->step == TOUR_HUD_RECORDING) {
         jsti_hud_show(1, "Recording", "Capturing audio",
                       "Could we move the catch-up to Friday? That gives us a little more time");
@@ -135,11 +137,11 @@ static gboolean tour_capture(gpointer data) {
     gchar *path = g_build_filename(tour->directory, file, NULL);
     char message[256] = { 0 };
     if (tour->step == TOUR_HISTORY_FILTERS || tour->step == TOUR_DARK_HISTORY_FILTERS) {
-        GtkPopover *popover = gtk_menu_button_get_popover(GTK_MENU_BUTTON(ui.history_page.history_filters));
+        GtkPopover *popover = gtk_menu_button_get_popover(GTK_MENU_BUTTON(history_page()->history_filters));
         if (!popover || jsti_widget_save_snapshot(GTK_WIDGET(popover), path, TRUE) != 0) {
             g_printerr("The History filter editor %s could not be saved.\n", file);
         }
-        gtk_menu_button_set_popover(GTK_MENU_BUTTON(ui.history_page.history_filters), NULL);
+        gtk_menu_button_set_popover(GTK_MENU_BUTTON(history_page()->history_filters), NULL);
         g_free(path); g_free(file);
         tour->step++;
         if (tour->step < TOUR_DONE) tour_show(tour);
@@ -237,9 +239,9 @@ static void tour_start(gpointer data) {
         return;
     }
     tour->output = (TextOutput){
-        .method = (gint32)adw_combo_row_get_selected(ui.output.output_row),
-        .restore = adw_switch_row_get_active(ui.output.restore_row),
-        .can_restore = ui.output.can_restore_clipboard
+        .method = (gint32)adw_combo_row_get_selected(output_page()->output_row),
+        .restore = adw_switch_row_get_active(output_page()->restore_row),
+        .can_restore = output_page()->can_restore_clipboard
     };
     tour_show(tour);
 }

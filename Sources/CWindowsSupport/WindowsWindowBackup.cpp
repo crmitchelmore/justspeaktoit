@@ -1,7 +1,34 @@
 // General > Backup and audio cleanup: migration backups, restore and cleanup confirmations.
-#include "WindowsWindowInternal.hpp"
+#include "WindowsWindowBackup.hpp"
 
 namespace jsti_window {
+namespace {
+// The audio cleanup confirmation and backup report waiting for the UI thread,
+// under WindowState::mutex.
+struct Housekeeping {
+    std::string audioCleanupToken;
+    size_t audioCleanupCount = 0;
+    std::wstring migrationReport;
+};
+Housekeeping housekeeping;
+} // namespace
+
+void takeAudioCleanup(std::string &token, size_t &count) {
+    token.swap(housekeeping.audioCleanupToken);
+    count = housekeeping.audioCleanupCount;
+}
+
+std::wstring takeMigrationReport() {
+    std::wstring report;
+    report.swap(housekeeping.migrationReport);
+    return report;
+}
+
+void retireHousekeeping() {
+    housekeeping.audioCleanupToken.clear();
+    housekeeping.migrationReport.clear();
+}
+
 
 void emitMigrationInspection(const std::string &path) {
     if (state.callback) state.callback(JSTI_EVENT_MIGRATION_INSPECT, path.c_str(), 0, state.context);
@@ -85,13 +112,13 @@ int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *err
         return jsti::fail("The recording audio confirmation is invalid.", error, capacity);
     }
     std::lock_guard<std::mutex> lock(state.mutex);
-    if (!state.window || !state.history.audioCleanupToken.empty()) {
+    if (!state.window || !housekeeping.audioCleanupToken.empty()) {
         return jsti::fail("The recording audio confirmation is unavailable.", error, capacity);
     }
-    state.history.audioCleanupToken = token;
-    state.history.audioCleanupCount = count;
+    housekeeping.audioCleanupToken = token;
+    housekeeping.audioCleanupCount = count;
     if (!PostMessageW(state.window, audioCleanupMessage, 0, 0)) {
-        state.history.audioCleanupToken.clear();
+        housekeeping.audioCleanupToken.clear();
         return jsti::fail("Could not show the recording audio confirmation.", error, capacity);
     }
     return 0;
@@ -121,14 +148,14 @@ int jsti_window_show_migration_report(const char *text, char *error, size_t capa
         return jsti::fail("The backup inspection report is invalid.", error, capacity);
     }
     std::lock_guard<std::mutex> lock(state.mutex);
-    if (!state.window || !state.history.migrationReport.empty()) {
+    if (!state.window || !housekeeping.migrationReport.empty()) {
         return jsti::fail("The backup inspection report is unavailable.", error, capacity);
     }
-    state.history.migrationReport = std::move(report);
+    housekeeping.migrationReport = std::move(report);
     if (!state.posted) {
         state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
         if (!state.posted) {
-            state.history.migrationReport.clear();
+            housekeeping.migrationReport.clear();
             return jsti::fail("Could not show the backup inspection report.", error, capacity);
         }
     }

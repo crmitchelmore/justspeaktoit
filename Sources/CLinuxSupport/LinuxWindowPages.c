@@ -1,5 +1,10 @@
 /* Page builders: shared page scaffolding, Dashboard and History. */
 #include "LinuxWindowInternal.h"
+#include "LinuxWindowDashboardPage.h"
+#include "LinuxWindowHistoryPage.h"
+
+static DashboardPage dashboard_state;
+DashboardPage *dashboard_page(void) { return &dashboard_state; }
 
 /* --------------------------------------------------------------- layout */
 
@@ -93,7 +98,6 @@ static GtkWidget *setup_tile(const char *icon, const char *title, GtkLabel **det
 }
 
 /* Side by side, or stacked when the window is narrow (see build_window). */
-GtkWidget *columns;
 
 /* Stack hero actions before their labels force the page wider than its viewport.
  * Breakpoint setters restore the desktop arrangement when space is available. */
@@ -110,13 +114,13 @@ void add_compact_hero_setters(AdwBreakpoint *breakpoint, GtkWidget *widget) {
 }
 
 static GtkWidget *two_columns(GtkWidget *first, GtkWidget *second) {
-    columns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 20);
-    gtk_box_set_homogeneous(GTK_BOX(columns), TRUE);
+    dashboard_page()->columns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 20);
+    gtk_box_set_homogeneous(GTK_BOX(dashboard_page()->columns), TRUE);
     gtk_widget_set_valign(first, GTK_ALIGN_START);
     gtk_widget_set_valign(second, GTK_ALIGN_START);
-    gtk_box_append(GTK_BOX(columns), first);
-    gtk_box_append(GTK_BOX(columns), second);
-    return columns;
+    gtk_box_append(GTK_BOX(dashboard_page()->columns), first);
+    gtk_box_append(GTK_BOX(dashboard_page()->columns), second);
+    return dashboard_page()->columns;
 }
 
 static GtkWidget *grid_of(GtkWidget *const *items, int count) {
@@ -145,21 +149,21 @@ GtkWidget *build_dashboard(GtkTextBuffer *buffer) {
         NULL, "Ready when you are",
         "Turn a thought into text. Record, review, and use it anywhere.",
         &chips, &trailing);
-    ui.dashboard.record = GTK_BUTTON(gtk_button_new_with_label("Start Recording"));
-    gtk_widget_add_css_class(GTK_WIDGET(ui.dashboard.record), "jsti-record-hero");
-    g_signal_connect(ui.dashboard.record, "clicked", G_CALLBACK(on_record), NULL);
-    gtk_box_append(GTK_BOX(trailing), GTK_WIDGET(ui.dashboard.record));
-    ui.dashboard.live_preview = GTK_LABEL(gtk_label_new(""));
-    gtk_label_set_xalign(ui.dashboard.live_preview, 0);
-    gtk_label_set_wrap(ui.dashboard.live_preview, TRUE);
-    gtk_label_set_lines(ui.dashboard.live_preview, 3);
-    gtk_label_set_ellipsize(ui.dashboard.live_preview, PANGO_ELLIPSIZE_START);
-    gtk_widget_add_css_class(GTK_WIDGET(ui.dashboard.live_preview), "jsti-live-preview");
-    gtk_widget_set_visible(GTK_WIDGET(ui.dashboard.live_preview), FALSE);
-    gtk_box_insert_child_after(GTK_BOX(hero), GTK_WIDGET(ui.dashboard.live_preview), gtk_widget_get_first_child(hero));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Sessions", &ui.dashboard.hero_sessions));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Recording Time", &ui.dashboard.hero_time));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Spend", &ui.dashboard.hero_spend));
+    dashboard_page()->record = GTK_BUTTON(gtk_button_new_with_label("Start Recording"));
+    gtk_widget_add_css_class(GTK_WIDGET(dashboard_page()->record), "jsti-record-hero");
+    g_signal_connect(dashboard_page()->record, "clicked", G_CALLBACK(on_record), NULL);
+    gtk_box_append(GTK_BOX(trailing), GTK_WIDGET(dashboard_page()->record));
+    dashboard_page()->live_preview = GTK_LABEL(gtk_label_new(""));
+    gtk_label_set_xalign(dashboard_page()->live_preview, 0);
+    gtk_label_set_wrap(dashboard_page()->live_preview, TRUE);
+    gtk_label_set_lines(dashboard_page()->live_preview, 3);
+    gtk_label_set_ellipsize(dashboard_page()->live_preview, PANGO_ELLIPSIZE_START);
+    gtk_widget_add_css_class(GTK_WIDGET(dashboard_page()->live_preview), "jsti-live-preview");
+    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->live_preview), FALSE);
+    gtk_box_insert_child_after(GTK_BOX(hero), GTK_WIDGET(dashboard_page()->live_preview), gtk_widget_get_first_child(hero));
+    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Sessions", &dashboard_page()->hero_sessions));
+    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Recording Time", &dashboard_page()->hero_time));
+    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Spend", &dashboard_page()->hero_spend));
     gtk_box_append(GTK_BOX(column), hero);
 
     GtkWidget *body;
@@ -176,29 +180,29 @@ GtkWidget *build_dashboard(GtkTextBuffer *buffer) {
     gtk_box_append(GTK_BOX(body), preview);
     GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(actions, GTK_ALIGN_END);
-    ui.dashboard.cancel = GTK_BUTTON(gtk_button_new_with_label("Cancel"));
-    g_signal_connect(ui.dashboard.cancel, "clicked", G_CALLBACK(on_cancel), NULL);
-    ui.dashboard.dashboard_copy = GTK_BUTTON(gtk_button_new_with_label("Copy"));
-    gtk_widget_add_css_class(GTK_WIDGET(ui.dashboard.dashboard_copy), "suggested-action");
-    g_signal_connect(ui.dashboard.dashboard_copy, "clicked", G_CALLBACK(on_copy), NULL);
-    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.dashboard.cancel));
-    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.dashboard.dashboard_copy));
+    dashboard_page()->cancel = GTK_BUTTON(gtk_button_new_with_label("Cancel"));
+    g_signal_connect(dashboard_page()->cancel, "clicked", G_CALLBACK(on_cancel), NULL);
+    dashboard_page()->dashboard_copy = GTK_BUTTON(gtk_button_new_with_label("Copy"));
+    gtk_widget_add_css_class(GTK_WIDGET(dashboard_page()->dashboard_copy), "suggested-action");
+    g_signal_connect(dashboard_page()->dashboard_copy, "clicked", G_CALLBACK(on_copy), NULL);
+    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(dashboard_page()->cancel));
+    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(dashboard_page()->dashboard_copy));
     gtk_box_append(GTK_BOX(body), actions);
     gtk_box_append(GTK_BOX(column), transcript);
 
     GtkWidget *insights_body;
     GtkWidget *insights = jsti_card_new("power-profile-performance-symbolic", "Insights", &insights_body);
     GtkWidget *stats[] = {
-        jsti_stat_new("Sessions", &ui.dashboard.insight_sessions), jsti_stat_new("Recording Time", &ui.dashboard.insight_time),
-        jsti_stat_new("Average Length", &ui.dashboard.insight_average), jsti_stat_new("Spend", &ui.dashboard.insight_spend),
+        jsti_stat_new("Sessions", &dashboard_page()->insight_sessions), jsti_stat_new("Recording Time", &dashboard_page()->insight_time),
+        jsti_stat_new("Average Length", &dashboard_page()->insight_average), jsti_stat_new("Spend", &dashboard_page()->insight_spend),
     };
     gtk_box_append(GTK_BOX(insights_body), grid_of(stats, G_N_ELEMENTS(stats)));
     GtkWidget *setup_body;
     GtkWidget *setup = jsti_card_new("emblem-system-symbolic", "Setup", &setup_body);
-    gtk_box_append(GTK_BOX(setup_body), setup_tile("audio-input-microphone-symbolic", "Microphone", &ui.dashboard.setup_microphone));
-    gtk_box_append(GTK_BOX(setup_body), setup_tile("document-edit-symbolic", "Transcription model", &ui.dashboard.setup_model));
-    gtk_box_append(GTK_BOX(setup_body), setup_tile("input-keyboard-symbolic", "Keyboard shortcut", &ui.dashboard.setup_shortcut));
-    gtk_box_append(GTK_BOX(setup_body), setup_tile("edit-paste-symbolic", "Text output", &ui.dashboard.setup_output));
+    gtk_box_append(GTK_BOX(setup_body), setup_tile("audio-input-microphone-symbolic", "Microphone", &dashboard_page()->setup_microphone));
+    gtk_box_append(GTK_BOX(setup_body), setup_tile("document-edit-symbolic", "Transcription model", &dashboard_page()->setup_model));
+    gtk_box_append(GTK_BOX(setup_body), setup_tile("input-keyboard-symbolic", "Keyboard shortcut", &dashboard_page()->setup_shortcut));
+    gtk_box_append(GTK_BOX(setup_body), setup_tile("edit-paste-symbolic", "Text output", &dashboard_page()->setup_output));
     gtk_box_append(GTK_BOX(column), two_columns(insights, setup));
     return page;
 }
@@ -241,8 +245,8 @@ GtkWidget *history_delete_dialog(const char *identifiers, gboolean clear) {
 
 static void on_history_delete(GtkButton *button, gpointer data) {
     (void)data;
-    gboolean clear = button == ui.history_page.history_clear;
-    const char *identifiers = clear ? ui.history_page.all_history_ids : ui.history_page.selected_id;
+    gboolean clear = button == history_page()->history_clear;
+    const char *identifiers = clear ? history_page()->all_history_ids : history_page()->selected_id;
     if (ui.state != 0 || identifiers == NULL || identifiers[0] == '\0') return;
     gtk_window_present(GTK_WINDOW(history_delete_dialog(identifiers, clear)));
 }
@@ -251,7 +255,7 @@ static void on_history_delete(GtkButton *button, gpointer data) {
 static void on_history_edge(GtkScrolledWindow *scroller, GtkPositionType position, gpointer data) {
     (void)scroller;
     (void)data;
-    if (position == GTK_POS_BOTTOM && ui.history_page.history_ids != NULL && ui.history_page.history_ids->len > 0) {
+    if (position == GTK_POS_BOTTOM && history_page()->history_ids != NULL && history_page()->history_ids->len > 0) {
         emit(JSTI_EVENT_HISTORY_LOAD_MORE, "", 0);
     }
 }
@@ -263,40 +267,40 @@ GtkWidget *build_history(GtkTextBuffer *buffer) {
     GtkWidget *hero = jsti_hero_new(
         NULL, "Session History", "Search, replay and reuse past recordings and their transcripts.", &chips,
         &trailing);
-    ui.history_page.history_import = GTK_BUTTON(gtk_button_new_with_label("Import…"));
-    gtk_widget_add_css_class(GTK_WIDGET(ui.history_page.history_import), "jsti-hero-button");
-    g_signal_connect(ui.history_page.history_import, "clicked", G_CALLBACK(on_import), NULL);
-    gtk_box_append(GTK_BOX(trailing), GTK_WIDGET(ui.history_page.history_import));
-    ui.history_page.history_clear = GTK_BUTTON(gtk_button_new_with_label("Clear History…"));
-    g_signal_connect(ui.history_page.history_clear, "clicked", G_CALLBACK(on_history_delete), NULL);
-    gtk_box_prepend(GTK_BOX(trailing), GTK_WIDGET(ui.history_page.history_clear));
-    ui.history_page.history_filters = jsti_history_filters_button_new();
-    gtk_box_prepend(GTK_BOX(trailing), ui.history_page.history_filters);
-    ui.history_page.search = GTK_SEARCH_ENTRY(gtk_search_entry_new());
-    gtk_search_entry_set_placeholder_text(ui.history_page.search, "Search transcripts, models and profiles");
-    gtk_accessible_update_property(GTK_ACCESSIBLE(ui.history_page.search), GTK_ACCESSIBLE_PROPERTY_LABEL, "Search History", -1);
-    g_signal_connect(ui.history_page.search, "search-changed", G_CALLBACK(on_search), NULL);
-    gtk_box_insert_child_after(GTK_BOX(hero), GTK_WIDGET(ui.history_page.search), gtk_widget_get_first_child(hero));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Sessions", &ui.history_page.history_sessions));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Errors", &ui.history_page.history_errors));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Average Length", &ui.history_page.history_average));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Spend", &ui.history_page.history_spend));
+    history_page()->history_import = GTK_BUTTON(gtk_button_new_with_label("Import…"));
+    gtk_widget_add_css_class(GTK_WIDGET(history_page()->history_import), "jsti-hero-button");
+    g_signal_connect(history_page()->history_import, "clicked", G_CALLBACK(on_import), NULL);
+    gtk_box_append(GTK_BOX(trailing), GTK_WIDGET(history_page()->history_import));
+    history_page()->history_clear = GTK_BUTTON(gtk_button_new_with_label("Clear History…"));
+    g_signal_connect(history_page()->history_clear, "clicked", G_CALLBACK(on_history_delete), NULL);
+    gtk_box_prepend(GTK_BOX(trailing), GTK_WIDGET(history_page()->history_clear));
+    history_page()->history_filters = jsti_history_filters_button_new();
+    gtk_box_prepend(GTK_BOX(trailing), history_page()->history_filters);
+    history_page()->search = GTK_SEARCH_ENTRY(gtk_search_entry_new());
+    gtk_search_entry_set_placeholder_text(history_page()->search, "Search transcripts, models and profiles");
+    gtk_accessible_update_property(GTK_ACCESSIBLE(history_page()->search), GTK_ACCESSIBLE_PROPERTY_LABEL, "Search History", -1);
+    g_signal_connect(history_page()->search, "search-changed", G_CALLBACK(on_search), NULL);
+    gtk_box_insert_child_after(GTK_BOX(hero), GTK_WIDGET(history_page()->search), gtk_widget_get_first_child(hero));
+    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Sessions", &history_page()->history_sessions));
+    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Errors", &history_page()->history_errors));
+    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Average Length", &history_page()->history_average));
+    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Spend", &history_page()->history_spend));
     gtk_box_append(GTK_BOX(column), hero);
 
-    ui.history_page.history = GTK_LIST_BOX(gtk_list_box_new());
-    gtk_widget_add_css_class(GTK_WIDGET(ui.history_page.history), "jsti-history");
-    gtk_list_box_set_selection_mode(ui.history_page.history, GTK_SELECTION_SINGLE);
-    g_signal_connect(ui.history_page.history, "row-selected", G_CALLBACK(on_history_selected), NULL);
-    ui.history_page.history_ids = g_ptr_array_new_with_free_func(g_free);
-    gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.history_page.history));
-    ui.history_page.history_empty = gtk_label_new("No history yet. Press Record to capture your first session.");
-    gtk_widget_add_css_class(ui.history_page.history_empty, "jsti-empty");
-    gtk_box_append(GTK_BOX(column), ui.history_page.history_empty);
+    history_page()->history = GTK_LIST_BOX(gtk_list_box_new());
+    gtk_widget_add_css_class(GTK_WIDGET(history_page()->history), "jsti-history");
+    gtk_list_box_set_selection_mode(history_page()->history, GTK_SELECTION_SINGLE);
+    g_signal_connect(history_page()->history, "row-selected", G_CALLBACK(on_history_selected), NULL);
+    history_page()->history_ids = g_ptr_array_new_with_free_func(g_free);
+    gtk_box_append(GTK_BOX(column), GTK_WIDGET(history_page()->history));
+    history_page()->history_empty = gtk_label_new("No history yet. Press Record to capture your first session.");
+    gtk_widget_add_css_class(history_page()->history_empty, "jsti-empty");
+    gtk_box_append(GTK_BOX(column), history_page()->history_empty);
 
     /* The detail moved into the selected card. */
-    ui.history_page.detail = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    g_object_ref_sink(ui.history_page.detail);
-    gtk_box_append(GTK_BOX(ui.history_page.detail), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    history_page()->detail = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    g_object_ref_sink(history_page()->detail);
+    gtk_box_append(GTK_BOX(history_page()->detail), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     GtkWidget *heading = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     GtkWidget *label = gtk_label_new("Transcript");
     gtk_label_set_xalign(GTK_LABEL(label), 0);
@@ -304,63 +308,63 @@ GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_widget_add_css_class(label, "jsti-detail-heading");
     gtk_box_append(GTK_BOX(heading), label);
     const char *versions[] = { "Processed", "Original", NULL };
-    ui.dashboard.version = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(versions));
-    gtk_widget_set_tooltip_text(GTK_WIDGET(ui.dashboard.version), "Transcript version");
-    jsti_accessible_set_name(GTK_WIDGET(ui.dashboard.version), "Transcript version");
-    g_signal_connect(ui.dashboard.version, "notify::selected", G_CALLBACK(on_version), NULL);
-    gtk_box_append(GTK_BOX(heading), GTK_WIDGET(ui.dashboard.version));
-    gtk_box_append(GTK_BOX(ui.history_page.detail), heading);
+    dashboard_page()->version = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(versions));
+    gtk_widget_set_tooltip_text(GTK_WIDGET(dashboard_page()->version), "Transcript version");
+    jsti_accessible_set_name(GTK_WIDGET(dashboard_page()->version), "Transcript version");
+    g_signal_connect(dashboard_page()->version, "notify::selected", G_CALLBACK(on_version), NULL);
+    gtk_box_append(GTK_BOX(heading), GTK_WIDGET(dashboard_page()->version));
+    gtk_box_append(GTK_BOX(history_page()->detail), heading);
     GtkWidget *scroller = transcript_view(buffer, 72);
-    ui.dashboard.transcript = GTK_TEXT_VIEW(gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller)));
-    gtk_box_append(GTK_BOX(ui.history_page.detail), scroller);
+    dashboard_page()->transcript = GTK_TEXT_VIEW(gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller)));
+    gtk_box_append(GTK_BOX(history_page()->detail), scroller);
 
     GtkWidget *playback = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    ui.history_page.play = GTK_BUTTON(gtk_button_new_with_label("Play"));
-    ui.history_page.stop_play = GTK_BUTTON(gtk_button_new_with_label("Stop"));
-    g_signal_connect(ui.history_page.play, "clicked", G_CALLBACK(on_play), NULL);
-    g_signal_connect(ui.history_page.stop_play, "clicked", G_CALLBACK(on_stop_play), NULL);
-    ui.history_page.playback_label = GTK_LABEL(gtk_label_new(""));
-    gtk_widget_add_css_class(GTK_WIDGET(ui.history_page.playback_label), "dim-label");
-    gtk_widget_add_css_class(GTK_WIDGET(ui.history_page.playback_label), "numeric");
-    gtk_widget_set_hexpand(GTK_WIDGET(ui.history_page.playback_label), TRUE);
-    gtk_label_set_xalign(ui.history_page.playback_label, 0);
-    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(ui.history_page.play));
-    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(ui.history_page.stop_play));
-    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(ui.history_page.playback_label));
-    ui.dashboard.copy = GTK_BUTTON(gtk_button_new_with_label("Copy"));
-    gtk_widget_add_css_class(GTK_WIDGET(ui.dashboard.copy), "suggested-action");
-    g_signal_connect(ui.dashboard.copy, "clicked", G_CALLBACK(on_copy), NULL);
-    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(ui.dashboard.copy));
-    gtk_box_append(GTK_BOX(ui.history_page.detail), playback);
+    history_page()->play = GTK_BUTTON(gtk_button_new_with_label("Play"));
+    history_page()->stop_play = GTK_BUTTON(gtk_button_new_with_label("Stop"));
+    g_signal_connect(history_page()->play, "clicked", G_CALLBACK(on_play), NULL);
+    g_signal_connect(history_page()->stop_play, "clicked", G_CALLBACK(on_stop_play), NULL);
+    history_page()->playback_label = GTK_LABEL(gtk_label_new(""));
+    gtk_widget_add_css_class(GTK_WIDGET(history_page()->playback_label), "dim-label");
+    gtk_widget_add_css_class(GTK_WIDGET(history_page()->playback_label), "numeric");
+    gtk_widget_set_hexpand(GTK_WIDGET(history_page()->playback_label), TRUE);
+    gtk_label_set_xalign(history_page()->playback_label, 0);
+    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(history_page()->play));
+    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(history_page()->stop_play));
+    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(history_page()->playback_label));
+    dashboard_page()->copy = GTK_BUTTON(gtk_button_new_with_label("Copy"));
+    gtk_widget_add_css_class(GTK_WIDGET(dashboard_page()->copy), "suggested-action");
+    g_signal_connect(dashboard_page()->copy, "clicked", G_CALLBACK(on_copy), NULL);
+    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(dashboard_page()->copy));
+    gtk_box_append(GTK_BOX(history_page()->detail), playback);
 
     GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_set_halign(actions, GTK_ALIGN_END);
     read_aloud.button = GTK_BUTTON(gtk_button_new_with_label("Read aloud"));
     g_signal_connect(read_aloud.button, "clicked", G_CALLBACK(on_read_aloud), NULL);
-    ui.history_page.retry = GTK_BUTTON(gtk_button_new_with_label("Retry"));
-    ui.history_page.export_button = GTK_BUTTON(gtk_button_new_with_label("Export…"));
-    ui.history_page.issue_button = GTK_BUTTON(gtk_button_new_with_label("Create Issue with Details…"));
-    g_signal_connect(ui.history_page.issue_button, "clicked", G_CALLBACK(on_issue_report), NULL);
-    ui.history_page.open_audio = GTK_BUTTON(gtk_button_new_with_label("Open audio"));
-    g_signal_connect(ui.history_page.retry, "clicked", G_CALLBACK(on_retry), NULL);
-    g_signal_connect(ui.history_page.export_button, "clicked", G_CALLBACK(on_export), NULL);
-    g_signal_connect(ui.history_page.open_audio, "clicked", G_CALLBACK(on_open_audio), NULL);
+    history_page()->retry = GTK_BUTTON(gtk_button_new_with_label("Retry"));
+    history_page()->export_button = GTK_BUTTON(gtk_button_new_with_label("Export…"));
+    history_page()->issue_button = GTK_BUTTON(gtk_button_new_with_label("Create Issue with Details…"));
+    g_signal_connect(history_page()->issue_button, "clicked", G_CALLBACK(on_issue_report), NULL);
+    history_page()->open_audio = GTK_BUTTON(gtk_button_new_with_label("Open audio"));
+    g_signal_connect(history_page()->retry, "clicked", G_CALLBACK(on_retry), NULL);
+    g_signal_connect(history_page()->export_button, "clicked", G_CALLBACK(on_export), NULL);
+    g_signal_connect(history_page()->open_audio, "clicked", G_CALLBACK(on_open_audio), NULL);
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(read_aloud.button));
-    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.history_page.retry));
-    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.history_page.export_button));
-    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.history_page.open_audio));
-    gtk_box_append(GTK_BOX(ui.history_page.detail), actions);
-    gtk_widget_set_halign(GTK_WIDGET(ui.history_page.issue_button), GTK_ALIGN_END);
-    gtk_widget_set_size_request(GTK_WIDGET(ui.history_page.issue_button), -1, 44);
-    gtk_box_append(GTK_BOX(ui.history_page.detail), GTK_WIDGET(ui.history_page.issue_button));
+    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(history_page()->retry));
+    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(history_page()->export_button));
+    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(history_page()->open_audio));
+    gtk_box_append(GTK_BOX(history_page()->detail), actions);
+    gtk_widget_set_halign(GTK_WIDGET(history_page()->issue_button), GTK_ALIGN_END);
+    gtk_widget_set_size_request(GTK_WIDGET(history_page()->issue_button), -1, 44);
+    gtk_box_append(GTK_BOX(history_page()->detail), GTK_WIDGET(history_page()->issue_button));
     GtkWidget *management = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_set_halign(management, GTK_ALIGN_END);
-    ui.history_page.correction_results = GTK_BUTTON(gtk_button_new_with_label("Correction results"));
-    g_signal_connect(ui.history_page.correction_results, "clicked", G_CALLBACK(on_correction_results), NULL);
-    ui.history_page.history_delete = GTK_BUTTON(gtk_button_new_with_label("Delete…"));
-    g_signal_connect(ui.history_page.history_delete, "clicked", G_CALLBACK(on_history_delete), NULL);
-    gtk_box_append(GTK_BOX(management), GTK_WIDGET(ui.history_page.correction_results));
-    gtk_box_append(GTK_BOX(management), GTK_WIDGET(ui.history_page.history_delete));
-    gtk_box_append(GTK_BOX(ui.history_page.detail), management);
+    history_page()->correction_results = GTK_BUTTON(gtk_button_new_with_label("Correction results"));
+    g_signal_connect(history_page()->correction_results, "clicked", G_CALLBACK(on_correction_results), NULL);
+    history_page()->history_delete = GTK_BUTTON(gtk_button_new_with_label("Delete…"));
+    g_signal_connect(history_page()->history_delete, "clicked", G_CALLBACK(on_history_delete), NULL);
+    gtk_box_append(GTK_BOX(management), GTK_WIDGET(history_page()->correction_results));
+    gtk_box_append(GTK_BOX(management), GTK_WIDGET(history_page()->history_delete));
+    gtk_box_append(GTK_BOX(history_page()->detail), management);
     return page;
 }

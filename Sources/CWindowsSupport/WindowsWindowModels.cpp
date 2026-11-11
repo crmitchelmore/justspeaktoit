@@ -1,30 +1,35 @@
 // Transcription page: the model and source pickers, model catalogue and microphones.
-#include "WindowsWindowInternal.hpp"
+#include "WindowsWindowModelsPage.hpp"
 
 namespace jsti_window {
+namespace {
+ModelsPageState modelChoices;
+} // namespace
+
+ModelsPageState &modelsState() { return modelChoices; }
 
 int selection(HWND window) {
     const LRESULT index = SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0);
-    return index == CB_ERR || static_cast<size_t>(index) >= state.models.filteredModels.size()
-        ? -1 : state.models.filteredModels[static_cast<size_t>(index)];
+    return index == CB_ERR || static_cast<size_t>(index) >= modelsState().filteredModels.size()
+        ? -1 : modelsState().filteredModels[static_cast<size_t>(index)];
 }
 
-int activeSource() { return state.models.activeMode / 2; }
+int activeSource() { return modelsState().activeMode / 2; }
 
 bool hasModeChoice() {
     const int source = activeSource() * 2;
-    return state.models.preferredModels[source] >= 0 && state.models.preferredModels[source + 1] >= 0;
+    return modelsState().preferredModels[source] >= 0 && modelsState().preferredModels[source + 1] >= 0;
 }
 
 bool hasSourceChoice() {
-    return (state.models.preferredModels[0] >= 0 || state.models.preferredModels[1] >= 0) &&
-        (state.models.preferredModels[2] >= 0 || state.models.preferredModels[3] >= 0);
+    return (modelsState().preferredModels[0] >= 0 || modelsState().preferredModels[1] >= 0) &&
+        (modelsState().preferredModels[2] >= 0 || modelsState().preferredModels[3] >= 0);
 }
 
 bool liveSelection(HWND window) {
     const int selected = selection(window);
-    return selected >= 0 && static_cast<size_t>(selected) < state.models.modelModes.size() &&
-        state.models.modelModes[selected] % 2 == 1;
+    return selected >= 0 && static_cast<size_t>(selected) < modelsState().modelModes.size() &&
+        modelsState().modelModes[selected] % 2 == 1;
 }
 
 // Remote shows OpenRouter discovery and Refresh models; Local shows the
@@ -33,7 +38,7 @@ void updateSourceControls(HWND window) {
     const bool local = activeSource() == 1;
     setShown(window, modelRefreshID, !local);
     setShown(window, localModelsID, local);
-    const std::wstring text = local ? jsti_local_models_summary() : state.models.remoteModelStatus;
+    const std::wstring text = local ? jsti_local_models_summary() : modelsState().remoteModelStatus;
     wchar_t shown[1100] = {};
     GetDlgItemTextW(window, modelStatusID, shown, 1100);
     if (text != shown) SetDlgItemTextW(window, modelStatusID, text.c_str());
@@ -57,30 +62,30 @@ bool populateModels(HWND window) {
     HWND combo = GetDlgItem(window, modelID);
     SendMessageW(combo, WM_SETREDRAW, FALSE, 0);
     SendMessageW(combo, CB_RESETCONTENT, 0, 0);
-    state.models.filteredModels.clear();
+    modelsState().filteredModels.clear();
     LRESULT selectedRow = CB_ERR;
     bool success = true;
     std::vector<size_t> visible;
-    for (size_t index = 0; index < state.models.modelNames.size(); ++index) {
-        if (state.models.modelModes[index] != state.models.activeMode) continue;
-        const int rank = index < state.models.modelOrder.size() ? state.models.modelOrder[index] : static_cast<int>(index);
-        if (rank >= 0 || static_cast<int>(index) == state.models.preferredModels[state.models.activeMode]) visible.push_back(index);
+    for (size_t index = 0; index < modelsState().modelNames.size(); ++index) {
+        if (modelsState().modelModes[index] != modelsState().activeMode) continue;
+        const int rank = index < modelsState().modelOrder.size() ? modelsState().modelOrder[index] : static_cast<int>(index);
+        if (rank >= 0 || static_cast<int>(index) == modelsState().preferredModels[modelsState().activeMode]) visible.push_back(index);
     }
     auto rank = [](size_t index) {
-        const int value = index < state.models.modelOrder.size() ? state.models.modelOrder[index] : static_cast<int>(index);
+        const int value = index < modelsState().modelOrder.size() ? modelsState().modelOrder[index] : static_cast<int>(index);
         return value < 0 ? (std::numeric_limits<int>::max)() : value;
     };
     std::stable_sort(visible.begin(), visible.end(), [&](size_t left, size_t right) { return rank(left) < rank(right); });
     for (const size_t index : visible) {
         const LRESULT row = SendMessageW(combo, CB_ADDSTRING, 0,
-                                         reinterpret_cast<LPARAM>(state.models.modelNames[index].c_str()));
+                                         reinterpret_cast<LPARAM>(modelsState().modelNames[index].c_str()));
         if (row == CB_ERR || row == CB_ERRSPACE) { success = false; break; }
-        state.models.filteredModels.push_back(static_cast<int>(index));
-        if (static_cast<int>(index) == state.models.preferredModels[state.models.activeMode]) selectedRow = row;
+        modelsState().filteredModels.push_back(static_cast<int>(index));
+        if (static_cast<int>(index) == modelsState().preferredModels[modelsState().activeMode]) selectedRow = row;
     }
     if (selectedRow == CB_ERR || !success) {
         SendMessageW(combo, CB_RESETCONTENT, 0, 0);
-        state.models.filteredModels.clear();
+        modelsState().filteredModels.clear();
         success = false;
     } else SendMessageW(combo, CB_SETCURSEL, static_cast<WPARAM>(selectedRow), 0);
     SendMessageW(combo, WM_SETREDRAW, TRUE, 0);
@@ -90,13 +95,13 @@ bool populateModels(HWND window) {
         (state.wanted.count(modeID) == 0 || state.wanted[modeID] != choice || state.wanted[sourceID] != hasSourceChoice());
     setShown(window, modeID, choice);
     setShown(window, 95, choice);
-    SendDlgItemMessageW(window, modeID, CB_SETCURSEL, state.models.activeMode % 2, 0);
+    SendDlgItemMessageW(window, modeID, CB_SETCURSEL, modelsState().activeMode % 2, 0);
     const bool sources = hasSourceChoice();
     setShown(window, sourceID, sources);
     setShown(window, sourceLabelID, sources);
     SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, activeSource(), 0);
     const wchar_t *label = activeSource() == 1 ? L"On-device &transcription model"
-        : (!choice && state.models.activeMode == 1 ? L"Live &transcription model" : L"&Transcription model");
+        : (!choice && modelsState().activeMode == 1 ? L"Live &transcription model" : L"&Transcription model");
     SetDlgItemTextW(window, 90, label);
     updateSourceControls(window);
     int recording;
@@ -109,20 +114,20 @@ bool populateModels(HWND window) {
 
 bool applyModelRows(HWND window, const std::vector<ModelRow> &rows) {
     if (rows.empty()) return true;
-    bool changed = rows.size() != state.models.modelNames.size();
+    bool changed = rows.size() != modelsState().modelNames.size();
     for (size_t index = 0; !changed && index < rows.size(); ++index) {
-        changed = rows[index].name != state.models.modelNames[index] || rows[index].mode != state.models.modelModes[index] ||
-            index >= state.models.modelOrder.size() || rows[index].order != state.models.modelOrder[index];
+        changed = rows[index].name != modelsState().modelNames[index] || rows[index].mode != modelsState().modelModes[index] ||
+            index >= modelsState().modelOrder.size() || rows[index].order != modelsState().modelOrder[index];
     }
     if (!changed) return true;
     const int selected = selection(window);
-    if (selected >= 0) state.models.preferredModels[state.models.activeMode] = selected;
+    if (selected >= 0) modelsState().preferredModels[modelsState().activeMode] = selected;
     const bool hadModeChoice = hasModeChoice() || hasSourceChoice();
     int oldPreferred[modeCount];
-    std::copy(std::begin(state.models.preferredModels), std::end(state.models.preferredModels), oldPreferred);
-    auto oldNames = state.models.modelNames;
-    auto oldModes = state.models.modelModes;
-    auto oldOrder = state.models.modelOrder;
+    std::copy(std::begin(modelsState().preferredModels), std::end(modelsState().preferredModels), oldPreferred);
+    auto oldNames = modelsState().modelNames;
+    auto oldModes = modelsState().modelModes;
+    auto oldOrder = modelsState().modelOrder;
     std::vector<std::wstring> names;
     std::vector<int> modes, order;
     for (const auto &row : rows) {
@@ -130,18 +135,18 @@ bool applyModelRows(HWND window, const std::vector<ModelRow> &rows) {
         modes.push_back(row.mode);
         order.push_back(row.order);
     }
-    state.models.modelNames = std::move(names); state.models.modelModes = std::move(modes); state.models.modelOrder = std::move(order);
+    modelsState().modelNames = std::move(names); modelsState().modelModes = std::move(modes); modelsState().modelOrder = std::move(order);
     for (size_t index = 0; index < rows.size(); ++index) {
-        if (rows[index].order >= 0 && state.models.preferredModels[rows[index].mode] < 0) {
-            state.models.preferredModels[rows[index].mode] = static_cast<int>(index);
+        if (rows[index].order >= 0 && modelsState().preferredModels[rows[index].mode] < 0) {
+            modelsState().preferredModels[rows[index].mode] = static_cast<int>(index);
         }
     }
     if (populateModels(window)) {
         if (hadModeChoice != (hasModeChoice() || hasSourceChoice())) updateModelLayout(window);
         return true;
     }
-    std::copy(std::begin(oldPreferred), std::end(oldPreferred), state.models.preferredModels);
-    state.models.modelNames = std::move(oldNames); state.models.modelModes = std::move(oldModes); state.models.modelOrder = std::move(oldOrder);
+    std::copy(std::begin(oldPreferred), std::end(oldPreferred), modelsState().preferredModels);
+    modelsState().modelNames = std::move(oldNames); modelsState().modelModes = std::move(oldModes); modelsState().modelOrder = std::move(oldOrder);
     populateModels(window);
     return false;
 }
@@ -165,11 +170,11 @@ bool populateMicrophones(HWND window) {
     SendMessageW(combo, CB_RESETCONTENT, 0, 0);
     LRESULT selected = CB_ERR;
     bool okay = true;
-    for (size_t index = 0; index < state.models.microphones.size(); ++index) {
-        const auto &row = state.models.microphones[index];
+    for (size_t index = 0; index < modelsState().microphones.size(); ++index) {
+        const auto &row = modelsState().microphones[index];
         const LRESULT added = SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(row.name.c_str()));
         if (added == CB_ERR || added == CB_ERRSPACE) { okay = false; break; }
-        if (row.id == state.models.microphoneSelection) selected = added;
+        if (row.id == modelsState().microphoneSelection) selected = added;
     }
     SendMessageW(combo, CB_SETCURSEL, static_cast<WPARAM>(selected), 0);
     SendMessageW(combo, WM_SETREDRAW, TRUE, 0);
@@ -179,24 +184,24 @@ bool populateMicrophones(HWND window) {
 
 bool applyMicrophones(HWND window, std::vector<MicrophoneRow> rows) {
     const auto selected = std::find_if(rows.begin(), rows.end(), [](const auto &row) {
-        return row.id == state.models.microphoneSelection;
+        return row.id == modelsState().microphoneSelection;
     });
     if (selected == rows.end()) {
-        const auto previous = std::find_if(state.models.microphones.begin(), state.models.microphones.end(), [](const auto &row) {
-            return row.id == state.models.microphoneSelection;
+        const auto previous = std::find_if(modelsState().microphones.begin(), modelsState().microphones.end(), [](const auto &row) {
+            return row.id == modelsState().microphoneSelection;
         });
-        std::wstring name = previous == state.models.microphones.end() ? L"Previously selected microphone" : previous->name;
+        std::wstring name = previous == modelsState().microphones.end() ? L"Previously selected microphone" : previous->name;
         const std::wstring defaultMarker = L" (system default)";
         const size_t marker = name.find(defaultMarker);
         if (marker != std::wstring::npos) name.erase(marker, defaultMarker.size());
         const std::wstring suffix = L" (unavailable)";
         if (name.size() < suffix.size() || name.substr(name.size() - suffix.size()) != suffix) name += suffix;
-        rows.push_back({state.models.microphoneSelection, std::move(name)});
+        rows.push_back({modelsState().microphoneSelection, std::move(name)});
     }
-    auto previous = std::move(state.models.microphones);
-    state.models.microphones = std::move(rows);
+    auto previous = std::move(modelsState().microphones);
+    modelsState().microphones = std::move(rows);
     if (populateMicrophones(window)) return true;
-    state.models.microphones = std::move(previous);
+    modelsState().microphones = std::move(previous);
     populateMicrophones(window);
     return false;
 }
@@ -216,11 +221,11 @@ int jsti_window_set_model_modes(const int *rowModes, size_t count, int preferred
         }
         std::lock_guard<std::mutex> lock(state.mutex);
         if (state.running) return -1;
-        state.models.configuredModelModes = std::move(modes);
-        state.models.configuredPreferredModels[0] = preferredBatch;
-        state.models.configuredPreferredModels[1] = preferredLive;
-        state.models.configuredPreferredModels[2] = preferredLocal;
-        state.models.configuredPreferredModels[3] = -1;
+        modelsState().configuredModelModes = std::move(modes);
+        modelsState().configuredPreferredModels[0] = preferredBatch;
+        modelsState().configuredPreferredModels[1] = preferredLive;
+        modelsState().configuredPreferredModels[2] = preferredLocal;
+        modelsState().configuredPreferredModels[3] = -1;
         return 0;
     } catch (const std::exception &) { return -1; }
 }
@@ -228,9 +233,9 @@ int jsti_window_set_model_modes(const int *rowModes, size_t count, int preferred
 int jsti_window_set_preferred_local_live_model(int index) {
     std::lock_guard<std::mutex> lock(state.mutex);
     if (state.running) return -1;
-    const auto &modes = state.models.configuredModelModes;
+    const auto &modes = modelsState().configuredModelModes;
     if (index < -1 || (index >= 0 && (static_cast<size_t>(index) >= modes.size() || modes[index] != 3))) return -1;
-    state.models.configuredPreferredModels[3] = index;
+    modelsState().configuredPreferredModels[3] = index;
     return 0;
 }
 
@@ -242,17 +247,17 @@ int jsti_window_set_local_model_preferences(int batch, int live) {
         if (index < -1) return -1;
         if (index < 0) continue;
         if (state.running) {
-            if (static_cast<size_t>(index) >= state.models.knownModelIdentities.size() ||
-                state.models.knownModelIdentities[index].second != mode) return -1;
-        } else if (static_cast<size_t>(index) >= state.models.configuredModelModes.size() ||
-                   state.models.configuredModelModes[index] != mode) return -1;
+            if (static_cast<size_t>(index) >= modelsState().knownModelIdentities.size() ||
+                modelsState().knownModelIdentities[index].second != mode) return -1;
+        } else if (static_cast<size_t>(index) >= modelsState().configuredModelModes.size() ||
+                   modelsState().configuredModelModes[index] != mode) return -1;
     }
     if (!state.running) {
-        for (int i = 0; i < 2; ++i) if (values[i] >= 0) state.models.configuredPreferredModels[i + 2] = values[i];
+        for (int i = 0; i < 2; ++i) if (values[i] >= 0) modelsState().configuredPreferredModels[i + 2] = values[i];
         return 0;
     }
-    for (int i = 0; i < 2; ++i) if (values[i] >= 0) state.models.pendingLocalModelPreferences[i] = values[i];
-    state.models.localModelPreferencesChanged = true;
+    for (int i = 0; i < 2; ++i) if (values[i] >= 0) modelsState().pendingLocalModelPreferences[i] = values[i];
+    modelsState().localModelPreferencesChanged = true;
     if (state.window && !state.posted) {
         state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
         if (!state.posted) return -1;
@@ -283,17 +288,17 @@ int jsti_window_set_model_catalog(const JSTIModelRow *rows, size_t count, const 
         for (const auto &row : models) identities.emplace_back(row.id, row.mode);
         std::lock_guard<std::mutex> lock(state.mutex);
         if (state.running) {
-            if (state.models.knownModelIdentities.empty() || count < state.models.knownModelIdentities.size()) return -1;
-            for (size_t index = 0; index < state.models.knownModelIdentities.size(); ++index) {
-                if (models[index].id != state.models.knownModelIdentities[index].first ||
-                    models[index].mode != state.models.knownModelIdentities[index].second) return -1;
+            if (modelsState().knownModelIdentities.empty() || count < modelsState().knownModelIdentities.size()) return -1;
+            for (size_t index = 0; index < modelsState().knownModelIdentities.size(); ++index) {
+                if (models[index].id != modelsState().knownModelIdentities[index].first ||
+                    models[index].mode != modelsState().knownModelIdentities[index].second) return -1;
             }
         }
-        state.models.knownModelIdentities = std::move(identities);
-        state.models.pendingModels = std::move(models);
-        state.models.modelsChanged = true;
-        state.models.modelsRefreshing = refreshing != 0;
-        if (status) state.models.modelStatus = std::move(wideStatus);
+        modelsState().knownModelIdentities = std::move(identities);
+        modelsState().pendingModels = std::move(models);
+        modelsState().modelsChanged = true;
+        modelsState().modelsRefreshing = refreshing != 0;
+        if (status) modelsState().modelStatus = std::move(wideStatus);
         if (state.window && !state.posted) {
             state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
             if (!state.posted) return -1;
@@ -320,8 +325,8 @@ int jsti_window_set_microphones(const char *const *ids, const char *const *names
         if (!found) return -1;
         std::lock_guard<std::mutex> lock(state.mutex);
         if (state.running) return -1;
-        state.models.microphones = std::move(devices);
-        state.models.microphoneSelection = selection;
+        modelsState().microphones = std::move(devices);
+        modelsState().microphoneSelection = selection;
         return 0;
     } catch (const std::exception &) { return -1; }
 }
@@ -354,9 +359,9 @@ int jsti_window_refresh_microphones(const JSTIAudioDevice *devices, size_t count
         }
         std::lock_guard<std::mutex> lock(state.mutex);
         if (!state.window || !state.running) return -1;
-        if (!error) state.models.pendingMicrophones = std::move(copied);
-        state.models.microphoneError = std::move(warning);
-        state.models.microphonesChanged = true;
+        if (!error) modelsState().pendingMicrophones = std::move(copied);
+        modelsState().microphoneError = std::move(warning);
+        modelsState().microphonesChanged = true;
         if (!state.posted) state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
         return state.posted ? 0 : -1;
     } catch (...) { return -1; }

@@ -47,11 +47,17 @@ int configureSidebarShortcuts(SidebarDelivery &delivery, HWND window,
     return delivery.stage(window, std::move(update));
 }
 
+namespace {
 // UI thread only. General > App visibility as applied: `trayResident` while
 // the window lives in the notification area with no taskbar button.
 ShellPresentation shell;
 HWND shellOwner = nullptr;
 bool trayResident = false;
+} // namespace
+
+void setShellPresentation(const ShellPresentation &presentation) { shell = presentation; }
+
+bool isTrayResident() { return trayResident; }
 
 // The taskbar shows a button for every visible unowned top-level window, so a
 // hidden owner removes it. The shell reads that rule only when a window is

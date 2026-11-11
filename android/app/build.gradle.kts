@@ -1,5 +1,11 @@
 import groovy.json.JsonSlurper
 
+// Play upload signing. CI decodes the upload keystore from the main-only `android-release`
+// environment (Docs/android-play-store-submission.md); without it the release bundle is unsigned.
+val uploadKeystore = providers.environmentVariable("JSTI_ANDROID_KEYSTORE_PATH").orNull
+// Play rejects a version code it has seen, so CI supplies a monotonically increasing one.
+val ciVersionCode = providers.environmentVariable("JSTI_ANDROID_VERSION_CODE").orNull?.toInt()
+
 plugins {
     // AGP 9 compiles Kotlin itself, so the separate Kotlin Android plugin is no longer applied.
     alias(libs.plugins.android.application)
@@ -15,8 +21,19 @@ android {
         applicationId = "com.justspeaktoit.android"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
+        versionCode = ciVersionCode ?: 1
         versionName = "0.1.0"
+    }
+
+    signingConfigs {
+        if (uploadKeystore != null) {
+            create("upload") {
+                storeFile = file(uploadKeystore)
+                storePassword = providers.environmentVariable("JSTI_ANDROID_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("JSTI_ANDROID_KEY_ALIAS").get()
+                keyPassword = providers.environmentVariable("JSTI_ANDROID_KEY_PASSWORD").get()
+            }
+        }
     }
 
     buildTypes {
@@ -27,6 +44,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (uploadKeystore != null) signingConfig = signingConfigs.getByName("upload")
         }
     }
 

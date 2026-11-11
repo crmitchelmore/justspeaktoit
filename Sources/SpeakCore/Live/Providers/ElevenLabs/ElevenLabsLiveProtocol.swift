@@ -40,8 +40,8 @@ public enum ElevenLabsLiveProtocol {
         if let language = TranscriptionLanguageCatalog.providerLanguage(for: language ?? "") {
             items.append(URLQueryItem(name: "language_code", value: language.localeLanguageCode))
         }
-        if modelID == "scribe_v2_realtime" {
-            items += boundedKeyterms(keywords).map { URLQueryItem(name: "keyterms", value: $0) }
+        if keytermModelIDs.contains(modelID) {
+            items += boundedRealtimeKeyterms(keywords).map { URLQueryItem(name: "keyterms", value: $0) }
         }
         components.queryItems = items
         return components.url
@@ -52,6 +52,16 @@ public enum ElevenLabsLiveProtocol {
         modelID: String, language: String?, sampleRate: Int
     ) -> URL? {
         webSocketURL(modelID: modelID, language: language, sampleRate: sampleRate, keywords: [])
+    }
+
+    /// Realtime models that accept `keyterms` query items.
+    static let scribeV3LiveModelID = "scribe_v3_live"
+    static let keytermModelIDs: Set<String> = ["scribe_v2_realtime", scribeV3LiveModelID]
+
+    /// Realtime keyterms are capped at 50 terms of at most 20 characters each
+    /// (keyterm prompting guide, checked 2026-11-11); batch allows more.
+    public static func boundedRealtimeKeyterms(_ words: [String]) -> [String] {
+        Array(boundedKeyterms(words).filter { $0.count <= 20 }.prefix(50))
     }
 
     /// Stay below the >100-term billing threshold; Scribe requires <50 characters,

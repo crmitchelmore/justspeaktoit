@@ -71,7 +71,7 @@ struct PostProcessingLocationPicker: View {
     case .remote:
       let cloudOptions = CleanupModelDiscoveryStore.shared.options(selected: settings.postProcessingModel)
       settings.postProcessingModel = cloudOptions.first {
-        $0.id == "openai/gpt-5-mini"
+        $0.id == ModelCatalog.defaultPostProcessingModel
       }?.id ?? cloudOptions.first?.id ?? settings.postProcessingModel
     }
   }

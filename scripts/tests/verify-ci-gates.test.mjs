@@ -775,6 +775,17 @@ test('a trusted pull request is one queue wait: CI Gate checks its record and ev
   assert.ok(assessCIGates(skipped, 'pull_request').length > 0, 'untrusted: skipped jobs are rejected');
 });
 
+test('auxiliary workflows never run for feature-branch pushes', () => {
+  const dir = new URL('../../.github/workflows/', import.meta.url);
+  for (const name of execFileSync('ls', [fileURLToPath(dir)], { encoding: 'utf8' }).split('\n').filter(f => f.endsWith('.yml'))) {
+    const source = readFileSync(new URL(name, dir), 'utf8');
+    const push = source.match(/^  push:\n((?: {4}[^\n]*\n)*)/m)?.[1];
+    if (!push) continue;
+    assert.doesNotMatch(push, /branches-ignore/, `${name}: push must name its branches`);
+    assert.match(push, /^    (branches|tags):/m, `${name}: push must be limited to named branches or tags`);
+  }
+});
+
 test('main can be re-verified by dispatch, as the auto-revert bot does', () => {
   assert.match(workflow, /^on:\n  push:\n    branches: \[main\]\n  pull_request:\n(?:  #.*\n)*  workflow_dispatch:\n/m);
 });

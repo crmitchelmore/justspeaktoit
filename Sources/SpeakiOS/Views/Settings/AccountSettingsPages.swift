@@ -19,15 +19,11 @@ struct PostProcessingSettingsPage: View {
             NavigationLink {
                 PostProcessingSettingsView(settings: settings)
             } label: {
-                HStack {
-                    Label("Model & Prompt", systemImage: "slider.horizontal.3")
-                        .layoutPriority(1)
-                    Spacer()
-                    Text(postProcessingModelName)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                SettingsValueLabel(
+                    title: "Model & Prompt", systemImage: "slider.horizontal.3", value: postProcessingModelName
+                )
             }
+            .accessibilityIdentifier("postProcessingModelRow")
 
             if settings.hasPostProcessingKey {
                 SettingsFootnote("Polish tidies punctuation and wording with an AI model, using your prompt.")

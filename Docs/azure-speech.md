@@ -244,7 +244,7 @@ not a proxy running on a Mac.
    Both saving and **Check Validity** use the local `/health` route for proxy
    credentials, never the regional TTS route. A successful save confirms local
    proxy compatibility for transcription only, not Azure model access or TTS support.
-3. Select **Remote → Batch → Azure MAI-Transcribe-2 (Preview)**, or Azure Fast
+3. Select **Remote → Batch → Azure MAI-Transcribe-2**, or Azure Fast
    Transcription, for recorded audio. For live transcription select
    **Remote → Streaming → Azure MAI-Transcribe-2-Streaming (Preview)** when the
    resource supports it, **Azure MAI Transcribe (Turn-based, Preview)** for the

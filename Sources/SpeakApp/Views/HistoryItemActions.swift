@@ -35,12 +35,14 @@ struct HistoryItemContextMenu: View {
     } label: {
       Label("Review Issue Report…", systemImage: "ladybug")
     }
+    .accessibilityIdentifier("historyMenuReviewIssueReport-\(item.id)")
 
     Button {
       onReviewIssueReport()
     } label: {
       Label("Review Before Copying…", systemImage: "doc.on.clipboard")
     }
+    .accessibilityIdentifier("historyMenuReviewBeforeCopying-\(item.id)")
 
     Divider()
 
@@ -118,7 +120,7 @@ struct HistoryItemFooterActions: View {
           Label("Review Issue Report…", systemImage: "ladybug")
         }
         .buttonStyle(.bordered)
-        .accessibilityIdentifier("historyReviewIssueReport")
+        .accessibilityIdentifier("historyReviewIssueReport-\(item.id)")
         .speakTooltip("Report wrong text, a slow request or the wrong model. Review the exact public draft first.")
       }
       if environment.main.isBusy {

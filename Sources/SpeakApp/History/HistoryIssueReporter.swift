@@ -9,8 +9,12 @@ enum HistoryIssueReporter {
             RequestDiagnosticContext.Failure(stage: safeStage(for: error.phase), domain: .unknown)
         }
         let failures = item.diagnosticContext?.requestFailure.map { [$0] + legacyPhases } ?? legacyPhases
+        // A successful legacy entry has no request context, so its catalogue-safe
+        // recorded models are what make a wrong-model report actionable.
+        let recordedModels = item.errors.isEmpty && item.diagnosticContext?.requestContext == nil
+            ? item.modelsUsed.prefix(8).map { RequestDiagnosticContext.ModelSelection.project($0) } : []
         return IssueDiagnosticReport(
-            context: item.diagnosticContext?.requestContext, failures: failures,
+            context: item.diagnosticContext?.requestContext, recordedModels: recordedModels, failures: failures,
             events: timeline(for: item),
             omittedSections: includeDiagnostics ? [] : Set(IssueDiagnosticReport.Section.allCases),
             observedHandoff: item.diagnosticContext?.observedHandoff,
@@ -30,10 +34,14 @@ enum HistoryIssueReporter {
             return .init(stage: stage, outcome: failed.contains(phase) ? .failed : .succeeded,
                          elapsedMilliseconds: Int(end.timeIntervalSince(start) * 1_000))
         }
+        // Live transcription streams during recording; its recorded interval is only finalisation.
+        let isLive = item.modelUsages.contains { $0.phase == .transcriptionLive }
+        let processingEnded = times.postProcessingEnded ?? times.transcriptionEnded
         return [
-            event(.request, .transcription, from: times.transcriptionStarted, to: times.transcriptionEnded),
+            event(isLive ? .finalization : .request, .transcription,
+                  from: times.transcriptionStarted, to: times.transcriptionEnded),
             event(.postProcessing, .postProcessing, from: times.postProcessingStarted, to: times.postProcessingEnded),
-            event(.output, .output, from: times.recordingEnded, to: times.outputDelivered)
+            event(.output, .output, from: processingEnded, to: times.outputDelivered)
         ].compactMap { $0 }
     }
 

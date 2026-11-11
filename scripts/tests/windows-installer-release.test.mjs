@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bundleFileName, canPromote, installerReceipt, packageVersion, rehearsalTag,
@@ -113,4 +113,18 @@ test('rehearsals skip Alphas assembled under a different runtime policy', () => 
     assert.equal(rehearsalTag(fakeReleases('alpha-build-70', ['alpha-build-69', 'alpha-build-70'], ['alpha-build-69'])),
         'alpha-build-69');
     assert.equal(rehearsalTag(fakeReleases('alpha-build-70', ['alpha-build-69', 'alpha-build-70'], [])), '');
+});
+
+test('installer bundles are verified against the commit each runtime bundle was built from', () => {
+    // A reused Alpha bundle is built at an earlier commit than the manifest source.
+    const workflow = readFileSync(new URL('../../.github/workflows/windows-installer.yml', import.meta.url), 'utf8');
+    const calls = workflow.match(/-ExpectedCommit \$env:SOURCE[^\n]*/g);
+    assert.equal(calls.length, 2);
+    for (const call of calls) {
+        assert.match(call, /-X64Commit \$built\.x64\.commit -Arm64Commit \$built\.arm64\.commit/);
+    }
+    const bundle = readFileSync(new URL('../windows-package/build-windows-installer-bundle.ps1', import.meta.url), 'utf8');
+    assert.match(bundle, /'--expected-commit', \$target\.Commit/);
+    const rehearse = readFileSync(new URL('../windows-package/rehearse-windows-installer.ps1', import.meta.url), 'utf8');
+    assert.match(rehearse, /-X64Commit \$X64Commit -Arm64Commit \$Arm64Commit/);
 });

@@ -119,8 +119,7 @@ MarkupHelper *make_markup_helper(Dialog *dialog) {
     gtk_box_append(GTK_BOX(box), label("Common tags"));
     helper->examples = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(
         (const char *const *)helper->config.descriptions));
-    gtk_accessible_update_property(GTK_ACCESSIBLE(helper->examples),
-        GTK_ACCESSIBLE_PROPERTY_LABEL, "Common SSML tags", -1);
+    jsti_accessible_set_name(GTK_WIDGET(helper->examples), "Common SSML tags");
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(helper->examples));
     helper->example = GTK_TEXT_VIEW(gtk_text_view_new());
     gtk_text_view_set_editable(helper->example, FALSE);

@@ -291,9 +291,11 @@ final class ModelCatalogTests: XCTestCase {
     func testPostProcessing_includesRecentFastCheapModels() {
         let ids = Set(ModelCatalog.postProcessing.map(\.id))
 
-        XCTAssertTrue(ids.contains("openai/gpt-5-mini"))
+        // GPT-5 Mini and GPT-5.4 Nano have scheduled shutdowns (ModelRetirementTests).
+        XCTAssertTrue(ids.contains("openai/gpt-5.6-luna"))
         XCTAssertTrue(ids.contains("openai/gpt-5.4-mini"))
-        XCTAssertTrue(ids.contains("openai/gpt-5.4-nano"))
+        XCTAssertTrue(ids.contains("openai/gpt-6-luna"))
+        XCTAssertTrue(ids.contains("anthropic/claude-haiku-5.5"))
         XCTAssertTrue(ids.contains("google/gemini-3.1-flash-lite"))
         XCTAssertTrue(ids.contains("qwen/qwen3.6-flash"))
     }
@@ -314,9 +316,10 @@ final class ModelCatalogTests: XCTestCase {
 
     func testPostProcessing_includesGPT56ModelsWithCurrentMetadata() {
         let expected: [String: ModelCatalog.Pricing] = [
-            "openai/gpt-5.6-luna": .init(promptPerMTokens: 1.0, completionPerMTokens: 6.0),
-            "openai/gpt-5.6-terra": .init(promptPerMTokens: 2.5, completionPerMTokens: 15.0),
-            "openai/gpt-5.6-sol": .init(promptPerMTokens: 5.0, completionPerMTokens: 30.0)
+            // OpenAI standard-tier rates, checked 2026-11-11.
+            "openai/gpt-5.6-luna": .init(promptPerMTokens: 0.20, completionPerMTokens: 1.2),
+            "openai/gpt-5.6-terra": .init(promptPerMTokens: 2.0, completionPerMTokens: 12.0),
+            "openai/gpt-5.6-sol": .init(promptPerMTokens: 4.0, completionPerMTokens: 20.0)
         ]
 
         for (id, pricing) in expected {

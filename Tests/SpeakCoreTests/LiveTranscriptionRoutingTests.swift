@@ -165,7 +165,7 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
             AssemblyAIModels.universal36ProStreamingID,
             "gladia/solaria-1-streaming",
             GeminiTranscribeModels.liveCatalogID,
-            XAIVoiceModels.thinkFast2CatalogID
+            XAIVoiceModels.voice3CatalogID
         ]
 
         // Act / Assert

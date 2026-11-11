@@ -13,14 +13,18 @@ on:
       - Sources/SpeakCore/ModelRetirements.swift
       - Sources/SpeakCore/ProviderCredentialCatalogue.swift
       - Sources/SpeakCore/OpenAITranscriptionModels.swift
+  # Owner-started Play upload of main without an Android change.
+  workflow_dispatch:
   # No pull_request trigger: pull requests merge on their pre-pr record and
   # main verifies every change after the merge (ci.yml, auto-revert.yml).
+
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a main run mid Play upload; the next one simply queues.
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -73,3 +77,98 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 14
           if-no-files-found: error
+
+  # Ships only a green main build: the job above ran the unit tests, lint and release R8 build.
+  # Secrets live in the main-only `android-release` environment; without the upload keystore it
+  # builds an unsigned rehearsal bundle, and without the Play service account it uploads nothing.
+  # Owner setup: Docs/android-play-store-submission.md.
+  release:
+    name: Signed release bundle (Play internal testing)
+    needs: build
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: android-release
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # No shared cache in a job that holds the signing key.
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          validate-wrappers: true
+          cache-disabled: true
+
+      - name: Decode upload keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$PLAY_SERVICE_ACCOUNT_JSON" ]; then echo "play=true" >> "$GITHUB_OUTPUT"; fi
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::notice::No upload keystore in the android-release environment; building an unsigned rehearsal bundle."
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload.jks"
+          echo "JSTI_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build release bundle
+        env:
+          JSTI_MAVEN_MIRROR: ${{ vars.JSTI_MAVEN_MIRROR }}
+          JSTI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          JSTI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          JSTI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        # Play needs a higher version code for every upload, including a rerun of an older run, so
+        # derive it from build time: seconds since 2026-01-01 (fits Play's 2,100,000,000 cap until
+        # about 2092). Main runs are serialised by the concurrency group, so two never share a second.
+        run: |
+          export JSTI_ANDROID_VERSION_CODE=$(( $(date -u +%s) - 1767225600 ))
+          echo "::notice::versionCode $JSTI_ANDROID_VERSION_CODE"
+          ./gradlew --stacktrace bundleRelease
+
+      - name: Verify upload signature
+        if: ${{ steps.keystore.outputs.signed == 'true' }}
+        run: |
+          aab=app/build/outputs/bundle/release/app-release.aab
+          certs="$(keytool -printcert -jarfile "$aab")"
+          if [ -z "$certs" ] || grep -q 'CN=Android Debug' <<<"$certs"; then
+            echo "::error::$aab is not signed with the upload key"
+            exit 1
+          fi
+          jarsigner -verify -strict "$aab" >/dev/null
+          rm -f "$RUNNER_TEMP/upload.jks"
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: justspeaktoit-android-release
+          path: |
+            android/app/build/outputs/bundle/release/app-release.aab
+            android/app/build/outputs/mapping/release/mapping.txt
+          retention-days: 30
+          if-no-files-found: error
+
+      # Draft until the app has passed its first Play review; then set the repository variable
+      # JSTI_PLAY_RELEASE_STATUS=completed so internal testers receive each build automatically.
+      - name: Publish to Play internal testing
+        if: ${{ steps.keystore.outputs.signed == 'true' && steps.keystore.outputs.play == 'true' }}
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.justspeaktoit.android
+          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+          mappingFile: android/app/build/outputs/mapping/release/mapping.txt
+          track: internal
+          status: ${{ vars.JSTI_PLAY_RELEASE_STATUS || 'draft' }}

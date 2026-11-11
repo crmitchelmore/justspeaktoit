@@ -6,6 +6,7 @@
     <string name="mode_speech_service">Speech service</string>
     <string name="mode_picker_label">Recognition</string>
     <string name="privacy_on_device">Audio stays on this phone. Works offline once the language is installed.</string>
+    <string name="privacy_policy_link">Privacy policy</string>
     <string name="privacy_speech_service">Uses your phone\'s speech service, which may send audio to its provider and needs a connection.</string>
     <string name="status_mode_requires_android12">On-device recognition needs Android 12 or newer.</string>
     <string name="status_mode_not_provided_on_device">This phone\'s speech service does not offer on-device recognition.</string>

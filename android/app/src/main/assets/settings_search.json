@@ -70,6 +70,23 @@
       ],
       "summary" : "Add or remove provider keys, encrypted with the Android Keystore.",
       "title" : "API keys"
+    },
+    {
+      "id" : "android.privacyPolicy",
+      "keywords" : [
+        "privacy",
+        "data",
+        "policy",
+        "data safety",
+        "what is collected"
+      ],
+      "section" : "about",
+      "sectionTitle" : "About",
+      "settingKeys" : [
+
+      ],
+      "summary" : "Open the Just Speak to It privacy policy on the website.",
+      "title" : "Privacy policy"
     }
   ],
   "synonyms" : [

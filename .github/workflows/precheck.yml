@@ -77,3 +77,11 @@ jobs:
           cache-read-only: true
       - name: Unit tests, lint and debug build
         run: scripts/ci-android.sh
+      # Lets device QA install a branch's build: android.yml only uploads one from main.
+      - name: Upload debug APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: justspeaktoit-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+          if-no-files-found: error

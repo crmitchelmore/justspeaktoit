@@ -683,6 +683,8 @@ static void present(gpointer data) {
             : g_strdup_printf("%s -> %s", row[1], row[2]);
         GtkWidget *label = gtk_label_new(title); gtk_label_set_xalign(GTK_LABEL(label), 0);
         gtk_label_set_wrap(GTK_LABEL(label), TRUE); gtk_list_box_append(e->list, label);
+        gtk_accessible_update_property(GTK_ACCESSIBLE(gtk_widget_get_parent(label)), GTK_ACCESSIBLE_PROPERTY_LABEL,
+            title, -1);
         g_free(title);
     }
     e->filling = FALSE;

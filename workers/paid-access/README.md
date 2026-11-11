@@ -133,8 +133,8 @@ There is no delete endpoint, by design.
 | Operation | Provider | Catalogue id | Upstream model | Transport | Metered in |
 | --- | --- | --- | --- | --- | --- |
 | Live transcription | Deepgram | `deepgram/nova-3-streaming` | `nova-3` | WebSocket | Audio seconds |
-| Batch transcription | OpenRouter | `google/gemini-2.0-flash-001` | `google/gemini-2.0-flash-001` | HTTPS | Audio seconds |
-| Post-processing | OpenRouter | `openai/gpt-5-mini` | `openai/gpt-5-mini` | HTTPS | Tokens |
+| Batch transcription | OpenRouter | `google/gemini-3.1-flash-lite` | `google/gemini-3.1-flash-lite` | HTTPS | Audio seconds |
+| Post-processing | OpenRouter | `openai/gpt-5.6-luna` | `openai/gpt-5.6-luna` | HTTPS | Tokens |
 
 ### Error codes
 

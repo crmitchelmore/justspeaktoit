@@ -30,7 +30,7 @@ struct Dialog {
     int scroll = 0;
     bool loading = false, accepted = false;
 };
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 std::wstring text(HWND window, int id) {
     HWND control = GetDlgItem(window, id);
     const int length = GetWindowTextLengthW(control);
@@ -197,11 +197,7 @@ bool apply(HWND window, Dialog &dialog) {
     dialog.accepted = true; return true;
 }
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     LRESULT themed = 0;
     if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
@@ -229,9 +225,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         dialog->scroll -= GET_WHEEL_DELTA_WPARAM(wparam) * scale(window, 72) / WHEEL_DELTA;
         layout(window); return 0;
     case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        jsti::chrome::applySuggestedBounds(window, lparam);
         font(window, *dialog); layout(window); return 0;
     }
     case WM_COMMAND: {

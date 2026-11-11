@@ -36,7 +36,7 @@ struct SettingsDialog {
     int localSelected = -1;
 };
 
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 
 size_t remoteBoundary(const Configuration &config) {
     return std::min(config.remoteCount == SIZE_MAX
@@ -227,11 +227,7 @@ void apply(HWND window, SettingsDialog &dialog) {
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<SettingsDialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<SettingsDialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<SettingsDialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     LRESULT themed = 0;
     if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
@@ -242,9 +238,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case WM_SIZE: layout(window); return 0;
     case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        jsti::chrome::applySuggestedBounds(window, lparam);
         refreshFont(window, *dialog); layout(window); return 0;
     }
     case WM_COMMAND:

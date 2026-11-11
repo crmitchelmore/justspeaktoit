@@ -37,6 +37,28 @@ void themeWindow(HWND window);
 // text on dark surfaces; in light mode the system colours stay.
 bool dialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT &result);
 
+// Dialog plumbing shared by the native settings dialogs. Each dialog keeps its
+// own controls, layout and messages; these are only the identical steps.
+// Logical (96-DPI) pixels at the window's DPI.
+int scale(HWND window, int value);
+// The instance passed as CreateWindowExW's lpParam, bound on WM_NCCREATE.
+template<typename Instance>
+Instance *dialogInstance(HWND window, UINT message, LPARAM lparam) {
+    if (message == WM_NCCREATE) {
+        auto instance = static_cast<Instance *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(instance));
+        return instance;
+    }
+    return reinterpret_cast<Instance *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+}
+// WM_GETMINMAXINFO: the smallest frame around a client area of the given logical size.
+void minimumTrackSize(HWND window, LPARAM lparam, int clientWidth, int clientHeight, DWORD style, DWORD exStyle);
+// WM_DPICHANGED: moves the window to the bounds Windows suggests.
+void applySuggestedBounds(HWND window, LPARAM lparam);
+// WM_ACTIVATE: remembers the focused control on deactivation and restores it,
+// or the control `fallback`, on activation.
+void rememberFocus(HWND window, WPARAM wparam, HWND &focus, int fallback);
+
 // GDI+ for the process; idempotent.
 bool startup();
 

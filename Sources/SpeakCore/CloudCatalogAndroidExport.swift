@@ -3,8 +3,8 @@ import Foundation
 /// The cloud catalogue the Android app offers, as JSON, so Android never keeps its own copy of
 /// model identifiers, names, wire fields or the cleanup prompt.
 ///
-/// Android implements OpenAI-compatible `/audio/transcriptions` uploads for OpenAI and Groq and
-/// OpenRouter chat for cleanup. It therefore offers every current batch model of those
+/// Android implements OpenAI-compatible `/audio/transcriptions` uploads for OpenAI and Groq, and
+/// OpenAI-compatible chat for cleanup through every native text provider and OpenRouter. It therefore offers every current batch model of those
 /// transcription providers that OpenAI's client sends directly (Groq reuses that client), except
 /// models with an announced retirement: Android has no saved-selection migration, so it never
 /// starts offering a model that is about to shut down.
@@ -27,9 +27,15 @@ public enum CloudCatalogAndroidExport {
         }
     }
 
+    /// Cleanup models Android offers, in catalogue order: native provider routes, then OpenRouter
+    /// slugs. On-device and Apple cleanup engines are Mac-only.
+    static var cleanupModels: [ModelCatalog.Option] { ModelCatalog.cloudPostProcessing }
+
     public static func json() throws -> Data {
         struct Provider: Encodable {
             let id, credentialId: String
+            /// Native text providers only: the cleanup endpoint, which Android's transport must match.
+            let chatCompletionsURL: String?
         }
         struct Model: Encodable {
             let catalogId, displayName, provider, apiName, languageField: String
@@ -37,17 +43,25 @@ public enum CloudCatalogAndroidExport {
         struct Cleanup: Encodable {
             let provider, model, systemPrompt: String
         }
+        struct CleanupModel: Encodable {
+            let selectionId, displayName, provider, apiName: String
+        }
         struct Document: Encodable {
             let version: Int
             let providers: [Provider]
             let transcriptionModels: [Model]
             let cleanup: Cleanup
+            let cleanupModels: [CleanupModel]
         }
-        let providerIDs = transcriptionProviderIDs + [OpenRouterService.providerID]
+        var providerIDs = transcriptionProviderIDs + [OpenRouterService.providerID]
+        providerIDs += NativeTextModels.providers.map(\.id).filter { !providerIDs.contains($0) }
         let document = Document(
             version: 1,
-            providers: providerIDs.map {
-                Provider(id: $0, credentialId: ProviderCredentialCatalogue.apiKeyIdentifier(for: $0))
+            providers: providerIDs.map { id in
+                Provider(
+                    id: id, credentialId: ProviderCredentialCatalogue.apiKeyIdentifier(for: id),
+                    chatCompletionsURL: NativeTextModels.providers.first { $0.id == id }?.chatCompletionsURL.absoluteString
+                )
             },
             transcriptionModels: transcriptionModels.map { option in
                 // The OpenAI client (also used for Groq) sends the last path component as the model.
@@ -62,7 +76,19 @@ public enum CloudCatalogAndroidExport {
                 provider: OpenRouterService.providerID,
                 model: ModelCatalog.defaultPostProcessingModel,
                 systemPrompt: TranscriptCleanupPolicy.systemPrompt()
-            )
+            ),
+            cleanupModels: cleanupModels.map { option in
+                if let route = NativeTextModels.route(for: option.id) {
+                    return CleanupModel(
+                        selectionId: option.id, displayName: option.displayName,
+                        provider: route.provider.id, apiName: route.model
+                    )
+                }
+                return CleanupModel(
+                    selectionId: option.id, displayName: option.displayName,
+                    provider: OpenRouterService.providerID, apiName: option.id
+                )
+            }
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]

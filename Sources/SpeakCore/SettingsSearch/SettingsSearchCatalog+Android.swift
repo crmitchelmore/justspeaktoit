@@ -15,9 +15,12 @@ extension SettingsSearchCatalog {
         SettingsSearchEntry(
             id: "android.cleanup", title: "Clean up transcripts", section: .postProcessing,
             systemImage: "wand.and.stars",
-            summary: "Send the final transcript to OpenRouter to fix punctuation and filler words.",
-            keywords: ["post-processing", "polish", "cleanup", "llm", "openrouter", "grammar"],
-            settingKeys: ["cleanup_enabled"], platforms: .android
+            summary: "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",
+            keywords: [
+                "post-processing", "polish", "cleanup", "llm", "openrouter", "grammar", "cleanup model",
+                "anthropic", "claude", "openai", "gemini", "groq", "mistral"
+            ],
+            settingKeys: ["cleanup_enabled", "cleanup_model"], platforms: .android
         ),
         SettingsSearchEntry(
             id: "android.keepAudio", title: "Keep audio when a recording is cancelled", section: .general,
@@ -25,6 +28,16 @@ extension SettingsSearchCatalog {
             summary: "Keep cancelled cloud recordings in History so you can transcribe them later.",
             keywords: ["keep audio", "cancel", "discard", "delete recording", "cancelled recording"],
             settingKeys: ["keepAudioOnCancel"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.resourcesInUse", title: "System resources in use", section: .general,
+            systemImage: "gauge.with.dots.needle.33percent",
+            summary: "See what the app holds now, such as the microphone or a cloud request, and release it.",
+            keywords: [
+                "status", "resources", "microphone in use", "mic stuck", "release", "release everything",
+                "stop recording", "orange dot", "privacy indicator"
+            ],
+            platforms: .android
         ),
         SettingsSearchEntry(
             id: "android.apiKeys", title: "API keys", section: .apiKeys, systemImage: "key.fill",

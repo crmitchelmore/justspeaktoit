@@ -49,8 +49,17 @@ object CloudWire {
         return Multipart(boundary, head.toByteArray(), tail.toByteArray())
     }
 
-    fun cleanupBody(model: String, transcript: String): String = JSONObject()
+    fun cleanupUrl(model: CleanupModel): String = "${model.provider.baseUrl}/chat/completions"
+
+    /** Anthropic rejects requests without an output limit; other routes keep their default. */
+    const val ANTHROPIC_MAX_TOKENS = 8_192
+
+    fun cleanupMaxTokens(model: CleanupModel): Int? =
+        if (model.provider == CloudProvider.Anthropic) ANTHROPIC_MAX_TOKENS else null
+
+    fun cleanupBody(model: String, transcript: String, maxTokens: Int? = null): String = JSONObject()
         .put("model", model)
+        .apply { if (maxTokens != null) put("max_tokens", maxTokens) }
         .put(
             "messages",
             JSONArray()

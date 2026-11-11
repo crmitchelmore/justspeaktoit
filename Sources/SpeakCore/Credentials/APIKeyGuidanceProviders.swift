@@ -176,6 +176,22 @@ extension APIKeyGuidance {
             sources: [url("https://docs.mistral.ai/admin/identity-access/api-keys")]
         ),
         APIKeyProviderGuide(
+            providerName: "Anthropic",
+            identifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: NativeTextModels.anthropic.id)],
+            creationURL: url("https://platform.claude.com/settings/keys"),
+            steps: ["Choose the workspace", "Create Key", "give it a name"],
+            scopes: .none("Keys are scoped to the workspace they were created in; a workspace for Speak can carry its own spend limit."),
+            requirements: [
+                APIKeyPermissionRequirement(.postProcessing, permissions: [], endpoints: ["/v1/chat/completions"])
+            ],
+            expiry: APIKeyExpiryGuidance(.notDocumented, providerRecommendation: "rotate API keys regularly and set a workspace spend limit."),
+            notes: ["Speak uses Anthropic's OpenAI-compatible endpoint for transcript cleanup only."],
+            sources: [
+                url("https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk"),
+                url("https://platform.claude.com/docs/en/manage-claude/authentication")
+            ]
+        ),
+        APIKeyProviderGuide(
             providerName: "Groq",
             identifiers: [GroqTTSCatalog.credentialIdentifier],
             creationURL: url("https://console.groq.com/keys"),

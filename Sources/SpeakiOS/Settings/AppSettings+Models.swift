@@ -54,7 +54,7 @@ extension AppSettings {
 
     /// Native text providers whose key this app stores. Groq has no iOS key slot,
     /// so its native cleanup routes stay macOS/desktop-only.
-    static let nativeTextProviderIDs: Set<String> = ["openai", "google", "mistral"]
+    static let nativeTextProviderIDs: Set<String> = ["anthropic", "google", "mistral", "openai"]
 
     public static let postProcessingModels = ModelCatalog.postProcessing.filter {
         !$0.id.hasPrefix("local/post-processing/")

@@ -21,11 +21,24 @@ class CallHandle {
         if (cancelled) conn.disconnect()
     }
 
+    /** Set when the user let the request go (from Settings), as opposed to a timeout or teardown. */
+    @Volatile var released = false
+        private set
+
     fun cancel() {
         cancelled = true
         connection?.disconnect()
     }
+
+    /** Cancels on the user's behalf; the blocked call then throws [RequestReleasedException]. */
+    fun release() {
+        released = true
+        cancel()
+    }
 }
+
+/** A request the user stopped; callers treat it as a cancel, not a failure. */
+class RequestReleasedException(cause: Throwable? = null) : Exception("Request released", cause)
 
 /** Blocking cloud requests; [CloudClient] in production. [call] lets another thread abort them. */
 interface CloudService {
@@ -38,7 +51,7 @@ interface CloudService {
         format: SharedAudio.Format = SharedAudio.Format("wav", "audio/wav"),
     ): String
 
-    fun cleanup(apiKey: String, transcript: String, call: CallHandle): String
+    fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String
 }
 
 /**
@@ -76,9 +89,10 @@ class CloudClient(
         return CloudWire.transcriptText(body)
     }
 
-    override fun cleanup(apiKey: String, transcript: String, call: CallHandle): String {
-        val json = CloudWire.cleanupBody(CloudCatalog.CLEANUP_MODEL, transcript).toByteArray()
-        val url = "${CloudCatalog.cleanupProvider.baseUrl}/chat/completions"
+    /** Sends cleanup to the model's own route: its native provider, or OpenRouter. */
+    override fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String {
+        val json = CloudWire.cleanupBody(model.apiName, transcript, CloudWire.cleanupMaxTokens(model)).toByteArray()
+        val url = CloudWire.cleanupUrl(model)
         val body = post(url, apiKey, "application/json", call) { conn ->
             conn.setFixedLengthStreamingMode(json.size)
             conn.outputStream.use { it.write(json) }
@@ -86,7 +100,7 @@ class CloudClient(
         return CloudWire.cleanupText(body)
     }
 
-    private fun post(
+    internal fun post(
         url: String,
         apiKey: String,
         contentType: String,
@@ -111,6 +125,7 @@ class CloudClient(
             }
             return conn.inputStream.use { CloudWire.readBody(it) }
         } catch (e: IOException) {
+            if (call.released) throw RequestReleasedException(e)
             throw CloudException(CloudWire.failureForIo(e), "Network error", e)
         } finally {
             conn.disconnect()

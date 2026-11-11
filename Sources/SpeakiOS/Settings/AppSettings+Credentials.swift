@@ -28,6 +28,7 @@ extension AppSettings {
     static let speechmaticsKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "speechmatics")
     static let revAIKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "revai")
     static let mistralKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "mistral")
+    static let anthropicKeyID = NativeTextModels.anthropic.credentialIdentifier
     static let stepfunKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "stepfun")
     static let reson8KeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "reson8")
     static let smallestKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "smallest")
@@ -59,7 +60,8 @@ extension AppSettings {
             (\.reson8APIKey, reson8KeyID), (\.stepfunAPIKey, stepfunKeyID),
             (\.azureAPIKey, azureKeyID), (\.alibabaAPIKey, alibabaKeyID),
             (\.metaAPIKey, metaKeyID), (\.speechmaticsAPIKey, speechmaticsKeyID),
-            (\.revAIAPIKey, revAIKeyID), (\.mistralAPIKey, mistralKeyID)
+            (\.revAIAPIKey, revAIKeyID), (\.mistralAPIKey, mistralKeyID),
+            (\.anthropicAPIKey, anthropicKeyID)
         ]
     }
 
@@ -82,6 +84,7 @@ extension AppSettings {
     }
     public var hasRevAIKey: Bool { !revAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasMistralKey: Bool { !mistralAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasAnthropicKey: Bool { !anthropicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Identifiers currently available to model pickers. Because this is
     /// derived from the published key values, readiness badges refresh as soon
@@ -111,6 +114,7 @@ extension AppSettings {
         if hasSpeechmaticsKey { identifiers.insert(Self.speechmaticsKeyID) }
         if hasRevAIKey { identifiers.insert(Self.revAIKeyID) }
         if hasMistralKey { identifiers.insert(Self.mistralKeyID) }
+        if hasAnthropicKey { identifiers.insert(Self.anthropicKeyID) }
         return identifiers
     }
 
@@ -200,6 +204,7 @@ extension AppSettings {
     private var apiKeysByIdentifier: [String: String] {
         var keys = liveAPIKeysByIdentifier
         keys[Self.openRouterKeyID] = openRouterAPIKey
+        keys[Self.anthropicKeyID] = anthropicAPIKey
         keys[Self.smallestKeyID] = smallestAPIKey
         keys[Self.stepfunKeyID] = stepfunAPIKey
         return keys

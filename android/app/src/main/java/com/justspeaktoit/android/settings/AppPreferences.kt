@@ -9,6 +9,7 @@ import com.justspeaktoit.android.history.Retention
 interface DictationPreferences {
     var chosenMode: RecognitionMode?
     var cloudModelId: String?
+    var cleanupModelId: String?
     var cleanupEnabled: Boolean
     var retention: Retention
     var keepAudioOnCancel: Boolean
@@ -28,6 +29,11 @@ class AppPreferences(context: Context) : DictationPreferences {
     override var cloudModelId: String?
         get() = prefs.getString(KEY_CLOUD_MODEL, null)
         set(value) = prefs.edit { putString(KEY_CLOUD_MODEL, value) }
+
+    /** Null until chosen; existing installs keep the default OpenRouter cleanup route. */
+    override var cleanupModelId: String?
+        get() = prefs.getString(KEY_CLEANUP_MODEL, null)
+        set(value) = prefs.edit { putString(KEY_CLEANUP_MODEL, value) }
 
     override var cleanupEnabled: Boolean
         get() = prefs.getBoolean(KEY_CLEANUP, false)
@@ -56,5 +62,6 @@ class AppPreferences(context: Context) : DictationPreferences {
         private const val KEY_MODE = "chosen_mode"
         private const val KEY_CLOUD_MODEL = "cloud_model"
         private const val KEY_CLEANUP = "cleanup_enabled"
+        private const val KEY_CLEANUP_MODEL = "cleanup_model"
     }
 }

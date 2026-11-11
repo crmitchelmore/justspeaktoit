@@ -3,6 +3,7 @@ package com.justspeaktoit.android.dictation
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudService
+import com.justspeaktoit.android.cloud.RequestReleasedException
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.security.SecretStore
@@ -16,7 +17,7 @@ import java.security.ProviderException
 /**
  * Transcribes a cancelled recording kept in History. It only computes the updated entry; the caller
  * writes it. Success completes the entry and drops its audio; a failure keeps the audio and records
- * why, so the user can try again.
+ * why, so the user can try again. A request the user released leaves the entry unchanged.
  */
 internal class HistoryRetry(
     private val cloud: CloudService,
@@ -34,7 +35,7 @@ internal class HistoryRetry(
             } else {
                 val key = withContext(io) { secrets.read(model.provider.credentialId) }
                     ?: throw CloudException(DictationFailure.MissingKey, "No key")
-                val text = capture.call(deadlineMs) { call ->
+                val text = capture.call(deadlineMs, model.provider) { call ->
                     cloud.transcribe(model, key, file, languageTag, call)
                 }.trim()
                 if (text.isEmpty()) {
@@ -49,6 +50,9 @@ internal class HistoryRetry(
                     )
                 }
             }
+        } catch (e: RequestReleasedException) {
+            // The user stopped it, so the entry stays as it was.
+            entry
         } catch (e: CloudException) {
             entry.copy(failure = e.failure.name)
         } catch (e: GeneralSecurityException) {

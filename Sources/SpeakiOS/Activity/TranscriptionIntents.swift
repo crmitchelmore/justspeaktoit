@@ -409,11 +409,17 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
 @available(iOS 18, *)
 public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIntent, LiveActivityIntent,
     ForegroundContinuableIntent {
-    public static var title: LocalizedStringResource = "Toggle Transcription"
-    /// Backs the Transcribe Voice control only. Shortcuts already offers the
-    /// same start/stop as Toggle Recording, and listing both read as two
-    /// different features (#1470). Hiding it keeps saved shortcuts running.
-    public static var isDiscoverable: Bool { false }
+    /// Named after the control it backs (#1470): "Toggle Transcription" read as
+    /// a different feature from Toggle Recording. Renaming the title keeps saved
+    /// shortcuts working, which hiding the intent would not.
+    public static var title: LocalizedStringResource = "Transcribe Voice Control"
+    public static var description = IntentDescription(
+        """
+        The action behind the Transcribe Voice control: turns recording on or off. \
+        In your own shortcuts, use Toggle Recording instead.
+        """,
+        categoryName: "Recording"
+    )
 
     /// Deliberately runs without authentication: Control Center is reachable
     /// from the lock screen and this toggle returns no transcript — results

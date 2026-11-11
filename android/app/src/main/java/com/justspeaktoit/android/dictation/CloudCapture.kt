@@ -3,7 +3,10 @@ package com.justspeaktoit.android.dictation
 import com.justspeaktoit.android.cloud.AudioRecorder
 import com.justspeaktoit.android.cloud.CallHandle
 import com.justspeaktoit.android.cloud.CloudException
+import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.RecorderFactory
+import com.justspeaktoit.android.resources.SystemResourceKind
+import com.justspeaktoit.android.resources.SystemResourceRegistry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
@@ -35,6 +38,8 @@ internal class CloudCapture(
     private val cacheDir: File,
     private val io: CoroutineDispatcher,
     private val retirement: RecorderRetirement = RecorderRetirement.shared,
+    /** Where requests to a provider are listed, so the user can release them; null lists nothing. */
+    private val resources: SystemResourceRegistry? = null,
 ) {
     class Recording(val recorder: AudioRecorder, val file: File) {
         private val claimed = AtomicBoolean(false)
@@ -136,11 +141,27 @@ internal class CloudCapture(
 
     /**
      * Runs a blocking request with an overall [deadlineMs]. Cancelling the coroutine or reaching the
-     * deadline disconnects the request, so no upload or response read outlives the session.
+     * deadline disconnects the request, so no upload or response read outlives the session. A request
+     * to [provider] is held in [resources] while it runs; releasing it there makes the blocked call throw
+     * [com.justspeaktoit.android.cloud.RequestReleasedException].
      */
-    suspend fun <T> call(deadlineMs: Long, block: (CallHandle) -> T): T {
+    suspend fun <T> call(deadlineMs: Long, provider: CloudProvider? = null, block: (CallHandle) -> T): T {
         val call = CallHandle()
-        return bounded(deadlineMs, DictationFailure.NetworkTimeout, abort = call::cancel) { block(call) }
+        val hold = provider?.let {
+            resources?.acquire(
+                kind = SystemResourceKind.ProviderConnection,
+                title = "Cloud request",
+                reason = "Waiting for ${it.displayName} to answer",
+                owner = "DictationViewModel",
+                releaseTitle = "Cancel request",
+                release = call::release,
+            )
+        }
+        return try {
+            bounded(deadlineMs, DictationFailure.NetworkTimeout, abort = call::cancel) { block(call) }
+        } finally {
+            hold?.end()
+        }
     }
 
     /**

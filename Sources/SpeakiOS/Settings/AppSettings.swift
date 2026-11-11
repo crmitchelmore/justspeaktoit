@@ -118,6 +118,10 @@ public final class AppSettings: ObservableObject {
     @Published public var mistralAPIKey: String = "" {
         didSet { secrets.persist(mistralAPIKey, identifier: Self.mistralKeyID) }
     }
+    /// Used only by native Anthropic cleanup models.
+    @Published public var anthropicAPIKey: String = "" {
+        didSet { secrets.persist(anthropicAPIKey, identifier: Self.anthropicKeyID) }
+    }
     @Published public var azureAPIKey: String = "" {
         didSet { secrets.persist(azureAPIKey, identifier: Self.azureKeyID) }
     }

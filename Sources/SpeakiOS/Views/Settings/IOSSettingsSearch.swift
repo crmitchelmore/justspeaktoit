@@ -33,6 +33,25 @@ enum IOSSettingsSearch {
         }
     }
 
+    static let pageEntryPrefix = "ios.page."
+
+    /// One entry per Settings sub-page, so a page's own name (for example
+    /// "Results & Recordings") is searchable as well as the sections on it.
+    static func pageEntries() -> [SettingsSearchEntry] {
+        IOSSettingsPage.allCases.compactMap { page in
+            guard SettingsSearchCatalog.entry(title: page.title, platform: .iOS) == nil else { return nil }
+            return SettingsSearchEntry(
+                id: pageEntryPrefix + page.rawValue,
+                title: page.title,
+                section: .general,
+                systemImage: page.systemImage,
+                summary: page.sectionTitles.joined(separator: ", "),
+                keywords: page.sectionTitles,
+                platforms: .iOS
+            )
+        }
+    }
+
     /// Entries whose settings live on the API Keys page rather than the main list.
     static func opensAPIKeys(_ entry: SettingsSearchEntry) -> Bool {
         entry.id.hasPrefix(apiKeyEntryPrefix) || entry.id == "apiKeys.alibaba" || entry.id == "apiKeys.azure"

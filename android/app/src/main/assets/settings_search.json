@@ -26,14 +26,22 @@
         "cleanup",
         "llm",
         "openrouter",
-        "grammar"
+        "grammar",
+        "cleanup model",
+        "anthropic",
+        "claude",
+        "openai",
+        "gemini",
+        "groq",
+        "mistral"
       ],
       "section" : "postProcessing",
       "sectionTitle" : "Post-processing",
       "settingKeys" : [
-        "cleanup_enabled"
+        "cleanup_enabled",
+        "cleanup_model"
       ],
-      "summary" : "Send the final transcript to OpenRouter to fix punctuation and filler words.",
+      "summary" : "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",
       "title" : "Clean up transcripts"
     },
     {
@@ -52,6 +60,27 @@
       ],
       "summary" : "Keep cancelled cloud recordings in History so you can transcribe them later.",
       "title" : "Keep audio when a recording is cancelled"
+    },
+    {
+      "id" : "android.resourcesInUse",
+      "keywords" : [
+        "status",
+        "resources",
+        "microphone in use",
+        "mic stuck",
+        "release",
+        "release everything",
+        "stop recording",
+        "orange dot",
+        "privacy indicator"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+
+      ],
+      "summary" : "See what the app holds now, such as the microphone or a cloud request, and release it.",
+      "title" : "System resources in use"
     },
     {
       "id" : "android.apiKeys",

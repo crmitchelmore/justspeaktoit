@@ -3,6 +3,14 @@ package com.justspeaktoit.android.cloud
 /** A provider row of `assets/cloud_catalog.json`, as written into [GeneratedCloudCatalog]. */
 internal data class CloudProviderSpec(val id: String, val credentialId: String)
 
+/** A cleanup model row of `assets/cloud_catalog.json`, as written into [GeneratedCloudCatalog]. */
+internal data class CleanupModelSpec(
+    val selectionId: String,
+    val displayName: String,
+    val providerId: String,
+    val apiName: String,
+)
+
 /** A transcription model row of `assets/cloud_catalog.json`, as written into [GeneratedCloudCatalog]. */
 internal data class CloudModelSpec(
     val catalogId: String,
@@ -22,6 +30,9 @@ enum class CloudProvider(val id: String, val displayName: String, val baseUrl: S
     OpenAI("openai", "OpenAI", "https://api.openai.com/v1"),
     Groq("groq", "Groq", "https://api.groq.com/openai/v1"),
     OpenRouter("openrouter", "OpenRouter", "https://openrouter.ai/api/v1"),
+    Anthropic("anthropic", "Anthropic", "https://api.anthropic.com/v1"),
+    Google("google", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai"),
+    Mistral("mistral", "Mistral", "https://api.mistral.ai/v1"),
     ;
 
     val credentialId: String
@@ -42,6 +53,20 @@ data class CloudModel(
     val languageField: String,
 )
 
+/** A cleanup route: a native provider's own API, or OpenRouter. */
+data class CleanupModel(
+    /** The identifier saved in settings, shared with the Mac (`native/<provider>/<model>` or an OpenRouter slug). */
+    val selectionId: String,
+    val displayName: String,
+    val provider: CloudProvider,
+    /** The model name the provider's `/chat/completions` endpoint expects. */
+    val apiName: String,
+    /** The provider name pickers sort by: the native provider, or the OpenRouter vendor. */
+    val vendor: String,
+) {
+    val isOpenRouter: Boolean get() = provider == CloudProvider.OpenRouter
+}
+
 /**
  * Cloud models available on Android. Every value comes from [GeneratedCloudCatalog], which the build
  * writes from `assets/cloud_catalog.json` (generated from `Sources/SpeakCore` by
@@ -60,11 +85,39 @@ object CloudCatalog {
 
     val defaultTranscriptionModel: CloudModel = transcriptionModels.first()
 
-    /** Matches `ModelCatalog.defaultPostProcessingModel` on the Mac. */
+    /** Matches `ModelCatalog.defaultPostProcessingModel` on the Mac (an OpenRouter route). */
     const val CLEANUP_MODEL = GeneratedCloudCatalog.CLEANUP_MODEL
 
-    /** The provider cleanup requests go to. */
+    /** The provider the default cleanup model uses. */
     val cleanupProvider: CloudProvider = CloudProvider.forId(GeneratedCloudCatalog.CLEANUP_PROVIDER)
+
+    // Declared before cleanupModels: object properties initialise in order.
+    /** Matches `ModelPickerGrouping.vendorNames` on the Mac. */
+    private val VENDOR_NAMES = mapOf(
+        "anthropic" to "Anthropic", "google" to "Google", "meta-llama" to "Meta Llama",
+        "mistralai" to "Mistral", "openai" to "OpenAI", "qwen" to "Qwen",
+    )
+
+    /** Cleanup models in catalogue order: native provider routes, then OpenRouter slugs. */
+    val cleanupModels: List<CleanupModel> = GeneratedCloudCatalog.cleanupModels.map {
+        val provider = CloudProvider.forId(it.providerId)
+        CleanupModel(
+            selectionId = it.selectionId,
+            displayName = it.displayName,
+            provider = provider,
+            apiName = it.apiName,
+            vendor = if (provider == CloudProvider.OpenRouter) {
+                it.apiName.substringBefore('/').let { prefix -> VENDOR_NAMES[prefix] ?: prefix }
+            } else {
+                provider.displayName
+            },
+        )
+    }
+
+    /** A saved choice, or the default when it is missing or no longer offered. */
+    fun cleanupModel(selectionId: String?): CleanupModel =
+        cleanupModels.firstOrNull { it.selectionId == selectionId }
+            ?: cleanupModels.first { it.selectionId == CLEANUP_MODEL }
 
     fun transcriptionModel(catalogId: String?): CloudModel =
         transcriptionModels.firstOrNull { it.catalogId == catalogId } ?: defaultTranscriptionModel

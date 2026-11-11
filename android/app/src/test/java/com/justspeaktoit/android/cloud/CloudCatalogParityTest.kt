@@ -63,4 +63,24 @@ class CloudCatalogParityTest {
         assertEquals(cleanup.getString("provider"), CloudCatalog.cleanupProvider.id)
         assertEquals(cleanup.getString("systemPrompt"), CleanupPolicy.systemPrompt())
     }
+
+    @Test
+    fun testCleanupModels_matchTheGeneratedCatalogueInOrder() {
+        val expected = asset.getJSONArray("cleanupModels").objects().map {
+            listOf(it.getString("selectionId"), it.getString("displayName"), it.getString("provider"), it.getString("apiName"))
+        }
+        val actual = CloudCatalog.cleanupModels.map { listOf(it.selectionId, it.displayName, it.provider.id, it.apiName) }
+        assertEquals(expected, actual)
+        assertEquals(CloudCatalog.CLEANUP_MODEL, CloudCatalog.cleanupModel(null).selectionId)
+    }
+
+    @Test
+    fun testNativeCleanupEndpoints_matchSpeakCore() {
+        val urls = asset.getJSONArray("providers").objects()
+            .filter { it.has("chatCompletionsURL") }
+            .associate { it.getString("id") to it.getString("chatCompletionsURL") }
+        CloudCatalog.cleanupModels.filterNot { it.isOpenRouter }.map { it.provider }.distinct().forEach { provider ->
+            assertEquals(provider.id, urls[provider.id], "${provider.baseUrl}/chat/completions")
+        }
+    }
 }

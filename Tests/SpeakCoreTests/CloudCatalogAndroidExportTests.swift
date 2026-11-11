@@ -47,9 +47,27 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
         XCTAssertEqual(object?["version"] as? Int, 1)
         let providers = object?["providers"] as? [[String: String]]
-        XCTAssertEqual(providers?.map { $0["credentialId"] }, ["openai.apiKey", "groq.apiKey", "openrouter.apiKey"])
+        XCTAssertEqual(
+            providers?.map { $0["credentialId"] },
+            ["openai.apiKey", "groq.apiKey", "openrouter.apiKey", "anthropic.apiKey", "google.apiKey", "mistral.apiKey"]
+        )
         let cleanup = object?["cleanup"] as? [String: String]
         XCTAssertEqual(cleanup?["model"], ModelCatalog.defaultPostProcessingModel)
         XCTAssertEqual(cleanup?["systemPrompt"], TranscriptCleanupPolicy.systemPrompt())
+    }
+
+    func testCleanupModelsAreNativeRoutesThenOpenRouterSlugs() throws {
+        let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
+        let models = try XCTUnwrap(object?["cleanupModels"] as? [[String: String]])
+        let offered = Set(ModelCatalog.cloudPostProcessing.map(\.id))
+        let native = NativeTextModels.postProcessing.filter { offered.contains($0.id) }
+        XCTAssertEqual(Array(models.prefix(native.count)).map { $0["selectionId"] }, native.map(\.id))
+        for model in models.dropFirst(native.count) {
+            XCTAssertEqual(model["provider"], OpenRouterService.providerID)
+            XCTAssertEqual(model["apiName"], model["selectionId"])
+        }
+        let ids = Set(models.compactMap { $0["selectionId"] })
+        XCTAssertTrue(ids.contains(ModelCatalog.defaultPostProcessingModel))
+        XCTAssertTrue(models.allSatisfy { !($0["selectionId"] ?? "").hasPrefix("local/") })
     }
 }

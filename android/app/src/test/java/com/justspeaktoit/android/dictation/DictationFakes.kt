@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.justspeaktoit.android.cloud.AudioRecorder
 import com.justspeaktoit.android.cloud.CallHandle
+import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.RecorderFactory
@@ -15,6 +16,7 @@ import com.justspeaktoit.android.cloud.WavFormat
 import com.justspeaktoit.android.history.HistoryFile
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.DictationPreferences
 import kotlinx.coroutines.CoroutineScope
@@ -160,7 +162,7 @@ internal class FakeCloud : CloudService {
         return onTranscribe(call)
     }
 
-    override fun cleanup(apiKey: String, transcript: String, call: CallHandle): String {
+    override fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String {
         cleanups += transcript
         return onCleanup(transcript)
     }
@@ -185,6 +187,7 @@ internal class MemorySecrets(vararg initial: Pair<String, String>) : SecretStore
 internal class MemoryPrefs(
     override var chosenMode: RecognitionMode? = RecognitionMode.Cloud,
     override var cloudModelId: String? = null,
+    override var cleanupModelId: String? = null,
     override var cleanupEnabled: Boolean = false,
     override var retention: Retention = Retention.Month,
     override var keepAudioOnCancel: Boolean = true,
@@ -228,6 +231,8 @@ internal class ViewModelHarness(root: File) {
     var timings = DictationTimings()
     /** Each harness gets its own lane, so a stalled stop in one test never refuses another's recording. */
     val retirement = RecorderRetirement(Dispatchers.IO)
+    /** Each harness lists its own holds, so tests never see another's microphone or request. */
+    val resources = SystemResourceRegistry()
 
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "test-main") }
     private val main = executor.asCoroutineDispatcher()
@@ -250,6 +255,7 @@ internal class ViewModelHarness(root: File) {
                     io = Dispatchers.IO,
                     timings = timings,
                     retirement = retirement,
+                    resources = resources,
                 )
             }
         }

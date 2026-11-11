@@ -109,22 +109,32 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     }
 }
 
-/// WASAPI capture. Keeps the context its native callbacks borrow alive until
-/// destroy has joined the capture worker.
+/// WASAPI capture. Owns the context its native callbacks borrow until destroy
+/// has joined the capture worker.
 final class WindowsNativeCapture: WindowsRecordingCapture {
     private let native: OpaquePointer
-    private let context: WindowsCaptureContext
+    private let callbacks: NativeCallbackContext<WindowsCaptureContext>
 
     init(context: WindowsCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int) throws {
-        native = try WindowsNative.createCapture(
-            context: context, deviceID: deviceID, sampleRate: sampleRate, frameMilliseconds: frameMilliseconds
-        )
-        self.context = context
+        let callbacks = NativeCallbackContext(context)
+        do {
+            native = try WindowsNative.createCapture(
+                callbacks: callbacks.pointer, deviceID: deviceID, sampleRate: sampleRate,
+                frameMilliseconds: frameMilliseconds
+            )
+        } catch {
+            callbacks.release()
+            throw error
+        }
+        self.callbacks = callbacks
     }
 
     func start() throws { try WindowsNative.checked { jsti_capture_start(native, $0, $1) } }
 
     func stop() throws { try WindowsNative.checked { jsti_capture_stop(native, $0, $1) } }
 
-    func destroy() { withExtendedLifetime(context) { jsti_capture_destroy(native) } }
+    func destroy() {
+        jsti_capture_destroy(native)
+        callbacks.release()
+    }
 }

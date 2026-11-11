@@ -190,12 +190,11 @@ enum WindowsNative {
 }
 
 func captureAudio(_ samples: UnsafePointer<Int16>?, _ count: Int, _ context: UnsafeMutableRawPointer?) {
-    guard let samples, let context else { return }
-    Unmanaged<WindowsCaptureContext>.fromOpaque(context).takeUnretainedValue().receive(samples, count: count)
+    guard let samples, let capture = NativeCallbackContext<WindowsCaptureContext>.resolve(context) else { return }
+    capture.receive(samples, count: count)
 }
 
 func captureError(_ message: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let capture = Unmanaged<WindowsCaptureContext>.fromOpaque(context).takeUnretainedValue()
+    guard let capture = NativeCallbackContext<WindowsCaptureContext>.resolve(context) else { return }
     capture.fail(message.map(String.init(cString:)) ?? "Microphone capture failed.")
 }

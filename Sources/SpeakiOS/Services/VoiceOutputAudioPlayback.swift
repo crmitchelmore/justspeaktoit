@@ -3,14 +3,14 @@ import AVFoundation
 import Foundation
 import SpeakCore
 
-/// One playback operation. Delegate callbacks never target a replacement operation.
+/// One voice-output file playback. Delegate callbacks never target a replacement operation.
 @MainActor
-final class OpenRouterIOSAudioPlayback: NSObject, AVAudioPlayerDelegate {
+final class VoiceOutputAudioPlayback: NSObject, AVAudioPlayerDelegate {
     private var player: AVAudioPlayer?
     private var hasStarted = false
     private var observers: [NSObjectProtocol] = []
     private var completionDeadline: ContinuousClock.Instant?
-    private var sessionLease: OpenRouterIOSAudioSessionLease?
+    private var sessionLease: VoiceOutputAudioSessionLease?
     private var completion: Result<Void, OpenRouterIOSVoiceOutputError>?
 
     var isFinished: Bool { completion != nil }
@@ -35,7 +35,7 @@ final class OpenRouterIOSAudioPlayback: NSObject, AVAudioPlayerDelegate {
         audioPlayer.delegate = self
         player = audioPlayer
         guard audioPlayer.prepareToPlay() else { throw OpenRouterIOSVoiceOutputError.playbackFailed }
-        sessionLease = try OpenRouterIOSAudioSessionLease.acquire()
+        sessionLease = try VoiceOutputAudioSessionLease.acquire()
         observeInterruptions()
         try AVAudioSession.sharedInstance().setActive(true)
         guard audioPlayer.play() else { throw OpenRouterIOSVoiceOutputError.playbackFailed }
@@ -109,7 +109,7 @@ final class OpenRouterIOSAudioPlayback: NSObject, AVAudioPlayerDelegate {
     }
 
     nonisolated static func interruptsPlayback(_ notice: Notification) -> Bool {
-        OpenRouterIOSAudioSessionLease.interruptsPlayback(notice)
+        VoiceOutputAudioSessionLease.interruptsPlayback(notice)
     }
 }
 

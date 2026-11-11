@@ -13,7 +13,7 @@ public final class OpenRouterIOSVoiceOutputClient: ObservableObject {
     private let progressiveSpeech: OpenRouterProgressiveSpeechOption
     private let makeProgressivePlayback: @MainActor () -> OpenRouterIOSProgressivePlayback
     private var synthesisTask: Task<OpenRouterSpeechResult, Error>?
-    private var playback: OpenRouterIOSAudioPlayback?
+    private var playback: VoiceOutputAudioPlayback?
     private var progressiveTask: Task<OpenRouterProgressiveSpeechResult, Error>?
     private var progressivePlayback: OpenRouterIOSProgressivePlayback?
     private var operationID: UUID?
@@ -161,7 +161,7 @@ public final class OpenRouterIOSVoiceOutputClient: ObservableObject {
     }
 
     private func playAudio(at url: URL, operation identifier: UUID, speed: Double) async throws {
-        let operation = OpenRouterIOSAudioPlayback()
+        let operation = VoiceOutputAudioPlayback()
         playback = operation
         try operation.start(at: url, speed: speed)
         isSpeaking = true

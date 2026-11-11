@@ -130,8 +130,9 @@ enum SentryManager {
     }
 
     /// The only host whose failed requests are captured automatically. The app
-    /// sends no credential to it.
-    static let failedRequestTarget = "justspeaktoit.com"
+    /// sends no credential to it. The scheme separator excludes subdomains:
+    /// `api.justspeaktoit.com` carries account and billing routes.
+    static let failedRequestTarget = "://justspeaktoit.com"
     #endif
 
     /// Capture an error with optional context

@@ -143,9 +143,12 @@ final class SentryManagerTests: XCTestCase {
         XCTAssertTrue(options.enableCaptureFailedRequests)
         XCTAssertEqual(
             options.failedRequestTargets.compactMap { $0 as? String },
-            ["justspeaktoit.com"],
+            ["://justspeaktoit.com"],
             "Provider responses must not be captured automatically"
         )
+        let target = SentryManager.failedRequestTarget
+        XCTAssertTrue("https://justspeaktoit.com/appcast.xml".contains(target))
+        XCTAssertFalse("https://api.justspeaktoit.com/v1/account".contains(target), "Account routes stay out")
     }
 
     func testConfigure_installsTheCredentialScrubbers() {

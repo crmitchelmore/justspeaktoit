@@ -72,7 +72,8 @@ public struct IssueDiagnosticReport: Sendable {
         let title = "Request issue — privacy-safe diagnostics"
         let body = """
         ## Description
-        Describe the problem and reproduction steps here after reviewing these details.
+        Describe the problem (for example wrong text, a slow request or the wrong model) and reproduction steps
+        here after reviewing these details.
 
         ## Request diagnostics
         These details contain only recorded allowlisted fields. Missing or invalid values are omitted.

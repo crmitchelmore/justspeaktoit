@@ -108,6 +108,45 @@ final class HistoryIssueReporterTests: XCTestCase {
     XCTAssertFalse(report.issueURL?.absoluteString.contains(model.id) ?? false)
   }
 
+  func testSuccessfulRequest_reportsRelativeTimingsWithoutFailuresOrPrivateText() throws {
+    let start = Date(timeIntervalSince1970: 1_717_171_717)
+    let item = HistoryItem(
+      modelsUsed: ["deepgram/nova-3"],
+      modelUsages: [],
+      rawTranscription: "secret dictated transcript",
+      postProcessedTranscription: "corrected private transcript",
+      recordingDuration: 2,
+      cost: nil,
+      audioFileURL: URL(fileURLWithPath: "/Users/cm/private.m4a"),
+      networkExchanges: [],
+      events: [],
+      phaseTimestamps: PhaseTimestamps(
+        recordingStarted: start, recordingEnded: start.addingTimeInterval(2),
+        transcriptionStarted: start.addingTimeInterval(2), transcriptionEnded: start.addingTimeInterval(3.25),
+        postProcessingStarted: start.addingTimeInterval(3.25), postProcessingEnded: start.addingTimeInterval(3.75),
+        outputDelivered: start.addingTimeInterval(4)
+      ),
+      trigger: HistoryTrigger(gesture: .doubleTap, hotKeyDescription: "Fn", outputMethod: .none,
+                              destinationApplication: "Private Notes"),
+      personalCorrections: nil,
+      errors: []
+    )
+    let report = HistoryIssueReporter.report(for: item)
+    let publicOutputs = report.body + report.jsonString + (report.issueURL?.absoluteString ?? "")
+    for excluded in ["secret dictated transcript", "corrected private transcript", "private.m4a",
+                     "/Users/cm", "Private Notes", "1717171717", item.id.uuidString] {
+      XCTAssertFalse(publicOutputs.contains(excluded), "Private data appeared in a successful report")
+    }
+    let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: report.jsonData) as? [String: Any])
+    XCTAssertEqual((payload["failures"] as? [Any])?.count, 0)
+    let timeline = try XCTUnwrap(payload["timeline"] as? [[String: Any]])
+    XCTAssertEqual(timeline.map { $0["stage"] as? String }, ["request", "postProcessing", "output"])
+    XCTAssertEqual(timeline.map { $0["outcome"] as? String }, ["succeeded", "succeeded", "succeeded"])
+    XCTAssertEqual(timeline.map { $0["elapsedMilliseconds"] as? Int }, [1_250, 500, 2_000])
+    XCTAssertNil(HistoryIssueReporter.report(for: item, includeDiagnostics: false).jsonString
+      .range(of: "elapsedMilliseconds"))
+  }
+
   // swiftlint:disable:next function_body_length
   private func makeErrorItem(
     errorMessage: String = "The selected microphone is unavailable", requestContext: RequestDiagnosticContext? = nil

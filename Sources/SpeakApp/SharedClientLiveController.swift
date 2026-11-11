@@ -267,6 +267,7 @@ private extension SharedClientLiveController {
     }
   }
 
+  /// A provider that reports no cost gets the canonical list-price estimate.
   static func result(
     _ snapshot: SharedClientControllerRun.Snapshot, projection: StreamingTranscriptSnapshot?,
     captureDuration: TimeInterval, modelIdentifier: String
@@ -275,7 +276,7 @@ private extension SharedClientLiveController {
     return TranscriptionResult(
       text: snapshot.text, segments: projection?.segments ?? [], confidence: projection?.confidence,
       duration: duration, modelIdentifier: modelIdentifier,
-      cost: projection?.cost,
+      cost: projection?.cost ?? TranscriptionPricing.estimatedCost(modelID: modelIdentifier, durationSeconds: duration),
       rawPayload: projection?.rawPayload, debugInfo: nil
     )
   }

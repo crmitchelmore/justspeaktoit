@@ -21,6 +21,25 @@ final class SharedClientLiveControllerRecoveryTests: XCTestCase {
         XCTAssertEqual(fixture.delegate.errors.count, 1)
     }
 
+    func testHealthyResultWithoutProviderCostCarriesTheListPriceEstimate() async throws {
+        let fixture = Fixture()
+        fixture.controller.configure(language: nil, model: "deepgram/nova-3-streaming")
+        try await fixture.controller.start()
+        fixture.client.finish = { "priced" }
+        await fixture.controller.stop()
+        let result = try XCTUnwrap(fixture.delegate.results.last)
+        XCTAssertEqual(result.cost?.currency, "USD")
+        XCTAssertEqual(
+            result.cost?.totalCost,
+            TranscriptionPricing.estimatedCostUSD(modelID: result.modelIdentifier, durationSeconds: result.duration)
+        )
+
+        let unpriced = Fixture()
+        try await unpriced.controller.start()
+        await unpriced.controller.stop()
+        XCTAssertNil(unpriced.delegate.results.last?.cost, "An unpriced model must not invent a cost")
+    }
+
     func testFailedFinishRetainsVisibleDraftWhenConfirmationIsRevised() async throws {
         let fixture = Fixture()
         try await fixture.controller.start()

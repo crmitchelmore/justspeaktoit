@@ -20,6 +20,13 @@ public enum TranscriptionPricing {
         return Decimal(durationSeconds) / 60 * perMinute
     }
 
+    /// The same estimate shaped as a session cost, for live results whose
+    /// provider reports none. Seconds of audio stand in for input tokens.
+    public static func estimatedCost(modelID: String, durationSeconds: Double) -> ChatCostBreakdown? {
+        guard let total = estimatedCostUSD(modelID: modelID, durationSeconds: durationSeconds) else { return nil }
+        return ChatCostBreakdown(inputTokens: Int(durationSeconds), outputTokens: 0, totalCost: total, currency: "USD")
+    }
+
     /// The list price per audio minute for `modelID`, or `nil` when unknown.
     public static func pricePerMinuteUSD(modelID: String) -> Decimal? {
         let trimmed = modelID.trimmingCharacters(in: .whitespacesAndNewlines)

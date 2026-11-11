@@ -257,12 +257,12 @@ through per-candidate `ComparisonLiveLane` instances, retains the common PCM cap
 `ComparisonRoundStore`. File comparison has its own runner, and `MacComparisonSyncAdapter` bridges rounds to `SpeakSync`.
 
 Windows/Linux comparison is another isolated capture consumer:
-`SpeakDesktop/DesktopComparisonRunner` runs immutable file snapshots through
+`SpeakDesktop/Comparison/DesktopComparisonRunner` runs immutable file snapshots through
 injected raw providers; `DesktopComparisonLive` gates one native capture on
 synchronized shared-client readiness and fans out bounded common PCM with a
 single rate projection. `DesktopComparisonStore` persists the canonical
 SpeakCore revision/round shape and derives its scoreboard; completion preserves
-the initially persisted blind identities/order. `SpeakDesktopHost/DesktopHostComparison`
+the initially persisted blind identities/order. `SpeakDesktopHost/Comparison/DesktopHostComparison`
 owns admission, cancellation, capture, raw provider execution, judging and
 exports without using normal History, post-processing or insertion.
 `DesktopHostComparisonReadiness` projects only qualified, credential/local-ready

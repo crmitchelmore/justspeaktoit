@@ -66,12 +66,12 @@ Domain and protocol policies
 In this repository those layers are `SpeakCore`, `SpeakDesktop`/
 `SpeakDesktopSync`, `SpeakDesktopHost`, then Windows/Linux adapters. See
 [Architecture](Architecture.md#portable-windows-and-linux-graph) and
-[DesktopHostPlatform](../Sources/SpeakDesktopHost/DesktopHostPlatform.swift).
+[DesktopHostPlatform](../Sources/SpeakDesktopHost/Controller/DesktopHostPlatform.swift).
 
 Keep identifiers, catalogues, defaults, parsing, transcript reconciliation,
 pricing, persistence formats and session rules canonical. Expose only the
 subset a host can actually execute. The
-[desktop live projection](../Sources/SpeakDesktop/DesktopLiveTranscription.swift)
+[desktop live projection](../Sources/SpeakDesktop/Transcription/DesktopLiveTranscription.swift)
 admits xAI speech-to-text by its specific route, not everything sharing the
 provider prefix. New catalogue entries must not accidentally imply support.
 
@@ -124,10 +124,10 @@ Write the contracts before implementing the native workers:
 | Failure/cancel | Retain audio and useful text, distinguish drafts from confirmed results, and suppress automatic insertion of a failed result. |
 | Close | Reject new work, cancel owned tasks, use one bounded shutdown budget and prevent late work from reaching the closed UI. |
 
-Examples: [recording](../Sources/SpeakDesktopHost/DesktopHostRecording.swift),
-[capture effects](../Sources/SpeakDesktopHost/DesktopHostEffects.swift),
-[WAV recovery](../Sources/SpeakDesktop/PCMRecordingFile.swift),
-[shutdown](../Sources/SpeakDesktopHost/DesktopHostShutdown.swift) and
+Examples: [recording](../Sources/SpeakDesktopHost/Recording/DesktopHostRecording.swift),
+[capture effects](../Sources/SpeakDesktopHost/Controller/DesktopHostEffects.swift),
+[WAV recovery](../Sources/SpeakDesktop/Capture/PCMRecordingFile.swift),
+[shutdown](../Sources/SpeakDesktopHost/Controller/DesktopHostShutdown.swift) and
 [stubborn-operation tests](../Tests/SpeakDesktopHostTests/DesktopHostShutdownTests.swift).
 The current host's five-second close budget is a repository choice, not a
 universal timeout for another app.

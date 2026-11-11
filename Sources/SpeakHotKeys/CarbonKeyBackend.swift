@@ -16,6 +16,8 @@ final class CarbonKeyBackend {
   private let log = Logger(subsystem: HotKeyLogging.subsystem, category: "CarbonKeyBackend")
   private var hotKeyRef: EventHotKeyRef?
   private var eventHandler: EventHandlerRef?
+  /// The handler's retained `userData`, released once the handler is removed.
+  private var eventHandlerContext: UnsafeMutableRawPointer?
   private var currentKeyCode: UInt16 = 0
   private var currentModifiers: HotKey.ModifierSet = []
 
@@ -49,7 +51,12 @@ final class CarbonKeyBackend {
     if let handler = eventHandler {
       RemoveEventHandler(handler)
     }
+    if let eventHandlerContext {
+      Context.release(eventHandlerContext)
+    }
   }
+
+  private typealias Context = HotKeyCallbackContext<CarbonKeyBackend>
 
   // MARK: - Carbon Event Handler
 
@@ -61,33 +68,43 @@ final class CarbonKeyBackend {
       EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased)),
     ]
 
-    let selfPtr = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+    let context = Context(owner: self).retainedPointer()
 
     let status = InstallEventHandler(
       GetApplicationEventTarget(),
       { _, event, userData -> OSStatus in
-        guard let userData, let event else { return OSStatus(eventNotHandledErr) }
-        let backend = Unmanaged<CarbonKeyBackend>.fromOpaque(userData).takeUnretainedValue()
+        guard let userData, let event,
+          let backend = HotKeyCallbackContext<CarbonKeyBackend>.context(from: userData).owner
+        else { return OSStatus(eventNotHandledErr) }
         return backend.handleCarbonEvent(event)
       },
       eventTypes.count,
       &eventTypes,
-      selfPtr,
+      context,
       &eventHandler
     )
 
     if status != noErr {
+      eventHandler = nil
+      Context.release(context)
       log.error("Failed to install Carbon event handler: \(status)")
       return false
     }
+    eventHandlerContext = context
     return true
   }
 
+  /// Cuts the handler off from this backend, removes it, then gives back its
+  /// retained context. Carbon never calls a removed handler.
   private func removeEventHandler() {
+    guard let context = eventHandlerContext else { return }
+    Context.context(from: context).invalidate()
     if let handler = eventHandler {
       RemoveEventHandler(handler)
       eventHandler = nil
     }
+    eventHandlerContext = nil
+    Context.release(context)
   }
 
   private func registerHotKey(keyCode: UInt16, modifiers: HotKey.ModifierSet) -> Bool {

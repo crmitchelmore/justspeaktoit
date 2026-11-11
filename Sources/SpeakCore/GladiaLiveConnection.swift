@@ -8,7 +8,7 @@ extension GladiaLiveClient {
 
     /// Validates the configuration, then requests the session. Caller holds
     /// the lock.
-    func begin(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    func begin(_ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         if !mode.isConfigured, apiKey.isEmpty {
             fail(StreamingClientError.missingAPIKey(provider: "Gladia"), active, &effects)
             return
@@ -35,7 +35,7 @@ extension GladiaLiveClient {
         arm(Self.readyDeadline, active, &effects) { client, active, effects in
             if active.stage != .open { client.fail(GladiaStreamingError.sessionNotReady, active, &effects) }
         }
-        effects.append { [self] in initiate(active, request) }
+        effects.add { [self] in initiate(active, request) }
         log("Gladia live session requested")
     }
 
@@ -55,7 +55,7 @@ extension GladiaLiveClient {
             if isCurrent(active), active.stage == .initiating {
                 active.sessionRequest = pending
             } else if active.stage == .closed {
-                effects.append { pending.cancel() }
+                effects.add { pending.cancel() }
             }
         }
     }
@@ -75,7 +75,7 @@ extension GladiaLiveClient {
             case .success(let url):
                 active.stage = .connecting
                 log("Gladia live session created")
-                effects.append { [self] in connect(active, to: url) }
+                effects.add { [self] in connect(active, to: url) }
             }
         }
     }
@@ -92,7 +92,7 @@ extension GladiaLiveClient {
         let connection = makeConnection(URLRequest(url: url))
         let generation: UInt64? = perform { effects in
             guard isCurrent(active), active.stage == .connecting, active.connection == nil else {
-                effects.append { connection.cancel() }
+                effects.add { connection.cancel() }
                 return nil
             }
             active.connection = connection
@@ -170,7 +170,7 @@ extension GladiaLiveClient {
     /// run stays open; its callbacks are delivered before that receive starts.
     private func handleReceive(
         _ result: Result<StreamingWebSocketMessage, Error>, _ active: GladiaLiveRun,
-        _ effects: inout GladiaLiveEffects
+        _ effects: inout LiveDeferredEffects
     ) -> UInt64? {
         switch result {
         case .failure:
@@ -188,7 +188,7 @@ extension GladiaLiveClient {
         }
     }
 
-    private func handle(_ event: GladiaLiveEvent, _ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    private func handle(_ event: GladiaLiveEvent, _ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         switch event {
         case .sessionStarted:
             active.sessionStarted = true
@@ -216,7 +216,7 @@ extension GladiaLiveClient {
     /// meanwhile on another thread is reported after it, never before.
     private func deliver( // swiftlint:disable:this function_parameter_count
         _ text: String, utteranceID: String?, isFinal: Bool, confidence: Double?, _ active: GladiaLiveRun,
-        _ effects: inout GladiaLiveEffects
+        _ effects: inout LiveDeferredEffects
     ) {
         guard !text.isEmpty else { return }
         if isFinal {
@@ -239,7 +239,7 @@ extension GladiaLiveClient {
         let boundary = isFinal ? boundaryCallback : nil
         let snapshot = active.snapshot
         active.transcriptCallbacksInFlight += 1
-        effects.append { [self] in
+        effects.add { [self] in
             withTranscriptSnapshot(snapshot, for: active) {
                 callback?(text, isFinal)
                 let retained = perform { _ in run === active && !active.discardAdmittedBoundaries }

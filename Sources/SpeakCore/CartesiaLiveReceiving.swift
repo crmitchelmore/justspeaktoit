@@ -67,7 +67,7 @@ extension CartesiaLiveClient {
     /// does not prove the peer answered with a normal closure.
     private func ignoreSpuriousDisconnect(
         _ error: Error, _ active: CartesiaLiveRun, _ connection: any StreamingWebSocketConnection,
-        _ effects: inout CartesiaLiveEffects
+        _ effects: inout LiveDeferredEffects
     ) {
         active.pendingReceiveFailure = error
         guard active.ignoredReceiveFailures.allowsRetry() else {
@@ -83,7 +83,7 @@ extension CartesiaLiveClient {
         }
     }
 
-    private func apply(_ event: CartesiaTurnEvent, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+    private func apply(_ event: CartesiaTurnEvent, _ active: CartesiaLiveRun, _ effects: inout LiveDeferredEffects) {
         switch event {
         case .connected:
             if recordOpen(active) { effects.add { [weak self] in self?.pump(active) } }
@@ -103,7 +103,7 @@ extension CartesiaLiveClient {
 
     /// The open turn's cumulative text replaces the previous draft. While a
     /// finish runs it is held back, to be released only if the finish fails.
-    private func showDraft(_ text: String, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+    private func showDraft(_ text: String, _ active: CartesiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         active.openTurnDraft = text
         guard active.phase != .finishing else {
@@ -116,7 +116,7 @@ extension CartesiaLiveClient {
     /// A completed turn is confirmed once, by order: `request_id` names the
     /// connection, so identical text in two turns is two utterances. A finish
     /// folds turns that end during it into its return instead of delivering them.
-    private func confirm(_ text: String, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+    private func confirm(_ text: String, _ active: CartesiaLiveRun, _ effects: inout LiveDeferredEffects) {
         active.openTurnDraft = nil
         active.withheldDraft = nil
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -132,7 +132,7 @@ extension CartesiaLiveClient {
     /// Hands a transcript to the host outside the lock and counts it until the
     /// callback returns, so a failure decided meanwhile is reported after it.
     private func deliver(
-        _ text: String, isFinal: Bool, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects
+        _ text: String, isFinal: Bool, _ active: CartesiaLiveRun, _ effects: inout LiveDeferredEffects
     ) {
         guard let callback = active.onTranscript else { return }
         active.transcriptsInFlight += 1
@@ -146,7 +146,7 @@ extension CartesiaLiveClient {
     /// broke. Only a closure after `close` has been handed to the transport can
     /// end the stream; one while it is merely claimed did not answer it. If
     /// that command's send has not completed yet, its completion settles it.
-    private func closed(by error: Error, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+    private func closed(by error: Error, _ active: CartesiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard active.closeSent else {
             fail(active, CartesiaLiveProtocol.connectionError(error), &effects)
             return
@@ -164,7 +164,7 @@ extension CartesiaLiveClient {
     /// including the words of a turn the server never ended. Any other code, or
     /// a transport failure without a close frame, fails it: the words it
     /// flushed are still released to the host before the error.
-    func settle(closure error: Error, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+    func settle(closure error: Error, _ active: CartesiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard CartesiaLiveProtocol.isNormalClosure(error) else {
             fail(active, CartesiaLiveProtocol.connectionError(error), &effects)
             return
@@ -174,7 +174,7 @@ extension CartesiaLiveClient {
 
     /// The finish ends successfully: the run retires and every waiter
     /// receives the whole session.
-    func complete(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+    func complete(_ active: CartesiaLiveRun, _ effects: inout LiveDeferredEffects) {
         log("Stream completed")
         retire(active, &effects)
     }

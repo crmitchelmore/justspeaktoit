@@ -4,11 +4,11 @@ extension GladiaLiveClient {
     /// Effect-side revalidation protects a delay whose clock headroom was
     /// exhausted after construction. No transport/callback runs under lock.
     func armChecked(
-        _ seconds: TimeInterval, _ active: GladiaLiveRun, effects: inout GladiaLiveEffects,
+        _ seconds: TimeInterval, _ active: GladiaLiveRun, effects: inout LiveDeferredEffects,
         ownsPhase: (@Sendable (GladiaLiveRun) -> Bool)?,
         action: @escaping @Sendable () -> Void
     ) {
-        effects.append { [weak self, weak active] in
+        effects.add { [weak self, weak active] in
             guard let self, let active else { return }
             let maySchedule = self.perform { _ in
                 self.isCurrent(active) && (ownsPhase?(active) ?? true)
@@ -32,7 +32,7 @@ extension GladiaLiveClient {
 
     /// Admission accounts for the partial frame as one retained frame slot;
     /// completing a send releases only that send's frame/bytes, never its tail.
-    func admitFramed(_ data: Data, _ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    func admitFramed(_ data: Data, _ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard var framer = active.framer else { return }
         guard data.count <= active.maximumAudioBytes - active.admittedAudioBytes else {
             fail(active.stage == .open ? stalledError : GladiaStreamingError.sessionNotReady, active, &effects)
@@ -54,7 +54,7 @@ extension GladiaLiveClient {
         startNextSend(active, &effects)
     }
 
-    func beginConfiguredFinish(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    func beginConfiguredFinish(_ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard var framer = active.framer else { return }
         guard framer.finalPaddingBytes <= active.maximumAudioBytes - active.admittedAudioBytes else {
             fail(stalledError, active, &effects)
@@ -73,7 +73,7 @@ extension GladiaLiveClient {
 
     /// Called after every owned PCM send completion, including synchronous
     /// completions in the existing nonrecursive pump.
-    func advanceConfiguredDrain(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    func advanceConfiguredDrain(_ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard isCurrent(active), active.finishing, active.finishPhase == .draining,
               active.admittedAudioBytes == 0, !active.sending, let timing = mode.timing else { return }
         if timing.grace == 0 {
@@ -86,14 +86,14 @@ extension GladiaLiveClient {
         }
     }
 
-    private func queueConfiguredStop(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    private func queueConfiguredStop(_ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         enterFinishPhase(.control, delay: GladiaConfiguredTiming.control, active, &effects) { client, active, effects in
             client.fail(client.stalledError, active, &effects)
         }
         active.outgoing.append(.stopRecording)
     }
 
-    func configuredStopCompleted(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    func configuredStopCompleted(_ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard isCurrent(active), active.finishPhase == .control, let timing = mode.timing else { return }
         enterFinishPhase(.finalEvents, delay: timing.finalWindow, active, &effects) { client, active, effects in
             client.fail(GladiaStreamingError.missingCompletion, active, &effects)
@@ -102,8 +102,8 @@ extension GladiaLiveClient {
 
     private func enterFinishPhase(
         _ phase: GladiaLiveRun.FinishPhase, delay: TimeInterval,
-        _ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects,
-        action: @escaping @Sendable (GladiaLiveClient, GladiaLiveRun, inout GladiaLiveEffects) -> Void
+        _ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects,
+        action: @escaping @Sendable (GladiaLiveClient, GladiaLiveRun, inout LiveDeferredEffects) -> Void
     ) {
         active.finishPhase = phase
         active.finishPhaseGeneration &+= 1

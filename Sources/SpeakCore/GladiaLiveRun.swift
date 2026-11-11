@@ -102,17 +102,3 @@ final class GladiaLiveRun: @unchecked Sendable {
 
     var isLive: Bool { stage != .idle && stage != .closed }
 }
-
-/// Work decided under the client's lock and performed after releasing it:
-/// transport calls, deadlines, callbacks and waiter resumption. Nothing a
-/// callback or transport does can therefore re-enter a held lock, and effects
-/// run in the order the state changed. An effect may run after its run was
-/// retired (behind a slow scheduler or callback), so every effect that
-/// touches a transport re-checks its run immediately beforehand.
-struct GladiaLiveEffects {
-    private var actions: [() -> Void] = []
-
-    mutating func append(_ action: @escaping () -> Void) { actions.append(action) }
-
-    func run() { for action in actions { action() } }
-}

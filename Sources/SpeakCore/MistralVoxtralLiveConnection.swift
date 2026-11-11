@@ -94,7 +94,7 @@ extension MistralVoxtralLiveClient {
     /// `transcription.segment`, anything added upstream, anything that is not
     /// JSON) decodes to `nil` and is ignored.
     func handle(_ message: StreamingWebSocketMessage, _ active: MistralVoxtralLiveRun,
-                _ effects: inout MistralVoxtralLiveEffects) {
+                _ effects: inout LiveDeferredEffects) {
         guard isCurrent(active), let event = MistralRealtimeEvent(message: message) else { return }
         switch event {
         case .sessionCreated:
@@ -119,11 +119,11 @@ extension MistralVoxtralLiveClient {
     /// Deltas are append-only fragments; every other provider here reports
     /// cumulative interim text, so the folding happens on this side.
     private func handleDelta(_ fragment: String, _ active: MistralVoxtralLiveRun,
-                             _ effects: inout MistralVoxtralLiveEffects) {
+                             _ effects: inout LiveDeferredEffects) {
         active.streamedText += fragment
         let running = active.streamedText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !running.isEmpty, let callback = active.onTranscript else { return }
-        effects.append { callback(running, false) }
+        effects.add { callback(running, false) }
     }
 
     /// `transcription.done` ends the session. Mistral's SDK stops reading at
@@ -138,7 +138,7 @@ extension MistralVoxtralLiveClient {
     /// is not adopted as confirmed, and the visible draft stays the recovery
     /// text (the done's own text only when no draft was ever visible).
     private func handleDone(_ text: String, _ active: MistralVoxtralLiveRun,
-                            _ effects: inout MistralVoxtralLiveEffects) {
+                            _ effects: inout LiveDeferredEffects) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard active.usesTransport else {
             // The socket-free parser seam keeps its established contract.
@@ -146,7 +146,7 @@ extension MistralVoxtralLiveClient {
             if !active.waiters.isEmpty {
                 close(active, &effects)
             } else if let final = active.transcript, let callback = active.onTranscript {
-                effects.append { callback(final, true) }
+                effects.add { callback(final, true) }
             }
             return
         }
@@ -180,8 +180,8 @@ extension MistralVoxtralLiveClient {
         let sendID: UInt64
     }
 
-    func requestPump(_ active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
-        effects.append { [weak self] in self?.pump(active) }
+    func requestPump(_ active: MistralVoxtralLiveRun, _ effects: inout LiveDeferredEffects) {
+        effects.add { [weak self] in self?.pump(active) }
     }
 
     /// Exactly one send is in flight, in queue order. The loop owns the queue

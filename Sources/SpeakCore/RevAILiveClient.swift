@@ -211,7 +211,7 @@ public final class RevAILiveClient: FinalizingStreamingTranscriptionClient, @unc
 
     private func join(
         _ active: RevAILiveRun, _ continuation: CheckedContinuation<String?, Never>,
-        _ effects: inout RevAILiveEffects
+        _ effects: inout LiveDeferredEffects
     ) {
         let transcript = active.transcript
         switch active.phase {
@@ -271,11 +271,8 @@ extension RevAILiveClient {
     var pendingFinishes: Int { withState { _ in run.waiters.count + run.lateWaiters.count } }
 
     /// Runs `body` under the lock, then performs the effects it recorded.
-    func withState<Value>(_ body: (inout RevAILiveEffects) -> Value) -> Value {
-        var effects = RevAILiveEffects()
-        let value = lock.withLock { body(&effects) }
-        effects.perform()
-        return value
+    func withState<Value>(_ body: (inout LiveDeferredEffects) -> Value) -> Value {
+        LiveDeferredEffects.applying(under: lock, body)
     }
 
     func isCurrent(_ active: RevAILiveRun) -> Bool { active === run && active.phase != .closed }
@@ -289,7 +286,7 @@ extension RevAILiveClient {
     /// keeps everything the server sent, while finish callers receive confirmed
     /// text only. A callback that starts a new session cannot be touched by
     /// this cleanup: the run is detached, and only its own callers are released.
-    func fail(_ active: RevAILiveRun, _ error: Error, _ effects: inout RevAILiveEffects) {
+    func fail(_ active: RevAILiveRun, _ error: Error, _ effects: inout LiveDeferredEffects) {
         guard isCurrent(active) else { return }
         let onTranscript = active.onTranscript
         let onError = active.onError
@@ -319,7 +316,7 @@ extension RevAILiveClient {
 
     /// A transcript callback returned. The last one out releases a failure
     /// report that was waiting behind it, on this thread and outside the lock.
-    func transcriptReturned(_ active: RevAILiveRun, _ effects: inout RevAILiveEffects) {
+    func transcriptReturned(_ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
         active.transcriptsInFlight -= 1
         guard active.transcriptsInFlight == 0, let report = active.deferredFailureReport else { return }
         active.deferredFailureReport = nil
@@ -327,7 +324,7 @@ extension RevAILiveClient {
     }
 
     /// The error is out: callers that joined while it was being delivered return.
-    private func endFailureDelivery(_ active: RevAILiveRun, _ effects: inout RevAILiveEffects) {
+    private func endFailureDelivery(_ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
         active.deliveringFailure = false
         let late = active.lateWaiters
         let transcript = active.transcript
@@ -338,7 +335,7 @@ extension RevAILiveClient {
     /// Ends the run for good: its socket is cancelled, admitted audio and its
     /// budget are released, callbacks are dropped and every waiter resumes with
     /// the confirmed transcript.
-    func retire(_ active: RevAILiveRun, _ effects: inout RevAILiveEffects) {
+    func retire(_ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
         guard active.phase != .closed else { return }
         active.phase = .closed
         let connection = active.connection
@@ -363,8 +360,8 @@ extension RevAILiveClient {
     /// Arms a deadline owned by `active`. It acts only while that run is still
     /// current, so a late timer cannot touch a stopped or replacement run.
     func after(
-        _ seconds: TimeInterval, _ active: RevAILiveRun, _ effects: inout RevAILiveEffects,
-        action: @escaping @Sendable (RevAILiveClient, RevAILiveRun, inout RevAILiveEffects) -> Void
+        _ seconds: TimeInterval, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects,
+        action: @escaping @Sendable (RevAILiveClient, RevAILiveRun, inout LiveDeferredEffects) -> Void
     ) {
         let schedule = self.schedule
         effects.add {

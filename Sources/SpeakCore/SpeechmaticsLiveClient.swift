@@ -52,8 +52,7 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
     let sampleRate: Int
     let makeConnection: ConnectionFactory
     let schedule: Scheduler
-    private let queue = DispatchQueue(label: "SpeechmaticsLiveClient.state")
-    private let queueKey = DispatchSpecificKey<Bool>()
+    let stateQueue = LiveClientStateQueue(label: "SpeechmaticsLiveClient.state")
     var run: SpeechmaticsLiveRun
 
     /// The pre-start priming buffer the earlier client exposed. Audio handed
@@ -96,7 +95,6 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         self.schedule = schedule
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
         self.run = SpeechmaticsLiveRun(sampleRate: sampleRate)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     /// Source-compatible overload preserved for callers predating keyword hints.
@@ -119,7 +117,6 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         self.schedule = schedule
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
         self.run = SpeechmaticsLiveRun(sampleRate: sampleRate)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     deinit { run.connection?.cancel() }
@@ -177,31 +174,15 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
     public func stop() { synchronized { close(run) } }
 
     public func finishAndWait() async -> String? {
-        let active = synchronized { run }
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                synchronized {
-                    // No live socket: `EndOfStream` would be rejected, so close
-                    // rather than burning the budget, and hand back what was
-                    // transcribed.
-                    guard isCurrent(active), active.connection != nil else {
-                        if active === run { close(active) }
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    if Task.isCancelled {
-                        close(active)
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    active.finishWaiters.append(continuation)
-                    beginFinish(active)
-                }
+        // No live socket: `EndOfStream` would be rejected, so close rather
+        // than burning the budget, and hand back what was transcribed.
+        await awaitFinish(
+            canFinish: { $0.connection != nil }, transcript: \.transcript,
+            register: { active, continuation in
+                active.finishWaiters.append(continuation)
+                beginFinish(active)
             }
-        } onCancel: { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { self.close(active) } }
-        }
+        )
     }
 
     // MARK: - Socket-free test helpers
@@ -304,19 +285,7 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
     var isFinishing: Bool { synchronized { isCurrent(run) && run.phase == .finishing } }
     var audioFrameCount: Int { synchronized { run.sentAudioFrameCount } }
 
-    func after(_ seconds: TimeInterval, _ active: SpeechmaticsLiveRun,
-               action: @escaping @Sendable (SpeechmaticsLiveClient, SpeechmaticsLiveRun) -> Void) {
-        schedule(seconds) { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { action(self, active) } }
-        }
-    }
-
     @discardableResult
-    func synchronized<Value>(_ action: () -> Value) -> Value {
-        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
-        return queue.sync(execute: action)
-    }
 
     func log(_ event: String) {
         #if canImport(os) && !SPEAK_PORTABLE_CORE
@@ -419,5 +388,6 @@ extension SpeechmaticsLiveClient {
 
 extension SpeechmaticsLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { isSessionReady }
-// existing owned WebSocket lifecycle/state surface; no behavior change.
-} // swiftlint:disable:this file_length
+}
+
+extension SpeechmaticsLiveClient: QueueConfinedLiveClient {}

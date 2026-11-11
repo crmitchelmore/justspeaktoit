@@ -37,6 +37,16 @@ final class LivePCM16ConversionTests: XCTestCase {
         XCTAssertNil(conversion.drainPCM16(), "A drained converter is released")
     }
 
+    func testPrepare_refusesAnImpossibleConversionBeforeTheFirstChunk() throws {
+        let input = try format(48_000)
+        let conversion = LivePCM16Conversion()
+        let mp3 = try XCTUnwrap(AVAudioFormat(settings: [
+            AVFormatIDKey: kAudioFormatMPEGLayer3, AVSampleRateKey: 16_000, AVNumberOfChannelsKey: 1
+        ]))
+        XCTAssertFalse(conversion.prepare(from: input, to: mp3), "No Apple converter encodes MP3")
+        XCTAssertTrue(conversion.prepare(from: input, to: try pcm16(16_000)))
+    }
+
     func testResetDropsTheConverterWithoutAnyTail() throws {
         let conversion = LivePCM16Conversion()
         _ = try conversion.pcm16(from: tone(format(48_000), frames: 1_024, start: 0), to: pcm16(16_000))

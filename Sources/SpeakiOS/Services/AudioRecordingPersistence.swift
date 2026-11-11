@@ -45,8 +45,8 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// nonisolated(unsafe): guarded by `stateLock`, held across the ioQueue submit and probed with try().
     nonisolated(unsafe) var isWriterOpen = false
     /// Pool for buffer copies handed to `ioQueue` so writes never touch the
-    /// caller's (reused) buffer.
-    private let writeBufferPool = PCMBufferPool(maximumBuffers: 8)
+    /// caller's (reused) buffer; at most eight in flight before admission falls back.
+    private let writeBufferPool = LivePCMBufferPool(maximumBuffers: 8, maximumOutstanding: 8, label: "ios-writer")
     /// Bounded admission (issue #705): short I/O stalls are absorbed by
     /// fallback allocations up to a duration budget sized from the sample
     /// format; sustained overflow drops frames and records the gap instead of
@@ -227,7 +227,8 @@ public final class AudioRecordingPersistence: ObservableObject {
         let sampleRate = buffer.format.sampleRate
         let frameSeconds = sampleRate > 0 ? Double(buffer.frameLength) / sampleRate : 0
         let admissionController = admission
-        let pooledCopy = writeBufferPool.copy(buffer)
+        let pooledCopy = writeBufferPool.buffer(format: buffer.format, frameCapacity: max(buffer.frameLength, 1))
+        if let pooledCopy { LivePCMCopy.copy(buffer, into: pooledCopy) }
         let verdict = admissionController.admit(
             frameSeconds: frameSeconds,
             poolHasCapacity: pooledCopy != nil

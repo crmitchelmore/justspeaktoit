@@ -8,40 +8,6 @@ private let logger = SpeakLogger.logger(category: "OpenAIRealtimeLiveTranscriber
 
 // swiftlint:disable file_length
 
-private let openAIRealtimeOutputBufferPool = OpenAIRealtimePCMBufferPool(maximumBuffers: 2)
-
-private final class OpenAIRealtimePCMBufferPool: @unchecked Sendable {
-    private let lock = NSLock()
-    private let maximumBuffers: Int
-    private var buffers: [AVAudioPCMBuffer] = []
-
-    init(maximumBuffers: Int) {
-        self.maximumBuffers = maximumBuffers
-    }
-
-    func buffer(format: AVAudioFormat, frameCapacity: AVAudioFrameCount) -> AVAudioPCMBuffer? {
-        lock.lock()
-        defer { lock.unlock() }
-
-        if let index = buffers.firstIndex(where: { $0.format == format && $0.frameCapacity >= frameCapacity }) {
-            let buffer = buffers.remove(at: index)
-            buffer.frameLength = 0
-            return buffer
-        }
-
-        return AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity)
-    }
-
-    func recycle(_ buffer: AVAudioPCMBuffer) {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard buffers.count < maximumBuffers else { return }
-        buffer.frameLength = 0
-        buffers.append(buffer)
-    }
-}
-
 /// iOS live transcriber backed by OpenAI's Realtime API in transcription mode.
 ///
 /// Mirrors the macOS `OpenAIRealtimeLiveTranscriber` / `OpenAIRealtimeLiveController`
@@ -119,10 +85,6 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     private var startCaptureOverride: ((AudioRecordingPersistence) throws -> Void)?
     private var startTime: Date?
     private var transcriber: OpenAIRealtimeWebSocketClient?
-    /// The resampler retained for the whole session, plus its end-of-stream
-    /// flush (issue #872). Built on `start()` before the tap is installed and
-    /// only touched on `audioProcessingQueue` after that, so it needs no lock.
-    private let converterCache = LiveConverterCache()
     private static let targetSampleRate: Double = 24_000
 
     /// Per-segment bookkeeping keyed by `item_id`. Mirrors the macOS
@@ -146,12 +108,14 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     public let audioRecorder = AudioRecordingPersistence()
     let recordingLoss = RecordingLossReporting()
 
-    /// Serial queue that takes tap buffers off the real-time audio thread —
-    /// persistence, resampling, and the base64/JSON encode inside
-    /// `sendAudio` all run here instead of in the tap callback.
-    private let audioProcessingQueue = DispatchQueue(label: "com.speak.ios.openairealtime.audioProcessing")
-    /// Pool for tap-buffer copies so the hot path never allocates.
-    private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
+    /// Takes tap buffers off the real-time audio thread: persistence,
+    /// resampling to PCM16 at 24 kHz and the base64/JSON encode inside
+    /// `sendAudio` all run on its serial queue instead of in the tap callback.
+    private let audioProcessor = LiveTapPCMProcessor(
+        queueLabel: "com.speak.ios.openairealtime.audioProcessing", poolLabel: "ios-openai-realtime"
+    )
+    /// This run's conversion-failure owner: reported once, text kept.
+    private(set) var conversionFailure: LivePCMConversionFailureReport?
 
     // MARK: - Init
 
@@ -275,7 +239,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         // Buffers handed to the queue just before the tap came off are still
         // being written and sent; let them land before the input buffer is
         // committed and the recorder is closed.
-        await audioProcessingQueue.drainPendingWork()
+        await audioProcessor.drainPendingWork()
 
         preStopCompletedItemIDs = Set(finalsByItem.keys)
 
@@ -283,7 +247,10 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         // window has not closed. Flush them down the same send path the live
         // chunks use, before the input buffer is committed, or the tail of a
         // short utterance never reaches the model (issue #872).
-        await drainConverterTail(to: transcriber)
+        var sendTail: (@Sendable (Data) -> Void)?
+        if let tailClient = transcriber { sendTail = { tailClient.sendAudio($0) } }
+        await audioProcessor.drainTail(send: sendTail)
+        audioProcessor.finishRun()
 
         if let client = transcriber {
             await finalizeRemoteSession(client)
@@ -318,27 +285,6 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         onFinalResult?(result)
 
         return result
-    }
-
-    /// Flushes the retained resampler's trailing frames down the same send path
-    /// the live chunks use, then releases the converter (issue #872).
-    ///
-    /// Hops through `audioProcessingQueue` so the tail lands strictly after the
-    /// last queued tap chunk and strictly before the commit — mirroring the
-    /// `queue.sync` drain in the macOS controllers. The target format is
-    /// already PCM16 at 24 kHz, so the drained bytes go out as-is.
-    private func drainConverterTail(to client: OpenAIRealtimeWebSocketClient?) async {
-        let cache = converterCache
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            audioProcessingQueue.async {
-                defer { continuation.resume() }
-                // Drain unconditionally: the converter is released either way,
-                // so a session that lost its client still starts clean.
-                let tail = cache.drainPCM16()
-                guard let client, let tail else { return }
-                client.sendAudio(tail)
-            }
-        }
     }
 
     /// Stop sequence that must run while we still have a live WebSocket client:
@@ -408,12 +354,12 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
         audioEngine.stop()
         removeInputTap()
-        audioProcessingQueue.sync {}
+        // Cancelled audio is thrown away, so there is nothing to drain — just
+        // wait out queued chunks and drop the converter so the next session
+        // builds a fresh one.
+        audioProcessor.finishRun()
         transcriber?.stop()
         transcriber = nil
-        // Cancelled audio is thrown away, so there is nothing to drain — just
-        // drop the converter so the next session builds a fresh one.
-        converterCache.reset()
 
         audioRecorder.cancelRecording()
 
@@ -456,6 +402,14 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     private func connectClient(apiKey: String) {
         let captureID = UUID()
         activeCaptureID = captureID
+        // Lost capture audio reaches the owner like a socket failure: once,
+        // with the transcript so far kept as recovery text.
+        conversionFailure = LivePCMConversionFailureReport { [weak self] error in
+            Task { @MainActor in
+                guard self?.activeCaptureID == captureID else { return }
+                self?.handleError(error)
+            }
+        }
         if let connectRealtimeClient {
             connectRealtimeClient(apiKey)
             return
@@ -488,72 +442,9 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     private func startAudioEngine() throws {
         let inputNode = audioEngine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
-        let (target, conv) = try createAudioConverter(from: nativeFormat)
-        let client = transcriber
-        let signal = firstInputSignal
-        let captureID = activeCaptureID
-        // Lost capture audio reaches the owner like a socket failure: once,
-        // with the transcript so far kept as recovery text.
-        let conversionFailure = LivePCMConversionFailureReport { [weak self] error in
-            Task { @MainActor in
-                guard self?.activeCaptureID == captureID else { return }
-                self?.handleError(error)
-            }
-        }
-
-        // The safety writer opens before the tap and the engine, so the file
-        // covers the very first buffers instead of starting a beat late
-        // (issue #992); a writer failure is reported, never fatal (issue #950).
-        recordingLoss.startWriter(audioRecorder, format: nativeFormat)
-        let lossReport = recordingLoss.currentReport
-        try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
-            // Copy the buffer and hop off the real-time audio thread —
-            // heavy work in the tap makes CoreAudio drop mic buffers.
-            guard let self, let copied = lossReport.copyCapture(buffer, using: self.tapBufferPool) else { return }
-            if copied.frameLength > 0, let captureID, signal.markObserved() {
-                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
-            }
-            self.audioProcessingQueue.async {
-                defer { self.tapBufferPool.recycle(copied) }
-                self.audioRecorder.writeBuffer(copied)
-                self.convertAndSendAudio(
-                    buffer: copied,
-                    targetFormat: target,
-                    converter: conv,
-                    client: client,
-                    onFailure: conversionFailure
-                )
-            }
-        }
-        hasInputTap = true
-
-        audioEngine.prepare()
-        try audioEngine.start()
-        // Only after the engine actually returned.
-        onStartupObservation?(.stage(.engineStarted))
-    }
-
-    private func createAudioConverter(
-        from nativeFormat: AVAudioFormat
-    ) throws -> (AVAudioFormat, AVAudioConverter) {
-        guard let target = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: Self.targetSampleRate,
-            channels: 1,
-            interleaved: true
-        ) else {
-            let err = iOSTranscriptionError.audioSessionFailed(
-                NSError(domain: "OpenAIRealtimeLiveTranscriber", code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "Failed to create target audio format"])
-            )
-            self.error = err
-            throw err
-        }
-        // The cache owns the converter for the session: it is reused for every
-        // tap buffer (never `reset()` between chunks, which would wipe the
-        // resampler's filter history) and flushed at stop by
-        // `drainConverterTail(to:)`.
-        guard let conv = converterCache.converter(from: nativeFormat, to: target) else {
+        guard let outputFormat = audioProcessor.prepareOutputFormat(
+            from: nativeFormat, sampleRate: Self.targetSampleRate
+        ), let conversionFailure else {
             let err = iOSTranscriptionError.audioSessionFailed(
                 NSError(domain: "OpenAIRealtimeLiveTranscriber", code: -2,
                         userInfo: [NSLocalizedDescriptionKey: "Failed to create audio converter"])
@@ -561,48 +452,32 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
             self.error = err
             throw err
         }
-        return (target, conv)
-    }
+        let client = transcriber
+        let signal = firstInputSignal
+        let captureID = activeCaptureID
 
-    private nonisolated func convertAndSendAudio(
-        buffer: AVAudioPCMBuffer,
-        targetFormat: AVAudioFormat,
-        converter: AVAudioConverter,
-        client: OpenAIRealtimeWebSocketClient?,
-        onFailure: LivePCMConversionFailureReport
-    ) {
-        let ratio = Self.targetSampleRate / converter.inputFormat.sampleRate
-        let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-        guard let outputBuffer = openAIRealtimeOutputBufferPool.buffer(
-            format: targetFormat,
-            frameCapacity: outputFrameCapacity
-        ) else {
-            return
-        }
-        defer { openAIRealtimeOutputBufferPool.recycle(outputBuffer) }
-        var error: NSError?
-        var didProvideInput = false
-        let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
-            // One-shot input: returning the same buffer with .haveData again
-            // would make the converter duplicate audio frames.
-            guard !didProvideInput else {
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-            didProvideInput = true
-            outStatus.pointee = .haveData
-            return buffer
-        }
-        guard status != .error, error == nil else {
-            onFailure(LivePCMConversionError.conversionFailed(domain: error?.domain, code: error?.code))
-            return
-        }
-        guard let int16Channel = outputBuffer.int16ChannelData?[0] else { return }
-        let frameCount = Int(outputBuffer.frameLength)
-        guard frameCount > 0 else { return }
-        let byteCount = frameCount * MemoryLayout<Int16>.size
-        let data = Data(bytes: int16Channel, count: byteCount)
-        client?.sendAudio(data)
+        // The safety writer opens before the tap and the engine, so the file
+        // covers the very first buffers instead of starting a beat late
+        // (issue #992); a writer failure is reported, never fatal (issue #950).
+        recordingLoss.startWriter(audioRecorder, format: nativeFormat)
+        let run = LiveTapPCMProcessor.Run(
+            recorder: audioRecorder,
+            lossReport: recordingLoss.currentReport,
+            outputFormat: outputFormat,
+            onInput: { [weak self] in
+                guard let captureID, signal.markObserved() else { return }
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            },
+            send: { client?.sendAudio($0) },
+            onConversionFailure: conversionFailure
+        )
+        try audioProcessor.installTap(on: inputNode, format: nativeFormat, run: run)
+        hasInputTap = true
+
+        audioEngine.prepare()
+        try audioEngine.start()
+        // Only after the engine actually returned.
+        onStartupObservation?(.stage(.engineStarted))
     }
 
     private func resetState() {

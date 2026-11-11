@@ -10,21 +10,8 @@ import CLinuxSupport
 enum LinuxWindow {
     private static let postProcessingPicker = DesktopPostProcessingPicker()
 
-    /// Owns C strings for the duration of one call.
-    final class Strings {
-        private var owned: [UnsafeMutablePointer<CChar>] = []
-        func add(_ value: String) -> UnsafePointer<CChar> {
-            let bytes = Array(value.utf8CString)
-            let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)
-            pointer.initialize(from: bytes, count: bytes.count)
-            owned.append(pointer)
-            return UnsafePointer(pointer)
-        }
-        deinit { owned.forEach { $0.deallocate() } }
-    }
-
     static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool) {
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let rows = records.map { record in
             let summary = DesktopHistoryRowSummary(record)
             return JSTIHistoryRow(
@@ -50,7 +37,7 @@ enum LinuxWindow {
 
     /// Dashboard and History header totals, formatted as the Mac formats them.
     static func insights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         func row(_ insights: DesktopHistoryInsights) -> JSTIInsights {
             JSTIInsights(
                 sessions: strings.add(String(insights.sessions)),
@@ -66,7 +53,7 @@ enum LinuxWindow {
     }
 
     /// Model rows in global slot order, with each visible slot's picker position.
-    static func modelRows(_ strings: Strings) -> [JSTIModelRow] {
+    static func modelRows(_ strings: DesktopNativeStrings) -> [JSTIModelRow] {
         // On-device models carry their install state, e.g. "— download in Local models".
         let (state, localLabels) = DesktopHostModels.labelledSnapshot
         let order = DesktopHostModels.displayOrder(state)
@@ -80,7 +67,7 @@ enum LinuxWindow {
     }
 
     static func publishModels(status: String, refreshing: Bool, selected: Int32) throws {
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let rows = modelRows(strings)
         let result = withExtendedLifetime(strings) {
             rows.withUnsafeBufferPointer {
@@ -138,7 +125,7 @@ enum LinuxWindow {
         if !devices.contains(where: { $0.id == selected }) {
             devices.append((selected, "Previously selected microphone (unavailable)"))
         }
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let ids: [UnsafePointer<CChar>?] = devices.map { strings.add($0.id) }
         let names: [UnsafePointer<CChar>?] = devices.map { strings.add($0.name) }
         withExtendedLifetime(strings) {
@@ -184,7 +171,7 @@ enum LinuxWindow {
             _ = jsti_window_update("Built-in Local Cleanup is missing from the shared catalogue.", nil, -1)
             return
         }
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let names: [UnsafePointer<CChar>?] = models.map { strings.add(DesktopHostModels.uiText($0.displayName)) }
         let selected = models.firstIndex { $0.id == options.modelIdentifier } ?? -1
         let result = withExtendedLifetime(strings) {

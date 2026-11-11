@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import SpeakDesktopHost
 import CLinuxSupport
 
@@ -10,7 +11,7 @@ extension LinuxWindow {
     }
 
     static func deliverAPIKeys(_ rows: [DesktopAPIKeyRow], request: UUID, status: String) {
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let native = rows.map {
             JSTILinuxAPIKeyRow(
                 identifier: strings.add($0.identifier), label: strings.add($0.label), uses: strings.add($0.uses),

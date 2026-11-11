@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 import CLinuxSupport
 
@@ -90,7 +91,7 @@ extension LinuxWindow {
         let bindings = await holder.controller.shortcutBindings
         holder.globalActionShortcuts.configure(bindings, holder: holder)
         let revision = LinuxActionShortcutEditorState.shared.configure(bindings)
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let rows = actionShortcutRows(
             bindings, strings: strings, globalNotes: holder.globalActionShortcuts.notes(for: bindings)
         )
@@ -118,7 +119,7 @@ extension LinuxWindow {
     }
 
     private static func actionShortcutRows(
-        _ bindings: DesktopShortcutBindings, strings: Strings,
+        _ bindings: DesktopShortcutBindings, strings: DesktopNativeStrings,
         globalNotes: [DesktopShortcutAction: String] = [:]
     ) -> [JSTILinuxActionShortcut] {
         DesktopShortcutAction.allCases.map { action in

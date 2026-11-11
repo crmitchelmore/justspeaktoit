@@ -78,7 +78,7 @@ extension WindowsNative {
                     shown.minimumSpeed, shown.maximumSpeed, $0) == 0
             }
         }
-        let strings = ConfigurationStrings()
+        let strings = DesktopNativeStrings()
         let examples = VoiceSynthesisMarkup.examples.map {
             JSTIVoiceMarkupExample(text: strings.add($0.text), description: strings.add($0.description))
         }

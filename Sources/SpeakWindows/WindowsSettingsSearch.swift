@@ -1,6 +1,7 @@
 import CWindowsSupport
 import Foundation
 import SpeakCore
+import SpeakDesktop
 
 /// The sidebar's settings search, on the UI thread: each query is answered
 /// synchronously from the shared index, and a chosen row opens its page and,
@@ -25,7 +26,7 @@ final class WindowsSettingsSearch {
     }
 
     private func publish(_ rows: [DesktopSettingsSearchSession.Row]) {
-        let strings = WindowsNative.ConfigurationStrings()
+        let strings = DesktopNativeStrings()
         let results = rows.prefix(50).map {
             JSTISettingsSearchResult(
                 title: strings.add($0.title), detail: strings.add($0.detail), identifier: strings.add($0.identifier)

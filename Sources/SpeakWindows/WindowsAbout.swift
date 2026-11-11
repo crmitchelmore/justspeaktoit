@@ -1,10 +1,11 @@
 import CWindowsSupport
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 
 extension WindowsNative {
     static func configureAbout() throws {
-        let strings = ConfigurationStrings()
+        let strings = DesktopNativeStrings()
         let links = AppInformationLink.allCases.map {
             JSTIAboutLink(title: strings.add($0.title), url: strings.add($0.url.absoluteString))
         }

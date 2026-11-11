@@ -53,6 +53,38 @@ extension DesktopHostController {
         return try await vocabulary.perform(kind: kind, payload: payload)
     }
 
+    /// One Windows or Linux vocabulary editor event: 70 applies `payload`, 71
+    /// reloads and 72 shows a History recording's correction results. `present`
+    /// hands the text to the native editor (`applied` false for previews and
+    /// failures) and returns false when the editor rejects it. Hosts that report
+    /// insertion-target support supply `targetAvailability`, read after the
+    /// event and appended to Dictionary and Learning notices.
+    package func nativeVocabularyEvent(
+        _ event: Int32, payload: String, kind: Int, targetAvailability: (@Sendable () -> String)? = nil,
+        present: @Sendable (_ kind: Int32, _ text: String, _ applied: Bool) -> Bool
+    ) async {
+        do {
+            if event == 72 {
+                let snapshot = try vocabularyHistoryPresentation(payload)
+                if !present(2, snapshot, false) { Platform.update("Correction results could not be displayed.") }
+                return
+            }
+            let learning = payload.hasPrefix("allowObservationalLearning\t")
+                || payload.hasPrefix("stopObservationalLearning\t")
+            var notice = event == 70 ? try await vocabularyEvent(kind: learning ? 3 : kind, payload: payload) : ""
+            if let targetAvailability, learning || kind == 0 || kind == 3 { notice += "\n" + targetAvailability() }
+            let preview = payload.hasPrefix("preview\t")
+            let snapshot = preview ? notice : try await vocabularyPresentation(
+                kind: kind, notice: notice, reload: event == 71
+            )
+            if !present(Int32(kind), snapshot, !preview) {
+                Platform.update("Vocabulary response could not be displayed. Reopen the editor.")
+            }
+        } catch {
+            if !present(Int32(kind), error.localizedDescription, false) { Platform.update(error.localizedDescription) }
+        }
+    }
+
     package func vocabularyKeywords() async throws -> [String] {
         let vocabulary = try await vocabularyStore()
         return await vocabulary.keywords()

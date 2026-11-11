@@ -72,3 +72,6 @@ API breakage: enumelement GeminiTTSModel.flash38LiteTTS has been added as a new 
 API breakage: enumelement AutomationCommand.speakText has been added as a new enum case
 API breakage: enumelement AutomationCommand.listVoices has been added as a new enum case
 API breakage: enumelement AutomationErrorCode.speechFailed has been added as a new enum case
+# Model retirements gain a cleanup (post-processing) mode so retired chat models
+# such as GPT-5 Mini move to their successor. Existing cases are retained.
+API breakage: enumelement ModelRetirement.Mode.postProcessing has been added as a new enum case

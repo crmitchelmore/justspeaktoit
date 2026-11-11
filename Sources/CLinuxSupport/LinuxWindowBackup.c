@@ -1,6 +1,7 @@
-/* General > Recordings and backup: folder choice, migration backup, audio cleanup, export and import. */
-#include "LinuxWindowInternal.h"
-#include "LinuxWindowStoragePage.h"
+/* General > Recordings and backup: folder choice, migration backup and restore,
+ * audio cleanup, export and import. Owns StoragePage (LinuxWindowStorageState.h). */
+#include "LinuxWindowStorageState.h"
+#include "LinuxWindowHistoryPage.h"
 
 static StoragePage storage_state;
 StoragePage *storage_page(void) { return &storage_state; }
@@ -8,7 +9,7 @@ StoragePage *storage_page(void) { return &storage_state; }
 _Static_assert(JSTI_EVENT_RECORDINGS_LOCATION != JSTI_EVENT_MIGRATION_RESTORE,
                "the recordings location choice must not decode as Migration restore");
 
-void on_recordings_folder(GtkButton *button, gpointer data) {
+static void on_recordings_folder(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     emit(JSTI_EVENT_RECORDINGS_FOLDER, "", 0);
 }
@@ -49,7 +50,7 @@ static void recordings_location_chosen(GObject *source, GAsyncResult *result, gp
     g_free(choice);
 }
 
-void on_recordings_choose(GtkButton *button, gpointer data) {
+static void on_recordings_choose(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     if (ui.closing || ui.state != 0 || storage_page()->location_chooser != NULL) return;
     LocationChoice *choice = g_new0(LocationChoice, 1);
@@ -122,7 +123,7 @@ static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) 
     g_free(choice);
 }
 
-void on_backup(GtkButton *button, gpointer data) {
+static void on_backup(GtkButton *button, gpointer data) {
     (void)button;
     if (ui.closing || ui.state != 0 || storage_page()->backup_chooser != NULL || storage_page()->restore_dialog != NULL) return;
     BackupChoice *choice = g_new0(BackupChoice, 1);
@@ -202,4 +203,202 @@ void on_import(GtkButton *button, gpointer data) {
     g_object_unref(filters);
     g_object_unref(filter);
     g_object_unref(dialog);
+}
+
+static GtkWidget *migration_restore_dialog_new(
+    const char *token, const char *text, gboolean offers_replace, gboolean confirming
+) {
+    GtkWidget *dialog = adw_message_dialog_new(ui.window,
+        confirming ? "Replace app profiles?" : "Restore backup: review before anything is written",
+        confirming ? "Replace your app profiles with the profiles in this backup?\n\n"
+            "Profiles absent from the backup will be removed. History is still only merged. "
+            "Settings, audio and credentials stay unchanged. Changes are rolled back if anything fails."
+            : text);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    adw_message_dialog_set_body_use_markup(ADW_MESSAGE_DIALOG(dialog), FALSE);
+    adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel");
+    if (!confirming) adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "merge", "Merge backup");
+    if (offers_replace) {
+        adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "replace",
+            confirming ? "Replace profiles" : "Replace profiles...");
+        adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "replace", ADW_RESPONSE_DESTRUCTIVE);
+    }
+    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+    g_object_set_data_full(G_OBJECT(dialog), "jsti-restore-token", g_strdup(token), g_free);
+    g_object_set_data(G_OBJECT(dialog), "jsti-restore-replace", GINT_TO_POINTER(offers_replace));
+    g_object_set_data(G_OBJECT(dialog), "jsti-restore-confirming", GINT_TO_POINTER(confirming));
+    g_signal_connect(dialog, "response", G_CALLBACK(migration_restore_response), NULL);
+    return g_object_ref_sink(dialog);
+}
+
+void retire_migration_restore(void) {
+    GtkWidget *dialog = storage_page()->restore_dialog;
+    storage_page()->restore_dialog = NULL;
+    if (dialog == NULL) return;
+    gtk_window_destroy(GTK_WINDOW(dialog));
+    g_object_unref(dialog);
+}
+
+void refresh_migration_restore(void) {
+    if (storage_page()->restore_dialog == NULL) return;
+    AdwMessageDialog *dialog = ADW_MESSAGE_DIALOG(storage_page()->restore_dialog);
+    gboolean idle = ui.state == JSTI_STATE_IDLE && !ui.closing;
+    if (adw_message_dialog_has_response(dialog, "merge"))
+        adw_message_dialog_set_response_enabled(dialog, "merge", idle);
+    if (adw_message_dialog_has_response(dialog, "replace"))
+        adw_message_dialog_set_response_enabled(dialog, "replace", idle);
+}
+
+void migration_restore_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    (void)data;
+    if (storage_page()->restore_dialog != GTK_WIDGET(dialog)) return;
+    gchar *token = g_strdup(g_object_get_data(G_OBJECT(dialog), "jsti-restore-token"));
+    gboolean offers_replace = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "jsti-restore-replace"));
+    gboolean confirming = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "jsti-restore-confirming"));
+    gboolean available = !ui.closing && ui.state == JSTI_STATE_IDLE;
+    gboolean replace = available && offers_replace && g_strcmp0(response, "replace") == 0;
+    if (replace && !confirming) {
+        retire_migration_restore();
+        storage_page()->restore_dialog = migration_restore_dialog_new(token, "", TRUE, TRUE);
+        refresh_actions();
+        gtk_window_present(GTK_WINDOW(storage_page()->restore_dialog));
+    } else {
+        gint choice = replace && confirming ? 2 : available && !confirming && g_strcmp0(response, "merge") == 0 ? 1 : 0;
+        retire_migration_restore();
+        refresh_actions();
+        emit(JSTI_EVENT_MIGRATION_RESTORE_RESPONSE, token, choice);
+    }
+    g_free(token);
+}
+
+static void migration_restore_confirmation_free(gpointer pointer) {
+    MigrationRestoreConfirmation *confirmation = pointer;
+    g_free(confirmation->token);
+    g_free(confirmation->text);
+    g_free(confirmation);
+}
+
+gboolean migration_restore_stage(const MigrationRestoreConfirmation *confirmation) {
+    if (storage_page()->restore_dialog != NULL &&
+        g_strcmp0(g_object_get_data(G_OBJECT(storage_page()->restore_dialog), "jsti-restore-token"), confirmation->token) == 0) {
+        return FALSE;
+    }
+    if (ui.window == NULL || ui.closing || storage_page()->restore_dialog != NULL) {
+        emit(JSTI_EVENT_MIGRATION_RESTORE_RESPONSE, confirmation->token, 0);
+        return FALSE;
+    }
+    storage_page()->restore_dialog = migration_restore_dialog_new(
+        confirmation->token, confirmation->text, confirmation->offers_replace, FALSE);
+    refresh_actions();
+    return TRUE;
+}
+
+static void migration_restore_confirmation_apply(gpointer pointer) {
+    if (migration_restore_stage(pointer)) gtk_window_present(GTK_WINDOW(storage_page()->restore_dialog));
+}
+
+int32_t jsti_window_confirm_migration_restore(const char *token, const char *text, int32_t offers_replace) {
+    if (token == NULL || !g_uuid_string_is_valid(token) || text == NULL || text[0] == '\0' ||
+        !g_utf8_validate(text, -1, NULL) || (offers_replace != 0 && offers_replace != 1)) return -1;
+    MigrationRestoreConfirmation *confirmation = g_new0(MigrationRestoreConfirmation, 1);
+    confirmation->token = g_strdup(token);
+    confirmation->text = g_strdup(text);
+    confirmation->offers_replace = offers_replace != 0;
+    return post(migration_restore_confirmation_apply, confirmation, migration_restore_confirmation_free);
+}
+
+/* General's Housekeeping and Data backup groups. */
+void storage_groups_add(GtkWidget *column) {
+    GtkWidget *housekeeping = group("Housekeeping");
+    GtkWidget *folder = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(folder), "Recording storage");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(folder), "Open the folder containing saved audio and History data.");
+    storage_page()->recordings_folder = GTK_BUTTON(gtk_button_new_with_mnemonic("_Open folder"));
+    gtk_widget_set_valign(GTK_WIDGET(storage_page()->recordings_folder), GTK_ALIGN_CENTER);
+    g_signal_connect(storage_page()->recordings_folder, "clicked", G_CALLBACK(on_recordings_folder), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(folder), GTK_WIDGET(storage_page()->recordings_folder));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), folder);
+    GtkWidget *location = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(location), "New recordings folder");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(location),
+        "Save new audio in a local folder you choose. Existing recordings are never moved or deleted.");
+    storage_page()->recordings_choose = GTK_BUTTON(gtk_button_new_with_mnemonic("_Choose…"));
+    gtk_widget_set_valign(GTK_WIDGET(storage_page()->recordings_choose), GTK_ALIGN_CENTER);
+    g_signal_connect(storage_page()->recordings_choose, "clicked", G_CALLBACK(on_recordings_choose), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(location), GTK_WIDGET(storage_page()->recordings_choose));
+    storage_page()->recordings_default = GTK_BUTTON(gtk_button_new_with_mnemonic("Use _default"));
+    gtk_widget_set_valign(GTK_WIDGET(storage_page()->recordings_default), GTK_ALIGN_CENTER);
+    g_signal_connect(storage_page()->recordings_default, "clicked", G_CALLBACK(on_recordings_default), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(location), GTK_WIDGET(storage_page()->recordings_default));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), location);
+    GtkWidget *cleanup = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(cleanup), "Saved recordings");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(cleanup), "Delete saved audio without removing History entries.");
+    adw_action_row_add_suffix(ADW_ACTION_ROW(cleanup), history_audio_cleanup_button());
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), cleanup);
+    gtk_box_append(GTK_BOX(column), housekeeping);
+    GtkWidget *backup = group("Data backup");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(backup),
+        "Save History text with optional saved audio and app profiles in a ZIP backup. "
+        "ZIPs are not encrypted. Settings and credentials are not included; existing files are never replaced.");
+    storage_page()->backup_audio = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(storage_page()->backup_audio), "Include saved recording audio");
+    adw_switch_row_set_active(storage_page()->backup_audio, TRUE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), GTK_WIDGET(storage_page()->backup_audio));
+    storage_page()->backup_profiles = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(storage_page()->backup_profiles), "Include app profiles");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(storage_page()->backup_profiles), "Includes per-app overrides and prompts.");
+    adw_switch_row_set_active(storage_page()->backup_profiles, FALSE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), GTK_WIDGET(storage_page()->backup_profiles));
+    GtkWidget *backup_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(backup_row), "Save a ZIP backup");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(backup_row),
+        "Turn off both optional categories for a History-only backup.");
+    storage_page()->backup_export = GTK_BUTTON(gtk_button_new_with_mnemonic("Save _backup…"));
+    gtk_widget_set_valign(GTK_WIDGET(storage_page()->backup_export), GTK_ALIGN_CENTER);
+    g_signal_connect(storage_page()->backup_export, "clicked", G_CALLBACK(on_backup), NULL);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(backup_row), GTK_WIDGET(storage_page()->backup_export));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), backup_row);
+    GtkWidget *inspect_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(inspect_row), "Inspect a ZIP backup");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(inspect_row),
+        "Review categories and archive notices without importing any data.");
+    storage_page()->backup_inspect = GTK_BUTTON(gtk_button_new_with_mnemonic("_Inspect…"));
+    gtk_widget_set_valign(GTK_WIDGET(storage_page()->backup_inspect), GTK_ALIGN_CENTER);
+    g_signal_connect(storage_page()->backup_inspect, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(1));
+    adw_action_row_add_suffix(ADW_ACTION_ROW(inspect_row), GTK_WIDGET(storage_page()->backup_inspect));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), inspect_row);
+    GtkWidget *restore_row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(restore_row), "Restore a ZIP backup");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(restore_row),
+        "Preview and confirm History text and app profiles. Settings, audio and credentials stay unchanged.");
+    storage_page()->backup_restore = GTK_BUTTON(gtk_button_new_with_mnemonic("_Restore..."));
+    gtk_widget_set_valign(GTK_WIDGET(storage_page()->backup_restore), GTK_ALIGN_CENTER);
+    g_signal_connect(storage_page()->backup_restore, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(2));
+    adw_action_row_add_suffix(ADW_ACTION_ROW(restore_row), GTK_WIDGET(storage_page()->backup_restore));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), restore_row);
+    gtk_box_append(GTK_BOX(column), backup);
+}
+
+void storage_refresh_actions(gboolean idle) {
+    if (storage_page()->recordings_choose != NULL) {
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->recordings_choose), idle && storage_page()->location_chooser == NULL);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->recordings_default), idle && storage_page()->location_chooser == NULL);
+    }
+    if (storage_page()->backup_audio != NULL) {
+        gboolean backup_idle = idle && storage_page()->backup_chooser == NULL && storage_page()->restore_dialog == NULL;
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_audio), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_profiles), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_export), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_inspect), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_restore), backup_idle);
+    }
+}
+
+void storage_page_close(void) {
+    if (storage_page()->backup_chooser != NULL) g_cancellable_cancel(storage_page()->backup_chooser);
+    g_clear_object(&storage_page()->backup_chooser);
+    if (storage_page()->location_chooser != NULL) g_cancellable_cancel(storage_page()->location_chooser);
+    g_clear_object(&storage_page()->location_chooser);
 }

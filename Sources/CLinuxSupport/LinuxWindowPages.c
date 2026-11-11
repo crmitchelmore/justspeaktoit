@@ -1,6 +1,9 @@
-/* Page builders: shared page scaffolding and the Dashboard. */
-#include "LinuxWindowInternal.h"
-#include "LinuxWindowDashboardPage.h"
+/* Page builders: shared page scaffolding and the Dashboard, which owns
+ * DashboardPage (LinuxWindowDashboardState.h). */
+#include "LinuxWindowDashboardState.h"
+#include "LinuxWindowHistoryPage.h"
+#include "LinuxWindowModelsPage.h"
+#include "LinuxWindowOutputPage.h"
 
 static DashboardPage dashboard_state;
 DashboardPage *dashboard_page(void) { return &dashboard_state; }
@@ -13,39 +16,9 @@ GtkWidget *group(const char *title) {
     return widget;
 }
 
-/* The voice Read aloud uses; the list comes from jsti_window_set_voices. */
-GtkWidget *read_aloud_group(void) {
-    GtkWidget *widget = group("Voice");
-    adw_preferences_group_set_description(
-        ADW_PREFERENCES_GROUP(widget),
-        "Read aloud sends the displayed History transcript to the selected voice provider using its saved key. "
-        "Play, Pause and Stop control playback.");
-    read_aloud.voices = gtk_string_list_new(NULL);
-    read_aloud.voice_row = ADW_COMBO_ROW(adw_combo_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(read_aloud.voice_row), "Voice");
-    adw_combo_row_set_model(read_aloud.voice_row, G_LIST_MODEL(read_aloud.voices));
-    adw_combo_row_set_enable_search(read_aloud.voice_row, TRUE);
-    g_signal_connect(read_aloud.voice_row, "notify::selected", G_CALLBACK(on_voice), NULL);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(widget), GTK_WIDGET(read_aloud.voice_row));
-    read_aloud.favorite_names = gtk_string_list_new(NULL);
-    read_aloud.favorite_row = ADW_COMBO_ROW(adw_combo_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(read_aloud.favorite_row), "Favorites");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(read_aloud.favorite_row),
-        "Choose a saved voice. Unavailable saved IDs are retained, not substituted.");
-    adw_combo_row_set_model(read_aloud.favorite_row, G_LIST_MODEL(read_aloud.favorite_names));
-    adw_combo_row_set_enable_search(read_aloud.favorite_row, TRUE);
-    g_signal_connect(read_aloud.favorite_row, "notify::selected", G_CALLBACK(on_favorite_voice), NULL);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(widget), GTK_WIDGET(read_aloud.favorite_row));
-    GtkWidget *favorite_action = adw_action_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(favorite_action), "Favorite selected voice");
-    read_aloud.favorite_button = GTK_BUTTON(gtk_button_new_with_label("Add to favorites"));
-    gtk_widget_set_valign(GTK_WIDGET(read_aloud.favorite_button), GTK_ALIGN_CENTER);
-    gtk_widget_set_size_request(GTK_WIDGET(read_aloud.favorite_button), -1, 36);
-    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button), FALSE);
-    g_signal_connect(read_aloud.favorite_button, "clicked", G_CALLBACK(on_favorite_toggle), NULL);
-    adw_action_row_add_suffix(ADW_ACTION_ROW(favorite_action), GTK_WIDGET(read_aloud.favorite_button));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(widget), favorite_action);
-    return widget;
+const char *combo_row_text(AdwComboRow *row) {
+    GObject *item = adw_combo_row_get_selected_item(row);
+    return item != NULL ? gtk_string_object_get_string(GTK_STRING_OBJECT(item)) : NULL;
 }
 
 GtkWidget *settings_hero(const char *title, const char *subtitle) {
@@ -53,7 +26,7 @@ GtkWidget *settings_hero(const char *title, const char *subtitle) {
 }
 
 void add_page(gint32 page, GtkWidget *widget) {
-    gtk_stack_add_named(ui.pages, widget, page_info[page].name);
+    gtk_stack_add_named(ui.pages, widget, page_name(page));
 }
 
 GtkWidget *transcript_view(GtkTextBuffer *buffer, int height) {
@@ -204,4 +177,103 @@ GtkWidget *build_dashboard(GtkTextBuffer *buffer) {
     gtk_box_append(GTK_BOX(setup_body), setup_tile("edit-paste-symbolic", "Text output", &dashboard_page()->setup_output));
     gtk_box_append(GTK_BOX(column), two_columns(insights, setup));
     return page;
+}
+
+void dashboard_add_compact_setters(AdwBreakpoint *breakpoint) {
+    GValue vertical = G_VALUE_INIT;
+    g_value_init(&vertical, GTK_TYPE_ORIENTATION);
+    g_value_set_enum(&vertical, GTK_ORIENTATION_VERTICAL);
+    adw_breakpoint_add_setter(breakpoint, G_OBJECT(dashboard_page()->columns), "orientation", &vertical);
+    g_value_unset(&vertical);
+    GValue unequal = G_VALUE_INIT;
+    g_value_init(&unequal, G_TYPE_BOOLEAN);
+    g_value_set_boolean(&unequal, FALSE);
+    adw_breakpoint_add_setter(breakpoint, G_OBJECT(dashboard_page()->columns), "homogeneous", &unequal);
+    g_value_unset(&unequal);
+}
+
+void dashboard_refresh_actions(gint32 state, gboolean copyable) {
+    gboolean recording = state == JSTI_STATE_RECORDING;
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), copyable);
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->cancel), state == JSTI_STATE_WORKING);
+    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->cancel), state == JSTI_STATE_WORKING);
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->record), state != JSTI_STATE_WORKING);
+    gtk_button_set_label(dashboard_page()->record, recording ? "Stop Recording"
+                                    : state == JSTI_STATE_WORKING ? "Working…" : "Start Recording");
+    if (recording) gtk_widget_add_css_class(GTK_WIDGET(dashboard_page()->record), "recording");
+    else gtk_widget_remove_css_class(GTK_WIDGET(dashboard_page()->record), "recording");
+    /* While recording, the hero previews the words as they arrive. */
+    gchar *preview = recording ? displayed_transcript() : NULL;
+    gtk_label_set_text(dashboard_page()->live_preview, preview != NULL && preview[0] != '\0' ? preview : "Listening…");
+    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->live_preview), recording);
+    g_free(preview);
+}
+
+void dashboard_set_copy_enabled(gboolean enabled) {
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), enabled);
+}
+
+gboolean dashboard_can_record(void) { return gtk_widget_is_sensitive(GTK_WIDGET(dashboard_page()->record)); }
+
+/* The dashboard's Setup card and the header subtitle echo the settings. */
+void refresh_setup(void) {
+    const char *microphone = models_microphone_name();
+    gtk_label_set_text(dashboard_page()->setup_microphone, microphone != NULL ? microphone : "Default microphone");
+    const char *model = models_model_name();
+    gtk_label_set_text(dashboard_page()->setup_model, model != NULL ? model : "No model selected");
+    adw_window_title_set_subtitle(ui.title, model != NULL ? model : "");
+    gchar *output = output_summary();
+    gtk_label_set_text(dashboard_page()->setup_output, output);
+    g_free(output);
+    const char *hint = output_shortcut_hint();
+    gtk_label_set_text(dashboard_page()->setup_shortcut, hint != NULL && hint[0] != '\0' ? hint : "Checking the desktop…");
+}
+
+void insights_free(gpointer pointer) {
+    Insights *insights = pointer;
+    for (int index = 0; index < 5; index++) {
+        g_free(insights->all[index]);
+        g_free(insights->visible[index]);
+    }
+    g_free(insights);
+}
+
+void insights_apply(gpointer pointer) {
+    Insights *insights = pointer;
+    /* Order: sessions, errors, recording time, average length, spend. */
+    gtk_label_set_text(dashboard_page()->hero_sessions, insights->all[0]);
+    gtk_label_set_text(dashboard_page()->hero_time, insights->all[2]);
+    gtk_label_set_text(dashboard_page()->hero_spend, insights->all[4]);
+    gtk_label_set_text(dashboard_page()->insight_sessions, insights->all[0]);
+    gtk_label_set_text(dashboard_page()->insight_time, insights->all[2]);
+    gtk_label_set_text(dashboard_page()->insight_average, insights->all[3]);
+    gtk_label_set_text(dashboard_page()->insight_spend, insights->all[4]);
+    history_show_insights(insights->visible[0], insights->visible[1], insights->visible[3], insights->visible[4]);
+    /* The status notifier's menu shows the dashboard's totals, as the Mac's menu bar extra does. */
+    g_free(ui.tray_summary);
+    ui.tray_summary = g_strcmp0(insights->all[0], "0") == 0
+        ? g_strdup("No sessions yet")
+        : g_strdup_printf("%s %s · %s · %s", insights->all[0],
+                          g_strcmp0(insights->all[0], "1") == 0 ? "session" : "sessions", insights->all[2],
+                          insights->all[4]);
+    jsti_tray_set_state(ui.state, ui.tray_summary);
+}
+
+void insights_copy(gchar **target, const JSTIInsights *source) {
+    const char *values[5] = { "0", "0", "—", "—", "—" };
+    if (source != NULL) {
+        values[0] = source->sessions;
+        values[1] = source->errors;
+        values[2] = source->recording_time;
+        values[3] = source->average_length;
+        values[4] = source->spend;
+    }
+    for (int index = 0; index < 5; index++) target[index] = g_strdup(values[index] != NULL ? values[index] : "—");
+}
+
+int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible) {
+    Insights *insights = g_new0(Insights, 1);
+    insights_copy(insights->all, all);
+    insights_copy(insights->visible, visible);
+    return post(insights_apply, insights, insights_free);
 }

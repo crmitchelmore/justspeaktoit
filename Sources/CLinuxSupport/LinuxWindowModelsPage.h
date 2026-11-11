@@ -1,28 +1,21 @@
-/* Model and microphone pickers: their state, owned by LinuxWindowModels.c. GTK main thread only.
- * Only translation units that include this header can reach it. */
+/* The model and microphone pickers, as the rest of the window sees them:
+ * functions only. Their state is private to LinuxWindowModels.c
+ * (LinuxWindowModelsState.h). GTK main thread only. */
 #ifndef JSTI_LINUX_WINDOW_MODELS_PAGE_H
 #define JSTI_LINUX_WINDOW_MODELS_PAGE_H
 
 #include "LinuxWindowInternal.h"
 
-typedef struct ModelsPage {
-    GtkStringList *model_names;
-    GArray *model_slots;
-    Models *model_catalog;
-    gint32 preferred_model_slots[4];
-    AdwComboRow *model_row;
-    GtkLabel *catalog_status;
-    GtkButton *catalog_refresh;
-    AdwPasswordEntryRow *key_row;
-    /* Shown while an Azure model is selected: live routes need the endpoint. */
-    AdwEntryRow *azure_row;
-    GtkStringList *microphone_names;
-    GPtrArray *microphone_ids;
-    AdwComboRow *microphone_row;
-} ModelsPage;
-
 #pragma GCC visibility push(hidden)
-ModelsPage *models_page(void);
+/* Transcription > Model, and General > Microphone. */
+GtkWidget *models_group(void);
+GtkWidget *microphone_group(void);
+void models_refresh_actions(gboolean idle);
+/* The selected rows' display names, or NULL. */
+const char *models_model_name(void);
+const char *models_microphone_name(void);
+/* Window close: the catalogue goes with the window. */
+void models_close(void);
 #pragma GCC visibility pop
 
 #endif

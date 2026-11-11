@@ -35,8 +35,13 @@ typedef struct HistoryPage {
     gchar *export_text;
     GtkButton *history_import;
     GtkLabel *history_sessions, *history_errors, *history_average, *history_spend;
-    /* The selected History card's transcript and actions, moved into that card. */
+    /* The selected History card's transcript and actions, moved into that card.
+     * The transcript view shows the window's one transcript buffer. */
     GtkWidget *detail;
+    GtkTextView *transcript;
+    GtkDropDown *version;
+    GtkButton *copy;
+    GtkButton *read_aloud;
     GtkWidget *history_empty;
 } HistoryPage;
 

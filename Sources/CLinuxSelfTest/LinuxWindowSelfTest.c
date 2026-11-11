@@ -3,14 +3,15 @@
  * this target, so CI and the desktop checks still run it inside the shipped binary.
  */
 #include "LinuxWindowSelfTestInternal.h"
-#include "../CLinuxSupport/LinuxWindowAboutPage.h"
-#include "../CLinuxSupport/LinuxWindowDashboardPage.h"
-#include "../CLinuxSupport/LinuxWindowGeneralPage.h"
+#include "../CLinuxSupport/LinuxWindowAboutState.h"
+#include "../CLinuxSupport/LinuxWindowDashboardState.h"
+#include "../CLinuxSupport/LinuxWindowGeneralState.h"
 #include "../CLinuxSupport/LinuxWindowHistoryState.h"
-#include "../CLinuxSupport/LinuxWindowModelsPage.h"
-#include "../CLinuxSupport/LinuxWindowOutputPage.h"
-#include "../CLinuxSupport/LinuxWindowPolishPage.h"
-#include "../CLinuxSupport/LinuxWindowStoragePage.h"
+#include "../CLinuxSupport/LinuxWindowModelsState.h"
+#include "../CLinuxSupport/LinuxWindowOutputState.h"
+#include "../CLinuxSupport/LinuxWindowPolishState.h"
+#include "../CLinuxSupport/LinuxWindowReadAloudState.h"
+#include "../CLinuxSupport/LinuxWindowStorageState.h"
 
 /* ---------------------------------------------------------- self-test */
 
@@ -30,7 +31,7 @@ static void observe_cancel(gint32 event, const char *text, gint32 index, void *c
     ++calls[0];
     calls[1] = event;
     gchar expected[32];
-    guint64 token = escape_token(&escape_policy);
+    guint64 token = window_escape_token();
     g_snprintf(expected, sizeof(expected), "%" G_GUINT64_FORMAT, token);
     calls[2] = token != 0 && g_strcmp0(text, expected) == 0;
     calls[3] = text != NULL && *text == '\0';
@@ -64,18 +65,16 @@ static gboolean cancel_key_self_test(void) {
     jsti_window_event_fn callback = ui.callback;
     void *context = ui.context;
     gint32 state = ui.state, calls[4] = {0};
-    g_mutex_lock(&escape_policy.mutex);
-    gboolean saved_policy = escape_policy.enabled, saved_recording = escape_policy.recording;
-    g_mutex_unlock(&escape_policy.mutex);
+    gboolean saved_policy = escape_enabled(), saved_recording = escape_recording();
     gboolean held = ui.cancel_key_held, suppress = ui.suppress, closing = ui.closing;
     gboolean sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window));
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
     ui.callback = observe_cancel; ui.context = calls;
     ui.cancel_key_held = FALSE; ui.suppress = FALSE; ui.closing = FALSE; ui.state = JSTI_STATE_IDLE;
-    escape_publish(&escape_policy, JSTI_STATE_IDLE, 1, FALSE);
+    window_escape_publish(JSTI_STATE_IDLE, 1, FALSE);
     gboolean okay = escape_policy_self_test() && !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE);
     ui.state = JSTI_STATE_RECORDING;
-    escape_publish(&escape_policy, ui.state, -1, FALSE);
+    window_escape_publish(ui.state, -1, FALSE);
     const GdkModifierType modified[] = {
         GDK_CONTROL_MASK, GDK_SHIFT_MASK, GDK_ALT_MASK, GDK_SUPER_MASK, GDK_HYPER_MASK, GDK_META_MASK
     };
@@ -97,15 +96,15 @@ static gboolean cancel_key_self_test(void) {
     okay = !cancel_key(GDK_KEY_Escape, 0, GTK_WIDGET(embedded), TRUE) && calls[0] == 0 && okay;
     g_object_unref(embedded);
 #endif
-    okay = cancel_key(GDK_KEY_Escape, GDK_LOCK_MASK, GTK_WIDGET(dashboard_page()->transcript), TRUE) &&
+    okay = cancel_key(GDK_KEY_Escape, GDK_LOCK_MASK, GTK_WIDGET(history_page()->transcript), TRUE) &&
         calls[0] == 1 && calls[1] == JSTI_EVENT_CANCEL && calls[2] && okay;
     ui.state = JSTI_STATE_IDLE;
-    escape_publish(&escape_policy, ui.state, -1, FALSE);
+    window_escape_publish(ui.state, -1, FALSE);
     okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 1 && okay;
     action_key_released(NULL, GDK_KEY_Escape, 9, 0, NULL);
     okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && !ui.cancel_key_held && okay;
     ui.state = JSTI_STATE_WORKING;
-    escape_publish(&escape_policy, ui.state, -1, FALSE);
+    window_escape_publish(ui.state, -1, FALSE);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
     okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && okay;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), TRUE);
@@ -113,7 +112,7 @@ static gboolean cancel_key_self_test(void) {
     okay = !cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && okay;
     ui.closing = FALSE;
     okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 2 && okay;
-    guint64 old_token = escape_token(&escape_policy);
+    guint64 old_token = window_escape_token();
     okay = jsti_window_set_escape_cancellation(-1) == -1 &&
         jsti_window_set_escape_cancellation(2) == -1 && jsti_window_escape_is_current(old_token) && okay;
     okay = jsti_window_set_escape_cancellation(0) == 0 &&
@@ -126,7 +125,7 @@ static gboolean cancel_key_self_test(void) {
         cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 3 && okay;
     action_key_released(NULL, GDK_KEY_Escape, 9, 0, NULL);
     okay = cancel_key(GDK_KEY_Escape, 0, NULL, TRUE) && calls[0] == 4 && calls[2] && okay;
-    escape_publish(&escape_policy, saved_recording ? JSTI_STATE_RECORDING : JSTI_STATE_IDLE, saved_policy, FALSE);
+    window_escape_publish(saved_recording ? JSTI_STATE_RECORDING : JSTI_STATE_IDLE, saved_policy, FALSE);
     ui.callback = callback; ui.context = context; ui.state = state;
     ui.cancel_key_held = held; ui.suppress = suppress; ui.closing = closing;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
@@ -201,35 +200,35 @@ static gboolean model_modes_self_test(void) {
  * and the window is idle, it reports that record, and the voice picker
  * reports the chosen position. */
 static int32_t read_aloud_self_test(const char *record, char *error, size_t capacity) {
-    if (g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)) < 2) {
+    if (g_list_model_get_n_items(G_LIST_MODEL(read_aloud_state()->voices)) < 2) {
         return fail(error, capacity, "Read aloud offers fewer than two voices");
     }
-    if (!gtk_widget_get_sensitive(GTK_WIDGET(read_aloud.button))) {
+    if (!gtk_widget_get_sensitive(GTK_WIDGET(history_page()->read_aloud))) {
         return fail(error, capacity, "Read aloud was unavailable for the presented record");
     }
     jsti_window_event_fn callback = ui.callback;
     ui.callback = observe_event;
-    JSTIVoicePickerCallback picker_callback = read_aloud.picker_callback;
-    read_aloud.picker_callback = NULL;
+    JSTIVoicePickerCallback picker_callback = read_aloud_state()->picker_callback;
+    read_aloud_state()->picker_callback = NULL;
     observed.event = 0;
-    g_signal_emit_by_name(read_aloud.button, "clicked");
+    g_signal_emit_by_name(history_page()->read_aloud, "clicked");
     gboolean reported = observed.event == JSTI_EVENT_READ_ALOUD && g_strcmp0(observed.text, record) == 0;
-    guint saved = adw_combo_row_get_selected(read_aloud.voice_row);
+    guint saved = adw_combo_row_get_selected(read_aloud_state()->voice_row);
     guint other = saved == 0 ? 1 : 0;
     observed.event = 0;
-    adw_combo_row_set_selected(read_aloud.voice_row, other);
+    adw_combo_row_set_selected(read_aloud_state()->voice_row, other);
     gboolean chosen = observed.event == JSTI_EVENT_VOICE_OUTPUT && observed.index == (gint32)other;
     ui.suppress = TRUE;
-    adw_combo_row_set_selected(read_aloud.voice_row, saved);
+    adw_combo_row_set_selected(read_aloud_state()->voice_row, saved);
     ui.suppress = FALSE;
     ui.callback = callback;
-    read_aloud.picker_callback = picker_callback;
+    read_aloud_state()->picker_callback = picker_callback;
     g_clear_pointer(&observed.text, g_free);
     if (!reported) return fail(error, capacity, "Read aloud did not report the presented record");
     if (!chosen) return fail(error, capacity, "the voice picker did not report the chosen voice");
     Update working = { .state = JSTI_STATE_WORKING };
     update_apply(&working);
-    gboolean offered = gtk_widget_get_sensitive(GTK_WIDGET(read_aloud.button));
+    gboolean offered = gtk_widget_get_sensitive(GTK_WIDGET(history_page()->read_aloud));
     Update idle = { .state = JSTI_STATE_IDLE };
     update_apply(&idle);
     if (offered) return fail(error, capacity, "Read aloud stayed available while transcribing");
@@ -248,14 +247,14 @@ static void observe_favorite(gint32 action, const char *identifier, void *contex
 static int32_t voice_favorites_self_test(char *error, size_t capacity) {
     Voices original = {0};
     original.names = g_ptr_array_new_with_free_func(g_free);
-    for (guint index = 0; index < g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)); ++index) {
-        g_ptr_array_add(original.names, g_strdup(gtk_string_list_get_string(read_aloud.voices, index)));
+    for (guint index = 0; index < g_list_model_get_n_items(G_LIST_MODEL(read_aloud_state()->voices)); ++index) {
+        g_ptr_array_add(original.names, g_strdup(gtk_string_list_get_string(read_aloud_state()->voices, index)));
     }
-    original.selected = (gint32)adw_combo_row_get_selected(read_aloud.voice_row);
-    original.identifiers = read_aloud.identifiers != NULL ? g_ptr_array_ref(read_aloud.identifiers) : NULL;
-    original.favorite_ranks = read_aloud.favorite_ranks != NULL ? g_array_ref(read_aloud.favorite_ranks) : NULL;
-    original.callback = read_aloud.picker_callback;
-    original.context = read_aloud.picker_context;
+    original.selected = (gint32)adw_combo_row_get_selected(read_aloud_state()->voice_row);
+    original.identifiers = read_aloud_state()->identifiers != NULL ? g_ptr_array_ref(read_aloud_state()->identifiers) : NULL;
+    original.favorite_ranks = read_aloud_state()->favorite_ranks != NULL ? g_array_ref(read_aloud_state()->favorite_ranks) : NULL;
+    original.callback = read_aloud_state()->picker_callback;
+    original.context = read_aloud_state()->picker_context;
     Voices fixture = {0};
     fixture.names = g_ptr_array_new_with_free_func(g_free);
     fixture.identifiers = g_ptr_array_new_with_free_func(g_free);
@@ -272,31 +271,31 @@ static int32_t voice_favorites_self_test(char *error, size_t capacity) {
     }
     favorite_observed.calls = 0;
     voices_apply(&fixture);
-    gboolean okay = favorite_observed.calls == 0 && read_aloud.favorite_indices->len == 1 &&
-        g_array_index(read_aloud.favorite_indices, guint, 0) == 1 &&
-        adw_combo_row_get_selected(read_aloud.favorite_row) == read_aloud.favorite_indices->len &&
-        g_list_model_get_n_items(G_LIST_MODEL(read_aloud.favorite_names)) == 2;
-    adw_combo_row_set_selected(read_aloud.favorite_row, 0);
+    gboolean okay = favorite_observed.calls == 0 && read_aloud_state()->favorite_indices->len == 1 &&
+        g_array_index(read_aloud_state()->favorite_indices, guint, 0) == 1 &&
+        adw_combo_row_get_selected(read_aloud_state()->favorite_row) == read_aloud_state()->favorite_indices->len &&
+        g_list_model_get_n_items(G_LIST_MODEL(read_aloud_state()->favorite_names)) == 2;
+    adw_combo_row_set_selected(read_aloud_state()->favorite_row, 0);
     okay = okay && favorite_observed.calls == 1 && favorite_observed.action == 0 &&
         g_strcmp0(favorite_observed.identifier, ids[1]) == 0;
-    adw_combo_row_set_selected(read_aloud.favorite_row, read_aloud.favorite_indices->len);
+    adw_combo_row_set_selected(read_aloud_state()->favorite_row, read_aloud_state()->favorite_indices->len);
     okay = okay && favorite_observed.calls == 1;
     /* A host acknowledgement, not an optimistic UI write, updates button state. */
     fixture.selected = 1;
     voices_apply(&fixture);
-    g_signal_emit_by_name(read_aloud.favorite_button, "clicked");
+    g_signal_emit_by_name(read_aloud_state()->favorite_button, "clicked");
     okay = okay && favorite_observed.calls == 2 && favorite_observed.action == 2 &&
         g_strcmp0(favorite_observed.identifier, ids[1]) == 0;
     fixture.selected = 0;
     voices_apply(&fixture);
-    g_signal_emit_by_name(read_aloud.favorite_button, "clicked");
+    g_signal_emit_by_name(read_aloud_state()->favorite_button, "clicked");
     okay = okay && favorite_observed.calls == 3 && favorite_observed.action == 1 &&
         g_strcmp0(favorite_observed.identifier, ids[0]) == 0;
     fixture.selected = 2;
     g_array_index(fixture.favorite_ranks, gint32, 1) = -1;
     voices_apply(&fixture);
-    okay = okay && !gtk_widget_get_sensitive(GTK_WIDGET(read_aloud.favorite_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(read_aloud.favorite_button)) && favorite_observed.calls == 3;
+    okay = okay && !gtk_widget_get_sensitive(GTK_WIDGET(read_aloud_state()->favorite_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(read_aloud_state()->favorite_button)) && favorite_observed.calls == 3;
     voices_apply(&original);
     g_ptr_array_unref(original.names);
     if (original.identifiers != NULL) g_ptr_array_unref(original.identifiers);
@@ -594,6 +593,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_settings_search_self_test(error, capacity) != 0) return -1;
     if (!text_output_self_test())
         return fail(error, capacity, "clipboard restoration did not follow the session capability and saved choice");
+    if (!page_functions_self_test())
+        return fail(error, capacity, "a page's functions disagree with the state it keeps to itself");
     const char *icon_name = gtk_window_get_icon_name(ui.window);
     GtkIconTheme *theme = gtk_icon_theme_get_for_display(gtk_widget_get_display(GTK_WIDGET(ui.window)));
     if (g_strcmp0(icon_name, "com.justspeaktoit.JustSpeakToIt") != 0 ||
@@ -728,7 +729,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     }
     for (gint32 page = JSTI_PAGE_COUNT - 1; page >= 0; page--) {
         show_page(page);
-        if (g_strcmp0(gtk_stack_get_visible_child_name(ui.pages), page_info[page].name) != 0
+        if (g_strcmp0(gtk_stack_get_visible_child_name(ui.pages), page_name(page)) != 0
             || gtk_list_box_row_get_index(gtk_list_box_get_selected_row(ui.sidebar)) != page) {
             return fail(error, capacity, "a sidebar page could not be shown");
         }
@@ -749,7 +750,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         g_strcmp0(buffer, "Processed text") != 0 || jsti_window_transcript_variant() != 0) {
         return fail(error, capacity, "the displayed transcript snapshot did not match");
     }
-    if (!gtk_widget_get_sensitive(GTK_WIDGET(dashboard_page()->copy)) || !gtk_widget_get_visible(GTK_WIDGET(dashboard_page()->version))) {
+    if (!gtk_widget_get_sensitive(GTK_WIDGET(history_page()->copy)) || !gtk_widget_get_visible(GTK_WIDGET(history_page()->version))) {
         return fail(error, capacity, "Copy or the version control stayed unavailable");
     }
     if (read_aloud_self_test(first, error, capacity) != 0) return -1;
@@ -762,10 +763,10 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     Update clear = { .status = (gchar *)"Self-test complete.", .transcript = (gchar *)"", .has_transcript = TRUE,
                      .state = JSTI_STATE_IDLE };
     update_apply(&clear);
-    if (history_page()->selected_id != NULL || gtk_widget_get_sensitive(GTK_WIDGET(dashboard_page()->copy))) {
+    if (history_page()->selected_id != NULL || gtk_widget_get_sensitive(GTK_WIDGET(history_page()->copy))) {
         return fail(error, capacity, "clearing History left record actions enabled");
     }
-    if (gtk_accessible_get_accessible_role(GTK_ACCESSIBLE(dashboard_page()->status)) != GTK_ACCESSIBLE_ROLE_STATUS)
+    if (gtk_accessible_get_accessible_role(GTK_ACCESSIBLE(ui.status)) != GTK_ACCESSIBLE_ROLE_STATUS)
         return fail(error, capacity, "the window status lost its accessible status role");
     if (jsti_hud_self_test(error, capacity) != 0) return -1;
     if (jsti_comparison_self_test(ui.window, error, capacity) != 0) return -1;

@@ -1,24 +1,21 @@
-/* Text output, app switching and shortcut rows: their state, owned by LinuxWindowSettingsPages.c. GTK main thread only.
- * Only translation units that include this header can reach it. */
+/* Text output and the keyboard shortcut rows, as the rest of the window sees
+ * them: functions only. Their state is private to LinuxWindowOutput.c
+ * (LinuxWindowOutputState.h). GTK main thread only. */
 #ifndef JSTI_LINUX_WINDOW_OUTPUT_PAGE_H
 #define JSTI_LINUX_WINDOW_OUTPUT_PAGE_H
 
 #include "LinuxWindowInternal.h"
 
-typedef struct OutputPage {
-    AdwPreferencesGroup *output_group;
-    AdwComboRow *output_row;
-    AdwComboRow *app_switch_row;
-    GtkLabel *app_switch_help;
-    gboolean app_switch_configured;
-    AdwSwitchRow *restore_row;
-    gboolean can_restore_clipboard;
-    AdwActionRow *shortcut_row;
-    AdwComboRow *style_row;
-} OutputPage;
-
 #pragma GCC visibility push(hidden)
-OutputPage *output_page(void);
+/* General > Output, and Keyboard > Shortcut. */
+GtkWidget *output_group(void);
+GtkWidget *shortcut_group(void);
+/* The Setup card's text output line, e.g. "Paste into the focused app · clipboard restored". */
+gchar *output_summary(void);
+/* The shortcut row's hint, or NULL. */
+const char *output_shortcut_hint(void);
+/* The method and clipboard restoration the rows show now. */
+TextOutput output_current(void);
 #pragma GCC visibility pop
 
 #endif

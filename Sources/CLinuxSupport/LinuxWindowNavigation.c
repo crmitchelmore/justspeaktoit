@@ -1,7 +1,15 @@
 /* Navigation: page switching, the sidebar, its shortcuts and cancel keys. */
-#include "LinuxWindowInternal.h"
+#include "LinuxWindowNavigationState.h"
 
-const PageInfo page_info[JSTI_PAGE_COUNT] = {
+/* Sidebar entries in page order, with the Mac sidebar's tints. */
+typedef struct PageInfo {
+    const char *name;
+    const char *title;
+    const char *icon;
+    const char *tint;
+} PageInfo;
+
+static const PageInfo page_info[JSTI_PAGE_COUNT] = {
     [JSTI_PAGE_DASHBOARD] = { "dashboard", "Dashboard", "view-grid-symbolic", "jsti-tint-lagoon" },
     [JSTI_PAGE_HISTORY] = { "history", "History", "document-open-recent-symbolic", "jsti-tint-accent" },
     [JSTI_PAGE_VOICE_OUTPUT] = { "voice-output", "Voice Output", "audio-speakers-symbolic", "jsti-tint-green" },
@@ -16,7 +24,12 @@ const PageInfo page_info[JSTI_PAGE_COUNT] = {
     [JSTI_PAGE_CLOUD_SYNC] = { "icloud-sync", "iCloud Sync", "emblem-synchronizing-symbolic", "jsti-tint-warm" },
     [JSTI_PAGE_ABOUT] = { "about", "About", "help-about-symbolic", "jsti-tint-warm" },
 };
-SidebarShortcuts sidebar_shortcuts;
+static SidebarShortcuts sidebar_shortcuts;
+SidebarShortcuts *sidebar_shortcuts_state(void) { return &sidebar_shortcuts; }
+
+const char *page_name(gint32 page) {
+    return page >= 0 && page < JSTI_PAGE_COUNT ? page_info[page].name : NULL;
+}
 
 void show_page(gint32 page) {
     if (page < 0 || page >= JSTI_PAGE_COUNT) return;
@@ -86,7 +99,7 @@ gboolean cancel_key(guint keyval, GdkModifierType modifiers, GtkWidget *focused,
     }
     if (ui.cancel_key_held) return TRUE;
     if (relevant != 0 || (ui.state != JSTI_STATE_RECORDING && ui.state != JSTI_STATE_WORKING)) return FALSE;
-    guint64 token = escape_token(&escape_policy);
+    guint64 token = window_escape_token();
     if (token == 0) return FALSE;
     ui.cancel_key_held = TRUE;
     gchar value[32];
@@ -183,4 +196,53 @@ GtkWidget *build_sidebar(void) {
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), jsti_settings_search_new(scroller));
     return toolbar;
+}
+
+static void sidebar_update_free(gpointer pointer) {
+    SidebarUpdate *update = pointer;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) g_free(update->hints[page]);
+    g_free(update);
+}
+
+void sidebar_update_apply(gpointer pointer) {
+    SidebarUpdate *update = pointer;
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+        sidebar_shortcuts.digits[page] = update->digits[page];
+        GtkWidget *hint = sidebar_shortcuts.hints[page];
+        const gchar *text = update->hints[page] != NULL ? update->hints[page] : "";
+        gtk_label_set_text(GTK_LABEL(hint), text);
+        gtk_widget_set_visible(hint, update->show_hints && text[0] != '\0');
+        GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.sidebar, page);
+        gchar *description = update->show_hints && text[0] != '\0' ? g_strdup_printf("Shortcut: %s.", text) : g_strdup("");
+        gtk_accessible_update_property(GTK_ACCESSIBLE(row),
+            GTK_ACCESSIBLE_PROPERTY_DESCRIPTION, description, -1);
+        g_free(description);
+    }
+    sidebar_shortcuts.configured = TRUE;
+}
+
+int32_t jsti_window_set_sidebar_shortcuts(const JSTISidebarShortcut *bindings, size_t count, int32_t show_hints) {
+    if (bindings == NULL || count > 10 || (show_hints != 0 && show_hints != 1)) return -1;
+    SidebarUpdate *update = g_new0(SidebarUpdate, 1);
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) update->digits[page] = -1;
+    gboolean used[10] = { FALSE };
+    for (size_t index = 0; index < count; ++index) {
+        const JSTISidebarShortcut *binding = &bindings[index];
+        gchar expected[8];
+        g_snprintf(expected, sizeof(expected), "Ctrl+%d", binding->digit);
+        if (binding->destination == NULL || binding->digit < 0 || binding->digit > 9 ||
+            used[binding->digit] || g_strcmp0(binding->hint, expected) != 0) {
+            sidebar_update_free(update);
+            return -1;
+        }
+        used[binding->digit] = TRUE;
+        for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+            if (g_strcmp0(page_info[page].name, binding->destination) != 0) continue;
+            if (update->digits[page] != -1) { sidebar_update_free(update); return -1; }
+            update->digits[page] = binding->digit;
+            update->hints[page] = g_strdup(binding->hint);
+        }
+    }
+    update->show_hints = show_hints != 0;
+    return post(sidebar_update_apply, update, sidebar_update_free);
 }

@@ -1,27 +1,17 @@
-/* Recordings folder, audio cleanup and backup controls:
- * their state, owned by LinuxWindowBackup.c. GTK main thread only.
- * Only translation units that include this header can reach it. */
+/* General's recordings folder, backup and restore controls, as the rest of
+ * the window sees them: functions only. Their state is private to
+ * LinuxWindowBackup.c (LinuxWindowStorageState.h). GTK main thread only. */
 #ifndef JSTI_LINUX_WINDOW_STORAGE_PAGE_H
 #define JSTI_LINUX_WINDOW_STORAGE_PAGE_H
 
 #include "LinuxWindowInternal.h"
 
-typedef struct StoragePage {
-    GtkButton *recordings_folder;
-    GtkButton *recordings_choose;
-    GtkButton *recordings_default;
-    GCancellable *location_chooser;
-    AdwSwitchRow *backup_audio;
-    AdwSwitchRow *backup_profiles;
-    GtkButton *backup_export;
-    GtkButton *backup_inspect;
-    GtkButton *backup_restore;
-    GtkWidget *restore_dialog;
-    GCancellable *backup_chooser;
-} StoragePage;
-
 #pragma GCC visibility push(hidden)
-StoragePage *storage_page(void);
+void storage_groups_add(GtkWidget *column);
+/* Folder and backup choices wait for an idle window and one open picker or restore. */
+void storage_refresh_actions(gboolean idle);
+/* Window close: cancels any open folder or backup picker. */
+void storage_page_close(void);
 #pragma GCC visibility pop
 
 #endif

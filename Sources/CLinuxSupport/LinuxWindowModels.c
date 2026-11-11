@@ -1,12 +1,41 @@
-/* The model catalogue, model preferences and microphones. */
-#include "LinuxWindowInternal.h"
-#include "LinuxWindowDashboardPage.h"
-#include "LinuxWindowModelsPage.h"
+/* The model catalogue, model preferences and microphones: the Transcription
+ * Model group and the General Microphone group. Owns ModelsPage
+ * (LinuxWindowModelsState.h). */
+#include "LinuxWindowModelsState.h"
 
 static ModelsPage models_state;
 ModelsPage *models_page(void) { return &models_state; }
 
 guint model_mode(gboolean local, gboolean live) { return (local ? 2 : 0) + (live ? 1 : 0); }
+
+gint32 selected_model_slot(void) {
+    guint position = adw_combo_row_get_selected(models_page()->model_row);
+    if (models_page()->model_slots == NULL || position == GTK_INVALID_LIST_POSITION || position >= models_page()->model_slots->len) {
+        return -1;
+    }
+    return g_array_index(models_page()->model_slots, Slot, position).global;
+}
+
+const char *selected_microphone(void) {
+    guint position = adw_combo_row_get_selected(models_page()->microphone_row);
+    if (models_page()->microphone_ids == NULL || position == GTK_INVALID_LIST_POSITION || position >= models_page()->microphone_ids->len) {
+        return "";
+    }
+    return g_ptr_array_index(models_page()->microphone_ids, position);
+}
+
+/* The Azure resource row belongs to Azure models only. */
+static void refresh_azure_row(void) {
+    guint position = adw_combo_row_get_selected(models_page()->model_row);
+    gboolean azure = models_page()->model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < models_page()->model_slots->len
+        && g_str_has_prefix(g_array_index(models_page()->model_slots, Slot, position).id, "azure/");
+    gtk_widget_set_visible(GTK_WIDGET(models_page()->azure_row), azure);
+    /* On-device models (canonical "local/" identifiers) need no API key. */
+    gboolean local = models_page()->model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < models_page()->model_slots->len
+        && g_str_has_prefix(g_array_index(models_page()->model_slots, Slot, position).id, "local/");
+    gtk_widget_set_visible(GTK_WIDGET(models_page()->key_row), !local);
+}
+
 
 static gint compare_order(gconstpointer left, gconstpointer right, gpointer orders) {
     gint32 a = g_array_index((GArray *)orders, gint32, ((const Slot *)left)->global);
@@ -146,7 +175,7 @@ void local_model_preferences_apply(gpointer pointer) {
             }
         }
         if (found) models_page()->preferred_model_slots[i + 2] = values[i];
-        else gtk_label_set_text(dashboard_page()->status, "Saved Local model choice is unavailable. Reopen the app before switching modes.");
+        else gtk_label_set_text(ui.status, "Saved Local model choice is unavailable. Reopen the app before switching modes.");
     }
 }
 
@@ -200,4 +229,116 @@ int32_t jsti_window_set_microphones(
     }
     microphones->selected = g_strdup(selected);
     return post(microphones_apply, microphones, microphones_free);
+}
+
+static void on_model(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    refresh_azure_row();
+    refresh_setup();
+    gint32 slot = selected_model_slot();
+    if (!ui.suppress && slot >= 0) {
+        guint mode = model_mode(jsti_model_filters_local(), jsti_model_filters_live());
+        models_page()->preferred_model_slots[mode] = slot;
+    }
+    if (slot >= 0) emit(JSTI_EVENT_SELECT_MODEL, "", slot);
+}
+
+static void on_azure_apply(AdwEntryRow *row, gpointer data) {
+    (void)data;
+    emit(JSTI_EVENT_AZURE_RESOURCE, gtk_editable_get_text(GTK_EDITABLE(row)), 0);
+}
+
+static void on_microphone(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    refresh_setup();
+    emit(JSTI_EVENT_SELECT_MICROPHONE, selected_microphone(), 0);
+}
+
+static void on_key_apply(AdwEntryRow *row, gpointer data) {
+    (void)data;
+    const char *key = gtk_editable_get_text(GTK_EDITABLE(row));
+    emit(JSTI_EVENT_SAVE_KEY, key, selected_model_slot());
+    gtk_editable_set_text(GTK_EDITABLE(row), "");
+}
+
+static void on_refresh(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    emit(JSTI_EVENT_REFRESH_MODELS, "", 0);
+}
+
+GtkWidget *models_group(void) {
+    GtkWidget *models = group("Model");
+    jsti_model_filters_add(models, on_model_filter);
+    models_page()->model_names = gtk_string_list_new(NULL);
+    models_page()->model_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(models_page()->model_row), "Transcription model");
+    adw_combo_row_set_model(models_page()->model_row, G_LIST_MODEL(models_page()->model_names));
+    adw_combo_row_set_enable_search(models_page()->model_row, TRUE);
+    g_signal_connect(models_page()->model_row, "notify::selected", G_CALLBACK(on_model), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), GTK_WIDGET(models_page()->model_row));
+
+    models_page()->key_row = ADW_PASSWORD_ENTRY_ROW(adw_password_entry_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(models_page()->key_row), "API key for the selected provider");
+    adw_entry_row_set_show_apply_button(ADW_ENTRY_ROW(models_page()->key_row), TRUE);
+    g_signal_connect(models_page()->key_row, "apply", G_CALLBACK(on_key_apply), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), GTK_WIDGET(models_page()->key_row));
+
+    /* Recorded audio falls back to the key's region; live Azure needs this. */
+    models_page()->azure_row = ADW_ENTRY_ROW(adw_entry_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(models_page()->azure_row),
+                                  "Azure Speech resource endpoint (https://…cognitiveservices.azure.com)");
+    adw_entry_row_set_show_apply_button(models_page()->azure_row, TRUE);
+    adw_entry_row_set_input_purpose(models_page()->azure_row, GTK_INPUT_PURPOSE_URL);
+    g_signal_connect(models_page()->azure_row, "apply", G_CALLBACK(on_azure_apply), NULL);
+    gtk_widget_set_visible(GTK_WIDGET(models_page()->azure_row), FALSE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), GTK_WIDGET(models_page()->azure_row));
+
+    GtkWidget *catalog = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_margin_top(catalog, 8);
+    models_page()->catalog_status = GTK_LABEL(gtk_label_new(""));
+    gtk_label_set_wrap(models_page()->catalog_status, TRUE);
+    gtk_label_set_xalign(models_page()->catalog_status, 0);
+    gtk_widget_set_hexpand(GTK_WIDGET(models_page()->catalog_status), TRUE);
+    gtk_widget_add_css_class(GTK_WIDGET(models_page()->catalog_status), "dim-label");
+    models_page()->catalog_refresh = GTK_BUTTON(gtk_button_new_with_label("Refresh models"));
+    g_signal_connect(models_page()->catalog_refresh, "clicked", G_CALLBACK(on_refresh), NULL);
+    gtk_box_append(GTK_BOX(catalog), GTK_WIDGET(models_page()->catalog_status));
+    gtk_box_append(GTK_BOX(catalog), GTK_WIDGET(models_page()->catalog_refresh));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), catalog);
+    return models;
+}
+
+GtkWidget *microphone_group(void) {
+    GtkWidget *microphone = group("Microphone");
+    models_page()->microphone_names = gtk_string_list_new(NULL);
+    models_page()->microphone_ids = g_ptr_array_new_with_free_func(g_free);
+    models_page()->microphone_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(models_page()->microphone_row), "Preferred microphone");
+    adw_combo_row_set_model(models_page()->microphone_row, G_LIST_MODEL(models_page()->microphone_names));
+    g_signal_connect(models_page()->microphone_row, "notify::selected", G_CALLBACK(on_microphone), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(microphone), GTK_WIDGET(models_page()->microphone_row));
+    return microphone;
+}
+
+static void azure_apply(gpointer data) {
+    ui.suppress = TRUE;
+    gtk_editable_set_text(GTK_EDITABLE(models_page()->azure_row), data != NULL ? data : "");
+    ui.suppress = FALSE;
+}
+
+int32_t jsti_window_set_azure_resource(const char *endpoint) {
+    return post(azure_apply, g_strdup(endpoint != NULL ? endpoint : ""), g_free);
+}
+
+void models_refresh_actions(gboolean idle) {
+    gtk_widget_set_sensitive(GTK_WIDGET(models_page()->model_row), idle);
+    jsti_model_filters_set_idle(idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(models_page()->microphone_row), idle);
+}
+
+const char *models_model_name(void) { return combo_row_text(models_page()->model_row); }
+const char *models_microphone_name(void) { return combo_row_text(models_page()->microphone_row); }
+
+void models_close(void) {
+    if (models_page()->model_catalog != NULL) { models_free(models_page()->model_catalog); models_page()->model_catalog = NULL; }
 }

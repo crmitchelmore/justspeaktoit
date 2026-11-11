@@ -1,21 +1,22 @@
 /* Self-tests for the dictation preferences form. */
 #include "LinuxWindowSelfTestInternal.h"
+#include "../CLinuxSupport/LinuxWindowConfigurationState.h"
 
 gboolean configuration_reveal_self_test(void) {
-    guint count = configuration.rows->len;
+    guint count = configuration_state()->rows->len;
     if (jsti_window_reveal_configuration_field(count) != -1 ||
         jsti_window_reveal_configuration_field(JSTI_MAXIMUM_CONFIGURATION_FIELDS) != -1 ||
         jsti_window_reveal_configuration_field((size_t)-1) != -1) return FALSE;
     guint index = count;
     for (guint i = 0; i < count && index == count; ++i)
-        if (gtk_widget_get_visible(g_ptr_array_index(configuration.rows, i))) index = i;
+        if (gtk_widget_get_visible(g_ptr_array_index(configuration_state()->rows, i))) index = i;
     if (index == count) return FALSE;
-    GtkWidget *row = g_ptr_array_index(configuration.rows, index);
+    GtkWidget *row = g_ptr_array_index(configuration_state()->rows, index);
     configuration_reveal_apply(GSIZE_TO_POINTER(index));
-    gboolean highlighted = reveal.target == row && reveal.highlight != 0 &&
+    gboolean highlighted = reveal_state()->target == row && reveal_state()->highlight != 0 &&
         gtk_widget_has_css_class(row, "jsti-search-highlight");
     reveal_cancel();
-    return highlighted && reveal.target == NULL && !gtk_widget_has_css_class(row, "jsti-search-highlight");
+    return highlighted && reveal_state()->target == NULL && !gtk_widget_has_css_class(row, "jsti-search-highlight");
 }
 
 /* The locale/language field is no longer guaranteed to occupy row 0 (visual
@@ -32,8 +33,8 @@ static const char auto_clean_choices[] = "instant\tInstant\nlivePolish\tAuto-Cle
 typedef struct { guint index; guint calls; } AutoCleanConfigurationTest;
 
 static gboolean configuration_test_revision(const char *const *values, size_t *count) {
-    if (configuration.revision == NULL) return TRUE;
-    if (*count == 0 || g_strcmp0(values[*count - 1], configuration.revision) != 0) return FALSE;
+    if (configuration_state()->revision == NULL) return TRUE;
+    if (*count == 0 || g_strcmp0(values[*count - 1], configuration_state()->revision) != 0) return FALSE;
     --*count;
     return TRUE;
 }
@@ -45,7 +46,7 @@ static int32_t configuration_auto_clean_callback(
     (void)error; (void)capacity;
     AutoCleanConfigurationTest *test = context;
     const guint index = test->index;
-    if (action != 0 || count != configuration.rows->len || index + 4 >= count ||
+    if (action != 0 || count != configuration_state()->rows->len || index + 4 >= count ||
         g_strcmp0(values[index], "instant") != 0 ||
         g_strcmp0(values[index + 1], "fixture/model") != 0 ||
         g_strcmp0(values[index + 2], "250") != 0 ||
@@ -56,18 +57,18 @@ static int32_t configuration_auto_clean_callback(
 }
 
 static gboolean configuration_auto_clean_self_test(void) {
-    guint index = configuration.rows->len;
-    for (guint i = 0; i < configuration.rows->len; ++i)
-        if (g_strcmp0(g_ptr_array_index(configuration.choices, i), auto_clean_choices) == 0) {
+    guint index = configuration_state()->rows->len;
+    for (guint i = 0; i < configuration_state()->rows->len; ++i)
+        if (g_strcmp0(g_ptr_array_index(configuration_state()->choices, i), auto_clean_choices) == 0) {
             index = i;
             break;
         }
-    if (index + 4 >= configuration.rows->len || configuration.rows->len <= 32) return FALSE;
-    AdwComboRow *speed = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, index));
-    GtkWidget *model = g_ptr_array_index(configuration.rows, index + 1);
-    GtkWidget *debounce = g_ptr_array_index(configuration.rows, index + 2);
-    GtkWidget *delta = g_ptr_array_index(configuration.rows, index + 3);
-    GtkWidget *skip = g_ptr_array_index(configuration.rows, index + 4);
+    if (index + 4 >= configuration_state()->rows->len || configuration_state()->rows->len <= 32) return FALSE;
+    AdwComboRow *speed = ADW_COMBO_ROW(g_ptr_array_index(configuration_state()->rows, index));
+    GtkWidget *model = g_ptr_array_index(configuration_state()->rows, index + 1);
+    GtkWidget *debounce = g_ptr_array_index(configuration_state()->rows, index + 2);
+    GtkWidget *delta = g_ptr_array_index(configuration_state()->rows, index + 3);
+    GtkWidget *skip = g_ptr_array_index(configuration_state()->rows, index + 4);
     if (!ADW_IS_ENTRY_ROW(model) || !ADW_IS_ENTRY_ROW(debounce) ||
         !ADW_IS_ENTRY_ROW(delta) || !ADW_IS_SWITCH_ROW(skip) ||
         g_list_model_get_n_items(adw_combo_row_get_model(speed)) != 2) return FALSE;
@@ -76,11 +77,11 @@ static gboolean configuration_auto_clean_self_test(void) {
     gchar *saved_debounce = g_strdup(gtk_editable_get_text(GTK_EDITABLE(debounce)));
     gchar *saved_delta = g_strdup(gtk_editable_get_text(GTK_EDITABLE(delta)));
     const gboolean saved_skip = adw_switch_row_get_active(ADW_SWITCH_ROW(skip));
-    JSTIConfigurationCallback callback = configuration.callback;
-    void *context = configuration.context;
+    JSTIConfigurationCallback callback = configuration_state()->callback;
+    void *context = configuration_state()->context;
     AutoCleanConfigurationTest test = { .index = index, .calls = 0 };
-    configuration.callback = configuration_auto_clean_callback;
-    configuration.context = &test;
+    configuration_state()->callback = configuration_auto_clean_callback;
+    configuration_state()->context = &test;
     adw_combo_row_set_selected(speed, 0);
     gtk_editable_set_text(GTK_EDITABLE(model), "fixture/model");
     gtk_editable_set_text(GTK_EDITABLE(debounce), "250");
@@ -93,8 +94,8 @@ static gboolean configuration_auto_clean_self_test(void) {
     gtk_editable_set_text(GTK_EDITABLE(delta), saved_delta);
     adw_switch_row_set_active(ADW_SWITCH_ROW(skip), saved_skip);
     g_free(saved_model); g_free(saved_debounce); g_free(saved_delta);
-    configuration.callback = callback;
-    configuration.context = context;
+    configuration_state()->callback = callback;
+    configuration_state()->context = context;
     return test.calls == 1;
 }
 
@@ -128,13 +129,13 @@ static int32_t configuration_test_callback(int32_t action, const char *const *va
     ConfigurationSelfTestContext *test_context = context;
     if (test_context->language_index >= count) return -1;
     if (g_strcmp0(values[test_context->language_index], "fr_FR") != 0) return -1;
-    if ((action == 0 || action == 4 || action == 5) && count != configuration.rows->len) return -1;
-    if (action == 3 && (count != configuration.rows->len + 1 ||
+    if ((action == 0 || action == 4 || action == 5) && count != configuration_state()->rows->len) return -1;
+    if (action == 3 && (count != configuration_state()->rows->len + 1 ||
         g_strcmp0(values[count - 1], "Second recoverable edit") != 0)) return -1;
     if (action != 0 && action != 3 && action != 4 && action != 5) return -1;
-    for (guint i = 0; i < configuration.rows->len; ++i)
-        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] != '\0') {
-            const char *choices = g_ptr_array_index(configuration.choices, i);
+    for (guint i = 0; i < configuration_state()->rows->len; ++i)
+        if (((const char *)g_ptr_array_index(configuration_state()->choices, i))[0] != '\0') {
+            const char *choices = g_ptr_array_index(configuration_state()->choices, i);
             gchar **lines = g_strsplit(choices, "\n", -1);
             const guint selected_index = test_context->empty_choice_index == i ? 0 : 1;
             const char *line = g_strv_length(lines) > selected_index ? lines[selected_index] : NULL;
@@ -159,7 +160,7 @@ static int32_t configuration_warm_approval_callback(
     if (!configuration_test_revision(values, &count)) return -1;
     (void)error; (void)capacity;
     WarmApprovalConfigurationTest *test = context;
-    if (action != 0 || count != configuration.rows->len || test->intent >= count || test->approval >= count ||
+    if (action != 0 || count != configuration_state()->rows->len || test->intent >= count || test->approval >= count ||
         g_strcmp0(values[test->intent], "1") != 0 ||
         g_strcmp0(values[test->approval], test->approved ? "1" : "0") != 0) return -1;
     ++test->calls;
@@ -168,28 +169,28 @@ static int32_t configuration_warm_approval_callback(
 
 static gboolean configuration_warm_approval_self_test(void) {
     WarmApprovalConfigurationTest test = {
-        .intent = configuration.rows->len, .approval = configuration.rows->len, .calls = 0, .approved = FALSE
+        .intent = configuration_state()->rows->len, .approval = configuration_state()->rows->len, .calls = 0, .approved = FALSE
     };
-    for (guint index = 0; index < configuration.rows->len; ++index) {
+    for (guint index = 0; index < configuration_state()->rows->len; ++index) {
         const char *title = adw_preferences_row_get_title(
-            ADW_PREFERENCES_ROW(g_ptr_array_index(configuration.rows, index)));
+            ADW_PREFERENCES_ROW(g_ptr_array_index(configuration_state()->rows, index)));
         if (g_strcmp0(title, "Prepare completed-only OpenRouter cleanup (not live/streaming)") == 0)
             test.intent = index;
         if (g_strcmp0(title, "Approve probes this session, only after successful capture") == 0)
             test.approval = index;
     }
-    if (test.intent >= configuration.rows->len || test.approval >= configuration.rows->len) return FALSE;
-    GtkWidget *intent = g_ptr_array_index(configuration.rows, test.intent);
-    GtkWidget *approval = g_ptr_array_index(configuration.rows, test.approval);
+    if (test.intent >= configuration_state()->rows->len || test.approval >= configuration_state()->rows->len) return FALSE;
+    GtkWidget *intent = g_ptr_array_index(configuration_state()->rows, test.intent);
+    GtkWidget *approval = g_ptr_array_index(configuration_state()->rows, test.approval);
     if (!ADW_IS_SWITCH_ROW(intent) || !ADW_IS_SWITCH_ROW(approval) ||
-        g_array_index(configuration.enabled_by_fields, gint32, test.approval) != (gint32)test.intent + 1)
+        g_array_index(configuration_state()->enabled_by_fields, gint32, test.approval) != (gint32)test.intent + 1)
         return FALSE;
     const gboolean saved_intent = adw_switch_row_get_active(ADW_SWITCH_ROW(intent));
     const gboolean saved_approval = adw_switch_row_get_active(ADW_SWITCH_ROW(approval));
-    JSTIConfigurationCallback saved_callback = configuration.callback;
-    void *saved_context = configuration.context;
-    configuration.callback = configuration_warm_approval_callback;
-    configuration.context = &test;
+    JSTIConfigurationCallback saved_callback = configuration_state()->callback;
+    void *saved_context = configuration_state()->context;
+    configuration_state()->callback = configuration_warm_approval_callback;
+    configuration_state()->context = &test;
     adw_switch_row_set_active(ADW_SWITCH_ROW(approval), FALSE);
     adw_switch_row_set_active(ADW_SWITCH_ROW(intent), FALSE);
     gboolean valid = !gtk_widget_get_sensitive(approval) &&
@@ -205,23 +206,23 @@ static gboolean configuration_warm_approval_self_test(void) {
     valid = valid && test.calls == 2;
     adw_switch_row_set_active(ADW_SWITCH_ROW(approval), saved_approval);
     adw_switch_row_set_active(ADW_SWITCH_ROW(intent), saved_intent);
-    configuration.callback = saved_callback;
-    configuration.context = saved_context;
+    configuration_state()->callback = saved_callback;
+    configuration_state()->context = saved_context;
     return valid;
 }
 
 gboolean configuration_self_test(void) {
     if (!configuration_empty_choice_self_test()) return FALSE;
-    if (configuration.rows == NULL || configuration.rows->len < 10 ||
-        configuration.rows->len != configuration.booleans->len ||
-        configuration.rows->len != configuration.overlay_settings->len ||
-        configuration.rows->len != configuration.hands_free_settings->len) return FALSE;
+    if (configuration_state()->rows == NULL || configuration_state()->rows->len < 10 ||
+        configuration_state()->rows->len != configuration_state()->booleans->len ||
+        configuration_state()->rows->len != configuration_state()->overlay_settings->len ||
+        configuration_state()->rows->len != configuration_state()->hands_free_settings->len) return FALSE;
     GtkWidget *corrections = gtk_stack_get_child_by_name(ui.pages, "corrections");
     if (ui.configuration_columns[4] == NULL || corrections == NULL ||
         !gtk_widget_is_ancestor(ui.configuration_columns[4], corrections)) return FALSE;
     gboolean found_learning_switch = FALSE, found_learning_threshold = FALSE;
-    for (guint i = 0; i < configuration.rows->len; ++i) {
-        GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+    for (guint i = 0; i < configuration_state()->rows->len; ++i) {
+        GtkWidget *row = g_ptr_array_index(configuration_state()->rows, i);
         if (!gtk_widget_is_ancestor(row, ui.configuration_columns[4])) continue;
         if (gtk_widget_is_ancestor(row, ui.configuration_columns[0])) return FALSE;
         found_learning_switch |= ADW_IS_SWITCH_ROW(row);
@@ -229,14 +230,14 @@ gboolean configuration_self_test(void) {
     }
     if (!found_learning_switch || !found_learning_threshold) return FALSE;
     gboolean found_dependency = FALSE;
-    for (guint i = 0; i < configuration.rows->len; ++i) {
-        gint32 enabling = g_array_index(configuration.enabled_by_fields, gint32, i);
-        if (enabling == -1 && gtk_widget_get_sensitive(g_ptr_array_index(configuration.rows, i)))
+    for (guint i = 0; i < configuration_state()->rows->len; ++i) {
+        gint32 enabling = g_array_index(configuration_state()->enabled_by_fields, gint32, i);
+        if (enabling == -1 && gtk_widget_get_sensitive(g_ptr_array_index(configuration_state()->rows, i)))
             return FALSE;
         if (enabling <= 0) continue;
         found_dependency = TRUE;
-        AdwSwitchRow *control = ADW_SWITCH_ROW(g_ptr_array_index(configuration.rows, enabling - 1));
-        GtkWidget *dependent = g_ptr_array_index(configuration.rows, i);
+        AdwSwitchRow *control = ADW_SWITCH_ROW(g_ptr_array_index(configuration_state()->rows, enabling - 1));
+        GtkWidget *dependent = g_ptr_array_index(configuration_state()->rows, i);
         gboolean saved = adw_switch_row_get_active(control);
         const gboolean is_switch = ADW_IS_SWITCH_ROW(dependent), is_choice = ADW_IS_COMBO_ROW(dependent);
         if (!is_switch && !is_choice && !GTK_IS_EDITABLE(dependent)) return FALSE;
@@ -258,12 +259,12 @@ gboolean configuration_self_test(void) {
         }
     }
     if (!found_dependency) return FALSE;
-    for (guint i = 0; i < configuration.rows->len; ++i) {
-        if (g_array_index(configuration.overlay_settings, gboolean, i) &&
-            gtk_widget_get_visible(g_ptr_array_index(configuration.rows, i)) != jsti_hud_overlay_supported())
+    for (guint i = 0; i < configuration_state()->rows->len; ++i) {
+        if (g_array_index(configuration_state()->overlay_settings, gboolean, i) &&
+            gtk_widget_get_visible(g_ptr_array_index(configuration_state()->rows, i)) != jsti_hud_overlay_supported())
             return FALSE;
-        if (g_array_index(configuration.hands_free_settings, gboolean, i)) {
-            GtkWidget *row = g_ptr_array_index(configuration.rows, i);
+        if (g_array_index(configuration_state()->hands_free_settings, gboolean, i)) {
+            GtkWidget *row = g_ptr_array_index(configuration_state()->rows, i);
             gboolean enabled = adw_switch_row_get_active(ADW_SWITCH_ROW(row));
             if (gtk_widget_get_sensitive(row) != (jsti_window_hands_free_guard_ready() != 0 || enabled))
                 return FALSE;
@@ -274,17 +275,17 @@ gboolean configuration_self_test(void) {
             configuration_hands_free_availability(row, enabled);
         }
     }
-    JSTIConfigurationCallback callback = configuration.callback;
-    void *context = configuration.context;
+    JSTIConfigurationCallback callback = configuration_state()->callback;
+    void *context = configuration_state()->context;
     /* Row ordering mirrors DesktopConfiguration.fields, which can insert
      * non-editable rows (e.g. visual density) ahead of the locale entry row;
      * find the real AdwEntryRow rather than assuming it is always row 0. */
-    guint language_index = configuration.rows->len;
-    for (guint i = 0; i < configuration.rows->len; ++i) {
-        if (ADW_IS_ENTRY_ROW(g_ptr_array_index(configuration.rows, i))) { language_index = i; break; }
+    guint language_index = configuration_state()->rows->len;
+    for (guint i = 0; i < configuration_state()->rows->len; ++i) {
+        if (ADW_IS_ENTRY_ROW(g_ptr_array_index(configuration_state()->rows, i))) { language_index = i; break; }
     }
-    if (language_index >= configuration.rows->len) return FALSE;
-    AdwEntryRow *language = ADW_ENTRY_ROW(g_ptr_array_index(configuration.rows, language_index));
+    if (language_index >= configuration_state()->rows->len) return FALSE;
+    AdwEntryRow *language = ADW_ENTRY_ROW(g_ptr_array_index(configuration_state()->rows, language_index));
     gchar *saved = g_strdup(gtk_editable_get_text(GTK_EDITABLE(language)));
     ConfigurationSelfTestContext test_context = {
         .calls = 0, .language_index = language_index, .empty_choice_index = G_MAXUINT
@@ -292,10 +293,10 @@ gboolean configuration_self_test(void) {
     AdwComboRow *choice_row = NULL;
     guint optional_choice_count = 0;
     GArray *original_choices = g_array_new(FALSE, FALSE, sizeof(guint));
-    for (guint i = 0; i < configuration.rows->len; ++i) {
-        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\0') continue;
-        choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i));
-        const char *choices = g_ptr_array_index(configuration.choices, i);
+    for (guint i = 0; i < configuration_state()->rows->len; ++i) {
+        if (((const char *)g_ptr_array_index(configuration_state()->choices, i))[0] == '\0') continue;
+        choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration_state()->rows, i));
+        const char *choices = g_ptr_array_index(configuration_state()->choices, i);
         if (choices[0] == '\t') ++optional_choice_count;
         guint count = g_list_model_get_n_items(adw_combo_row_get_model(choice_row));
         gchar **lines = g_strsplit(choices, "\n", -1);
@@ -310,8 +311,8 @@ gboolean configuration_self_test(void) {
         adw_combo_row_set_selected(choice_row, 1);
     }
     if (choice_row == NULL) { g_array_unref(original_choices); return FALSE; }
-    configuration.callback = configuration_test_callback;
-    configuration.context = &test_context;
+    configuration_state()->callback = configuration_test_callback;
+    configuration_state()->context = &test_context;
     gtk_editable_set_text(GTK_EDITABLE(language), "fr_FR");
     gchar *saved_title = g_strdup(adw_preferences_row_get_title(ADW_PREFERENCES_ROW(language)));
     gchar gemini_title[] = "Gemini voice language";
@@ -334,9 +335,9 @@ gboolean configuration_self_test(void) {
         g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(language)), "fr_FR") == 0;
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(language), saved_title);
     g_free(saved_title);
-    for (guint i = 0; i < configuration.rows->len; ++i) {
-        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] != '\t') continue;
-        AdwComboRow *optional_choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i));
+    for (guint i = 0; i < configuration_state()->rows->len; ++i) {
+        if (((const char *)g_ptr_array_index(configuration_state()->choices, i))[0] != '\t') continue;
+        AdwComboRow *optional_choice_row = ADW_COMBO_ROW(g_ptr_array_index(configuration_state()->rows, i));
         test_context.empty_choice_index = i;
         adw_combo_row_set_selected(optional_choice_row, 0);
         on_configuration_apply(NULL, NULL);
@@ -346,32 +347,32 @@ gboolean configuration_self_test(void) {
     on_configuration_apply(NULL, NULL);
     on_configuration_apply(NULL, GINT_TO_POINTER(4));
     on_configuration_apply(NULL, GINT_TO_POINTER(5));
-    GListModel *saved_model = adw_combo_row_get_model(configuration.recovery_row);
+    GListModel *saved_model = adw_combo_row_get_model(configuration_state()->recovery_row);
     g_object_ref(saved_model);
-    guint saved_count = configuration.recovery_count;
-    guint saved_selection = adw_combo_row_get_selected(configuration.recovery_row);
+    guint saved_count = configuration_state()->recovery_count;
+    guint saved_selection = adw_combo_row_get_selected(configuration_state()->recovery_row);
     const char *edits[] = {"First recoverable edit", "Second recoverable edit", NULL};
     GtkStringList *recovered = gtk_string_list_new(edits);
-    adw_combo_row_set_model(configuration.recovery_row, G_LIST_MODEL(recovered));
+    adw_combo_row_set_model(configuration_state()->recovery_row, G_LIST_MODEL(recovered));
     g_object_unref(recovered);
-    configuration.recovery_count = 2;
-    adw_combo_row_set_selected(configuration.recovery_row, 1);
+    configuration_state()->recovery_count = 2;
+    adw_combo_row_set_selected(configuration_state()->recovery_row, 1);
     on_configuration_apply(NULL, GINT_TO_POINTER(3));
-    adw_combo_row_set_model(configuration.recovery_row, saved_model);
-    adw_combo_row_set_selected(configuration.recovery_row, saved_selection);
-    configuration.recovery_count = saved_count;
+    adw_combo_row_set_model(configuration_state()->recovery_row, saved_model);
+    adw_combo_row_set_selected(configuration_state()->recovery_row, saved_selection);
+    configuration_state()->recovery_count = saved_count;
     guint choice_index = 0;
-    for (guint i = 0; i < configuration.rows->len; ++i) {
-        if (((const char *)g_ptr_array_index(configuration.choices, i))[0] == '\0') continue;
-        adw_combo_row_set_selected(ADW_COMBO_ROW(g_ptr_array_index(configuration.rows, i)),
+    for (guint i = 0; i < configuration_state()->rows->len; ++i) {
+        if (((const char *)g_ptr_array_index(configuration_state()->choices, i))[0] == '\0') continue;
+        adw_combo_row_set_selected(ADW_COMBO_ROW(g_ptr_array_index(configuration_state()->rows, i)),
             g_array_index(original_choices, guint, choice_index++));
     }
     g_array_unref(original_choices);
     g_object_unref(saved_model);
     gtk_editable_set_text(GTK_EDITABLE(language), saved);
     g_free(saved);
-    configuration.callback = callback;
-    configuration.context = context;
+    configuration_state()->callback = callback;
+    configuration_state()->context = context;
     if (test_context.calls != optional_choice_count + 4 || !title_preserved || !availability_preserved) {
         g_printerr("Configuration self-test: calls %u/%u, title %d, availability %d.\n",
             test_context.calls, optional_choice_count + 4, title_preserved, availability_preserved);

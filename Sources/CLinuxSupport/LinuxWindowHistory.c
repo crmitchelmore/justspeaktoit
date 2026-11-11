@@ -1,7 +1,6 @@
-/* History rows, History management, audio cleanup and migration restore confirmations. */
+/* History rows, History management, audio cleanup and the migration report. */
 #include "LinuxWindowInternal.h"
 #include "LinuxWindowHistoryState.h"
-#include "LinuxWindowStoragePage.h"
 
 static HistoryPage history_state;
 HistoryPage *history_page(void) { return &history_state; }
@@ -188,107 +187,4 @@ static void migration_report_apply(gpointer pointer) {
 int32_t jsti_window_show_migration_report(const char *text) {
     if (text == NULL || text[0] == '\0' || !g_utf8_validate(text, -1, NULL)) return -1;
     return post(migration_report_apply, g_strdup(text), g_free);
-}
-
-static GtkWidget *migration_restore_dialog_new(
-    const char *token, const char *text, gboolean offers_replace, gboolean confirming
-) {
-    GtkWidget *dialog = adw_message_dialog_new(ui.window,
-        confirming ? "Replace app profiles?" : "Restore backup: review before anything is written",
-        confirming ? "Replace your app profiles with the profiles in this backup?\n\n"
-            "Profiles absent from the backup will be removed. History is still only merged. "
-            "Settings, audio and credentials stay unchanged. Changes are rolled back if anything fails."
-            : text);
-    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-    adw_message_dialog_set_body_use_markup(ADW_MESSAGE_DIALOG(dialog), FALSE);
-    adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel");
-    if (!confirming) adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "merge", "Merge backup");
-    if (offers_replace) {
-        adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "replace",
-            confirming ? "Replace profiles" : "Replace profiles...");
-        adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "replace", ADW_RESPONSE_DESTRUCTIVE);
-    }
-    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
-    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
-    g_object_set_data_full(G_OBJECT(dialog), "jsti-restore-token", g_strdup(token), g_free);
-    g_object_set_data(G_OBJECT(dialog), "jsti-restore-replace", GINT_TO_POINTER(offers_replace));
-    g_object_set_data(G_OBJECT(dialog), "jsti-restore-confirming", GINT_TO_POINTER(confirming));
-    g_signal_connect(dialog, "response", G_CALLBACK(migration_restore_response), NULL);
-    return g_object_ref_sink(dialog);
-}
-
-void retire_migration_restore(void) {
-    GtkWidget *dialog = storage_page()->restore_dialog;
-    storage_page()->restore_dialog = NULL;
-    if (dialog == NULL) return;
-    gtk_window_destroy(GTK_WINDOW(dialog));
-    g_object_unref(dialog);
-}
-
-void refresh_migration_restore(void) {
-    if (storage_page()->restore_dialog == NULL) return;
-    AdwMessageDialog *dialog = ADW_MESSAGE_DIALOG(storage_page()->restore_dialog);
-    gboolean idle = ui.state == JSTI_STATE_IDLE && !ui.closing;
-    if (adw_message_dialog_has_response(dialog, "merge"))
-        adw_message_dialog_set_response_enabled(dialog, "merge", idle);
-    if (adw_message_dialog_has_response(dialog, "replace"))
-        adw_message_dialog_set_response_enabled(dialog, "replace", idle);
-}
-
-void migration_restore_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
-    (void)data;
-    if (storage_page()->restore_dialog != GTK_WIDGET(dialog)) return;
-    gchar *token = g_strdup(g_object_get_data(G_OBJECT(dialog), "jsti-restore-token"));
-    gboolean offers_replace = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "jsti-restore-replace"));
-    gboolean confirming = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "jsti-restore-confirming"));
-    gboolean available = !ui.closing && ui.state == JSTI_STATE_IDLE;
-    gboolean replace = available && offers_replace && g_strcmp0(response, "replace") == 0;
-    if (replace && !confirming) {
-        retire_migration_restore();
-        storage_page()->restore_dialog = migration_restore_dialog_new(token, "", TRUE, TRUE);
-        refresh_actions();
-        gtk_window_present(GTK_WINDOW(storage_page()->restore_dialog));
-    } else {
-        gint choice = replace && confirming ? 2 : available && !confirming && g_strcmp0(response, "merge") == 0 ? 1 : 0;
-        retire_migration_restore();
-        refresh_actions();
-        emit(JSTI_EVENT_MIGRATION_RESTORE_RESPONSE, token, choice);
-    }
-    g_free(token);
-}
-
-static void migration_restore_confirmation_free(gpointer pointer) {
-    MigrationRestoreConfirmation *confirmation = pointer;
-    g_free(confirmation->token);
-    g_free(confirmation->text);
-    g_free(confirmation);
-}
-
-gboolean migration_restore_stage(const MigrationRestoreConfirmation *confirmation) {
-    if (storage_page()->restore_dialog != NULL &&
-        g_strcmp0(g_object_get_data(G_OBJECT(storage_page()->restore_dialog), "jsti-restore-token"), confirmation->token) == 0) {
-        return FALSE;
-    }
-    if (ui.window == NULL || ui.closing || storage_page()->restore_dialog != NULL) {
-        emit(JSTI_EVENT_MIGRATION_RESTORE_RESPONSE, confirmation->token, 0);
-        return FALSE;
-    }
-    storage_page()->restore_dialog = migration_restore_dialog_new(
-        confirmation->token, confirmation->text, confirmation->offers_replace, FALSE);
-    refresh_actions();
-    return TRUE;
-}
-
-static void migration_restore_confirmation_apply(gpointer pointer) {
-    if (migration_restore_stage(pointer)) gtk_window_present(GTK_WINDOW(storage_page()->restore_dialog));
-}
-
-int32_t jsti_window_confirm_migration_restore(const char *token, const char *text, int32_t offers_replace) {
-    if (token == NULL || !g_uuid_string_is_valid(token) || text == NULL || text[0] == '\0' ||
-        !g_utf8_validate(text, -1, NULL) || (offers_replace != 0 && offers_replace != 1)) return -1;
-    MigrationRestoreConfirmation *confirmation = g_new0(MigrationRestoreConfirmation, 1);
-    confirmation->token = g_strdup(token);
-    confirmation->text = g_strdup(text);
-    confirmation->offers_replace = offers_replace != 0;
-    return post(migration_restore_confirmation_apply, confirmation, migration_restore_confirmation_free);
 }

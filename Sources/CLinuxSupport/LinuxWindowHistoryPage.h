@@ -17,8 +17,13 @@ void history_set_import_button(GtkButton *button);
 /* General > Saved recordings' Delete audio button, created and kept here. */
 GtkWidget *history_audio_cleanup_button(void);
 GtkWidget *history_filters_button(void);
-/* Enables the History actions for the window state. */
-void refresh_history_actions(gboolean idle, gboolean has_text);
+/* Enables the History actions for the window state. Copy needs text that is not
+ * a cleanup preview; Read aloud the presented record's text and a voice. */
+void refresh_history_actions(gboolean idle, gboolean has_text, gboolean copyable, gboolean readable);
+void history_set_copy_enabled(gboolean enabled);
+/* The Processed/Original choice under the selected record. */
+void history_show_variant(gint32 variant);
+guint history_selected_variant(void);
 void history_show_insights(const char *sessions, const char *errors, const char *average, const char *spend);
 
 /* The selected record, or NULL. */

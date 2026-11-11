@@ -181,6 +181,85 @@ extension SettingsView {
       providerAPIKeyCard(for: provider)
     case .textToSpeech(let provider):
       ttsProviderAPIKeyCard(for: provider)
+    case .postProcessing(let provider):
+      nativeTextAPIKeyCard(for: provider)
+    }
+  }
+
+  /// Cleanup-only providers have no speech validator, so the key is stored as entered
+  /// and checked by the first cleanup request.
+  private func nativeTextAPIKeyCard(for provider: NativeTextProvider) -> some View {
+    let stateID = "text-\(provider.id)"
+    let identifier = provider.credentialIdentifier
+    let isStored = isAPIKeyStored(identifier)
+    let validationState = providerValidationStates[stateID] ?? .idle
+    let inFlight = isValidationInFlight(validationState)
+    return apiKeyCard(
+      title: "\(provider.displayName) (Post-processing)",
+      systemImage: "text.badge.checkmark",
+      tint: .orange,
+      statusIcon: isStored ? "checkmark.seal.fill" : "key.fill",
+      statusTint: .orange,
+      isStored: isStored,
+      descriptionText: "Stored securely in your macOS Keychain. "
+        + "Used only for \(provider.displayName) transcript cleanup.",
+      keyFieldLabel: "\(provider.displayName) API Key",
+      keyBinding: binding(for: stateID),
+      onSave: { saveNativeTextAPIKey(provider) },
+      onValidate: nil,
+      onRemove: isStored ? { removeNativeTextAPIKey(provider) } : nil,
+      isSaveDisabled: inFlight
+        || (providerAPIKeys[stateID] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      isValidateDisabled: true,
+      isRemoveDisabled: inFlight,
+      validationState: validationState,
+      credentialIdentifier: identifier,
+      tooltip: "Manage your \(provider.displayName) API key securely without leaving Speak.",
+      saveButtonTitle: isStored ? "Replace Key" : "Save Key",
+      saveTooltip: "Securely store your \(provider.displayName) key for native cleanup models.",
+      validateButtonTitle: "Check Validity",
+      validateTooltip: "The key is checked by the first cleanup request.",
+      removeButtonTitle: "Remove Key",
+      removeTooltip: "Forget this key from Speak and your Keychain when you no longer use it.",
+      link: APIKeyCatalog.keyPageURL(for: identifier),
+      linkLabel: "Get API Key",
+      guideUses: .postProcessing
+    )
+  }
+
+  private func saveNativeTextAPIKey(_ provider: NativeTextProvider) {
+    let stateID = "text-\(provider.id)"
+    guard let value = providerAPIKeys[stateID]?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !value.isEmpty
+    else { return }
+    providerValidationStates[stateID] = .validating
+    Task {
+      do {
+        try await environment.secureStorage.storeSecret(
+          value, identifier: provider.credentialIdentifier, label: "\(provider.displayName) API Key"
+        )
+        await MainActor.run {
+          providerAPIKeys[stateID] = ""
+          providerValidationStates[stateID] = .finished(.success(message: "API key saved"))
+        }
+      } catch {
+        await MainActor.run {
+          providerValidationStates[stateID] = .finished(
+            .failure(message: "Failed to store key: \(error.localizedDescription)")
+          )
+        }
+      }
+    }
+  }
+
+  private func removeNativeTextAPIKey(_ provider: NativeTextProvider) {
+    let stateID = "text-\(provider.id)"
+    Task {
+      try? await environment.secureStorage.removeSecret(identifier: provider.credentialIdentifier)
+      await MainActor.run {
+        providerAPIKeys[stateID] = ""
+        providerValidationStates[stateID] = .idle
+      }
     }
   }
 

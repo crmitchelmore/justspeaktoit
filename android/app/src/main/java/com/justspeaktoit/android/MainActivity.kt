@@ -94,6 +94,7 @@ class MainActivity : ComponentActivity() {
                                 onChooseModel = viewModel::chooseCloudModel,
                                 onCleanupChanged = viewModel::setCleanupEnabled,
                                 onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
+                                onChooseCleanupModel = viewModel::chooseCleanupModel,
                                 onReleaseResource = viewModel::releaseResource,
                                 onReleaseEverything = viewModel::releaseEverything,
                             ),

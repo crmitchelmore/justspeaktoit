@@ -217,6 +217,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var capturePreparation: (deviceID: String, value: any DesktopCapturePreparation)? {
         didSet { reconcileSystemResources() }
     }
+    var capturePreparationWatch: Task<Void, Never>?
+    var capturePreparationPollInterval: Duration = .seconds(1)
     var shortcutPressMicrophone: (id: UUID, capture: any DesktopRecordingCapture)? {
         didSet { reconcileSystemResources() }
     }

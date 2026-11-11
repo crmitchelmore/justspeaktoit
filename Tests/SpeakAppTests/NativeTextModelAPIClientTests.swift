@@ -25,4 +25,9 @@ final class NativeTextModelAPIClientTests: XCTestCase {
             XCTAssertEqual(error as? NativeTextModelError, .apiKeyMissing(providerName: "Google Gemini"))
         }
     }
+
+    func testAnthropicKeyIsTransferableButNotCloudSynced() {
+        XCTAssertTrue(ConfigTransferManager.transferableSecretIdentifiers.contains("anthropic.apiKey"))
+        XCTAssertFalse(ProviderCredentialCatalogue.cloudKitSyncable.contains("anthropic.apiKey"))
+    }
 }

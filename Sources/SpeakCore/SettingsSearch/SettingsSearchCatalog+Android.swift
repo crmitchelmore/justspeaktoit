@@ -15,9 +15,12 @@ extension SettingsSearchCatalog {
         SettingsSearchEntry(
             id: "android.cleanup", title: "Clean up transcripts", section: .postProcessing,
             systemImage: "wand.and.stars",
-            summary: "Send the final transcript to OpenRouter to fix punctuation and filler words.",
-            keywords: ["post-processing", "polish", "cleanup", "llm", "openrouter", "grammar"],
-            settingKeys: ["cleanup_enabled"], platforms: .android
+            summary: "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",
+            keywords: [
+                "post-processing", "polish", "cleanup", "llm", "openrouter", "grammar", "cleanup model",
+                "anthropic", "claude", "openai", "gemini", "groq", "mistral"
+            ],
+            settingKeys: ["cleanup_enabled", "cleanup_model"], platforms: .android
         ),
         SettingsSearchEntry(
             id: "android.keepAudio", title: "Keep audio when a recording is cancelled", section: .general,

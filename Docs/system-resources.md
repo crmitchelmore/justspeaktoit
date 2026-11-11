@@ -58,7 +58,11 @@ add a small adapter to the platform monitor instead
   stops resolving when the window closes. WASAPI supplies the OS view: an
   active `IAudioSessionManager2` session owned by this process on any active
   capture endpoint (`jsti_audio_process_capturing`). The same monitor polls it
-  every 2 seconds. The Windows workflow's executable self-test drives the
+  every 2 seconds. The *Microphone preparation* row is the
+  `WindowsCapturePrewarm` worker: the shared host polls its state every second
+  and ends the hold (and joins the worker) as soon as its ten-minute lifetime
+  ends or the endpoint proves unavailable, without waiting for the next idle
+  transition. The Windows workflow's executable self-test drives the
   window's fixture (`jsti_system_resources_self_test`) and names the first
   check that fails. `NativeCallbackContextTests` fails when a raw `Unmanaged`
   pointer reaches a callback that resolves a `NativeCallbackContext`.

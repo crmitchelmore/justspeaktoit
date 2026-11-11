@@ -157,87 +157,72 @@ void apply(HWND window, Dialog &dialog) {
 constexpr jsti::chrome::DialogFrame dialogFrame{
     minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, voiceID, IDOK};
 
-LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
-    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT handled = 0;
-    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
-                                            handled)) return handled;
+bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM, LRESULT &) {
     switch (message) {
-    case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
     case refreshPickerMessage: {
         Configuration updated;
         { std::lock_guard<std::mutex> lock(configurationMutex); updated = configuration; }
-        if (updated.context != dialog->config.context || !updated.pickerCallback) return 0;
+        if (updated.context != dialog.config.context || !updated.pickerCallback) return true;
         const int previous = chosen(window);
-        const std::string identity = previous >= 0 && static_cast<size_t>(previous) < dialog->config.identifiers.size()
-            ? dialog->config.identifiers[previous] : "";
-        dialog->config = std::move(updated);
+        const std::string identity = previous >= 0 && static_cast<size_t>(previous) < dialog.config.identifiers.size()
+            ? dialog.config.identifiers[previous] : "";
+        dialog.config = std::move(updated);
         SendDlgItemMessageW(window, voiceID, CB_RESETCONTENT, 0, 0);
-        int selected = dialog->config.selected;
-        for (size_t index = 0; index < dialog->config.voices.size(); ++index) {
+        int selected = dialog.config.selected;
+        for (size_t index = 0; index < dialog.config.voices.size(); ++index) {
             SendDlgItemMessageW(window, voiceID, CB_ADDSTRING, 0,
-                reinterpret_cast<LPARAM>(dialog->config.voices[index].c_str()));
-            if (!identity.empty() && dialog->config.identifiers[index] == identity) selected = static_cast<int>(index);
+                reinterpret_cast<LPARAM>(dialog.config.voices[index].c_str()));
+            if (!identity.empty() && dialog.config.identifiers[index] == identity) selected = static_cast<int>(index);
         }
         SendDlgItemMessageW(window, voiceID, CB_SETCURSEL, selected, 0);
-        refreshFavorites(window, *dialog);
-        return 0;
+        refreshFavorites(window, dialog);
+        return true;
     }
     case WM_COMMAND:
         if (HIWORD(wparam) == CBN_SELCHANGE && LOWORD(wparam) == favoritesID) {
             const int row = static_cast<int>(SendDlgItemMessageW(window, favoritesID, CB_GETCURSEL, 0, 0));
-            if (row >= 0 && static_cast<size_t>(row) < dialog->favoriteIndices.size()) {
-                SendDlgItemMessageW(window, voiceID, CB_SETCURSEL, dialog->favoriteIndices[row], 0);
-                refreshFavorites(window, *dialog);
+            if (row >= 0 && static_cast<size_t>(row) < dialog.favoriteIndices.size()) {
+                SendDlgItemMessageW(window, voiceID, CB_SETCURSEL, dialog.favoriteIndices[row], 0);
+                refreshFavorites(window, dialog);
             }
-            return 0;
+            return true;
         }
         if (HIWORD(wparam) == CBN_SELCHANGE && LOWORD(wparam) == voiceID) {
-            refreshFavorites(window, *dialog); return 0;
+            refreshFavorites(window, dialog); return true;
         }
-        if (HIWORD(wparam) != BN_CLICKED) break;
-        if (LOWORD(wparam) == favoriteButtonID && dialog->config.pickerCallback) {
+        if (HIWORD(wparam) != BN_CLICKED) return false;
+        if (LOWORD(wparam) == favoriteButtonID && dialog.config.pickerCallback) {
             const int selected = chosen(window);
-            if (selected >= 0 && static_cast<size_t>(selected) < dialog->config.identifiers.size() &&
-                !dialog->config.identifiers[selected].empty() && IsWindowEnabled(GetDlgItem(window, favoriteButtonID))) {
+            if (selected >= 0 && static_cast<size_t>(selected) < dialog.config.identifiers.size() &&
+                !dialog.config.identifiers[selected].empty() && IsWindowEnabled(GetDlgItem(window, favoriteButtonID))) {
                 EnableWindow(GetDlgItem(window, favoriteButtonID), FALSE);
-                dialog->config.pickerCallback(dialog->config.favoriteRanks[selected] >= 0 ? 2 : 1,
-                    dialog->config.identifiers[selected].c_str(), dialog->config.context);
+                dialog.config.pickerCallback(dialog.config.favoriteRanks[selected] >= 0 ? 2 : 1,
+                    dialog.config.identifiers[selected].c_str(), dialog.config.context);
             }
-            return 0;
+            return true;
         }
-        if (LOWORD(wparam) == IDOK) { apply(window, *dialog); return 0; }
-        if (LOWORD(wparam) == IDCANCEL) { close(window); return 0; }
+        if (LOWORD(wparam) == IDOK) { apply(window, dialog); return true; }
+        if (LOWORD(wparam) == IDCANCEL) { close(window); return true; }
         if (LOWORD(wparam) == 185 && jsti_voice_credentials_available()) {
-            jsti_show_voice_credentials(window); return 0;
+            jsti_show_voice_credentials(window); return true;
         }
-        return 0;
-    case WM_CLOSE: close(window); return 0;
+        return true;
     case WM_DESTROY:
         { std::lock_guard<std::mutex> lock(configurationMutex); if (activeDialog == window) activeDialog = nullptr; }
-        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
-        return 0;
+        return false;
     }
-    return DefWindowProcW(window, message, wparam, lparam);
+    return false;
+}
+
+const jsti::chrome::DialogProcedure<Dialog> dialogParts{dialogFrame, layout, refreshFont, createControls, close, handle};
+
+LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    return jsti::chrome::dialogProcedure(dialogParts, window, message, wparam, lparam);
 }
 
 HWND createDialog(HWND owner, Dialog &dialog) {
-    const HINSTANCE instance = GetModuleHandleW(nullptr);
-    WNDCLASSW type{};
-    type.lpfnWndProc = procedure;
-    type.hInstance = instance;
-    type.lpszClassName = L"JustSpeakToItVoiceOutput";
-    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT frame{0, 0, scale(owner, 560), scale(owner, 440)};
-    AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(owner));
-    RECT bounds{};
-    GetWindowRect(owner, &bounds);
-    return CreateWindowExW(windowExStyle, type.lpszClassName, L"Voice output — Just Speak to It", windowStyle,
-        bounds.left + scale(owner, 40), bounds.top + scale(owner, 40), frame.right - frame.left,
-        frame.bottom - frame.top, owner, nullptr, instance, &dialog);
+    return jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItVoiceOutput", procedure, L"Voice output — Just Speak to It",
+        560, 440, windowStyle, windowExStyle, &dialog);
 }
 
 Configuration snapshot() {

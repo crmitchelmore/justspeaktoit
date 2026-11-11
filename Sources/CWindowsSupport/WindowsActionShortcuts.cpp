@@ -482,71 +482,54 @@ void save(HWND window, Dialog &dialog) {
 constexpr jsti::chrome::DialogFrame dialogFrame{
     minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, listID, IDOK};
 
-LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
-    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT handled = 0;
-    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
-                                            handled)) return handled;
+bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM lparam, LRESULT &) {
     switch (message) {
-    case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
     case WM_NOTIFY: {
         const auto header = reinterpret_cast<NMHDR *>(lparam);
-        if (header->idFrom != static_cast<UINT_PTR>(listID) || header->code != LVN_ITEMCHANGED) break;
+        if (header->idFrom != static_cast<UINT_PTR>(listID) || header->code != LVN_ITEMCHANGED) return false;
         const auto change = reinterpret_cast<NMLISTVIEW *>(lparam);
         if ((change->uChanged & LVIF_STATE) && (change->uNewState & LVIS_SELECTED) &&
             !(change->uOldState & LVIS_SELECTED)) {
-            dialog->selected = change->iItem;
-            loadDetail(window, *dialog);
+            dialog.selected = change->iItem;
+            loadDetail(window, dialog);
         }
-        return 0;
+        return true;
     }
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
-        case keyID: if (HIWORD(wparam) == EN_CHANGE) readDetail(window, *dialog); return 0;
-        case enabledID: case globalID: if (HIWORD(wparam) == BN_CLICKED) readDetail(window, *dialog); return 0;
+        case keyID: if (HIWORD(wparam) == EN_CHANGE) readDetail(window, dialog); return true;
+        case enabledID: case globalID: if (HIWORD(wparam) == BN_CLICKED) readDetail(window, dialog); return true;
         case clearID:
             if (HIWORD(wparam) == BN_CLICKED) {
                 SendDlgItemMessageW(window, keyID, HKM_SETHOTKEY, 0, 0);
-                readDetail(window, *dialog);
+                readDetail(window, dialog);
                 SetFocus(GetDlgItem(window, keyID));
             }
-            return 0;
+            return true;
         case presetID:
             if (HIWORD(wparam) == CBN_SELCHANGE)
-                applyPreset(window, *dialog, static_cast<int>(SendDlgItemMessageW(window, presetID, CB_GETCURSEL, 0, 0)));
-            return 0;
-        case resetID: if (HIWORD(wparam) == BN_CLICKED) applyPreset(window, *dialog, 0); return 0;
-        case IDOK: if (HIWORD(wparam) == BN_CLICKED) save(window, *dialog); return 0;
-        case IDCANCEL: if (HIWORD(wparam) == BN_CLICKED) close(window); return 0;
-        default: break;
+                applyPreset(window, dialog, static_cast<int>(SendDlgItemMessageW(window, presetID, CB_GETCURSEL, 0, 0)));
+            return true;
+        case resetID: if (HIWORD(wparam) == BN_CLICKED) applyPreset(window, dialog, 0); return true;
+        case IDOK: if (HIWORD(wparam) == BN_CLICKED) save(window, dialog); return true;
+        case IDCANCEL: if (HIWORD(wparam) == BN_CLICKED) close(window); return true;
+        default: return false;
         }
-        break;
-    case WM_CLOSE: close(window); return 0;
-    case WM_DESTROY:
-        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
-        return 0;
+        return false;
     }
-    return DefWindowProcW(window, message, wparam, lparam);
+    return false;
+}
+
+const jsti::chrome::DialogProcedure<Dialog> dialogParts{dialogFrame, layout, refreshFont, createControls, close, handle};
+
+LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    return jsti::chrome::dialogProcedure(dialogParts, window, message, wparam, lparam);
 }
 
 HWND createDialog(HWND owner, Dialog &dialog) {
-    const HINSTANCE instance = GetModuleHandleW(nullptr);
-    WNDCLASSW type{};
-    type.lpfnWndProc = procedure;
-    type.hInstance = instance;
-    type.lpszClassName = L"JustSpeakToItActionShortcuts";
-    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT frame{0, 0, scale(owner, 760), scale(owner, 600)};
-    AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(owner));
-    RECT bounds{};
-    GetWindowRect(owner, &bounds);
     dialog.owner = owner;
-    return CreateWindowExW(windowExStyle, type.lpszClassName, L"Action shortcuts — Just Speak to It", windowStyle,
-        bounds.left + scale(owner, 40), bounds.top + scale(owner, 40), frame.right - frame.left,
-        frame.bottom - frame.top, owner, nullptr, instance, &dialog);
+    return jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItActionShortcuts", procedure, L"Action shortcuts — Just Speak to It",
+        760, 600, windowStyle, windowExStyle, &dialog);
 }
 
 bool parseRow(const JSTIActionShortcut &source, Row &row, bool keysOnly) {

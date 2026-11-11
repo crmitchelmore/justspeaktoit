@@ -243,61 +243,57 @@ void openKeyPage(HWND window, const Dialog &dialog) {
 constexpr jsti::chrome::DialogFrame dialogFrame{
     minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, listID, IDCANCEL};
 
-LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
-    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT handled = 0;
-    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
-                                            handled)) return handled;
+bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM, LRESULT &) {
     switch (message) {
-    case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
     case refreshMessage: {
         Configuration latest = snapshot();
-        if (latest.revision != dialog->config.revision) {
-            const Row *row = selectedRow(*dialog);
+        if (latest.revision != dialog.config.revision) {
+            const Row *row = selectedRow(dialog);
             const std::string keep = row ? row->identifier : std::string();
-            dialog->config = std::move(latest);
-            dialog->busy = false;
-            populate(window, *dialog, keep);
+            dialog.config = std::move(latest);
+            dialog.busy = false;
+            populate(window, dialog, keep);
         }
-        return 0;
+        return true;
     }
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
         case listID:
             if (HIWORD(wparam) == LBN_SELCHANGE) {
                 const LRESULT chosen = SendDlgItemMessageW(window, listID, LB_GETCURSEL, 0, 0);
-                dialog->selected = chosen == LB_ERR || static_cast<size_t>(chosen) >= dialog->visible.size()
-                    ? -1 : static_cast<int>(dialog->visible[static_cast<size_t>(chosen)]);
+                dialog.selected = chosen == LB_ERR || static_cast<size_t>(chosen) >= dialog.visible.size()
+                    ? -1 : static_cast<int>(dialog.visible[static_cast<size_t>(chosen)]);
                 SetDlgItemTextW(window, keyID, L"");
-                updateActions(window, *dialog);
+                updateActions(window, dialog);
             }
-            return 0;
+            return true;
         case filterID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {
                 const LRESULT chosen = SendDlgItemMessageW(window, filterID, CB_GETCURSEL, 0, 0);
-                if (chosen == CB_ERR || chosen >= filterCount) return 0;
-                const Row *row = selectedRow(*dialog);
+                if (chosen == CB_ERR || chosen >= filterCount) return true;
+                const Row *row = selectedRow(dialog);
                 const std::string keep = row ? row->identifier : std::string();
-                dialog->filter = static_cast<int>(chosen);
+                dialog.filter = static_cast<int>(chosen);
                 SetDlgItemTextW(window, keyID, L"");
-                populate(window, *dialog, keep);
+                populate(window, dialog, keep);
             }
-            return 0;
-        case keyID: if (HIWORD(wparam) == EN_CHANGE) updateActions(window, *dialog); return 0;
-        case saveID: if (HIWORD(wparam) == BN_CLICKED) act(window, *dialog, JSTI_API_KEY_SAVE); return 0;
-        case removeID: if (HIWORD(wparam) == BN_CLICKED) act(window, *dialog, JSTI_API_KEY_REMOVE); return 0;
-        case validateID: if (HIWORD(wparam) == BN_CLICKED) act(window, *dialog, JSTI_API_KEY_VALIDATE); return 0;
-        case linkID: if (HIWORD(wparam) == BN_CLICKED) openKeyPage(window, *dialog); return 0;
-        case IDCANCEL: if (HIWORD(wparam) == BN_CLICKED) close(window); return 0;
+            return true;
+        case keyID: if (HIWORD(wparam) == EN_CHANGE) updateActions(window, dialog); return true;
+        case saveID: if (HIWORD(wparam) == BN_CLICKED) act(window, dialog, JSTI_API_KEY_SAVE); return true;
+        case removeID: if (HIWORD(wparam) == BN_CLICKED) act(window, dialog, JSTI_API_KEY_REMOVE); return true;
+        case validateID: if (HIWORD(wparam) == BN_CLICKED) act(window, dialog, JSTI_API_KEY_VALIDATE); return true;
+        case linkID: if (HIWORD(wparam) == BN_CLICKED) openKeyPage(window, dialog); return true;
+        case IDCANCEL: if (HIWORD(wparam) == BN_CLICKED) close(window); return true;
         }
-        break;
-    case WM_CLOSE: close(window); return 0;
-    case WM_DESTROY:
-        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
-        return 0;
+        return false;
     }
-    return DefWindowProcW(window, message, wparam, lparam);
+    return false;
+}
+
+const jsti::chrome::DialogProcedure<Dialog> dialogParts{dialogFrame, layout, refreshFont, createControls, close, handle};
+
+LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    return jsti::chrome::dialogProcedure(dialogParts, window, message, wparam, lparam);
 }
 
 HWND createDialog(HWND owner, Dialog &dialog) {

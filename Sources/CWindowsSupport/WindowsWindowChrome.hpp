@@ -107,6 +107,55 @@ bool standardDialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     default: return false;
     }
 }
+// One settings dialog's procedure, minus the frame every dialog shares. The
+// dialog keeps its controls (`create`, `layout`, `refreshFont`) and its own
+// messages (`handle`); `close` ends it.
+template<typename Dialog>
+struct DialogProcedure {
+    const DialogFrame &frame;
+    void (*layout)(HWND);
+    void (*refreshFont)(HWND, Dialog &);
+    bool (*create)(HWND, Dialog &);
+    void (*close)(HWND);
+    // Sees every message after the standard ones and WM_CREATE. Returns true,
+    // with `result`, when it answered; WM_CLOSE and WM_DESTROY then run only if
+    // it did not. Extra WM_DESTROY cleanup returns false so the font is freed.
+    bool (*handle)(HWND, Dialog &, UINT, WPARAM, LPARAM, LRESULT &);
+};
+// The window procedure frame of every settings dialog: binds the instance,
+// answers standardDialogMessage, creates the controls on WM_CREATE, closes on
+// WM_CLOSE and frees `dialog.font` on WM_DESTROY. Everything else goes to
+// `procedure.handle`, then DefWindowProcW.
+template<typename Dialog>
+LRESULT dialogProcedure(const DialogProcedure<Dialog> &procedure, HWND window, UINT message, WPARAM wparam,
+                        LPARAM lparam) {
+    Dialog *dialog = dialogInstance<Dialog>(window, message, lparam);
+    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
+    LRESULT result = 0;
+    if (standardDialogMessage(window, message, wparam, lparam, procedure.frame, *dialog, procedure.layout,
+                              procedure.refreshFont, result)) return result;
+    if (message == WM_CREATE) return procedure.create(window, *dialog) ? 0 : -1;
+    result = 0;
+    if (procedure.handle(window, *dialog, message, wparam, lparam, result)) return result;
+    switch (message) {
+    case WM_CLOSE: procedure.close(window); return 0;
+    case WM_DESTROY:
+        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
+        return 0;
+    default: return DefWindowProcW(window, message, wparam, lparam);
+    }
+}
+// WM_COMMAND for a dialog whose buttons are Apply (IDOK) and Cancel: their
+// clicks run `apply` or `close`. True for every button click, which the dialog
+// consumes; false for other notifications.
+template<typename Dialog>
+bool dialogCommand(HWND window, Dialog &dialog, WPARAM wparam, void (*apply)(HWND, Dialog &), void (*close)(HWND)) {
+    if (HIWORD(wparam) != BN_CLICKED) return false;
+    if (LOWORD(wparam) == IDOK) apply(window, dialog);
+    else if (LOWORD(wparam) == IDCANCEL) close(window);
+    return true;
+}
+
 // Shows `window` modally over `owner`, focuses `focusID`, runs `shown` and
 // pumps messages until the dialog is gone; then closes it if needed with
 // `close`, re-enables the owner and forwards WM_QUIT. A failed message read is

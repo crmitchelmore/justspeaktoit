@@ -68,6 +68,8 @@ data class DictationUiState(
     val originalTranscript: String? = null,
     /** Set when a key could not be saved or removed securely. */
     val keyStoreError: Boolean = false,
+    /** Providers whose key last failed to save, be read or be accepted, for the Errors filter. */
+    val keyErrors: Set<CloudProvider> = emptySet(),
     /** True until a discarded recording has released the microphone. */
     val releasingMicrophone: Boolean = false,
     /** Newest first. */
@@ -259,10 +261,13 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                     },
                 )
             } catch (e: CloudException) {
+                noteKeyFailure(model.provider, e.failure)
                 DictationEvent.Error(e.failure)
             } catch (e: GeneralSecurityException) {
+                noteKeyFailure(model.provider, DictationFailure.KeyUnavailable)
                 DictationEvent.Error(DictationFailure.KeyUnavailable)
             } catch (e: ProviderException) {
+                noteKeyFailure(model.provider, DictationFailure.KeyUnavailable)
                 DictationEvent.Error(DictationFailure.KeyUnavailable)
             } catch (e: IOException) {
                 DictationEvent.Error(DictationFailure.Audio)
@@ -340,11 +345,11 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun saveKey(provider: CloudProvider, key: String) =
-        updateKeys { secrets.write(provider.credentialId, key.trim()) }
+        updateKeys(provider) { secrets.write(provider.credentialId, key.trim()) }
 
-    fun removeKey(provider: CloudProvider) = updateKeys { secrets.remove(provider.credentialId) }
+    fun removeKey(provider: CloudProvider) = updateKeys(provider) { secrets.remove(provider.credentialId) }
 
-    private fun updateKeys(change: () -> Unit) {
+    private fun updateKeys(provider: CloudProvider, change: () -> Unit) {
         val ok = try {
             change()
             true
@@ -353,8 +358,17 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         } catch (e: ProviderException) {
             false
         }
-        _state.update { it.copy(keyStoreError = !ok) }
+        _state.update {
+            it.copy(keyStoreError = !ok, keyErrors = if (ok) it.keyErrors - provider else it.keyErrors + provider)
+        }
         refreshAvailability()
+    }
+
+    /** A provider that rejected its saved key, or whose key could not be read, shows under Errors. */
+    private fun noteKeyFailure(provider: CloudProvider, failure: DictationFailure) {
+        if (failure == DictationFailure.InvalidKey || failure == DictationFailure.KeyUnavailable) {
+            _state.update { it.copy(keyErrors = it.keyErrors + provider) }
+        }
     }
 
     private var downloadWatch: Job? = null
@@ -572,10 +586,13 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
             } catch (e: CloudException) {
+                noteKeyFailure(model.provider, e.failure)
                 DictationEvent.Error(e.failure)
             } catch (e: GeneralSecurityException) {
+                noteKeyFailure(model.provider, DictationFailure.KeyUnavailable)
                 DictationEvent.Error(DictationFailure.KeyUnavailable)
             } catch (e: ProviderException) {
+                noteKeyFailure(model.provider, DictationFailure.KeyUnavailable)
                 DictationEvent.Error(DictationFailure.KeyUnavailable)
             } finally {
                 releaseOwnership(rec)

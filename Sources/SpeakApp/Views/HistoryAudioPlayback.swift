@@ -36,7 +36,7 @@ struct AudioPlaybackControls: View {
 }
 
 @MainActor
-final class AudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDelegate, RepeatingTimerTarget {
+final class AudioPlaybackController: NSObject, ObservableObject, RepeatingTimerTarget {
   enum PlaybackState {
     case idle
     case playing
@@ -46,7 +46,8 @@ final class AudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDe
   @Published private(set) var state: PlaybackState = .idle
   @Published private(set) var currentTime: TimeInterval = 0
 
-  private var player: AVAudioPlayer?
+  private lazy var playback = ManagedAudioPlayer { [weak self] _, _ in self?.playbackDidEnd() }
+  private var player: AVAudioPlayer? { playback.player }
   private var timer: Timer?
 
   init(url: URL) {
@@ -55,8 +56,8 @@ final class AudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDe
   }
 
   deinit {
+    // `playback` detaches the delegate and stops the player as it goes.
     timer?.invalidate()
-    player?.stop()
   }
 
   func togglePlayPause() {
@@ -97,11 +98,10 @@ final class AudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDe
   private func configurePlayer(url: URL) {
     do {
       let player = try AVAudioPlayer(contentsOf: url)
-      player.delegate = self
       player.prepareToPlay()
-      self.player = player
+      playback.adopt(player)
     } catch {
-      player = nil
+      playback.stop()
     }
   }
 
@@ -135,7 +135,8 @@ final class AudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDe
     return String(format: "%02d:%02d.%02d", minutes, seconds, fractional)
   }
 
-  func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+  /// The current player reached its end, or failed to decode.
+  func playbackDidEnd() {
     timer?.invalidate()
     currentTime = 0
     state = .idle

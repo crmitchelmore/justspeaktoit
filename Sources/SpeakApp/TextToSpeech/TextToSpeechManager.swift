@@ -30,7 +30,13 @@ final class TextToSpeechManager: ObservableObject {
   /// Holds the usage ledger; a test bootstrap passes its own suite.
   private let defaults: UserDefaults
   let clients: [TTSProvider: TextToSpeechClient]
-  private var audioPlayer: AVAudioPlayer?
+  /// The file player. Its delegate reports a natural end straight away; the
+  /// `monitorPlayback` poll stays as the backstop for a player that stops
+  /// without telling its delegate.
+  private lazy var playback = ManagedAudioPlayer { [weak self] player, _ in
+    self?.filePlaybackDidEnd(player)
+  }
+  private var audioPlayer: AVAudioPlayer? { playback.player }
   private let progressivePlayer = TTSProgressivePlayer()
   private var synthesisTask: Task<TTSSynthesisOutput, Error>?
   private var playbackTask: Task<Void, Never>?
@@ -156,7 +162,7 @@ final class TextToSpeechManager: ObservableObject {
         player.enableRate = true
         player.rate = Self.openRouterPlaybackRate(speed: openRouterSpeed)
       }
-      audioPlayer = player
+      playback.adopt(player)
       player.prepareToPlay()
       guard player.play() else { throw TTSError.audioPlaybackFailure }
       isPlaying = true
@@ -178,8 +184,7 @@ final class TextToSpeechManager: ObservableObject {
   private func stopPlayback() {
     playbackTask?.cancel()
     playbackTask = nil
-    audioPlayer?.stop()
-    audioPlayer = nil
+    playback.stop()
     progressivePlayer.stop()
     isPlaying = false
   }
@@ -374,6 +379,12 @@ extension TextToSpeechManager {
 
   static func openRouterPlaybackRate(speed: Double) -> Float {
     speed.isFinite ? Float(min(2, max(0.5, speed))) : 1
+  }
+
+  private func filePlaybackDidEnd(_ player: AVAudioPlayer) {
+    playbackTask?.cancel()
+    playbackTask = nil
+    isPlaying = player.isPlaying
   }
 
   private func monitorPlayback(_ player: AVAudioPlayer) {

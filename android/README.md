@@ -70,8 +70,10 @@ app/src/main/java/com/justspeaktoit/android/
 ├── dictation/
 │   ├── DictationState.kt    # pure state machine, events and error mapping
 │   ├── RecognizerAvailability.kt  # pure availability and language resolution
-│   ├── AndroidSpeechEngine.kt     # SpeechRecognizer adapter (main thread)
-│   └── DictationViewModel.kt
+│   ├── AndroidSpeechEngine.kt     # SpeechEngine: SpeechRecognizer adapter (main thread)
+│   ├── CloudCapture.kt      # owns the Cloud recording and deadline-bounded, abortable blocking IO
+│   ├── SharedAudioSource.kt # reads audio shared by other apps (content:// only)
+│   └── DictationViewModel.kt      # orchestration; collaborators injected, production wiring in Factory
 ├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
 ├── history/                 # transcript history, retention and atomic storage
 ├── settings/                # non-secret preferences
@@ -81,7 +83,9 @@ app/src/main/java/com/justspeaktoit/android/
 ```
 
 Policy lives in plain Kotlin so it is unit-tested on the JVM; Android classes stay in the
-adapter, ViewModel and UI. `CloudParityTest` reads `Sources/SpeakCore` to keep model IDs,
+adapters and UI. The ViewModel takes its engine, recorder factory, cloud client, history,
+preferences and secret store as interfaces, so `DictationViewModelTest` drives the real
+ViewModel with fakes. `CloudParityTest` reads `Sources/SpeakCore` to keep model IDs,
 credential IDs and the cleanup prompt identical to the Mac app.
 
 ## Privacy

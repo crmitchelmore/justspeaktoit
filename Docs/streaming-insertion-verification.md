@@ -7,7 +7,7 @@ the current allowlist: TextEdit (`com.apple.TextEdit`) and Notes
 allowlist expansion; do not temporarily allowlist another app for this run.
 
 The source of truth for that scope is
-[`StreamingInsertionAllowlist`](../Sources/SpeakApp/StreamingInsertionAllowlist.swift).
+[`StreamingInsertionAllowlist`](../Sources/SpeakApp/Output/StreamingInsertionAllowlist.swift).
 Unit tests support the policy and reconciliation rules, but only an unlocked,
 interactive Mac can qualify actual app Accessibility behavior.
 
@@ -104,7 +104,7 @@ be observed. Never leave an unobserved row looking like an inferred pass.
 
 ## Interpreting finalization safely
 
-[`LiveTextInserter.streamingFinalize(with:)`](../Sources/SpeakApp/LiveTextInserter.swift)
+[`LiveTextInserter.streamingFinalize(with:)`](../Sources/SpeakApp/Output/LiveTextInserter.swift)
 can return `.applied` after focus is lost or a final patch fails, provided
 verified partials already landed. This prevents a duplicate one-shot insertion;
 it does **not** prove that the field equals the final or polished History text.

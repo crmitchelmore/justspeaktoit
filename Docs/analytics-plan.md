@@ -215,7 +215,7 @@ fail on any non-enum string property, exactly as issue #591 specifies.
 
 | Concern | Owner | Notes |
 | --- | --- | --- |
-| Crashes, hangs, HTTP client errors, performance traces | **Sentry** (macOS production only, as today — `Sources/SpeakApp/SentryManager.swift`) | PostHog crash capture stays disabled |
+| Crashes, hangs, HTTP client errors, performance traces | **Sentry** (macOS production only, as today — `Sources/SpeakApp/Analytics/SentryManager.swift`) | PostHog crash capture stays disabled |
 | Deliberate product events | **PostHog** | Typed catalogue only |
 | Shared identity between the two | **None** | Different IDs, never joined; `SentryManager.setUser` must not receive the analytics install ID |
 
@@ -422,7 +422,7 @@ than on the logo at the bottom of the dashboard.
 
 - Issue [#591](https://github.com/crmitchelmore/justspeaktoit/issues/591) — research base: Apple ATT rules, PostHog SDK configuration baseline, Element X / OpenUsage / Quotio / cmux patterns, keyboard-extension constraint
 - PR #590 — `docs: align telemetry privacy disclosures` (Sentry disclosure baseline this plan extends)
-- `Docs/PRIVACY.md`, `Docs/SECURITY_TRANSCRIPT_LOGGING.md`, `Docs/SENTRY_CONFIGURATION.md`, `Sources/SpeakApp/SentryManager.swift`
+- `Docs/PRIVACY.md`, `Docs/SECURITY_TRANSCRIPT_LOGGING.md`, `Docs/SENTRY_CONFIGURATION.md`, `Sources/SpeakApp/Analytics/SentryManager.swift`
 - [PostHog pricing](https://posthog.com/pricing) — 1M free events/month, EU Cloud (Frankfurt)
 - [TelemetryDeck pricing update, July 2026](https://telemetrydeck.com/blog/pricing-update-2026/) — free tier now 50k events/month for new accounts
 - [TelemetryDeck Swift platform overview](https://telemetrydeck.com/platforms/swift/) — funnels, retention, TQL

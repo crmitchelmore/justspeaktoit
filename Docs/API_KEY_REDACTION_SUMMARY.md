@@ -57,7 +57,7 @@ public init(
 
 **Impact**: All existing code creating debug snapshots now gets automatic redaction with zero code changes required.
 
-### 3. Modified: `Sources/SpeakApp/SettingsView.swift`
+### 3. Modified: `Sources/SpeakApp/Views/Settings/SettingsView.swift`
 
 Enhanced `headersSection()` view to show visual indicators for redacted values:
 
@@ -201,6 +201,6 @@ Potential improvements for future PRs:
 **Files changed**:
 - `Sources/SpeakCore/History/SensitiveHeaderRedactor.swift` (new)
 - `Sources/SpeakCore/Credentials/APIKeyValidationResult.swift` (modified)
-- `Sources/SpeakApp/SettingsView.swift` (modified)
+- `Sources/SpeakApp/Views/Settings/SettingsView.swift` (modified)
 - `Tests/SpeakAppTests/SensitiveHeaderRedactorTests.swift` (new)
 - `SECURITY.md` (modified)

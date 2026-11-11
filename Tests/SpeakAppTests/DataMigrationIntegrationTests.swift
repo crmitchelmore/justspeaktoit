@@ -324,7 +324,7 @@ extension DataMigrationIntegrationTests {
     func testSettingsReload_CoversEveryPublishedPreference() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let source = try String(contentsOf: root.appendingPathComponent("Sources/SpeakApp/AppSettings.swift"),
+        let source = try String(contentsOf: root.appendingPathComponent("Sources/SpeakApp/Settings/AppSettings.swift"),
                                 encoding: .utf8)
         let pattern = #"@Published\s+(?:private\(set\)\s+)?var\s+(\w+)"#
         let regex = try NSRegularExpression(pattern: pattern)

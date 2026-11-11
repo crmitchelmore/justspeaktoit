@@ -41,6 +41,20 @@ public enum KeyboardHandoffStartDiagnosis {
         applicationIsInForeground ? [.isolated, .mixable] : [.mixable]
     }
 
+    /// Whether the readiness engine must keep running while a hand-off records.
+    ///
+    /// iOS only lets a background app keep recording, never start: a new
+    /// recording from the background fails with `cannotStartRecording`
+    /// (`'!rec'`). Stopping the readiness engine first would make the
+    /// dictation, and the readiness restart after it, exactly such a start.
+    /// In the foreground the engine is still handed over, as before.
+    public static func keepsReadinessRunningDuringRecording(
+        applicationIsInForeground: Bool,
+        readinessIsRunning: Bool
+    ) -> Bool {
+        !applicationIsInForeground && readinessIsRunning
+    }
+
     /// `AVAudioSession` FourCC codes iOS uses to refuse audio for an app that
     /// is not allowed to take the microphone from where it is running.
     static let backgroundRefusalCodes: Set<String> = ["!int", "!pri", "!rec"]

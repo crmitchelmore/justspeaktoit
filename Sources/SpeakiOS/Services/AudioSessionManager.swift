@@ -221,10 +221,19 @@ public final class AudioSessionManager: ObservableObject {
     }
 
     /// Deactivate audio session when done recording.
+    ///
+    /// Skipped while ``activeSessionHold`` reports that keyboard readiness is
+    /// still recording on the same session (issue #1469): deactivating would
+    /// stop it, and a background app cannot start recording again.
     public func deactivate() {
         if let deactivateRecording {
             deactivateRecording()
             isConfigured = false
+            return
+        }
+        if Self.activeSessionHold?() == true {
+            isConfigured = false
+            logger.info("Kept session active for keyboard readiness")
             return
         }
         do {
@@ -340,6 +349,9 @@ public final class AudioSessionManager: ObservableObject {
 }
 
 extension AudioSessionManager {
+    /// Set by keyboard readiness while it keeps recording through a background
+    /// dictation, so a finishing transcriber leaves the shared session active.
+    static var activeSessionHold: (() -> Bool)?
     /// The exact options of the mixable recording session. Keyboard readiness
     /// holds its session open with these, so a background hand-off finds the
     /// category already in place and does not reconfigure an active session.

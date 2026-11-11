@@ -20,6 +20,21 @@ final class KeyboardHandoffStartDiagnosisTests: XCTestCase {
         XCTAssertEqual(Diagnosis.sessionCategories(applicationIsInForeground: true), [.isolated, .mixable])
     }
 
+    func testReadiness_keepsRunningThroughBackgroundDictation() {
+        XCTAssertTrue(Diagnosis.keepsReadinessRunningDuringRecording(
+            applicationIsInForeground: false, readinessIsRunning: true
+        ))
+    }
+
+    func testReadiness_handedOverInForegroundOrWhenAlreadyStopped() {
+        XCTAssertFalse(Diagnosis.keepsReadinessRunningDuringRecording(
+            applicationIsInForeground: true, readinessIsRunning: true
+        ))
+        XCTAssertFalse(Diagnosis.keepsReadinessRunningDuringRecording(
+            applicationIsInForeground: false, readinessIsRunning: false
+        ))
+    }
+
     func testBackgroundRefusal_recognisesEachRefusalCode() {
         for code in ["!rec", "!pri", "!int"] {
             XCTAssertTrue(Diagnosis.isBackgroundAudioRefusal(Self.osStatus(code)), code)

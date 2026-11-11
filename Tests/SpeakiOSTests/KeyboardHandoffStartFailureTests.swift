@@ -40,5 +40,13 @@ final class KeyboardHandoffStartFailureTests: XCTestCase {
         let other = NSError(domain: "provider", code: 7)
         XCTAssertEqual(KeyboardInstantDictationCoordinator.audioCause(of: other) as NSError, other)
     }
+
+    func testDeactivate_keepsSessionWhileReadinessHoldsIt() {
+        let manager = AudioSessionManager()
+        AudioSessionManager.activeSessionHold = { true }
+        defer { AudioSessionManager.activeSessionHold = nil }
+        manager.deactivate()
+        XCTAssertFalse(manager.isConfigured)
+    }
 }
 #endif

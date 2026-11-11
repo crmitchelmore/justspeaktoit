@@ -403,7 +403,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         // liveness loop would mistake a healthy engine swap for interruption.
         claimRecording(for: record)
         session = sessionStore.heartbeat(phase: .recording)
-        readinessAudio.stop(deactivateAudioSession: false)
+        holdReadinessThroughRecordingIfNeeded()
         do {
             try await recordingService.startRecording(
                 retainBatchRecording: false,
@@ -425,6 +425,29 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             activeRequestID = nil
             activeProfile = nil
             await resumeReadinessAfterRequest()
+        }
+    }
+
+    /// Hands the microphone from readiness to the dictation.
+    ///
+    /// In the background the readiness engine keeps running and the session
+    /// stays active, because iOS lets a background app continue recording but
+    /// not start it (issue #1469). In the foreground it is stopped as before.
+    private func holdReadinessThroughRecordingIfNeeded() {
+        let inForeground = UIApplication.shared.applicationState != .background
+        let keepsRunning = KeyboardHandoffStartDiagnosis.keepsReadinessRunningDuringRecording(
+            applicationIsInForeground: inForeground,
+            readinessIsRunning: readinessAudio.isRunning
+        )
+        let decision = "appForeground=\(inForeground) keepsReadiness=\(keepsRunning)"
+        SpeakLogger.transcription.info("Keyboard hand-off start: \(decision, privacy: .public)")
+        if keepsRunning {
+            AudioSessionManager.activeSessionHold = { [weak self] in
+                self?.readinessAudio.isRunning ?? false
+            }
+        } else {
+            AudioSessionManager.activeSessionHold = nil
+            readinessAudio.stop(deactivateAudioSession: false)
         }
     }
 

@@ -209,8 +209,10 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
 
   /// The controller that owns a cloud live model, chosen by the shared
   /// `LiveTranscriptionProviderID` so a newly catalogued provider fails to
-  /// compile here until the Mac decides how it streams. Most providers run on
-  /// the shared SpeakCore client; the rest keep a dedicated controller.
+  /// compile here until the Mac decides how it streams. Every provider runs on
+  /// the shared SpeakCore client except OpenAI, whose Apple hosts sequence the
+  /// Realtime commit themselves, and Modulate, whose Mac result keeps diarised
+  /// utterance formatting, timings and the raw payload the shared client lacks.
   private func cloudController(for model: String) -> (any LiveTranscriptionController)? {
     guard let provider = Self.cloudProvider(for: model) else { return nil }
     switch provider {
@@ -219,9 +221,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     // API, so any openai/* live model is handled by the realtime controller.
     case .openai: return controllers.openAIRealtime
     case .modulate: return controllers.modulate
-    case .elevenlabs: return controllers.elevenlabs
-    case .assemblyai, .cartesia, .deepgram, .gladia, .google, .xai, .azure, .alibaba, .meta, .speechmatics, .revai,
-         .mistral, .reson8, .soniox:
+    case .assemblyai, .cartesia, .deepgram, .elevenlabs, .gladia, .google, .xai, .azure, .alibaba, .meta,
+         .speechmatics, .revai, .mistral, .reson8, .soniox:
       return controllers.sharedClient
     }
   }
@@ -393,7 +394,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     let native: NativeOSXLiveTranscriber
     let speechAnalyzer: AppleSpeechAnalyzerLiveController
     let modulate: ModulateLiveController
-    let elevenlabs: ElevenLabsLiveController
     let openAIRealtime: OpenAIRealtimeLiveController
     let sharedClient: SharedClientLiveController
     let fluidAudio: FluidAudioParakeetLiveController
@@ -403,7 +403,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     #endif
     let unsupportedLocalLive: UnsupportedLocalLiveTranscriber
 
-    // swiftlint:disable:next function_body_length
     init(
       appSettings: AppSettings,
       permissionsManager: PermissionsManager,
@@ -421,12 +420,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         audioDeviceManager: audioDeviceManager
       )
       modulate = ModulateLiveController(
-        appSettings: appSettings,
-        permissionsManager: permissionsManager,
-        audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
-      )
-      elevenlabs = ElevenLabsLiveController(
         appSettings: appSettings,
         permissionsManager: permissionsManager,
         audioDeviceManager: audioDeviceManager,
@@ -471,7 +464,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         native,
         speechAnalyzer,
         modulate,
-        elevenlabs,
         openAIRealtime,
         sharedClient,
         whisperKit,

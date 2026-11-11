@@ -7,14 +7,14 @@ import XCTest
 final class TranscriptionStopWatchdogTests: XCTestCase {
     func testElevenLabsWholeStopOutlivesDrainAndTheExactBoundedGrace() {
         for grace in [0.0, 0.1, 1, 2, -1, 500, .infinity, .nan] {
-            let bounded = ElevenLabsStopPolicy.boundedGrace(grace)
+            let bounded = LiveStopGracePolicy.hostDelay(for: .elevenlabs, grace: grace)
             XCTAssertTrue((0...2).contains(bounded))
             XCTAssertGreaterThan(
-                ElevenLabsStopPolicy.completionTimeout(grace: grace),
+                Self.elevenLabsTimeout(grace: grace),
                 ElevenLabsLiveClient.finishDrainBudget + bounded
             )
         }
-        XCTAssertEqual(ElevenLabsStopPolicy.completionTimeout(grace: 2), 13)
+        XCTAssertEqual(Self.elevenLabsTimeout(grace: 2), 13)
         XCTAssertEqual(DefaultController().stopCompletionTimeout, 10, "Other controllers retain their existing bound")
     }
 
@@ -78,6 +78,13 @@ final class TranscriptionStopWatchdogTests: XCTestCase {
 private extension TranscriptionStopWatchdogTests {
     struct ProviderFailure: Error {}
 
+    nonisolated static func elevenLabsTimeout(grace: TimeInterval) -> TimeInterval {
+        LiveStopGracePolicy.completionTimeout(
+            finalisationBudget: ElevenLabsLiveClient.finishDrainBudget,
+            hostDelay: LiveStopGracePolicy.hostDelay(for: .elevenlabs, grace: grace)
+        )
+    }
+
     final class DefaultController: LiveTranscriptionController {
         weak var delegate: LiveTranscriptionSessionDelegate?
         var isRunning = false
@@ -89,7 +96,7 @@ private extension TranscriptionStopWatchdogTests {
     final class Controller: LiveTranscriptionController {
         weak var delegate: LiveTranscriptionSessionDelegate?
         var isRunning = false
-        var stopCompletionTimeout = ElevenLabsStopPolicy.completionTimeout(grace: 2)
+        var stopCompletionTimeout = TranscriptionStopWatchdogTests.elevenLabsTimeout(grace: 2)
         var onStop: (() -> Void)?
         private var stopContinuation: CheckedContinuation<Void, Never>?
         func configure(language: String?, model: String) {}

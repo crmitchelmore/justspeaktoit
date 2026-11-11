@@ -294,12 +294,14 @@ struct HistoryPresentation {
 struct MicrophoneRow { std::string id; std::wstring name; };
 struct ModelRow { std::string id; std::wstring name; int mode = 0; int order = -1; };
 struct AboutLink { std::wstring title, url; };
-struct WindowState {
-    std::mutex mutex;
-    HWND window = nullptr;
-    bool running = false;
+// About page: build details and links, delivered under WindowState::mutex.
+struct AboutPageState {
     std::wstring aboutDetails = L"Build metadata has not been supplied by this host.";
     std::vector<AboutLink> aboutLinks;
+};
+
+// General page: automation and Launch at login.
+struct GeneralPageState {
     bool automationEnabled = false, automationChanged = false;
     // Launch at login: the shared DesktopLoginItemState, -1 until the host
     // reports it; a click waits for the state reached.
@@ -309,12 +311,21 @@ struct WindowState {
     // UI thread only: the note under App behaviour, shown when the system
     // decides the switch.
     std::wstring loginItemNote;
-    bool posted = false;
-    SidebarDelivery sidebarDelivery;
-    DensityDelivery densityDelivery;
-    ShellDelivery shellDelivery;
+};
+
+// Dashboard: status, the latest transcript and the insights totals.
+struct DashboardPageState {
     bool statusChanged = false;
     bool transcriptChanged = false;
+    std::wstring status;
+    std::wstring transcript;
+    // Totals: [all, visible][sessions, errors, recording time, average, spend].
+    std::wstring insights[2][5];
+    bool insightsChanged = false;
+};
+
+// History page: pending snapshots (under WindowState::mutex) and the UI-thread presentation.
+struct HistoryPageState {
     bool historyChanged = false;
     bool historySelectionProvided = false;
     uint64_t historyInteractionRevision = 0;
@@ -322,16 +333,6 @@ struct WindowState {
     bool variantChanged = false;
     bool presentationChanged = false;
     HistoryPresentation pendingPresentation;
-    bool microphonesChanged = false;
-    std::vector<MicrophoneRow> pendingMicrophones;
-    std::wstring microphoneError;
-    bool modelsChanged = false;
-    bool localModelPreferencesChanged = false;
-    int pendingLocalModelPreferences[2] = {-1, -1};
-    bool modelsRefreshing = false;
-    std::wstring modelStatus;
-    std::vector<ModelRow> pendingModels;
-    std::vector<std::pair<std::string, int>> knownModelIdentities;
     std::string pendingVariantRecord;
     int pendingVariant = -1;
     bool pendingVariantSwitchable = false;
@@ -339,15 +340,6 @@ struct WindowState {
     std::string pendingPlaybackRecord;
     int pendingPlaybackState = playbackIdle;
     std::wstring pendingPlaybackText;
-    int recording = 0;
-    bool globalEscapeEnabled = false;
-    bool cancelKeyHeld = false;
-    std::wstring status;
-    std::wstring transcript;
-    std::vector<MicrophoneRow> microphones;
-    std::string microphoneSelection;
-    std::vector<int> configuredModelModes;
-    int configuredPreferredModels[4] = {-1, -1, -1, -1}; // Global remote batch, remote live, local batch and local live rows.
     std::vector<HistoryRow> pendingHistory;
     std::string pendingHistorySelection;
     std::string selectedHistoryID;
@@ -355,10 +347,6 @@ struct WindowState {
     std::string audioCleanupToken;
     std::wstring migrationReport;
     size_t audioCleanupCount = 0;
-    JSTIWindowCallback callback = nullptr;
-    void *context = nullptr;
-    HFONT font = nullptr;
-    std::vector<HWND> controls;
     // Only accessed by the UI thread. Pending snapshots above use mutex.
     std::vector<HistoryRow> displayedHistory;
     // UI thread only: the last row was drawn and the next page was asked for.
@@ -369,6 +357,24 @@ struct WindowState {
     int requestedVariant = -1;
     int displayedPlayback = playbackIdle;
     bool suppressSearchEvents = false;
+};
+
+// Models page: microphones and transcription model choices.
+struct ModelsPageState {
+    bool microphonesChanged = false;
+    std::vector<MicrophoneRow> pendingMicrophones;
+    std::wstring microphoneError;
+    bool modelsChanged = false;
+    bool localModelPreferencesChanged = false;
+    int pendingLocalModelPreferences[2] = {-1, -1};
+    bool modelsRefreshing = false;
+    std::wstring modelStatus;
+    std::vector<ModelRow> pendingModels;
+    std::vector<std::pair<std::string, int>> knownModelIdentities;
+    std::vector<MicrophoneRow> microphones;
+    std::string microphoneSelection;
+    std::vector<int> configuredModelModes;
+    int configuredPreferredModels[4] = {-1, -1, -1, -1}; // Global remote batch, remote live, local batch and local live rows.
     std::vector<std::wstring> modelNames;
     std::vector<int> modelModes;
     std::vector<int> modelOrder;
@@ -376,6 +382,31 @@ struct WindowState {
     int preferredModels[modeCount] = {-1, -1, -1, -1};
     int activeMode = 0;
     std::wstring remoteModelStatus;
+};
+
+// The screenshot tour (UI thread).
+struct TourState {
+    std::wstring tourDirectory;
+    int tourStep = -1;
+};
+
+// The window shell. It owns one state per page; each page file reads and
+// writes its own, and cross-thread fields stay under `mutex`.
+struct WindowState {
+    std::mutex mutex;
+    HWND window = nullptr;
+    bool running = false;
+    bool posted = false;
+    SidebarDelivery sidebarDelivery;
+    DensityDelivery densityDelivery;
+    ShellDelivery shellDelivery;
+    int recording = 0;
+    bool globalEscapeEnabled = false;
+    bool cancelKeyHeld = false;
+    JSTIWindowCallback callback = nullptr;
+    void *context = nullptr;
+    HFONT font = nullptr;
+    std::vector<HWND> controls;
     // Pages and presentation (UI thread).
     int page = dashboardPage;
     SidebarBindings sidebar;
@@ -383,12 +414,12 @@ struct WindowState {
     std::wstring headerSubtitle;
     int displayedRecording = 0;
     std::wstring traySummary;
-    // Totals: [all, visible][sessions, errors, recording time, average, spend].
-    std::wstring insights[2][5];
-    bool insightsChanged = false;
-    // The screenshot tour (UI thread).
-    std::wstring tourDirectory;
-    int tourStep = -1;
+    AboutPageState about;
+    GeneralPageState general;
+    DashboardPageState dashboard;
+    HistoryPageState history;
+    ModelsPageState models;
+    TourState tour;
 };
 
 struct CleanupPreview {

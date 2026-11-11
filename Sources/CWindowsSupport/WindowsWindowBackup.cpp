@@ -85,13 +85,13 @@ int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *err
         return jsti::fail("The recording audio confirmation is invalid.", error, capacity);
     }
     std::lock_guard<std::mutex> lock(state.mutex);
-    if (!state.window || !state.audioCleanupToken.empty()) {
+    if (!state.window || !state.history.audioCleanupToken.empty()) {
         return jsti::fail("The recording audio confirmation is unavailable.", error, capacity);
     }
-    state.audioCleanupToken = token;
-    state.audioCleanupCount = count;
+    state.history.audioCleanupToken = token;
+    state.history.audioCleanupCount = count;
     if (!PostMessageW(state.window, audioCleanupMessage, 0, 0)) {
-        state.audioCleanupToken.clear();
+        state.history.audioCleanupToken.clear();
         return jsti::fail("Could not show the recording audio confirmation.", error, capacity);
     }
     return 0;
@@ -121,14 +121,14 @@ int jsti_window_show_migration_report(const char *text, char *error, size_t capa
         return jsti::fail("The backup inspection report is invalid.", error, capacity);
     }
     std::lock_guard<std::mutex> lock(state.mutex);
-    if (!state.window || !state.migrationReport.empty()) {
+    if (!state.window || !state.history.migrationReport.empty()) {
         return jsti::fail("The backup inspection report is unavailable.", error, capacity);
     }
-    state.migrationReport = std::move(report);
+    state.history.migrationReport = std::move(report);
     if (!state.posted) {
         state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
         if (!state.posted) {
-            state.migrationReport.clear();
+            state.history.migrationReport.clear();
             return jsti::fail("Could not show the backup inspection report.", error, capacity);
         }
     }

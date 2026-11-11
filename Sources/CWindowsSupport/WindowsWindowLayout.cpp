@@ -443,7 +443,7 @@ void layoutSettings(HWND window, const RECT &content) {
         top = y + 2 * row + scale(window, 12) + densitySpace(window, 20, visualDensity.card_padding) + gap;
         // The Mac's App Behaviour card. The note appears only when the system
         // decides Launch at login, so the page still fits the minimum height.
-        y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.loginItemNote,
+        y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.general.loginItemNote,
                                3 * row + scale(window, 24));
         label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
         place(window, loginItemID, RECT{left + scale(window, 188 + 220 + 24), y, right, y + row});
@@ -544,14 +544,14 @@ void layoutAbout(HWND window, const RECT &content) {
     HDC dc = GetDC(window);
     const int detailsWidth = widthOf(content) - 2 * inset;
     const int detailsHeight = jsti::chrome::measure(
-        dc, state.aboutDetails, detailsWidth, jsti::chrome::Font::body, GetDpiForWindow(window)
+        dc, state.about.aboutDetails, detailsWidth, jsti::chrome::Font::body, GetDpiForWindow(window)
     ) + scale(window, 12);
     const int noteHeight = jsti::chrome::measure(
         dc, note, detailsWidth, jsti::chrome::Font::body, GetDpiForWindow(window)
     );
     ReleaseDC(window, dc);
     const int gap = scale(window, 8);
-    const int linkRows = (static_cast<int>(state.aboutLinks.size()) + 2) / 3;
+    const int linkRows = (static_cast<int>(state.about.aboutLinks.size()) + 2) / 3;
     int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"",
         scale(window, 96) + noteHeight + detailsHeight + (linkRows + 2) * (row + gap));
     frame.icon = box(content.left + inset, y, scale(window, 72), scale(window, 72));
@@ -566,7 +566,7 @@ void layoutAbout(HWND window, const RECT &content) {
     place(window, aboutDetailsID, box(content.left + inset, y, widthOf(content) - 2 * inset, detailsHeight));
     y += detailsHeight;
     const int linkWidth = (widthOf(content) - 2 * inset - 2 * gap) / 3;
-    for (size_t i = 0; i < state.aboutLinks.size(); ++i)
+    for (size_t i = 0; i < state.about.aboutLinks.size(); ++i)
         place(window, aboutLinkBaseID + static_cast<int>(i),
             box(content.left + inset + static_cast<int>(i % 3) * (linkWidth + gap),
                 y + static_cast<int>(i / 3) * (row + gap), linkWidth, row));

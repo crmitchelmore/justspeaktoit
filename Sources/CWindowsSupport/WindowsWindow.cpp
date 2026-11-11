@@ -120,77 +120,77 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         if (state.running) return jsti::fail("The desktop window is already running.", error, capacity);
-        if (!state.configuredModelModes.empty() && state.configuredModelModes.size() != count) {
+        if (!state.models.configuredModelModes.empty() && state.models.configuredModelModes.size() != count) {
             return jsti::fail("The model mode catalogue does not match the supplied model labels.", error, capacity);
         }
-        state.modelNames = std::move(names);
-        state.modelModes = state.configuredModelModes.empty() ? std::vector<int>(count, 0) : state.configuredModelModes;
-        state.modelOrder.resize(count);
-        for (size_t index = 0; index < count; ++index) state.modelOrder[index] = static_cast<int>(index);
-        if (!state.pendingModels.empty()) {
-            if (state.pendingModels.size() != count) return jsti::fail("The discovered model catalogue has the wrong slot count.", error, capacity);
+        state.models.modelNames = std::move(names);
+        state.models.modelModes = state.models.configuredModelModes.empty() ? std::vector<int>(count, 0) : state.models.configuredModelModes;
+        state.models.modelOrder.resize(count);
+        for (size_t index = 0; index < count; ++index) state.models.modelOrder[index] = static_cast<int>(index);
+        if (!state.models.pendingModels.empty()) {
+            if (state.models.pendingModels.size() != count) return jsti::fail("The discovered model catalogue has the wrong slot count.", error, capacity);
             for (size_t index = 0; index < count; ++index) {
-                const auto &row = state.pendingModels[index];
-                if (row.mode != state.modelModes[index]) return jsti::fail("The discovered model catalogue has inconsistent modes.", error, capacity);
-                state.modelNames[index] = row.name;
-                state.modelOrder[index] = row.order;
+                const auto &row = state.models.pendingModels[index];
+                if (row.mode != state.models.modelModes[index]) return jsti::fail("The discovered model catalogue has inconsistent modes.", error, capacity);
+                state.models.modelNames[index] = row.name;
+                state.models.modelOrder[index] = row.order;
             }
         }
-        state.pendingModels.clear(); state.modelsChanged = false;
-        state.localModelPreferencesChanged = false;
-        std::fill(std::begin(state.pendingLocalModelPreferences), std::end(state.pendingLocalModelPreferences), -1);
+        state.models.pendingModels.clear(); state.models.modelsChanged = false;
+        state.models.localModelPreferencesChanged = false;
+        std::fill(std::begin(state.models.pendingLocalModelPreferences), std::end(state.models.pendingLocalModelPreferences), -1);
         for (int mode = 0; mode < modeCount; ++mode) {
-            const auto first = std::find(state.modelModes.begin(), state.modelModes.end(), mode);
-            state.preferredModels[mode] = first == state.modelModes.end() ? -1 : static_cast<int>(first - state.modelModes.begin());
+            const auto first = std::find(state.models.modelModes.begin(), state.models.modelModes.end(), mode);
+            state.models.preferredModels[mode] = first == state.models.modelModes.end() ? -1 : static_cast<int>(first - state.models.modelModes.begin());
         }
         // Configured batch and live preferences belong to whichever source holds them.
-        for (const int preferred : state.configuredPreferredModels) {
-            if (preferred >= 0) state.preferredModels[state.modelModes[preferred]] = preferred;
+        for (const int preferred : state.models.configuredPreferredModels) {
+            if (preferred >= 0) state.models.preferredModels[state.models.modelModes[preferred]] = preferred;
         }
         if (selected < 0 || static_cast<size_t>(selected) >= count) {
-            selected = state.configuredPreferredModels[0] >= 0 ? state.configuredPreferredModels[0] : -1;
-            for (int mode = 0; selected < 0 && mode < modeCount; ++mode) selected = state.preferredModels[mode];
+            selected = state.models.configuredPreferredModels[0] >= 0 ? state.models.configuredPreferredModels[0] : -1;
+            for (int mode = 0; selected < 0 && mode < modeCount; ++mode) selected = state.models.preferredModels[mode];
         }
-        state.activeMode = state.modelModes[selected];
-        state.preferredModels[state.activeMode] = selected;
-        state.filteredModels.clear();
-        if (state.microphones.empty()) state.microphones.push_back({"", L"Default communications microphone"});
+        state.models.activeMode = state.models.modelModes[selected];
+        state.models.preferredModels[state.models.activeMode] = selected;
+        state.models.filteredModels.clear();
+        if (state.models.microphones.empty()) state.models.microphones.push_back({"", L"Default communications microphone"});
         state.running = true;
         state.recording = 0;
         jsti::globalEscape::publish(0);
         state.cancelKeyHeld = false;
-        state.microphonesChanged = false;
-        state.pendingMicrophones.clear(); state.microphoneError.clear();
+        state.models.microphonesChanged = false;
+        state.models.pendingMicrophones.clear(); state.models.microphoneError.clear();
         state.posted = false;
-        state.statusChanged = false;
-        state.transcriptChanged = false;
-        state.historyChanged = false;
-        state.historySelectionProvided = false;
-        state.historyInteractionRevision = 0;
-        state.pendingHistoryRevision = 0;
-        state.variantChanged = false;
-        state.presentationChanged = false;
-        state.pendingPresentation = {};
-        state.pendingVariantRecord.clear();
-        state.pendingVariant = -1;
-        state.pendingVariantSwitchable = false;
-        state.playbackChanged = false;
-        state.pendingPlaybackRecord.clear();
-        state.pendingPlaybackState = playbackIdle;
-        state.pendingPlaybackText.clear();
-        state.pendingHistory.clear(); state.pendingHistorySelection.clear(); state.selectedHistoryID.clear();
-        state.allHistoryIDs.clear();
-        state.status.clear(); state.transcript.clear();
+        state.dashboard.statusChanged = false;
+        state.dashboard.transcriptChanged = false;
+        state.history.historyChanged = false;
+        state.history.historySelectionProvided = false;
+        state.history.historyInteractionRevision = 0;
+        state.history.pendingHistoryRevision = 0;
+        state.history.variantChanged = false;
+        state.history.presentationChanged = false;
+        state.history.pendingPresentation = {};
+        state.history.pendingVariantRecord.clear();
+        state.history.pendingVariant = -1;
+        state.history.pendingVariantSwitchable = false;
+        state.history.playbackChanged = false;
+        state.history.pendingPlaybackRecord.clear();
+        state.history.pendingPlaybackState = playbackIdle;
+        state.history.pendingPlaybackText.clear();
+        state.history.pendingHistory.clear(); state.history.pendingHistorySelection.clear(); state.history.selectedHistoryID.clear();
+        state.history.allHistoryIDs.clear();
+        state.dashboard.status.clear(); state.dashboard.transcript.clear();
     }
     state.callback = callback; state.context = context;
     state.controls.clear();
-    state.displayedHistory.clear();
-    state.displayedVariant = -1;
-    state.variantSwitchable = false;
-    state.historyPresentationReady = false;
-    state.requestedVariant = -1;
-    state.displayedPlayback = playbackIdle;
-    state.suppressSearchEvents = false;
+    state.history.displayedHistory.clear();
+    state.history.displayedVariant = -1;
+    state.history.variantSwitchable = false;
+    state.history.historyPresentationReady = false;
+    state.history.requestedVariant = -1;
+    state.history.displayedPlayback = playbackIdle;
+    state.history.suppressSearchEvents = false;
     // The process may already have a manifest-defined awareness context.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const ULONG_PTR visualStyles = activateVisualStyles();
@@ -282,7 +282,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     state.controls.clear(); state.callback = nullptr; state.context = nullptr;
     jsti::appIcon::destroy();
     if (visualStyles) DeactivateActCtx(0, visualStyles);
-    state.displayedHistory.clear();
+    state.history.displayedHistory.clear();
     if (registered) UnregisterClassW(type.lpszClassName, instance);
     {
         std::lock_guard<std::mutex> lock(state.mutex);

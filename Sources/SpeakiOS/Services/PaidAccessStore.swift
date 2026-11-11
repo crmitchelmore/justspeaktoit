@@ -90,6 +90,7 @@ public final class PaidAccessStore: NSObject, ObservableObject {
             self.transactionListener = Task { [weak self] in
                 for await update in Transaction.updates {
                     guard let self else { return }
+                    guard PaidAccessFeature.isAvailableOnIOS else { continue }
                     await self.flow.handleTransactionUpdate(update)
                 }
             }

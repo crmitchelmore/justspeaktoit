@@ -2,9 +2,10 @@
 
 No app graph, Apple account, Keychain, network or StoreKit service is used. The
 Swift fixture substitutes only framework containers, feature inputs and external
-storage/transport. Initialisers, handlers, subscription filter, session lifecycle
-and entitlement/session methods come from the production files. Guard-removal
-controls must fail the same executable assertions.
+storage/transport. The platform initialisers (which own the StoreKit listener and
+its feature guards), the shared PaidAccessFlow handler, subscription filter,
+session lifecycle and entitlement/session methods come from the production
+files. Guard-removal controls must fail the same executable assertions.
 """
 import plistlib
 import shutil
@@ -14,29 +15,29 @@ import tempfile
 import unittest
 from pathlib import Path
 from test_paid_access_recovery import block
+from test_paid_access_session_boundaries import shared_flow
 
 ROOT = Path(__file__).resolve().parents[2]
 PLATFORMS = [
-    ('mac', 'Sources/SpeakApp/PaidAccess/PaidAccessManager.swift', None, 'isEnabled'),
-    ('ios', 'Sources/SpeakiOS/Services/PaidAccessStore.swift',
-     'Sources/SpeakiOS/Services/PaidAccessStore+Purchase.swift', 'isAvailableOnIOS'),
+    ('mac', 'Sources/SpeakApp/PaidAccess/PaidAccessManager.swift', 'isEnabled'),
+    ('ios', 'Sources/SpeakiOS/Services/PaidAccessStore.swift', 'isAvailableOnIOS'),
 ]
 
 
-def program(platform, path, purchase, flag, mutation=None):
+def program(platform, path, flag, mutation=None):
     source = (ROOT / path).read_text()
-    purchasing = (ROOT / purchase).read_text() if purchase else source
     initialiser = block(source, 'init(\n' if platform == 'mac' else 'init(client:')
-    handler = block(purchasing, 'func handleTransactionUpdate(')
     if mutation == 'listener':
         needle = ('PaidAccessFeature.isEnabled && ' if platform == 'mac'
                   else 'if PaidAccessFeature.isAvailableOnIOS {')
         assert initialiser.count(needle) == 1
         initialiser = initialiser.replace(needle, '' if platform == 'mac' else 'if true {')
     elif mutation == 'handler':
-        needle = f'guard PaidAccessFeature.{flag} else {{ return }}'
-        assert handler.count(needle) == 1
-        handler = handler.replace(needle, '')
+        # Each platform admits updates into the shared, flag-free flow handler
+        # only while its own feature flag is still on.
+        needle = f'guard PaidAccessFeature.{flag} else {{ continue }}'
+        assert initialiser.count(needle) == 1
+        initialiser = initialiser.replace(needle, '')
     feature = block(source, 'enum PaidAccessFeature')
     # A mutable test input allows an enabled success control even though the
     # real iOS constant remains false. Production feature defaults are retained.
@@ -46,29 +47,29 @@ def program(platform, path, purchase, flag, mutation=None):
     sync = (ROOT / 'Sources/SpeakCore/PaidAccess/Apple/PaidStoreKitSync.swift').read_text()
     actual = '\n'.join([feature, block(models, 'public struct PaidAccessSession:'),
                         block(models, 'public protocol PaidAccessSessionStoring:'), lifecycle,
-                        'enum PaidStoreKitSync {' + block(sync, 'static func entitlement(') + '}'])
-    methods = [block(source, 'func ' + name) for name in
-               ['currentSession()', 'clearSession()', 'refreshEntitlement()']]
-    methods += [handler, block(purchasing, 'func syncIfSubscription(')]
+                        'enum PaidStoreKitSync {' + block(sync, 'static func entitlement(') + '}',
+                        shared_flow()])
+    # Only the macOS owner keeps its own client and injected settings.
+    stored = ('let client: any PaidAccessClienting\n        let settings: AppSettings\n'
+              if platform == 'mac' else '')
     manager = '''@MainActor final class Manager: NSObject {
-        let client: any PaidAccessClienting
-        let sessions: PaidAccessSessionLifecycle
-        let settings: AppSettings''' + ('\n' if platform == 'mac' else ' = AppSettings()\n') + '''
+        let flow: PaidAccessFlow
+        ''' + stored + '''
         var simpleModelChoices = false, paidRoutingEnabled = false
-        var isSignedIn = false
         var entitlement = PaidEntitlement.unentitled
         var policy = PaidRoutingPolicy.unknown
+        var isSignedIn = false, isBusy = false
         var lastError: String?
+        var products: [Product] = []
         var transactionListener: Task<Void, Never>?
         var billingChannel: PaidBillingChannel { Probe.channel }
-    ''' + initialiser + '\n' + '\n'.join(methods) + '\n}'
+    ''' + initialiser + '\n' + block(source, 'func publish(') + '\n}'
     create = ('Manager(client: client, sessionStore: store, settings: AppSettings())'
               if platform == 'mac' else 'Manager(client: client, sessionStore: store)')
     fixture = (ROOT / 'scripts/tests/fixtures/paid-access-inert.swift').read_text()
     return (fixture.replace('// PRODUCTION inserted here.', actual + '\n' + manager)
             .replace('FEATURE_FLAG', flag).replace('MAKE_MANAGER', create)
             .replace('IS_MAC', 'true' if platform == 'mac' else 'false'))
-
 
 class PaidShippingEntitlementsTests(unittest.TestCase):
     def test_ordinary_shipping_entitlements_do_not_enable_paid_identity(self):
@@ -81,10 +82,10 @@ class PaidShippingEntitlementsTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('xcrun'), 'Apple Swift required')
 class PaidAutomaticInactivityTests(unittest.TestCase):
-    def execute(self, platform, path, purchase, flag, mutation=None):
+    def execute(self, platform, path, flag, mutation=None):
         with tempfile.TemporaryDirectory(prefix='paid-inert-') as temp:
             source = Path(temp) / 'Inert.swift'
-            source.write_text(program(platform, path, purchase, flag, mutation))
+            source.write_text(program(platform, path, flag, mutation))
             binary = Path(temp) / 'inert'
             result = subprocess.run(['xcrun', 'swiftc', '-swift-version', '6', '-parse-as-library',
                                      '-module-cache-path', str(Path(temp) / 'cache'),

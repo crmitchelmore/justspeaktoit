@@ -1,5 +1,6 @@
 // Framework, storage and transport boundaries only. The Python test inserts
-// actual initialisers, handlers, lifecycle, session and subscription filtering.
+// actual initialisers, the shared flow and its handler, lifecycle, session and
+// subscription filtering.
 import Foundation
 
 enum PaidAccessError: Error { case notSignedIn, invalidResponse, network(String)
@@ -29,6 +30,7 @@ struct UserDefaults {
     static let standard = Self()
     func bool(forKey key: String) -> Bool { false }
 }
+struct Product: Equatable, Sendable {}
 enum PaidSubscriptionTerm { static let productIDs = Set(["subscription.monthly", "subscription.yearly"]) }
 enum VerificationResult<Value: Sendable>: Sendable {
     case verified(Value), unverified(Value)
@@ -39,6 +41,7 @@ struct Transaction: Sendable {
     @MainActor static var updates: AsyncStream<VerificationResult<Transaction>> {
         Probe.subscriptions += 1
         return AsyncStream { continuation in
+            if Probe.holdUpdates { Probe.pending = continuation; return }
             for update in Probe.updates { continuation.yield(update) }
             continuation.finish()
         }
@@ -50,7 +53,18 @@ struct Transaction: Sendable {
     static var channel = PaidBillingChannel.storeKit
     static var updates: [VerificationResult<Transaction>] = []
     static var events: [String] = []
-    static func reset() { subscriptions = 0; channel = .storeKit; updates = []; events = [] }
+    static var holdUpdates = false
+    static var pending: AsyncStream<VerificationResult<Transaction>>.Continuation?
+    static func reset() {
+        subscriptions = 0; channel = .storeKit; updates = []; events = []; holdUpdates = false; pending = nil
+    }
+    /// Delivers the held updates to a listener that subscribed while enabled.
+    static func release() async {
+        for _ in 0..<10000 where pending == nil { await Task.yield() }
+        guard let pending else { fatalError("listener never subscribed") }
+        for update in updates { pending.yield(update) }
+        pending.finish()
+    }
 }
 @MainActor final class Store: PaidAccessSessionStoring {
     var stored: PaidAccessSession?
@@ -102,8 +116,18 @@ let old = makeSession("old", expired: true), fresh = makeSession("fresh")
             require(Probe.subscriptions == 0 && store.reads == 0 && store.saves == 0
                     && store.clears == 0 && client.calls == 0 && store.stored == old,
                     "disabled listener accessed paid state")
-            // Direct handler admission is a separate guard, even without a listener.
-            await manager.handleTransactionUpdate(subscription)
+        }
+        // Handler admission is a separate guard: an update reaching a listener
+        // after the feature turns off must not enter the shared flow handler.
+        Probe.reset(); PaidAccessFeature.FEATURE_FLAG = true
+        Probe.updates = [subscription]; Probe.holdUpdates = true
+        do {
+            let store = Store(old), client = Client()
+            let manager = MAKE_MANAGER
+            require(manager.transactionListener != nil, "enabled listener was not created")
+            PaidAccessFeature.FEATURE_FLAG = false
+            await Probe.release()
+            await manager.transactionListener?.value
             require(store.reads == 0 && store.saves == 0 && store.clears == 0
                     && client.calls == 0 && Probe.events.isEmpty && store.stored == old,
                     "disabled handler accessed paid state")

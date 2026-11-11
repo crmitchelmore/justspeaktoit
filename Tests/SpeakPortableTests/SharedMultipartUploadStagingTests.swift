@@ -198,6 +198,58 @@ final class SharedMultipartUploadStagingTests: XCTestCase {
         for file in files { XCTAssertTrue(FileManager.default.fileExists(atPath: file.path)) }
     }
 
+    func testPurgeReportsDirectoryEnumerationFailure() {
+        let directory = temporaryDirectory()
+        let failures = FailureRecorder()
+        let store = SharedMultipartUploadStaging(
+            directory: directory,
+            securityPolicy: .init(prepareDirectory: { _, _ in }, createFile: { _, _ in false }),
+            stalenessThreshold: 0,
+            fileManager: .default,
+            report: { _ in },
+            reportInspectionFailure: failures.record
+        )
+        store.purgeStaleUploads(now: .distantFuture)
+        XCTAssertEqual(failures.all.count, 1)
+        guard case .directoryEnumerationFailed? = failures.all.first else {
+            return XCTFail("Expected an enumeration failure, got \(failures.all)")
+        }
+    }
+
+    func testPurgeKeepsBodiesWhoseModificationDateCannotBeRead() throws {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let unreadable = directory.appendingPathComponent("mistral-upload-unreadable.multipart")
+        let undated = directory.appendingPathComponent("mistral-upload-undated.multipart")
+        let stale = directory.appendingPathComponent("mistral-upload-stale.multipart")
+        for url in [unreadable, undated, stale] { try Data("fixture".utf8).write(to: url) }
+        let failures = FailureRecorder()
+        let store = SharedMultipartUploadStaging(
+            directory: directory,
+            securityPolicy: Self.fixturePolicy,
+            stalenessThreshold: 0,
+            fileManager: .default,
+            report: { _ in },
+            reportInspectionFailure: failures.record,
+            modificationDate: { url in
+                switch url.lastPathComponent {
+                case unreadable.lastPathComponent: throw PolicyError.denied
+                case undated.lastPathComponent: return nil
+                default: return Date(timeIntervalSinceReferenceDate: 0)
+                }
+            }
+        )
+        store.purgeStaleUploads(now: Date())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unreadable.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: undated.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        let unknownAge = failures.all.compactMap { event -> String? in
+            guard case .modificationDateUnavailable(let filename, _) = event else { return nil }
+            return filename
+        }
+        XCTAssertEqual(Set(unknownAge), [unreadable.lastPathComponent, undated.lastPathComponent])
+    }
+
     #if !os(Windows)
     func testPOSIXPolicyRepairsLooseDirectoryPermissionsAndProtectsNewFiles() throws {
         let directory = temporaryDirectory()
@@ -214,6 +266,17 @@ final class SharedMultipartUploadStagingTests: XCTestCase {
 
 private extension SharedMultipartUploadStagingTests {
     enum PolicyError: Error { case denied }
+
+    final class FailureRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var failures: [SharedMultipartUploadStaging.InspectionFailure] = []
+
+        var all: [SharedMultipartUploadStaging.InspectionFailure] { lock.withLock { failures } }
+
+        func record(_ failure: SharedMultipartUploadStaging.InspectionFailure) {
+            lock.withLock { failures.append(failure) }
+        }
+    }
 
     // Synthetic fixtures only. This injected policy deliberately makes no
     // claim about native Windows ACLs; the executable validates that adapter.

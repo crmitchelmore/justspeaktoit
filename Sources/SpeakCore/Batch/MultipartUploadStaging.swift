@@ -20,7 +20,8 @@ public final class MultipartUploadStaging: @unchecked Sendable {
             stalenessThreshold: stalenessThreshold.isFinite && stalenessThreshold > 0
                 ? stalenessThreshold : Self.defaultStalenessThreshold,
             fileManager: fileManager,
-            report: Self.report
+            report: Self.report,
+            reportInspectionFailure: Self.report
         )
     }
 
@@ -50,6 +51,20 @@ public final class MultipartUploadStaging: @unchecked Sendable {
             )
         case .directoryPreparationFailed(let message):
             logger.error("Failed to secure multipart upload directory: \(message, privacy: .public)")
+        }
+        #endif
+    }
+
+    private static func report(_ failure: SharedMultipartUploadStaging.InspectionFailure) {
+        #if !SPEAK_PORTABLE_CORE
+        let logger = SpeakLogger.logger(category: "MultipartUploadStaging")
+        switch failure {
+        case .directoryEnumerationFailed(let message):
+            logger.error("Failed to list multipart upload directory: \(message, privacy: .public)")
+        case .modificationDateUnavailable(let filename, let message):
+            logger.error(
+                "Kept multipart upload body \(filename, privacy: .public) of unknown age: \(message, privacy: .public)"
+            )
         }
         #endif
     }

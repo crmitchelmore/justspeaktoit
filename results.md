@@ -56,8 +56,12 @@ black-hole HTTP proxy; a fake OpenAI key was used.
 | R5 | Keyboard has an opaque background and sits clear of the navigation bar, in light and dark modes | PASS | `25`, `26` |
 | R6 | No FATAL EXCEPTION or ANR in logcat | PASS | — |
 
-Known side effect: releasing during a main-screen upload deletes the recorded audio even with
-"Keep audio when a recording is cancelled" on, because the existing `finally` block removes it.
+Fixed in 1ee00576: releasing during a main-screen upload now keeps the recording when "Keep audio when a recording is cancelled" is on.
+
+| # | Check | Result | Evidence |
+|---|-------|--------|----------|
+| R7 | Keep audio on: release the main-screen upload → Ready; History has a Cancelled entry with Transcribe; the WAV is in `files/recordings/` | PASS | `27`–`30` |
+| R8 | Keep audio off: same steps → no new History entry, and the WAV is deleted | PASS | — |
 
 The CI change that publishes precheck APKs is in #1491.
 

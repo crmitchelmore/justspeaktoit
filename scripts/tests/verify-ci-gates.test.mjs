@@ -652,10 +652,11 @@ test('Apple path detection excludes only docs, the website, the Android app and 
   const filter = body.match(
     /id: apple\n\s+with:\n\s+predicate-quantifier: every\n\s+filters: \|\n\s+apple:\n((?:\s+- '[^']+'\n)+)/);
   assert.ok(filter, 'apple filter must use the every-pattern quantifier');
-  assert.deepEqual(filter[1].trim().split('\n').map(line => line.trim()), [
-    "- '**'", "- '!android/**'", "- '!.github/workflows/android.yml'", "- '!Docs/**'", "- '!**/*.md'",
-    "- '!landing-page/**'", "- '!.github/workflows/deploy-landing-page.yml'", "- '!workers/**'",
-  ]);
+  // The list itself is routing.json's apple route, kept in step by scripts/ci/routing.py.
+  const routing = JSON.parse(readFileSync(new URL('../ci/routing.json', import.meta.url), 'utf8')).routes;
+  assert.deepEqual(filter[1].trim().split('\n').map(line => line.trim()), routing.apple.paths.map(p => `- '${p}'`));
+  assert.equal(routing.apple.quantifier, 'every');
+  assert.deepEqual(routing.apple.paths.slice(1).filter(p => !p.startsWith('!')), [], 'apple only excludes');
   assert.match(body, /\{ echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "api=true"; echo "full=true"; echo "workers=true"; \}/,
     'pushes force every gate');
   const swiftFilter = body.match(/\n            swift:\n((?:              - '[^']+'\n)+)/)?.[1] ?? '';

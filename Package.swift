@@ -97,6 +97,7 @@ let appleCoreSources: [String] = [
     "OpenRouter/OpenRouterAudioClient+Speech.swift",
     "OpenRouter/OpenRouterAudioFilter.swift",
     "OpenRouter/OpenRouterAudioPreview.swift",
+    "PaidAccess/PaidAccessFlow.swift",
     "PaidAccess/PaidAccessHTTPClient.swift",
     "PaidAccess/PaidAudioPayload.swift",
     "PaidAccess/PaidStoreKitSync.swift",

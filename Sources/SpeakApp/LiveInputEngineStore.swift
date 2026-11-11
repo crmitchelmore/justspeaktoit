@@ -310,7 +310,6 @@ extension DeepgramLiveController: LiveInputEngineConsumer {}
 extension ModulateLiveController: LiveInputEngineConsumer {}
 extension ElevenLabsLiveController: LiveInputEngineConsumer {}
 extension SonioxLiveController: LiveInputEngineConsumer {}
-extension CartesiaLiveController: LiveInputEngineConsumer {}
 extension OpenAIRealtimeLiveController: LiveInputEngineConsumer {}
 extension SharedClientLiveController: LiveInputEngineConsumer {}
 extension FluidAudioParakeetLiveController: LiveInputEngineConsumer {}

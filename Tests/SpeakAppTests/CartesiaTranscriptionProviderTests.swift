@@ -26,7 +26,7 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
   }
 
   func testWebSocketURL_usesTurnsEndpointAndInk2Parameters() throws {
-    let url = try XCTUnwrap(CartesiaLiveTranscriber.webSocketURL(model: "ink-2", sampleRate: 16_000))
+    let url = try XCTUnwrap(CartesiaLiveClient.webSocketURL(model: "ink-2", sampleRate: 16_000))
     let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
     let query = Dictionary(uniqueKeysWithValues: try XCTUnwrap(components.queryItems).map { ($0.name, $0.value ?? "") })
 
@@ -36,13 +36,12 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(query["model"], "ink-2")
     XCTAssertEqual(query["encoding"], "pcm_s16le")
     XCTAssertEqual(query["sample_rate"], "16000")
-    XCTAssertEqual(query["cartesia_version"], CartesiaLiveTranscriber.apiVersion)
+    XCTAssertEqual(query["cartesia_version"], CartesiaLiveClient.apiVersion)
   }
 
-  /// The macOS controller opens the one canonical handshake the shared client
-  /// opens: the trimmed key as a bearer token and the pinned version.
+  /// The shared client trims the key into a bearer token and pins the version.
   func testLiveRequest_isTheCanonicalSharedRequest() throws {
-    let request = try XCTUnwrap(CartesiaLiveTranscriber.webSocketRequest(
+    let request = try XCTUnwrap(CartesiaLiveClient.webSocketRequest(
       apiKey: " synthetic-key \n", model: "ink-2", sampleRate: 16_000
     ))
     let canonical = try XCTUnwrap(CartesiaLiveClient.webSocketRequest(
@@ -58,7 +57,6 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer synthetic-key")
     XCTAssertEqual(request.value(forHTTPHeaderField: "Cartesia-Version"), "2026-03-01")
     XCTAssertEqual(request.allHTTPHeaderFields, canonical.allHTTPHeaderFields)
-    XCTAssertEqual(CartesiaLiveTranscriber.apiVersion, CartesiaLiveClient.apiVersion)
   }
 
   // Transcript event parsing is shared: CartesiaLiveClientTests in SpeakCoreTests covers it.

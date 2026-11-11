@@ -13,7 +13,6 @@ private let logger = SpeakLogger.logger(category: "WireUp")
 // one assignment per service, so it grows by three lines whenever the app gains
 // one. Splitting it would only move the list somewhere else.
 @MainActor
-// swiftlint:disable:next type_body_length
 final class AppEnvironment: ObservableObject {
   /// Process-wide access point for the App Intents (Shortcuts) surface, set at
   /// bootstrap. Intents can fire before the SwiftUI scene has bootstrapped the
@@ -79,13 +78,24 @@ final class AppEnvironment: ObservableObject {
   /// or Apple Watch (issue #1007).
   fileprivate(set) var remoteTranscriptDelivery: RemoteTranscriptDelivery?
 
-  private(set) var statusBarController: StatusBarController?
+  /// Status bar, menu bar, Dock menu, Services and Touch Bar; see `AppChrome`.
+  private(set) lazy var chrome = AppChrome(
+    settings: settings,
+    history: history,
+    main: main,
+    hotKeys: hotKeys,
+    shortcuts: shortcuts,
+    tts: tts,
+    openMainWindow: { [weak self] in self?.presentMainWindow() },
+    openSettings: { [weak self] in self?.presentSettings() },
+    openStatus: { [weak self] in self?.presentSystemResourcesStatus() }
+  )
+  var statusBarController: StatusBarController? { chrome.statusBarController }
   /// Voice-edit controller; created by `installVoiceEdit()` in AppEnvironment+VoiceEdit.
   var voiceEdit: VoiceEditController?
   /// Reopens the main window when the app is running without any visible
   /// window (e.g. menu-bar-only mode). Supplied by the SwiftUI scene.
   var reopenMainWindow: (() -> Void)?
-  private var statusBarVisibilityObserver: AnyCancellable?
   /// Product analytics controller — nil when PostHog configuration is absent.
   private(set) var analytics: ProductAnalyticsController?
   #if !APP_STORE
@@ -93,13 +103,6 @@ final class AppEnvironment: ObservableObject {
   #endif
   var analyticsAvailable: Bool { analytics != nil }
   private var analyticsConsentObserver: AnyCancellable?
-  private(set) var menuBarManager: MenuBarManager?
-  private(set) var dockMenuManager: DockMenuManager?
-  private(set) var servicesProvider: ServicesProvider?
-  #if canImport(AppKit)
-  @available(macOS 10.12.2, *)
-  private(set) var touchBarProvider: TouchBarProvider?
-  #endif
 
   init(
     settings: AppSettings,
@@ -201,55 +204,6 @@ final class AppEnvironment: ObservableObject {
     Task { try? await analytics.capture(event) }
   }
 
-  func captureOnboardingCompletedAfterConsent() {
-    guard settings.analyticsEnabled, let analytics else { return }
-    Task {
-      try? await analytics.setConsent(.optedIn)
-      try? await analytics.capture(.onboardingCompleted(stepsSkipped: .zero))
-    }
-  }
-
-  /// Installs the status bar controller and the observer that keeps it in sync
-  /// with the visibility settings. Safe to call more than once; it is
-  /// idempotent. This is intentionally decoupled from any window lifecycle so
-  /// the menu bar access point exists even when no window is on screen (for
-  /// example after launching straight into menu-bar-only mode).
-  func installStatusBarIfNeeded() {
-    SystemResourceMonitor.shared.start(environment: self)
-    if statusBarVisibilityObserver == nil {
-      statusBarVisibilityObserver = settings.$appVisibility
-        .removeDuplicates()
-        .combineLatest(settings.$showStatusBarIconInDockOnly.removeDuplicates())
-        .receive(on: RunLoop.main)
-        .sink { [weak self] _, _ in
-          self?.updateStatusBarVisibility()
-        }
-    }
-    updateStatusBarVisibility()
-  }
-
-  /// Installs or removes the status bar icon to match the current visibility
-  /// settings. In Dock Only mode the icon follows `showStatusBarIconInDockOnly`;
-  /// in every mode without a Dock icon the status bar icon is always shown so
-  /// the app can never end up with no access point.
-  private func updateStatusBarVisibility() {
-    guard settings.shouldShowStatusBarIcon else {
-      statusBarController?.tearDown()
-      statusBarController = nil
-      return
-    }
-    guard statusBarController == nil else { return }
-    statusBarController = StatusBarController(
-      appSettings: settings,
-      historyManager: history,
-      mainManager: main,
-      hotKeyManager: hotKeys,
-      openMainWindow: { [weak self] in self?.presentMainWindow() },
-      openSettings: { [weak self] in self?.presentSettings() },
-      openStatus: { [weak self] in self?.presentSystemResourcesStatus() }
-    )
-  }
-
   /// Opens the main window on the General settings tab. This backs the status
   /// bar item's "Settings…"; the navigation target is set first so a window
   /// SwiftUI has yet to create still receives the selection when it subscribes.
@@ -283,156 +237,28 @@ final class AppEnvironment: ObservableObject {
     }
   }
 
-  func installMenuBar() {
-    guard menuBarManager == nil else { return }
-    menuBarManager = MenuBarManager(shortcutManager: shortcuts, appSettings: settings)
-    menuBarManager?.setupMainMenu()
+  /// Installs the status bar and keeps it in step with the visibility settings.
+  func installStatusBarIfNeeded() {
+    SystemResourceMonitor.shared.start(environment: self)
+    chrome.installStatusBarIfNeeded()
   }
-
-  func installDockMenu() {
-    guard dockMenuManager == nil else { return }
-    dockMenuManager = DockMenuManager(historyManager: history)
-  }
-
-  func installServices() {
-    guard servicesProvider == nil else { return }
-    servicesProvider = ServicesProvider(ttsManager: tts, appSettings: settings)
-    servicesProvider?.registerServices()
-  }
-
+  func installMenuBar() { chrome.installMenuBar() }
+  func installDockMenu() { chrome.installDockMenu() }
+  func installServices() { chrome.installServices() }
   #if canImport(AppKit)
   @available(macOS 10.12.2, *)
-  func installTouchBar() {
-    touchBarProvider = TouchBarProvider(mainManager: main, ttsManager: tts, appSettings: settings)
-  }
+  func installTouchBar() { chrome.installTouchBar() }
   #endif
+  func createDockMenu() -> NSMenu? { chrome.createDockMenu() }
 
-  func createDockMenu() -> NSMenu? {
-    dockMenuManager?.createDockMenu()
-  }
-
-  func configureShortcutHandlers() {
-    shortcuts.register(action: .startStopRecording) { [weak self] in
-      self?.main.toggleRecordingFromUI()
-    }
-    shortcuts.register(action: .speakClipboard) { [weak self] in
-      guard let self else { return }
-      if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
-        Task {
-          try? await self.tts.synthesize(text: text)
-        }
-      }
-    }
-    shortcuts.register(action: .speakSelectedText) { [weak self] in
-      guard let self else { return }
-      // Get selected text via accessibility or pasteboard simulation
-      Task {
-        if let text = await self.getSelectedText(), !text.isEmpty {
-          _ = try? await self.tts.synthesize(text: text)
-        }
-      }
-    }
-    shortcuts.register(action: .pauseResumeTTS) { [weak self] in
-      guard let self else { return }
-      if self.tts.isPlaying {
-        self.tts.pause()
-      } else {
-        self.tts.resume()
-      }
-    }
-    shortcuts.register(action: .stopTTS) { [weak self] in
-      self?.tts.stop()
-    }
-    shortcuts.register(action: .pasteLastHistoryItem) { [weak self] in self?.pasteLastHistoryItem() }
-    shortcuts.register(action: .editSelectionByVoice) { [weak self] in self?.toggleVoiceEdit() }
-    registerNavigationShortcutHandlers()
-    registerQuickVoiceShortcutHandlers()
-    #if DEBUG
-    if CoreJourneyLaunchProfile.isRequested { return }
-    #endif
-    shortcuts.startMonitoring()
-  }
-
-  private func registerNavigationShortcutHandlers() {
-    let navigationActions: [ShortcutAction: SidebarItem] = [
-      .openDashboard: .dashboard,
-      .showHistory: .history,
-      .openVoiceOutput: .voiceOutput,
-      .openCorrections: .corrections,
-      .openTroubleshooting: .troubleshooting,
-      .openSettings: .settings(.general),
-      .openTranscriptionSettings: .settings(.transcription),
-      .openPostProcessingSettings: .settings(.postProcessing),
-      .openDataMigrationSettings: .settings(.dataMigration),
-      .openProfilesSettings: .settings(.profiles),
-      .openVoiceOutputSettings: .settings(.voiceOutput),
-      .openPronunciationSettings: .settings(.pronunciation),
-      .openAPIKeysSettings: .settings(.apiKeys),
-      .openKeyboardSettings: .settings(.shortcuts),
-      .openPermissionsSettings: .settings(.permissions),
-      .openCompareModelsSettings: .settings(.compareModels),
-      .openAboutSettings: .settings(.about)
-    ]
-    for (action, item) in navigationActions {
-      shortcuts.register(action: action) { [weak self] in
-        self?.sidebarNavigationTarget = item
-      }
+  func captureOnboardingCompletedAfterConsent() {
+    guard settings.analyticsEnabled, let analytics else { return }
+    Task {
+      try? await analytics.setConsent(.optedIn)
+      try? await analytics.capture(.onboardingCompleted(stepsSkipped: .zero))
     }
   }
 
-  private func registerQuickVoiceShortcutHandlers() {
-    shortcuts.register(action: .quickVoice1) { [weak self] in
-      self?.switchToQuickVoice(1)
-    }
-    shortcuts.register(action: .quickVoice2) { [weak self] in
-      self?.switchToQuickVoice(2)
-    }
-    shortcuts.register(action: .quickVoice3) { [weak self] in
-      self?.switchToQuickVoice(3)
-    }
-  }
-
-  private func getSelectedText() async -> String? {
-    // Save current clipboard
-    let pasteboard = NSPasteboard.general
-    let savedContents = pasteboard.pasteboardItems?.compactMap { item -> [NSPasteboard.PasteboardType: Data]? in
-      var dict: [NSPasteboard.PasteboardType: Data] = [:]
-      for type in item.types {
-        if let data = item.data(forType: type) {
-          dict[type] = data
-        }
-      }
-      return dict.isEmpty ? nil : dict
-    }
-
-    // Simulate Cmd+C to copy selected text
-    let source = CGEventSource(stateID: .hidSystemState)
-    let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: true)
-    let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: false)
-    keyDown?.flags = .maskCommand
-    keyUp?.flags = .maskCommand
-    keyDown?.post(tap: .cghidEventTap)
-    keyUp?.post(tap: .cghidEventTap)
-
-    // Wait for clipboard to update
-    try? await Task.sleep(nanoseconds: 100_000_000)
-
-    let selectedText = pasteboard.string(forType: .string)
-
-    // Restore clipboard
-    pasteboard.clearContents()
-    if let savedContents {
-      for itemData in savedContents {
-        let item = NSPasteboardItem()
-        for (type, data) in itemData {
-          item.setData(data, forType: type)
-        }
-        pasteboard.writeObjects([item])
-      }
-    }
-
-    return selectedText
-  }
 }
 
 extension AppEnvironment {
@@ -452,91 +278,9 @@ extension AppEnvironment {
     await AppSettings.SystemDependencies.drainLoginItemChanges()
   }
 
-  fileprivate func switchToQuickVoice(_ index: Int) {
-    let favorites = settings.ttsFavoriteVoices
-    let arrayIndex = index - 1
-    if arrayIndex < favorites.count {
-      settings.defaultTTSVoice = favorites[arrayIndex]
-    }
-  }
-
-  /// Pastes the most recent history item's text into the frontmost app,
-  /// preferring the post-processed transcription over the raw one. Reuses the
-  /// same insertion path as transcription delivery (accessibility or paste,
-  /// per the user's configured output method).
-  func pasteLastHistoryItem() {
-    let text = history.items.first.flatMap { $0.postProcessedTranscription ?? $0.rawTranscription }
-    guard let text, PasteTextOutput.hasDeliverableText(text) else {
-      hud.finishFailure(
-        headline: "Nothing to paste",
-        message: "No history items with text yet.",
-        displayDuration: 2.5
-      )
-      return
-    }
-    let output = SmartTextOutput(permissionsManager: permissions, appSettings: settings)
-    let result = output.output(text: text)
-    if let error = result.error {
-      let remedy = DeliverySettingsRemedy.forOutput(
-        error: error,
-        warning: nil,
-        focusMovedToOtherApplication: false,
-        configuration: DeliverySettingsRemedy.Configuration(settings: settings)
-      )
-      main.offerDeliveryRemedy(remedy)
-      hud.finishFailure(
-        headline: MainManager.deliveryFailureHeadline(for: error),
-        message: remedy.annotate(error.localizedDescription)
-      )
-    }
-  }
-}
-
-// MARK: - Automation
-
-extension AppEnvironment {
-  /// Opens the local automation socket when the user has opted in.
-  ///
-  /// Off by default: the socket lets any process running as this user start the
-  /// microphone and read past transcripts, so it stays closed until asked for.
-  /// Best-effort at launch — a socket that cannot bind puts the preference back
-  /// to off rather than failing startup, exactly as "Send to Mac" does.
-  func startAutomationServerIfEnabled() {
-    guard settings.enableAutomationServer else { return }
-    do {
-      try startAutomationServer()
-    } catch {
-      SpeakLogger.logError(error, context: "Automation socket startup", logger: SpeakLogger.transport)
-      settings.enableAutomationServer = false
-    }
-  }
-
-  /// Opens the socket, wiring it onto the same managers the UI drives.
-  ///
-  /// Throws rather than logging so the Settings toggle can put the stored
-  /// preference back in step with reality.
-  func startAutomationServer() throws {
-    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
-    try automationServer.start(
-      handler: AppAutomationHandler(
-        main: main,
-        history: history,
-        transcription: transcription,
-        tts: tts,
-        appVersion: version ?? "unknown"
-      )
-    )
-  }
-
-  /// Closes the socket, so nothing local can drive dictation once the user
-  /// turns automation off.
-  func stopAutomationServer() {
-    automationServer.stop()
-  }
 }
 
 @MainActor
-// swiftlint:disable:next type_body_length
 enum WireUp {
 
   // MARK: - Dependency Injection Options
@@ -581,13 +325,6 @@ enum WireUp {
   /// uses `.live`; a test injects its own so bootstrap never syncs the
   /// developer's iCloud account, registers for or posts notifications, or
   /// sends analytics.
-  struct AnalyticsServices {
-    let controller: ProductAnalyticsController
-    #if !APP_STORE
-    let privacyControls: AnalyticsPrivacyControls
-    #endif
-  }
-
   struct Integrations {
     /// Starts CloudKit history and Compare Models sync, and remote-transcript
     /// delivery, which registers its notification actions and re-runs sync
@@ -652,21 +389,8 @@ enum WireUp {
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
     #endif
 
-    // Paid access wraps, rather than replaces, the bring-your-own-key client.
-    // Without a verified entitlement every request goes straight through to
-    // `openRouter`, so subscribers and non-subscribers share one code path and
-    // an outage degrades to the user's own keys instead of breaking dictation.
-    let paidClient = PaidAccessHTTPClient(baseURL: PaidAccessFeature.baseURL)
-    let paidAccess = PaidAccessManager(
-      client: paidClient,
-      sessionStore: AppSecureStorageSessionStore(storage: secureStorage),
-      settings: settings
-    )
-    let routedClient = PaidAccessProxyClient(
-      fallback: openRouter,
-      paidClient: paidClient,
-      sessionProvider: paidAccess.sessionProvider(),
-      routerProvider: paidAccess.routerProvider()
+    let (paidAccess, routedClient) = makePaidAccessRouting(
+      openRouter: openRouter, secureStorage: secureStorage, settings: settings
     )
 
     let transcription = TranscriptionManager(
@@ -780,7 +504,6 @@ enum WireUp {
   }
 
   // MARK: - Service Configuration
-  // swiftlint:disable:next function_body_length
   private static func configureServices(
     environment: AppEnvironment,
     settings: AppSettings,
@@ -800,36 +523,36 @@ enum WireUp {
 
     restorePaidAccessEntitlement(in: environment)
 
-    environment.transportServer.onTranscriptReceived = { _, text in
-      Task { @MainActor in
-        environment.liveTextInserter.update(with: text)
-      }
-    }
-
-    // The listener can also fail asynchronously, after start() has already returned
-    // (NWListener.start is non-throwing). Handle that the same way as a synchronous
-    // failure so the toggle never stays ON with a dead listener behind it — this covers
-    // both the launch-time start below and the one in Settings, which share this server.
-    environment.transportServer.onFailure = { error in
-      Task { @MainActor in
-        SpeakLogger.logError(error, context: "Send to Mac listener failed", logger: SpeakLogger.transport)
-        settings.enableSendToMac = false
-      }
-    }
-
-    if settings.enableSendToMac {
-      do {
-        try environment.transportServer.start()
-      } catch {
-        // Keep the stored preference honest: leaving the toggle ON while the
-        // listener never started would silently drop every "Send to Mac" session.
-        SpeakLogger.logError(error, context: "Send to Mac startup", logger: SpeakLogger.transport)
-        settings.enableSendToMac = false
-      }
-    }
-
+    configureSendToMac(environment: environment, settings: settings)
     environment.startAutomationServerIfEnabled()
+    attachCloudSync(to: environment, settings: settings, options: options)
 
+    Task { await secureStorage.preloadTrackedSecrets() }
+    if options.startsCredentialKeySync(on: .current) {
+      startCredentialKeySync(secureStorage: secureStorage)
+    }
+    Task {
+      await configureDefaultTranscriptionProvider(settings: settings, secureStorage: secureStorage)
+    }
+
+    // Analytics
+    if let analyticsServices = options.integrations.makeAnalytics(settings, options.fileManager) {
+      #if !APP_STORE
+      environment.analyticsPrivacyControls = analyticsServices.privacyControls
+      #endif
+      environment.installAnalytics(analyticsServices.controller)
+    }
+
+    logger.info("AppEnvironment.bootstrap complete")
+  }
+
+  /// CloudKit History and Compare Models sync, plus notifications for
+  /// transcripts arriving from an iPhone or Apple Watch (#1007).
+  private static func attachCloudSync(
+    to environment: AppEnvironment,
+    settings: AppSettings,
+    options: BootstrapOptions
+  ) {
     let syncAdapter = MacHistorySyncAdapter(historyManager: environment.history, defaults: options.defaults)
     environment.historySyncAdapter = syncAdapter
     // Phone and watch captures arriving through CloudKit history sync (#1007).
@@ -855,102 +578,6 @@ enum WireUp {
     environment.comparisonSyncAdapter = comparisonSync
     options.integrations.startCloudSync(syncAdapter, comparisonSync, remoteTranscripts)
 
-    Task { await secureStorage.preloadTrackedSecrets() }
-    if options.startsCredentialKeySync(on: .current) {
-      Task {
-        let coreStorage = await secureStorage.coreStorage()
-        let keySync = CloudKitKeySync.shared
-        await keySync.configure(secureStorage: coreStorage)
-        guard await keySync.isAvailable() else { return }
-        do {
-          try await keySync.syncNow()
-        } catch {
-          logger.error("CloudKit API-key sync failed: \(error.localizedDescription, privacy: .public)")
-        }
-      }
-    }
-    Task {
-      await configureDefaultTranscriptionProvider(settings: settings, secureStorage: secureStorage)
-    }
-
-    // Analytics
-    if let analyticsServices = options.integrations.makeAnalytics(settings, options.fileManager) {
-      #if !APP_STORE
-      environment.analyticsPrivacyControls = analyticsServices.privacyControls
-      #endif
-      environment.installAnalytics(analyticsServices.controller)
-    }
-
-    logger.info("AppEnvironment.bootstrap complete")
-  }
-
-  private static func restorePaidAccessEntitlement(in environment: AppEnvironment) {
-    guard PaidAccessFeature.isEnabled else { return }
-    // Routing waits briefly for this launch restore, preventing a subscriber's
-    // first dictation from racing it and falling back to an unconfigured key.
-    Task { @MainActor in
-      environment.paidAccess.restoreEntitlementAtLaunch()
-    }
-  }
-
-  // MARK: - Analytics Factory
-
-  private static func makeAnalyticsController(
-    settings: AppSettings,
-    fileManager: FileManager
-  ) -> AnalyticsServices? {
-    #if APP_STORE
-    return nil
-    #else
-    guard DistributionChannel.current == .direct else { return nil }
-    guard PostHogProductAnalyticsSink.isConfigured else { return nil }
-    let stateURL = (fileManager
-      .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-      .first ?? fileManager.homeDirectoryForCurrentUser)
-      .appendingPathComponent(ReleaseTrain.current.supportDirectory)
-      .appendingPathComponent("analytics_state.json")
-    let queueURL = stateURL.deletingLastPathComponent().appendingPathComponent("analytics_queue.json")
-    let stateStore = FileProductAnalyticsStateStore(fileURL: stateURL)
-    let context = buildAnalyticsContext()
-    let policy = AnalyticsLocalPolicy()
-    let sink = PostHogProductAnalyticsSink(queueURL: queueURL, forceDisabled: { policy.isDisabled })
-    guard let controller = try? ProductAnalyticsController(
-      context: context,
-      sink: sink,
-      stateStore: stateStore,
-      forceDisabled: { policy.isDisabled }
-    ) else { return nil }
-    return AnalyticsServices(
-      controller: controller,
-      privacyControls: AnalyticsPrivacyControls(controller: controller, sink: sink, policy: policy)
-    )
-    #endif
-  }
-
-  private static func buildAnalyticsContext() -> ProductAnalyticsContext {
-    let bundle = Bundle.main
-    let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
-    let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
-    let osVersion = ProcessInfo.processInfo.operatingSystemVersion
-    let osMajorMinor = "\(osVersion.majorVersion).\(osVersion.minorVersion)"
-    let localeCode = Locale.current.language.languageCode?.identifier ?? "en"
-    let distributionChannel: AnalyticsDistributionChannel = DistributionChannel.current == .appStore
-      ? .macAppStore
-      : .direct
-    #if arch(arm64)
-    let arch = "arm64"
-    #else
-    let arch = "x86_64"
-    #endif
-    return ProductAnalyticsContext(
-      platform: .macOS,
-      appVersion: version,
-      build: build,
-      osMajorMinor: osMajorMinor,
-      distributionChannel: distributionChannel,
-      localeLanguageCode: localeCode,
-      architecture: arch
-    )
   }
 
   // MARK: - Credential Vault Factory
@@ -968,71 +595,6 @@ enum WireUp {
     )
   }
 
-  // MARK: - TTS Factory
-
-  private static func buildTTSManager(
-    settings: AppSettings,
-    secureStorage: SecureAppStorage,
-    pronunciation: PronunciationManager,
-    defaults: UserDefaults
-  ) -> TextToSpeechManager {
-    let clients: [TTSProvider: TextToSpeechClient] = [
-      .elevenlabs: ElevenLabsClient(secureStorage: secureStorage),
-      .openai: OpenAITTSClient(secureStorage: secureStorage),
-      .openrouter: OpenRouterTTSClient(secureStorage: secureStorage),
-      .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
-      .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
-      .soniox: SonioxTTSClient(secureStorage: secureStorage, appSettings: settings),
-      .cartesia: CartesiaTTSClient(secureStorage: secureStorage),
-      .groq: GroqTTSClient(secureStorage: secureStorage),
-      .gemini: GeminiTTSClient(secureStorage: secureStorage),
-      .mistral: MistralTTSClient(secureStorage: secureStorage),
-      .speechmatics: SpeechmaticsTTSClient(secureStorage: secureStorage),
-      .xai: XAITTSClient(secureStorage: secureStorage),
-      .system: SystemTTSClient()
-    ]
-    return TextToSpeechManager(
-      appSettings: settings,
-      secureStorage: secureStorage,
-      clients: clients,
-      pronunciationManager: pronunciation,
-      defaults: defaults
-    )
-  }
-
-  /// Configure the default live transcription model based on available API keys.
-  /// Priority: Deepgram > Apple (fallback)
-  /// Called on app launch and after onboarding completes.
-  static func configureDefaultTranscriptionProvider(
-    settings: AppSettings,
-    secureStorage: SecureAppStorage
-  ) async {
-    // Only configure if the user has never chosen a live transcription model.
-    // Checking the stored choice (rather than "is it still Apple?") means a
-    // deliberate Apple Speech selection survives every launch.
-    guard !settings.hasExplicitLiveTranscriptionModelChoice else {
-      logger.info("User has chosen a transcription model, skipping auto-config")
-      return
-    }
-
-    // Check for Deepgram API key
-    let hasDeepgramKey = await secureStorage.hasSecret(identifier: "deepgram.apiKey")
-
-    if hasDeepgramKey {
-      await MainActor.run {
-        // Re-check after the keychain await: the user may have chosen a model
-        // while this task was suspended, and that choice must win.
-        guard !settings.hasExplicitLiveTranscriptionModelChoice else {
-          logger.info("User chose a transcription model during auto-config, skipping")
-          return
-        }
-        settings.liveTranscriptionModel = "deepgram/nova-3-streaming"
-        logger.info("Deepgram API key found, setting as default transcription provider")
-      }
-    } else {
-      logger.info("No Deepgram API key found, using Apple on-device transcription as default")
-    }
-  }
 }
 // @Implement: This file wires up and configures app dependencies.
 // swiftlint:enable file_length

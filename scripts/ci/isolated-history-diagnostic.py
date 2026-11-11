@@ -9,9 +9,9 @@ when the capture is complete and every expected case started and finished
 exactly once.
 """
 import json
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 
 
 def capture(directory: Path) -> int:

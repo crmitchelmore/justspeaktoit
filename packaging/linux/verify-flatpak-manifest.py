@@ -2,12 +2,12 @@
 """Check the resolved Flatpak build contract before an expensive native build."""
 import argparse
 import json
-from itertools import islice
 import re
 import stat
 import subprocess
 import tempfile
 import time
+from itertools import islice
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -6,12 +6,11 @@ This tests driver ownership, not GTK rendering or screenshot contents.
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 

@@ -95,6 +95,7 @@ FAILED=0
 
 log() { printf '==> %s\n' "$*"; }
 
+# shellcheck disable=SC2329 # Invoked by the EXIT trap.
 cleanup() {
     if [ -n "$SERVER_PID" ]; then
         kill "$SERVER_PID" 2>/dev/null || true

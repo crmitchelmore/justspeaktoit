@@ -61,7 +61,9 @@ class SelectionTests(unittest.TestCase):
 
 class MainTests(unittest.TestCase):
     def test_an_unresolvable_base_runs_every_test_target(self):
-        import contextlib, io, subprocess
+        import contextlib
+        import io
+        import subprocess
         from unittest import mock
 
         def fake_run(command, **kwargs):
@@ -85,7 +87,8 @@ class ShallowCloneTests(unittest.TestCase):
                               capture_output=True, text=True).stdout.strip()
 
     def test_a_shallow_merge_commit_diffs_against_the_fetched_base(self):
-        import os, tempfile
+        import os
+        import tempfile
         with tempfile.TemporaryDirectory() as root:
             origin = os.path.join(root, "origin")
             os.makedirs(os.path.join(origin, "Sources/SpeakApp"))

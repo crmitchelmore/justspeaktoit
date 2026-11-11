@@ -105,6 +105,7 @@ jobs:
           refs=$(for pr in $PRS; do printf '#%s ' "$pr"; done)
           log=$(gh run view "$RED_RUN_ID" --log-failed 2>/dev/null | tail -n 80 | cut -c1-300 || true)
           deadline=$(date -u -d "$RED_SINCE + 120 minutes" '+%H:%M UTC')
+          # shellcheck disable=SC2016 # Backticks are literal Markdown in the comment body.
           gh issue comment "$number" --body "$(printf '%s\n**Fix forward needed.** Main turned red at %s: %s\n\nFailed jobs: %s\nSuspects: %s(%s)\n\nOpen a fix PR (with a passing `scripts/pre-pr` record) that references this issue. If main is still red at %s, or 3 more commits merge first, the suspects are auto-reverted.\n\n<details><summary>Failure log (tail)</summary>\n\n```\n%s\n```\n</details>\n' \
             "$marker" "${RED_SHA:0:12}" "$RED_RUN" "$FAILED" "$refs" "$SHAS" "$deadline" "$log")"
           for pr in $PRS; do
@@ -148,6 +149,7 @@ jobs:
           fi
           head=$(git rev-parse HEAD)
           gh label create auto-revert --color B60205 --description 'Opened by the auto-revert bot' 2>/dev/null || true
+          # shellcheck disable=SC2016 # Backticks are literal Markdown in the comment body.
           body=$(printf 'Main CI failed at %s: %s\n\nFailed jobs: %s\n\nThis reverts %s. Its `CI Gate` check proves the commit is an exact revert; the bot merges it and re-runs main CI.\n\n%s %s\n' \
             "$RED_SHA" "$RUN_URL" "$FAILED" "${refs:-$SHAS}" "Auto-revert-of:" "$SHAS")
           url=$(gh pr create --base main --head "$branch" --title "$title" --body "$body" --label auto-revert)
@@ -185,6 +187,7 @@ jobs:
           for sha in $SHAS; do
             subject=$(git log -1 --format=%s "$sha")
             pr=$(printf '%s' "$subject" | sed -nE 's/.*\(#([0-9]+)\)[[:space:]]*$/\1/p')
+            # shellcheck disable=SC2016 # Backticks are literal Markdown in the comment body.
             note=$(printf 'Main CI failed after this merged, so %s reverted it: %s\n\nFailed jobs: %s\n\n<details><summary>Failure log (tail)</summary>\n\n```\n%s\n```\n</details>\n' \
               "$REVERT_PR" "$RUN_URL" "$FAILED" "$log")
             reland=''
@@ -192,6 +195,7 @@ jobs:
             git checkout --quiet -B "$branch" origin/main
             if git cherry-pick "$sha" >/dev/null 2>&1 && git push --quiet --force origin "$branch"; then
               author=$(gh pr view "$pr" --json author --jq .author.login 2>/dev/null || true)
+              # shellcheck disable=SC2016 # Backticks are literal Markdown in the comment body.
               reland=$(gh pr create --draft --base main --head "$branch" \
                 --title "${subject% (#*} (reland)" \
                 --body "$(printf 'Reapplies #%s.\n\n%s\nPush a fix to this branch, run `scripts/pre-pr`, update this body with its record, then mark it ready.\n' "$pr" "$note")" \

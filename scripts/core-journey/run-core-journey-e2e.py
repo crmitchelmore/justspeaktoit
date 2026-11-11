@@ -5,7 +5,6 @@ import collections
 import heapq
 import json
 import os
-from pathlib import Path
 import re
 import signal
 import stat
@@ -13,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 # Exact suite names, not source filenames: one file can contain several suites.
 REQUIRED_SUITES = (

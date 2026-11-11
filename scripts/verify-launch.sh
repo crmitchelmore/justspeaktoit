@@ -111,6 +111,7 @@ finish_capture() {
         CAPTURE_PID=""
     fi
 }
+# shellcheck disable=SC2329 # Invoked by the EXIT trap.
 cleanup() {
     if [ -n "$APP_PID" ]; then
         kill "$APP_PID" 2>/dev/null || true

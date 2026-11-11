@@ -4,7 +4,6 @@ import http.client
 import importlib.util
 import json
 import os
-from pathlib import Path
 import select
 import socket
 import struct
@@ -13,8 +12,9 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
 import uuid
+from pathlib import Path
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location("modulate_opening", Path(__file__).resolve().parents[1] / "qualification/modulate-opening-audio-probe.py")
 PEER = importlib.util.module_from_spec(SPEC)

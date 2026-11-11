@@ -256,11 +256,16 @@ jobs:
       - name: Cache lint tooling
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: Tooling/.build
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-tooling-${{ hashFiles('Tooling/Package.resolved') }}
+          # Tooling/.build: SwiftLint and SwiftFormat; .build/quality-tools: scripts/quality's Ruff,
+          # ShellCheck and actionlint (pinned and SHA-256 verified).
+          path: |
+            Tooling/.build
+            .build/quality-tools
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-tooling-${{ hashFiles('Tooling/Package.resolved', 'Tooling/quality-requirements.txt', 'scripts/quality') }}
 
       # The same target scripts/pre-pr runs, so a local pass means this passes:
-      # strict SwiftLint (isolated Tooling/ graph, issue #677), accessibility,
+      # strict SwiftLint (isolated Tooling/ graph, issue #677), scripts/quality (SwiftFormat,
+      # Ruff, ShellCheck, actionlint; zero violations), accessibility,
       # tooling Package.resolved drift and the tooling tests.
       - name: Lint and tooling tests (make ci-lint)
         run: make ci-lint

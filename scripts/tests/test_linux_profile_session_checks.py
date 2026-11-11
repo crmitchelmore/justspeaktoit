@@ -1,7 +1,6 @@
 import importlib.util
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
@@ -9,8 +8,8 @@ import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
-
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'linux'
 

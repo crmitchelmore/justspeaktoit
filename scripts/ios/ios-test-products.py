@@ -5,11 +5,10 @@ import argparse
 import io
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import tarfile
-
+from pathlib import Path
 
 PRODUCT = "SpeakiOS.xctestproducts"
 METADATA = "provenance.json"

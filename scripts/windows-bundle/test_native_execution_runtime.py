@@ -23,7 +23,11 @@ import native_execution_debugger as DEBUGGER  # noqa: E402
 import native_execution_runtime as RUNTIME  # noqa: E402
 import windows_targets  # noqa: E402
 from native_execution_fakes import (  # noqa: E402
-    AMD64, ARM64, FIXTURES, PE, StandaloneRequests,
+    AMD64,
+    ARM64,
+    FIXTURES,
+    PE,
+    StandaloneRequests,
 )
 
 
@@ -230,7 +234,7 @@ foreach ($encoded in ([Console]::In.ReadToEnd() | ConvertFrom-Json -Depth 8)) {
         environment = dict(os.environ, JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
         completed = subprocess.run([host, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
             input=json.dumps([json.dumps(value) for value in values]).encode("utf-8"), cwd=self.root, env=environment,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+            capture_output=True, timeout=15, check=False)
         self.assertEqual(completed.returncode, 0)
         self.assertEqual(completed.stderr, b"")
         lines = completed.stdout.decode("utf-8").splitlines()
@@ -290,7 +294,7 @@ try {
         environment = dict(os.environ, JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
         completed = subprocess.run([host, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
             input=json.dumps(self.rows).encode("utf-8"), cwd=self.root, env=environment,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+            capture_output=True, timeout=15, check=False)
         self.assertEqual(completed.returncode, 0)
         self.assertEqual(completed.stderr, b"")
         value = json.loads(completed.stdout)
@@ -524,7 +528,7 @@ ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
             environment = dict(os.environ, JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
             completed = subprocess.run([host, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
                 input=json.dumps(value).encode("utf-8"), cwd=directory, env=environment,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+                capture_output=True, timeout=15, check=False)
         self.assertEqual(completed.returncode, 0)
         self.assertEqual(completed.stderr, b"")
         projected = json.loads(completed.stdout)

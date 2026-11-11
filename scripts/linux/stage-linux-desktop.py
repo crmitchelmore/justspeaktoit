@@ -2,10 +2,10 @@
 """Stage a native Linux desktop layout; never install into the running system."""
 import argparse
 import pathlib
-import shutil
 import re
-import subprocess
+import shutil
 import struct
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]

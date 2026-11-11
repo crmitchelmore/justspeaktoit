@@ -23,7 +23,17 @@ sys.path.insert(0, str(HERE))
 import native_execution_host as HOST  # noqa: E402
 import native_execution_run as RUN  # noqa: E402
 from native_execution_fakes import (  # noqa: E402
-    AMD64, APP, ARM64, Clock, FIXTURES, FakeAPI, FakeProcess, NATIVE, PE, SYSTEM, native_image,
+    AMD64,
+    APP,
+    ARM64,
+    FIXTURES,
+    NATIVE,
+    PE,
+    SYSTEM,
+    Clock,
+    FakeAPI,
+    FakeProcess,
+    native_image,
 )
 
 
@@ -407,8 +417,8 @@ class NativeOwnerRoutingTests(unittest.TestCase):
                                JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
             query = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
                                     "@{frequency=[System.Diagnostics.Stopwatch]::Frequency;ticks=[System.Diagnostics.Stopwatch]::GetTimestamp()} | ConvertTo-Json -Compress"],
-                                   env=environment, cwd=directory, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, timeout=10, check=False)
+                                   env=environment, cwd=directory, capture_output=True,
+                                   timeout=10, check=False)
             self.assertEqual(query.returncode, 0)
             self.assertEqual(query.stderr, b"")
             clock = json.loads(query.stdout)
@@ -444,7 +454,7 @@ try {
 """
             completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
                                        input=json.dumps(record).encode(), env=environment, cwd=directory,
-                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+                                       capture_output=True, timeout=15, check=False)
         self.assertEqual(completed.returncode, 0, "actual shared native adapter failed")
         self.assertEqual(completed.stderr, b"")
         self.assertLessEqual(len(completed.stdout), 8192)

@@ -2,13 +2,13 @@
 """Qualify real X11 profile identities only on the caller's owned private Xvfb."""
 import json
 import os
-from pathlib import Path
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 
 def admit_display(environment, parent=None, proc=Path('/proc')):

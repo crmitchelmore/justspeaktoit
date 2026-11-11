@@ -15,7 +15,12 @@ import time
 import windows_pe
 import windows_targets
 from native_execution_host import (
-    EMULATION_MODULES, ExecutionError, check_images, describe_image, machine_name, query_machine
+    EMULATION_MODULES,
+    ExecutionError,
+    check_images,
+    describe_image,
+    machine_name,
+    query_machine,
 )
 from native_execution_process import StandaloneWindows
 

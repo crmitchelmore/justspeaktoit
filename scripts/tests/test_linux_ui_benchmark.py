@@ -1,7 +1,7 @@
 import importlib.util
-from pathlib import Path
 import subprocess
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 SPEC = importlib.util.spec_from_file_location("benchmark", Path(__file__).resolve().parents[1] / "linux" / "linux-ui-benchmark.py")

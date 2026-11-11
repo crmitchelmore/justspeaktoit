@@ -39,11 +39,10 @@ if str(HERE) not in sys.path:
 #   native_execution_events    packaged-application-error: one Event 1000 query
 import windows_pe  # noqa: E402
 import windows_targets  # noqa: E402
-from native_execution_host import (  # noqa: E402
-    ExecutionError, WindowsAPI, check_host, check_images, load_evidence, save_evidence)
-from native_execution_run import run  # noqa: E402
 from native_execution_debugger import standalone_main  # noqa: E402
 from native_execution_events import packaged_event_main  # noqa: E402
+from native_execution_host import ExecutionError, WindowsAPI, check_host, check_images, load_evidence, save_evidence  # noqa: E402
+from native_execution_run import run  # noqa: E402
 
 
 def parse_arguments(argv=None):
@@ -120,4 +119,4 @@ if __name__ == "__main__":
     try:
         dispatch_main()
     except (ExecutionError, windows_pe.PEFormatError, OSError, ValueError) as error:
-        raise SystemExit("native execution: " + str(error))
+        raise SystemExit("native execution: " + str(error)) from error

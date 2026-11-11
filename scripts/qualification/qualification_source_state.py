@@ -11,11 +11,10 @@ import datetime
 import hashlib
 import json
 import os
-from pathlib import Path
 import stat
 import subprocess
 import time
-
+from pathlib import Path
 
 MAX_RECORDS = 512
 MAX_HASH_BYTES = 32 * 1024 * 1024

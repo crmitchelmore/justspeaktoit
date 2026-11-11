@@ -2,11 +2,10 @@
 import base64
 import importlib.util
 import json
-from pathlib import Path
 import struct
 import unittest
+from pathlib import Path
 from unittest.mock import patch
-
 
 SPEC = importlib.util.spec_from_file_location(
     "websocket_peer", Path(__file__).resolve().parents[1] / "loopback/websocket-loopback-probe.py"

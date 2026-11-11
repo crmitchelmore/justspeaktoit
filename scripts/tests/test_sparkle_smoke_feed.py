@@ -1,7 +1,7 @@
 import importlib.util
-from pathlib import Path
 import unittest
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 spec = importlib.util.spec_from_file_location(
     "smoke_feed", Path(__file__).resolve().parents[1] / "prepare-sparkle-smoke-feed.py"

@@ -3,11 +3,11 @@
 
 import argparse
 import json
-from pathlib import Path
 import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 
 # Cold hosted runners can take over 60s to start CoreSimulatorService, so the
 # first inventory read timed out with no tests run (runs 42501577925,

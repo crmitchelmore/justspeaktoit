@@ -71,6 +71,7 @@ timeout 180 flatpak run "$app" --self-test
 echo '== sandbox PID namespace hides host processes (app profiles are default-only in the Flatpak)'
 # A host X11 window's _NET_WM_PID cannot be resolved through /proc inside the
 # sandbox, so the app must not attempt automatic profile matching here.
+# shellcheck disable=SC2016 # The script is expanded by the sandboxed shell, not this one.
 flatpak run --command=sh "$app" -ec '
   test -f /.flatpak-info
   test ! -e "/proc/$1/exe"
@@ -80,6 +81,7 @@ echo '== installed automation CLI'
 flatpak run --command=speak "$app" --help
 
 echo '== pinned runtime and license in the installed package'
+# shellcheck disable=SC2016 # The script is expanded by the sandboxed shell, not this one.
 flatpak run --command=sh "$app" -ec '
   test "$JSTI_WHISPER_RUNTIME_DIRECTORY" = /app/lib/justspeaktoit
   for name in libggml-base.so.0 libggml.so.0 libwhisper.so.1; do
@@ -99,6 +101,7 @@ python3 "$(dirname "$0")/../../packaging/linux/verify-flatpak-manifest.py" \
 echo '== real on-device transcription, live folding, silence and cancellation'
 # Transfer this public-domain fixture over stdin; no access to host files is
 # added to the app. The app downloads and verifies its canonical tiny model.
+# shellcheck disable=SC2016 # The script is expanded by the sandboxed shell, not this one.
 timeout 480 flatpak run --env=JSTI_WHISPER_CPU_ONLY=1 --command=sh "$app" -ec '
   sample=$(mktemp /tmp/jsti-jfk.XXXXXX.wav)
   trap '\''rm -f "$sample"'\'' EXIT

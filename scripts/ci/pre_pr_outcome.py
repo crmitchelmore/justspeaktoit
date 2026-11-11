@@ -20,8 +20,8 @@ deliberately not run, else pass. Only pass exits 0; warn and skip never fail a r
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 PASS, FAIL, WARN, SKIP, PENDING = 'pass', 'fail', 'warn', 'skip', 'pending'
 INCOMPLETE = 'incomplete'

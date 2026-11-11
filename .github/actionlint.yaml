@@ -14,3 +14,10 @@ self-hosted-runner:
     # The macOS runner with a provisioned iPhone attached, used by the opt-in
     # `ios-device-matrix.yml` workflow.
     - ios-device
+
+# GitHub Actions' `concurrency.queue` key postdates actionlint 1.7.12's schema;
+# the workflows rely on it, so only that one message is ignored.
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'

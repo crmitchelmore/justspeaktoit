@@ -12,12 +12,14 @@ import re
 import tempfile
 
 from native_execution_process import (
-    DiagnosticBudget, StandaloneWindows, bounded_diagnostic_process, diagnostic_identity,
-    diagnostic_preparation_phase
+    DiagnosticBudget,
+    StandaloneWindows,
+    bounded_diagnostic_process,
+    diagnostic_identity,
+    diagnostic_preparation_phase,
 )
 from native_execution_run import APPLICATION_ERROR_QUERY, CRASH_CODES, project_application_error
 from native_execution_runtime import diagnostic_runtime_request, prepare_diagnostic_runtime
-
 
 # --- Private failure-only standalone diagnostic -------------------------------------
 # This is not an authenticated service or a qualification retry. The trusted PS

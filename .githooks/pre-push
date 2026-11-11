@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 # Legacy hooksPath entry point. Prefer scripts/install-pre-pr-hook (make install-hooks).
 set -euo pipefail
-exec "$(git rev-parse --show-toplevel)/scripts/pre-pr"
+exec "$(git rev-parse --show-toplevel)/scripts/pre-pr" --fail-on-fix

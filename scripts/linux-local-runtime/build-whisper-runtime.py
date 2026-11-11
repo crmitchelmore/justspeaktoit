@@ -223,4 +223,4 @@ if __name__ == "__main__":
     try:
         main()
     except (RuntimeError_, WINDOWS.RuntimeError_, subprocess.CalledProcessError) as error:
-        raise SystemExit("whisper runtime: " + str(error))
+        raise SystemExit("whisper runtime: " + str(error)) from error

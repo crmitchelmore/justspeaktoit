@@ -10,12 +10,14 @@ import os
 import re
 import tempfile
 
+from native_execution_debugger import closed_module, unique_json
 from native_execution_process import (
-    DiagnosticBudget, StandaloneWindows, bounded_diagnostic_process, diagnostic_identity
+    DiagnosticBudget,
+    StandaloneWindows,
+    bounded_diagnostic_process,
+    diagnostic_identity,
 )
 from native_execution_run import APPLICATION_ERROR_QUERY, CRASH_CODES, project_application_error
-from native_execution_debugger import closed_module, unique_json
-
 
 PACKAGED_EVENT_KEYS = {"schema", "architecture", "label", "exitCode", "originalPid", "startedUTC", "endedUTC",
                        "executable", "expectedSHA256", "powershell", "powershellSHA256", "parentPid",

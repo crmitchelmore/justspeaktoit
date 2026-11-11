@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""Autofix, then check, code quality for the files a change touches (or the whole repository).
+
+Usage:
+    scripts/quality fix                 # autofix files changed against origin/main
+    scripts/quality check               # check them; exit 1 on any violation
+    scripts/quality check --all         # every tracked file (CI's Lint job runs this)
+    scripts/quality fix FILE...         # only these files
+    scripts/quality check --base REF    # compare against another base
+
+Tools, each over the files it owns:
+
+    Swift       SwiftFormat (fix and lint), SwiftLint --fix (fix only; `make lint` checks
+                the whole repository strictly)
+    Python      Ruff (ruff.toml): `ruff check --fix`, then `ruff check`
+    Shell       ShellCheck, every severity (check only)
+    Workflows   actionlint, which also runs ShellCheck over `run:` blocks (check only)
+    TypeScript  ESLint --fix in workers/paid-access when its node_modules are installed
+
+The bar is zero violations; there is no baseline. A narrowly justified inline
+suppression (`# noqa: RULE`, `# shellcheck disable=SCxxxx # reason`,
+`// swiftlint:disable:next rule`) is acceptable only where the rule is wrong for
+that line.
+
+Tool resolution fails closed. Locally the tools on PATH are used (brew install
+shellcheck actionlint); Ruff is installed on first use into .build/quality-tools
+from Tooling/quality-requirements.txt with pip's configured index. With CI=true,
+pinned ShellCheck and actionlint releases are downloaded and verified by SHA-256
+so CI and every runner use the same versions.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+TOOLS = ROOT / '.build' / 'quality-tools'
+REQUIREMENTS = ROOT / 'Tooling' / 'quality-requirements.txt'
+WORKER = ROOT / 'workers' / 'paid-access'
+
+# Pinned for CI. Bump the version and every digest together.
+SHELLCHECK_VERSION = 'v0.11.0'
+SHELLCHECK_SHA256 = {
+    'x86_64': 'b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6',
+    'aarch64': '68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc',
+}
+ACTIONLINT_VERSION = '1.7.12'
+ACTIONLINT_SHA256 = {
+    'amd64': '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8',
+    'arm64': '325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6',
+}
+
+# Vendored or generated trees that are not ours to lint.
+EXCLUDED = ('.build/', 'Tooling/.build/', 'node_modules/', 'android/', 'landing-page/node_modules/')
+
+
+def git(*args: str) -> str:
+    result = subprocess.run(['git', *args], cwd=ROOT, text=True, capture_output=True)
+    if result.returncode != 0:
+        raise SystemExit(f'quality: git {" ".join(args)} failed: {result.stderr.strip()}')
+    return result.stdout
+
+
+def all_files() -> list[str]:
+    return sorted(set(filter(None, git('ls-files', '--cached', '--others', '--exclude-standard').splitlines())))
+
+
+def changed_files(base: str) -> list[str]:
+    merge_base = git('merge-base', 'HEAD', base).strip()
+    files = set(filter(None, git('diff', '--name-only', merge_base).splitlines()))
+    files |= set(filter(None, git('ls-files', '--others', '--exclude-standard').splitlines()))
+    return sorted(files)
+
+
+def shebang(path: Path) -> str:
+    try:
+        with path.open('rb') as handle:
+            first = handle.readline(120)
+    except OSError:
+        return ''
+    return first.decode('utf-8', 'replace').strip() if first.startswith(b'#!') else ''
+
+
+def classify(files: list[str]) -> dict[str, list[str]]:
+    """The existing files each tool owns."""
+    groups: dict[str, list[str]] = {'swift': [], 'python': [], 'shell': [], 'workflows': [], 'worker': []}
+    for name in files:
+        path = ROOT / name
+        if not path.is_file() or name.startswith(EXCLUDED) or '/node_modules/' in name:
+            continue
+        line = shebang(path) if '.' not in path.name else ''
+        if name.endswith('.swift'):
+            groups['swift'].append(name)
+        elif name.endswith('.py') or 'python' in line:
+            groups['python'].append(name)
+        elif name.endswith(('.sh', '.bash')) or (line and (line.endswith(('/sh', '/bash', ' bash', ' sh')))):
+            groups['shell'].append(name)
+        elif name.startswith('.github/workflows/') and name.endswith(('.yml', '.yaml')):
+            groups['workflows'].append(name)
+        elif name.startswith('workers/paid-access/') and name.endswith(('.ts', '.mts', '.js', '.mjs')) \
+                and name.split('/')[2] in ('src', 'test'):
+            groups['worker'].append(name)
+    return groups
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as handle:
+        for block in iter(lambda: handle.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def download(url: str, expected: str, member: str, name: str) -> str:
+    """A pinned release binary, downloaded once into .build/quality-tools and verified by SHA-256."""
+    target = TOOLS / 'bin' / name
+    stamp = target.with_suffix('.sha256')
+    if target.is_file() and stamp.is_file() and stamp.read_text().strip() == expected:
+        return str(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as scratch:
+        archive = Path(scratch) / 'archive.tar.gz'
+        with urllib.request.urlopen(url, timeout=120) as response, archive.open('wb') as out:
+            shutil.copyfileobj(response, out)
+        actual = sha256(archive)
+        if actual != expected:
+            raise SystemExit(f'quality: {url} has SHA-256 {actual}, expected {expected}')
+        with tarfile.open(archive) as tar:
+            source = tar.extractfile(member)
+            if source is None:
+                raise SystemExit(f'quality: {member} missing from {url}')
+            target.write_bytes(source.read())
+    target.chmod(0o755)
+    stamp.write_text(expected + '\n')
+    return str(target)
+
+
+def pinned(tool: str) -> str | None:
+    if sys.platform != 'linux':
+        return None
+    machine = platform.machine().lower()
+    if tool == 'shellcheck':
+        arch = {'x86_64': 'x86_64', 'amd64': 'x86_64', 'aarch64': 'aarch64', 'arm64': 'aarch64'}.get(machine)
+        if arch is None:
+            return None
+        base = f'https://github.com/koalaman/shellcheck/releases/download/{SHELLCHECK_VERSION}'
+        return download(f'{base}/shellcheck-{SHELLCHECK_VERSION}.linux.{arch}.tar.gz', SHELLCHECK_SHA256[arch],
+                        f'shellcheck-{SHELLCHECK_VERSION}/shellcheck', 'shellcheck')
+    arch = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(machine)
+    if arch is None:
+        return None
+    base = f'https://github.com/rhysd/actionlint/releases/download/v{ACTIONLINT_VERSION}'
+    return download(f'{base}/actionlint_{ACTIONLINT_VERSION}_linux_{arch}.tar.gz', ACTIONLINT_SHA256[arch],
+                    'actionlint', 'actionlint')
+
+
+def binary(tool: str) -> str:
+    """A ShellCheck or actionlint executable: pinned on CI, else PATH; fails closed."""
+    if os.environ.get('CI') == 'true':
+        found = pinned(tool)
+        if found:
+            return found
+    found = shutil.which(tool)
+    if found:
+        return found
+    raise SystemExit(f'quality: {tool} is not installed. Install it (macOS: brew install {tool}) and re-run.')
+
+
+def ruff() -> str:
+    """Ruff at the version Tooling/quality-requirements.txt pins, in a private virtualenv."""
+    venv = TOOLS / 'venv'
+    executable = venv / ('Scripts' if os.name == 'nt' else 'bin') / 'ruff'
+    stamp = venv / 'requirements.sha256'
+    wanted = sha256(REQUIREMENTS)
+    if executable.exists() and stamp.is_file() and stamp.read_text().strip() == wanted:
+        return str(executable)
+    print('quality: installing Ruff into .build/quality-tools (pip uses its configured index)', flush=True)
+    subprocess.run([sys.executable, '-m', 'venv', '--clear', str(venv)], check=True)
+    python = venv / ('Scripts' if os.name == 'nt' else 'bin') / 'python'
+    subprocess.run([str(python), '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
+                    '-r', str(REQUIREMENTS)], check=True)
+    stamp.write_text(wanted + '\n')
+    return str(executable)
+
+
+def run(label: str, command: list[str], cwd: Path = ROOT) -> bool:
+    print(f'▶ {label}', flush=True)
+    result = subprocess.run(command, cwd=cwd)
+    if result.returncode != 0:
+        print(f'✗ {label} (exit {result.returncode})', flush=True)
+    return result.returncode == 0
+
+
+def chunks(files: list[str], size: int = 400) -> list[list[str]]:
+    return [files[i:i + size] for i in range(0, len(files), size)]
+
+
+def fix(groups: dict[str, list[str]], whole: bool) -> bool:
+    ok = True
+    if groups['swift']:
+        for part in chunks(['.'] if whole else groups['swift']):
+            ok &= run('SwiftFormat (fix)', ['scripts/swiftformat.sh', *part, '--quiet'])
+        # SwiftLint covers .swiftlint.yml's included paths; `make lint` checks them all strictly.
+        linted = [f for f in groups['swift'] if f.startswith(('Sources/', 'Tests/'))]
+        for part in [[]] if whole else chunks(linted) if linted else []:
+            ok &= run('SwiftLint --fix', ['scripts/swiftlint.sh', 'lint', '--fix', '--quiet', *part])
+    if groups['python']:
+        for part in chunks(groups['python']):
+            ok &= run('Ruff --fix', [ruff(), 'check', '--fix', '--quiet', *part])
+    if groups['worker']:
+        if (WORKER / 'node_modules' / '.bin' / 'eslint').exists():
+            names = [str(Path(f).relative_to('workers/paid-access')) for f in groups['worker']]
+            ok &= run('ESLint --fix (workers/paid-access)', ['node_modules/.bin/eslint', '--fix', *names], cwd=WORKER)
+        else:
+            print('quality: workers/paid-access has no node_modules; skipping ESLint --fix (npm ci to enable)')
+    return ok
+
+
+def check(groups: dict[str, list[str]], whole: bool) -> bool:
+    ok = True
+    if groups['swift']:
+        for part in chunks(['.'] if whole else groups['swift']):
+            ok &= run('SwiftFormat --lint', ['scripts/swiftformat.sh', *part, '--lint', '--quiet'])
+    if groups['python']:
+        for part in chunks(groups['python']):
+            ok &= run('Ruff', [ruff(), 'check', '--quiet', *part])
+    if groups['shell']:
+        for part in chunks(groups['shell']):
+            ok &= run('ShellCheck', [binary('shellcheck'), *part])
+    if groups['workflows']:
+        ok &= run('actionlint', [binary('actionlint'), '-shellcheck', binary('shellcheck'), *groups['workflows']])
+    return ok
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    parser.add_argument('mode', choices=('fix', 'check'))
+    parser.add_argument('files', nargs='*', help='only these files (default: files changed against --base)')
+    parser.add_argument('--all', action='store_true', help='every tracked and untracked (not ignored) file')
+    parser.add_argument('--base', default='origin/main')
+    args = parser.parse_args(argv)
+
+    whole = args.all
+    files = all_files() if whole else (args.files or changed_files(args.base))
+    groups = classify(files)
+    counts = ', '.join(f'{name} {len(hits)}' for name, hits in groups.items() if hits) or 'nothing to do'
+    print(f'quality {args.mode}: {counts}', flush=True)
+    ok = fix(groups, whole) if args.mode == 'fix' else check(groups, whole)
+    if not ok:
+        hint = ' Run `scripts/quality fix` first; fix what remains by hand.' if args.mode == 'check' else ''
+        print(f'quality {args.mode}: FAILED.{hint}', file=sys.stderr)
+    return 0 if ok else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

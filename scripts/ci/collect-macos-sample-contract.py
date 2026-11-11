@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """Copy installed sample manual candidates; never execute the tool or infer safety."""
 
-from contextlib import contextmanager
 import hashlib
 import json
 import os
-from pathlib import PurePosixPath
 import re
 import stat
 import sys
 import zlib
-
+from contextlib import contextmanager
+from pathlib import PurePosixPath
 
 MANUAL_ROOTS = (
     '/usr/share/man/man1',

@@ -24,7 +24,8 @@ import native_execution_debugger as DEBUGGER  # noqa: E402
 import native_execution_events as EVENTS  # noqa: E402
 import native_execution_run as RUN  # noqa: E402
 from native_execution_fakes import (  # noqa: E402
-    NATIVE, StandaloneRequests,
+    NATIVE,
+    StandaloneRequests,
 )
 
 

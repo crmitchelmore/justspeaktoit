@@ -115,7 +115,7 @@ wait "$grab"
 step "X11 shortcut lock states (extra Shift refused, CapsLock/NumLock preserved)"
 JSTI_TEST_READY_FILE="$work/lock-ready" timeout 150 "$binary" --integration-test x11-hotkey-locks & lock_grab=$!
 lock_grab_index=${#pids[@]}
-pids+=($lock_grab)
+pids+=("$lock_grab")
 for _ in $(seq 1 200); do [ -e "$work/lock-ready" ] && break; sleep 0.05; done
 [ -e "$work/lock-ready" ] || { echo "The X11 lock-state listener never became ready." >&2; exit 1; }
 lock_phase() {
@@ -141,11 +141,11 @@ lock_phase 4 Caps_Lock ctrl+alt+space
 lock_phase 5 Num_Lock ctrl+alt+space
 lock_status=0
 wait "$lock_grab" || lock_status=$?
-unset 'pids[lock_grab_index]'
+unset "pids[$lock_grab_index]"
 [ "$lock_status" -eq 0 ] || exit "$lock_status"
 
 zenity --entry --title "JSTI target" --text "Paste here" >"$work/zenity.out" 2>/dev/null & zenity=$!
-pids+=($zenity)
+pids+=("$zenity")
 target="$(timeout 30 xdotool search --sync --name 'JSTI target' | head -1)"
 [ -n "$target" ] || { echo "The Zenity target window never appeared." >&2; exit 1; }
 JSTI_TEST_TARGET_WINDOW="$target" "$binary" --integration-test x11 & app=$!
@@ -170,14 +170,14 @@ step "recorded native profile host (owned private bus, existing PipeWire monitor
 # Join the original finite tone before replaying speech into that same owned
 # monitor. Keep the original service/device/default settings unchanged.
 wait "$tone"
-unset 'pids[tone_index]'
+unset "pids[$tone_index]"
 JSTI_PROFILE_OWNED_DISPLAY="$DISPLAY" JSTI_PROFILE_OWNED_DISPLAY_PID="$xvfb" \
     JSTI_PROFILE_OWNED_PULSE_PID="$pulse" \
     "$python" -B "$repo/scripts/linux/linux-profile-session-checks.py" "$binary"
 
 step "login launch (--background starts minimised)"
 "$binary" --background >"$work/background.out" 2>&1 & background=$!
-pids+=($background)
+pids+=("$background")
 window="$(timeout 30 xdotool search --sync --name '^Just Speak to It$' | head -1)"
 [ -n "$window" ] || { cat "$work/background.out" >&2; echo "The login launch never created its window." >&2; exit 1; }
 sleep 1
@@ -192,7 +192,7 @@ echo "A login launch started with its window minimised."
 
 step "status notifier (fake StatusNotifierWatcher)"
 "$python" "$repo/scripts/linux/linux-fake-watcher.py" "$work/watcher.json" >"$work/watcher.out" 2>&1 & watcher=$!
-pids+=($watcher)
+pids+=("$watcher")
 for _ in $(seq 1 100); do grep -q "fake watcher ready" "$work/watcher.out" 2>/dev/null && break; sleep 0.1; done
 # The app runs until the watcher clicks Quit in its menu.
 if ! timeout 60 "$binary" >"$work/tray-app.out" 2>&1; then

@@ -8,6 +8,7 @@ Only the output directory is suitable for uploading as a build artifact.
 import argparse
 import concurrent.futures
 import hashlib
+import http.client
 import json
 import mmap
 import os
@@ -17,13 +18,12 @@ import shutil
 import struct
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
-import http.client
-import time
-import urllib.error
 
 # GitHub release assets and other pinned sources intermittently return 5xx or
 # time out; an outage on 9 Nov lasted well over the old single attempt. The

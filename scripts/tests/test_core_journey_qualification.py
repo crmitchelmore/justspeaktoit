@@ -2,9 +2,9 @@
 
 import importlib.util
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "core-journey/summarise-core-journey-qualification.py"
 SPEC = importlib.util.spec_from_file_location("journey_qualification", SCRIPT)

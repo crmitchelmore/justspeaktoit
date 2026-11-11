@@ -99,7 +99,7 @@ def check_appinstaller(data, name, publisher, version):
     try:
         root = ET.fromstring(data)
     except ET.ParseError as error:
-        raise PackageError("App Installer file is not well-formed XML: %s" % error)
+        raise PackageError("App Installer file is not well-formed XML: %s" % error) from error
     ns = {"a": APPINSTALLER_NAMESPACE}
     if root.tag != "{%s}AppInstaller" % APPINSTALLER_NAMESPACE or root.get("Version") != version or not root.get("Uri"):
         raise PackageError("App Installer root must state its own URI and the bundle version")
@@ -206,7 +206,7 @@ def verify_bundle(bundle_path, name, publisher, version, packages, signed, origi
                 inner[architecture] = {"fileName": file_name, "sha256": digest, "bytes": len(data),
                                        "bundledSha256": windows_msix.sha256(data), "repacked": repacked}
     except (zipfile.BadZipFile, ET.ParseError, KeyError) as error:
-        raise PackageError("bundle is unreadable: %s" % error)
+        raise PackageError("bundle is unreadable: %s" % error) from error
     data = bundle_path.read_bytes()
     return {"name": bundle_path.name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data),
             "signed": bool(signed), "identity": expected, "packages": inner,

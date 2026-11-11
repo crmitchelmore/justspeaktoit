@@ -14,7 +14,6 @@ import signing_configuration  # noqa: E402
 import windows_msix  # noqa: E402
 from package_test_fixtures import make_bundle, make_package  # noqa: E402
 
-
 SIGNING = {
     "AZURE_ARTIFACT_SIGNING_CLIENT_ID": "00000000-0000-4000-8000-000000000001",
     "AZURE_ARTIFACT_SIGNING_TENANT_ID": "00000000-0000-4000-8000-000000000002",

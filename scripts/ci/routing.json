@@ -89,11 +89,11 @@
       ]
     },
     "workflows": {
-      "description": "pre-pr only: actionlint over changed workflows (advisory).",
+      "description": "pre-pr only: reported as an area; scripts/quality check runs actionlint over changed workflows.",
       "paths": [".github/workflows/**", ".github/actions/**", ".github/actionlint.yaml"]
     },
     "shell": {
-      "description": "pre-pr only: ShellCheck over changed shell scripts (advisory).",
+      "description": "pre-pr only: reported as an area; scripts/quality check runs ShellCheck over changed shell scripts.",
       "paths": ["scripts/**/*.sh", ".githooks/**", "scripts/install-pre-pr-hook"]
     },
     "paid-access-worker": {

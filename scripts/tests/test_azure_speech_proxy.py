@@ -1,17 +1,16 @@
-import importlib.util
-import json
 import base64
+import importlib.util
 import io
+import json
 import socket
-from pathlib import Path
 import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import Mock, patch
 import urllib.error
 import urllib.request
-
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 SPEC = importlib.util.spec_from_file_location(
     "azure_speech_proxy", Path(__file__).resolve().parents[1] / "azure-speech-proxy.py",

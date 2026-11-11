@@ -3,15 +3,14 @@
 
 import json
 import os
-from pathlib import Path
-import subprocess
 import signal
-import threading
+import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
-
+from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "ci/check-api-compatibility.sh"
 EXISTING_PRODUCTS = ["SpeakCore", "SpeakSync", "SpeakiOSLib", "SpeakHotKeys", "SpeakAutomationKit"]

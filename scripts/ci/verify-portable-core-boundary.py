@@ -5,9 +5,9 @@ The portable target must discover sources by default. A new domain source then
 builds on every platform automatically; only deliberate adapter exclusions need
 manifest edits. Native CI proves whether the admitted sources really compile.
 """
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 manifest = (root / "Package.swift").read_text(encoding="utf-8")

@@ -24,10 +24,11 @@ import urllib.request
 HERE = pathlib.Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE.parent / "windows-bundle"))
-import windows_pe  # noqa: E402
 import http.client
 import time
 import urllib.error
+
+import windows_pe  # noqa: E402
 
 # GitHub release assets and other pinned sources intermittently return 5xx or
 # time out; an outage on 9 Nov lasted well over the old single attempt. The
@@ -321,4 +322,4 @@ if __name__ == "__main__":
     try:
         main()
     except (RuntimeError_, windows_pe.PEFormatError, subprocess.CalledProcessError) as error:
-        raise SystemExit("whisper runtime: " + str(error))
+        raise SystemExit("whisper runtime: " + str(error)) from error

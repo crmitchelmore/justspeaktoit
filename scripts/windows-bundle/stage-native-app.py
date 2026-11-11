@@ -24,9 +24,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+import production_symbols  # noqa: E402
 import windows_pe  # noqa: E402
 import windows_targets  # noqa: E402
-import production_symbols  # noqa: E402
 
 APPLICATION = "SpeakWindows.exe"
 EXECUTABLES = (APPLICATION, "speak.exe")
@@ -120,4 +120,4 @@ if __name__ == "__main__":
     try:
         main()
     except (StageError, windows_pe.PEFormatError, OSError, ValueError) as error:
-        raise SystemExit("stage native app: " + str(error))
+        raise SystemExit("stage native app: " + str(error)) from error

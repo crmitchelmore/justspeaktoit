@@ -9,7 +9,13 @@ HERE = pathlib.Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 from bundle_test_fixtures import (  # noqa: E402
-    BUILD, CLOSURE_GRAPH, LOCAL_ARM64_GRAPH, LOCAL_GRAPH, LOCAL_PINS, PE, write_local_runtime,
+    BUILD,
+    CLOSURE_GRAPH,
+    LOCAL_ARM64_GRAPH,
+    LOCAL_GRAPH,
+    LOCAL_PINS,
+    PE,
+    write_local_runtime,
 )
 
 

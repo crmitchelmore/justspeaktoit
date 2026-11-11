@@ -84,7 +84,7 @@ class PEReaderTests(unittest.TestCase):
         data = bytearray(build_pe(machine=PE.IMAGE_FILE_MACHINE_ARM64, hybrid_metadata=0x180001000))
         struct.pack_into("<I", data, 0x40 + 24 + 112 + PE.DIRECTORY_LOAD_CONFIG * 8 + 4, 2)
         with self.assertRaisesRegex(PE.PEFormatError, "load configuration"):
-            PE.PEImage(bytes(data)).architecture
+            _ = PE.PEImage(bytes(data)).architecture
 
     def test_version_resource_is_decoded(self):
         image = PE.PEImage(build_pe(version=((14, 51, 36247, 0), {"OriginalFilename": "vcruntime140.dll",

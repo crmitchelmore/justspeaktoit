@@ -2,16 +2,16 @@
 """Collect existing, workspace-bound macOS XCTest reports; never run a test."""
 
 import argparse
-from contextlib import contextmanager
 import errno
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import sys
 import time
+from contextlib import contextmanager
+from pathlib import Path
 
 MAX_REPORTS = 4
 MAX_REPORT_BYTES = 4 * 1024 * 1024

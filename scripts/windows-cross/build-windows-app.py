@@ -20,8 +20,9 @@ import tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE.parent / "windows-bundle"))
-import windows_pe  # noqa: E402
 import production_symbols  # noqa: E402
+import windows_pe  # noqa: E402
+
 SPEC = importlib.util.spec_from_file_location("cross_bootstrap", HERE / "build-foundation-proof.py")
 BOOTSTRAP = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BOOTSTRAP)

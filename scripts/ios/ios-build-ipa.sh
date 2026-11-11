@@ -56,4 +56,4 @@ rm -rf "$EXPORT_PATH"
 echo "==> Done"
 echo "Archive: $ARCHIVE_PATH"
 echo "Export:  $EXPORT_PATH"
-ls -1 "$EXPORT_PATH" | sed 's/^/  - /'
+find "$EXPORT_PATH" -mindepth 1 -maxdepth 1 -exec basename {} \; | sort | sed 's/^/  - /'

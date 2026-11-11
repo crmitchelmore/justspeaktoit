@@ -4,12 +4,11 @@ import gzip
 import hashlib
 import importlib.util
 import io
-from pathlib import Path
 import stat
-from types import SimpleNamespace
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
-
 
 SPEC = importlib.util.spec_from_file_location(
     'sample_contract', Path(__file__).resolve().parents[1] / 'ci/collect-macos-sample-contract.py')

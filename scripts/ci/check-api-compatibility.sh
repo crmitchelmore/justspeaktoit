@@ -171,6 +171,7 @@ if [[ -n "$allowed" ]]; then
     ignored=$(grep -xF -f <(printf '%s\n' "$allowed") <<< "$findings" || true)
     if [[ -n "$ignored" ]]; then
         echo "==> Ignoring reviewed additive changes from ${ALLOWLIST}:"
+        # shellcheck disable=SC2001 # Indents every line of multi-line text.
         sed 's/^/    /' <<< "$ignored"
     fi
 fi
@@ -181,6 +182,7 @@ if [[ -z "${remaining//[[:space:]]/}" ]]; then
 fi
 
 echo "==> Unreviewed breaking changes:" >&2
+# shellcheck disable=SC2001 # Indents every line of multi-line text.
 sed 's/^/    /' <<< "$remaining" >&2
 
 breaking_title_pattern='^[a-z]+(\([^)]+\))?!:'

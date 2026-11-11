@@ -10,12 +10,12 @@ import base64
 import hashlib
 import importlib.util
 import json
-from pathlib import Path
 import re
 import struct
 import threading
 import time
 import urllib.parse
+from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location("websocket_probe", Path(__file__).resolve().parents[1] / "loopback" / "websocket-loopback-probe.py")
 WS = importlib.util.module_from_spec(_SPEC)

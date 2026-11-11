@@ -119,13 +119,19 @@ guards that enforce them.
 - Select device/simulator and build (Cmd+B)
 - Or use xcodebuild MCP for automation (see below)
 
-### Linting
+### Linting and autofix
 ```bash
+make fix                                           # autofix files changed vs origin/main (pre-pr runs this first)
+make format                                        # autofix the whole repository
+make quality                                       # zero-violation SwiftFormat, Ruff, ShellCheck, actionlint
 make lint                                          # strict SwiftLint: zero violations, no baseline
 ./scripts/swiftlint.sh lint --strict Sources/SpeakApp  # lint a subset
 ./scripts/swiftformat.sh Sources/SpeakApp          # format a subset (isolated Tooling graph)
 ```
 - SwiftLint and SwiftFormat resolve through the isolated `Tooling/` graph (pinned in `Tooling/Package.resolved`) so app/test dependency changes cannot downgrade the linter; upgrade it intentionally with `make update-tooling`.
+- `scripts/quality` owns the non-SwiftLint linters: SwiftFormat and SwiftLint `--fix` (Swift), Ruff (`ruff.toml`; every `*.py` and Python-shebang script), ShellCheck at every severity (every `*.sh` and shell-shebang script), actionlint (workflows, with `.github/actionlint.yaml`) and ESLint `--fix` for `workers/paid-access` when its `node_modules` exist. `fix` autofixes; `check` fails on anything left. CI's Lint job runs `make quality` (`check --all`), so the bar is zero everywhere.
+- Install the local tools once: `brew install shellcheck actionlint`. Ruff installs itself into `.build/quality-tools` from `Tooling/quality-requirements.txt` with pip's configured index (on Microsoft devices that is the CFS proxy). With `CI=true`, pinned ShellCheck and actionlint releases are downloaded and SHA-256 verified.
+- Suppress only where a rule is wrong for that line, with a reason: `# noqa: RULE`, `# shellcheck disable=SCxxxx # reason`.
 - SwiftLint has no baseline: every violation fails. Fix it; where a rule is genuinely wrong for one line (for example a public API name), use a scoped `// swiftlint:disable:this <rule>` or `:next` with a reason. File-wide `swiftlint:disable` is legacy debt that `scripts/ci/lint-suppression-ratchet.py` stops from growing.
 
 ## MCP Tools
@@ -220,6 +226,14 @@ files, with `origin/main` and runs what the CI Gate's pull-request jobs would
 run for those files, with the same commands, so a pass predicts a green gate.
 Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
 `--full` to run every macOS unit-test target.
+
+- **Autofix first:** pre-pr starts with `scripts/quality fix` over the changed
+  files and lists every file it edited; commit those edits (the record's tree
+  includes them). `--no-fix` skips it. The pre-push hook passes
+  `--fail-on-fix`, so a push whose commit still needed fixes is blocked.
+- **Code quality:** `scripts/quality check` over the changed Swift, Python,
+  shell and workflow files (SwiftFormat, Ruff, ShellCheck, actionlint). It is
+  required, not advisory, and fails closed when a tool is missing.
 
 - **Lint:** `make ci-lint`, the target ci.yml's Lint job runs. That is
   whole-repo strict SwiftLint with zero violations and no baseline,

@@ -6,7 +6,6 @@ import hashlib
 import itertools
 import json
 import os
-from pathlib import Path
 import platform
 import runpy
 import shlex
@@ -14,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 GATE = runpy.run_path(str(Path(__file__).with_name("run-core-journey-e2e.py")))
 UI = runpy.run_path(str(Path(__file__).with_name("verify-core-journey-ui.py")))

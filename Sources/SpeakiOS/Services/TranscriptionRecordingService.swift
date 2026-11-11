@@ -58,8 +58,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// stays `nil` when the polish failed or was never started, which is what
     /// keeps the wait honest: the caller falls back to the raw transcript
     /// rather than being told nothing came back.
-    @Published public internal(set) var isPostProcessing = false
-    @Published public internal(set) var lastPolishedTranscript: String?
+    @Published public private(set) var isPostProcessing = false
+    @Published public private(set) var lastPolishedTranscript: String?
     /// Which capture's polish `isPostProcessing` and `lastPolishedTranscript`
     /// describe.
     ///
@@ -68,7 +68,19 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// its own result and clear the flag, and B's waiter would return A's
     /// text. Completion state belongs to a particular stop, so it is tagged
     /// with one.
-    @Published public internal(set) var polishingRunID: UUID?
+    @Published public private(set) var polishingRunID: UUID?
+    /// The owned completion and polish state the three properties above
+    /// project; see `CapturePolishLedger`.
+    var polishLedger = CapturePolishLedger() {
+        didSet {
+            guard polishLedger != oldValue else { return }
+            if lastPolishedTranscript != polishLedger.polishedTranscript {
+                lastPolishedTranscript = polishLedger.polishedTranscript
+            }
+            if isPostProcessing != polishLedger.isPostProcessing { isPostProcessing = polishLedger.isPostProcessing }
+            if polishingRunID != polishLedger.polishingRunID { polishingRunID = polishLedger.polishingRunID }
+        }
+    }
 
     /// What one capture finished with, tagged with the session that produced it.
     ///
@@ -196,7 +208,6 @@ public final class TranscriptionRecordingService: ObservableObject {
     let polishClipboard: PolishClipboard
     let hasPolishingKey: @MainActor () -> Bool
     let polish: @MainActor (String, String, String) async throws -> String
-    var latestCompletionID: UUID?
     typealias ActivityCompletion =
         @MainActor (Int, Int, String, TranscriptionCompletionOutcome, String, String?, String) -> Void
     typealias OwnedActivityCompletion =
@@ -297,7 +308,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // A completed recording's polish has its own lifetime. Cancelling a
         // subsequent capture must not cancel that work or invalidate its result.
         if lifecycle.state == .stopping {
-            latestCompletionID = nil
+            polishLedger.retireCompletion()
             // The current finalisation keeps ownership until its drain ends.
             // A replacement must not start while it can still publish output.
             return

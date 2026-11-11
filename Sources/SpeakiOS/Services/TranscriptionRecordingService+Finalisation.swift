@@ -88,8 +88,7 @@ extension TranscriptionRecordingService {
         // claimed, before the drain; the transcript is committed below.
         sharedState.clearRecordingState()
         let duration = elapsedSeconds
-        let completionID = UUID()
-        latestCompletionID = completionID
+        let completionID = polishLedger.beginCompletion()
 
         // Keep the (often headless / backgrounded) process alive long enough for
         // the clipboard write — and any post-processing — to actually commit.
@@ -108,7 +107,7 @@ extension TranscriptionRecordingService {
         let endingSession = transcriptionSession
         let drained = await drainActiveTranscriber(duration: duration)
         startTime = nil
-        guard latestCompletionID == completionID else {
+        guard polishLedger.isCurrent(completionID) else {
             // Explicit Cancel during the drain must not publish History or
             // output. The run still settles for anything waiting on it, and
             // its recording is not discarded: nothing delivered it.
@@ -171,7 +170,7 @@ extension TranscriptionRecordingService {
         // Cancellation can retire this completion while its admitted History write
         // finishes. Keep that durable receipt, but never deliver a retired run or
         // clear a replacement run's state. cancelRecording already owns teardown.
-        guard latestCompletionID == completionID else {
+        guard polishLedger.isCurrent(completionID) else {
             assertion.end()
             return result.replacingText("")
         }
@@ -328,22 +327,18 @@ extension TranscriptionRecordingService {
         // write is final. Release the assertion when post-processing finishes.
         // A new stop supersedes whatever the previous one polished, so an
         // intent that waits can never be handed the run before last's text.
-        lastPolishedTranscript = nil
-        if shouldPostProcess(
+        let polishes = shouldPostProcess(
             destination: resolvedDestination,
             isLegacyCaller: legacyCaller && (selected.origin == .global || selected.origin == .legacy)
-        ) && !text.isEmpty {
-            if let historyItem {
-                historyManager.beginPostProcessing(for: historyItem.id)
-            }
-            // Published so a returning intent can wait for the polished text
-            // instead of being handed the raw transcript (issue #1015).
-            isPostProcessing = true
-            // Which capture this polish belongs to, so a waiter can only be
-            // satisfied by its own (#1015 review). `completionID` already
-            // identifies the stop for `AutomaticPolishOperation`; this is the
-            // same identity expressed in the run ids intents hold.
-            polishingRunID = completedRunID
+        ) && !text.isEmpty
+        if polishes, let historyItem {
+            historyManager.beginPostProcessing(for: historyItem.id)
+        }
+        // Published so a returning intent can wait for the polished text
+        // instead of being handed the raw transcript (issue #1015), tagged with
+        // the run ids intents hold so a waiter is only satisfied by its own.
+        polishLedger.settlePolish(startingFor: completedRunID, polishes: polishes)
+        if polishes {
             startPostProcessing(
                 text: text,
                 historyItemID: historyItem?.id,
@@ -353,8 +348,6 @@ extension TranscriptionRecordingService {
                 assertion: assertion
             )
         } else {
-            isPostProcessing = false
-            polishingRunID = nil
             assertion.end()
         }
 

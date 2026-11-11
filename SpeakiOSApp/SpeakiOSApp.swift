@@ -191,6 +191,7 @@ struct SpeakiOSApp: App {
                 // A link that cold-launched the app is queued before the
                 // scene is active; drain it once the view is up.
                 runPendingCaptureAction()
+                IOSSystemResourceMonitor.shared.start()
                 guard FeatureFlags.iOSKeyboardEnabled else {
                     KeyboardInstantDictationStore.shared.setEnabled(false)
                     return

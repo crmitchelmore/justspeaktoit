@@ -215,6 +215,7 @@ final class AppEnvironment: ObservableObject {
   /// the menu bar access point exists even when no window is on screen (for
   /// example after launching straight into menu-bar-only mode).
   func installStatusBarIfNeeded() {
+    SystemResourceMonitor.shared.start(environment: self)
     if statusBarVisibilityObserver == nil {
       statusBarVisibilityObserver = settings.$appVisibility
         .removeDuplicates()
@@ -244,7 +245,8 @@ final class AppEnvironment: ObservableObject {
       mainManager: main,
       hotKeyManager: hotKeys,
       openMainWindow: { [weak self] in self?.presentMainWindow() },
-      openSettings: { [weak self] in self?.presentSettings() }
+      openSettings: { [weak self] in self?.presentSettings() },
+      openStatus: { [weak self] in self?.presentSystemResourcesStatus() }
     )
   }
 
@@ -253,6 +255,12 @@ final class AppEnvironment: ObservableObject {
   /// SwiftUI has yet to create still receives the selection when it subscribes.
   func presentSettings() {
     sidebarNavigationTarget = .settings(.general)
+    presentMainWindow()
+  }
+
+  /// Opens the "System resources in use" card, which lives on the Permissions page.
+  func presentSystemResourcesStatus() {
+    sidebarNavigationTarget = .settings(.permissions)
     presentMainWindow()
   }
 

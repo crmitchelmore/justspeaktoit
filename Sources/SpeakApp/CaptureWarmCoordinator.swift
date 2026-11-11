@@ -103,7 +103,21 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   private var audioWarmGeneration = 0
   private var knownRecordingsDirectory: URL?
   private var endpointProbeTask: Task<Void, Never>?
-  private var warmedSpeechAnalyzerKey: String?
+  private var warmedSpeechAnalyzerKey: String? {
+    didSet {
+      guard warmedSpeechAnalyzerKey != oldValue else { return }
+      // The model stays loaded for the app's lifetime; Status says so (issue #1471).
+      speechAnalyzerModelHold?.end()
+      speechAnalyzerModelHold = warmedSpeechAnalyzerKey.map { key in
+        SystemResourceRegistry.shared.acquire(
+          kind: .localModel, title: "Apple SpeechAnalyzer model",
+          reason: "Loaded ahead of time so on-device dictation starts quickly. It never opens the microphone.",
+          owner: "CaptureWarmCoordinator", detail: key.replacingOccurrences(of: "|", with: " · ")
+        )
+      }
+    }
+  }
+  private var speechAnalyzerModelHold: SystemResourceToken?
   private var warmingSpeechAnalyzerKey: String?
   private var speechAnalyzerWarmTask: Task<Void, Never>?
 

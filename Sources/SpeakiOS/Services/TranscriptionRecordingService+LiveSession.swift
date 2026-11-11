@@ -15,9 +15,7 @@ extension TranscriptionRecordingService {
         // per partial; throttle them to ~1/s, mirroring the Live Activity
         // manager's own update throttle. The full transcript is committed
         // once more at stop.
-        let now = Date()
-        if now.timeIntervalSince(lastSharedStateWriteAt) >= Self.sharedStateWriteInterval {
-            lastSharedStateWriteAt = now
+        if sharedStateWrites.admit(at: Date()) {
             wordCount = text.split(separator: " ").count
             if sharesLiveTranscript {
                 sharedState.updateTranscript(text)

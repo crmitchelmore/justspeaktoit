@@ -31,28 +31,19 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// app can surface it on next foreground instead of silently losing audio.
     @Published public internal(set) var lastSessionError: Error? {
         didSet {
-            // Every publication gets a fresh identity, including one that
-            // repeats an earlier failure word for word — a presenter that
-            // de-duplicated on the message would swallow the later one, with no
-            // intervening `nil` to tell the two apart (#1084).
-            let token = lastSessionError == nil ? nil : UUID()
-            requestDiagnostics.publish(pendingIssueFailure, token: token)
-            pendingIssueFailure = nil
-            sessionErrorToken = token
+            // A fresh identity per publication, even for a repeated failure (#1084).
+            sessionErrorToken = health.publishSessionError(lastSessionError)
             // One funnel for every capture failure, so the health screen can
             // report how the last real run ended rather than only what is
             // true this second (issue #997). The journal keeps a closed-set
             // label, local diagnostic code and a date — never the error's text.
             guard let lastSessionError else { return }
-            CaptureOutcomeJournal.record(
-                CaptureOutcomeJournal.outcome(for: lastSessionError), failure: lastSessionError,
-                defaults: outcomeJournalDefaults()
-            )
+            health.journal(failure: lastSessionError)
         }
     }
     /// Identifies the *publication* of `lastSessionError`, not its text, so a
     /// failure that reads identically to the last one is still a new event.
-    @Published public private(set) var sessionErrorToken: UUID?
+    @Published public internal(set) var sessionErrorToken: UUID?
     /// Non-nil when the session silently fell back to on-device transcription
     /// because the selected cloud model had no API key available.
     @Published public internal(set) var providerFallbackNotice: String?
@@ -105,12 +96,12 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     /// Identifies the capture currently starting or running, from the moment
     /// `startRecording` commits to it until it finishes.
-    @Published public private(set) var currentSessionID: UUID?
+    @Published public internal(set) var currentSessionID: UUID?
 
     /// The most recent capture to finish, whoever stopped it. Published after
     /// the transcriber has drained and the transcript has been committed, so a
     /// waiter that sees its own session id here is reading a settled result.
-    @Published public private(set) var lastFinishedCapture: FinishedCapture?
+    @Published public internal(set) var lastFinishedCapture: FinishedCapture?
 
     private let audioSessionManager = AudioSessionManager()
     let dependencies: RecordingServiceDependencies
@@ -119,7 +110,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     let activityManager: RecordingServiceActivity
     let sharedState: SharedTranscriptionState
     let historyManager: iOSHistoryManager
-    private let foregroundOwnership: ForegroundRecordingOwnership
+    let foregroundOwnership: ForegroundRecordingOwnership
     private let ensureKeysLoaded: @MainActor () async -> Void
     let networkSnapshot: CaptureNetworkPathMonitor.SnapshotProvider
     let localRecognitionCapability: @MainActor (String) -> AppleLocalRecognitionCapability
@@ -157,31 +148,21 @@ public final class TranscriptionRecordingService: ObservableObject {
         else { return nil }
         return destination.displayName + (effectiveConfiguration.destinationOrigin == .focus ? " · Focus" : "")
     }
-    /// Identity of the capture in flight, so a caller that started one can
-    /// recognise its own result. `nil` once that capture has settled.
-    var currentRunID: UUID?
-    var requestDiagnostics = IOSRequestDiagnosticState()
-    private var pendingIssueFailure: IOSIssueReportSnapshot?
+    /// Run identity and the transcript each run committed; see `CaptureRunLedger`.
+    var runLedger = CaptureRunLedger()
+    /// Identity of the capture in flight. `nil` once that capture has settled.
+    var currentRunID: UUID? { runLedger.currentRunID }
+    /// Request diagnostics, staged issue snapshots and the outcome journal.
+    var health: CaptureHealthReporter
 
-    func issueSnapshot(for token: UUID?) -> IOSIssueReportSnapshot { requestDiagnostics.snapshot(for: token) }
+    func issueSnapshot(for token: UUID?) -> IOSIssueReportSnapshot { health.snapshot(for: token) }
 
     func publishRequestFailure(_ error: Error, failure: RequestDiagnosticContext.Failure) {
-        pendingIssueFailure = error is CancellationError ? nil
-            : requestDiagnostics.freezeFailure(failure, run: currentRunID)
+        health.stageFailure(error, failure: failure, run: currentRunID)
         lastSessionError = error
     }
-    /// The transcript the most recent capture committed, tagged with the
-    /// capture it belongs to.
-    ///
-    /// A waiter cannot read "the last completed transcript" and assume it is
-    /// its own: a stop leaves `recording` for `stopping` before it drains the
-    /// session, so a poll on liveness can return while finalisation is still
-    /// running, and an untagged slot would then hand back the *previous*
-    /// capture's text. Tagging also lets an empty result stay empty instead of
-    /// being satisfied by an older non-empty one.
-    private var lastRunCompletion: CaptureRunCompletion?
     /// Closed typed cause retained while this startup owns cancellation cleanup.
-    private var startupWatchdogFailure: (runID: UUID, error: iOSTranscriptionError)?
+    var startupWatchdogFailure: (runID: UUID, error: iOSTranscriptionError)?
     /// Run-identity state machine for cancellable startup (issue #701); the
     /// pure mechanics live in SpeakCore so they are testable on every
     /// platform. `state` mirrors it for observers.
@@ -212,9 +193,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// The cloud model this run would have used had the network been up,
     /// when offline routing substituted on-device recognition (issue #999).
     var offlineIntendedModel: String?
-    /// Last time the App Group shared state was written for a partial result.
-    var lastSharedStateWriteAt: Date = .distantPast
-    static let sharedStateWriteInterval: TimeInterval = 1.0
+    /// Rate limit for App Group writes of live partials.
+    var sharedStateWrites = SharedTranscriptWriteThrottle()
 
     let polishClipboard: PolishClipboard
     let hasPolishingKey: @MainActor () -> Bool
@@ -227,7 +207,6 @@ public final class TranscriptionRecordingService: ObservableObject {
     let completeActivity: ActivityCompletion
     let completeOwnedActivity: OwnedActivityCompletion?
     private let sessionFactory: (() throws -> IOSTranscriptionSession)?
-    let outcomeJournalDefaults: @MainActor () -> UserDefaults?
 
     private convenience init() {
         let settings = AppSettings.shared
@@ -274,7 +253,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         self.settings = dependencies.settings
         self.activityManager = dependencies.activity
         self.sessionFactory = sessionFactory
-        self.outcomeJournalDefaults = outcomeJournalDefaults
+        self.health = CaptureHealthReporter(journalDefaults: outcomeJournalDefaults)
         self.foregroundOwnership = foregroundOwnership ?? .shared
         self.ensureKeysLoaded = ensureKeysLoaded ?? { await dependencies.settings.ensureKeysLoaded() }
         self.networkSnapshot = networkSnapshot
@@ -315,14 +294,6 @@ public final class TranscriptionRecordingService: ObservableObject {
     }
 
     // MARK: - Public API
-
-    /// Surfaces a refused capture link on the same alert path a failed session
-    /// uses, so a link that does nothing says why. The caller is told through
-    /// its `x-error` callback; this is the half the user can see.
-    public func reportCaptureFailure(_ failure: Error) {
-        lastSessionError = failure
-        sessionErrorToken = UUID()
-    }
 
     /// Starts a headless recording session with Live Activity.
     ///
@@ -386,8 +357,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Claimed before the first suspension point too, so every unwind below
         // publishes an empty completion for *this* run rather than leaving a
         // waiter to read an older one.
-        currentRunID = runID
-        requestDiagnostics.begin(runID)
+        runLedger.begin(runID)
+        health.requests.begin(runID)
         recordingWarningRunID = UUID()
         state = lifecycle.state
         defer { state = lifecycle.state }
@@ -398,7 +369,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             request: configurationRequest, run: runID
         )
         effectiveConfiguration = configuration
-        requestDiagnostics.admit(
+        health.requests.admit(
             IOSRequestDiagnosticProjection.admission(configuration, keyboardProfile: keyboardProfile != nil), run: runID
         )
         effectiveDestination = CaptureDestinationSelection(
@@ -440,7 +411,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
         partialText = ""
         wordCount = 0
-        lastSharedStateWriteAt = .distantPast
+        sharedStateWrites.reset()
         currentSessionID = runID
         startTime = Date()
         self.sharedTranscriptRequested = sharesLiveTranscript
@@ -566,7 +537,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             guard lifecycle.installStartCancellation(for: runID, cancel: { session.cancel() }) else {
                 throw CancellationError()
             }
-            requestDiagnostics.observe(
+            health.requests.observe(
                 session.resolution, run: runID, defaultSession: makeSession == nil && sessionFactory == nil
             )
             try await session.start()
@@ -649,76 +620,6 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
     }
 
-    /// Settles the current session's outcome under its own identity and clears
-    /// the identity, so nothing waiting on it can be answered twice or answered
-    /// with a later recording's result.
-    func publishFinishedCapture(text: String, failure: Error?) {
-        guard let sessionID = currentSessionID else { return }
-        currentSessionID = nil
-        lastFinishedCapture = FinishedCapture(
-            sessionID: sessionID,
-            text: text,
-            failureMessage: failure?.localizedDescription
-        )
-    }
-
-    /// The transcript committed by a specific capture, tagged with its
-    /// identity.
-    public struct CaptureRunCompletion: Sendable, Equatable {
-        public let runID: UUID
-        public let text: String
-    }
-
-    /// Identity of the capture in flight, or `nil` when none is. A caller that
-    /// starts a capture and then waits for it reads this immediately after
-    /// `startRecording` returns and uses it to claim its own result.
-    public var activeCaptureID: UUID? { currentRunID }
-
-    /// Whether anything is still in flight — including a stop that is draining
-    /// the transcriber and committing its result.
-    ///
-    /// `isActive` deliberately excludes `stopping`, because a stop has nothing
-    /// left to act on. A *waiter* needs the wider question: a poll on
-    /// `isActive` returns while finalisation is still running.
-    public var isSettling: Bool { state != .idle }
-
-    /// The transcript `runID` committed, or `nil` when that capture has not
-    /// completed (or a different one did). An empty string is a real answer:
-    /// the capture finished and produced no text.
-    public func completedTranscript(forRun runID: UUID) -> String? {
-        guard let lastRunCompletion, lastRunCompletion.runID == runID else { return nil }
-        return lastRunCompletion.text
-    }
-
-    func retainStartupWatchdogFailure(_ error: iOSTranscriptionError, run: UUID) {
-        guard currentRunID == run, lifecycle.isCurrentStartRun(run) else { return }
-        startupWatchdogFailure = (run, error)
-    }
-
-    /// A final intent failure may only annotate its own failed, fully settled admission.
-    /// A late framework error after a successful start cannot rewrite even that same run's result.
-    func recordTerminalStartupFailure(
-        _ error: Error,
-        request: CaptureConfigurationRequest
-    ) {
-        guard !request.serviceStartReturnedNormally, let run = request.admittedRunID,
-              state == .idle, !foregroundOwnership.isOwned, lastRunCompletion?.runID == run else { return }
-        let cause = startupWatchdogFailure.flatMap { $0.runID == run ? $0.error : nil }
-        let failure: Error = (cause as Error?) ?? error
-        CaptureOutcomeJournal.record(
-            CaptureOutcomeJournal.outcome(for: failure), failure: failure, defaults: outcomeJournalDefaults()
-        )
-    }
-
-    /// A start intent refused its own Shortcut parameters before any admission,
-    /// so the foreground helper never ran and nothing else journals the refusal.
-    /// Recorded only while nothing is in flight or owned in the foreground, so a
-    /// refused retry cannot overwrite a running or in-app capture's outcome.
-    func recordRefusedStartParameters(_ failure: CaptureParameterFailure) {
-        guard state == .idle, !foregroundOwnership.isOwned else { return }
-        CaptureOutcomeJournal.record(.failed, failure: failure, defaults: outcomeJournalDefaults())
-    }
-
     /// Reverts everything a cancelled startup run had published: timing,
     /// shared App Group recording state and the Live Activity. The run calls
     /// this itself so ownership never crosses runs.
@@ -751,15 +652,6 @@ public final class TranscriptionRecordingService: ObservableObject {
         completeRun(with: "")
         lifecycle.finishStartUnwind()
         state = lifecycle.state
-    }
-
-    /// Publishes the result of the capture in flight, if there is one, and
-    /// retires its identity.
-    func completeRun(with text: String) {
-        guard let currentRunID else { return }
-        lastRunCompletion = CaptureRunCompletion(runID: currentRunID, text: text)
-        requestDiagnostics.retire(currentRunID)
-        self.currentRunID = nil
     }
 
     /// Cancels recording without saving. During startup this retires the

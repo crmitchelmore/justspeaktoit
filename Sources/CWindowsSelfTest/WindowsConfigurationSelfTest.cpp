@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstring>
 
+bool jsti_configuration_field_available(size_t index);
+
 using namespace jsti::configuration;
 using jsti::chrome::scale;
 

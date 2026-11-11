@@ -63,6 +63,7 @@ let appleCoreSources: [String] = [
     "Capture/CaptureOnboardingStore.swift",
     "Capture/CaptureSafetyClaim.swift",
     "Capture/CaptureSelfTest.swift",
+    "Capture/CaptureWatchdogHandle.swift",
     "Capture/CaptureWatchdogs.swift",
     "Capture/HandsFreeAudioPreRollBuffer.swift",
     "Capture/HandsFreeDictationApple.swift",

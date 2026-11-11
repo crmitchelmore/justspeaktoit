@@ -73,6 +73,11 @@ final class ProviderRefresh202611Tests: XCTestCase {
                        Decimal(string: "0.0077"))
         XCTAssertEqual(DeepgramTTSAPI.costPerThousandCharacters, Decimal(string: "0.030"))
         XCTAssertEqual(DeepgramTTSAPI.aura1CostPerThousandCharacters, Decimal(string: "0.015"))
+        XCTAssertEqual(DeepgramTTSAPI.costPerThousandCharacters(forVoiceID: "deepgram/aura-asteria-en"),
+                       Decimal(string: "0.015"))
+        XCTAssertEqual(DeepgramTTSAPI.costPerThousandCharacters(forVoiceID: "aura-2-asteria-en"),
+                       Decimal(string: "0.030"))
+        XCTAssertNil(DeepgramTTSAPI.costPerThousandCharacters(forVoiceID: "deepgram/flux-hannah"))
     }
 
     func testClaude55CleanupEntries_routeThroughOpenRouter() {

@@ -41,6 +41,19 @@ class LinuxAccessibilityCheckTests(unittest.TestCase):
                  'gtk_label_set_mnemonic_widget(GTK_LABEL(label), size);\n'
         self.assertEqual(self.check(source), [])
 
+    def test_neighbouring_drop_down_name_does_not_cover_another(self):
+        source = 'GtkWidget *first = gtk_drop_down_new(NULL, NULL);\n' \
+                 'GtkWidget *second = gtk_drop_down_new(NULL, NULL);\n' \
+                 'jsti_accessible_set_name(second, "Second");\n'
+        problems = self.check(source)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("Widget.c:1:", problems[0])
+
+    def test_drop_down_named_through_alias_passes(self):
+        source = 'widget = gtk_drop_down_new_from_strings(items); e->fields[i] = widget;\n' \
+                 'gtk_label_set_mnemonic_widget(GTK_LABEL(label), e->fields[i]);\n'
+        self.assertEqual(self.check(source), [])
+
     def test_repository_sources_pass(self):
         root = Path(__file__).resolve().parents[2] / "Sources/CLinuxSupport"
         self.assertEqual(checker.main([str(root)]), 0)

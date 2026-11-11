@@ -838,9 +838,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     /// Cloud cleanup choices supported on every platform. Platform-specific
     /// local cleanup engines remain in `postProcessing` for macOS.
-    public static let cloudPostProcessing: [Option] = postProcessing.filter {
+    /// Computed so a running process drops models on their shutdown day.
+    public static var cloudPostProcessing: [Option] { postProcessing.filter {
         !$0.id.hasPrefix("local/post-processing/") && $0.id != AppleLocalModels.foundationModelID
-    }
+    } }
 
     private static let applePostProcessingOptions: [Option] = {
         guard AppleLocalModels.supportsFoundationModels else { return [] }

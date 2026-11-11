@@ -211,16 +211,20 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var connectionWarmGeneration = UUID()
     var connectionWarmTracker = LiveStreamWarmTracker()
     var connectionWarmCapture: DesktopHostConnectionWarmCapture?
-    var connectionWarmTask: (id: UUID, task: Task<Void, Never>)?
+    var connectionWarmTask: (id: UUID, task: Task<Void, Never>)? { didSet { reconcileSystemResources() } }
     var connectionWarmPending = false
     var connectionWarmCredentialWork = 0
-    var capturePreparation: (deviceID: String, value: any DesktopCapturePreparation)?
-    var shortcutPressMicrophone: (id: UUID, capture: any DesktopRecordingCapture)?
-    package var recording: Recording?
+    var capturePreparation: (deviceID: String, value: any DesktopCapturePreparation)? {
+        didSet { reconcileSystemResources() }
+    }
+    var shortcutPressMicrophone: (id: UUID, capture: any DesktopRecordingCapture)? {
+        didSet { reconcileSystemResources() }
+    }
+    package var recording: Recording? { didSet { reconcileSystemResources() } }
     var recordingCapturePolicy: (recordID: UUID, value: DesktopHostCapturePolicy)?
-    var ownedCaptureStartup: DesktopHostOwnedStartupHandle?
+    var ownedCaptureStartup: DesktopHostOwnedStartupHandle? { didSet { reconcileSystemResources() } }
     let ownedDictationCapability: DesktopHostOwnedDictationCapability?
-    var ownedDictation: DesktopHostOwnedDictationHandle<Platform>?
+    var ownedDictation: DesktopHostOwnedDictationHandle<Platform>? { didSet { reconcileSystemResources() } }
     var ownedDictationAdmission: DesktopHostOwnedDictationAdmission<Platform>?
     package var recordingTail: (recordID: UUID, task: Task<Void, Never>)?
     var isReady = false
@@ -235,6 +239,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
                 revokeCorrectionLearningConsent()
                 capturedCleanup.removeAll()
                 retireCleanupPresentation()
+                endSavedAudioPlaybackIfStopped()
+                reconcileSystemResources()
             }
         }
     }
@@ -258,7 +264,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     package var transcript = ""
     package var hotKeySession = DesktopHostHotKeySessionState()
-    package var readAloudState = Platform.makeReadAloudState()
+    package var readAloudState = Platform.makeReadAloudState() { didSet { reconcileSystemResources() } }
     /// Actual History ownership of active voice work; nil for every non-History source.
     package var voiceOutputRecordID: UUID?
     package var voiceTextImportTask: Task<Void, Never>?
@@ -375,7 +381,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var comparisonTask: Task<Void, Never>?
     package var comparisonFinalization: Task<Void, Never>?
     var comparisonUpdates: Task<Void, Never>?
-    package var comparisonCapture: DesktopHostComparisonCapture?
+    package var comparisonCapture: DesktopHostComparisonCapture? { didSet { reconcileSystemResources() } }
     package var comparisonLive: DesktopComparisonLive?
     package var comparisonSelection: UUID?
     var comparisonReference: UUID?
@@ -387,7 +393,13 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var comparisonPending: ModelComparisonRound?
     package var comparisonNotice = "Select models and an input to begin."
     var handsFreeMachine = HandsFreeDictationMachine()
-    var handsFreeRun: DesktopHandsFreeRun<Platform>?
+    var handsFreeRun: DesktopHandsFreeRun<Platform>? { didSet { reconcileSystemResources() } }
+    /// Holds listed in "System resources in use", by claim key; see DesktopHostSystemResources.
+    var systemResourceHolds: [String: SystemResourceToken] = [:]
+    /// Replaced only by tests.
+    var systemResourceRegistry = SystemResourceRegistry.shared
+    /// The History recording whose saved audio the player holds, watched until it stops.
+    var savedAudioPlayback: (recordID: UUID, watch: Task<Void, Never>)? { didSet { reconcileSystemResources() } }
 
     package init(
         directory: URL, effects: any DesktopHostEffects<Platform>, shutdownGrace: Duration = DesktopHostShutdown.grace,

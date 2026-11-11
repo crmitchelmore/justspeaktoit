@@ -118,6 +118,8 @@ public final class LinuxAudioPlayback: @unchecked Sendable {
 
     public func isCurrent(revision: UInt64) -> Bool { lock.withLock { self.revision == revision && !closed } }
 
+    public var isPlayingSavedAudio: Bool { lock.withLock { current.map { !$0.isSpeech } ?? false } }
+
     /// Starts `path` for `recordID`, replacing whatever plays and ending Read aloud.
     public func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {
         let (samples, rate) = try Self.readPCM16WAV(URL(fileURLWithPath: path))

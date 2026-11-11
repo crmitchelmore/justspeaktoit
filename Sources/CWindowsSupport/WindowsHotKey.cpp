@@ -51,6 +51,10 @@ Configuration snapshot() {
     return configuration;
 }
 
+std::mutex observerMutex;
+JSTIHotKeyRegistrationCallback registrationObserver = nullptr;
+void *registrationContext = nullptr;
+
 bool modifierKey(UINT key) {
     switch (key) {
     case VK_SHIFT: case VK_CONTROL: case VK_MENU: case VK_LSHIFT: case VK_RSHIFT: case VK_LCONTROL:
@@ -95,6 +99,21 @@ void stopRelease(HWND window) {
     runtime.held = false;
 }
 
+// Tells the host what is registered now, for System resources in use. UI
+// thread; the observer is called without the lock held.
+void announceRegistration() {
+    JSTIHotKeyRegistrationCallback callback;
+    void *context;
+    {
+        std::lock_guard<std::mutex> lock(observerMutex);
+        callback = registrationObserver;
+        context = registrationContext;
+    }
+    if (!callback) return;
+    const std::string name = runtime.registered ? jsti::utf8(comboName(runtime.modifiers, runtime.key)) : "";
+    callback(runtime.registered ? name.c_str() : nullptr, context);
+}
+
 // Probes availability on a separate identifier first, so a refused
 // combination never releases the working one.
 bool registerCombination(HWND window, UINT modifiers, UINT key) {
@@ -105,9 +124,11 @@ bool registerCombination(HWND window, UINT modifiers, UINT key) {
         runtime.registered = true;
         runtime.modifiers = modifiers;
         runtime.key = key;
+        announceRegistration();
         return true;
     }
     runtime.registered = runtime.registerKey(window, hotkeyID, runtime.modifiers | MOD_NOREPEAT, runtime.key) != 0;
+    announceRegistration();
     return false;
 }
 
@@ -348,8 +369,10 @@ bool jsti_hotkey_start(HWND window, std::string &failure) {
     runtime.key = config.key;
     if (runtime.registerKey(window, hotkeyID, config.modifiers | MOD_NOREPEAT, config.key)) {
         runtime.registered = true;
+        announceRegistration();
         return true;
     }
+    announceRegistration();
     failure = jsti::utf8(comboName(config.modifiers, config.key)) +
         " is unavailable. Another app may own it; choose another in Shortcut or use Record in this window.";
     return false;
@@ -360,6 +383,13 @@ void jsti_hotkey_stop(HWND window) {
     if (runtime.registered) runtime.unregisterKey(window, hotkeyID);
     runtime.registered = false;
     runtime.window = nullptr;
+    announceRegistration();
+}
+
+void jsti_hotkey_set_registration_observer(JSTIHotKeyRegistrationCallback callback, void *context) {
+    std::lock_guard<std::mutex> lock(observerMutex);
+    registrationObserver = callback;
+    registrationContext = callback ? context : nullptr;
 }
 
 // WM_HOTKEY and WM_TIMER from the main window. Returns true when handled.
@@ -531,6 +561,19 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
     runtime.registerKey = fakeRegister;
     runtime.unregisterKey = fakeUnregister;
     runtime.keyState = fakeKeyState;
+    // System resources in use follows every registration change.
+    std::vector<std::string> announced;
+    JSTIHotKeyRegistrationCallback originalObserver;
+    void *originalObserverContext;
+    {
+        std::lock_guard<std::mutex> lock(observerMutex);
+        originalObserver = registrationObserver;
+        originalObserverContext = registrationContext;
+    }
+    jsti_hotkey_set_registration_observer([](const char *name, void *context) {
+        static_cast<std::vector<std::string> *>(context)->push_back(name ? name : "<none>");
+    }, &announced);
+    auto lastAnnounced = [&] { return announced.empty() ? std::string() : announced.back(); };
     auto check = [&]() -> bool {
         const char *names[] = {"Toggle", "Hold", "Tap"};
         const char *descriptions[] = {"Each press toggles.", "Hold to record.", "Double tap."};
@@ -548,8 +591,12 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
         std::string failure;
         jsti_hotkey_stop(owner);
         local.registered.clear();
+        const bool stopAnnounced = lastAnnounced() == "<none>";
         if (!jsti_hotkey_start(owner, failure) || !registeredAs(MOD_CONTROL | MOD_ALT, VK_SPACE)) {
             error = "The configured shortcut was not registered at start."; return false;
+        }
+        if (!stopAnnounced || lastAnnounced().rfind("Ctrl+Alt+", 0) != 0) {
+            error = "Starting or stopping the shortcut was not reported to System resources in use."; return false;
         }
         // Press-to-toggle keeps the native toggle event.
         SendMessageW(owner, WM_HOTKEY, hotkeyID, 0);
@@ -581,6 +628,9 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
         if (!applied || local.applies != 1 || local.lastModifiers != (MOD_CONTROL | MOD_ALT) || local.lastKey != 'J' ||
             local.lastStyle != 1 || !registeredAs(MOD_CONTROL | MOD_ALT, 'J') || !snapshot().gestures()) {
             error = "Applying an available shortcut did not register it and report one complete change."; return false;
+        }
+        if (lastAnnounced() != jsti::utf8(comboName(MOD_CONTROL | MOD_ALT, 'J'))) {
+            error = "A changed shortcut was not reported to System resources in use."; return false;
         }
         // Gesture styles report the press, then the release seen by polling.
         local.keyDown = true;
@@ -624,6 +674,8 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
     }
     runtime = originalRuntime;
     fixture = nullptr;
+    jsti_hotkey_set_registration_observer(originalObserver, originalObserverContext);
+    announceRegistration();
     jsti_window_update(nullptr, nullptr, -1);
     return passed;
 }

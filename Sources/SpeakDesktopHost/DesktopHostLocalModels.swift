@@ -42,6 +42,7 @@ package extension DesktopHostPlatform where ReadAloudState == Void {
     static func makeReadAloudState() {}
     static func stopReadAloud(_ state: inout Void, playback: Playback) {}
     static func isReadingAloud(_ state: Void) -> Bool { false }
+    static func readAloudActivity(_ state: Void) -> DesktopHostReadAloudActivity { .idle }
 }
 
 package extension DesktopHostPlatform {

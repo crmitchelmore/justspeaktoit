@@ -34,6 +34,8 @@ final class LinuxEventContext: @unchecked Sendable {
     let historyPaste = DesktopHistoryPasteAdmission()
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
+    /// General > System resources in use; started with the microphone monitor it probes through.
+    lazy var systemResources = LinuxSystemResources.makeMonitor()
     /// Set before the window opens, when iCloud sync is configured.
     var cloudSync: LinuxCloudSync?
     /// Sidebar settings search; read and written on the GTK main thread only.
@@ -284,6 +286,7 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
     if linuxReadAloudEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxLocalModelEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxCloudSyncEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxSystemResourcesEvent(event, value: value, holder: holder) { return }
     if linuxAppearanceEvent(event, slot: slot, holder: holder) { return }
     _ = linuxSettingsEvent(event, value: value, slot: slot, holder: holder)
 }
@@ -502,6 +505,7 @@ private func linuxReady(_ holder: LinuxEventContext) { // swiftlint:disable:this
         do { try holder.microphones.start() } catch {
             LinuxHostPlatform.update("Microphone changes will not be noticed: \(error.localizedDescription)")
         }
+        holder.systemResources.start()
         return
     }
     do {

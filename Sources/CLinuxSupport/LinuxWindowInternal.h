@@ -46,69 +46,26 @@ typedef struct CleanupPreview {
     gboolean visible;
 } CleanupPreview;
 
-typedef struct UI {
-    AdwApplication *application;
-    GtkWindow *window;
-    GtkLabel *about_details;
-    GtkFlowBox *about_links;
-    jsti_window_event_fn callback;
-    void *context;
-    gint32 flags;
-    gboolean ready_sent;
-    gboolean suppress;
-    /* Started by the login item (--background): the window starts minimised. */
-    gboolean start_minimized;
-    /* Models: picker position -> global slot. */
-    GtkStringList *model_names;
-    GArray *model_slots;
-    Models *model_catalog;
-    gint32 preferred_model_slots[4];
-    AdwComboRow *model_row;
-    GtkLabel *catalog_status;
-    GtkButton *catalog_refresh;
-    AdwPasswordEntryRow *key_row;
-    /* Shown while an Azure model is selected: live routes need the endpoint. */
-    AdwEntryRow *azure_row;
-    /* Microphones */
-    GtkStringList *microphone_names;
-    GPtrArray *microphone_ids;
-    AdwComboRow *microphone_row;
-    /* Text output */
-    AdwPreferencesGroup *output_group;
-    AdwComboRow *output_row;
-    AdwComboRow *app_switch_row;
-    GtkLabel *app_switch_help;
-    gboolean app_switch_configured;
-    AdwSwitchRow *restore_row;
-    gboolean can_restore_clipboard;
-    AdwActionRow *shortcut_row;
-    AdwComboRow *style_row;
-    /* Post-processing */
-    AdwSwitchRow *polish_row;
-    AdwComboRow *polish_model_row;
-    GtkStringList *polish_models;
-    AdwComboRow *polish_location_row;
-    GPtrArray *polish_catalog;
-    GArray *polish_slots;
-    gint32 polish_local_index;
-    gint32 polish_remote_selected;
-    gint32 polish_local_selected;
-    gchar *polish_local_notice;
-    GtkTextView *polish_prompt_row;
-    AdwPasswordEntryRow *polish_key_row;
-    AdwSwitchRow *polish_directives_row;
-    AdwSwitchRow *polish_tags_row;
-    /* Recording */
+/* The dashboard: recording controls, the latest transcript, totals and the setup card. */
+typedef struct DashboardPage {
     GtkButton *record;
     GtkButton *cancel;
     GtkLabel *status;
     GtkTextView *transcript;
     GtkButton *copy;
     GtkDropDown *version;
-    gint32 state;
-    guint state_announcement; /* Idle source that speaks a state change when the HUD is hidden */
-    gchar *tray_summary; /* Sessions, Recording Time and Spend for the status notifier */
-    /* History */
+    GtkButton *hero_record;
+    GtkLabel *live_preview;
+    GtkButton *dashboard_copy;
+    /* Totals: dashboard hero chips and the Insights card. */
+    GtkLabel *hero_sessions, *hero_time, *hero_spend;
+    GtkLabel *insight_sessions, *insight_time, *insight_average, *insight_spend;
+    /* Setup card on the dashboard. */
+    GtkLabel *setup_microphone, *setup_model, *setup_shortcut, *setup_output;
+} DashboardPage;
+
+/* The History page: search, cards, the selected record, playback and totals. */
+typedef struct HistoryPage {
     GtkSearchEntry *search;
     GtkWidget *history_filters;
     GtkButton *history_delete;
@@ -125,20 +82,7 @@ typedef struct UI {
     GtkButton *export_button;
     GtkButton *issue_button;
     GtkButton *open_audio;
-    GtkButton *recordings_folder;
-    GtkButton *recordings_choose;
-    GtkButton *recordings_default;
-    GCancellable *location_chooser;
     GtkButton *audio_cleanup;
-    AdwSwitchRow *backup_audio;
-    AdwSwitchRow *backup_profiles;
-    GtkButton *backup_export;
-    GtkButton *backup_inspect;
-    GtkButton *backup_restore;
-    GtkWidget *restore_dialog;
-    GCancellable *backup_chooser;
-    gboolean closing;
-    gboolean cancel_key_held;
     GtkButton *import_button;
     GtkButton *play;
     GtkButton *stop_play;
@@ -146,35 +90,130 @@ typedef struct UI {
     gint32 playback_state;
     /* Export in progress: the text and version captured at the click. */
     gchar *export_text;
-    /* Navigation */
+    GtkButton *history_import;
+    GtkLabel *history_sessions, *history_errors, *history_average, *history_spend;
+    /* The selected History card's transcript and actions, moved into that card. */
+    GtkWidget *detail;
+    GtkWidget *history_empty;
+} HistoryPage;
+
+/* Models and microphones: picker position -> global slot. */
+typedef struct ModelsPage {
+    GtkStringList *model_names;
+    GArray *model_slots;
+    Models *model_catalog;
+    gint32 preferred_model_slots[4];
+    AdwComboRow *model_row;
+    GtkLabel *catalog_status;
+    GtkButton *catalog_refresh;
+    AdwPasswordEntryRow *key_row;
+    /* Shown while an Azure model is selected: live routes need the endpoint. */
+    AdwEntryRow *azure_row;
+    GtkStringList *microphone_names;
+    GPtrArray *microphone_ids;
+    AdwComboRow *microphone_row;
+} ModelsPage;
+
+/* Text output. */
+typedef struct OutputPage {
+    AdwPreferencesGroup *output_group;
+    AdwComboRow *output_row;
+    AdwComboRow *app_switch_row;
+    GtkLabel *app_switch_help;
+    gboolean app_switch_configured;
+    AdwSwitchRow *restore_row;
+    gboolean can_restore_clipboard;
+    AdwActionRow *shortcut_row;
+    AdwComboRow *style_row;
+} OutputPage;
+
+/* Post-processing. */
+typedef struct PolishPage {
+    AdwSwitchRow *polish_row;
+    AdwComboRow *polish_model_row;
+    GtkStringList *polish_models;
+    AdwComboRow *polish_location_row;
+    GPtrArray *polish_catalog;
+    GArray *polish_slots;
+    gint32 polish_local_index;
+    gint32 polish_remote_selected;
+    gint32 polish_local_selected;
+    gchar *polish_local_notice;
+    GtkTextView *polish_prompt_row;
+    AdwPasswordEntryRow *polish_key_row;
+    AdwSwitchRow *polish_directives_row;
+    AdwSwitchRow *polish_tags_row;
+} PolishPage;
+
+/* Recordings folder, audio cleanup choosers and backups. */
+typedef struct StoragePage {
+    GtkButton *recordings_folder;
+    GtkButton *recordings_choose;
+    GtkButton *recordings_default;
+    GCancellable *location_chooser;
+    AdwSwitchRow *backup_audio;
+    AdwSwitchRow *backup_profiles;
+    GtkButton *backup_export;
+    GtkButton *backup_inspect;
+    GtkButton *backup_restore;
+    GtkWidget *restore_dialog;
+    GCancellable *backup_chooser;
+} StoragePage;
+
+/* Voice Output page actions. */
+typedef struct VoicePage {
+    GtkButton *voice_read;
+    GtkButton *voice_stop;
+    GtkButton *voice_sources;
+} VoicePage;
+
+/* General: appearance, Launch at login and automation. */
+typedef struct GeneralPage {
+    AdwComboRow *appearance_row;
+    AdwSwitchRow *login_row;
+    AdwSwitchRow *automation_row;
+} GeneralPage;
+
+/* About: build details and links. */
+typedef struct AboutPage {
+    GtkLabel *about_details;
+    GtkFlowBox *about_links;
+} AboutPage;
+
+/* The window shell: application, navigation and recording state, plus one
+ * state per page. Each page file reads and writes its own. */
+typedef struct UI {
+    AdwApplication *application;
+    GtkWindow *window;
+    jsti_window_event_fn callback;
+    void *context;
+    gint32 flags;
+    gboolean ready_sent;
+    gboolean suppress;
+    /* Started by the login item (--background): the window starts minimised. */
+    gboolean start_minimized;
+    gint32 state;
+    guint state_announcement; /* Idle source that speaks a state change when the HUD is hidden */
+    gchar *tray_summary; /* Sessions, Recording Time and Spend for the status notifier */
+    gboolean closing;
+    gboolean cancel_key_held;
     AdwNavigationSplitView *split;
     GtkListBox *sidebar;
     GtkStack *pages;
     AdwWindowTitle *title;
     gint32 page;
-    /* Record buttons: the header's and the dashboard hero's. */
+    /* The header's Record button; the dashboard hero has its own. */
     GtkButton *header_record;
-    GtkButton *hero_record;
-    GtkLabel *live_preview;
-    GtkButton *dashboard_copy;
-    GtkButton *history_import;
-    /* Totals: dashboard hero chips, the Insights card and the History header. */
-    GtkLabel *hero_sessions, *hero_time, *hero_spend;
-    GtkLabel *insight_sessions, *insight_time, *insight_average, *insight_spend;
-    GtkLabel *history_sessions, *history_errors, *history_average, *history_spend;
-    /* Setup card on the dashboard. */
-    GtkLabel *setup_microphone, *setup_model, *setup_shortcut, *setup_output;
-    /* The selected History card's transcript and actions, moved into that card. */
-    GtkWidget *detail;
-    GtkWidget *history_empty;
-    /* Voice Output page actions. */
-    GtkButton *voice_read;
-    GtkButton *voice_stop;
-    GtkButton *voice_sources;
-    AdwComboRow *appearance_row;
-    AdwSwitchRow *login_row;
-    AdwSwitchRow *automation_row;
     GtkWidget *configuration_columns[5];
+    DashboardPage dashboard;
+    HistoryPage history_page;
+    ModelsPage models;
+    OutputPage output;
+    PolishPage polish;
+    StoragePage storage;
+    VoicePage voice;
+    GeneralPage general;
+    AboutPage about;
 } UI;
 GtkWidget *jsti_vocabulary_page_new(int kind);
 GtkWidget *jsti_vocabulary_learning_preferences(void);

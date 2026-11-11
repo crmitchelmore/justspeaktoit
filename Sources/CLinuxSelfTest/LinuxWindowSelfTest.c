@@ -89,7 +89,7 @@ static gboolean cancel_key_self_test(void) {
     okay = !cancel_key(GDK_KEY_Escape, 0, GTK_WIDGET(embedded), TRUE) && calls[0] == 0 && okay;
     g_object_unref(embedded);
 #endif
-    okay = cancel_key(GDK_KEY_Escape, GDK_LOCK_MASK, GTK_WIDGET(ui.transcript), TRUE) &&
+    okay = cancel_key(GDK_KEY_Escape, GDK_LOCK_MASK, GTK_WIDGET(ui.dashboard.transcript), TRUE) &&
         calls[0] == 1 && calls[1] == JSTI_EVENT_CANCEL && calls[2] && okay;
     ui.state = JSTI_STATE_IDLE;
     escape_publish(&escape_policy, ui.state, -1, FALSE);
@@ -127,17 +127,17 @@ static gboolean cancel_key_self_test(void) {
 
 /* Real model rows must remain distinct across all four source/mode pairs. */
 static gboolean model_modes_self_test(void) {
-    if (ui.model_catalog == NULL) return FALSE;
+    if (ui.models.model_catalog == NULL) return FALSE;
     gint32 saved[4], preferred[] = { -1, -1, -1, -1 }, first[] = { -1, -1, -1, -1 };
     guint counts[4] = {0};
-    memcpy(saved, ui.preferred_model_slots, sizeof(saved));
+    memcpy(saved, ui.models.preferred_model_slots, sizeof(saved));
     gint32 selection = selected_model_slot();
     gboolean local = jsti_model_filters_local(), live = jsti_model_filters_live();
     gboolean remote_live = jsti_model_filters_preferred_live(FALSE);
     gboolean local_live = jsti_model_filters_preferred_live(TRUE), suppress = ui.suppress;
     jsti_window_event_fn callback = ui.callback;
-    for (guint i = 0; i < ui.model_catalog->slots->len; ++i) {
-        Slot slot = g_array_index(ui.model_catalog->slots, Slot, i);
+    for (guint i = 0; i < ui.models.model_catalog->slots->len; ++i) {
+        Slot slot = g_array_index(ui.models.model_catalog->slots, Slot, i);
         guint mode = model_mode(g_str_has_prefix(slot.id, "local/"), slot.live);
         if (first[mode] < 0) first[mode] = slot.global;
         preferred[mode] = slot.global;
@@ -154,9 +154,9 @@ static gboolean model_modes_self_test(void) {
         jsti_model_filters_select(mode >= 2, (mode & 1) != 0);
         observed.event = 0;
         on_model_filter(mode >= 2, (mode & 1) != 0);
-        okay = selected_model_slot() == preferred[mode] && ui.model_slots->len == counts[mode] &&
+        okay = selected_model_slot() == preferred[mode] && ui.models.model_slots->len == counts[mode] &&
             observed.event == JSTI_EVENT_SELECT_MODEL && observed.index == preferred[mode] &&
-            gtk_widget_get_visible(GTK_WIDGET(ui.key_row)) == (mode < 2);
+            gtk_widget_get_visible(GTK_WIDGET(ui.models.key_row)) == (mode < 2);
     }
     if (okay) {
         jsti_model_filters_select(FALSE, FALSE);
@@ -165,8 +165,8 @@ static gboolean model_modes_self_test(void) {
         const gint32 imported[] = { first[2], first[3] };
         local_model_preferences_apply((gpointer)imported);
         okay = selected_model_slot() == selected && observed.event == event &&
-            ui.preferred_model_slots[0] == preferred[0] && ui.preferred_model_slots[2] == first[2] &&
-            ui.preferred_model_slots[3] == first[3];
+            ui.models.preferred_model_slots[0] == preferred[0] && ui.models.preferred_model_slots[2] == first[2] &&
+            ui.models.preferred_model_slots[3] == first[3];
         jsti_model_filters_select(TRUE, TRUE);
         on_model_filter(TRUE, TRUE);
         okay = okay && observed.event == JSTI_EVENT_SELECT_MODEL && observed.index == first[3];
@@ -174,8 +174,8 @@ static gboolean model_modes_self_test(void) {
         const gint32 replacement[] = { preferred[2], preferred[3] };
         local_model_preferences_apply((gpointer)replacement);
         okay = okay && selected_model_slot() == first[3] && observed.event == -500 &&
-            ui.preferred_model_slots[3] == first[3] &&
-            ui.preferred_model_slots[2] == preferred[2] &&
+            ui.models.preferred_model_slots[3] == first[3] &&
+            ui.models.preferred_model_slots[2] == preferred[2] &&
             jsti_window_set_local_model_preferences(-2, -1) == -1;
     }
     jsti_model_filters_select(FALSE, remote_live);
@@ -305,8 +305,8 @@ static int32_t voice_favorites_self_test(char *error, size_t capacity) {
 static int32_t login_item_self_test(char *error, size_t capacity) {
     LoginItem blocked = { .state = 2, .detail = (gchar *)"Turned off in Settings." };
     login_item_apply(&blocked);
-    if (adw_switch_row_get_active(ui.login_row) || gtk_widget_get_sensitive(GTK_WIDGET(ui.login_row))
-        || g_strcmp0(adw_action_row_get_subtitle(ADW_ACTION_ROW(ui.login_row)), blocked.detail) != 0) {
+    if (adw_switch_row_get_active(ui.general.login_row) || gtk_widget_get_sensitive(GTK_WIDGET(ui.general.login_row))
+        || g_strcmp0(adw_action_row_get_subtitle(ADW_ACTION_ROW(ui.general.login_row)), blocked.detail) != 0) {
         return fail(error, capacity, "Launch at login did not show a state the system decides");
     }
     LoginItem off = { .state = 0, .detail = (gchar *)"Start minimised." };
@@ -314,9 +314,9 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
     jsti_window_event_fn callback = ui.callback;
     ui.callback = observe_event;
     observed.event = 0;
-    adw_switch_row_set_active(ui.login_row, TRUE);
+    adw_switch_row_set_active(ui.general.login_row, TRUE);
     gboolean reported = observed.event == JSTI_EVENT_LOGIN_ITEM && observed.index == 1;
-    gboolean waiting = !gtk_widget_get_sensitive(GTK_WIDGET(ui.login_row));
+    gboolean waiting = !gtk_widget_get_sensitive(GTK_WIDGET(ui.general.login_row));
     observed.event = 0;
     LoginItem on = { .state = 1, .detail = (gchar *)"Start minimised." };
     login_item_apply(&on);
@@ -324,7 +324,7 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
     ui.callback = callback;
     g_clear_pointer(&observed.text, g_free);
     if (!reported || !waiting) return fail(error, capacity, "Launch at login did not report the switch");
-    if (!quiet || !adw_switch_row_get_active(ui.login_row) || !gtk_widget_get_sensitive(GTK_WIDGET(ui.login_row))) {
+    if (!quiet || !adw_switch_row_get_active(ui.general.login_row) || !gtk_widget_get_sensitive(GTK_WIDGET(ui.general.login_row))) {
         return fail(error, capacity, "Launch at login did not show the state reached");
     }
     login_item_apply(&off);
@@ -332,8 +332,8 @@ static int32_t login_item_self_test(char *error, size_t capacity) {
 }
 
 static void text_output_capture(int32_t event, const char *text, int32_t index, void *context) {
-    gchar *expected = ui.app_switch_configured
-        ? g_strdup_printf("restore\t%u", adw_combo_row_get_selected(ui.app_switch_row)) : g_strdup("restore");
+    gchar *expected = ui.output.app_switch_configured
+        ? g_strdup_printf("restore\t%u", adw_combo_row_get_selected(ui.output.app_switch_row)) : g_strdup("restore");
     if (event == JSTI_EVENT_TEXT_OUTPUT && index == 1 && g_strcmp0(text, expected) == 0)
         ++*(guint *)context;
     g_free(expected);
@@ -345,15 +345,15 @@ static int32_t automation_self_test(char *error, size_t capacity) {
     jsti_window_event_fn callback = ui.callback;
     ui.callback = observe_event;
     observed.event = 0;
-    adw_switch_row_set_active(ui.automation_row, TRUE);
+    adw_switch_row_set_active(ui.general.automation_row, TRUE);
     gboolean pending = observed.event == JSTI_EVENT_AUTOMATION && observed.index == 1
-        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.automation_row));
+        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.general.automation_row));
     observed.event = 0;
     LoginItem failed = { .state = 0, .detail = (gchar *)"Automation could not start." };
     automation_apply(&failed);
-    gboolean actual = observed.event == 0 && !adw_switch_row_get_active(ui.automation_row)
-        && gtk_widget_get_sensitive(GTK_WIDGET(ui.automation_row))
-        && g_strcmp0(adw_action_row_get_subtitle(ADW_ACTION_ROW(ui.automation_row)), failed.detail) == 0;
+    gboolean actual = observed.event == 0 && !adw_switch_row_get_active(ui.general.automation_row)
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.general.automation_row))
+        && g_strcmp0(adw_action_row_get_subtitle(ADW_ACTION_ROW(ui.general.automation_row)), failed.detail) == 0;
     ui.callback = callback;
     g_clear_pointer(&observed.text, g_free);
     automation_apply(&off);
@@ -361,15 +361,15 @@ static int32_t automation_self_test(char *error, size_t capacity) {
 }
 
 static gboolean app_switch_output_self_test(void) {
-    GListModel *model = adw_combo_row_get_model(ui.app_switch_row);
+    GListModel *model = adw_combo_row_get_model(ui.output.app_switch_row);
     if (model != NULL) g_object_ref(model);
-    guint selection = adw_combo_row_get_selected(ui.app_switch_row);
-    gboolean configured = ui.app_switch_configured;
-    gchar *title = g_strdup(adw_preferences_row_get_title(ADW_PREFERENCES_ROW(ui.app_switch_row)));
-    gchar *help = g_strdup(gtk_label_get_text(ui.app_switch_help));
+    guint selection = adw_combo_row_get_selected(ui.output.app_switch_row);
+    gboolean configured = ui.output.app_switch_configured;
+    gchar *title = g_strdup(adw_preferences_row_get_title(ADW_PREFERENCES_ROW(ui.output.app_switch_row)));
+    gchar *help = g_strdup(gtk_label_get_text(ui.output.app_switch_help));
     TextOutput original = {
-        .method = (gint32)adw_combo_row_get_selected(ui.output_row),
-        .restore = adw_switch_row_get_active(ui.restore_row), .can_restore = ui.can_restore_clipboard
+        .method = (gint32)adw_combo_row_get_selected(ui.output.output_row),
+        .restore = adw_switch_row_get_active(ui.output.restore_row), .can_restore = ui.output.can_restore_clipboard
     };
     TextOutput policy = {
         .method = 0, .restore = TRUE, .can_restore = FALSE,
@@ -380,26 +380,26 @@ static gboolean app_switch_output_self_test(void) {
     ui.callback = observe_event;
     observed.event = 0;
     text_output_apply(&policy);
-    gboolean valid = observed.event == 0 && adw_combo_row_get_selected(ui.app_switch_row) == 2 &&
-        g_list_model_get_n_items(adw_combo_row_get_model(ui.app_switch_row)) == 4 &&
-        gtk_label_get_wrap(ui.app_switch_help) &&
-        g_strcmp0(gtk_label_get_text(ui.app_switch_help), policy.policy_help) == 0;
-    adw_combo_row_set_selected(ui.app_switch_row, 3);
+    gboolean valid = observed.event == 0 && adw_combo_row_get_selected(ui.output.app_switch_row) == 2 &&
+        g_list_model_get_n_items(adw_combo_row_get_model(ui.output.app_switch_row)) == 4 &&
+        gtk_label_get_wrap(ui.output.app_switch_help) &&
+        g_strcmp0(gtk_label_get_text(ui.output.app_switch_help), policy.policy_help) == 0;
+    adw_combo_row_set_selected(ui.output.app_switch_row, 3);
     valid = valid && observed.event == JSTI_EVENT_TEXT_OUTPUT && observed.index == 0 &&
         g_strcmp0(observed.text, "restore\t3") == 0;
     policy.method = 1;
     policy.policy_selection = 3;
     observed.event = 0;
     text_output_apply(&policy);
-    valid = valid && observed.event == 0 && !gtk_widget_get_sensitive(GTK_WIDGET(ui.app_switch_row)) &&
-        adw_combo_row_get_selected(ui.app_switch_row) == 3;
+    valid = valid && observed.event == 0 && !gtk_widget_get_sensitive(GTK_WIDGET(ui.output.app_switch_row)) &&
+        adw_combo_row_get_selected(ui.output.app_switch_row) == 3;
     ui.suppress = TRUE;
-    adw_combo_row_set_model(ui.app_switch_row, model);
+    adw_combo_row_set_model(ui.output.app_switch_row, model);
     if (model != NULL) g_object_unref(model);
-    adw_combo_row_set_selected(ui.app_switch_row, selection);
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.app_switch_row), title);
-    gtk_label_set_text(ui.app_switch_help, help);
-    ui.app_switch_configured = configured;
+    adw_combo_row_set_selected(ui.output.app_switch_row, selection);
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.output.app_switch_row), title);
+    gtk_label_set_text(ui.output.app_switch_help, help);
+    ui.output.app_switch_configured = configured;
     ui.suppress = FALSE;
     ui.callback = callback;
     g_clear_pointer(&observed.text, g_free);
@@ -410,48 +410,48 @@ static gboolean app_switch_output_self_test(void) {
 }
 
 static gboolean text_output_self_test(void) {
-    guint original_policy = adw_combo_row_get_selected(ui.app_switch_row);
-    if (ui.app_switch_configured) {
+    guint original_policy = adw_combo_row_get_selected(ui.output.app_switch_row);
+    if (ui.output.app_switch_configured) {
         ui.suppress = TRUE;
-        adw_combo_row_set_selected(ui.app_switch_row, 0);
+        adw_combo_row_set_selected(ui.output.app_switch_row, 0);
         ui.suppress = FALSE;
     }
     TextOutput original = {
-        .method = (gint32)adw_combo_row_get_selected(ui.output_row),
-        .restore = adw_switch_row_get_active(ui.restore_row),
-        .can_restore = ui.can_restore_clipboard,
-        .hint = g_strdup(adw_action_row_get_subtitle(ui.shortcut_row))
+        .method = (gint32)adw_combo_row_get_selected(ui.output.output_row),
+        .restore = adw_switch_row_get_active(ui.output.restore_row),
+        .can_restore = ui.output.can_restore_clipboard,
+        .hint = g_strdup(adw_action_row_get_subtitle(ui.output.shortcut_row))
     };
     TextOutput unsupported = { .method = 0, .restore = TRUE, .can_restore = FALSE };
     text_output_apply(&unsupported);
-    gboolean valid = !gtk_widget_get_visible(GTK_WIDGET(ui.restore_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) && adw_switch_row_get_active(ui.restore_row) &&
-        gtk_widget_get_visible(GTK_WIDGET(ui.output_group)) &&
-        strstr(adw_preferences_group_get_description(ui.output_group), "Wayland") != NULL &&
-        strstr(gtk_label_get_text(ui.setup_output), "restored") == NULL;
+    gboolean valid = !gtk_widget_get_visible(GTK_WIDGET(ui.output.restore_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.output.restore_row)) && adw_switch_row_get_active(ui.output.restore_row) &&
+        gtk_widget_get_visible(GTK_WIDGET(ui.output.output_group)) &&
+        strstr(adw_preferences_group_get_description(ui.output.output_group), "Wayland") != NULL &&
+        strstr(gtk_label_get_text(ui.dashboard.setup_output), "restored") == NULL;
     guint calls = 0;
     jsti_window_event_fn callback = ui.callback;
     void *context = ui.context;
     ui.callback = text_output_capture;
     ui.context = &calls;
-    adw_combo_row_set_selected(ui.output_row, 1);
-    valid = valid && calls == 1 && adw_switch_row_get_active(ui.restore_row);
+    adw_combo_row_set_selected(ui.output.output_row, 1);
+    valid = valid && calls == 1 && adw_switch_row_get_active(ui.output.restore_row);
     ui.callback = callback;
     ui.context = context;
     TextOutput supported = { .method = 0, .restore = TRUE, .can_restore = TRUE };
     text_output_apply(&supported);
-    valid = valid && gtk_widget_get_visible(GTK_WIDGET(ui.restore_row)) &&
-        gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) &&
-        strstr(gtk_label_get_text(ui.setup_output), "restored") != NULL;
+    valid = valid && gtk_widget_get_visible(GTK_WIDGET(ui.output.restore_row)) &&
+        gtk_widget_get_sensitive(GTK_WIDGET(ui.output.restore_row)) &&
+        strstr(gtk_label_get_text(ui.dashboard.setup_output), "restored") != NULL;
     supported.method = 1;
     text_output_apply(&supported);
-    valid = valid && !gtk_widget_get_sensitive(GTK_WIDGET(ui.restore_row)) &&
-        adw_switch_row_get_active(ui.restore_row) && strstr(gtk_label_get_text(ui.setup_output), "restored") == NULL;
+    valid = valid && !gtk_widget_get_sensitive(GTK_WIDGET(ui.output.restore_row)) &&
+        adw_switch_row_get_active(ui.output.restore_row) && strstr(gtk_label_get_text(ui.dashboard.setup_output), "restored") == NULL;
     text_output_apply(&original);
     gboolean policy_valid = app_switch_output_self_test();
-    if (ui.app_switch_configured) {
+    if (ui.output.app_switch_configured) {
         ui.suppress = TRUE;
-        adw_combo_row_set_selected(ui.app_switch_row, original_policy);
+        adw_combo_row_set_selected(ui.output.app_switch_row, original_policy);
         ui.suppress = FALSE;
         text_output_apply(&original);
     }
@@ -465,14 +465,14 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
     if (jsti_issue_report_self_test(error, capacity) != 0) return -1;
     const JSTIAboutLink invalid_about_link = {"Invalid", "file:///not-an-update"};
-    if (ui.about_details == NULL || ui.about_links == NULL ||
-        strstr(gtk_label_get_text(ui.about_details), "Version:") == NULL ||
+    if (ui.about.about_details == NULL || ui.about.about_links == NULL ||
+        strstr(gtk_label_get_text(ui.about.about_details), "Version:") == NULL ||
         jsti_window_configure_about("bad", NULL, 0) != -1 ||
         jsti_window_configure_about("bad", &invalid_about_link, 1) != -1 ||
         jsti_window_configure_about("\xff", &invalid_about_link, 1) != -1)
         return fail(error, capacity, "About metadata or invalid input refusal failed");
     guint about_count = 0;
-    for (GtkWidget *child = gtk_widget_get_first_child(GTK_WIDGET(ui.about_links));
+    for (GtkWidget *child = gtk_widget_get_first_child(GTK_WIDGET(ui.about.about_links));
          child != NULL; child = gtk_widget_get_next_sibling(child)) {
         GtkWidget *button = gtk_flow_box_child_get_child(GTK_FLOW_BOX_CHILD(child));
         const char *uri = g_object_get_data(G_OBJECT(button), "about-uri");
@@ -497,27 +497,27 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (!command_process_self_test(error, capacity)) return -1;
     if (!post_processing_self_test())
         return fail(error, capacity, "Local/Remote post-processing controls, key isolation or callback indexes failed");
-    if (ui.recordings_folder == NULL || ui.audio_cleanup == NULL ||
-        ui.backup_audio == NULL || ui.backup_profiles == NULL ||
-        ui.backup_export == NULL || ui.backup_inspect == NULL || ui.backup_restore == NULL ||
-        !adw_switch_row_get_active(ui.backup_audio) ||
-        adw_switch_row_get_active(ui.backup_profiles) ||
+    if (ui.storage.recordings_folder == NULL || ui.history_page.audio_cleanup == NULL ||
+        ui.storage.backup_audio == NULL || ui.storage.backup_profiles == NULL ||
+        ui.storage.backup_export == NULL || ui.storage.backup_inspect == NULL || ui.storage.backup_restore == NULL ||
+        !adw_switch_row_get_active(ui.storage.backup_audio) ||
+        adw_switch_row_get_active(ui.storage.backup_profiles) ||
         jsti_window_confirm_audio_cleanup(NULL, 1) != -1 ||
-        g_strcmp0(gtk_button_get_label(ui.recordings_folder), "_Open folder") != 0) {
+        g_strcmp0(gtk_button_get_label(ui.storage.recordings_folder), "_Open folder") != 0) {
         return fail(error, capacity, "the recording folder control was not created");
     }
     BackupChoice choice = {0};
     g_weak_ref_init(&choice.parent, G_OBJECT(ui.window));
     choice.cancelled = g_cancellable_new();
-    ui.backup_chooser = g_object_ref(choice.cancelled);
+    ui.storage.backup_chooser = g_object_ref(choice.cancelled);
     GObject *choice_parent = g_weak_ref_get(&choice.parent);
     refresh_actions();
     gboolean backup_ok = backup_choice_active(&choice, choice_parent) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_audio)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_profiles)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_export)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_inspect)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(ui.backup_restore));
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.storage.backup_audio)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.storage.backup_profiles)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.storage.backup_export)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.storage.backup_inspect)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(ui.storage.backup_restore));
     jsti_window_event_fn backup_callback = ui.callback;
     ui.callback = observe_event;
     for (gint32 flags = 0; flags < 4; ++flags) {
@@ -543,7 +543,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     ui.closing = FALSE;
     g_cancellable_cancel(choice.cancelled);
     backup_ok = backup_ok && !backup_choice_active(&choice, choice_parent);
-    g_clear_object(&ui.backup_chooser);
+    g_clear_object(&ui.storage.backup_chooser);
     g_clear_object(&choice_parent);
     g_weak_ref_clear(&choice.parent);
     g_object_unref(choice.cancelled);
@@ -590,14 +590,14 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     }
     if (login_item_self_test(error, capacity) != 0) return -1;
     if (automation_self_test(error, capacity) != 0) return -1;
-    if (g_list_model_get_n_items(G_LIST_MODEL(ui.model_names)) == 0) {
+    if (g_list_model_get_n_items(G_LIST_MODEL(ui.models.model_names)) == 0) {
         return fail(error, capacity, "no models are offered");
     }
     /* The Azure resource row follows the picker: shown for Azure models only. */
-    guint original = adw_combo_row_get_selected(ui.model_row);
+    guint original = adw_combo_row_get_selected(ui.models.model_row);
     guint azure = GTK_INVALID_LIST_POSITION, other = GTK_INVALID_LIST_POSITION;
-    for (guint index = 0; index < ui.model_slots->len; index++) {
-        gboolean is_azure = g_str_has_prefix(g_array_index(ui.model_slots, Slot, index).id, "azure/");
+    for (guint index = 0; index < ui.models.model_slots->len; index++) {
+        gboolean is_azure = g_str_has_prefix(g_array_index(ui.models.model_slots, Slot, index).id, "azure/");
         if (is_azure && azure == GTK_INVALID_LIST_POSITION) azure = index;
         if (!is_azure && other == GTK_INVALID_LIST_POSITION) other = index;
     }
@@ -605,21 +605,21 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "the picker offers no Azure model, or only Azure models");
     }
     ui.suppress = TRUE;
-    adw_combo_row_set_selected(ui.model_row, azure);
-    gboolean shown_for_azure = gtk_widget_get_visible(GTK_WIDGET(ui.azure_row));
-    adw_combo_row_set_selected(ui.model_row, other);
-    gboolean shown_for_other = gtk_widget_get_visible(GTK_WIDGET(ui.azure_row));
-    adw_combo_row_set_selected(ui.model_row, original);
+    adw_combo_row_set_selected(ui.models.model_row, azure);
+    gboolean shown_for_azure = gtk_widget_get_visible(GTK_WIDGET(ui.models.azure_row));
+    adw_combo_row_set_selected(ui.models.model_row, other);
+    gboolean shown_for_other = gtk_widget_get_visible(GTK_WIDGET(ui.models.azure_row));
+    adw_combo_row_set_selected(ui.models.model_row, original);
     ui.suppress = FALSE;
     if (!shown_for_azure || shown_for_other) {
         return fail(error, capacity, "the Azure resource row did not follow the selected model");
     }
-    for (guint index = 0; index < ui.model_slots->len; index++) {
-        if (!g_str_has_prefix(g_array_index(ui.model_slots, Slot, index).id, "local/")) continue;
+    for (guint index = 0; index < ui.models.model_slots->len; index++) {
+        if (!g_str_has_prefix(g_array_index(ui.models.model_slots, Slot, index).id, "local/")) continue;
         ui.suppress = TRUE;
-        adw_combo_row_set_selected(ui.model_row, index);
-        gboolean key_for_local = gtk_widget_get_visible(GTK_WIDGET(ui.key_row));
-        adw_combo_row_set_selected(ui.model_row, original);
+        adw_combo_row_set_selected(ui.models.model_row, index);
+        gboolean key_for_local = gtk_widget_get_visible(GTK_WIDGET(ui.models.key_row));
+        adw_combo_row_set_selected(ui.models.model_row, original);
         ui.suppress = FALSE;
         if (key_for_local) return fail(error, capacity, "an on-device model asks for an API key");
         break;
@@ -638,16 +638,16 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_setup_self_test(ui.window, error, capacity) != 0) return -1;
     if (!cancel_key_self_test()) return fail(error, capacity, "Escape cancellation ownership or repeat guards failed");
     {
-        GtkTextBuffer *prompt = gtk_text_view_get_buffer(ui.polish_prompt_row);
+        GtkTextBuffer *prompt = gtk_text_view_get_buffer(ui.polish.polish_prompt_row);
         GtkTextIter prompt_start, prompt_end;
         gtk_text_buffer_get_bounds(prompt, &prompt_start, &prompt_end);
         gchar *draft = gtk_text_buffer_get_text(prompt, &prompt_start, &prompt_end, TRUE);
-        gint32 saved_enabled = adw_switch_row_get_active(ui.polish_row) ? 1 : 0;
+        gint32 saved_enabled = adw_switch_row_get_active(ui.polish.polish_row) ? 1 : 0;
         gint32 disabled = 0;
         post_processing_enabled_apply(&disabled);
         gtk_text_buffer_get_bounds(prompt, &prompt_start, &prompt_end);
         gchar *after_fix = gtk_text_buffer_get_text(prompt, &prompt_start, &prompt_end, TRUE);
-        gboolean draft_preserved = g_strcmp0(draft, after_fix) == 0 && !adw_switch_row_get_active(ui.polish_row);
+        gboolean draft_preserved = g_strcmp0(draft, after_fix) == 0 && !adw_switch_row_get_active(ui.polish.polish_row);
         post_processing_enabled_apply(&saved_enabled);
         g_free(draft); g_free(after_fix);
         if (!draft_preserved || jsti_window_set_post_processing_enabled(2) != -1)
@@ -662,7 +662,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     History *history = history_copy(rows, G_N_ELEMENTS(rows), first);
     history_apply(history);
     history_free(history);
-    if (ui.history_ids->len != 2 || g_strcmp0(ui.selected_id, first) != 0) {
+    if (ui.history_page.history_ids->len != 2 || g_strcmp0(ui.history_page.selected_id, first) != 0) {
         return fail(error, capacity, "History rows or selection were not applied");
     }
     gchar *all_ids = g_strdup_printf("%s\n%s", first, second);
@@ -673,8 +673,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     history_management_apply(all_ids);
     GtkWidget *confirmation = history_delete_dialog(all_ids, TRUE);
     g_object_ref_sink(confirmation);
-    gboolean management_ok = gtk_widget_get_sensitive(GTK_WIDGET(ui.history_delete))
-        && gtk_widget_get_sensitive(GTK_WIDGET(ui.history_clear))
+    gboolean management_ok = gtk_widget_get_sensitive(GTK_WIDGET(ui.history_page.history_delete))
+        && gtk_widget_get_sensitive(GTK_WIDGET(ui.history_page.history_clear))
         && adw_message_dialog_has_response(ADW_MESSAGE_DIALOG(confirmation), "keep-audio")
         && adw_message_dialog_has_response(ADW_MESSAGE_DIALOG(confirmation), "delete-audio")
         && g_strcmp0(adw_message_dialog_get_default_response(ADW_MESSAGE_DIALOG(confirmation)), "cancel") == 0;
@@ -687,8 +687,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     g_free(all_ids);
     if (!management_ok) return fail(error, capacity, "History confirmation choices or frozen IDs were not retained");
     /* The selected card holds the transcript and its actions. */
-    GtkListBoxRow *first_row = gtk_list_box_get_row_at_index(ui.history, 0);
-    if (gtk_widget_get_parent(ui.detail) != gtk_list_box_row_get_child(first_row)) {
+    GtkListBoxRow *first_row = gtk_list_box_get_row_at_index(ui.history_page.history, 0);
+    if (gtk_widget_get_parent(ui.history_page.detail) != gtk_list_box_row_get_child(first_row)) {
         return fail(error, capacity, "the selected History card does not hold its transcript");
     }
     JSTIInsights totals = { "2", "1", "00m 24s", "00m 12s", "$0.01" };
@@ -697,9 +697,9 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     insights_copy(insights->visible, &totals);
     insights_apply(insights);
     insights_free(insights);
-    if (g_strcmp0(gtk_label_get_text(ui.hero_sessions), "2") != 0
-        || g_strcmp0(gtk_label_get_text(ui.history_errors), "1") != 0
-        || g_strcmp0(gtk_label_get_text(ui.insight_average), "00m 12s") != 0) {
+    if (g_strcmp0(gtk_label_get_text(ui.dashboard.hero_sessions), "2") != 0
+        || g_strcmp0(gtk_label_get_text(ui.history_page.history_errors), "1") != 0
+        || g_strcmp0(gtk_label_get_text(ui.dashboard.insight_average), "00m 12s") != 0) {
         return fail(error, capacity, "the History totals were not shown");
     }
     for (gint32 page = JSTI_PAGE_COUNT - 1; page >= 0; page--) {
@@ -725,7 +725,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         g_strcmp0(buffer, "Processed text") != 0 || jsti_window_transcript_variant() != 0) {
         return fail(error, capacity, "the displayed transcript snapshot did not match");
     }
-    if (!gtk_widget_get_sensitive(GTK_WIDGET(ui.copy)) || !gtk_widget_get_visible(GTK_WIDGET(ui.version))) {
+    if (!gtk_widget_get_sensitive(GTK_WIDGET(ui.dashboard.copy)) || !gtk_widget_get_visible(GTK_WIDGET(ui.dashboard.version))) {
         return fail(error, capacity, "Copy or the version control stayed unavailable");
     }
     if (read_aloud_self_test(first, error, capacity) != 0) return -1;
@@ -738,10 +738,10 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     Update clear = { .status = (gchar *)"Self-test complete.", .transcript = (gchar *)"", .has_transcript = TRUE,
                      .state = JSTI_STATE_IDLE };
     update_apply(&clear);
-    if (ui.selected_id != NULL || gtk_widget_get_sensitive(GTK_WIDGET(ui.copy))) {
+    if (ui.history_page.selected_id != NULL || gtk_widget_get_sensitive(GTK_WIDGET(ui.dashboard.copy))) {
         return fail(error, capacity, "clearing History left record actions enabled");
     }
-    if (gtk_accessible_get_accessible_role(GTK_ACCESSIBLE(ui.status)) != GTK_ACCESSIBLE_ROLE_STATUS)
+    if (gtk_accessible_get_accessible_role(GTK_ACCESSIBLE(ui.dashboard.status)) != GTK_ACCESSIBLE_ROLE_STATUS)
         return fail(error, capacity, "the window status lost its accessible status role");
     if (jsti_hud_self_test(error, capacity) != 0) return -1;
     if (jsti_comparison_self_test(ui.window, error, capacity) != 0) return -1;

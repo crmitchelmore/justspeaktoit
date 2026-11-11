@@ -31,7 +31,7 @@ gboolean sidebar_navigation_self_test(void) {
     g_object_ref_sink(entry);
     okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, entry) && ui.page == JSTI_PAGE_HISTORY;
     g_object_unref(entry);
-    okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, GTK_WIDGET(ui.transcript));
+    okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, GTK_WIDGET(ui.dashboard.transcript));
     GtkWidget *row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_DASHBOARD));
     gtk_widget_set_sensitive(row, FALSE);
     okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, NULL) && ui.page == JSTI_PAGE_HISTORY;
@@ -67,8 +67,8 @@ gboolean action_execution_self_test(void) {
     void *context = ui.context;
     gint original_page = ui.page, original_state = ui.state;
     gboolean window_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window));
-    gboolean record_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.record));
-    gboolean stop_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice_stop));
+    gboolean record_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.dashboard.record));
+    gboolean stop_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice.voice_stop));
     ActionShortcutCapture capture = { 0 };
     ui.callback = action_shortcut_capture;
     ui.context = &capture;
@@ -81,12 +81,12 @@ gboolean action_execution_self_test(void) {
     okay = okay && !action_shortcut_run(2, "history", 0);
     gtk_widget_set_sensitive(history, history_sensitive);
     capture.calls = 0;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.record), TRUE);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard.record), TRUE);
     okay = okay && action_shortcut_run(1, "", 0) && capture.calls == 1 &&
         capture.event == JSTI_EVENT_TOGGLE_RECORDING;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.record), FALSE);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard.record), FALSE);
     okay = okay && !action_shortcut_run(1, "", 0) && capture.calls == 1;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), TRUE);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice.voice_stop), TRUE);
     okay = okay && action_shortcut_run(3, "", 0) && capture.calls == 2 &&
         capture.event == JSTI_EVENT_PLAYBACK_STOP;
     ui.state = JSTI_STATE_IDLE;
@@ -103,7 +103,7 @@ gboolean action_execution_self_test(void) {
     okay = okay && action_shortcut_run(10, "", 0) && capture.event == JSTI_EVENT_PERMISSIONS &&
         capture.slot == 0 && capture.calls == 9;
     gint paste_page = ui.page;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), FALSE);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice.voice_stop), FALSE);
     gtk_widget_set_sensitive(history, FALSE);
     okay = okay && action_shortcut_run(11, "", 0) && capture.event == JSTI_EVENT_PASTE_LAST_HISTORY &&
         capture.slot == 0 && capture.calls == 10 && ui.page == paste_page;
@@ -124,8 +124,8 @@ gboolean action_execution_self_test(void) {
         !action_shortcut_run(9, "", 0) && !action_shortcut_run(10, "", 0) &&
         !action_shortcut_run(11, "", 0) && !action_shortcut_run(12, "", 0) && capture.calls == 11;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), window_sensitive);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.record), record_sensitive);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard.record), record_sensitive);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice.voice_stop), stop_sensitive);
     ui.state = original_state;
     show_page(original_page);
     ui.callback = callback;
@@ -193,7 +193,7 @@ gboolean command_forwarding_self_test(void) {
     void *context = ui.context;
     gint state = ui.state, page = ui.page;
     gboolean sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window)), closing = ui.closing;
-    gboolean stop_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice_stop));
+    gboolean stop_sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice.voice_stop));
     GtkWindow *window = ui.window;
     ActionShortcutCapture capture = { 0 };
     ui.callback = action_shortcut_capture;
@@ -222,7 +222,7 @@ gboolean command_forwarding_self_test(void) {
         capture.calls == 2;
     ui.closing = FALSE;
     ui.state = JSTI_STATE_IDLE;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), TRUE);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice.voice_stop), TRUE);
     for (guint index = 0; index < G_N_ELEMENTS(controls); ++index) {
         capture = (ActionShortcutCapture){ 0 };
         gint run = controls[index].run, slot = controls[index].slot;
@@ -243,9 +243,9 @@ gboolean command_forwarding_self_test(void) {
             ui.state = JSTI_STATE_IDLE;
         }
     }
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), FALSE);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice.voice_stop), FALSE);
     okay = okay && forward_window_command(3, 0, TRUE) == 3;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_sensitive);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice.voice_stop), stop_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
     ui.closing = closing;
     ui.state = state;
@@ -363,7 +363,7 @@ gboolean command_process_self_test(char *error, size_t capacity) {
     gint state = ui.state, page = ui.page;
     gboolean closing = ui.closing, sensitive = gtk_widget_get_sensitive(GTK_WIDGET(ui.window));
     gboolean visible = gtk_widget_get_visible(GTK_WIDGET(ui.window));
-    gboolean stop_enabled = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice_stop));
+    gboolean stop_enabled = gtk_widget_get_sensitive(GTK_WIDGET(ui.voice.voice_stop));
     ActionShortcutCapture capture = { 0 };
     ui.callback = action_shortcut_capture;
     ui.context = &capture;
@@ -455,7 +455,7 @@ gboolean command_process_self_test(char *error, size_t capacity) {
     refresh_actions();
     ui.callback = callback;
     ui.context = callback_context;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice_stop), stop_enabled);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice.voice_stop), stop_enabled);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), sensitive);
     gtk_widget_set_visible(GTK_WIDGET(ui.window), visible);
     GDir *contents = g_dir_open(directory, 0, &failure);

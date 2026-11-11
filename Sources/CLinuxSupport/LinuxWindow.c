@@ -76,17 +76,17 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     ui.closing = TRUE;
     escape_publish(&escape_policy, -1, -1, TRUE);
     retire_migration_restore();
-    if (ui.backup_chooser != NULL) g_cancellable_cancel(ui.backup_chooser);
-    g_clear_object(&ui.backup_chooser);
-    if (ui.location_chooser != NULL) g_cancellable_cancel(ui.location_chooser);
-    g_clear_object(&ui.location_chooser);
+    if (ui.storage.backup_chooser != NULL) g_cancellable_cancel(ui.storage.backup_chooser);
+    g_clear_object(&ui.storage.backup_chooser);
+    if (ui.storage.location_chooser != NULL) g_cancellable_cancel(ui.storage.location_chooser);
+    g_clear_object(&ui.storage.location_chooser);
     g_clear_handle_id(&ui.state_announcement, g_source_remove);
     jsti_hud_destroy();
     jsti_tray_stop();
     emit(JSTI_EVENT_CLOSING, "", 0);
     close_posts();
-    if (ui.model_catalog != NULL) { models_free(ui.model_catalog); ui.model_catalog = NULL; }
-    g_clear_pointer(&ui.all_history_ids, g_free);
+    if (ui.models.model_catalog != NULL) { models_free(ui.models.model_catalog); ui.models.model_catalog = NULL; }
+    g_clear_pointer(&ui.history_page.all_history_ids, g_free);
     return FALSE;
 }
 
@@ -144,11 +144,11 @@ static void build_window(void) {
     GtkWidget *header = adw_header_bar_new();
     ui.title = ADW_WINDOW_TITLE(adw_window_title_new("Dashboard", ""));
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), GTK_WIDGET(ui.title));
-    ui.import_button = GTK_BUTTON(gtk_button_new_from_icon_name("document-open-symbolic"));
-    gtk_widget_set_tooltip_text(GTK_WIDGET(ui.import_button), "Import audio…");
-    gtk_accessible_update_property(GTK_ACCESSIBLE(ui.import_button), GTK_ACCESSIBLE_PROPERTY_LABEL, "Import audio", -1);
-    g_signal_connect(ui.import_button, "clicked", G_CALLBACK(on_import), NULL);
-    adw_header_bar_pack_start(ADW_HEADER_BAR(header), GTK_WIDGET(ui.import_button));
+    ui.history_page.import_button = GTK_BUTTON(gtk_button_new_from_icon_name("document-open-symbolic"));
+    gtk_widget_set_tooltip_text(GTK_WIDGET(ui.history_page.import_button), "Import audio…");
+    gtk_accessible_update_property(GTK_ACCESSIBLE(ui.history_page.import_button), GTK_ACCESSIBLE_PROPERTY_LABEL, "Import audio", -1);
+    g_signal_connect(ui.history_page.import_button, "clicked", G_CALLBACK(on_import), NULL);
+    adw_header_bar_pack_start(ADW_HEADER_BAR(header), GTK_WIDGET(ui.history_page.import_button));
     ui.header_record = GTK_BUTTON(gtk_button_new());
     GtkWidget *record_content = adw_button_content_new();
     adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(record_content), "audio-input-microphone-symbolic");
@@ -162,13 +162,13 @@ static void build_window(void) {
     GtkWidget *statusbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(statusbar, "jsti-statusbar");
     /* The status role lets screen readers and agents find the app's current state. */
-    ui.status = GTK_LABEL(g_object_new(GTK_TYPE_LABEL, "label", "Starting…",
+    ui.dashboard.status = GTK_LABEL(g_object_new(GTK_TYPE_LABEL, "label", "Starting…",
                                        "accessible-role", GTK_ACCESSIBLE_ROLE_STATUS, NULL));
-    gtk_label_set_wrap(ui.status, TRUE);
-    gtk_label_set_xalign(ui.status, 0);
-    gtk_label_set_selectable(ui.status, TRUE);
-    gtk_widget_set_hexpand(GTK_WIDGET(ui.status), TRUE);
-    gtk_box_append(GTK_BOX(statusbar), GTK_WIDGET(ui.status));
+    gtk_label_set_wrap(ui.dashboard.status, TRUE);
+    gtk_label_set_xalign(ui.dashboard.status, 0);
+    gtk_label_set_selectable(ui.dashboard.status, TRUE);
+    gtk_widget_set_hexpand(GTK_WIDGET(ui.dashboard.status), TRUE);
+    gtk_box_append(GTK_BOX(statusbar), GTK_WIDGET(ui.dashboard.status));
     adw_toolbar_view_add_bottom_bar(ADW_TOOLBAR_VIEW(content), statusbar);
 
     ui.split = ADW_NAVIGATION_SPLIT_VIEW(adw_navigation_split_view_new());
@@ -283,7 +283,7 @@ int32_t jsti_window_run(
     ui.callback = callback;
     ui.context = context;
     ui.flags = flags;
-    ui.presented_variant = -1;
+    ui.history_page.presented_variant = -1;
     initial_models = (RunModels){ .rows = models, .count = model_count, .selected = selected_model };
     GSimpleAction *toggle = g_simple_action_new("toggle-recording", NULL);
     g_signal_connect(toggle, "activate", G_CALLBACK(on_toggle_action), NULL);
@@ -317,9 +317,9 @@ int32_t jsti_window_run(
     configuration.recovery_group = NULL;
     configuration.recovery_row = NULL;
     configuration.recovery_count = 0;
-    g_clear_pointer(&ui.polish_catalog, g_ptr_array_unref);
-    g_clear_pointer(&ui.polish_slots, g_array_unref);
-    g_clear_pointer(&ui.polish_local_notice, g_free);
+    g_clear_pointer(&ui.polish.polish_catalog, g_ptr_array_unref);
+    g_clear_pointer(&ui.polish.polish_slots, g_array_unref);
+    g_clear_pointer(&ui.polish.polish_local_notice, g_free);
     g_clear_object(&ui.application);
     ui.window = NULL;
     jsti_app_icon_clear();

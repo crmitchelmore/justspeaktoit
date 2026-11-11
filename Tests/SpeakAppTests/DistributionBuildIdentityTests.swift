@@ -112,7 +112,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         // Besides its own sources, iOS compiles only the Mac's two non-UI Sentry
         // files, so both platforms share one crash-reporting contract.
         let sharedSentryFiles = [
-            "\"Sources/SpeakApp/SentryManager.swift\"", "\"Sources/SpeakApp/SentryEventScrubber.swift\""
+            "\"Sources/SpeakApp/Analytics/SentryManager.swift\"", "\"Sources/SpeakApp/Analytics/SentryEventScrubber.swift\""
         ]
         XCTAssertTrue(iosTarget.contains("\"SpeakiOSApp/**\""))
         XCTAssertTrue(iosTarget.contains("dependencies: iosAppDependencies"))

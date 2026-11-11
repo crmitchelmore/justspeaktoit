@@ -455,8 +455,8 @@ let iosAppTarget: Target = .target(
     // its crash handler and session tracking do not fit their memory limits.
     sources: [
         "SpeakiOSApp/**",
-        "Sources/SpeakApp/SentryManager.swift",
-        "Sources/SpeakApp/SentryEventScrubber.swift"
+        "Sources/SpeakApp/Analytics/SentryManager.swift",
+        "Sources/SpeakApp/Analytics/SentryEventScrubber.swift"
     ],
     resources: [
         "SpeakiOSApp/Assets.xcassets",

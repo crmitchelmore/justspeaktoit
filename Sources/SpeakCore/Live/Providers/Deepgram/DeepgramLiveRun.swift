@@ -25,4 +25,19 @@ final class DeepgramLiveRun: @unchecked Sendable {
             sampleRate: sampleRate, seconds: StreamingAudioPreroll.defaultBudgetSeconds
         )
     }
+
+    /// Folds a final into the transcript; for Flux, tracks the turn still open.
+    func record(_ text: String, isFinal: Bool, flux: Bool) {
+        if isFinal { accumulated.append(final: text) }
+        if flux { openFluxTurn = isFinal ? nil : text }
+    }
+
+    /// Folds a Flux turn left open at close into the finals, once.
+    func settledTranscript() -> String? {
+        if let open = openFluxTurn {
+            openFluxTurn = nil
+            accumulated.append(final: open)
+        }
+        return accumulated.transcriptOrNil
+    }
 }

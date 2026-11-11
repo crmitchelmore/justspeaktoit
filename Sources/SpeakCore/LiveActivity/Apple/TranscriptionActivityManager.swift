@@ -3,9 +3,6 @@ import ActivityKit
 import Foundation
 import os.log
 
-// Keep compatible public entry points beside the run ownership guards they share.
-// swiftlint:disable file_length
-
 /// Manages Live Activity lifecycle for transcription sessions.
 ///
 /// Every piece of asynchronous work — the observer, throttled updates, the
@@ -326,12 +323,11 @@ extension TranscriptionActivityManager {
         completionMessage: String? = nil,
         resultCompletionID: String = ""
     ) {
-        completeActivity(
+        complete(TranscriptionActivityCompletion(
             finalWordCount: finalWordCount, duration: duration, keepPrimed: keepPrimed,
-            primedMessage: primedMessage, primedStatus: primedStatus, completionOutcome: completionOutcome,
-            resultPreview: resultPreview, completionMessage: completionMessage, resultCompletionID: resultCompletionID,
-            owner: nil
-        )
+            primedMessage: primedMessage, primedStatus: primedStatus, outcome: completionOutcome,
+            resultPreview: resultPreview, message: completionMessage, resultCompletionID: resultCompletionID
+        ), owner: nil)
     }
 
     /// Associates only the retained active result surface with an in-process owner.
@@ -348,26 +344,14 @@ extension TranscriptionActivityManager {
         resultCompletionID: String = "",
         surfaceOwnerID: UUID
     ) {
-        completeActivity(
+        complete(TranscriptionActivityCompletion(
             finalWordCount: finalWordCount, duration: duration, keepPrimed: keepPrimed,
-            primedMessage: primedMessage, primedStatus: primedStatus, completionOutcome: completionOutcome,
-            resultPreview: resultPreview, completionMessage: completionMessage, resultCompletionID: resultCompletionID,
-            owner: surfaceOwnerID
-        )
+            primedMessage: primedMessage, primedStatus: primedStatus, outcome: completionOutcome,
+            resultPreview: resultPreview, message: completionMessage, resultCompletionID: resultCompletionID
+        ), owner: surfaceOwnerID)
     }
 
-    private func completeActivity(
-        finalWordCount: Int,
-        duration: Int,
-        keepPrimed: Bool = false,
-        primedMessage: String = "Ready for the Action Button",
-        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
-        completionOutcome: TranscriptionCompletionOutcome,
-        resultPreview: String = "",
-        completionMessage: String? = nil,
-        resultCompletionID: String = "",
-        owner: UUID?
-    ) {
+    private func complete(_ completion: TranscriptionActivityCompletion, owner: UUID?) {
         guard let activity else { return }
         let provider = (latestState ?? activity.transcriptionState).provider
         beginRun()
@@ -382,15 +366,15 @@ extension TranscriptionActivityManager {
             // headline still comes from `completionOutcome`, so a richer
             // snippet can never turn into a delivery claim the lane did not
             // earn (issue #945).
-            lastSnippet: completionMessage ?? completionOutcome.message,
-            wordCount: finalWordCount,
-            duration: duration,
+            lastSnippet: completion.message ?? completion.outcome.message,
+            wordCount: completion.finalWordCount,
+            duration: completion.duration,
             provider: provider,
-            completionOutcome: completionOutcome,
-            resultPreview: resultPreview,
-            resultCompletionID: resultCompletionID
+            completionOutcome: completion.outcome,
+            resultPreview: completion.resultPreview,
+            resultCompletionID: completion.resultCompletionID
         )
-        guard keepPrimed, activity.supportsUpdateTimestamps || inFlightUpdates[activity.id] == nil else {
+        guard completion.keepPrimed, activity.supportsUpdateTimestamps || inFlightUpdates[activity.id] == nil else {
             retire(activity, finalState: finalState)
             return
         }
@@ -406,12 +390,11 @@ extension TranscriptionActivityManager {
             do { try await sleep(Self.resultRowDuration) } catch { return }
             guard !Task.isCancelled, let self, self.isCurrent(activity, runID: completionRun) else { return }
             let idleState = TranscriptionActivityAttributes.ContentState(
-                status: primedStatus, lastSnippet: primedMessage, provider: finalState.provider
+                status: completion.primedStatus, lastSnippet: completion.primedMessage, provider: finalState.provider
             )
             self.completedSurfaceOwner = nil
             self.enqueueUpdate(idleState, activity: activity, runID: completionRun)
         }
     }
-
 }
 #endif

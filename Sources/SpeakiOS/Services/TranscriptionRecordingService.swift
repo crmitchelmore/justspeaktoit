@@ -183,13 +183,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Local run-scoped startup timing (issue #972). Measurement only: it adds
     /// no network call, no vendor reporting and no behaviour change.
     var diagnostics = StartupDiagnostics()
-    /// The bounds this run is held to (issue #993). Every rule lives in
-    /// SpeakCore's `CaptureWatchdogMonitor`; see
+    /// The one run-owned handle for this run's watchdog work (issue #993):
+    /// identity, clock, bounds and tick. Every rule lives in SpeakCore; see
     /// `TranscriptionRecordingService+Watchdogs.swift` for the wiring.
-    var watchdog = CaptureWatchdogMonitor()
-    var watchdogTask: Task<Void, Never>?
-    var watchdogRunID: UUID?
-    var watchdogStartedAt: Date?
+    let watchdog = CaptureWatchdogHandle()
     /// The armed silence end-pointing monitor's poll loop (issue #1012), or
     /// `nil` when this capture runs until somebody stops it. See
     /// `TranscriptionRecordingService+EndPointing.swift`.

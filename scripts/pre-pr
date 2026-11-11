@@ -365,7 +365,7 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
     if apple:
         # Lint: exactly the ci.yml Lint job (whole-repo strict SwiftLint, accessibility, tooling pins and tests).
         checks.append(Check('ci-lint', 'ci-lint', 'CI Lint job (make ci-lint)', ['make', 'ci-lint'],
-                            forbid_drift=('Tooling/Package.resolved',)))
+                            env={'JSTI_LINT_BASELINE_BASE': base}, forbid_drift=('Tooling/Package.resolved',)))
         if not sys.platform.startswith('linux') and linux != 'skip':
             # CI runs Lint on Ubuntu, where Apple-only tooling tests skip and others behave differently.
             checks.append(Check('ci-lint-linux', 'ci-lint', 'CI Lint job on Ubuntu (make ci-lint), remote',

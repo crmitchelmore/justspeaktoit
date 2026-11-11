@@ -94,8 +94,9 @@ lint: ## Run strict SwiftLint (isolated Tooling graph) against the checked-in de
 
 # CI parity: ci.yml's Lint job and scripts/pre-pr both run exactly this target.
 .PHONY: ci-lint
-ci-lint: ## Run the CI Lint job: whole-repo strict SwiftLint, accessibility, tooling pins and tooling tests
+ci-lint: ## Run the CI Lint job: whole-repo strict SwiftLint, accessibility, baseline ratchet, tooling pins and tests
 	$(MAKE) lint
+	python3 scripts/ci/lint-baseline-ratchet.py
 	git diff --exit-code Tooling/Package.resolved
 	$(MAKE) test-tooling
 

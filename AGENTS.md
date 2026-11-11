@@ -219,7 +219,9 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
 `--full` to run every macOS unit-test target.
 
 - **Lint:** `make ci-lint`, the target ci.yml's Lint job runs. That is
-  whole-repo strict SwiftLint against the baseline, accessibility,
+  whole-repo strict SwiftLint against the baseline, accessibility, a ratchet
+  that fails when `.swiftlint-baseline.json` gains entries against
+  `origin/main` (`scripts/ci/lint-baseline-ratchet.py`),
   `Tooling/Package.resolved` drift and `make test-tooling`. It runs unless
   every changed file is docs, website, Android or Workers.
 - **Portable Swift (Linux):** `scripts/ci-portable-linux.sh` in the CI image

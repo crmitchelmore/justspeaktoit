@@ -9,6 +9,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -125,6 +126,11 @@ internal class CloudCapture(
                 }
                 try {
                     withContext(io) { block() }
+                } catch (e: Exception) {
+                    // The aborted call fails with its own error (a closed socket reads as a network
+                    // error), which would otherwise hide the deadline or cancellation that caused it.
+                    ensureActive()
+                    throw e
                 } finally {
                     watchdog.cancel()
                 }

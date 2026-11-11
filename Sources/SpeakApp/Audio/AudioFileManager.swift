@@ -8,9 +8,9 @@ import os.log
 /// recordings, and serves the recordings list. One recording at a time, and
 /// each flow may only stop or cancel the recording it owns (issue #673).
 actor AudioFileManager {
-  private let appSettings: AppSettings
-  private let permissionsManager: PermissionsManager
-  private let audioDeviceManager: AudioInputDeviceManager
+  let appSettings: AppSettings
+  let permissionsManager: PermissionsManager
+  let audioDeviceManager: AudioInputDeviceManager
   private let captureSource: (any RecordingCaptureSource)?
   private var captureSourceGeneration: UUID?
   private var sourceTeardownCount = 0
@@ -87,23 +87,6 @@ actor AudioFileManager {
 
   // MARK: - Recording
 
-  /// Reads the main-actor state a capture start needs, synchronously on the
-  /// main actor, so `startRecording(preflight:)` can open the microphone
-  /// without waiting for the main thread. Begins the preferred-input session
-  /// only when the microphone is already granted; otherwise the start falls
-  /// back to the authoritative request path.
-  @MainActor
-  func makeStartPreflight() async -> CaptureStartPreflight {
-    permissionsManager.refresh(.microphone, ifOlderThan: Self.microphoneStatusMaxAge)
-    let granted = permissionsManager.status(for: .microphone).isGranted
-    let inputSession = granted ? await audioDeviceManager.beginUsingPreferredInput() : nil
-    return CaptureStartPreflight(
-      microphoneGranted: granted,
-      recordingsDirectory: appSettings.recordingsDirectory,
-      inputSession: inputSession
-    )
-  }
-
   /// Starts capture, claiming the staged recorder when `warmContext` matches
   /// the one it was prepared for. On the warm path the only work left on the
   /// hotkey→capture path is the input-device session and `record()` itself.
@@ -164,54 +147,6 @@ actor AudioFileManager {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw AudioFileManagerError.failedToCreateRecorder
     }
-  }
-
-  /// Throws unless the microphone may be used, asking only when the status is
-  /// not already granted. Returns whether it was granted without asking, the
-  /// only case in which a preflight input session is used.
-  private func authoriseMicrophone(_ preflight: CaptureStartPreflight?) async throws -> Bool {
-    let permissionGranted: Bool
-    if let preflight {
-      permissionGranted = preflight.microphoneGranted
-    } else {
-      permissionGranted = await MainActor.run {
-        // Reuses the authoritative query made at hotkey key-down when it is
-        // fresh, keeping 15-35 ms of TCC off the trigger-to-capture path (#611).
-        permissionsManager.refresh(.microphone, ifOlderThan: Self.microphoneStatusMaxAge)
-        return permissionsManager.status(for: .microphone).isGranted
-      }
-    }
-    guard !permissionGranted else { return true }
-    await endPreflightInput(preflight)
-    self.invalidateWarmRecorder()
-    let requested = await permissionsManager.request(.microphone)
-    guard requested.isGranted else {
-      throw AudioFileManagerError.microphonePermissionMissing
-    }
-    return false
-  }
-
-  /// The claimed staged recorder, or a cold one built in the recordings directory.
-  private func prepareRecorder(
-    _ claimed: CaptureWarmStage.StagedRecorder?,
-    directory preflightDirectory: URL?
-  ) async throws -> (AudioRecorderFactory.PreparedRecorder, URL) {
-    if let claimed {
-      return (claimed.prepared, claimed.destination.deletingLastPathComponent())
-    }
-    let directory: URL
-    if let preflightDirectory {
-      directory = preflightDirectory
-    } else {
-      directory = await MainActor.run { appSettings.recordingsDirectory }
-    }
-    return (try AudioRecorderFactory.makeRecorder(in: directory), directory)
-  }
-
-  /// Ends the input session a preflight began for a start that will not use it.
-  private func endPreflightInput(_ preflight: CaptureStartPreflight?) async {
-    guard let session = preflight?.inputSession else { return }
-    await audioDeviceManager.endUsingPreferredInput(session: session)
   }
 
   /// Publishes a recorder that proved it captures as the active recording.

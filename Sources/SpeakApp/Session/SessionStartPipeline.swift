@@ -57,12 +57,12 @@ final class SessionStartPipeline {
   private(set) var isStarting = false
   weak var host: SessionStartHost?
 
-  private let settings: AppSettings
+  let settings: AppSettings
   private let capture: SessionCaptureServices
   private let transcription: TranscriptionManager
   private let postProcessing: PostProcessingManager
-  private let hud: HUDManager
-  private let owners: Owners
+  let hud: HUDManager
+  let owners: Owners
   private let logger = SpeakLogger.logger(category: "SessionStartPipeline")
 
   init(
@@ -176,26 +176,12 @@ final class SessionStartPipeline {
         // beside the primer's open microphone.
         await owners.keyPressPrimer.closeBeforeStart(primedInput)
       }
-      let showsHUD = showsRecordingHUD(for: request.trigger)
-      // The panel renders on the main run loop, which the capture start used to
-      // wait behind (#611). Show it up front only when a slow input-node build
-      // needs covering; otherwise it renders while the recorder opens.
-      let showsHUDBeforeInputBuild = showsHUD
-        && StartingHUDTiming.presentsBeforeInputBuild(
-          buildsInputNode: prepareStream != nil, hasPrimedInput: request.primedInput != nil
-        )
-      if showsHUDBeforeInputBuild {
-        presentStartingHUD()
-      }
+      let hudDuringStart = beginStartingHUD(for: request, buildsInputNode: prepareStream != nil)
       let sequencer = RecordingStartSequencer(
         isSessionCurrent: { [weak host] in host?.activeSession === session },
         prepareStream: prepareStream,
         discardPreparedStream: { await liveInputPreparation.finish(startFailed: true) },
-        startCapture: makeStartCaptureStep(
-          for: session, warmContext: warmContext,
-          hud: HUDDuringStart(shows: showsHUD, presentsWhileOpening: showsHUD && !showsHUDBeforeInputBuild),
-          host: host
-        ),
+        startCapture: makeStartCaptureStep(for: session, warmContext: warmContext, hud: hudDuringStart, host: host),
         discardCapture: { [weak self] in await self?.discardStartedCapture() },
         startStream: startStream,
         discardStream: { [transcription] in transcription.cancelLiveTranscription() },
@@ -227,33 +213,6 @@ final class SessionStartPipeline {
       host.failStartedSession(message: error.localizedDescription)
       return .rejected(HandsFreeDictationMachine.Failure(error))
     }
-  }
-
-  /// Whether this session shows the HUD.
-  private func showsRecordingHUD(for trigger: SessionTriggerSource) -> Bool {
-    // A hands-free capture always moves the HUD to the recording pane, even
-    // when the user hides the HUD for their own sessions: the armed pane
-    // otherwise claims the app only listens while it in fact records.
-    // Showing that the microphone captures is a privacy duty, not a taste.
-    settings.showHUDDuringSessions || trigger == .handsFree
-  }
-
-  /// Shows the HUD as "Getting ready"; its clock starts only when the
-  /// microphone delivers real audio, never while words can't be heard. Uses
-  /// the cached microphone status: each TCC query costs 13-35 ms before
-  /// capture (#611), and the capture start makes the authoritative check; the
-  /// HUD health is refreshed once capture is live.
-  private func presentStartingHUD() {
-    hud.updateCaptureHealth(owners.captureHealth.snapshot())
-    hud.beginRecording(profileName: owners.profileApplier.activeProfileName, awaitingAudio: true)
-  }
-
-  /// How the capture step treats the HUD.
-  private struct HUDDuringStart {
-    /// The session shows the HUD, so its health is refreshed once capture is live.
-    let shows: Bool
-    /// The HUD is presented while the recorder opens rather than before.
-    let presentsWhileOpening: Bool
   }
 
   /// The sequencer step that opens the live stream, nil for batch modes.

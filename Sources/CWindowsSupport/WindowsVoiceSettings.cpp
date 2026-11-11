@@ -154,23 +154,17 @@ void apply(HWND window, Dialog &dialog) {
     close(window);
 }
 
+constexpr jsti::chrome::DialogFrame dialogFrame{
+    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, voiceID, IDOK};
+
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT themed = 0;
-    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
+    LRESULT handled = 0;
+    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
+                                            handled)) return handled;
     switch (message) {
     case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
-    case WM_GETMINMAXINFO:
-        jsti::chrome::minimumTrackSize(window, lparam, minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle);
-        return 0;
-    case WM_SIZE: layout(window); return 0;
-    case WM_DPICHANGED: {
-        jsti::chrome::applySuggestedBounds(window, lparam);
-        refreshFont(window, *dialog); layout(window); return 0;
-    }
-    case WM_ACTIVATE: jsti::chrome::rememberFocus(window, wparam, dialog->focus, voiceID); return 0;
-    case DM_GETDEFID: return MAKELRESULT(IDOK, DC_HASDEFID);
     case refreshPickerMessage: {
         Configuration updated;
         { std::lock_guard<std::mutex> lock(configurationMutex); updated = configuration; }
@@ -267,18 +261,7 @@ void jsti_show_voice_settings(HWND owner) {
         return;
     }
     { std::lock_guard<std::mutex> lock(configurationMutex); activeDialog = window; }
-    EnableWindow(owner, FALSE);
-    ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, voiceID));
-    MSG message{};
-    BOOL result = 1;
-    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    }
-    if (IsWindow(window)) close(window);
-    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
-    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
-    else if (result < 0) jsti_window_update(jsti::systemError("Reading voice output messages").c_str(), nullptr, -1);
+    jsti::chrome::runModalDialog(owner, window, voiceID, close, "voice output");
 }
 
 int32_t jsti_window_set_voice_picker(const char *const *names, const char *const *ids,

@@ -228,11 +228,15 @@ void command(HWND window, Dialog &dialog, int id) {
     }
 }
 
+constexpr jsti::chrome::DialogFrame dialogFrame{
+    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, toggleID, IDCANCEL};
+
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT themed = 0;
-    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
+    LRESULT handled = 0;
+    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
+                                            handled)) return handled;
     switch (message) {
     case WM_CREATE:
         if (!createControls(window, *dialog)) return -1;
@@ -241,16 +245,6 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case WM_TIMER:
         if (wparam == refreshTimer) refresh(window, *dialog);
         return 0;
-    case WM_GETMINMAXINFO:
-        jsti::chrome::minimumTrackSize(window, lparam, minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle);
-        return 0;
-    case WM_SIZE: layout(window); return 0;
-    case WM_DPICHANGED: {
-        jsti::chrome::applySuggestedBounds(window, lparam);
-        refreshFont(window, *dialog); layout(window); return 0;
-    }
-    case WM_ACTIVATE: jsti::chrome::rememberFocus(window, wparam, dialog->focus, toggleID); return 0;
-    case DM_GETDEFID: return MAKELRESULT(IDCANCEL, DC_HASDEFID);
     case WM_COMMAND:
         if (HIWORD(wparam) == BN_CLICKED) command(window, *dialog, LOWORD(wparam));
         return 0;
@@ -308,18 +302,7 @@ void jsti_show_automation_settings(HWND owner, bool (*enabled)(), void (*toggle)
         jsti_window_update(jsti::systemError("Opening CLI and MCP setup").c_str(), nullptr, -1);
         return;
     }
-    EnableWindow(owner, FALSE);
-    ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, toggleID));
-    MSG message{};
-    BOOL result = 1;
-    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    }
-    if (IsWindow(window)) close(window);
-    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
-    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
-    else if (result < 0) jsti_window_update(jsti::systemError("Reading CLI and MCP setup messages").c_str(), nullptr, -1);
+    jsti::chrome::runModalDialog(owner, window, toggleID, close, "CLI and MCP setup");
 }
 
 int jsti_window_set_automation_details(const char *pipe_name, const char *cli_path, const char *usage,

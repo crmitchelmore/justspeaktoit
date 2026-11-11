@@ -1,4 +1,5 @@
 #include "WindowsWindowChrome.hpp"
+#include "include/CWindowsSupport.h"
 
 #include <commctrl.h>
 #include <dwmapi.h>
@@ -235,6 +236,26 @@ HWND createOwnedDialog(HWND owner, const wchar_t *className, WNDPROC procedure, 
 void rememberFocus(HWND window, WPARAM wparam, HWND &focus, int fallback) {
     if (LOWORD(wparam) == WA_INACTIVE) { focus = GetFocus(); return; }
     SetFocus(focus && IsChild(window, focus) ? focus : GetDlgItem(window, fallback));
+}
+
+void runModalDialog(HWND owner, HWND window, int focusID, void (*close)(HWND), const char *what,
+                    void (*shown)(HWND, void *), void *context) {
+    EnableWindow(owner, FALSE);
+    ShowWindow(window, SW_SHOW);
+    SetFocus(GetDlgItem(window, focusID));
+    if (shown) shown(window, context);
+    MSG message{};
+    BOOL result = 1;
+    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
+    }
+    if (IsWindow(window)) close(window);
+    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
+    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
+    else if (result < 0) {
+        const std::string operation = std::string("Reading ") + what + " messages";
+        jsti_window_update(jsti::systemError(operation.c_str()).c_str(), nullptr, -1);
+    }
 }
 
 bool dialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT &result) {

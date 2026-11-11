@@ -13,13 +13,10 @@ import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.RecorderFactory
-import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
 import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.history.AtomicHistoryFile
-import com.justspeaktoit.android.history.HistoryAudio
 import com.justspeaktoit.android.history.HistoryEntry
-import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.security.KeystoreSecretStore
@@ -29,7 +26,6 @@ import com.justspeaktoit.android.settings.DictationPreferences
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -43,9 +39,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import java.io.InputStream
-import java.util.concurrent.atomic.AtomicReference
-import java.util.UUID
 import java.security.GeneralSecurityException
 import java.security.ProviderException
 import java.util.Locale
@@ -122,9 +115,11 @@ internal data class DictationTimings(
 )
 
 /**
- * Orchestrates dictation: availability, recognition, Cloud capture and upload, cleanup and History.
- * Every collaborator is injected ([Factory] wires the production ones), and all calls run on the
- * main thread of [scope]; blocking work moves to [io] through [CloudCapture].
+ * Orchestrates dictation: availability, recognition, Cloud capture and upload, and cleanup. History
+ * writes belong to [DictationHistory], retries of kept audio to [HistoryRetry] and shared-audio
+ * copies to [SharedAudioImporter]. Every collaborator is injected ([Factory] wires the production
+ * ones), and all calls run on the main thread of [scope]; blocking work moves to [io] through
+ * [CloudCapture].
  */
 class DictationViewModel internal constructor(
     private val engine: SpeechEngine,
@@ -132,7 +127,7 @@ class DictationViewModel internal constructor(
     private val cloud: CloudService,
     private val secrets: SecretStore,
     private val prefs: DictationPreferences,
-    private val history: HistoryStore,
+    history: HistoryStore,
     private val sharedAudioSource: SharedAudioSource,
     private val cacheDir: File,
     private val recordingsDir: File,
@@ -142,10 +137,8 @@ class DictationViewModel internal constructor(
     private val timings: DictationTimings = DictationTimings(),
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     private val capture = CloudCapture(recorders, cacheDir, io)
-
-    // One thread owns the history file, so writes are ordered without locks.
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val historyDispatcher = io.limitedParallelism(1)
+    private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
+    private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs)
 
     private val _state = MutableStateFlow(
         DictationUiState(
@@ -157,15 +150,12 @@ class DictationViewModel internal constructor(
         ),
     )
 
+    private val historyOwner = DictationHistory(history, recordingsDir, scope, io) { entries, failed ->
+        _state.update { it.copy(history = entries, historyError = failed) }
+    }
+
     init {
-        val retention = prefs.retention
-        updateHistory {
-            history.load(retention).also { entries ->
-                // Audio no entry refers to (for example after a crash mid-save) is never shown, so delete it.
-                val stored = recordingsDir.listFiles().orEmpty().map { it.absolutePath }
-                HistoryAudio.orphans(stored, entries).forEach { File(it).delete() }
-            }
-        }
+        historyOwner.load(prefs.retention)
     }
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
 
@@ -262,7 +252,12 @@ class DictationViewModel internal constructor(
             val event = try {
                 val key = withContext(io) { secrets.read(model.provider.credentialId) }
                     ?: throw CloudException(DictationFailure.MissingKey, "No key")
-                val format = importSharedAudio(uri, mimeType, file)
+                val format = sharedAudioImporter.import(
+                    mimeType,
+                    file,
+                    providerType = { sharedAudioSource.type(uri) },
+                    open = { sharedAudioSource.open(uri) },
+                )
                 DictationEvent.Final(
                     capture.call(timings.transcribeMs) { call ->
                         cloud.transcribe(model, key, file, language, call, format)
@@ -286,43 +281,6 @@ class DictationViewModel internal constructor(
             }
             ensureActive()
             onEngineEvent(event)
-        }
-    }
-
-    /**
-     * Resolves the format and copies at most [SharedAudio.MAX_BYTES] off the main thread, within a
-     * deadline. Cancelling closes the provider stream, so a stalled sender cannot hold a worker.
-     */
-    private suspend fun importSharedAudio(uri: Uri, declaredType: String?, target: File): SharedAudio.Format {
-        val stream = AtomicReference<InputStream?>(null)
-        val closeStream: () -> Unit = { runCatching { stream.get()?.close() } }
-        return capture.bounded(timings.importMs, DictationFailure.Audio, closeStream) {
-            // Senders often declare a generic type such as audio/*; the provider's type is more precise.
-            val format = SharedAudio.format(declaredType) ?: SharedAudio.format(sharedAudioSource.type(uri))
-                ?: throw CloudException(DictationFailure.UnsupportedAudio, "Unsupported audio")
-            val input = sharedAudioSource.open(uri) ?: throw IOException("Unreadable audio")
-            stream.set(input)
-            copyLimited(input, target)
-            format
-        }
-    }
-
-    /** Fails early rather than uploading a file the provider would reject. */
-    private fun copyLimited(input: InputStream, target: File) {
-        input.use { source ->
-            target.outputStream().use { out ->
-                val buffer = ByteArray(64 * 1024)
-                var total = 0L
-                while (true) {
-                    val read = source.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    if (total > SharedAudio.MAX_BYTES) {
-                        throw CloudException(DictationFailure.AudioTooLarge, "Audio too large")
-                    }
-                    out.write(buffer, 0, read)
-                }
-            }
         }
     }
 
@@ -435,71 +393,24 @@ class DictationViewModel internal constructor(
     fun setRetention(retention: Retention) {
         prefs.retention = retention
         _state.update { it.copy(retention = retention) }
-        updateHistory { history.load(retention) }
+        historyOwner.refresh(retention)
     }
 
     fun deleteHistoryEntry(id: String) {
-        val retention = _state.value.retention
-        updateHistory { history.remove(id, retention) }
+        historyOwner.remove(id, _state.value.retention)
     }
 
-    fun clearHistory() = updateHistory { history.clear() }
+    fun clearHistory() {
+        historyOwner.clear()
+    }
 
     /** Re-reads and prunes history so the retention cutoff holds while the app stays open. */
     fun refreshHistory() {
-        val retention = _state.value.retention
-        updateHistory { history.load(retention) }
+        historyOwner.refresh(_state.value.retention)
     }
-
-    private fun updateHistory(change: () -> List<HistoryEntry>) {
-        scope.launch { applyHistory(change) }
-    }
-
-    private suspend fun applyHistory(change: () -> List<HistoryEntry>) {
-        val (entries, failed) = withContext(historyDispatcher) {
-            try {
-                change() to false
-            } catch (e: IOException) {
-                history.cached to true
-            }
-        }
-        _state.update { it.copy(history = entries, historyError = failed) }
-    }
-
-    /** The latest session's history entry, so a later cleanup updates it rather than adding another. */
-    private var lastEntry: HistoryEntry? = null
 
     // The model is fixed when the session starts, so later Settings changes cannot relabel it.
     private var sessionModelId: String? = null
-
-    private fun record(state: DictationState) {
-        val entry = when (state) {
-            is DictationState.Done -> entry(state.mode, HistoryStatus.Completed, state.transcript, null)
-            is DictationState.Failed -> entry(state.mode, HistoryStatus.Failed, state.unfinishedText, state.failure)
-            else -> return
-        }
-        lastEntry = entry
-        val retention = _state.value.retention
-        updateHistory { history.add(entry, retention) }
-    }
-
-    private fun recordCleanup(cleaned: String) {
-        val entry = lastEntry?.copy(text = cleaned, cleanedUp = true) ?: return
-        lastEntry = entry
-        val retention = _state.value.retention
-        updateHistory { history.replace(entry, retention) }
-    }
-
-    private fun entry(mode: RecognitionMode, status: HistoryStatus, text: String, failure: DictationFailure?) =
-        HistoryEntry(
-            id = UUID.randomUUID().toString(),
-            createdAtMs = System.currentTimeMillis(),
-            mode = mode.name,
-            model = if (mode == RecognitionMode.Cloud) sessionModelId else null,
-            status = status,
-            text = text,
-            failure = failure?.name,
-        )
 
     /**
      * Android does not let a foreground-only app keep the microphone once it leaves the screen, so
@@ -525,11 +436,7 @@ class DictationViewModel internal constructor(
     fun showOriginal() {
         val original = _state.value.originalTranscript ?: return
         val done = _state.value.dictation as? DictationState.Done ?: return
-        lastEntry?.copy(text = original, cleanedUp = false)?.let { entry ->
-            lastEntry = entry
-            val retention = _state.value.retention
-            updateHistory { history.replace(entry, retention) }
-        }
+        historyOwner.replaceSessionText(original, cleanedUp = false, _state.value.retention)
         _state.update {
             it.copy(
                 dictation = done.copy(transcript = original),
@@ -621,37 +528,7 @@ class DictationViewModel internal constructor(
                 capture.delete(file)
                 return@launch
             }
-            val id = UUID.randomUUID().toString()
-            updateHistory {
-                val kept = File(recordingsDir, "$id.wav")
-                if (!moveRecording(file, kept)) {
-                    file.delete()
-                    return@updateHistory history.cached
-                }
-                val entry = HistoryEntry(
-                    id = id,
-                    createdAtMs = System.currentTimeMillis(),
-                    mode = RecognitionMode.Cloud.name,
-                    model = modelId,
-                    status = HistoryStatus.Cancelled,
-                    text = "",
-                    audioPath = kept.absolutePath,
-                )
-                history.add(entry, retention)
-            }
-        }
-    }
-
-    private fun moveRecording(source: File, target: File): Boolean {
-        target.parentFile?.mkdirs()
-        if (source.renameTo(target)) return true
-        return try {
-            source.copyTo(target, overwrite = true)
-            source.delete()
-            true
-        } catch (e: IOException) {
-            target.delete()
-            false
+            historyOwner.keepRecording(file, modelId, retention)
         }
     }
 
@@ -663,47 +540,16 @@ class DictationViewModel internal constructor(
         val current = _state.value
         if (current.dictation.isActive || current.transcribingEntryId != null) return
         val entry = current.history.firstOrNull { it.id == id } ?: return
-        val path = entry.audioPath ?: return
+        if (entry.audioPath == null) return
         val model = current.cloudModel
         val language = current.languageTag
         _state.update { it.copy(transcribingEntryId = id) }
         scope.launch {
-            val file = File(path)
-            val updated = try {
-                if (!withContext(io) { file.isFile }) {
-                    // The audio is gone, so the entry can no longer be transcribed.
-                    entry.copy(status = HistoryStatus.Failed, failure = DictationFailure.Audio.name, audioPath = null)
-                } else {
-                    val key = withContext(io) { secrets.read(model.provider.credentialId) }
-                        ?: throw CloudException(DictationFailure.MissingKey, "No key")
-                    val text = capture.call(timings.transcribeMs) { call ->
-                        cloud.transcribe(model, key, file, language, call)
-                    }.trim()
-                    if (text.isEmpty()) {
-                        entry.copy(failure = DictationFailure.NoSpeech.name)
-                    } else {
-                        entry.copy(
-                            status = HistoryStatus.Completed,
-                            model = model.catalogId,
-                            text = text,
-                            failure = null,
-                            audioPath = null,
-                        )
-                    }
-                }
-            } catch (e: CloudException) {
-                entry.copy(failure = e.failure.name)
-            } catch (e: GeneralSecurityException) {
-                entry.copy(failure = DictationFailure.KeyUnavailable.name)
-            } catch (e: ProviderException) {
-                entry.copy(failure = DictationFailure.KeyUnavailable.name)
-            } catch (e: IOException) {
-                entry.copy(failure = DictationFailure.Audio.name)
-            }
+            val updated = historyRetry.transcribe(entry, model, language)
             val retention = _state.value.retention
             // Cleared with the updated entry, so Transcribe never reappears on the stale one.
             try {
-                applyHistory { history.replace(updated, retention) }
+                historyOwner.replace(updated, retention)
             } finally {
                 _state.update { it.copy(transcribingEntryId = null) }
             }
@@ -741,7 +587,9 @@ class DictationViewModel internal constructor(
                     )
                 }
             }
-            if (!cleaned.isNullOrBlank()) recordCleanup(cleaned)
+            if (!cleaned.isNullOrBlank()) {
+                historyOwner.replaceSessionText(cleaned, cleanedUp = true, _state.value.retention)
+            }
         }
     }
 
@@ -756,7 +604,7 @@ class DictationViewModel internal constructor(
         if (!after.isActive) _level.value = 0f
         if (!before.isActive || after.isActive) return
         // A session just ended: record it now, so it survives even if optional cleanup never finishes.
-        record(after)
+        historyOwner.recordSession(after, sessionModelId, _state.value.retention)
     }
 
     override fun onCleared() {

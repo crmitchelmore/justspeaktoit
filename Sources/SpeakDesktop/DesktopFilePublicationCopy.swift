@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 
 extension DesktopFilePublication {
     /// The native operation copies into private destination-side staging and
@@ -43,5 +44,27 @@ extension DesktopFilePublication {
         url.isFileURL && !url.hasDirectoryPath && !url.path.utf8.contains(0)
             && !url.absoluteString.lowercased().contains("%00")
             && (url.host == nil || url.host == "" || url.host?.lowercased() == "localhost")
+    }
+}
+
+extension DesktopFilePublication.Copy {
+    /// A copy through a desktop adapter's private-publish C ABI, whose status is
+    /// 0 published, 2 cancelled and 3 published without confirmed completion.
+    public static func native(
+        _ publish: @escaping @Sendable (
+            _ source: String, _ destination: String, _ error: UnsafeMutablePointer<CChar>, _ capacity: Int
+        ) -> Int32
+    ) -> Self {
+        Self { source, destination in
+            var error = [CChar](repeating: 0, count: 1_024)
+            let result = publish(source.path, destination.path, &error, error.count)
+            if result == 2 { throw CancellationError() }
+            if result == 3 {
+                throw DesktopFilePublication.CopyCompletionFailure(
+                    destination: destination, detail: String(cString: error)
+                )
+            }
+            guard result == 0 else { throw DataMigrationError.invalid(String(cString: error)) }
+        }
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 import CWindowsSupport
 
@@ -27,18 +28,6 @@ extension WindowsNative {
             settings.qualityControlsAvailable(accountInventory: accountInventory) ? 1 : 0) >= 0
     }
 
-    final class ConfigurationStrings {
-        private var owned: [UnsafeMutablePointer<CChar>] = []
-        func add(_ value: String) -> UnsafePointer<CChar> {
-            let bytes = Array(value.utf8CString)
-            let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)
-            pointer.initialize(from: bytes, count: bytes.count)
-            owned.append(pointer)
-            return UnsafePointer(pointer)
-        }
-        deinit { owned.forEach { $0.deallocate() } }
-    }
-
     static func configureConfiguration(_ holder: WindowsEventContext) async throws {
         let snapshot = try await holder.controller.nativeConfigurationEditorSnapshot()
         let preferences = snapshot.preferences
@@ -48,7 +37,7 @@ extension WindowsNative {
         holder.hotKeys.configureTiming(
             hold: preferences.number("holdThreshold"), doubleTap: preferences.number("doubleTapWindow")
         )
-        let strings = ConfigurationStrings()
+        let strings = DesktopNativeStrings()
         let rows = zip(DesktopConfiguration.fields, snapshot.entries).map { field, value in
             JSTIConfigurationField(
                 title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle
@@ -86,7 +75,7 @@ extension WindowsNative {
     }
 
     private static func configureConfigurationLayout(
-        _ preferences: DesktopConfiguration, strings: ConfigurationStrings
+        _ preferences: DesktopConfiguration, strings: DesktopNativeStrings
     ) throws {
         let density = preferences.visualDensity
         let layout = JSTIVisualDensity(
@@ -117,23 +106,7 @@ extension WindowsNative {
     static func performConfigurationAction(
         _ action: Int32, values: [String], holder: WindowsEventContext, editorID: String? = nil
     ) async throws {
-        switch action {
-        case 0: try await holder.controller.saveConfiguration(values, intent: .apply, editorID: editorID)
-        case 1: try await holder.controller.importConfiguration(path: values[0])
-        case 2: try await holder.controller.exportConfiguration(path: values[0])
-        case 3:
-            guard let selected = values.last else {
-                throw DesktopConfigurationError.invalidField("Recovered keyword selection")
-            }
-            try await holder.controller.recoverConfigurationKeywords(
-                Array(values.dropLast()), selected: selected, editorID: editorID
-            )
-        case 4, 5:
-            try await holder.controller.previewRecordingFeedback(
-                action == 4 ? .start : .stop, configurationEntries: values, editorID: editorID
-            )
-        default: throw DesktopConfigurationError.invalidField("Configuration action")
-        }
+        try await holder.controller.performConfigurationEditorAction(action, values: values, editorID: editorID)
         try await configureConfiguration(holder)
         guard configureVoiceOutput(await holder.controller.voiceOutputSettings(),
             context: Unmanaged.passUnretained(holder).toOpaque(),
@@ -181,10 +154,7 @@ func windowsConfigurationEvent(
         }
         return 0
     } catch {
-        if let buffer = errorBuffer, capacity > 0 {
-            let bytes = Array(error.localizedDescription.utf8CString.prefix(capacity - 1)) + [0]
-            bytes.withUnsafeBufferPointer { buffer.update(from: $0.baseAddress!, count: $0.count) }
-        }
+        DesktopNativeStrings.copy(error.localizedDescription, into: errorBuffer, capacity: capacity)
         return -1
     }
 }

@@ -5,10 +5,6 @@ import SpeakDesktopHost
 import SpeakLinuxPlatform
 import CLinuxSupport
 
-extension LinuxWhisperRuntime: DesktopHostLocalRuntime {
-    package var recognizer: any DesktopLocalRecognizer { LinuxWhisperRecognizer(runtime: self) }
-}
-
 // On-device transcription: the shared host owns downloads, readiness, removal
 // and recognition (DesktopHostLocalModelManagement.swift); Linux supplies
 // GChecksum, the whisper.cpp runtime beside the executable and the GTK group.
@@ -47,7 +43,7 @@ extension LinuxHostPlatform: DesktopHostLocalModelPlatform {
     package static func presentLocalModels(
         _ rows: [DesktopHostLocalModelRow], status: String, useGPU: Bool, presenter: UnsafeMutableRawPointer?
     ) {
-        let strings = LinuxWindow.Strings()
+        let strings = DesktopNativeStrings()
         let native = rows.map { row in
             JSTILocalModelRow(
                 name: strings.add(row.name), detail: strings.add(row.detail), about: strings.add(row.about),

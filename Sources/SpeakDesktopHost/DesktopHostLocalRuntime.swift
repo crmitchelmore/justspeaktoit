@@ -15,6 +15,11 @@ package protocol DesktopHostLocalRuntime: AnyObject, Sendable {
     func releaseModel(loadedFrom modelFile: URL) -> Bool
 }
 
+/// The Windows and Linux whisper.cpp runtime.
+extension DesktopNativeWhisperRuntime: DesktopHostLocalRuntime {
+    package var recognizer: any DesktopLocalRecognizer { DesktopNativeWhisperRecognizer(runtime: self) }
+}
+
 /// The controller's Local models state: running downloads, their progress and
 /// the runtime once loaded.
 package struct DesktopHostLocalModelsState<Runtime: DesktopHostLocalRuntime> {

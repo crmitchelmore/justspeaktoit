@@ -348,8 +348,8 @@ if windowsTargetBuild {
         .target(
             name: "SpeakWindowsPlatform",
             dependencies: [
-                "SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakFeedbackResources", "CWindowsSupport",
-                "CWindowsAutomation"
+                "SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakDesktopSync", "SpeakFeedbackResources",
+                "CWindowsSupport", "CWindowsAutomation"
             ]
         ),
         .executableTarget(

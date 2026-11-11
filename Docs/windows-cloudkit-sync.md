@@ -204,6 +204,8 @@ What remains:
   controller's synced-History presentation. A host supplies only
   `DesktopHostCloudSyncNative`: how the settings show state, the listener,
   the browser launch, its origin platform and where its choices live.
+- `Sources/SpeakDesktopSync/DesktopNativeEnvelopeCryptography.swift`: the
+  envelope adapter both desktop hosts share over their identical crypto C ABI.
 - `Sources/SpeakWindowsPlatform/WindowsCloudKitNative.swift` with
   `Sources/CWindowsSupport/WindowsHTTP.cpp`, `WindowsLoopback.cpp` and
   `WindowsCrypto.cpp`: the WinHTTP transport, the 127.0.0.1 listener and the

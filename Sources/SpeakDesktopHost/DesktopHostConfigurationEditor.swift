@@ -104,6 +104,28 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 }
 
 extension DesktopHostController {
+    /// Runs one validated `DesktopHostConfigurationEditorEvent.action` from the
+    /// Windows or Linux preferences editor. The host then re-presents the editor.
+    package func performConfigurationEditorAction(
+        _ action: Int32, values: [String], editorID: String?
+    ) async throws {
+        switch action {
+        case 0: try await saveConfiguration(values, intent: .apply, editorID: editorID)
+        case 1: try await importConfiguration(path: values[0])
+        case 2: try exportConfiguration(path: values[0])
+        case 3:
+            guard let selected = values.last else {
+                throw DesktopConfigurationError.invalidField("Recovered keyword selection")
+            }
+            try await recoverConfigurationKeywords(Array(values.dropLast()), selected: selected, editorID: editorID)
+        case 4, 5:
+            try await previewRecordingFeedback(
+                action == 4 ? .start : .stop, configurationEntries: values, editorID: editorID
+            )
+        default: throw DesktopConfigurationError.invalidField("Configuration action")
+        }
+    }
+
     /// Activate only after the native field replacement succeeds, not merely after loading its data.
     package func activateConfigurationEditorSnapshot(_ snapshot: DesktopHostConfigurationEditorSnapshot) throws {
         try activateConfigurationEditorSnapshot(snapshot.id)

@@ -19,18 +19,10 @@ extension WindowsHostPlatform {
     package static func voiceProviderCredentialFinished(
         _ result: Result<Void, VoiceOutputCredentialError>, request: VoiceProviderCredentialRequest
     ) {
-        let success: Int32
-        let message: String
-        switch result {
-        case .success:
-            success = 1
-            message = request.operation == .remove
-                ? "The saved provider key was removed." : "The provider key was saved."
-        case .failure(let error): success = 0; message = error.localizedDescription
-        }
+        let outcome = DesktopVoiceCredentialOutcome(result, removing: request.operation == .remove)
         if jsti_window_finish_voice_provider_credential(
             request.id.uuidString, request.context.sessionID.uuidString,
-            request.context.epoch.uuidString, request.context.provider.id, success, message) < 0 {
+            request.context.epoch.uuidString, request.context.provider.id, outcome.success, outcome.message) < 0 {
             WindowsNative.update("The account Voice key operation result could not be shown.")
         }
     }
@@ -49,19 +41,9 @@ extension WindowsHostPlatform {
     package static func voiceCredentialFinished(
         _ result: Result<Void, VoiceOutputCredentialError>, request: VoiceOutputCredentialRequest
     ) {
-        let message: String
-        let success: Int32
-        switch result {
-        case .success:
-            success = 1
-            message = request.operation == .remove
-                ? "The saved provider key was removed." : "The provider key was saved."
-        case .failure(let error):
-            success = 0
-            message = error.localizedDescription
-        }
+        let outcome = DesktopVoiceCredentialOutcome(result, removing: request.operation == .remove)
         if jsti_window_finish_voice_credential(
-            request.id.uuidString, request.selectionEpoch.uuidString, success, message) < 0 {
+            request.id.uuidString, request.selectionEpoch.uuidString, outcome.success, outcome.message) < 0 {
             WindowsNative.update("The Voice provider key operation result could not be shown.")
         }
     }

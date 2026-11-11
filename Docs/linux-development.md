@@ -17,7 +17,7 @@ criterion; this document says exactly what is verified and what is not.
 |---|---|
 | `SpeakDesktopHost` | Recording, transcription, History, output, post-processing, profiles, model catalogue, Read aloud, on-device model and iCloud sync orchestration, generic over `DesktopHostPlatform`. Shared with Windows (moved out of `SpeakWindows`). |
 | `CLinuxSystem/*` | pkg-config system libraries: `libadwaita-1`, `gio-unix-2.0`, `libpulse`, `libsecret-1`, `xtst`, `libcrypto` (OpenSSL). |
-| `CLinuxSupport` | The `jsti_*` C ABI (`include/CLinuxSupport.h`): window, clipboard, credentials, capture, private files, X11, portals, the whisper.cpp loader and GChecksum SHA-256, iCloud sync (group, loopback listener, sign-in page, envelope crypto), self-tests. |
+| `CLinuxSupport` | The `jsti_*` C ABI (`include/CLinuxSupport.h`, an umbrella over domain headers): window, clipboard, credentials, capture, private files, X11, portals, the whisper.cpp loader and GChecksum SHA-256, iCloud sync (group, loopback listener, sign-in page, envelope crypto), self-tests. |
 | `CLinuxSelfTest` | The window `--ui-smoke-test` checks (`jsti_window_self_test`), kept out of `CLinuxSupport` and linked only by the executable. |
 | `SpeakLinuxPlatform` | Testable Swift over the C ABI: keyring, capture, session detection, text-output options, output planning, the output job, History playback and speech, voice output staging, and the iCloud sync adapters. |
 | `SpeakLinux` | The executable: `LinuxHostPlatform`, events, shortcuts, `--self-test`, `--ui-smoke-test`, `--integration-test`. |

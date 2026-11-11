@@ -285,7 +285,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
 
         await offerToKeyboard(text)
 
-        if settings.autoPostProcess && settings.hasOpenRouterKey {
+        if settings.autoPostProcess && settings.hasPostProcessingKey {
             await iOSHistoryManager.shared.reprocess(item)
         }
     }

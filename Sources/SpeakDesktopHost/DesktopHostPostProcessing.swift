@@ -63,7 +63,11 @@ extension DesktopHostController {
             case .local: enabledStatus = DesktopPostProcessing.localRulesNotice
             case .localLLM: enabledStatus = "Local post-processing enabled. Transcripts stay on this computer."
             case .remote, .disabled:
-                enabledStatus = "Remote post-processing enabled. Transcripts will be sent to OpenRouter."
+                var provider = "OpenRouter"
+                if case .apiKey(_, let name) = ModelCredentialResolver.requirement(
+                    for: model, purpose: .postProcessing
+                ) { provider = name }
+                enabledStatus = "Remote post-processing enabled. Transcripts will be sent to \(provider)."
             }
             updateProviderCredentialEditor(enabled ? enabledStatus : "Post-processing disabled.")
         } catch {

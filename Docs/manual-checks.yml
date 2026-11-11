@@ -540,6 +540,21 @@ sessions:
           - "Stop the screen recording and attach it to #1368 (or share it with the agent)."
         expected: "A recording under one minute showing both starts and stops, the Live Activity with the fictional words, and no notifications, names or personal data on screen."
         final_gate: false
+      - id: "iphone-native-first-model-picker"
+        issues:
+          - 1382
+        title: "Post-processing picker: native models first, OpenRouter as one entry"
+        minutes: 3
+        core: true
+        build: "First TestFlight Alpha that includes #1382"
+        steps:
+          - "Open Settings \u203a Post-Processing."
+          - "Check the Model list: OpenAI and Gemini models appear before a single OpenRouter row."
+          - "Tap GPT-6 Luna (the native OpenAI one) and go back: the Settings row reads GPT-6 Luna."
+          - "Open Post-Processing again, tap OpenRouter, search \"luna\" and pick GPT-6 Luna there."
+          - "Go back: the Settings row reads OpenRouter \u203a GPT-6 Luna."
+        expected: "Native models are listed first, OpenRouter models only appear inside the OpenRouter row, and the selected row names OpenRouter only for the OpenRouter choice."
+        final_gate: true
       - id: "iphone-settings-search"
         issues:
           - 1410

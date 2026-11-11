@@ -115,6 +115,9 @@ public enum ModelCredentialResolver {
         if isLocal(modelIdentifier) {
             return .notRequired
         }
+        if let native = NativeTextModels.route(for: modelIdentifier) {
+            return .apiKey(identifier: native.provider.credentialIdentifier, providerName: native.provider.displayName)
+        }
         return openRouterRequirement
     }
 

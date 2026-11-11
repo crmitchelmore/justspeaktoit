@@ -85,7 +85,7 @@ final class DesktopComparisonReadinessTests: XCTestCase {
         )
         await controller.openComparison()
         XCTAssertEqual(ComparisonPresentations.shared.latest?.models, "")
-        await controller.savePostProcessing(enabled: true, modelIndex: 0, prompt: "", key: "synthetic-key")
+        await controller.saveOpenRouterPostProcessing(enabled: true, prompt: "", key: "synthetic-key")
         let presentation = try XCTUnwrap(ComparisonPresentations.shared.latest)
         let expected = DesktopHostModels.visible.filter {
             ModelCredentialResolver.requirement(for: $0.id, purpose: .batchTranscription)

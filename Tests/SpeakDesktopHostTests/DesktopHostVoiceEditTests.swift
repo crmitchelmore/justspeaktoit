@@ -27,7 +27,7 @@ final class DesktopHostVoiceEditTests: XCTestCase {
         XCTAssertTrue(selected)
         FakeLog.shared.setKey("fixture-transcription-key", name: "openai.apiKey")
         FakeLog.shared.setKey("fixture-rewrite-key", name: "openrouter.apiKey")
-        await controller.savePostProcessing(enabled: false, modelIndex: 0, prompt: "Not an editing prompt.", key: "")
+        await controller.saveOpenRouterPostProcessing(enabled: false, prompt: "Not an editing prompt.", key: "")
         FakeLog.shared.setKey("fixture-rewrite-key", name: "openrouter.apiKey")
         _ = try await controller.recognitionVocabulary()
     }

@@ -492,29 +492,13 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       writer: FileHandle,
       logger: Logger
     ) {
-      guard let copied = copyPCMBuffer(buffer) else { return }
+      guard let copied = copyBufferPool.copy(buffer) else { return }
       queue.async { [weak self] in
         guard let self else { return }
         defer { self.copyBufferPool.recycle(copied) }
         guard self.isRunning else { return }
         self.processAndWriteAudio(copied, from: inputFormat, to: outputFormat, writer: writer, logger: logger)
       }
-    }
-
-    private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-      let frameLength = buffer.frameLength
-      guard let copy = copyBufferPool.buffer(format: buffer.format, frameCapacity: frameLength) else {
-        return nil
-      }
-      copy.frameLength = frameLength
-      let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
-      let dst = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: copy.audioBufferList))
-      for idx in 0..<min(src.count, dst.count) {
-        guard let srcData = src[idx].mData, let dstData = dst[idx].mData else { continue }
-        dstData.copyMemory(from: srcData, byteCount: Int(src[idx].mDataByteSize))
-        dst[idx].mDataByteSize = src[idx].mDataByteSize
-      }
-      return copy
     }
 
     private func processAndWriteAudio(

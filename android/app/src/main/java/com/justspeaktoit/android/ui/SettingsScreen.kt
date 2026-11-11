@@ -25,6 +25,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -66,6 +69,7 @@ import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.dictation.DictationUiState
+import com.justspeaktoit.android.settings.ApiKeyStatusFilter
 import com.justspeaktoit.android.settings.SettingsSearchEntry
 import com.justspeaktoit.android.settings.SettingsSearchIndex
 import com.justspeaktoit.android.settings.SettingsSearchRecents
@@ -98,6 +102,7 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     var query by rememberSaveable { mutableStateOf("") }
+    var keyFilter by rememberSaveable { mutableStateOf(ApiKeyStatusFilter.All) }
     var recents by remember { mutableStateOf(emptyList<String>()) }
     var highlighted by remember { mutableStateOf<String?>(null) }
     val anchors = remember { mutableStateMapOf<String, Int>() }
@@ -117,6 +122,8 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
         query = ""
         focusManager.clearFocus()
         val target = anchorFor(entry)
+        // A key hidden by the status filter must still be reachable from search.
+        if (target.startsWith(SettingsSearchIndex.KEY_PREFIX)) keyFilter = ApiKeyStatusFilter.All
         highlighted = target
         scope.launch { anchors[target]?.let { scrollState.animateScrollTo(it) } }
     }
@@ -229,10 +236,22 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
             if (state.keyStoreError) {
                 Text(stringResource(R.string.settings_key_error), color = MaterialTheme.colorScheme.error)
             }
-            CloudCatalog.providers.forEach { provider ->
+            KeyFilterPicker(keyFilter, onFilter = { keyFilter = it })
+            val visibleProviders = CloudCatalog.providers.filter {
+                keyFilter.matches(saved = it in state.savedKeys, hasError = it in state.keyErrors)
+            }
+            if (visibleProviders.isEmpty()) {
+                Text(
+                    stringResource(keyFilter.emptyMessage),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            visibleProviders.forEach { provider ->
                 KeyRow(
                     provider,
                     saved = provider in state.savedKeys,
+                    failed = provider in state.keyErrors,
                     actions,
                     anchor("${SettingsSearchIndex.KEY_PREFIX}${provider.id}"),
                 )
@@ -332,15 +351,49 @@ private fun SearchResultRow(result: SettingsSearchResult, onOpen: (SettingsSearc
 }
 
 @Composable
-private fun KeyRow(provider: CloudProvider, saved: Boolean, actions: SettingsActions, modifier: Modifier = Modifier) {
+private fun KeyFilterPicker(filter: ApiKeyStatusFilter, onFilter: (ApiKeyStatusFilter) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.settings_keys_filter), style = MaterialTheme.typography.labelLarge)
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().testTag(AutomationIds.API_KEYS_FILTER)) {
+            ApiKeyStatusFilter.entries.forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = option == filter,
+                    onClick = { onFilter(option) },
+                    shape = SegmentedButtonDefaults.itemShape(index, ApiKeyStatusFilter.entries.size),
+                ) {
+                    Text(stringResource(option.label))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeyRow(
+    provider: CloudProvider,
+    saved: Boolean,
+    failed: Boolean,
+    actions: SettingsActions,
+    modifier: Modifier = Modifier,
+) {
     // The entered key is held only in this composable until saved; saved keys are never read back.
     var draft by remember(provider, saved) { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(provider.displayName, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
             Text(
-                stringResource(if (saved) R.string.settings_key_saved else R.string.settings_key_not_set),
-                color = if (saved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                stringResource(
+                    when {
+                        failed -> R.string.settings_key_failed
+                        saved -> R.string.settings_key_saved
+                        else -> R.string.settings_key_not_set
+                    },
+                ),
+                color = when {
+                    failed -> MaterialTheme.colorScheme.error
+                    saved -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 style = MaterialTheme.typography.labelLarge,
             )
         }

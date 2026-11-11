@@ -34,12 +34,10 @@ extension SettingsView {
         }
 
         if visibleMacAPIKeyItems.isEmpty {
-          ContentUnavailableView(
-            "No API Keys",
-            systemImage: "key.slash",
-            description: Text("Try a different search or status filter.")
-          )
-          .padding(.vertical, 24)
+          let empty = APIKeyListQuery.emptyState(status: apiKeyStatusFilter, searchText: apiKeySearchText)
+          ContentUnavailableView(empty.title, systemImage: empty.systemImage, description: Text(empty.message))
+            .padding(.vertical, 24)
+            .accessibilityIdentifier("apiKeysEmptyState")
         } else {
           SpeakDensitySettingsSection(
             density: settings.visualDensity,
@@ -121,6 +119,7 @@ extension SettingsView {
         }
       }
       .pickerStyle(.menu)
+      .accessibilityIdentifier("apiKeysStatusFilter")
 
       Picker("Sort", selection: $apiKeySortOrder) {
         ForEach(APIKeySortOrder.allCases) { order in

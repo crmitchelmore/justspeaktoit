@@ -17,9 +17,9 @@ class PaidEndpointTests(unittest.TestCase):
     def test_app_flag_and_both_composed_clients_use_the_same_endpoint(self):
         transport = (ROOT / 'Sources/SpeakCore/PaidAccess/PaidAccessHTTPClient.swift').read_text()
         manager = (ROOT / 'Sources/SpeakApp/PaidAccess/PaidAccessManager.swift').read_text()
-        wire = (ROOT / 'Sources/SpeakApp/WireUp.swift').read_text()
+        wire = (ROOT / 'Sources/SpeakApp/WireUp+PaidAccess.swift').read_text()
         composition = wire[wire.index('    let paidClient = PaidAccessHTTPClient('):
-                           wire.index('    let transcription = TranscriptionManager(')]
+                           wire.index('    return (paidAccess, routedClient)')]
         core = ('import Foundation\npublic struct PaidAccessHTTPClient {\n'
                 + block(transport, 'public static var defaultBaseURL:')
                 + '''\npublic let baseURL: URL

@@ -1,7 +1,9 @@
 # iOS History persistence isolation
 
 Issue #1118 increment two retains the existing local store and sync disclosure.
-`iOSHistoryManager` owns observable state on MainActor. Its `IOSHistoryPersistence`
+`iOSHistoryManager` owns observable state on MainActor. Admission revisions and
+the ownership checks receipts are judged by live in its `IOSHistoryRevisionLedger`;
+pending CloudKit acknowledgements in its `IOSHistoryRemoteLedger`. Its `IOSHistoryPersistence`
 actor facade admits typed operations synchronously to one private serial worker
 before awaiting a result. That worker owns authoritative rows, recovery state,
 JSON encoders/decoders, SHA256 digests and all injected `StorageIO` calls. It never

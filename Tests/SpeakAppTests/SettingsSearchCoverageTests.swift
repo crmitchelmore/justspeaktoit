@@ -49,9 +49,13 @@ final class SettingsSearchCoverageTests: XCTestCase {
     }
 
     func testEveryIOSSettingsSectionIsIndexed() throws {
+        // The root list and every Settings sub-page that hosts top-level sections.
         let paths = [
             "Sources/SpeakiOS/Views/SettingsView.swift",
-            "Sources/SpeakiOS/Views/FocusCaptureSettingsSection.swift"
+            "Sources/SpeakiOS/Views/FocusCaptureSettingsSection.swift",
+            "Sources/SpeakiOS/Views/Settings/TranscriptionSettingsPage.swift",
+            "Sources/SpeakiOS/Views/Settings/RecordingSettingsPage.swift",
+            "Sources/SpeakiOS/Views/Settings/AccountSettingsPages.swift"
         ]
         var unregistered: [String] = []
         var missing: [String] = []

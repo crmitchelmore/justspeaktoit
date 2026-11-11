@@ -164,7 +164,9 @@ final class DistributionBuildIdentityTests: XCTestCase {
             encoding: .utf8
         )
         let settings = try String(
-            contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Views/SettingsView.swift"),
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "Sources/SpeakiOS/Views/Settings/RecordingSettingsPage.swift"
+            ),
             encoding: .utf8
         )
         let appSettings = try String(

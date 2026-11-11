@@ -9,8 +9,18 @@ package struct DesktopAPIKeyRow: Equatable, Sendable {
     package let uses: String
     package let status: String
     package let isSaved: Bool
+    /// The last check failed or the store could not be read.
+    package let hasError: Bool
     package let keyPageURL: String
     package let entryHint: String
+
+    /// The shared filters this row passes, one bit per `APIKeyStatusFilter`
+    /// case; native pages test their selected filter's index against it.
+    package var filterMask: UInt32 {
+        APIKeyStatusFilter.matchMask(for: APIKeyListEntry(
+            id: identifier, title: label, category: uses, isStored: isSaved, hasError: hasError
+        ))
+    }
 }
 
 /// What one secure-storage read found, reduced to a non-reversible hint.
@@ -104,12 +114,14 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             }
             var isSaved = false
             if case .saved = state { isSaved = true }
+            let failed = state == .unreadable || (isSaved && apiKeyCheckFailures.contains(entry.identifier))
             return DesktopAPIKeyRow(
                 identifier: entry.identifier,
                 label: DesktopHostModels.uiText(entry.label),
                 uses: entry.uses.summary,
-                status: status,
+                status: failed && isSaved ? "\(status). Last check failed" : status,
                 isSaved: isSaved,
+                hasError: failed,
                 keyPageURL: entry.keyPageURL?.absoluteString ?? "",
                 entryHint: entry.setupHint
             )
@@ -163,6 +175,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let validation = await checkAPIKey(cleaned, identifier: identifier)
         guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
         guard case .success = validation.outcome else { return report(Self.message(validation)) }
+        apiKeyCheckFailures.remove(identifier)
         guard canSaveVoiceCredential else { return Self.apiKeysBusyMessage }
         do {
             try await writeProviderAPIKey(cleaned, identifier: identifier)
@@ -188,6 +201,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
             return report("Failed to remove key: \(error.localizedDescription)")
         }
+        apiKeyCheckFailures.remove(identifier)
         await apiKeyChanged(identifier)
         guard !closed, !Task.isCancelled else { return Self.apiKeysWriteFinishedMessage }
         return report("\(entry.label) key removed from \(Platform.credentialStoreName).")
@@ -202,6 +216,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             return APIKeyEntryError.unknownProvider.localizedDescription
         }
         var key = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        let checksSavedKey = key.isEmpty
         if key.isEmpty {
             let effects = effects
             do {
@@ -218,7 +233,17 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
         let result = await checkAPIKey(key, identifier: identifier)
         guard !Task.isCancelled else { return Self.apiKeysCancelledMessage }
+        if checksSavedKey { recordSavedKeyCheck(result, identifier: identifier) }
         return Self.message(result)
+    }
+
+    /// Only a check of the saved key decides whether that key shows under Errors.
+    private func recordSavedKeyCheck(_ result: APIKeyValidationResult, identifier: String) {
+        if case .success = result.outcome {
+            apiKeyCheckFailures.remove(identifier)
+        } else {
+            apiKeyCheckFailures.insert(identifier)
+        }
     }
 
     private func checkAPIKey(_ key: String, identifier: String) async -> APIKeyValidationResult {

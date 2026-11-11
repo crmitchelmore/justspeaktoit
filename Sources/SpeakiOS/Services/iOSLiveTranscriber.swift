@@ -142,7 +142,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     /// recognition feeding and persistence run here, not in the tap callback.
     private let audioProcessingQueue = DispatchQueue(label: "com.speak.ios.applespeech.audioProcessing")
     /// Pool for tap-buffer copies so the hot path never allocates.
-    private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
+    private let tapBufferPool = LivePCMBufferPool(maximumBuffers: 4, maximumOutstanding: 4, label: "apple-speech")
 
     // MARK: - Init
 

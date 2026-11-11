@@ -265,6 +265,14 @@ public final class LivePCM16Conversion: @unchecked Sendable {
 
     public init() {}
 
+    /// Builds and retains the converter for `input` → `outputFormat` before the
+    /// first buffer, so a host can refuse to start rather than fail per chunk.
+    /// Call it before the tap is installed; afterwards only the audio queue may
+    /// touch this conversion.
+    public func prepare(from input: AVAudioFormat, to outputFormat: AVAudioFormat) -> Bool {
+        cache.converter(from: input, to: outputFormat) != nil
+    }
+
     /// Feeds `input` once through the retained converter (never `reset()`
     /// between chunks) and returns its PCM16 bytes, empty while the resampler
     /// is still priming.

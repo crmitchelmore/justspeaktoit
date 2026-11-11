@@ -73,7 +73,9 @@ final class RecordingLossReporting {
 
 extension RecordingLossReport {
     /// The same admission path is used by every live tap, including both Apple paths.
-    func copyCapture(_ buffer: AVAudioPCMBuffer, using pool: PCMBufferPool) -> AVAudioPCMBuffer? {
+    /// An empty tap buffer carries no audio, so it is skipped rather than lost.
+    func copyCapture(_ buffer: AVAudioPCMBuffer, using pool: LivePCMBufferPool) -> AVAudioPCMBuffer? {
+        guard buffer.frameLength > 0 else { return nil }
         guard let copy = pool.copy(buffer) else {
             rejectCapture(frameLength: buffer.frameLength, sampleRate: buffer.format.sampleRate)
             return nil

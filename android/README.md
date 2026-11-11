@@ -62,6 +62,12 @@ Optional personal feed (owner steps; the CFS proxy does not serve Maven today):
    feed needs nothing else. A private feed's token must live in a `main`-only environment, which
    pull-request builds cannot read, so pull requests would keep using the hosted-runner default.
 
+Without a feed, get a branch's APK from GitHub-hosted runners instead.
+`scripts/linux-precheck --job android --tree . --base origin/main` (which `scripts/pre-pr` runs) pushes
+a throwaway `precheck/**` branch. `precheck.yml` runs `scripts/ci-android.sh` there and uploads the
+debug APK as `justspeaktoit-android-debug`. Install it on an emulator with
+`gh run download <run-id> -n justspeaktoit-android-debug && adb install -r -g app-debug.apk`.
+
 ## Layout
 
 ```

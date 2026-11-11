@@ -86,21 +86,28 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     // next recording's transcript (issue #668).
     let run = LiveTranscriptionRun.Token()
     activeRun = run
-    let session = try await AppleSpeechAnalyzerLiveSession(
-      localeIdentifier: currentLanguage ?? appSettings.resolvedPreferredLocaleIdentifier,
-      engine: AppleSpeechAnalyzerEngine(modelID: currentModel)
-    ) { [weak self, weak run] update in
-      Task { @MainActor [weak self, weak run] in
-        guard let self,
-          LiveTranscriptionRun.isCurrent(run, activeStream: self.activeRun)
-        else { return }
-        self.latestUpdate = LiveTranscriptionUpdate(
-          text: update.text,
-          isFinal: update.isFinal,
-          confidence: update.confidence
-        )
-        self.delegate?.liveTranscriber(self, didUpdateWith: self.latestUpdate)
-        self.delegate?.liveTranscriber(self, didUpdatePartial: update.text)
+    let localeIdentifier = currentLanguage ?? appSettings.resolvedPreferredLocaleIdentifier
+    let engine = AppleSpeechAnalyzerEngine(modelID: currentModel)
+    // Set the analyzer up off this path while the microphone starts, as legacy
+    // Apple Speech does with its recognition request (#614). Buffers captured
+    // meanwhile wait in `relay` and reach the analyzer in order once it runs.
+    let sessionTask = Task {
+      try await AppleSpeechAnalyzerLiveSession(
+        localeIdentifier: localeIdentifier,
+        engine: engine
+      ) { [weak self, weak run] update in
+        Task { @MainActor [weak self, weak run] in
+          guard let self,
+            LiveTranscriptionRun.isCurrent(run, activeStream: self.activeRun)
+          else { return }
+          self.latestUpdate = LiveTranscriptionUpdate(
+            text: update.text,
+            isFinal: update.isFinal,
+            confidence: update.confidence
+          )
+          self.delegate?.liveTranscriber(self, didUpdateWith: self.latestUpdate)
+          self.delegate?.liveTranscriber(self, didUpdatePartial: update.text)
+        }
       }
     }
 
@@ -111,19 +118,15 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     let inputFormat = inputNode.outputFormat(forBus: 0)
     guard audioInputFormatIsUsable(inputFormat) else {
       activeRun = nil
-      await session.cancel()
+      await Self.discard(sessionTask)
       throw TranscriptionManagerError.noUsableAudioInput
     }
+    let relay = LiveAudioRelay<AVAudioPCMBuffer>()
     do {
-      let converter = try AppleSpeechAudioConverter(
-        sourceFormat: inputFormat,
-        targetFormat: session.audioFormat
-      )
       let sendAudio: (AVAudioPCMBuffer) -> Void = { buffer in
         guard buffer.format.sampleRate == inputFormat.sampleRate,
           buffer.format.channelCount == inputFormat.channelCount else { return }
-        guard let converted = converter.convert(buffer) else { return }
-        session.send(converted)
+        relay.send(buffer)
       }
       let retainedTap = activePrimedInput?.startConsuming(
         preRollBuffers: preRollBuffers, inputFormat: inputFormat, using: sendAudio
@@ -144,14 +147,38 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
         }
       }
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+      let session = try await sessionTask.value
+      let converter = try AppleSpeechAudioConverter(
+        sourceFormat: inputFormat,
+        targetFormat: session.audioFormat
+      )
+      relay.attach { buffer in
+        guard let converted = converter.convert(buffer) else { return }
+        session.send(converted)
+      }
+      if relay.droppedCount > 0 {
+        SpeakLogger.logger(category: "AudioInput").warning(
+          "SpeechAnalyzer setup outlasted the start buffer; dropped \(relay.droppedCount) buffers"
+        )
+      }
       analyzerSession = session
       audioConverter = converter
     } catch {
       activeRun = nil
+      relay.close()
       audioEngine.stop()
       inputNode.removeTap(onBus: 0)
-      await session.cancel()
+      await Self.discard(sessionTask)
       throw error
+    }
+  }
+
+  /// Cancels a session that is still being set up, or tears down one that is ready.
+  @available(macOS 26.0, *)
+  private static func discard(_ sessionTask: Task<AppleSpeechAnalyzerLiveSession, Error>) async {
+    sessionTask.cancel()
+    if let session = try? await sessionTask.value {
+      await session.cancel()
     }
   }
 

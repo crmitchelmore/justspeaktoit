@@ -149,10 +149,12 @@ func linuxVoiceSourceEvent(
 }
 
 /// Read aloud and voice picker events. Returns false for others.
-func linuxReadAloudEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+func linuxReadAloudEvent(
+    _ event: DesktopNativeLinuxEvent, value: String, slot: Int, holder: LinuxEventContext
+) -> Bool {
     switch event {
-    case Int(JSTI_EVENT_READ_ALOUD): holder.readAloud(value)
-    case Int(JSTI_EVENT_VOICE_OUTPUT): holder.selectVoice(slot)
+    case .readAloud: holder.readAloud(value)
+    case .voiceOutput: holder.selectVoice(slot)
     default: return false
     }
     return true

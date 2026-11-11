@@ -8,11 +8,13 @@ import SpeakDesktopNativeBindings
 /// Sidebar settings search, on the GTK main thread. Ranking is in memory and
 /// synchronous, so it never joins the settings queue that shutdown drains.
 /// Returns false for other events.
-func linuxSettingsSearchEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+func linuxSettingsSearchEvent(
+    _ event: DesktopNativeWindowEvent, value: String, slot: Int, holder: LinuxEventContext
+) -> Bool {
     switch event {
-    case Int(JSTI_EVENT_SETTINGS_SEARCH):
+    case .settingsSearch:
         LinuxSettingsSearch.show(holder.settingsSearch.results(for: value))
-    case Int(JSTI_EVENT_SETTINGS_SEARCH_OPEN):
+    case .settingsSearchOpen:
         if let target = holder.settingsSearch.choose(slot) { LinuxSettingsSearch.open(target) }
     default: return false
     }

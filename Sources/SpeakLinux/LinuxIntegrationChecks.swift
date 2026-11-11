@@ -6,7 +6,7 @@ import SpeakLinuxPlatform
 import CLinuxSupport
 
 /// End-to-end checks of the native adapters against real services, run by
-/// scripts/linux-integration-checks.sh inside a disposable session: a private
+/// scripts/linux/linux-integration-checks.sh inside a disposable session: a private
 /// bus, an unlocked keyring, PipeWire with a test tone source, an X server with
 /// a window manager and a fake XDG portal. Each check fails loudly when its
 /// service is missing; nothing is skipped.

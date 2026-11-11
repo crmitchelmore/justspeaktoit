@@ -160,12 +160,14 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
                 AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
             ]
             let recorder = try AVAudioRecorder(url: url, settings: settings)
-            recorder.delegate = self
 
             // Persist before audio starts flowing. A process kill after this
             // point leaves enough information for relaunch recovery.
             try activeCaptureRegistry.persist(capture)
 
+            // Only an owned recorder gets a delegate, so one discarded by a
+            // throw above never calls back into this object.
+            recorder.delegate = self
             self.recorder = recorder
             currentID = id
             startedAt = capture.startedAt
@@ -252,6 +254,10 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         // callbacks may already see zero, so asset inspection below remains
         // the authoritative fallback.
         let recorderDuration = recorder.currentTime
+        // Detach before stopping and releasing: stop's own completion callback
+        // and anything after it would be ignored anyway, and AVFoundation must
+        // not message a delegate about a recorder this object no longer owns.
+        recorder.delegate = nil
         recorder.stop()
         self.recorder = nil
         isRecording = false

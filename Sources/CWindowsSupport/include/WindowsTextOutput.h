@@ -181,13 +181,6 @@ void jsti_clipboard_output_destroy(JSTIClipboardOutput *job);
  * Never touches the system clipboard. */
 int jsti_clipboard_output_self_test(char *error, size_t error_capacity);
 
-/* Deterministic native checks on app-owned synthetic hidden controls with
- * injected foreground, clipboard and keystroke seams: caret/selection
- * insertion, surrogate pairs, stale identity, password/read-only refusal,
- * UI Automation value/paste paths, timeouts and worker cleanup. Never sends
- * real input, touches the system clipboard or inserts into another app. */
-int jsti_text_output_self_test(char *error, size_t error_capacity);
-
 #ifdef __cplusplus
 }
 #endif

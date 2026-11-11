@@ -499,8 +499,6 @@ void jsti_window_request_close(void);
 int32_t jsti_window_is_active(void);
 /* Desktop notification through GNotification (portal-backed in Flatpak). */
 void jsti_notify(const char *title, const char *body);
-/* Main thread only: exercises widget construction and event plumbing. */
-int32_t jsti_window_self_test(char *error, size_t error_capacity);
 /* Main thread only: renders the window to a PNG for visual review. */
 int32_t jsti_window_save_snapshot(const char *path, char *error, size_t error_capacity);
 /* Shows every page in turn (then a recording, then dark mode), saves each as

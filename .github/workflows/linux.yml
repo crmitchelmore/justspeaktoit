@@ -31,6 +31,7 @@ on:
       - Sources/SpeakLinuxPlatform/**
       - Sources/SpeakLinuxWebSocket/**
       - Sources/CLinuxSupport/**
+      - Sources/CLinuxSelfTest/**
       - Sources/CLinuxSystem/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**

@@ -10,7 +10,7 @@ because the platform APIs differ; this document records what is implemented,
 what each method can and cannot do, and which acceptance gates remain open.
 
 Source: `Sources/CWindowsSupport/WindowsTextOutput.cpp` (adapter),
-`WindowsTextOutputSelfTest.cpp` (deterministic checks),
+`Sources/CWindowsSelfTest/WindowsTextOutputSelfTest.cpp` (deterministic checks),
 `WindowsClipboardOutput.cpp` (clipboard-only output without a captured field),
 `WindowsTextOutputSettings.cpp` (the native Text output dialog),
 `Sources/SpeakWindowsPlatform/WindowsTextOutput.swift` (ownership, settings

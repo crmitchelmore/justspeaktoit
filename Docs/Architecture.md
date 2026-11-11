@@ -127,9 +127,11 @@ excluded; the Keychain implementation inside the client contract file is guarded
 | `SpeakDesktopSync` | library target | Depends on `SpeakDesktop`, `SpeakSync` and `SpeakCore`; iCloud History sync and key import for desktop hosts. |
 | `SpeakDesktopHost` | library target | Depends on `SpeakCore`, `SpeakDesktop`, `SpeakDesktopSync` and `SpeakSync`; `DesktopHostController<Platform>`, the recording, History, playback, output, settings, Read aloud, on-device model and iCloud sync orchestration shared by the Windows and Linux apps behind `DesktopHostPlatform`. |
 | `CWindowsSupport`, `CWindowsAutomation` | C++ targets | `SPEAK_WINDOWS_TARGET`; Win32, WASAPI, Media Foundation, UI Automation, WinHTTP, CNG, Credential Manager and the run-time whisper.cpp loader. |
+| `CWindowsSelfTest` | C++ target | `SPEAK_WINDOWS_TARGET`; the native `--self-test`/`--ui-smoke-test` checks, outside the product library. `SpeakWindows` links it so CI and the bundle verifier qualify the shipped binary. |
 | `SpeakWindowsPlatform` | library target | `SPEAK_WINDOWS_TARGET`; Swift over the Windows C++ ABI. |
 | `SpeakWindows` | executable target | `SPEAK_WINDOWS_TARGET`; the Windows app, `WindowsHostPlatform` and its self-tests. The product also ships `speak` (`SpeakCLI`) over a named pipe. |
 | `CLinuxSystem/*`, `CLinuxSupport` | system library and C targets | `SPEAK_LINUX_TARGET`; GTK 4/libadwaita, libpulse, libsecret, X11/XTest, GStreamer, OpenSSL libcrypto and the XDG portals behind the `jsti_*` ABI, plus the run-time whisper.cpp loader. |
+| `CLinuxSelfTest` | C target | `SPEAK_LINUX_TARGET`; the window `--ui-smoke-test` checks, outside the product library. `SpeakLinux` links it so CI and the installed-Flatpak checks qualify the shipped binary. |
 | `SpeakLinuxPlatform`, `SpeakLinuxWebSocket` | library targets | `SPEAK_LINUX_TARGET`; Swift over the Linux C ABI, and the SwiftNIO live-transcription transport. |
 | `SpeakLinux` | executable target | `SPEAK_LINUX_TARGET`; the Linux app, `LinuxHostPlatform` and its self-tests. |
 | `SpeakPortableTests`, `SpeakDesktopTests`, `SpeakDesktopHostTests`, `SpeakDesktopSyncTests`, `SpeakSyncTests` | test targets | Shared-core, desktop and host tests run on Linux, Windows and portable macOS. |

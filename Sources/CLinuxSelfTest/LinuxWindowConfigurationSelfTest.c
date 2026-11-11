@@ -1,5 +1,5 @@
 /* Self-tests for the dictation preferences form. */
-#include "LinuxWindowInternal.h"
+#include "LinuxWindowSelfTestInternal.h"
 
 gboolean configuration_reveal_self_test(void) {
     guint count = configuration.rows->len;

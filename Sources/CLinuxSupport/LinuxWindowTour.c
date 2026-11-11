@@ -255,6 +255,12 @@ int32_t jsti_window_screenshot_tour(const char *directory, char *error, size_t c
     return post(tour_start, tour, NULL);
 }
 
+/* Window smoke-test failures share one prefix; the self-test target reports through it too. */
+int32_t fail(char *error, size_t capacity, const char *message) {
+    jsti_set_error(error, capacity, "Window self-test: %s", message);
+    return -1;
+}
+
 /* Renders the window to a PNG for visual review in smoke tests. */
 int32_t jsti_window_save_snapshot(const char *path, char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "no window to capture");

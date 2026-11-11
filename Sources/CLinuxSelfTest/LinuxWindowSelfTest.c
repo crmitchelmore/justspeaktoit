@@ -1,16 +1,11 @@
 /*
- * The window self-test (jsti_window_self_test) and its UI checks. It runs inside the
- * shipped SpeakLinux binary, which CI and the desktop checks invoke, so it is kept
- * apart from the product code here rather than in a separate target.
+ * The window self-test (jsti_window_self_test) and its UI checks. SpeakLinux links
+ * this target, so CI and the desktop checks still run it inside the shipped binary.
  */
-#include "LinuxWindowInternal.h"
+#include "LinuxWindowSelfTestInternal.h"
 
 /* ---------------------------------------------------------- self-test */
 
-int32_t fail(char *error, size_t capacity, const char *message) {
-    jsti_set_error(error, capacity, "Window self-test: %s", message);
-    return -1;
-}
 ObservedEvent observed;
 
 void observe_event(gint32 event, const char *text, gint32 index, void *context) {

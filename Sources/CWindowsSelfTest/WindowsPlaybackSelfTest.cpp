@@ -1,5 +1,6 @@
+#include "CWindowsSelfTest.h"
 #include "CWindowsSupport.h"
-#include "WindowsPlaybackInternal.hpp"
+#include "../CWindowsSupport/WindowsPlaybackInternal.hpp"
 #include <array>
 #include <cstdio>
 #include <deque>

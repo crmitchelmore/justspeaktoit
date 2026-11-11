@@ -10,9 +10,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def windows_main_window_source():
-    """The main window's translation units (WindowsWindow.cpp and its WindowsWindow*.cpp parts)."""
-    return "\n".join(path.read_text() for path in sorted((ROOT / "Sources/CWindowsSupport").glob("WindowsWindow*.cpp"))
-                     if path.name != "WindowsWindowChrome.cpp")
+    """The main window's translation units (WindowsWindow.cpp, its WindowsWindow*.cpp parts and self-test)."""
+    paths = [*(ROOT / "Sources/CWindowsSupport").glob("WindowsWindow*.cpp"),
+             *(ROOT / "Sources/CWindowsSelfTest").glob("WindowsWindow*.cpp")]
+    return "\n".join(path.read_text() for path in sorted(paths) if path.name != "WindowsWindowChrome.cpp")
 
 
 def load(name, path):

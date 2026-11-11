@@ -1,5 +1,5 @@
 /* Self-tests for post-processing, local cleanup sources, cleanup preview and migration restore. */
-#include "LinuxWindowInternal.h"
+#include "LinuxWindowSelfTestInternal.h"
 
 gboolean post_processing_self_test(void) {
     if (ui.polish_catalog == NULL || ui.polish_local_notice == NULL) return FALSE;

@@ -347,13 +347,6 @@ typedef struct Voices {
     void *context;
 } Voices;
 
-/* The last event the Read aloud check observed instead of reporting it. */
-typedef struct ObservedEvent {
-    gint32 event;
-    gchar *text;
-    gint32 index;
-} ObservedEvent;
-
 void jsti_voice_discovery_show_fixture(GtkWindow *owner);
 int32_t jsti_voice_discovery_save_snapshot(const char *path);
 
@@ -377,7 +370,6 @@ extern const PageInfo page_info[JSTI_PAGE_COUNT]; /* LinuxWindowNavigation.c */
 extern SidebarShortcuts sidebar_shortcuts; /* LinuxWindowNavigation.c */
 extern GtkWidget *columns; /* LinuxWindowPages.c */
 extern Reveal reveal; /* LinuxWindowConfiguration.c */
-extern ObservedEvent observed; /* LinuxWindowSelfTest.c */
 
 /* Defined in the LinuxWindow*.c translation units. */
 void escape_publish(EscapePolicy *policy, gint32 recording, gint32 enabled, gboolean close);
@@ -512,19 +504,8 @@ void configuration_title_apply(gpointer data);
 void configuration_availability_apply(gpointer data);
 void reveal_cancel(void);
 void configuration_reveal_apply(gpointer data);
-gboolean configuration_reveal_self_test(void);
-gboolean configuration_self_test(void);
 void voices_apply(gpointer pointer);
 int32_t fail(char *error, size_t capacity, const char *message);
-void observe_event(gint32 event, const char *text, gint32 index, void *context);
-gboolean sidebar_navigation_self_test(void);
-gboolean action_execution_self_test(void);
-gboolean command_forwarding_self_test(void);
-gboolean command_process_self_test(char *error, size_t capacity);
-gboolean post_processing_self_test(void);
-int32_t local_cleanup_sources_self_test(char *error, size_t capacity);
-gboolean cleanup_preview_self_test(void);
-gboolean migration_restore_self_test(void);
 
 #pragma GCC visibility pop
 

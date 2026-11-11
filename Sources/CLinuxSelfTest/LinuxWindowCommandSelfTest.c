@@ -1,5 +1,5 @@
 /* Self-tests for sidebar navigation, action shortcuts and command forwarding. */
-#include "LinuxWindowInternal.h"
+#include "LinuxWindowSelfTestInternal.h"
 
 gboolean sidebar_navigation_self_test(void) {
     SidebarUpdate saved = { 0 }, fixture = { 0 };

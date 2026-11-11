@@ -206,10 +206,14 @@ What remains:
   the browser launch, its origin platform and where its choices live.
 - `Sources/SpeakDesktopSync/DesktopNativeEnvelopeCryptography.swift`: the
   envelope adapter both desktop hosts share over their identical crypto C ABI.
+- `Sources/SpeakDesktopSync/DesktopNativeLoopbackListener.swift`: the
+  sign-in listener both desktop hosts share over their identical
+  `jsti_loopback_*` C ABI (`WindowsLoopbackListener` and
+  `LinuxLoopbackListener` are this type with the host's function table).
 - `Sources/SpeakWindowsPlatform/WindowsCloudKitNative.swift` with
   `Sources/CWindowsSupport/WindowsHTTP.cpp`, `WindowsLoopback.cpp` and
-  `WindowsCrypto.cpp`: the WinHTTP transport, the 127.0.0.1 listener and the
-  CNG envelope primitives.
+  `WindowsCrypto.cpp`: the WinHTTP transport, the 127.0.0.1 listener's
+  Winsock side and the CNG envelope primitives.
 - `Sources/SpeakWindows/WindowsCloudSync.swift` and
   `Sources/CWindowsSupport/WindowsCloudSyncSettings.cpp`: the Windows
   specialisation and its dialog.

@@ -67,9 +67,18 @@ extension MacAPIKeyItem {
         source: .textToSpeech(provider)
       )
     }
+    items += nativeTextItems(coveredBy: transcriptionProviders, isStored: isStored)
+    return items
+  }
+
+  /// Native cleanup providers whose key no transcription or voice-output card already manages.
+  private static func nativeTextItems(
+    coveredBy transcriptionProviders: [TranscriptionProviderMetadata],
+    isStored: (String) -> Bool
+  ) -> [MacAPIKeyItem] {
     let covered = Set(transcriptionProviders.map(\.apiKeyIdentifier))
       .union(TTSProvider.allCases.map(\.apiKeyIdentifier))
-    items += NativeTextModels.providers
+    return NativeTextModels.providers
       .filter { !covered.contains($0.credentialIdentifier) }
       .map { provider in
         MacAPIKeyItem(
@@ -82,7 +91,6 @@ extension MacAPIKeyItem {
           source: .postProcessing(provider)
         )
       }
-    return items
   }
 }
 

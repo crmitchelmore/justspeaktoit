@@ -8,7 +8,7 @@ need. The single source is `APIKeyGuidance` in SpeakCore
 | Surface | Where |
 |---|---|
 | Mac Settings › API Keys | `SettingsView+APIKeys.swift`, collapsed `APIKeyGuideDisclosure` per card |
-| Mac onboarding | `OnboardingView.swift`, step 2 |
+| Mac onboarding | `Onboarding/OnboardingAPIKeyStepView.swift`, step 2 |
 | Mac missing-key alerts | `MissingLiveAPIKeyAlert.message` / `keyPageURL` |
 | iOS Settings › API Keys | `APIKeysView.swift`, disclosure per section |
 | iOS missing-key alert | `MissingTranscriptionAPIKeyAlert.swift` |

@@ -209,3 +209,92 @@ public final class LiveConverterCache: @unchecked Sendable {
     return (converter, outputFormat)
   }
 }
+
+/// A live tap buffer that could not become provider PCM. Converter failures
+/// repeat for every later buffer of the same format, so a host reports the
+/// first one to the session owner once per run and keeps the text it has.
+public enum LivePCMConversionError: LocalizedError, Equatable, Sendable {
+    case converterUnavailable(inputSampleRate: Double, outputSampleRate: Double)
+    case conversionFailed(domain: String?, code: Int?)
+
+    public var errorDescription: String? {
+        "Live audio could not be converted for transcription, so later speech may be missing. "
+            + "The text transcribed so far is kept."
+    }
+}
+
+/// Copies one tap buffer's samples into a same-format buffer, so the render
+/// thread hands work off without converting or allocating.
+public enum LivePCMCopy {
+    /// `destination` must share `source`'s format and hold its frame length.
+    public static func copy(_ source: AVAudioPCMBuffer, into destination: AVAudioPCMBuffer) {
+        destination.frameLength = source.frameLength
+        let from = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: source.audioBufferList))
+        let into = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: destination.audioBufferList))
+        for index in 0..<min(from.count, into.count) {
+            guard let sourceData = from[index].mData, let destinationData = into[index].mData else { continue }
+            destinationData.copyMemory(from: sourceData, byteCount: Int(from[index].mDataByteSize))
+            into[index].mDataByteSize = from[index].mDataByteSize
+        }
+    }
+}
+
+/// One live processor's retained converter and reusable output buffer,
+/// producing PCM16 mono bytes for a provider. Provider framing stays with the
+/// caller. Owned by one serial audio queue, like ``LiveConverterCache``.
+public final class LivePCM16Conversion: @unchecked Sendable {
+    private let cache = LiveConverterCache()
+    private var output: AVAudioPCMBuffer?
+
+    public init() {}
+
+    /// Feeds `input` once through the retained converter (never `reset()`
+    /// between chunks) and returns its PCM16 bytes, empty while the resampler
+    /// is still priming.
+    public func pcm16(from input: AVAudioPCMBuffer, to outputFormat: AVAudioFormat) throws -> Data {
+        guard let converter = cache.converter(from: input.format, to: outputFormat) else {
+            throw LivePCMConversionError.converterUnavailable(
+                inputSampleRate: input.format.sampleRate, outputSampleRate: outputFormat.sampleRate
+            )
+        }
+        let ratio = outputFormat.sampleRate / input.format.sampleRate
+        let capacity = AVAudioFrameCount(ceil(Double(input.frameLength) * ratio)) + 1
+        let buffer: AVAudioPCMBuffer
+        if let output, output.format == outputFormat, output.frameCapacity >= capacity {
+            output.frameLength = 0
+            buffer = output
+        } else {
+            guard let created = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
+                throw LivePCMConversionError.conversionFailed(domain: nil, code: nil)
+            }
+            output = created
+            buffer = created
+        }
+        var error: NSError?
+        var didProvideInput = false
+        let status = converter.convert(to: buffer, error: &error) { _, outStatus in
+            // One-shot input: offering the same buffer again duplicates frames.
+            guard !didProvideInput else {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            didProvideInput = true
+            outStatus.pointee = .haveData
+            return input
+        }
+        guard status != .error, error == nil else {
+            throw LivePCMConversionError.conversionFailed(domain: error?.domain, code: error?.code)
+        }
+        guard buffer.frameLength > 0, let samples = buffer.int16ChannelData else { return Data() }
+        return Data(bytes: samples[0], count: Int(buffer.frameLength) * MemoryLayout<Int16>.size)
+    }
+
+    /// The resampler's end-of-stream tail as PCM16 bytes; see ``LiveConverterCache/drainPCM16()``.
+    public func drainPCM16() -> Data? { cache.drainPCM16() }
+
+    /// Drops the converter and output buffer without flushing them.
+    public func reset() {
+        cache.reset()
+        output = nil
+    }
+}

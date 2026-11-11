@@ -78,7 +78,7 @@ class CloudClient(
 
     override fun cleanup(apiKey: String, transcript: String, call: CallHandle): String {
         val json = CloudWire.cleanupBody(CloudCatalog.CLEANUP_MODEL, transcript).toByteArray()
-        val url = "${CloudProvider.OpenRouter.baseUrl}/chat/completions"
+        val url = "${CloudCatalog.cleanupProvider.baseUrl}/chat/completions"
         val body = post(url, apiKey, "application/json", call) { conn ->
             conn.setFixedLengthStreamingMode(json.size)
             conn.outputStream.use { it.write(json) }

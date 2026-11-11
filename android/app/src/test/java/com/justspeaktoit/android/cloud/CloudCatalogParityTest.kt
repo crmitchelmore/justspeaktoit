@@ -8,9 +8,9 @@ import org.junit.Test
 
 /**
  * `assets/cloud_catalog.json` is generated from SpeakCore (`CloudCatalogAndroidExport`, kept fresh by
- * `CloudCatalogAndroidExportTests`). [CloudCatalog] and [CleanupPolicy] must match it exactly, so a
- * catalogue, retirement, credential, wire-field or prompt change on the Mac fails here until Android
- * follows it.
+ * `CloudCatalogAndroidExportTests`), and the build generates [GeneratedCloudCatalog] from it. These
+ * tests are the one golden drift check on that generator: [CloudCatalog] and [CleanupPolicy] must
+ * expose exactly what the asset says, and every provider needs an Android transport.
  */
 class CloudCatalogParityTest {
     private val asset = JSONObject(SettingsSearchAsset.locate("app/src/main/assets/cloud_catalog.json").readText())
@@ -20,13 +20,22 @@ class CloudCatalogParityTest {
     @Test
     fun testAssetVersion_isUnderstood() {
         assertEquals(1, asset.getInt("version"))
+        assertEquals(asset.getInt("version"), GeneratedCloudCatalog.VERSION)
     }
 
     @Test
     fun testProviders_matchIdsAndCredentialIdsInOrder() {
         val expected = asset.getJSONArray("providers").objects().map { it.getString("id") to it.getString("credentialId") }
-        assertEquals(expected, CloudProvider.entries.map { it.id to it.credentialId })
-        assertEquals(CloudProvider.entries, CloudCatalog.providers)
+        assertEquals(expected, CloudCatalog.providers.map { it.id to it.credentialId })
+    }
+
+    @Test
+    fun testEveryTransport_belongsToAGeneratedProvider() {
+        assertEquals(
+            "a CloudProvider transport with no catalogue provider is dead code",
+            CloudProvider.entries.map { it.id }.toSet(),
+            CloudCatalog.providers.map { it.id }.toSet(),
+        )
     }
 
     @Test
@@ -51,7 +60,7 @@ class CloudCatalogParityTest {
     fun testCleanup_matchesModelProviderAndPrompt() {
         val cleanup = asset.getJSONObject("cleanup")
         assertEquals(cleanup.getString("model"), CloudCatalog.CLEANUP_MODEL)
-        assertEquals(cleanup.getString("provider"), CloudProvider.OpenRouter.id)
+        assertEquals(cleanup.getString("provider"), CloudCatalog.cleanupProvider.id)
         assertEquals(cleanup.getString("systemPrompt"), CleanupPolicy.systemPrompt())
     }
 }

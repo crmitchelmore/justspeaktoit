@@ -107,9 +107,9 @@ data class DictationUiState(
         get() = !dictation.isActive && !checkingAvailability && !releasingMicrophone &&
             cleanup != CleanupStatus.Running && options.firstOrNull { it.mode == activeMode }?.usable == true
 
-    /** Cleanup runs only when switched on and an OpenRouter key exists. */
+    /** Cleanup runs only when switched on and a key for the cleanup provider (OpenRouter) exists. */
     val cleanupReady: Boolean
-        get() = cleanupEnabled && CloudProvider.OpenRouter in savedKeys
+        get() = cleanupEnabled && CloudCatalog.cleanupProvider in savedKeys
 }
 
 /** Deadlines and polling for the session's blocking work; tests shorten them. */
@@ -720,7 +720,7 @@ class DictationViewModel internal constructor(
         _state.update { it.copy(cleanup = CleanupStatus.Running) }
         work = scope.launch {
             val cleaned = try {
-                val key = withContext(io) { secrets.read(CloudProvider.OpenRouter.credentialId) }
+                val key = withContext(io) { secrets.read(CloudCatalog.cleanupProvider.credentialId) }
                 key?.let { capture.call(timings.cleanupMs) { call -> cloud.cleanup(it, done.transcript, call) } }
             } catch (e: CloudException) {
                 null

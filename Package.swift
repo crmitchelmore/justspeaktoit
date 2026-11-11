@@ -352,10 +352,15 @@ if windowsTargetBuild {
                 "CWindowsSupport", "CWindowsAutomation"
             ]
         ),
+        // The window bindings shared with Linux, compiled against CWindowsSupport.
+        .target(
+            name: "SpeakDesktopNativeBindings",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "CWindowsSupport"]
+        ),
         .executableTarget(
             name: "SpeakWindows", dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakDesktopSync", "SpeakSync",
-                "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsAutomation"
+                "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsAutomation", "SpeakDesktopNativeBindings"
             ],
             // A windowed app: Start menu and startup launches open no console.
             // Swift emits `main`, so the CRT entry is mainCRTStartup, not WinMain.
@@ -455,11 +460,16 @@ if linuxTargetBuild {
                 .product(name: "NIOSSL", package: "swift-nio-ssl")
             ]
         ),
+        // The window bindings shared with Windows, compiled against CLinuxSupport.
+        .target(
+            name: "SpeakDesktopNativeBindings",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "CLinuxSupport"]
+        ),
         .executableTarget(
             name: "SpeakLinux",
             dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
-                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync", "SpeakLinuxAutomation"
+                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync", "SpeakLinuxAutomation", "SpeakDesktopNativeBindings"
             ],
             resources: [.copy("Resources/hicolor")]
         ),

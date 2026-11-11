@@ -2,6 +2,7 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
+import SpeakDesktopNativeBindings
 import SpeakWindowsPlatform
 import CWindowsSupport
 
@@ -78,39 +79,12 @@ extension WindowsNative {
                     shown.minimumSpeed, shown.maximumSpeed, $0) == 0
             }
         }
-        let strings = DesktopNativeStrings()
-        let examples = VoiceSynthesisMarkup.examples.map {
-            JSTIVoiceMarkupExample(text: strings.add($0.text), description: strings.add($0.description))
-        }
-        let helper = withExtendedLifetime(strings) {
-            examples.withUnsafeBufferPointer {
-                jsti_window_set_voice_markup_helper(
-                    shown.markupHelperEnabled ? 1 : 0, $0.baseAddress, $0.count
-                ) { input, output, capacity, utf16, scalars in
-                    VoiceSynthesisMarkup.writeWrappedText(input, output: output, capacity: capacity,
-                        leadingUTF16: utf16, leadingScalars: scalars)
-                }
-            }
-        }
-        return configured && helper == 0
+        let helper = DesktopNativeBindings.voiceMarkupHelper(enabled: shown.markupHelperEnabled)
+        return configured && helper
     }
 
     static func voiceDiscovery(_ shown: DesktopVoiceDiscoveryPresentation) {
-        let labels = shown.voices.map {
-            $0.label + (DesktopSpeechVoice.voices.contains($0) ? " (documented preset)" : " (account listing)")
-        }.joined(separator: "\n")
-        let ids = shown.voices.map(\.id).joined(separator: "\n")
-        let result = shown.requestID.withCString { token in
-            labels.withCString { names in
-                ids.withCString { identifiers in
-                    shown.message.withCString {
-                        jsti_window_set_voice_account_inventory(
-                            token, names, identifiers, Int32(shown.selected), $0, shown.loading ? 1 : 0)
-                    }
-                }
-            }
-        }
-        guard let context = voiceContext.get(), result == 0,
+        guard let context = voiceContext.get(), WindowsHostPlatform.showVoiceAccountInventory(shown),
               configureVoiceOutput(shown.settings, context: context,
                   accountInventory: shown.accountInventory ?? shown.inventory.map(VoiceAccountInventory.xai)) else {
             update("The account voice listing or saved voice could not be shown."); return
@@ -132,117 +106,37 @@ extension WindowsNative {
                 jsti_window_set_voice_credential_handler(windowsVoiceCredentialEvent, context) == 0
         }
     }
-
-    static func voiceTextImported(_ result: Result<String, Error>, requestID: String) {
-        let text: String
-        let error: String
-        switch result {
-        case .success(let value): text = value; error = ""
-        case .failure(let failure): text = ""; error = failure.localizedDescription
-        }
-        let status = requestID.withCString { token in
-            text.withCString { value in
-                error.withCString { jsti_window_set_voice_text_import(token, value, $0) }
-            }
-        }
-        if status < 0 { WindowsNative.update("The text import result could not be shown.") }
-    }
-
 }
 
 extension WindowsHostPlatform {
     package static func voiceDiscovery(_ presentation: DesktopVoiceDiscoveryPresentation) {
         WindowsNative.voiceDiscovery(presentation)
     }
-    package static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation) {
-        let result = presentation.requestID.withCString { token in
-            presentation.text.withCString {
-                jsti_window_set_voice_usage(token, $0, presentation.trackingEnabled ? 1 : 0)
-            }
+
+    package static func showVoiceAudioFormats(_ settings: DesktopVoiceOutputSettings, status: String) {
+        if !WindowsNative.configureVoiceAudioFormats(settings, status: status) {
+            update("The saved Voice file format could not be shown.")
         }
-        if result < 0 { WindowsNative.update("The Voice usage report could not be shown.") }
     }
 
-    package static func voiceTextImportCancelled(_ requestID: String) {
-        let result = requestID.withCString { token in
-            "".withCString { empty in
-                "Text import stopped.".withCString { jsti_window_set_voice_text_import(token, empty, $0) }
-            }
+    package static func showVoiceControls(
+        _ settings: DesktopVoiceOutputSettings, accountInventory: VoiceAccountInventory?
+    ) {
+        if !WindowsNative.configureVoiceControls(settings, accountInventory: accountInventory) {
+            update("The saved Voice synthesis controls could not be shown.")
         }
-        if result < 0 { WindowsNative.update("The stopped text import could not be shown.") }
-    }
-
-    package static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation) {
-        let result = presentation.resultID.withCString { identifier in
-            presentation.message.withCString { message in
-                presentation.format.rawValue.withCString {
-                    jsti_window_set_voice_generated_result_with_format(
-                        identifier, presentation.working ? 1 : 0, message, $0)
-                }
-            }
-        }
-        if result < 0 { WindowsNative.update("The generated voice result could not be shown.") }
     }
 }
 
-// The native callback preserves one validated event order and its fixed ABI.
-// swiftlint:disable:next function_parameter_count cyclomatic_complexity
+// The native callback's parameter list is fixed by the C ABI.
+// swiftlint:disable:next function_parameter_count
 func windowsVoiceSourceEvent(
     _ action: Int32, _ source: Int32, _ text: UnsafePointer<CChar>?,
     _ record: UnsafePointer<CChar>?, _ path: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
-    do {
-        let message = try DesktopVoiceSourceMessage(
-            action: action, source: source, text: text.map(String.init(cString:)) ?? "",
-            record: record.map(String.init(cString:)) ?? "", path: path.map(String.init(cString:)) ?? ""
-        )
-        switch message {
-        case .audioFormat(let identifier):
-            holder.enqueueSettings {
-                await holder.controller.beginVoiceAudioFormatSave(identifier) { saved, failure in
-                    guard let saved else { return }
-                    if !WindowsNative.configureVoiceAudioFormats(saved,
-                        status: failure ?? "Voice file format saved. Generated results keep their captured format.") {
-                        WindowsNative.update("The saved Voice file format could not be shown.")
-                    }
-                }
-            }
-        case .discoveryOpen, .discoveryOpenModern, .discoveryRefresh,
-             .discoveryClose, .discoveryChoose, .discoveryProvider:
-            holder.enqueueSettings { await holder.controller.handleVoiceDiscovery(message) }
-        case .event(let event): holder.submitHistoryPlayback(event)
-        case .preferences(let options):
-            holder.enqueueSettings {
-                await holder.controller.saveVoiceGenerationOptions(options)
-                let saved = await holder.controller.voiceOutputSettings()
-                if jsti_window_set_voice_generation_options(saved.generationOptions.nativeFlags) != 0 {
-                    WindowsNative.update("The saved Voice Output preferences could not be shown.")
-                }
-            }
-        case .usageReport(let text, let requestID):
-            holder.enqueueSettings { await holder.controller.showVoiceUsage(text: text, requestID: requestID) }
-        case .usageTracking(let enabled, let requestID):
-            holder.enqueueSettings { await holder.controller.saveVoiceUsageTracking(enabled, requestID: requestID) }
-        case .synthesisPreferences(let options, let requestID):
-            saveWindowsVoiceControls(options, requestID: requestID, holder: holder)
-        }
-    } catch { WindowsNative.update(error.localizedDescription) }
-}
-
-private func saveWindowsVoiceControls(
-    _ options: VoiceSynthesisOptions, requestID: String, holder: WindowsEventContext
-) {
-    holder.enqueueSettings {
-        let saved = await holder.controller.saveVoiceSynthesisOptions(options)
-        if !WindowsNative.configureVoiceControls(await holder.controller.voiceOutputSettings(),
-            accountInventory: await holder.controller.selectedVoiceAccountInventory) {
-            WindowsNative.update("The saved Voice synthesis controls could not be shown.")
-        }
-        if requestID.withCString({ jsti_window_finish_voice_synthesis_options($0, saved ? 1 : 0) }) != 0 {
-            WindowsNative.update("The Voice controls save result could not be shown.")
-        }
-    }
+    WindowsEventContext.voiceSourceEvent(
+        action: action, source: source, strings: [text, record, path], context: context
+    )
 }
 
 private final class WindowsVoiceContext: @unchecked Sendable {

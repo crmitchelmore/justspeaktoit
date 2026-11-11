@@ -2,33 +2,29 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
+import SpeakDesktopNativeBindings
 import CLinuxSupport
 
 extension LinuxWindow {
     static func voiceLanguageTitle(
         _ settings: LinuxVoiceOutputSettings, accountInventory: VoiceAccountInventory?
     ) {
-        guard let index = DesktopConfiguration.fields.firstIndex(where: {
-            $0.key == VoiceOutputLanguagePreference.key
-        }) else {
+        let calls = DesktopNativeBindings.configuration
+        guard let index = DesktopNativeConfiguration.languageFieldIndex else {
             LinuxHostPlatform.update("The canonical Voice language field is unavailable.")
             return
         }
-        let result = settings.languageTitle(accountInventory: accountInventory).withCString {
-            jsti_window_set_configuration_field_title(index, $0)
+        if calls.setFieldTitle(index, settings.languageTitle(accountInventory: accountInventory)) < 0 {
+            LinuxHostPlatform.update("The Voice language label could not be shown.")
         }
-        if result < 0 { LinuxHostPlatform.update("The Voice language label could not be shown.") }
-        guard let qualityIndex = DesktopConfiguration.fields.firstIndex(where: {
-            $0.key == VoiceSynthesisPreference.quality.key.rawValue
-        }) else {
+        guard let qualityIndex = DesktopNativeConfiguration.qualityFieldIndex else {
             LinuxHostPlatform.update("The canonical Voice quality field is unavailable.")
             return
         }
-        let qualityResult = settings.qualityTitle(accountInventory: accountInventory).withCString {
-            jsti_window_set_configuration_field_title(qualityIndex, $0)
+        if calls.setFieldTitle(qualityIndex, settings.qualityTitle(accountInventory: accountInventory)) < 0 {
+            LinuxHostPlatform.update("The Voice quality label could not be shown.")
         }
-        if qualityResult < 0 { LinuxHostPlatform.update("The Voice quality label could not be shown.") }
-        if jsti_window_set_configuration_field_enabled(qualityIndex,
+        if calls.setFieldEnabled(qualityIndex,
             settings.qualityControlsAvailable(accountInventory: accountInventory) ? 1 : 0) < 0 {
             LinuxHostPlatform.update("The Voice quality availability could not be shown.")
         }
@@ -36,78 +32,31 @@ extension LinuxWindow {
 
     static func configureConfiguration(_ holder: LinuxEventContext) async throws {
         let snapshot = try await holder.controller.nativeConfigurationEditorSnapshot()
-        let preferences = snapshot.preferences
-        guard jsti_window_set_escape_cancellation(preferences.cancelRecordingOnEscape ? 1 : 0) == 0 else {
-            throw DesktopConfigurationError.invalidField("Escape cancellation")
-        }
-        holder.gestures.configureTiming(
-            hold: preferences.number("holdThreshold"), doubleTap: preferences.number("doubleTapWindow")
-        )
-        let strings = DesktopNativeStrings()
-        let rows = zip(DesktopConfiguration.fields, snapshot.entries).map { field, value in
-            JSTIConfigurationField(
-                title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle
-                    : field.key == VoiceSynthesisPreference.quality.key.rawValue ? snapshot.qualityTitle : field.title),
-                value: strings.add(value), group: strings.add(field.group),
-                is_boolean: { if case .boolean = field.kind { return 1 }; return 0 }(),
-                requires_hud_overlay: field.requiresHUDOverlay ? 1 : 0,
-                choices: preferences.serializedChoices(for: field).map { strings.add($0) },
-                requires_hands_free_guard: field.requiresHandsFreeGuard ? 1 : 0,
-                enabled_by_field: field.enabledBy.flatMap { key in
-                    DesktopConfiguration.fields.firstIndex { $0.key == key }.map { Int32($0 + 1) }
-                } ?? 0
+        let failed = DesktopNativeConfiguration.present(
+            snapshot, calls: DesktopNativeBindings.configuration, callback: linuxConfigurationEvent,
+            context: holder.callbackContext
+        ) { preferences in
+            holder.gestures.configureTiming(
+                hold: preferences.number("holdThreshold"), doubleTap: preferences.number("doubleTapWindow")
             )
         }
-        let recovered: [UnsafePointer<CChar>?] = preferences.recoveredKeywords.map { strings.add($0) }
-        let result = withExtendedLifetime(strings) {
-            rows.withUnsafeBufferPointer { fields in
-                recovered.withUnsafeBufferPointer { recovery in
-                    snapshot.id.withCString {
-                        jsti_window_set_configuration_revision(
-                            fields.baseAddress, fields.count, recovery.baseAddress, recovery.count,
-                            linuxConfigurationEvent, holder.callbackContext, $0
-                        )
-                    }
-                }
-            }
+        if let failed { throw configurationFailure(failed) }
+        if let failed = DesktopNativeConfiguration.presentLayout(
+            snapshot.preferences, calls: DesktopNativeBindings.layout
+        ) {
+            throw configurationFailure(failed)
         }
-        guard result == 0 else { throw DesktopConfigurationError.invalidField("Native preferences") }
-        guard let qualityIndex = DesktopConfiguration.fields.firstIndex(where: {
-            $0.key == VoiceSynthesisPreference.quality.key.rawValue
-        }), jsti_window_set_configuration_field_enabled(qualityIndex, snapshot.qualityEnabled ? 1 : 0) >= 0 else {
-            throw DesktopConfigurationError.invalidField("Voice quality availability")
-        }
-        try configureConfigurationLayout(preferences, strings: strings)
         try await configureActionShortcuts(holder)
     }
 
-    private static func configureConfigurationLayout(
-        _ preferences: DesktopConfiguration, strings: DesktopNativeStrings
-    ) throws {
-        let density = preferences.visualDensity
-        let layout = JSTIVisualDensity(
-            compact: density.isCompact ? 1 : 0,
-            page_padding: Int32(density.pagePadding), section_spacing: Int32(density.sectionSpacing),
-            card_padding: Int32(density.cardPadding), content_spacing: Int32(density.cardContentSpacing),
-            inline_spacing: Int32(density.inlineSpacing), group_spacing: Int32(density.groupSpacing),
-            minimum_row_height: Int32(density.minimumListRowHeight)
-        )
-        guard jsti_window_set_visual_density(layout) == 0 else {
-            throw DesktopConfigurationError.invalidField("Layout density")
+    private static func configurationFailure(_ step: DesktopNativeConfiguration.Step) -> DesktopConfigurationError {
+        switch step {
+        case .escapeCancellation: return .invalidField("Escape cancellation")
+        case .preferences: return .invalidField("Native preferences")
+        case .qualityAvailability: return .invalidField("Voice quality availability")
+        case .layoutDensity: return .invalidField("Layout density")
+        case .sidebarShortcuts: return .invalidField("Sidebar shortcuts")
         }
-        let bindings = DesktopSidebarShortcut.allCases.map {
-            JSTISidebarShortcut(
-                destination: strings.add($0.rawValue), digit: Int32($0.digit), hint: strings.add($0.chord)
-            )
-        }
-        let sidebar = withExtendedLifetime(strings) {
-            bindings.withUnsafeBufferPointer {
-                jsti_window_set_sidebar_shortcuts(
-                    $0.baseAddress, $0.count, preferences.enabled("showSidebarShortcutHints") ? 1 : 0
-                )
-            }
-        }
-        guard sidebar == 0 else { throw DesktopConfigurationError.invalidField("Sidebar shortcuts") }
     }
 
     static func performConfigurationAction(
@@ -127,36 +76,19 @@ func linuxConfigurationEvent(
     _ action: Int32, _ entries: UnsafePointer<UnsafePointer<CChar>?>?, _ count: Int,
     _ context: UnsafeMutableRawPointer?, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ capacity: Int
 ) -> Int32 {
-    guard let context, let entries else { return -1 }
-    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return -1 }
-    let received = UnsafeBufferPointer(start: entries, count: count).map { $0.map(String.init(cString:)) ?? "" }
-    do {
-        switch try DesktopHostConfigurationEditorEvent(action: action, values: received) {
-        case .rendered(let id):
-            holder.enqueueSettings {
-                do { try await holder.controller.activateConfigurationEditorSnapshot(id) } catch {
-                    LinuxHostPlatform.update(error.localizedDescription)
-                }
-            }
-        case .action(let action, let values, let editorID):
-            holder.enqueueSettings {
-                do {
-                    try await LinuxWindow.performConfigurationAction(
-                        action, values: values, holder: holder, editorID: editorID
-                    )
-                } catch {
-                    LinuxHostPlatform.update(error.localizedDescription)
-                    do { try await LinuxWindow.configureConfiguration(holder) } catch {
-                        LinuxHostPlatform.update(error.localizedDescription)
-                    }
-                }
-            }
-        }
-        return 0
-    } catch {
-        DesktopNativeStrings.copy(error.localizedDescription, into: errorBuffer, capacity: capacity)
-        return -1
+    guard let entries else { return -1 }
+    let received = UnsafeBufferPointer(start: entries, count: count).map(String.init(nativeOrEmpty:))
+    return LinuxEventContext.configurationEditorEvent(
+        action: action, values: received, context: context, errorBuffer: errorBuffer, capacity: capacity
+    )
+}
+
+extension LinuxEventContext {
+    func performConfigurationAction(_ action: Int32, values: [String], editorID: String?) async throws {
+        try await LinuxWindow.performConfigurationAction(action, values: values, holder: self, editorID: editorID)
     }
+
+    func configureConfiguration() async throws { try await LinuxWindow.configureConfiguration(self) }
 }
 
 func linuxPostProcessingEvent(_ value: String, slot: Int, holder: LinuxEventContext) {

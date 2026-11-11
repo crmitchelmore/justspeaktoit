@@ -14,7 +14,7 @@
 // message-only window, so the main window's dictation shortcut identifiers are
 // never touched. Nothing installs a keyboard hook.
 
-// Provided by WindowsWindow.cpp.
+// Provided by WindowsWindowBridge.cpp.
 void jsti_window_action_command(HWND window, int run, const char *page);
 
 namespace {

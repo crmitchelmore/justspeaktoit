@@ -15,7 +15,7 @@
 // presses, so the release is observed by polling the key state while the key
 // is held; nothing polls while it is up and no keyboard hook is installed.
 
-// Provided by WindowsWindow.cpp.
+// Provided by WindowsWindowBridge.cpp.
 void jsti_window_hotkey_event(HWND window, int event);
 int jsti_window_recording_state();
 

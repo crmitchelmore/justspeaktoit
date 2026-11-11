@@ -91,6 +91,7 @@ enum {
     JSTI_EVENT_ISSUE_REPORT_SAVE = 153,
     JSTI_EVENT_ISSUE_REPORT_OPEN = 154,
     JSTI_EVENT_ISSUE_REPORT_CLOSE = 155,
+    JSTI_EVENT_HISTORY_LOAD_MORE = 156, /* the History page scrolled to its end; no text */
     JSTI_EVENT_PROFILES = 140
 };
 
@@ -403,6 +404,9 @@ enum {
 typedef struct {
     const char *identifier, *label, *uses, *status, *url, *hint;
     int32_t saved;
+    /* Bit i set when the row passes SpeakCore APIKeyStatusFilter case i
+     * (All, Errors, Set, Unset). */
+    uint32_t filters;
 } JSTILinuxAPIKeyRow;
 /* Keys exist only during this callback and are erased from the native form.
  * Rows returned to GTK contain masked metadata only. */

@@ -362,9 +362,12 @@ struct KeyboardRootView: View {
         case .fullAccessRequired:
             return "Turn on Full Access in Settings, then try again."
         case .appUnavailable:
-            return "Open Just Speak from the Home Screen, then tap the mic to retry."
+            // Also how a background microphone refusal arrives (issue #1469):
+            // iOS only lets Just Speak take the microphone again once it has
+            // been opened.
+            return "iOS paused Just Speak's microphone. Open Just Speak, then return here and tap the mic."
         case .recordingUnavailable:
-            return "Recording could not start. Check the microphone permission in Just Speak."
+            return "Just Speak couldn't start recording. Tap the mic to retry."
         case .noSpeech:
             return "No speech detected. Nothing was inserted."
         case .timedOut:

@@ -85,14 +85,17 @@ final class ModelRetirementTests: XCTestCase {
     func testCleanupRetirements_moveSavedAndInFlightSelectionsOnTheirDay() throws {
         XCTAssertEqual(Dictionary(uniqueKeysWithValues: cleanup.map { ($0.id, $0.successorID) }), [
             "openai/gpt-5-mini": "openai/gpt-5.6-luna",
-            "openai/gpt-5.4-nano": "openai/gpt-6-luna"
+            "openai/gpt-5.4-nano": "openai/gpt-6-luna",
+            "native/openai/gpt-5-mini": "native/openai/gpt-6-luna",
+            "native/groq/llama-3.1-8b-instant": "native/groq/openai/gpt-oss-20b"
         ])
         for retirement in cleanup {
             let day = retirement.shutdownDate
+            let eve = day.addingTimeInterval(-1)
             let successor = try XCTUnwrap(retirement.successorID)
-            let before = ModelRetirements.current(ModelCatalog.postProcessing, at: beforeAll)
+            let before = ModelRetirements.current(ModelCatalog.postProcessing, at: eve)
             XCTAssertTrue(before.first { $0.id == retirement.id }?.description?.contains(retirement.notice) == true)
-            XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(retirement.id, at: beforeAll), retirement.id)
+            XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(retirement.id, at: eve), retirement.id)
             let after = Set(ModelRetirements.current(ModelCatalog.postProcessing, at: day).map(\.id))
             XCTAssertFalse(after.contains(retirement.id), retirement.id)
             XCTAssertTrue(after.contains(successor), retirement.id)

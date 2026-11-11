@@ -1,0 +1,148 @@
+#if os(iOS)
+import SpeakCore
+import SwiftUI
+
+// MARK: - Post-processing model picker
+
+/// Native and on-device cleanup models first, then one OpenRouter row that opens
+/// a searchable list of OpenRouter models. Grouping comes from the shared
+/// `ModelPickerGrouping`, so the list always reflects the route a model uses.
+struct PostProcessingModelPickerRows: View {
+    @ObservedObject var settings: AppSettings
+    var showsDescriptions = true
+    var onSelect: () -> Void = {}
+
+    private var groups: ModelPickerGrouping.Groups {
+        ModelPickerGrouping.groups(Self.options(selected: settings.postProcessingModel), purpose: .postProcessing)
+    }
+
+    /// The iOS catalogue plus discovered or saved OpenRouter choices.
+    static func options(selected: String) -> [ModelCatalog.Option] {
+        var options = AppSettings.postProcessingModels
+        let bundled = Set(ModelCatalog.postProcessing.map(\.id))
+        options += CleanupModelDiscoveryStore.shared.options(selected: selected)
+            .filter { !bundled.contains($0.id) }
+        return options
+    }
+
+    var body: some View {
+        ForEach(groups.direct) { model in
+            PostProcessingModelRow(
+                settings: settings, model: model, showsDescription: showsDescriptions, onSelect: onSelect
+            )
+        }
+        if !groups.openRouter.isEmpty {
+            NavigationLink {
+                OpenRouterPostProcessingModelList(
+                    settings: settings, options: groups.openRouter, onSelect: onSelect
+                )
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(ModelPickerGrouping.openRouterTitle)
+                            .foregroundStyle(.primary)
+                        Text(openRouterSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    IOSModelCredentialStatusView(
+                        availability: ModelCredentialResolver.availability(
+                            for: groups.openRouter[0].id,
+                            purpose: .postProcessing,
+                            storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
+                        )
+                    )
+                    if isOpenRouterSelected {
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+            }
+            .accessibilityIdentifier("postProcessingModel.openRouter")
+        }
+    }
+
+    private var isOpenRouterSelected: Bool {
+        groups.openRouter.contains { $0.id == settings.postProcessingModel }
+    }
+
+    private var openRouterSubtitle: String {
+        if let selected = groups.openRouter.first(where: { $0.id == settings.postProcessingModel }) {
+            return selected.displayName
+        }
+        return "Choose from \(groups.openRouter.count) models with one OpenRouter key"
+    }
+}
+
+/// The OpenRouter level: every OpenRouter cleanup model, searchable, plus the
+/// optional discovery of newer OpenRouter models.
+private struct OpenRouterPostProcessingModelList: View {
+    @ObservedObject var settings: AppSettings
+    let options: [ModelCatalog.Option]
+    let onSelect: () -> Void
+    @State private var query = ""
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(ModelPickerGrouping.filter(options, query: query)) { model in
+                    PostProcessingModelRow(settings: settings, model: model, showsDescription: true, onSelect: onSelect)
+                }
+            } footer: {
+                Text("These models are sent to OpenRouter with your OpenRouter key.")
+            }
+            Section("Model discovery") {
+                CleanupModelDiscoveryView(
+                    selection: $settings.postProcessingModel,
+                    enabled: $settings.cleanupModelDiscoveryEnabled
+                )
+            }
+        }
+        .searchable(text: $query, prompt: "Search OpenRouter models")
+        .navigationTitle(ModelPickerGrouping.openRouterTitle)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct PostProcessingModelRow: View {
+    @ObservedObject var settings: AppSettings
+    let model: ModelCatalog.Option
+    let showsDescription: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button {
+            settings.postProcessingModel = model.id
+            onSelect()
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.displayName)
+                        .foregroundStyle(.primary)
+                    if showsDescription, let description = model.description {
+                        Text(description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                IOSModelCredentialStatusView(
+                    availability: ModelCredentialResolver.availability(
+                        for: model.id,
+                        purpose: .postProcessing,
+                        storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
+                    )
+                )
+
+                if settings.postProcessingModel == model.id {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+    }
+}
+#endif

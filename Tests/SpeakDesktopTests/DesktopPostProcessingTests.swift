@@ -103,7 +103,13 @@ final class DesktopPostProcessingTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(
             DesktopPostProcessing.Options.self, from: JSONEncoder().encode(options)
         ), options)
-        XCTAssertEqual(DesktopPostProcessing.remoteModels.map(\.id), ModelCatalog.cloudPostProcessing.map(\.id))
+        XCTAssertEqual(
+            DesktopPostProcessing.remoteModels.map(\.id),
+            ModelPickerGrouping.flattened(ModelCatalog.cloudPostProcessing, purpose: .postProcessing).map(\.id)
+        )
+        XCTAssertEqual(
+            Set(DesktopPostProcessing.remoteModels.map(\.id)), Set(ModelCatalog.cloudPostProcessing.map(\.id))
+        )
         XCTAssertTrue(DesktopPostProcessing.remoteModels.contains { $0.id == ModelCatalog.defaultPostProcessingModel })
         XCTAssertEqual(DesktopPostProcessing.Options().mode, .disabled)
     }

@@ -215,6 +215,12 @@ preview in Azure Speech.
     (`CloudCatalog.CLEANUP_MODEL`) and the paid-access worker.
   - GPT-5.6 rates now match the standard tier: Luna $0.20/$1.20, Terra $2/$12,
     Sol $4/$20 (previously $1/$6, $2.5/$15 and $5/$30).
+- **Direct (native) cleanup routes** from #1453 follow the same rules.
+  `native/openai/gpt-5-mini` moves to `native/openai/gpt-6-luna` on 11 December;
+  the direct list has no GPT-5.6 Luna. Groq shut down `llama-3.1-8b-instant` for
+  free and developer tiers on 16 August 2026 ([deprecations](https://console.groq.com/docs/deprecations)),
+  so `native/groq/llama-3.1-8b-instant` is hidden and moves to the new
+  `native/groq/openai/gpt-oss-20b` entry ($0.075/$0.30 per M tokens).
 - **Paid-access worker.** Its batch route, `google/gemini-2.0-flash-001`, is no
   longer listed on OpenRouter. It now uses `google/gemini-3.1-flash-lite`, the
   app's batch default. Policy version `2026-11-11`.

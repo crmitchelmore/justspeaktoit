@@ -22,11 +22,14 @@ import os.log
 public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:this type_body_length
     BatchTranscriptionClient {
     public typealias APIKeyProvider = @Sendable () async -> String?
+    /// Resolves a stored key by credential identifier for native text providers.
+    public typealias NativeAPIKeyProvider = @Sendable (_ identifier: String) async -> String?
 
     private let baseURL = OpenRouterService.baseURL
     private let session: URLSession
     private let apiKeyProvider: APIKeyProvider
     private let apiKeyOverride: String?
+    private let nativeAPIKeyProvider: NativeAPIKeyProvider?
     private let maximumInlineAudioBytes: Int64
     private let branding: OpenRouterBranding
     private let logger = SpeakLogger.logger(category: "OpenRouter")
@@ -80,13 +83,33 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         session: URLSession = .shared,
         apiKeyOverride: String? = nil,
         maximumInlineAudioBytes: Int64 = 50 * 1024 * 1024,
-        branding: OpenRouterBranding = .platformDefault
+        branding: OpenRouterBranding = .platformDefault,
+        nativeAPIKeyProvider: NativeAPIKeyProvider?
     ) {
         self.apiKeyProvider = apiKeyProvider
         self.session = session
         self.apiKeyOverride = apiKeyOverride
+        self.nativeAPIKeyProvider = nativeAPIKeyProvider
         self.maximumInlineAudioBytes = maximumInlineAudioBytes
         self.branding = branding
+    }
+
+    /// OpenRouter only: native selections report a missing provider key.
+    public init(
+        apiKeyProvider: @escaping APIKeyProvider,
+        session: URLSession = .shared,
+        apiKeyOverride: String? = nil,
+        maximumInlineAudioBytes: Int64 = 50 * 1024 * 1024,
+        branding: OpenRouterBranding = .platformDefault
+    ) {
+        self.init(
+            apiKeyProvider: apiKeyProvider,
+            session: session,
+            apiKeyOverride: apiKeyOverride,
+            maximumInlineAudioBytes: maximumInlineAudioBytes,
+            branding: branding,
+            nativeAPIKeyProvider: nil
+        )
     }
 
     /// Convenience initialiser for call sites that already hold the key.
@@ -94,18 +117,42 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         apiKey: String,
         session: URLSession = .shared,
         maximumInlineAudioBytes: Int64 = 50 * 1024 * 1024,
-        branding: OpenRouterBranding = .platformDefault
+        branding: OpenRouterBranding = .platformDefault,
+        nativeAPIKeyProvider: NativeAPIKeyProvider?
     ) {
         self.init(
             apiKeyProvider: { apiKey },
             session: session,
             maximumInlineAudioBytes: maximumInlineAudioBytes,
-            branding: branding
+            branding: branding,
+            nativeAPIKeyProvider: nativeAPIKeyProvider
+        )
+    }
+
+    /// Convenience initialiser for OpenRouter-only call sites that already hold the key.
+    public init(
+        apiKey: String,
+        session: URLSession = .shared,
+        maximumInlineAudioBytes: Int64 = 50 * 1024 * 1024,
+        branding: OpenRouterBranding = .platformDefault
+    ) {
+        self.init(
+            apiKey: apiKey,
+            session: session,
+            maximumInlineAudioBytes: maximumInlineAudioBytes,
+            branding: branding,
+            nativeAPIKeyProvider: nil
         )
     }
 
     public func hasStoredAPIKey() async -> Bool {
         await storedAPIKey() != nil
+    }
+
+    /// Whether the key the model's route needs is stored: the provider's own key
+    /// for a native selection, otherwise the OpenRouter key.
+    public func hasStoredAPIKey(forModel model: String) async -> Bool {
+        await chatAPIKey(for: model) != nil
     }
 
     public func requiresRemoteAccess(for model: String) -> Bool {
@@ -136,7 +183,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         temperature: Double,
         maxTokens: Int?
     ) async throws -> ChatResponse {
-        if let key = await storedAPIKey() {
+        if let key = await chatAPIKey(for: model) {
             return try await OpenRouterChatClient(apiKey: key, session: session, branding: branding).sendChat(
                 systemPrompt: systemPrompt,
                 messages: messages,
@@ -146,6 +193,9 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
             )
         }
 
+        if let native = NativeTextModels.route(for: model) {
+            throw NativeTextModelError.apiKeyMissing(providerName: native.provider.displayName)
+        }
         return performLocalChatFallback(systemPrompt: systemPrompt, messages: messages)
     }
 
@@ -158,8 +208,11 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    guard let key = await self.storedAPIKey() else {
-                        continuation.finish(throwing: OpenRouterClientError.apiKeyMissing)
+                    guard let key = await self.chatAPIKey(for: model) else {
+                        let error: Error = NativeTextModels.route(for: model).map {
+                            NativeTextModelError.apiKeyMissing(providerName: $0.provider.displayName)
+                        } ?? OpenRouterClientError.apiKeyMissing
+                        continuation.finish(throwing: error)
                         return
                     }
 
@@ -271,6 +324,13 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
     }
 
     // MARK: - API key resolution
+
+    private func chatAPIKey(for model: String) async -> String? {
+        guard let native = NativeTextModels.route(for: model) else { return await storedAPIKey() }
+        let key = await nativeAPIKeyProvider?(native.provider.credentialIdentifier)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.flatMap { $0.isEmpty ? nil : $0 }
+    }
 
     private func storedAPIKey() async -> String? {
         if let apiKeyOverride {
@@ -448,12 +508,12 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         model: String,
         temperature: Double
     ) throws -> URLRequest {
-        let url = baseURL.appendingPathComponent("chat/completions")
-        var request = URLRequest(url: url)
+        let target = try ChatCompletionTarget.resolve(model)
+        var request = URLRequest(url: target.url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        applyBrandHeaders(&request)
+        if target.isOpenRouter { applyBrandHeaders(&request) }
 
         let payload = OpenRouterChatRequest(
             model: model,

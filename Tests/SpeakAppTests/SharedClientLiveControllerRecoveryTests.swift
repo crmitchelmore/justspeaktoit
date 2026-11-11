@@ -21,6 +21,19 @@ final class SharedClientLiveControllerRecoveryTests: XCTestCase {
         XCTAssertEqual(fixture.delegate.errors.count, 1)
     }
 
+    func testProviderConnectionIsListedInStatusOnlyWhileTheRunLasts() async throws {
+        let fixture = Fixture()
+        XCTAssertNil(fixture.controller.connectionHold)
+        try await fixture.controller.start()
+        let hold = try XCTUnwrap(fixture.controller.connectionHold)
+        let listed = SystemResourceRegistry.shared.holds.first { $0.id == hold.id }
+        XCTAssertEqual(listed?.kind, .providerConnection)
+        XCTAssertEqual(listed?.isReleasable, false)
+        await fixture.controller.stop()
+        XCTAssertNil(fixture.controller.connectionHold)
+        XCTAssertFalse(SystemResourceRegistry.shared.holds.contains { $0.id == hold.id })
+    }
+
     func testFailedFinishRetainsVisibleDraftWhenConfirmationIsRevised() async throws {
         let fixture = Fixture()
         try await fixture.controller.start()

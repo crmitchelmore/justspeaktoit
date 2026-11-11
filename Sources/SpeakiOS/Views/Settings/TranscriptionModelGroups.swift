@@ -11,8 +11,8 @@ struct LiveModelGroup: Identifiable {
     let title: String
     let options: [ModelCatalog.Option]
 
-    /// Buckets catalogue options by provider, preserving first-appearance order
-    /// so the sections stay stable as models are added. Options whose id doesn't
+    /// Buckets catalogue options by provider; sections and their models are
+    /// alphabetical (provider, then model name). Options whose id doesn't
     /// resolve to a known provider are still shown (grouped by their id prefix)
     /// rather than silently dropped.
     static func grouped(_ options: [ModelCatalog.Option]) -> [LiveModelGroup] {
@@ -28,7 +28,13 @@ struct LiveModelGroup: Identifiable {
             }
             buckets[key, default: []].append(option)
         }
-        return order.map { LiveModelGroup(id: $0, title: titles[$0] ?? $0, options: buckets[$0] ?? []) }
+        return order.map { key in
+            LiveModelGroup(
+                id: key, title: titles[key] ?? key,
+                options: ModelPickerGrouping.sortedByProvider(buckets[key] ?? [], purpose: .liveTranscription)
+            )
+        }
+        .sorted { ModelPickerGrouping.ordered($0.title, $1.title) ?? false }
     }
 }
 
@@ -41,13 +47,16 @@ struct BatchModelGroup: Identifiable {
         let grouped = Dictionary(grouping: options) { option in
             String(option.id.prefix { $0 != "/" })
         }
-        return grouped.keys.sorted().map { provider in
+        return grouped.keys.map { provider in
             BatchModelGroup(
                 id: provider,
                 title: providerDisplayName(provider),
-                options: grouped[provider, default: []]
+                options: ModelPickerGrouping.sortedByProvider(
+                    grouped[provider, default: []], purpose: .batchTranscription
+                )
             )
         }
+        .sorted { ModelPickerGrouping.ordered($0.title, $1.title) ?? ($0.id < $1.id) }
     }
 
     private static func providerDisplayName(_ provider: String) -> String {

@@ -173,6 +173,8 @@ final class PrimedLiveInput {
   private let deviceManager: AudioInputDeviceManager
   private var inputSession: AudioInputDeviceManager.SessionContext?
   private var state = State.open
+  /// Lists the key-down microphone in Status until a session takes it over.
+  private var resourceHold: SystemResourceToken?
 
   private init(
     keyDownUptime: TimeInterval,
@@ -191,6 +193,12 @@ final class PrimedLiveInput {
     self.preRoll = preRoll
     self.deviceManager = deviceManager
     self.inputSession = inputSession
+    self.resourceHold = SystemResourceRegistry.shared.acquire(
+      kind: .microphone, title: "Hotkey warm-up",
+      reason: "Opened when the hotkey went down, so dictation starts without a delay. Closes within seconds.",
+      owner: "PrimedLiveInput", releaseTitle: "Close",
+      release: { [weak self] in _ = await self?.close() }
+    )
   }
 
   /// Selects the preferred input, then starts the standby engine for it (or
@@ -291,6 +299,8 @@ final class PrimedLiveInput {
   func handOver() -> Handover? {
     guard state == .open else { return nil }
     state = .handedOver
+    resourceHold?.end()
+    resourceHold = nil
     let session = inputSession
     inputSession = nil
     let preRoll = self.preRoll
@@ -339,6 +349,8 @@ final class PrimedLiveInput {
   func close() async -> (engine: AVAudioEngine, inputDeviceID: AudioDeviceID)? {
     guard state == .open else { return nil }
     state = .closed
+    resourceHold?.end()
+    resourceHold = nil
     let engine = self.engine
     let preRoll = self.preRoll
     await Task.detached(priority: .userInitiated) {

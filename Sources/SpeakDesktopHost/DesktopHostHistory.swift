@@ -16,6 +16,21 @@ extension DesktopHostController {
         }
     }
 
+    /// The page of `visible` the native list shows. The window grows to keep
+    /// the selected record listed, so paging alone never hides a selection.
+    func displayedHistory(_ visible: [DesktopRecordingStore.Record]) -> ArraySlice<DesktopRecordingStore.Record> {
+        if let selected = selectedHistoryID, let index = visible.firstIndex(where: { $0.id == selected }) {
+            historyPage.reveal(index: index)
+        }
+        return visible.prefix(historyPage.visibleCount(of: visible.count))
+    }
+
+    /// The native list scrolled to its end: show the next page of matches.
+    package func loadMoreHistory() {
+        guard !closed, historyPage.loadMore(total: visibleHistory().count) else { return }
+        refreshHistory()
+    }
+
     package func refreshHistory(selectRecord: Bool = false) {
         guard !closed else { return }
         Platform.historyManagement(identifiers: history.keys.sorted { $0.uuidString < $1.uuidString })
@@ -34,7 +49,7 @@ extension DesktopHostController {
             transcriptVariant = .processed
             playback.stop(announcing: false)
             stopReadAloud()
-            Platform.history(visible, selected: nil, selectRecord: selectRecord)
+            Platform.history(Array(displayedHistory(visible)), selected: nil, selectRecord: selectRecord)
             Platform.transcriptVariant(nil, for: nil, switchable: false)
             update(
                 "The selected recording is hidden by this search or filter. Clear it or choose a matching recording.",
@@ -42,7 +57,7 @@ extension DesktopHostController {
             )
             return
         }
-        Platform.history(visible, selected: selectedHistoryID, selectRecord: selectRecord)
+        Platform.history(Array(displayedHistory(visible)), selected: selectedHistoryID, selectRecord: selectRecord)
     }
 
     /// Startup renders the restored selection through the same record-bound
@@ -88,6 +103,7 @@ extension DesktopHostController {
         criteria.searchText = nil
         guard criteria != historyFilter else { return }
         historyFilter = criteria
+        historyPage.reset()
         refreshHistory()
     }
 
@@ -119,6 +135,7 @@ extension DesktopHostController {
     package func searchHistory(_ query: String) {
         guard !closed, query != historyQuery else { return }
         historyQuery = query
+        historyPage.reset()
         refreshHistory()
     }
 

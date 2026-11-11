@@ -214,7 +214,8 @@ struct SettingsView: View {
           id: "general-openrouter",
           title: "OpenRouter",
           category: "Transcription, Voice Output & Post-processing",
-          isStored: isOpenRouterKeyStored
+          isStored: isOpenRouterKeyStored,
+          hasError: Self.failedValidation(apiKeyValidationState)
         ),
         source: .openRouter
       )
@@ -232,7 +233,8 @@ struct SettingsView: View {
             id: "transcription-\(provider.id)",
             title: provider.displayName,
             category: "Transcription",
-            isStored: isAPIKeyStored(provider.apiKeyIdentifier)
+            isStored: isAPIKeyStored(provider.apiKeyIdentifier),
+            hasError: Self.failedValidation(providerValidationStates[provider.id])
           ),
           source: .transcription(provider)
         )
@@ -244,12 +246,19 @@ struct SettingsView: View {
           id: "tts-\(provider.id)",
           title: provider == .elevenlabs ? "ElevenLabs" : provider.displayName,
           category: isShared ? "Transcription & Voice Output" : "Voice Output",
-          isStored: isAPIKeyStored(provider.apiKeyIdentifier)
+          isStored: isAPIKeyStored(provider.apiKeyIdentifier),
+          hasError: Self.failedValidation(ttsProviderValidationStates[provider.rawValue])
         ),
         source: .textToSpeech(provider)
       )
     }
     return items
+  }
+
+  /// Whether a card's last check failed, which the Errors filter shows.
+  static func failedValidation(_ state: ValidationViewState?) -> Bool {
+    guard case .finished(let result) = state, case .failure = result.outcome else { return false }
+    return true
   }
 
   var visibleMacAPIKeyItems: [MacAPIKeyItem] {

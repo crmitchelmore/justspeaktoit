@@ -147,7 +147,20 @@ public enum ModelRetirements {
         ModelRetirement(
             id: "openai/gpt-5.4-nano", mode: .postProcessing, shutdownDay: "2027-04-01",
             successorID: "openai/gpt-6-luna",
-            migrationNote: "moves to GPT-6 Luna ($0.10/$0.50 per million tokens, down from $0.20/$1.25).")
+            migrationNote: "moves to GPT-6 Luna ($0.10/$0.50 per million tokens, down from $0.20/$1.25)."),
+        // The direct-OpenAI list has no GPT-5.6 Luna; GPT-6 Luna is its cheapest current model.
+        ModelRetirement(
+            id: NativeTextModels.selectionID(provider: NativeTextModels.openAI, model: "gpt-5-mini"),
+            mode: .postProcessing, shutdownDay: "2026-12-11",
+            successorID: NativeTextModels.selectionID(provider: NativeTextModels.openAI, model: "gpt-6-luna"),
+            migrationNote: "moves to GPT-6 Luna, direct from OpenAI ($0.10/$0.50 per million tokens)."),
+        // Groq shut Llama 3.1 8B Instant down for free and developer tiers on
+        // 2026-08-16 and names GPT-OSS 20B (https://console.groq.com/docs/deprecations).
+        ModelRetirement(
+            id: NativeTextModels.selectionID(provider: NativeTextModels.groq, model: "llama-3.1-8b-instant"),
+            mode: .postProcessing, shutdownDay: "2026-08-16",
+            successorID: NativeTextModels.selectionID(provider: NativeTextModels.groq, model: "openai/gpt-oss-20b"),
+            migrationNote: "moves to GPT-OSS 20B on Groq ($0.075/$0.30 per million tokens).")
     ]
 
     public static func retirement(for id: String) -> ModelRetirement? {

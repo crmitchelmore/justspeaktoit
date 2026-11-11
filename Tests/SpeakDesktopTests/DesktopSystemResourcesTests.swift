@@ -36,7 +36,7 @@ final class DesktopSystemResourcesTests: XCTestCase {
         )
         view = DesktopSystemResources.presentation(holds: registry.holds, microphone: .idle, osName: "OS")
         XCTAssertTrue(view.canReleaseEverything)
-        XCTAssertEqual(view.rows.last?.releaseTitle, "Cancel recording")
+        XCTAssertEqual(view.rows.first { $0.kind == .microphone }?.releaseTitle, "Cancel recording")
         withExtendedLifetime((hotKey, mic)) {}
     }
 
@@ -74,7 +74,10 @@ final class DesktopSystemResourcesTests: XCTestCase {
         monitor.sample(now: start.addingTimeInterval(7))
         XCTAssertNotNil(published.value.last?.warning)
         XCTAssertEqual(published.value.last?.headline, "Microphone open, not claimed by any feature")
-        XCTAssertTrue(published.value.last?.canReleaseEverything == true)
+        XCTAssertEqual(
+            published.value.last?.canReleaseEverything, false,
+            "Release everything reaches only registered holds, so it cannot stop an unclaimed capture"
+        )
         XCTAssertEqual(reports.value.count, 1, "One report per episode")
 
         let mic = registry.acquire(kind: .microphone, title: "Dictation", reason: "", owner: "test")

@@ -26,6 +26,8 @@ package protocol DesktopHostPlayback: AnyObject, Sendable {
     func stopAndWait() async throws
     func stopSavedAudioAndWait() async throws
     func close() async throws
+    /// True while a saved recording is audible or paused; Read aloud segments are not saved audio.
+    var isPlayingSavedAudio: Bool { get }
 }
 
 /// Native services and the window presenter a desktop host provides. Every
@@ -154,6 +156,8 @@ package protocol DesktopHostPlatform: Sendable {
     static func stopReadAloud(_ state: inout ReadAloudState, playback: Playback)
     /// True while Read aloud is speaking or synthesizing a segment.
     static func isReadingAloud(_ state: ReadAloudState) -> Bool
+    /// Separates speech that is audible from an export that only writes a file.
+    static func readAloudActivity(_ state: ReadAloudState) -> DesktopHostReadAloudActivity
 
     // On-device transcription. Hosts without a local runtime keep the defaults
     // and configure no local models.

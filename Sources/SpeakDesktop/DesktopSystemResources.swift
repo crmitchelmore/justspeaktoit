@@ -42,9 +42,12 @@ package enum DesktopSystemResources {
     package static func presentation(
         holds: [SystemResourceHold], microphone: MicrophoneUseAttribution, osName: String, now: Date = Date()
     ) -> Presentation {
+        // Release everything reaches only registered holds, so it cannot stop an
+        // unclaimed capture and is never offered for one.
         let warning = microphone.isUnattributed
             ? "\(osName) reports that Just Speak to It is recording, yet nothing in the app says it is. "
-                + "Release everything stops every capture; please report this so it can be fixed."
+                + "The app cannot stop a capture it does not track: quit and reopen it, "
+                + "and please report this so it can be fixed."
             : nil
         return Presentation(
             headline: microphone.isUnattributed
@@ -54,8 +57,7 @@ package enum DesktopSystemResources {
                 + "or anything else right now.",
             rows: holds.map { row($0, now: now) },
             microphone: microphoneSummary(microphone, osName: osName),
-            canReleaseEverything: microphone.isUnattributed
-                || holds.contains { $0.isReleasable && releaseEverythingKinds.contains($0.kind) }
+            canReleaseEverything: holds.contains { $0.isReleasable && releaseEverythingKinds.contains($0.kind) }
         )
     }
 

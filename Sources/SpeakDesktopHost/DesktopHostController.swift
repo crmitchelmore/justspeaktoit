@@ -239,6 +239,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
                 revokeCorrectionLearningConsent()
                 capturedCleanup.removeAll()
                 retireCleanupPresentation()
+                endSavedAudioPlaybackIfStopped()
                 reconcileSystemResources()
             }
         }
@@ -397,6 +398,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var systemResourceHolds: [String: SystemResourceToken] = [:]
     /// Replaced only by tests.
     var systemResourceRegistry = SystemResourceRegistry.shared
+    /// The History recording whose saved audio the player holds, watched until it stops.
+    var savedAudioPlayback: (recordID: UUID, watch: Task<Void, Never>)? { didSet { reconcileSystemResources() } }
 
     package init(
         directory: URL, effects: any DesktopHostEffects<Platform>, shutdownGrace: Duration = DesktopHostShutdown.grace,

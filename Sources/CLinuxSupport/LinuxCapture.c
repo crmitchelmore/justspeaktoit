@@ -506,7 +506,14 @@ typedef struct CaptureQuery {
     gboolean outputs_done;
     gboolean capturing;
     gboolean sources_done;
+    /* The server answered a list with an error (eol < 0): the answer is unknown. */
+    gboolean failed;
 } CaptureQuery;
+
+/* A server that accepts the query but never answers must not hold monitor_lock,
+   and with it shutdown, for longer than this; a probe makes at most two
+   queries, and the monitor polls every 2 s. */
+#define JSTI_CAPTURE_QUERY_TIMEOUT_USEC ((pa_usec_t)500 * 1000)
 
 /* Inside Flatpak the server sees a different pid, so the app id also counts. */
 static gboolean own_stream(const pa_proplist *properties) {
@@ -519,6 +526,7 @@ static void source_output_info(pa_context *context, const pa_source_output_info 
     (void)context;
     CaptureQuery *query = userdata;
     if (eol != 0 || info == NULL) {
+        if (eol < 0) query->failed = TRUE;
         query->outputs_done = TRUE;
         pa_threaded_mainloop_signal(query->loop, 0);
         return;
@@ -530,6 +538,7 @@ static void capture_source_info(pa_context *context, const pa_source_info *info,
     (void)context;
     CaptureQuery *query = userdata;
     if (eol != 0 || info == NULL) {
+        if (eol < 0) query->failed = TRUE;
         query->sources_done = TRUE;
         pa_threaded_mainloop_signal(query->loop, 0);
         return;
@@ -541,11 +550,45 @@ static void capture_source_info(pa_context *context, const pa_source_info *info,
     }
 }
 
+typedef struct QueryDeadline {
+    pa_threaded_mainloop *loop;
+    gboolean expired;
+} QueryDeadline;
+
+static void query_deadline_expired(pa_mainloop_api *api, pa_time_event *event, const struct timeval *tv, void *data) {
+    (void)api; (void)event; (void)tv;
+    QueryDeadline *deadline = data;
+    deadline->expired = TRUE;
+    pa_threaded_mainloop_signal(deadline->loop, 0);
+}
+
+/* Waits with the loop locked until *done, the operation stops running, or
+   `timeout` passes. Returns FALSE on timeout. The timer is freed before
+   returning, so its stack state never outlives this call. */
+static gboolean wait_bounded(
+    pa_threaded_mainloop *loop, pa_operation *operation, const gboolean *done, pa_usec_t timeout) {
+    pa_mainloop_api *api = pa_threaded_mainloop_get_api(loop);
+    QueryDeadline deadline = { .loop = loop };
+    struct timeval when;
+    pa_timeval_add(pa_gettimeofday(&when), timeout);
+    pa_time_event *timer = api->time_new(api, &when, query_deadline_expired, &deadline);
+    if (timer == NULL) return FALSE;
+    while (!*done && !deadline.expired &&
+           (operation == NULL || pa_operation_get_state(operation) == PA_OPERATION_RUNNING)) {
+        pa_threaded_mainloop_wait(loop);
+    }
+    api->time_free(timer);
+    return !deadline.expired || *done;
+}
+
+/* Called with the loop locked. On timeout the operation is cancelled while
+   still locked, so its callback can never touch the caller's stack query. */
 static gboolean await_query(pa_threaded_mainloop *loop, pa_operation *operation, const gboolean *done) {
     if (operation == NULL) return FALSE;
-    while (!*done && pa_operation_get_state(operation) == PA_OPERATION_RUNNING) pa_threaded_mainloop_wait(loop);
+    gboolean answered = wait_bounded(loop, operation, done, JSTI_CAPTURE_QUERY_TIMEOUT_USEC) && *done;
+    if (!answered && pa_operation_get_state(operation) == PA_OPERATION_RUNNING) pa_operation_cancel(operation);
     pa_operation_unref(operation);
-    return *done;
+    return answered;
 }
 
 int32_t jsti_audio_process_capturing(void) {
@@ -561,11 +604,11 @@ int32_t jsti_audio_process_capturing(void) {
     int32_t result = -1;
     if (pa_context_get_state(state->pulse.context) == PA_CONTEXT_READY &&
         await_query(query.loop, pa_context_get_source_output_info_list(
-            state->pulse.context, source_output_info, &query), &query.outputs_done)) {
+            state->pulse.context, source_output_info, &query), &query.outputs_done) && !query.failed) {
         if (query.sources->len == 0) {
             result = 0;
         } else if (await_query(query.loop, pa_context_get_source_info_list(
-            state->pulse.context, capture_source_info, &query), &query.sources_done)) {
+            state->pulse.context, capture_source_info, &query), &query.sources_done) && !query.failed) {
             result = query.capturing ? 1 : 0;
         }
     }
@@ -573,6 +616,34 @@ int32_t jsti_audio_process_capturing(void) {
     g_mutex_unlock(&monitor_lock);
     g_array_free(query.sources, TRUE);
     return result;
+}
+
+/* The deadline and error handling without a sound server: a wait nothing
+   answers ends at its deadline, and a list that reports an error is unknown. */
+int32_t jsti_audio_capture_query_self_test(void) {
+    pa_threaded_mainloop *loop = pa_threaded_mainloop_new();
+    if (loop == NULL) return 1;
+    if (pa_threaded_mainloop_start(loop) < 0) {
+        pa_threaded_mainloop_free(loop);
+        return 2;
+    }
+    int32_t failure = 0;
+    pa_threaded_mainloop_lock(loop);
+    gboolean never = FALSE;
+    gint64 started = g_get_monotonic_time();
+    if (wait_bounded(loop, NULL, &never, 50 * 1000)) failure = 3;
+    else if (g_get_monotonic_time() - started > 5 * G_USEC_PER_SEC) failure = 4;
+    CaptureQuery query = { .loop = loop, .sources = g_array_new(FALSE, FALSE, sizeof(uint32_t)) };
+    source_output_info(NULL, NULL, -1, &query);
+    if (failure == 0 && (!query.outputs_done || !query.failed)) failure = 5;
+    query.failed = FALSE;
+    capture_source_info(NULL, NULL, 1, &query);
+    if (failure == 0 && (!query.sources_done || query.failed)) failure = 6;
+    pa_threaded_mainloop_unlock(loop);
+    g_array_free(query.sources, TRUE);
+    pa_threaded_mainloop_stop(loop);
+    pa_threaded_mainloop_free(loop);
+    return failure;
 }
 
 int32_t jsti_audio_devices_enumerate(jsti_audio_device_fn callback, void *context, char *error, size_t capacity) {

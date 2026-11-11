@@ -13,7 +13,7 @@ private struct DictationSession {
 struct DesktopHostResourceClaim: Equatable, Sendable {
     enum Release: Equatable, Sendable {
         case cancelDictation, disarmHandsFree, closePressMicrophone(UUID), releaseCapturePreparation
-        case closeConnectionWarmUp, stopSpeaking, cancelComparison
+        case closeConnectionWarmUp, stopSpeaking, cancelVoiceExport, stopPlayback, cancelComparison
     }
 
     /// Changes with the underlying session, so a new session gets a new hold and start time.
@@ -77,13 +77,60 @@ extension DesktopHostController {
                 releaseTitle: "Close", release: .closeConnectionWarmUp
             ))
         }
-        if Platform.isReadingAloud(readAloudState) {
+        claims.append(contentsOf: audioOutputClaims)
+        return claims
+    }
+
+    /// Speech, an export that only writes a file, and History playback.
+    private var audioOutputClaims: [DesktopHostResourceClaim] {
+        var claims: [DesktopHostResourceClaim] = []
+        switch Platform.readAloudActivity(readAloudState) {
+        case .speaking:
             claims.append(.init(
                 key: "speech", kind: .audioOutput, title: "Speech playback", reason: "Reading text aloud.",
                 releaseTitle: "Stop speaking", release: .stopSpeaking
             ))
+        case .exporting:
+            claims.append(.init(
+                key: "voiceExport", kind: .backgroundTask, title: "Voice export",
+                reason: "Writing voice audio to the file you chose. Nothing is played.",
+                releaseTitle: "Cancel export", release: .cancelVoiceExport
+            ))
+        case .idle: break
+        }
+        if let saved = savedAudioPlayback {
+            claims.append(.init(
+                key: "playback:\(saved.recordID)", kind: .audioOutput, title: "Recording playback",
+                reason: "Playing a saved recording from History.",
+                releaseTitle: "Stop playback", release: .stopPlayback
+            ))
         }
         return claims
+    }
+
+    /// Lists History playback until the player reports it stopped. Every
+    /// path that ends it (Stop, another row, recording, import, finishing)
+    /// goes through the player, so the claim follows the player itself.
+    func trackSavedAudioPlayback(recordID: UUID) {
+        savedAudioPlayback?.watch.cancel()
+        let watch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard let self, await self.endSavedAudioPlaybackIfStopped() else { continue }
+                return
+            }
+        }
+        savedAudioPlayback = (recordID, watch)
+    }
+
+    /// Returns true once the claim is gone.
+    @discardableResult
+    func endSavedAudioPlaybackIfStopped() -> Bool {
+        guard let saved = savedAudioPlayback else { return true }
+        guard closed || !playback.isPlayingSavedAudio else { return false }
+        saved.watch.cancel()
+        savedAudioPlayback = nil
+        return true
     }
 
     /// The dictation's microphone and, when streaming, its provider socket.
@@ -160,7 +207,8 @@ extension DesktopHostController {
         case .closePressMicrophone(let id): endShortcutPressMicrophone(id: id)
         case .releaseCapturePreparation: releaseCapturePreparation()
         case .closeConnectionWarmUp: invalidateConnectionPreWarming(resetCapture: false)
-        case .stopSpeaking: stopReadAloud()
+        case .stopSpeaking, .cancelVoiceExport: stopReadAloud()
+        case .stopPlayback: playbackStop()
         case .cancelComparison: await cancelComparison()
         }
         reconcileSystemResources()

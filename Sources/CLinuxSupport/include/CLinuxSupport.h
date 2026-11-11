@@ -598,9 +598,13 @@ typedef struct JSTISystemResourcesView {
 int32_t jsti_window_set_system_resources(const JSTISystemResourcesView *view);
 
 /* Whether this process records from any PulseAudio/PipeWire source right now:
- * 1 yes, 0 no, -1 unknown (the device monitor is not running or the server
- * did not answer). Blocks for at most a few hundred milliseconds. */
+ * 1 yes, 0 no, -1 unknown (the device monitor is not running, or the server
+ * reported an error or did not answer). Each of its two queries gives up after
+ * 500 ms, so a stalled server cannot hold up monitor shutdown for longer. */
 int32_t jsti_audio_process_capturing(void);
+/* Exercises the probe's query deadline and error handling without a sound
+ * server. 0 on success, otherwise the failing step. */
+int32_t jsti_audio_capture_query_self_test(void);
 
 /* OpenSSL (libcrypto) primitives for the API-key sync envelope, the same ones
  * CNG provides on Windows: PBKDF2-HMAC-SHA256, and AES-256-GCM with a fresh

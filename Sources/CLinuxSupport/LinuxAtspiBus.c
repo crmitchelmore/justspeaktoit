@@ -220,9 +220,9 @@ gboolean admission(gpointer data) {
     s->admission_queued = FALSE;
     if (s->busy || g_atomic_int_get(&s->stopped) || s->pending_owner == NULL) return G_SOURCE_REMOVE;
     s->busy = TRUE;
-    g_mutex_lock(&state_lock);
+    atspi_lock();
     JSTIAtspiTarget *old = s->admitted; s->admitted = NULL;
-    g_mutex_unlock(&state_lock);
+    atspi_unlock();
     if (old != NULL) { detach(old); jsti_atspi_release(old); }
     JSTIAtspiTarget *t = g_new0(JSTIAtspiTarget, 1);
     t->refs = 1; t->session = session_ref(s); t->focus = s->focus; t->epoch = s->epoch;
@@ -234,10 +234,10 @@ gboolean admission(gpointer data) {
     if (pid != NULL) { g_variant_get(pid, "(u)", &t->pid); g_variant_unref(pid); }
     gboolean ok = external_pid(t->pid) && identity(t, TRUE, deadline)
         && attach_metadata(t, deadline);
-    g_mutex_lock(&state_lock);
+    atspi_lock();
     ok = ok && current_target(t);
     s->admitted = ok ? target_ref(t) : NULL;
-    g_mutex_unlock(&state_lock);
+    atspi_unlock();
     if (!ok) { invalidate(t); detach(t); }
     jsti_atspi_release(t); s->busy = FALSE;
     if (s->pending_owner != NULL && !g_atomic_int_get(&s->stopped)) queue_admission(s);
@@ -292,13 +292,13 @@ gpointer worker(gpointer data) {
         while (!g_atomic_int_get(&s->stopped) && g_atomic_int_get(&s->status) == 2)
             g_main_context_iteration(s->context, TRUE);
     } else if (g_atomic_int_get(&s->status) != 5) g_atomic_int_set(&s->status, 3);
-    g_mutex_lock(&state_lock);
+    atspi_lock();
     g_atomic_int_set(&s->stopped, TRUE);
-    g_mutex_unlock(&state_lock);
+    atspi_unlock();
     invalidate_focus(s);
-    g_mutex_lock(&state_lock);
+    atspi_lock();
     JSTIAtspiTarget *t = s->admitted; s->admitted = NULL;
-    g_mutex_unlock(&state_lock);
+    atspi_unlock();
     if (t != NULL) { detach(t); jsti_atspi_release(t); }
     if (s->bus != NULL) {
         if (s->focus_signal) g_dbus_connection_signal_unsubscribe(s->bus, s->focus_signal);

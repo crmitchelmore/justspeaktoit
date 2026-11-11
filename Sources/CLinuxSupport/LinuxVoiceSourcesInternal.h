@@ -1,5 +1,9 @@
 /* Private to the LinuxVoiceSources*.c units and their self-test: the dialog
- * state and the helpers they share. Never exported. */
+ * type and the helpers they share. Never exported. Each piece of module
+ * state is static in the unit that writes it and reached only through the
+ * functions below: the open dialog in LinuxVoiceSources.c, the markup helper
+ * configuration in LinuxVoiceSourcesMarkup.c, and the audio formats and last
+ * generated result in LinuxVoiceSourcesTransfer.c. GTK main thread only. */
 #ifndef JSTI_LINUX_VOICE_SOURCES_INTERNAL_H
 #define JSTI_LINUX_VOICE_SOURCES_INTERNAL_H
 #include "LinuxSupportInternal.h"
@@ -57,13 +61,21 @@ void jsti_show_voice_discovery(GtkWindow *owner, JSTIVoiceSourceCallback callbac
 
 #pragma GCC visibility push(hidden)
 
-extern MarkupConfiguration markup_configuration;  /* LinuxVoiceSources.c */
-extern guint generation_flags;  /* LinuxVoiceSources.c */
-extern gboolean generation_working;  /* LinuxVoiceSources.c */
-extern gchar *generated_result;  /* LinuxVoiceSources.c */
-extern gchar *generated_format;  /* LinuxVoiceSources.c */
-extern FormatState format_state;  /* LinuxVoiceSources.c */
-extern Dialog *active;  /* LinuxVoiceSources.c */
+/* LinuxVoiceSources.c: the dialog jsti_show_voice_sources opened, while its
+ * window is open; NULL otherwise. */
+Dialog *voice_open_dialog(void);
+/* LinuxVoiceSourcesMarkup.c: whether the host enabled the markup helper. */
+gboolean markup_configured(void);
+void reset_markup_configuration(void);
+/* Exchanges the configuration with `value`; the caller owns what it gets back. */
+void swap_markup_configuration(MarkupConfiguration *value);
+/* LinuxVoiceSourcesTransfer.c: whether format row `index` can be exported
+ * (always, before the host has listed any formats). */
+gboolean format_available(guint index);
+/* Exchanges the format rows with `value`; the caller owns what it gets back. */
+void swap_format_state(FormatState *value);
+/* Copies the last generated result and generation options into a new dialog. */
+void adopt_generation_state(Dialog *dialog);
 Dialog *retain(Dialog *dialog);
 void release(gpointer data);
 gchar *text(Dialog *dialog);

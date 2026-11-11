@@ -4,13 +4,24 @@
  * caller waits for discovery. An admitted target is metadata only until consented
  * output; all captured text stays inside its bounded, short-lived lease. */
 
-GMutex state_lock;
-Session *current;
-Session *selection_current;
-SelectionAdmission selection_admission;
+static GMutex state_lock;
+/* The published correction and selection sessions. */
+static Session *current;
+static Session *selection_current;
+/* At most one selection lease is pending across every selection target. */
+static SelectionAdmission selection_admission;
 static guint64 next_epoch;
 static ConsentLedger consent;
 static ConsentLedger selection_consent;
+
+void atspi_lock(void) { g_mutex_lock(&state_lock); }
+void atspi_unlock(void) { g_mutex_unlock(&state_lock); }
+Session *selection_session_locked(void) { return selection_current; }
+JSTIAtspiSelection *jsti_atspi_selection_capture(void) {
+    g_mutex_lock(&state_lock);
+    JSTIAtspiSelection *lease = capture_selection(selection_current, &selection_admission);
+    g_mutex_unlock(&state_lock); return lease;
+}
 
 Session *session_ref(Session *s) { g_atomic_int_inc(&s->refs); return s; }
 void session_unref(Session *s) {

@@ -1,6 +1,9 @@
 /* The markup helper: wrapping, examples, copy and its configuration from Swift. */
 #include "LinuxVoiceSourcesInternal.h"
 
+/* The host's markup helper configuration, kept for the next dialog. */
+static MarkupConfiguration markup_configuration;
+
 void clear_markup(MarkupConfiguration *config) {
     g_strfreev(config->texts); g_strfreev(config->descriptions);
     *config = (MarkupConfiguration){0};
@@ -161,12 +164,18 @@ void show_markup(GtkButton *button, gpointer data) {
     MarkupHelper *helper = make_markup_helper(dialog);
     if (helper != NULL) gtk_window_present(helper->window);
 }
+gboolean markup_configured(void) { return markup_configuration.enabled && markup_configuration.wrap != NULL; }
+void reset_markup_configuration(void) { clear_markup(&markup_configuration); }
+void swap_markup_configuration(MarkupConfiguration *value) {
+    MarkupConfiguration previous = markup_configuration;
+    markup_configuration = *value; *value = previous;
+}
 static void apply_markup_configuration(gpointer data) {
     MarkupConfiguration *changed = data;
-    clear_markup(&markup_configuration);
-    markup_configuration = *changed;
-    changed->texts = NULL; changed->descriptions = NULL;
-    if (active != NULL && active->window != NULL) refresh(active);
+    swap_markup_configuration(changed);
+    clear_markup(changed);
+    Dialog *open = voice_open_dialog();
+    if (open != NULL) refresh(open);
 }
 static void free_markup_configuration(gpointer data) {
     MarkupConfiguration *config = data; clear_markup(config); g_free(config);

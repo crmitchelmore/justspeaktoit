@@ -5,71 +5,36 @@ public actor AutoCorrectionStore {
   /// Candidates older than this with only 1 occurrence are auto-expired
   private static let candidateExpirationInterval: TimeInterval = 30 * 24 * 60 * 60  // 30 days
 
-  private let fileURL: URL
-  private let encoder: JSONEncoder
-  private let decoder: JSONDecoder
-  private let fileManager: FileManager
-  private var directory: VocabularyStoreDirectory
+  private var file: VocabularyJSONFile<AutoCorrectionCandidate>
 
   public init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
-    let supportURL: URL
-    if let baseDirectory {
-      supportURL = baseDirectory
-    } else {
-      supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-    }
     self.init(
       fileManager: fileManager,
-      appDirectory: supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
+      appDirectory: VocabularyJSONFile<AutoCorrectionCandidate>.appDirectory(
+        fileManager: fileManager, baseDirectory: baseDirectory
+      )
     )
   }
 
   public init(fileManager: FileManager = .default, appDirectory: URL) {
-    self.fileManager = fileManager
-    let autoCorrectionFolder = appDirectory.appendingPathComponent("AutoCorrections", isDirectory: true)
-    directory = VocabularyStoreDirectory(fileManager: fileManager, url: autoCorrectionFolder)
-    fileURL = autoCorrectionFolder.appendingPathComponent("candidates.json")
-
-    encoder = JSONEncoder()
-    encoder.dateEncodingStrategy = .iso8601
-    decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
+    file = VocabularyJSONFile(
+      fileManager: fileManager, appDirectory: appDirectory, folder: "AutoCorrections", fileName: "candidates.json"
+    )
   }
 
   public func load() throws -> [AutoCorrectionCandidate] {
-    try directory.prepare()
-    guard fileManager.fileExists(atPath: fileURL.path) else {
-      return []
-    }
-
-    let data = try Data(contentsOf: fileURL)
-    let candidates = try decoder.decode([AutoCorrectionCandidate].self, from: data)
-
     // Filter out expired candidates (older than 30 days with only 1 occurrence)
     let expirationDate = Date().addingTimeInterval(-Self.candidateExpirationInterval)
-    return candidates.filter { candidate in
+    return try file.load().filter { candidate in
       candidate.seenCount > 1 || candidate.lastSeenAt > expirationDate
     }
   }
 
   public func save(_ candidates: [AutoCorrectionCandidate]) throws {
-    try directory.prepare()
-    if candidates.isEmpty {
-      if fileManager.fileExists(atPath: fileURL.path) {
-        try fileManager.removeItem(at: fileURL)
-      }
-      return
-    }
-
-    let data = try encoder.encode(candidates)
-    try data.write(to: fileURL, options: [.atomic])
+    try file.save(candidates)
   }
 
   public func deleteAll() throws {
-    try directory.prepare()
-    if fileManager.fileExists(atPath: fileURL.path) {
-      try fileManager.removeItem(at: fileURL)
-    }
+    try file.deleteAll()
   }
 }

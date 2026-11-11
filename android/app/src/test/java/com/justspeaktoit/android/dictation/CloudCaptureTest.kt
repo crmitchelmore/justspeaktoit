@@ -148,13 +148,42 @@ class CloudCaptureTest {
 
         val teardown = checkNotNull(capture.close())
         assertSame("close joins the stop under way", recording.stopped, teardown)
-        assertEquals(0, retirement.pendingOrphans)
+        assertEquals("the ownerless stop counts until it settles", 1, retirement.pendingOrphans)
 
         gate.countDown()
         assertEquals(recorders.bytes, withTimeout(ViewModelHarness.TIMEOUT_MS) { stopping.await() })
         teardown.join()
         assertEquals(1, recorders.last.stops)
+        assertEquals(0, retirement.pendingOrphans)
         assertTrue("the stopping path still owns the file", recording.file.exists())
+    }
+
+    @Test
+    fun testRecreatedOwners_eachClosingDuringAStalledStop_refuseNewRecordingsUntilTheStopsSettle() = runBlocking {
+        val gate = CountDownLatch(1)
+        recorders.stopGate = gate
+        val owners = List(3) { owner() }
+        val stops = owners.take(2).map { owner ->
+            assertTrue(owner.start(onLevel = {}, onLimitReached = {}, onCaptureFailed = {}))
+            val recording = checkNotNull(owner.current)
+            val stopping = async(Dispatchers.Default) { owner.stop(recording) }
+            ViewModelHarness.await(recorders.last.stopEntered)
+            Triple(recording, stopping, checkNotNull(owner.close()))
+        }
+
+        assertEquals(2, retirement.pendingOrphans)
+        assertFalse("no microphone opens while two ownerless stops stall", owners[2].start({}, {}, {}))
+        assertEquals(2, recorders.created.size)
+
+        gate.countDown()
+        stops.forEach { (recording, stopping, teardown) ->
+            assertEquals(recorders.bytes, withTimeout(ViewModelHarness.TIMEOUT_MS) { stopping.await() })
+            teardown.join()
+            assertTrue("the stopping path still owns the file", recording.file.exists())
+        }
+        assertEquals("each recorder stopped exactly once", listOf(1, 1), recorders.created.map { it.stops })
+        assertEquals(0, retirement.pendingOrphans)
+        assertTrue("admission reopens once the stops settle", owners[2].start({}, {}, {}))
     }
 
     @Test

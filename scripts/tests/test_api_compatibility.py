@@ -13,7 +13,7 @@ import textwrap
 import unittest
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "check-api-compatibility.sh"
+SCRIPT = Path(__file__).resolve().parents[1] / "ci/check-api-compatibility.sh"
 EXISTING_PRODUCTS = ["SpeakCore", "SpeakSync", "SpeakiOSLib", "SpeakHotKeys", "SpeakAutomationKit"]
 MANIFEST = "// swift-tools-version: 5.9\n// SpeakWatchCore is mentioned, but this is not a product declaration.\n"
 

@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-SCRIPT = Path(__file__).resolve().parents[1] / "verify-ios-test-evidence.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "ios/verify-ios-test-evidence.py"
 SPEC = importlib.util.spec_from_file_location("ios_test_evidence", SCRIPT)
 gate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(gate)
@@ -350,7 +350,7 @@ class IOSCoverageTests(unittest.TestCase):
 class WorkflowEvidenceTests(unittest.TestCase):
     @staticmethod
     def step(name):
-        workflow = SCRIPT.parents[1] / ".github/workflows/ci-ios.yml"
+        workflow = SCRIPT.parents[2] / ".github/workflows/ci-ios.yml"
         return workflow.read_text().split(f"      - name: {name}\n", 1)[1].split("\n      - name:", 1)[0]
 
     def test_full_test_records_and_verifier_are_required_on_success(self):

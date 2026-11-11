@@ -143,8 +143,8 @@ its sandbox; cross-sandbox host access is not established by this source.
 ### Canonical application icons
 
 The Linux application uses the canonical Mac icon exports, not a separately
-drawn approximation. `scripts/generate-icon.swift` invokes the dependency-free
-`scripts/generate-desktop-icons.py`, producing a private hicolor theme with
+drawn approximation. `scripts/assets/generate-icon.swift` invokes the dependency-free
+`scripts/assets/generate-desktop-icons.py`, producing a private hicolor theme with
 16, 24, 32, 48, 64, 128, 256 and 512px PNGs and transparent corners. SwiftPM
 bundles that theme in `SpeakApp_SpeakLinux.resources`; it is loaded via
 `Bundle.module`, not the current working directory. GTK sets the window icon
@@ -160,7 +160,7 @@ For a native developer layout, stage (do not install) the executable, resource
 bundles, desktop entry, metainfo and icons with:
 
 ```sh
-python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux \
+python3 scripts/linux/stage-linux-desktop.py --binary .build/release/SpeakLinux \
   --output .build/linux-desktop-layout --prefix /usr/local
 ```
 
@@ -178,7 +178,7 @@ Spaces, quotes, backslashes, dollar signs and backticks in prefixes use the two
 Desktop Entry escaping layers. Percent/equal-sign prefixes are refused before
 writing because they are not portable executable paths for desktop launchers.
 
-`python3 scripts/generate-desktop-icons.py --check` verifies exact exports;
+`python3 scripts/assets/generate-desktop-icons.py --check` verifies exact exports;
 `python3 -B -m unittest discover -s scripts/tests -p test_desktop_icons.py`
 checks native resource wiring and a synthetic staged layout. The GTK window
 self-test requires the canonical name to resolve in the theme. The Python
@@ -757,7 +757,7 @@ proven on a physical desktop.
 
 | Feature | State | Evidence |
 |---|---|---|
-| Shared host controller (record, stop, transcribe, cancel, close, output slot, History) | Verified | `SpeakDesktopHostTests` with a fake platform; Windows Swift type-checks against it (`scripts/typecheck-windows-swift.sh`) |
+| Shared host controller (record, stop, transcribe, cancel, close, output slot, History) | Verified | `SpeakDesktopHostTests` with a fake platform; Windows Swift type-checks against it (`scripts/ci/typecheck-windows-swift.sh`) |
 | All 31 batch models, OpenRouter discovery, post-processing | Shared code, verified by the portable tests | `swift test` (portable suite) |
 | GTK window, events, record-bound History presentation | Verified headless on X11 and Wayland | `--ui-smoke-test` under Xvfb and headless Weston (`scripts/linux/linux-wayland-smoke.sh`), window self-test, snapshot |
 | Mac layout: sidebar pages, dashboard, History cards, totals, appearance | Verified headless on X11 | Window self-test (every page shown from the sidebar, the selected card holds its transcript, totals shown); `DesktopHistoryPresentationTests`; `--ui-screenshots` pictures of every page in light, dark and recording states (CI artifact). Real desktops and HiDPI **unverified** |

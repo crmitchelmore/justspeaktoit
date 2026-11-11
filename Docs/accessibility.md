@@ -80,7 +80,7 @@ Android and the website have their own sections below.
 
 #### Automated guard
 
-`scripts/check-apple-accessibility.py` runs in `make lint` (and so in the CI
+`scripts/accessibility/check-apple-accessibility.py` runs in `make lint` (and so in the CI
 Lint job) and in `make test-tooling`. It fails on:
 
 | Rule | Meaning |
@@ -130,7 +130,7 @@ Mac; UI tests run on hosted CI.
   short, unique within a window and independent of state where possible.
 - The window status label has the `status` role. Announce with
   `gtk_accessible_announce`.
-- Guard: `scripts/check-linux-accessibility.py` runs in the Linux workflow and
+- Guard: `scripts/accessibility/check-linux-accessibility.py` runs in the Linux workflow and
   fails on unnamed icon buttons and on drop-downs named only by property. The
   window self-test checks the status role.
 

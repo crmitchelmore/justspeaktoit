@@ -47,13 +47,13 @@ PATHS = [
     'Tests/SpeakAppTests/HistoryTests.swift', 'Tests/SpeakCoreTests/X.swift', 'Tests/SpeakAppUITests/X.swift',
     # Windows.
     'Sources/SpeakWindows/App.swift', 'Sources/SpeakWindowsPlatform/P.swift', 'Sources/CWindowsSupport/x.cpp',
-    'Tests/SpeakWindowsPlatformTests/T.swift', 'scripts/typecheck-windows-swift.sh',
+    'Tests/SpeakWindowsPlatformTests/T.swift', 'scripts/ci/typecheck-windows-swift.sh',
     # Scripts the Swift jobs run, the API gate and other tooling.
-    'scripts/ci/affected-swift-tests.py', 'scripts/retry-network.sh', 'scripts/retry-xctest-crash.py',
-    'scripts/with-test-keychain.py', 'scripts/private-test-keychain.py', 'scripts/verify-portable-core-boundary.py',
-    'scripts/collect-macos-sample-contract.py', 'scripts/collect-macos-xctest-crashes.py',
+    'scripts/ci/affected-swift-tests.py', 'scripts/ci/retry-network.sh', 'scripts/ci/retry-xctest-crash.py',
+    'scripts/with-test-keychain.py', 'scripts/private-test-keychain.py', 'scripts/ci/verify-portable-core-boundary.py',
+    'scripts/ci/collect-macos-sample-contract.py', 'scripts/ci/collect-macos-xctest-crashes.py',
     'scripts/prepare-mac-cli-symbols.sh', 'scripts/tests/brand-assets.test.mjs',
-    'scripts/check-api-compatibility.sh', 'scripts/api-breakage-allowlist.txt', 'scripts/ci-api-compatibility.sh',
+    'scripts/ci/check-api-compatibility.sh', 'scripts/ci/api-breakage-allowlist.txt', 'scripts/ci-api-compatibility.sh',
     'scripts/release-train.mjs', 'scripts/pre-pr', 'scripts/install-pre-pr-hook', 'scripts/linux-precheck',
     'scripts/create-dmg.sh', 'scripts/windows-bundle/build-windows-bundle.py', 'scripts/tests/test_pre_pr.py',
     '.githooks/pre-push', 'Tooling/Package.resolved', '.swiftlint-baseline.json', '.swiftlint.yml',
@@ -138,7 +138,7 @@ class RoutingTruthTableTests(unittest.TestCase):
 
     def test_glob_semantics(self):
         self.assertTrue(glob_any('Sources/A/B.swift', ['Sources/**']))
-        self.assertFalse(glob_any('scripts/collect-macos-a/b.py', ['scripts/collect-macos-*.py']))
+        self.assertFalse(glob_any('scripts/collect-macos-a/b.py', ['scripts/ci/collect-macos-*.py']))
         self.assertTrue(glob_any('README.md', ['**/*.md']))
         self.assertTrue(glob_any('.github/x', ['**']))
         self.assertFalse(glob_every('Docs/a.txt', ['**', '!Docs/**']))

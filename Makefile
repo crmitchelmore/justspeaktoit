@@ -90,7 +90,7 @@ preflight: test-all verify ## Full pre-release check (tests + launch verificatio
 .PHONY: lint
 lint: ## Run strict SwiftLint (isolated Tooling graph) against the checked-in debt baseline
 	./scripts/swiftlint.sh lint --strict --baseline .swiftlint-baseline.json
-	python3 scripts/check-apple-accessibility.py
+	python3 scripts/accessibility/check-apple-accessibility.py
 
 # CI parity: ci.yml's Lint job and scripts/pre-pr both run exactly this target.
 .PHONY: ci-lint
@@ -107,7 +107,7 @@ ci-portable-linux: ## Run the CI Portable Swift (Linux) job's build and tests (L
 
 .PHONY: lint-accessibility
 lint-accessibility: ## Check Apple SwiftUI controls have accessible names and identifiers
-	python3 scripts/check-apple-accessibility.py
+	python3 scripts/accessibility/check-apple-accessibility.py
 
 .PHONY: format
 format: ## Auto-fix formatting and lint violations where possible
@@ -120,7 +120,7 @@ update-tooling: ## Intentionally upgrade the lint toolchain pinned in Tooling/Pa
 
 .PHONY: verify-checksums
 verify-checksums: ## Verify binary XCFramework and package checksums
-	./scripts/verify-checksums.sh
+	./scripts/dev/verify-checksums.sh
 
 .PHONY: bench
 bench: ## Run the isolated local-transcription benchmark (pass arguments with BENCH_ARGS)

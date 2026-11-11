@@ -227,4 +227,19 @@ extension iOSHistoryItem {
 
     var presentationItem: HistoryPresentationItem { self.historyRecord.iosPresentation }
 }
+
+extension iOSHistoryItem {
+    /// A new History row for a finished recording; `nil` when it produced no text.
+    static func recordedTranscript(
+        text: String, model: String, duration: TimeInterval, errorMessage: String?,
+        requestContext: RequestDiagnosticContext? = nil, requestFailure: RequestDiagnosticContext.Failure? = nil
+    ) -> iOSHistoryItem? {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return iOSHistoryItem(
+            transcription: text, model: model, duration: duration,
+            wordCount: text.split(separator: " ").count, errorMessage: errorMessage, requestContext: requestContext,
+            requestFailure: requestFailure
+        )
+    }
+}
 #endif

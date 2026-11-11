@@ -113,7 +113,7 @@ once in `SpeakWatchCore`; those package dependencies are module arrows, while th
 [Package.swift](../Package.swift) switches to a portable graph on Windows and Linux, and on macOS when
 `SPEAK_PORTABLE_CORE=1` or `SPEAK_WINDOWS_TARGET=1` is set. It compiles the canonical `SpeakCore` sources without
 Apple-only packages; an Apple adapter must live in a folder listed in `appleCoreSources` to be left out, so new
-domain files reach every platform. `scripts/verify-portable-core-boundary.py` checks that boundary.
+domain files reach every platform. `scripts/ci/verify-portable-core-boundary.py` checks that boundary.
 Paid-access models, routing, session lifecycle and client/storage protocols remain shared.
 Only its CryptoKit HTTP adapter, AVFoundation WAV converter and StoreKit adapter are
 excluded; the Keychain implementation inside the client contract file is guarded by
@@ -151,7 +151,7 @@ flowchart TD
     LinuxPlatform[SpeakLinuxPlatform] --> Linux
 ```
 
-`scripts/typecheck-windows-swift.sh` compiles the Windows Swift targets against the shared host on a Linux or macOS
+`scripts/ci/typecheck-windows-swift.sh` compiles the Windows Swift targets against the shared host on a Linux or macOS
 host. Windows development, packaging and parity are described in [windows-development.md](windows-development.md);
 Linux in [linux-development.md](linux-development.md).
 
@@ -197,7 +197,7 @@ cross-cutting utilities stay at the top level.
 keeps its Apple adapters in an `Apple/` subfolder (for example `Keyboard/Apple/`, `Credentials/Apple/`); SwiftUI views
 live in `AppleUI/`, Apple Speech in `AppleSpeech/`, the Apple-only root helpers in `AppleSupport/`, and `SpeechInsights/`
 is Apple-only as a whole. Adding an adapter or a portable file therefore never edits the manifest.
-`scripts/verify-portable-core-boundary.py` rejects a file entry, a stale or nested folder entry, and a SwiftUI view
+`scripts/ci/verify-portable-core-boundary.py` rejects a file entry, a stale or nested folder entry, and a SwiftUI view
 declared outside `AppleUI/`. `SpeakSync` follows the same rule: its native CloudKit adapters live in
 `Sources/SpeakSync/AppleCloudKit/` (tests in `Tests/SpeakSyncTests/AppleCloudKit/`), listed as one folder in
 `appleSyncSources` and `appleSyncTestSources`.

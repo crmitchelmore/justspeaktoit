@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "summarise-core-journey-qualification.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "core-journey/summarise-core-journey-qualification.py"
 SPEC = importlib.util.spec_from_file_location("journey_qualification", SCRIPT)
 qualification = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(qualification)

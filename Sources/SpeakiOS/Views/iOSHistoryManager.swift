@@ -3,7 +3,6 @@
 import Foundation
 import SpeakCore
 import SpeakSync
-import UIKit
 import os.log
 
 private let logger = SpeakLogger.logger(category: "iOSHistoryManager")
@@ -27,22 +26,13 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
     private let syncEnabled: Bool
     private var syncStarted = false
     private var hasLoadedFromDisk = false
-    private var revision: UInt64 = 0
-    private var publishedRevision: UInt64 = 0
-    private var versions: [UUID: UInt64] = [:]
-    private var durableVersions: [UUID: UInt64] = [:]
-    private var offeredVersions: [UUID: UInt64] = [:]
-    private var latestMutation: [UUID: UInt64] = [:]
-    private var latestClear: UInt64 = 0
-    private var latestInsertion: [UUID: UInt64] = [:]
-    private var directUploads: [UUID: Int] = [:]
+    private var ledger = IOSHistoryRevisionLedger()
+    private var remote = IOSHistoryRemoteLedger()
     private let uploadEntry: @MainActor (SyncableHistoryEntry) async throws -> Void
     private let deleteEntry: @MainActor (UUID) async throws -> Void
     private let uploadSettled: @MainActor (UUID) -> Void
-    private var remotePendingVersions: [UUID: UInt64] = [:]
-    private var remoteRevision: UInt64 = 0
     private var pendingRemoteCommit: Task<Void, Never>?
-    private var lifecycleObservers: [NSObjectProtocol] = []
+    private var lifecycleObservers: IOSHistoryLifecycleObservers?
     private var loadingCount = 0
 
     static let syncedIDsKey = "speak.sync.syncedHistoryIDs"
@@ -101,59 +91,18 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         self.uploadSettled = uploadSettled
         loadSyncedIDs()
         if loadImmediately { _ = performSynchronously(.load) }
-        registerLifecycleFlushObservers()
+        lifecycleObservers = IOSHistoryLifecycleObservers(history: self)
     }
 
     deinit {
         pendingRemoteCommit?.cancel()
-        for observer in lifecycleObservers { NotificationCenter.default.removeObserver(observer) }
-    }
-
-    private func registerLifecycleFlushObservers() {
-        lifecycleObservers.append(NotificationCenter.default.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
-        ) { @MainActor [weak self] _ in
-            guard let self else { return }
-            let assertion = BackgroundTaskAssertion(name: "History flush")
-            Task { await self.flushPendingChangesAndWait(); assertion.end() }
-        })
-        lifecycleObservers.append(NotificationCenter.default.addObserver(
-            forName: UIApplication.willTerminateNotification, object: nil, queue: .main
-        ) { @MainActor [weak self] _ in
-            // Termination provides no guaranteed asynchronous execution window.
-            self?.flushPendingChanges()
-        })
-        lifecycleObservers.append(NotificationCenter.default.addObserver(
-            forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main
-        ) { @MainActor [weak self] _ in
-            Task { await self?.retryPersistenceAndWait() }
-        })
     }
 
     // MARK: - Ordered execution
 
-    private func admission(_ operation: IOSHistoryPersistence.Operation) -> UInt64 {
-        revision += 1
-        switch operation {
-        case .upsert(let item), .remote(let item):
-            latestMutation[item.id] = revision
-            latestInsertion[item.id] = revision
-        case .replaceIfUntouched(let item, _, _):
-            latestMutation[item.id] = revision
-        case let .processed(id, _, _), let .error(id, _), .remove(let id), .remoteDelete(let id):
-            latestMutation[id] = revision
-        case .clear: latestClear = revision
-        case .load, .retry, .commit: break
-        }
-        return revision
-    }
-
     private func publish(_ result: IOSHistoryPersistence.Result) {
-        guard result.revision >= publishedRevision else { return }
-        publishedRevision = result.revision
+        guard ledger.accept(result) else { return }
         items = result.rows
-        versions = result.versions
-        durableVersions = result.durableVersions
         let wasReady = isStorageReady
         isStorageReady = result.isReady
         hasLoadedFromDisk = isStorageReady
@@ -165,13 +114,13 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
 
     @discardableResult
     private func performSynchronously(_ operation: IOSHistoryPersistence.Operation) -> IOSHistoryPersistence.Result {
-        let result = persistence.synchronously(operation, revision: admission(operation))
+        let result = persistence.synchronously(operation, revision: ledger.admit(operation))
         publish(result)
         return result
     }
 
     private func performAndWait(_ operation: IOSHistoryPersistence.Operation) async -> IOSHistoryPersistence.Result {
-        let admittedRevision = admission(operation)
+        let admittedRevision = ledger.admit(operation)
         // Enqueue before the first suspension, rather than relying on actor mailbox order.
         let ticket = persistence.admit(operation, revision: admittedRevision)
         let showsLoading: Bool
@@ -186,19 +135,8 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         return result
     }
 
-    private func isCurrent(_ id: UUID, version: UInt64, receiptRevision: UInt64) -> Bool {
-        versions[id] == version && durableVersions[id] == version
-            && (latestMutation[id] ?? 0) <= receiptRevision && latestClear <= receiptRevision
-    }
-
-    private func ownsMutation(_ id: UUID, result: IOSHistoryPersistence.Result) -> Bool {
-        (latestMutation[id] ?? 0) <= result.revision && latestClear <= result.revision
-            && (publishedRevision <= result.revision || versions[id] == result.versions[id])
-    }
-
     private func ownsDeletion(_ id: UUID, result: IOSHistoryPersistence.Result) -> Bool {
-        (latestInsertion[id] ?? 0) <= result.revision
-            && !(publishedRevision > result.revision && currentItemIDs.contains(id))
+        ledger.ownsDeletion(id, result: result, isVisible: currentItemIDs.contains(id))
     }
 
     /// Legacy adapters block on the same serial worker, and never return optimistic durability.
@@ -242,24 +180,23 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
     }
 
     private func finishUpsert(_ result: IOSHistoryPersistence.Result, id: UUID) -> Bool {
-        if (latestMutation[id] ?? 0) <= result.revision { syncedIDs.remove(id); saveSyncedIDs() }
+        if ledger.isUnchanged(id, since: result.revision) { syncedIDs.remove(id); saveSyncedIDs() }
         guard result.durable else { return false }
         guard syncEnabled, result.isReady, result.versions[id] != nil,
               let item = result.rows.first(where: { $0.id == id }),
-              ownsMutation(id, result: result) else { return true }
-        directUploads[id, default: 0] += 1
+              ledger.ownsMutation(id, result: result) else { return true }
+        remote.beginDirectUpload(id)
         Task {
             defer {
-                let count = self.directUploads[id, default: 1] - 1
-                self.directUploads[id] = count == 0 ? nil : count
+                self.remote.endDirectUpload(id)
                 self.uploadSettled(id)
             }
-            guard self.ownsMutation(id, result: result) else { return }
+            guard self.ledger.ownsMutation(id, result: result) else { return }
             do {
                 // The generic ID-only delegate callback occurs inside this await.
                 // Only this captured-revision wrapper may acknowledge its result.
                 try await self.uploadEntry(item.toSyncable())
-                guard self.ownsMutation(id, result: result) else { return }
+                guard self.ledger.ownsMutation(id, result: result) else { return }
                 self.syncedIDs.insert(id)
                 self.saveSyncedIDs()
             } catch is HistorySyncDisabledError {
@@ -280,8 +217,9 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
     func recordTranscription(
         text: String, model: String, duration: TimeInterval, errorMessage: String?
     ) -> iOSHistoryItem? {
-        guard let item = makeItem(text: text, model: model, duration: duration, errorMessage: errorMessage),
-              upsertReportingDurability(item) else { return nil }
+        guard let item = iOSHistoryItem.recordedTranscript(
+            text: text, model: model, duration: duration, errorMessage: errorMessage
+        ), upsertReportingDurability(item) else { return nil }
         return item
     }
 
@@ -307,28 +245,11 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         text: String, model: String, duration: TimeInterval, errorMessage: String? = nil,
         requestContext: RequestDiagnosticContext? = nil, requestFailure: RequestDiagnosticContext.Failure?
     ) async -> iOSHistoryItem? {
-        guard let item = makeItem(text: text, model: model, duration: duration, errorMessage: errorMessage,
-                                  requestContext: requestContext, requestFailure: requestFailure),
-              await upsertAndWait(item) else { return nil }
+        guard let item = iOSHistoryItem.recordedTranscript(
+            text: text, model: model, duration: duration, errorMessage: errorMessage,
+            requestContext: requestContext, requestFailure: requestFailure
+        ), await upsertAndWait(item) else { return nil }
         return item
-    }
-
-    private func makeItem(
-        text: String, model: String, duration: TimeInterval, errorMessage: String?
-    ) -> iOSHistoryItem? {
-        makeItem(text: text, model: model, duration: duration, errorMessage: errorMessage, requestContext: nil)
-    }
-
-    private func makeItem(
-        text: String, model: String, duration: TimeInterval, errorMessage: String?,
-        requestContext: RequestDiagnosticContext?, requestFailure: RequestDiagnosticContext.Failure? = nil
-    ) -> iOSHistoryItem? {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        return iOSHistoryItem(
-            transcription: text, model: model, duration: duration,
-            wordCount: text.split(separator: " ").count, errorMessage: errorMessage, requestContext: requestContext,
-            requestFailure: requestFailure
-        )
     }
 
     public func remove(_ item: iOSHistoryItem) { finishRemoval(performSynchronously(.remove(item.id))) }
@@ -348,7 +269,7 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         removeNotificationClaims(deleted)
         syncedIDs.subtract(deleted)
         saveSyncedIDs()
-        if clearingAll && latestInsertion.values.allSatisfy({ $0 <= result.revision }) {
+        if clearingAll && ledger.hasNoInsertion(after: result.revision) {
             TranscriptHandoffPublisher.invalidate()
         } else {
             for id in deleted { TranscriptHandoffPublisher.invalidateIfAdvertising(entryID: id) }
@@ -430,11 +351,9 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
 
     private func finishRemoteCommit(_ result: IOSHistoryPersistence.Result, target: UInt64) -> Bool {
         guard result.durable else { return false }
-        for (id, version) in remotePendingVersions where isCurrent(
+        for (id, version) in remote.finishCommit(revision: result.revision, target: target) where ledger.isCurrent(
             id, version: version, receiptRevision: result.revision
         ) { syncedIDs.insert(id) }
-        remotePendingVersions = remotePendingVersions.filter { $0.value > result.revision }
-        if remoteRevision == target { remoteRevision = 0 }
         pruneStaleSyncedIDs()
         saveSyncedIDs()
         return true
@@ -444,16 +363,16 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
     private func commitRemoteChangesNow() -> Bool {
         pendingRemoteCommit?.cancel()
         pendingRemoteCommit = nil
-        guard remoteRevision != 0 else { return true }
-        let target = remoteRevision
+        let target = remote.uncommittedRevision
+        guard target != 0 else { return true }
         return finishRemoteCommit(performSynchronously(.commit), target: target)
     }
 
     private func commitRemoteChangesAndWait() async -> Bool {
         pendingRemoteCommit?.cancel()
         pendingRemoteCommit = nil
-        guard remoteRevision != 0 else { return true }
-        let target = remoteRevision
+        let target = remote.uncommittedRevision
+        guard target != 0 else { return true }
         return finishRemoteCommit(await performAndWait(.commit), target: target)
     }
 
@@ -489,28 +408,24 @@ extension iOSHistoryManager: HistorySyncDurabilityDelegate {
     public func pendingEntries() -> [SyncableHistoryEntry] {
         pruneStaleSyncedIDs()
         let pending = items.filter { item in
-            guard !syncedIDs.contains(item.id), let version = versions[item.id] else { return false }
-            return isCurrent(item.id, version: version, receiptRevision: publishedRevision)
+            guard !syncedIDs.contains(item.id), let version = ledger.versions[item.id] else { return false }
+            return ledger.isCurrent(item.id, version: version, receiptRevision: ledger.publishedRevision)
         }
         // Status queries may run while an upload is suspended. Retain the first
         // offer until its acknowledgement is consumed, rather than rebinding an
         // old ID-only callback to a later local edit. Ambiguity costs a retry.
-        for item in pending where offeredVersions[item.id] == nil {
-            offeredVersions[item.id] = versions[item.id]
-        }
+        for item in pending { remote.offer(item.id, version: ledger.versions[item.id]) }
         return pending.map { $0.toSyncable() }
     }
 
     public func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) async {
         let result = await performAndWait(.remote(iOSHistoryItem.fromSyncable(entry)))
         for id in result.remoteAcknowledgedIDs {
-            if let version = result.versions[id] {
-                remotePendingVersions[id] = max(remotePendingVersions[id] ?? 0, version)
-            }
+            if let version = result.versions[id] { remote.recordAcknowledged(id, version: version) }
         }
-        for id in result.remoteNewerLocalIDs where versions[id] == result.versions[id]
-            && (latestMutation[id] ?? 0) <= result.revision { syncedIDs.remove(id) }
-        remoteRevision = max(remoteRevision, result.revision)
+        for id in result.remoteNewerLocalIDs where ledger.versions[id] == result.versions[id]
+            && ledger.isUnchanged(id, since: result.revision) { syncedIDs.remove(id) }
+        remote.recordUncommitted(result.revision)
         scheduleRemoteCommit()
     }
 
@@ -519,18 +434,20 @@ extension iOSHistoryManager: HistorySyncDurabilityDelegate {
         syncedIDs.remove(id)
         OfflineTranscriptUpgradeStore.shared.remove(historyID: id)
         if result.durable { saveSyncedIDs() }
-        if !result.durable { remoteRevision = max(remoteRevision, result.revision) }
+        if !result.durable { remote.recordUncommitted(result.revision) }
         if ownsDeletion(id, result: result) {
             TranscriptHandoffPublisher.invalidateIfAdvertising(entryID: id)
         }
     }
 
     public func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {
-        let offered = offeredVersions.filter { ids.contains($0.key) && directUploads[$0.key, default: 0] == 0 }
+        let offered = remote.unraced(offersAmong: ids)
         guard await commitRemoteChangesAndWait() else { return }
-        for (id, version) in offered where directUploads[id, default: 0] == 0 && offeredVersions[id] == version {
-            offeredVersions.removeValue(forKey: id)
-            if isCurrent(id, version: version, receiptRevision: publishedRevision) { syncedIDs.insert(id) }
+        for (id, version) in offered {
+            guard remote.consume(id, version: version) else { continue }
+            if ledger.isCurrent(id, version: version, receiptRevision: ledger.publishedRevision) {
+                syncedIDs.insert(id)
+            }
         }
         pruneStaleSyncedIDs()
         saveSyncedIDs()

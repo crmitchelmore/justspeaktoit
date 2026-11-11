@@ -637,7 +637,9 @@ let iosTestsTarget: Target = .target(
     sources: isIOSKeyboardEnabled
         ? [
             "Tests/SpeakiOSTests/**",
+            "JustSpeakKeyboard/KeyboardDeliveryCoordinator.swift",
             "JustSpeakKeyboard/KeyboardDictationEngine.swift",
+            "JustSpeakKeyboard/KeyboardDirectCaptureSession.swift",
             "JustSpeakKeyboard/KeyboardDocumentSession.swift",
             "JustSpeakKeyboard/KeyboardHandoffController.swift",
             "JustSpeakKeyboard/KeyboardViewModel.swift"

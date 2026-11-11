@@ -1,45 +1,10 @@
 #if os(iOS)
 import SpeakCore
 import SwiftUI
-import os.log
 
-// swiftlint:disable file_length
-
-private let apiKeysLogger = SpeakLogger.logger(category: "APIKeys")
-
-// MARK: - API Key Drafts
-
-/// The keys typed on the API Keys screen, keyed by entry id.
-///
-/// Every field reads and writes here, so whether Save has anything to save
-/// covers each editable key, including a provider added later.
-struct APIKeyDrafts: Equatable {
-    private var values: [String: String] = [:]
-
-    subscript(id: String) -> String {
-        get { self.values[id] ?? "" }
-        set { self.values[id] = newValue }
-    }
-
-    var hasUnsavedKey: Bool {
-        self.values.values.contains { !$0.isEmpty }
-    }
-
-    /// The non-empty drafts at the moment Save is pressed.
-    func submission() -> [String: String] {
-        self.values.filter { !$0.value.isEmpty }
-    }
-
-    /// Clears a saved draft, unless the user has edited it since submitting.
-    mutating func clear(_ id: String, ifStill submitted: String) {
-        guard self.values[id] == submitted else { return }
-        self.values[id] = nil
-    }
-}
-
-// MARK: - API Keys View
-
-// swiftlint:disable:next type_body_length
+/// The API Keys screen: the provider list, its search, filter and sort, and
+/// the Save flow. Each provider is an `APIKeyProviderCard`; checking and
+/// storing a key belongs to `APIKeyCredentialWriter`.
 struct APIKeysView: View {
     @ObservedObject var settings: AppSettings
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -57,102 +22,12 @@ struct APIKeysView: View {
     /// by `ProviderBalanceDirectory`.
     @StateObject private var balances = ProviderBalanceStore()
 
-    private struct KeyPresentation {
-        let title: String
-        let systemImage: String
-        let help: String
-    }
-
     private var allEntries: [APIKeyListEntry] {
         Self.entries(for: settings, failedEntryIDs: failedEntryIDs)
     }
 
     static func entries(for settings: AppSettings, failedEntryIDs: Set<String> = []) -> [APIKeyListEntry] {
-        let entries = coreEntries(for: settings) + streamingProviderEntries(for: settings)
-            + FileSpeechProvider.allCases.map {
-                APIKeyListEntry(
-                    id: $0.rawValue, title: $0.metadata.displayName, category: "Transcription",
-                    isStored: settings.storedAPIKeyIdentifiers.contains($0.metadata.apiKeyIdentifier)
-                )
-            }
-        guard !failedEntryIDs.isEmpty else { return entries }
-        return entries.map { entry in
-            APIKeyListEntry(
-                id: entry.id, title: entry.title, category: entry.category, isStored: entry.isStored,
-                hasError: failedEntryIDs.contains(entry.id)
-            )
-        }
-    }
-
-    private static func coreEntries(for settings: AppSettings) -> [APIKeyListEntry] {
-        [
-            APIKeyListEntry(
-                id: "deepgram", title: "Deepgram", category: "Transcription", isStored: settings.hasDeepgramKey
-            ),
-            APIKeyListEntry(
-                id: "elevenlabs", title: "ElevenLabs", category: "Transcription & Voice Output",
-                isStored: settings.hasElevenLabsKey
-            ),
-            APIKeyListEntry(
-                id: "openrouter", title: "OpenRouter", category: "Post-processing", isStored: settings.hasOpenRouterKey
-            ),
-            APIKeyListEntry(
-                id: "openai", title: "OpenAI", category: "Transcription", isStored: settings.hasOpenAIKey
-            ),
-            APIKeyListEntry(
-                id: "cartesia", title: "Cartesia", category: "Transcription", isStored: settings.hasCartesiaKey
-            ),
-            APIKeyListEntry(
-                id: "soniox", title: "Soniox", category: "Transcription & Voice Output",
-                isStored: settings.hasSonioxKey
-            ),
-            APIKeyListEntry(
-                id: "modulate", title: "Modulate", category: "Transcription", isStored: settings.hasModulateKey
-            ),
-            APIKeyListEntry(
-                id: "assemblyai", title: "AssemblyAI", category: "Transcription",
-                isStored: settings.hasAssemblyAIKey
-            ),
-            APIKeyListEntry(
-                id: "gladia", title: "Gladia", category: "Transcription", isStored: settings.hasGladiaKey
-            ),
-            APIKeyListEntry(
-                id: "google", title: GeminiTranscribeModels.providerDisplayName,
-                category: "Transcription", isStored: settings.hasGoogleKey
-            )
-        ]
-    }
-
-    private static func streamingProviderEntries(for settings: AppSettings) -> [APIKeyListEntry] {
-        [
-            APIKeyListEntry(
-                id: "alibaba", title: "Alibaba Model Studio", category: "Transcription",
-                isStored: settings.hasAlibabaKey
-            ),
-            APIKeyListEntry(
-                id: "xai", title: "xAI", category: "Transcription", isStored: settings.hasXAIKey
-            ),
-            APIKeyListEntry(
-                id: "meta", title: "Meta", category: "Transcription", isStored: settings.hasMetaKey
-            ),
-            APIKeyListEntry(
-                id: "speechmatics", title: "Speechmatics", category: "Transcription & Voice Output",
-                isStored: settings.hasSpeechmaticsKey
-            ),
-            APIKeyListEntry(
-                id: "revai", title: "Rev.ai", category: "Transcription", isStored: settings.hasRevAIKey
-            ),
-            APIKeyListEntry(
-                id: "mistral", title: "Mistral", category: "Transcription & Voice Output",
-                isStored: settings.hasMistralKey
-            ),
-            APIKeyListEntry(
-                id: "azure", title: "Azure Speech", category: "Transcription", isStored: settings.hasAzureKey
-            ),
-            APIKeyListEntry(
-                id: "anthropic", title: "Anthropic", category: "Post-processing", isStored: settings.hasAnthropicKey
-            )
-        ]
+        APIKeyListEntries.all(for: settings, failedEntryIDs: failedEntryIDs)
     }
 
     private var visibleEntries: [APIKeyListEntry] {
@@ -174,7 +49,11 @@ struct APIKeysView: View {
                     .accessibilityIdentifier("apiKeysEmptyState")
             } else {
                 ForEach(visibleEntries) { entry in
-                    apiKeySection(for: entry)
+                    APIKeyProviderCard(
+                        entry: entry, draft: draftBinding(for: entry.id), balances: balances
+                    ) {
+                        clearStoredKey(for: entry.id)
+                    }
                 }
             }
         }
@@ -252,139 +131,6 @@ struct APIKeysView: View {
         .background(.bar)
     }
 
-    private func apiKeySection(for entry: APIKeyListEntry) -> some View {
-        let presentation = presentation(for: entry.id)
-        return Section {
-            SecureField("API Key", text: draftBinding(for: entry.id))
-                .textContentType(.password)
-                .autocorrectionDisabled()
-
-            if entry.isStored && draftBinding(for: entry.id).wrappedValue.isEmpty {
-                Button("Clear Stored Key", role: .destructive) {
-                    clearStoredKey(for: entry.id)
-                }
-            }
-
-            APIKeyGuideDisclosure(
-                identifier: Self.credentialIdentifier(for: entry.id), uses: Self.guideUses(for: entry)
-            )
-
-            // Purely informational: a billing endpoint that fails changes this
-            // line and nothing else on the screen.
-            ProviderBalanceView(
-                credentialIdentifier: Self.credentialIdentifier(for: entry.id),
-                isKeyStored: entry.isStored,
-                store: balances
-            )
-        } header: {
-            HStack {
-                Label(presentation.title, systemImage: presentation.systemImage)
-                Spacer()
-                Text(entry.hasError ? "Error" : entry.isStored ? "Set" : "Unset")
-                    .font(.caption)
-                    .foregroundStyle(entry.hasError ? .red : entry.isStored ? .green : .secondary)
-            }
-        } footer: {
-            Text(presentation.help)
-                .font(.caption)
-        }
-    }
-
-    // swiftlint:disable:next cyclomatic_complexity function_body_length
-    private func presentation(for id: String) -> KeyPresentation {
-        if let provider = FileSpeechProvider(rawValue: id) {
-            return KeyPresentation(
-                title: provider.metadata.displayName, systemImage: provider.metadata.systemImage,
-                help: "Get your key from \(provider.metadata.website). Access is checked when transcribing."
-            )
-        }
-        switch id {
-        case "deepgram":
-            return KeyPresentation(
-                title: "Deepgram",
-                systemImage: "waveform",
-                help: "Get your key from deepgram.com."
-            )
-        case "elevenlabs":
-            return KeyPresentation(
-                title: "ElevenLabs", systemImage: "mic.and.signal.meter", help: "Get your key from elevenlabs.io."
-            )
-        case "openrouter":
-            return KeyPresentation(
-                title: "OpenRouter",
-                systemImage: "network",
-                help: "Get your key from openrouter.ai."
-            )
-        case "openai":
-            return KeyPresentation(
-                title: "OpenAI", systemImage: "brain.head.profile", help: "Get your key from platform.openai.com."
-            )
-        case "cartesia":
-            return KeyPresentation(
-                title: "Cartesia", systemImage: "waveform.circle", help: "Get your key from cartesia.ai."
-            )
-        case "soniox":
-            return KeyPresentation(
-                title: "Soniox", systemImage: "waveform.badge.mic", help: "Get your key from soniox.com."
-            )
-        case "modulate":
-            return KeyPresentation(
-                title: "Modulate", systemImage: "waveform.badge.magnifyingglass", help: "Get your key from modulate.ai."
-            )
-        case "assemblyai":
-            return KeyPresentation(
-                title: "AssemblyAI", systemImage: "waveform.badge.plus", help: "Get your key from assemblyai.com."
-            )
-        case "google":
-            return KeyPresentation(
-                title: GeminiTranscribeModels.providerDisplayName, systemImage: "sparkles",
-                help: "Get your key from aistudio.google.com."
-            )
-        case "xai":
-            return KeyPresentation(
-                title: "xAI", systemImage: "waveform.badge.mic", help: "Get your key from console.x.ai."
-            )
-        case "azure":
-            return KeyPresentation(title: "Azure Speech", systemImage: "cloud",
-                                   help: "Enter your Azure key and region as key:region.")
-        case "alibaba":
-            return KeyPresentation(
-                title: "Alibaba Model Studio", systemImage: "waveform",
-                help: "Choose the matching region and workspace above, then enter its Model Studio API key. "
-                    + "Access is checked when transcribing; no cross-region retry."
-            )
-        case "meta":
-            return KeyPresentation(
-                title: "Meta", systemImage: "waveform.badge.mic",
-                help: "Get your Model API key from llama.developer.meta.com."
-            )
-        case "speechmatics":
-            return KeyPresentation(
-                title: "Speechmatics", systemImage: "waveform.and.magnifyingglass",
-                help: "Get your key from portal.speechmatics.com."
-            )
-        case "revai":
-            return KeyPresentation(
-                title: "Rev.ai", systemImage: "waveform.badge.mic",
-                help: "Get your access token from www.rev.ai."
-            )
-        case "mistral":
-            return KeyPresentation(
-                title: "Mistral", systemImage: "waveform.circle",
-                help: "Get your key from console.mistral.ai."
-            )
-        case "anthropic":
-            return KeyPresentation(
-                title: "Anthropic", systemImage: "text.badge.checkmark",
-                help: "Get your key from platform.claude.com. Used for Claude cleanup models."
-            )
-        default:
-            return KeyPresentation(
-                title: "Gladia", systemImage: "waveform.badge.exclamationmark", help: "Get your key from gladia.io."
-            )
-        }
-    }
-
     private func draftBinding(for id: String) -> Binding<String> {
         Binding(
             get: { self.drafts[id] },
@@ -428,37 +174,14 @@ struct APIKeysView: View {
         )
     }
 
-    private func clearStoredKey(for id: String) {
-        self.store("", for: id)
-        failedEntryIDs.remove(id)
-        reloadBalancesAfterCredentialChange()
+    private var writer: APIKeyCredentialWriter {
+        APIKeyCredentialWriter(settings: settings)
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
-    private func store(_ key: String, for id: String) {
-        switch id {
-        case "deepgram": settings.deepgramAPIKey = key
-        case "elevenlabs": settings.elevenLabsAPIKey = key
-        case "openrouter": settings.openRouterAPIKey = key
-        case "openai": settings.openAIAPIKey = key
-        case "cartesia": settings.cartesiaAPIKey = key
-        case "soniox": settings.sonioxAPIKey = key
-        case "modulate": settings.modulateAPIKey = key
-        case "assemblyai": settings.assemblyAIAPIKey = key
-        case "google": settings.googleAPIKey = key
-        case "xai": settings.xAIAPIKey = key
-        case "smallest": settings.smallestAPIKey = key
-        case "reson8": settings.reson8APIKey = key
-        case "stepfun": settings.stepfunAPIKey = key
-        case "azure": settings.azureAPIKey = key
-        case "alibaba": settings.alibabaAPIKey = key
-        case "meta": settings.metaAPIKey = key
-        case "speechmatics": settings.speechmaticsAPIKey = key
-        case "revai": settings.revAIAPIKey = key
-        case "mistral": settings.mistralAPIKey = key
-        case "anthropic": settings.anthropicAPIKey = key
-        default: settings.gladiaAPIKey = key
-        }
+    private func clearStoredKey(for id: String) {
+        writer.store("", for: id)
+        failedEntryIDs.remove(id)
+        reloadBalancesAfterCredentialChange()
     }
 
     /// Saves what was entered when Save was pressed.
@@ -502,77 +225,18 @@ struct APIKeysView: View {
     /// returns its line for the Validation alert.
     private func save(_ key: String, for id: String, credential: String? = nil) async -> String {
         let savedValue = credential ?? key
-        if let failure = await self.validationFailure(of: savedValue, for: id) {
+        if let failure = await writer.validationFailure(of: savedValue, for: id) {
             failedEntryIDs.insert(id)
             return failure
         }
         failedEntryIDs.remove(id)
-        self.store(savedValue, for: id)
+        writer.store(savedValue, for: id)
         self.drafts.clear(id, ifStill: key)
         if id == "deepgram" {
             // Auto-select Deepgram as the provider now that there is a key.
             settings.reconfigureDefaultProvider()
         }
-        return Self.savedMessage(for: id, title: self.presentation(for: id).title)
-    }
-
-    /// The alert line for a key its provider rejects, or nil when the key
-    /// passed or the provider has no cheap probe; the others check the key
-    /// when a session connects, and a stored key is never read as entitlement.
-    ///
-    /// Provider responses can echo account details or the submitted key, so
-    /// the alert gets a fixed local line and the original goes to the private
-    /// log.
-    private func validationFailure(of key: String, for id: String) async -> String? {
-        let title = self.presentation(for: id).title
-        let outcome: APIKeyValidationResult.Outcome
-        switch id {
-        case "alibaba":
-            do {
-                _ = try AlibabaSpeechConfiguration(credentials: key)
-                return nil
-            } catch { return error.localizedDescription }
-        case "azure":
-            do {
-                _ = try await AzureSpeechVoiceAPI().listVoices(credentials: key)
-                return nil
-            } catch {
-                SpeakLogger.logError(error, context: "Azure Speech key validation", logger: apiKeysLogger)
-                return "✗ \(title): the key and region could not be verified, so they were not saved."
-            }
-        case "deepgram":
-            outcome = await DeepgramAPIKeyValidator().validate(key).outcome
-        case "elevenlabs":
-            outcome = await ElevenLabsSTTAPIKeyValidator().validate(key).outcome
-        case "meta":
-            outcome = await MetaMuseAPIKeyValidator().validate(key).outcome
-        default:
-            return nil
-        }
-        guard case .failure(let detail) = outcome else { return nil }
-        apiKeysLogger.error(
-            "API key validation failed for \(id, privacy: .public): \(detail, privacy: .private)"
-        )
-        return "✗ \(title): the key could not be verified, so it was not saved. Check it and try again."
-    }
-
-    private static func savedMessage(for id: String, title: String) -> String {
-        switch id {
-        case "alibaba":
-            return "✓ Alibaba key, region and workspace saved. Access is checked when transcribing."
-        case "azure":
-            return "✓ Azure key and region saved; transcription access depends on your resource."
-        case "deepgram", "elevenlabs":
-            return "✓ \(title) key validated and saved"
-        case "meta":
-            return "✓ Meta key validated for Muse Voice Transcribe and saved"
-        case "soniox":
-            return "✓ Soniox key saved for transcription and voice output"
-        case "revai":
-            return "✓ Rev.ai access token saved"
-        default:
-            return "✓ \(title) key saved"
-        }
+        return APIKeyCredentialWriter.savedMessage(for: id, title: APIKeyProviderPresentation(entryID: id).title)
     }
 }
 #endif

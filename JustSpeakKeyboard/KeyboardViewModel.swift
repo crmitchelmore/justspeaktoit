@@ -3,10 +3,11 @@ import Foundation
 import SpeakCore
 
 /// Top-level keyboard model. Plans the capture path for each appearance and
-/// drives either the policy-gated in-extension engine or the Instant Dictation
-/// handoff, exposing one surface to the SwiftUI view.
+/// drives either the policy-gated in-extension engine
+/// (`KeyboardDirectCaptureSession`) or the Instant Dictation handoff, exposing
+/// one surface to the SwiftUI view. Pickup of app-owned transcripts belongs to
+/// `KeyboardDeliveryCoordinator`.
 @MainActor
-// swiftlint:disable:next type_body_length
 final class KeyboardViewModel: ObservableObject {
     struct DirectCaptureCapabilities {
         let microphonePermission: KeyboardCapturePlanner.Permission
@@ -32,8 +33,8 @@ final class KeyboardViewModel: ObservableObject {
 
     let handoff: KeyboardHandoffController
 
-    private var machine = KeyboardDictationMachine()
-    private let engine: any KeyboardDictationEngineProtocol
+    private let direct: KeyboardDirectCaptureSession
+    private let delivery: KeyboardDeliveryCoordinator
     private let handoffStore: KeyboardHandoffStore
     private let preferences: KeyboardDictationPreferencesStore
     private let directCapturePolicy: KeyboardCapturePlanner.DirectCapturePolicy
@@ -42,28 +43,14 @@ final class KeyboardViewModel: ObservableObject {
     private var profileSelection = KeyboardProfileSelection.directOnly
     private var handoffForwarder: AnyCancellable?
     private var hasFullAccess = false
-    private var activeRunID: UUID?
-    private var documentSession: KeyboardDocumentSession?
 
     private var currentDocumentIdentifier: UUID?
     private var proxyInsert: ((String) -> Void)?
     private var proxySetMarkedText: ((String) -> Void)?
     private var proxyUnmarkText: (() -> Void)?
-    private var statusObservation: KeyboardHandoffSignalObservation?
-    private let deliveryStore: KeyboardDeliveryStore
-    private var deliveryPreferences: KeyboardDeliveryPreferences = .default
     private var isSecureField = false
     private var activeInputModeCount = 0
     private var handBack: (() -> Void)?
-    private var pickupTask: Task<Void, Never>?
-    private var isDelivering = false
-
-    /// Cadence for refreshing the open-target advertisement (which lapses
-    /// after 8 s) and as the safety net for noticing an offer. Since #990 the
-    /// app also posts a Darwin `statusChanged` when it publishes one, so a new
-    /// offer no longer waits for a tick; the target refresh still needs the
-    /// loop, and the store throttles that rewrite to one write per 2 s.
-    private static let deliveryPollInterval = Duration.milliseconds(500)
 
     convenience init() {
         self.init(
@@ -94,22 +81,35 @@ final class KeyboardViewModel: ObservableObject {
         directCapturePolicy: KeyboardCapturePlanner.DirectCapturePolicy,
         directCaptureCapabilities: @escaping @MainActor () -> DirectCaptureCapabilities
     ) {
-        self.engine = engine
+        self.direct = KeyboardDirectCaptureSession(engine: engine)
         self.handoff = handoff
         self.handoffStore = handoffStore
         self.preferences = preferences
-        self.deliveryStore = deliveryStore
         self.directCapturePolicy = directCapturePolicy
         self.directCaptureCapabilities = directCaptureCapabilities
-        engine.onEvent = { [weak self] runID, event in
-            self?.receiveEngineEvent(runID: runID, event: event)
+        self.delivery = KeyboardDeliveryCoordinator(store: deliveryStore)
+        delivery.context = { [weak self] in
+            self?.deliveryContext
+        }
+        delivery.onOfferingChange = { [weak self] offering in
+            self?.pickupOffering = offering
+        }
+        direct.localeIdentifier = { [weak self] in
+            self?.activeLocaleIdentifier ?? ""
+        }
+        direct.onStateChange = { [weak self] state, liveText in
+            self?.directState = state
+            self?.liveText = liveText
+        }
+        direct.onCaptureCancelled = { [weak self] in
+            self?.fallBackToHandoffIfDirectCaptureIsImpossible()
         }
         // Republish nested handoff changes so the shared root view refreshes.
         handoffForwarder = handoff.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
         handoff.onDidInsert = { [weak self] in
-            self?.handBackAfterInsertIfPermitted()
+            self?.delivery.handBackAfterInsertIfPermitted()
         }
     }
 
@@ -122,7 +122,7 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     var isCapturing: Bool {
-        machine.isCapturing
+        direct.isCapturing
     }
 
     /// Capture or app handoff is in flight; the quick-switch chips and editing
@@ -130,7 +130,7 @@ final class KeyboardViewModel: ObservableObject {
     var isBusy: Bool {
         switch mode {
         case .direct:
-            return machine.isCapturing
+            return direct.isCapturing
         case .handoff:
             return handoff.presentation == .starting || handoff.presentation == .recording
                 || handoff.presentation == .transcribing
@@ -189,53 +189,42 @@ final class KeyboardViewModel: ObservableObject {
         self.proxyInsert = insertText
         self.proxySetMarkedText = setMarkedText
         self.proxyUnmarkText = unmarkText
-        self.documentSession = KeyboardDocumentSession(
+        direct.attach(KeyboardDocumentSession(
             insertText: insertText,
             deleteBackward: deleteBackward,
             contextBeforeInput: contextBeforeInput,
             contextAfterInput: contextAfterInput
-        )
+        ))
         handoffStore.recordExtensionObservation(hasFullAccess: hasFullAccess)
 
         languageSelection = preferences.selection()
         profileSelection = preferences.profileSelection()
-        deliveryPreferences = deliveryStore.preferences()
+        delivery.reloadPreferences()
         refreshChips()
 
-        isActiveAppearance = true
+        delivery.beginAppearance()
         configureCaptureMode(autoStartHandoff: true)
-        refreshDelivery()
-        startDeliveryLoop()
-        observeStatusChanges()
+        delivery.refresh()
+        delivery.startObserving()
     }
 
-    /// The app wakes the keyboard when it publishes an offer (issue #990), so
-    /// a targeted insert lands as soon as the capture finishes instead of on
-    /// the next tick. The notification carries nothing: the offer, its nonce
-    /// and its document binding are still read and validated from the App
-    /// Group by `evaluatePickup`.
-    private func observeStatusChanges() {
-        guard statusObservation == nil else { return }
-        // Delivered on the main queue, and coalesced to one outstanding
-        // wake-up by the observation, so this needs no main-actor task of its
-        // own — one per notification would let any process posting the
-        // payload-free Darwin name stack stale refreshes on this extension.
-        statusObservation = KeyboardHandoffSignal.observeStatusChanges { [weak self] in
-            MainActor.assumeIsolated {
-                self?.refreshDelivery()
-            }
+    private var deliveryContext: KeyboardDeliveryContext {
+        let isBlocked: Bool
+        if case .blocked = mode {
+            isBlocked = true
+        } else {
+            isBlocked = false
         }
+        return KeyboardDeliveryContext(
+            isBlocked: isBlocked,
+            documentIdentifier: currentDocumentIdentifier,
+            isSecureField: isSecureField,
+            captureInFlight: handoff.isInFlight || direct.isCapturing,
+            activeInputModeCount: activeInputModeCount,
+            insertText: proxyInsert,
+            handBack: handBack
+        )
     }
-
-    /// Whether this appearance is still on screen.
-    ///
-    /// A status wake-up is a queued main-actor task, and dropping the
-    /// observation does not unschedule one that has already been dispatched.
-    /// Without this guard such a task could run after `deactivate()` and
-    /// re-advertise an open target for a keyboard that is no longer visible —
-    /// which the app would then treat as grounds for a targeted insert into a
-    /// document nobody is looking at.
-    private var isActiveAppearance = false
 
     private func configureCaptureMode(autoStartHandoff: Bool) {
         guard let currentDocumentIdentifier, let proxyInsert else { return }
@@ -258,9 +247,7 @@ final class KeyboardViewModel: ObservableObject {
         case .direct:
             handoff.deactivate()
             mode = .direct
-            machine = KeyboardDictationMachine()
-            directState = machine.state
-            liveText = ""
+            direct.reset()
         case .handoff:
             activateHandoff(
                 documentIdentifier: currentDocumentIdentifier,
@@ -285,7 +272,7 @@ final class KeyboardViewModel: ObservableObject {
             documentIdentifier: documentIdentifier,
             profile: captureProfile,
             autoStart: autoStart,
-            streamsMarkedText: deliveryPreferences.streamsMarkedText,
+            streamsMarkedText: delivery.preferences.streamsMarkedText,
             isSecureField: isSecureField,
             insertText: proxyInsert,
             setMarkedText: proxySetMarkedText,
@@ -294,20 +281,11 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     func deactivate() {
-        isActiveAppearance = false
-        dispatch(.dismissed)
+        // First, so nothing the teardown below triggers can advertise a target
+        // or evaluate an offer for this appearance.
+        delivery.deactivate()
+        direct.dispatch(.dismissed)
         handoff.deactivate()
-        // Not just dropped: a wake-up already queued on the main actor still
-        // runs otherwise, and it would find enough state left behind to
-        // republish a target for a dismissed keyboard.
-        statusObservation?.invalidate()
-        statusObservation = nil
-        pickupTask?.cancel()
-        pickupTask = nil
-        // Withdraw the open-target advertisement. Its short lifetime covers
-        // the case where the extension is killed before this ever runs.
-        deliveryStore.clearTarget()
-        pickupOffering = .none
         proxyInsert = nil
         proxySetMarkedText = nil
         proxyUnmarkText = nil
@@ -315,8 +293,7 @@ final class KeyboardViewModel: ObservableObject {
         // No document is open to this keyboard any more, so nothing can be
         // advertised or aimed at even if a late callback does arrive.
         currentDocumentIdentifier = nil
-        documentSession?.invalidate()
-        documentSession = nil
+        direct.detachDocument()
     }
 
     /// Every host callback carries the *current* secure-entry answer, not the
@@ -336,33 +313,32 @@ final class KeyboardViewModel: ObservableObject {
             // Nothing may keep aiming at a field that is now collecting a
             // secret: withdraw the advertisement, drop the chip, and abandon
             // any capture that was going to write into it.
-            deliveryStore.clearTarget()
-            pickupOffering = .none
+            delivery.withdrawForSecureField()
             switch mode {
             case .direct:
-                if machine.isCapturing { dispatch(.targetChanged) }
+                if direct.isCapturing { direct.dispatch(.targetChanged) }
             case .handoff:
                 if handoff.isInFlight { handoff.cancel() }
             case .blocked:
                 break
             }
         }
-        defer { refreshDelivery() }
+        defer { delivery.refresh() }
         switch mode {
         case .direct:
             // Extension-authored edits update the session anchor before UIKit
             // callbacks arrive. Any other caret or host-text mutation makes
             // the bounded replacement region unprovable and pauses the run.
-            if machine.isCapturing,
-               changedDocument || documentSession?.anchorIsCurrent() != true {
+            if direct.isCapturing,
+               changedDocument || !direct.documentAnchorIsCurrent {
                 // A new field means the proxy now reads a document this session
                 // never wrote to. Drop the anchor first, so the `.targetChanged`
                 // failure path cannot delete separator whitespace from the new
                 // field on an exact scalar collision between the two contexts.
                 if changedDocument {
-                    documentSession?.invalidate()
+                    direct.invalidateDocument()
                 }
-                dispatch(.targetChanged)
+                direct.dispatch(.targetChanged)
             }
         case .handoff:
             handoff.updateDocumentContext(
@@ -379,7 +355,7 @@ final class KeyboardViewModel: ObservableObject {
     func micTapped() {
         switch mode {
         case .direct:
-            dispatch(.micTapped)
+            direct.dispatch(.micTapped)
         case .handoff:
             switch handoff.presentation {
             case .recording:
@@ -398,22 +374,19 @@ final class KeyboardViewModel: ObservableObject {
 
     /// Explicit one-tap pickup of the chip (#1003).
     func insertPendingPickup() {
-        guard case let .chip(chip) = pickupOffering else { return }
-        deliver(chip.text, offerID: chip.offerID)
+        delivery.insertPendingPickup()
     }
 
     /// The user declining the chip. The claim is recorded so it does not come
     /// back on the next appearance; the transcript stays in History.
     func dismissPendingPickup() {
-        guard case let .chip(chip) = pickupOffering else { return }
-        deliveryStore.claimOffer(chip.offerID)
-        pickupOffering = .none
+        delivery.dismissPendingPickup()
     }
 
     func cancelTapped() {
         switch mode {
         case .direct:
-            dispatch(.dismissed)
+            direct.dispatch(.dismissed)
         case .handoff:
             handoff.cancel()
         case .blocked:
@@ -466,62 +439,6 @@ final class KeyboardViewModel: ObservableObject {
         )
     }
 
-    private func dispatch(_ event: KeyboardDictationMachine.Event) {
-        let effects = machine.handle(event)
-        directState = machine.state
-        liveText = machine.liveText
-        for effect in effects {
-            perform(effect)
-        }
-        // Every failure that can follow a started capture must clean up the
-        // session-owned separator. An interruption or a target change after a
-        // whitespace-only hypothesis ends in `.failed`, and would otherwise
-        // leave a stray space in the host document.
-        switch directState {
-        case .failed(.noSpeech), .failed(.audioInterrupted), .failed(.targetChanged):
-            _ = documentSession?.removeSeparatorIfTranscriptIsEmpty()
-        default:
-            break
-        }
-    }
-
-    private func receiveEngineEvent(runID: UUID, event: KeyboardDictationMachine.Event) {
-        guard activeRunID == runID else { return }
-        dispatch(event)
-        switch event {
-        case .captureFailed, .finalized:
-            if activeRunID == runID {
-                activeRunID = nil
-            }
-        default:
-            break
-        }
-    }
-
-    private func perform(_ effect: KeyboardDictationMachine.Effect) {
-        switch effect {
-        case .startCapture:
-            documentSession?.begin()
-            let runID = UUID()
-            activeRunID = runID
-            engine.start(runID: runID, localeIdentifier: activeLocaleIdentifier)
-        case .stopCapture:
-            guard let activeRunID else { return }
-            engine.stop(runID: activeRunID)
-        case .cancelCapture:
-            if let activeRunID {
-                engine.cancel(runID: activeRunID)
-                self.activeRunID = nil
-            }
-            fallBackToHandoffIfDirectCaptureIsImpossible()
-        case let .applyEdit(edit):
-            guard documentSession?.apply(edit) == .applied else {
-                dispatch(.targetChanged)
-                return
-            }
-        }
-    }
-
     private func plannedCapturePath(hasFullAccess: Bool) -> KeyboardCapturePlanner.Path {
         guard directCapturePolicy == .enabled else {
             return KeyboardCapturePlanner.path(
@@ -548,7 +465,7 @@ final class KeyboardViewModel: ObservableObject {
     /// this appearance, so the keyboard degrades to the app-owned handoff.
     private func fallBackToHandoffIfDirectCaptureIsImpossible() {
         guard mode == .direct,
-              case let .failed(failure) = machine.state,
+              case let .failed(failure) = direct.state,
               failure == .microphoneUnavailable || failure == .speechRecognitionUnavailable else {
             return
         }
@@ -563,110 +480,6 @@ final class KeyboardViewModel: ObservableObject {
             proxyInsert: proxyInsert,
             autoStart: autoStart
         )
-    }
-
-    // MARK: - Delivery (issues #1002, #1003, #1005)
-
-    /// Advertises the open field and watches for a transcript the app has left
-    /// pending. Both halves are cheap reads of the App Group; the store
-    /// throttles the target rewrite.
-    private func startDeliveryLoop() {
-        guard pickupTask == nil else { return }
-        pickupTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                self.refreshDelivery()
-                try? await Task.sleep(for: Self.deliveryPollInterval)
-            }
-        }
-    }
-
-    private func refreshDelivery() {
-        guard isActiveAppearance else {
-            // A delayed callback from an appearance that has ended may neither
-            // advertise a target nor evaluate an offer.
-            pickupOffering = .none
-            return
-        }
-        if case .blocked = mode {
-            // Without Full Access there is no shared container to advertise
-            // into and nothing to offer; the blocked strip already says so.
-            pickupOffering = .none
-            return
-        }
-        guard !isSecureField else {
-            // Not merely "do not advertise": actively withdraw, because the
-            // advertisement outlives its last refresh by design and the app
-            // would otherwise still see an open target for a password field.
-            deliveryStore.clearTarget()
-            pickupOffering = .none
-            return
-        }
-        // Preferences are app-owned and the user can change them while this
-        // keyboard stays on screen. Re-reading them here is one small App Group
-        // read per tick, and it stops hand-back or auto-pickup decisions
-        // applying a choice the user has already superseded.
-        deliveryPreferences = deliveryStore.preferences()
-        publishTargetIfPossible()
-        evaluatePickup()
-    }
-
-    private func publishTargetIfPossible() {
-        guard let currentDocumentIdentifier, !isSecureField else { return }
-        deliveryStore.publishTarget(
-            documentIdentifier: currentDocumentIdentifier,
-            isSecureField: false
-        )
-    }
-
-    /// The decision, the text, and the claimed identifier all come from **one**
-    /// snapshot of the offer. Reading the store twice let the app replace the
-    /// offer in between, so the keyboard could insert offer A's text while
-    /// claiming — and so silently burning — offer B.
-    private func evaluatePickup() {
-        let offer = deliveryStore.pendingOffer()
-        let offering = KeyboardPickupPolicy.offering(
-            offer: offer,
-            claim: deliveryStore.claim(),
-            currentDocumentIdentifier: currentDocumentIdentifier,
-            isSecureField: isSecureField,
-            handoffInFlight: handoff.isInFlight || machine.isCapturing,
-            preferences: deliveryPreferences
-        )
-        if case let .autoInsert(text) = offering, let offer {
-            deliver(text, offerID: offer.offerID)
-            return
-        }
-        pickupOffering = offering
-    }
-
-    /// Inserts once and records the claim afterwards, so a death between the
-    /// two leaves the offer retryable rather than losing the transcript.
-    private func deliver(_ text: String, offerID: UUID) {
-        // The insertion makes the host call back into `updateDocumentContext`.
-        // Claiming happens after the proxy accepts the text, so guard the
-        // window in between rather than letting a re-entrant pass insert twice.
-        guard let proxyInsert, !isDelivering else { return }
-        isDelivering = true
-        defer { isDelivering = false }
-        proxyInsert(text)
-        deliveryStore.claimOffer(offerID)
-        pickupOffering = .none
-        handBackAfterInsertIfPermitted()
-    }
-
-    /// Hands the keyboard back after a successful insertion (#1005). Only when
-    /// exactly two keyboards are enabled: `advanceToNextInputMode()` moves to
-    /// the *next* one, and with three or more that is not the one the user was
-    /// typing on.
-    private func handBackAfterInsertIfPermitted() {
-        guard KeyboardHandBackPolicy.shouldAdvanceToNextInputMode(
-            preferences: deliveryPreferences,
-            activeInputModeCount: activeInputModeCount
-        ) else {
-            return
-        }
-        handBack?()
     }
 
     private func refreshChips() {

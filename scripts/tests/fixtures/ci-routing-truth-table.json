@@ -522,7 +522,7 @@
   }
  },
  {
-  "path": "scripts/typecheck-windows-swift.sh",
+  "path": "scripts/ci/typecheck-windows-swift.sh",
   "pre_pr": [
    "ci-lint",
    "shell",
@@ -551,7 +551,7 @@
   }
  },
  {
-  "path": "scripts/retry-network.sh",
+  "path": "scripts/ci/retry-network.sh",
   "pre_pr": [
    "ci-lint",
    "shell",
@@ -566,7 +566,7 @@
   }
  },
  {
-  "path": "scripts/retry-xctest-crash.py",
+  "path": "scripts/ci/retry-xctest-crash.py",
   "pre_pr": [
    "ci-lint",
    "swift"
@@ -608,7 +608,7 @@
   }
  },
  {
-  "path": "scripts/verify-portable-core-boundary.py",
+  "path": "scripts/ci/verify-portable-core-boundary.py",
   "pre_pr": [
    "ci-lint",
    "swift"
@@ -622,7 +622,7 @@
   }
  },
  {
-  "path": "scripts/collect-macos-sample-contract.py",
+  "path": "scripts/ci/collect-macos-sample-contract.py",
   "pre_pr": [
    "ci-lint",
    "swift"
@@ -636,7 +636,7 @@
   }
  },
  {
-  "path": "scripts/collect-macos-xctest-crashes.py",
+  "path": "scripts/ci/collect-macos-xctest-crashes.py",
   "pre_pr": [
    "ci-lint",
    "swift"
@@ -679,7 +679,7 @@
   }
  },
  {
-  "path": "scripts/check-api-compatibility.sh",
+  "path": "scripts/ci/check-api-compatibility.sh",
   "pre_pr": [
    "ci-lint",
    "public-api",
@@ -694,7 +694,7 @@
   }
  },
  {
-  "path": "scripts/api-breakage-allowlist.txt",
+  "path": "scripts/ci/api-breakage-allowlist.txt",
   "pre_pr": [
    "ci-lint",
    "public-api"

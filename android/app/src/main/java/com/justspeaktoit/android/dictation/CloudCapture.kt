@@ -31,7 +31,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Each recorder is stopped exactly once, by whichever path claims it first: [stop], [discard] or
  * [close]. A recording still owned at [close] is handed to [retirement], which outlives the owner on
  * purpose (the microphone must be released after the screen is gone) and is shared by every owner
- * in the process, so recreated owners cannot multiply stalled stops.
+ * in the process: it retires an unstopped recording on its one lane, and counts a stop already under
+ * way until it settles, so recreated owners cannot multiply stalled stops either way.
  */
 internal class CloudCapture(
     private val recorders: RecorderFactory,
@@ -133,9 +134,9 @@ internal class CloudCapture(
         val recording = current ?: return null
         current = null
         // A stop already under way owns the recording and decides what happens to its file; a second
-        // stop or a delete here could race it. Otherwise retire it off the main thread: joining the
-        // capture thread here could cause an ANR.
-        if (!recording.claimStop()) return recording.stopped
+        // stop or a delete here could race it, so it is only counted until it settles. Otherwise retire
+        // it off the main thread: joining the capture thread here could cause an ANR.
+        if (!recording.claimStop()) return retirement.adopt(recording)
         return retirement.retire(recording)
     }
 

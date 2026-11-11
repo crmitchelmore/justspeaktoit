@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "check-linux-accessibility.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "accessibility/check-linux-accessibility.py"
 spec = importlib.util.spec_from_file_location("check_linux_accessibility", SCRIPT)
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)

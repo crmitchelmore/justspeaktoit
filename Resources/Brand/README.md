@@ -5,7 +5,7 @@ palette. Large, simple shapes stay legible at Dock, tab and Home Screen sizes.
 
 Run from the repository root using Apple's toolchain:
 
-    xcrun swift scripts/generate-icon.swift
+    xcrun swift scripts/assets/generate-icon.swift
     node --test scripts/tests/brand-assets.test.mjs
 
 The generator is the canonical geometry and export recipe. The adjacent SVGs

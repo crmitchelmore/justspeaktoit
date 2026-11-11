@@ -95,7 +95,7 @@ jobs:
 
       # GitHub release-asset 5xx outages outlast short fixed retries.
       - name: Resolve pinned dependencies with bounded network retries
-        run: scripts/retry-network.sh swift package resolve --force-resolved-versions
+        run: scripts/ci/retry-network.sh swift package resolve --force-resolved-versions
 
       - name: Build
         run: swift build --disable-automatic-resolution

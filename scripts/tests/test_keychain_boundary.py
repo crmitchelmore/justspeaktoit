@@ -55,7 +55,7 @@ class ShippedKeychainRedirectTests(unittest.TestCase):
             output = root / name / 'KeychainAccess.o'
             output.parent.mkdir()
             subprocess.run(['xcrun', 'swiftc', '-parse-as-library', '-module-name', 'SpeakCore', *flags, '-c',
-                            str(ROOT / 'Sources/SpeakCore/KeychainAccess.swift'), '-o', str(output)],
+                            str(ROOT / 'Sources/SpeakCore/Credentials/KeychainAccess.swift'), '-o', str(output)],
                            check=True, capture_output=True, text=True, timeout=120)
             cls.objects[name] = output
 

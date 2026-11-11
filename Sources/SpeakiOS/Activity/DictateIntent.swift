@@ -8,7 +8,7 @@ import SpeakCore
 // pair that is the only text-returning path today.
 //
 // The end-pointing this depends on is issue #1012's, and every rule about when
-// to stop is in `SpeakCore/CaptureEndPointing.swift` where it is unit-tested.
+// to stop is in `SpeakCore/Capture/CaptureEndPointing.swift` where it is unit-tested.
 // This file is the Shortcuts-facing wrapper and the wait.
 
 /// One-shot dictation that returns its transcript.

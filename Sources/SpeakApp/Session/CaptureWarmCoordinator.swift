@@ -4,122 +4,41 @@ import Foundation
 import Network
 import SpeakCore
 
-@MainActor
-protocol CaptureWarmScheduling: AnyObject {
-  func schedule(after delay: TimeInterval, operation: @escaping @MainActor @Sendable () -> Void)
-  func cancel()
-}
-
-@MainActor
-private final class SystemCaptureWarmScheduler: CaptureWarmScheduling {
-  private var task: Task<Void, Never>?
-
-  func schedule(after delay: TimeInterval, operation: @escaping @MainActor @Sendable () -> Void) {
-    self.cancel()
-    self.task = Task { @MainActor in
-      let nanoseconds = UInt64(max(0, delay) * 1_000_000_000)
-      try? await Task.sleep(nanoseconds: nanoseconds)
-      guard !Task.isCancelled else { return }
-      operation()
-    }
-  }
-
-  func cancel() {
-    self.task?.cancel()
-    self.task = nil
-  }
-}
-
-@MainActor
-protocol CaptureWarmNetworkMonitoring: AnyObject {
-  var statusDidChange: ((NWPath.Status) -> Void)? { get set }
-  func start()
-  func cancel()
-}
-
-@MainActor
-private final class SystemCaptureWarmNetworkMonitor: CaptureWarmNetworkMonitoring {
-  var statusDidChange: ((NWPath.Status) -> Void)?
-
-  private let monitor = NWPathMonitor()
-  private let queue = DispatchQueue(label: "com.github.speakapp.capture-warm-network")
-
-  func start() {
-    self.monitor.pathUpdateHandler = { [weak self] path in
-      Task { @MainActor [weak self] in
-        self?.statusDidChange?(path.status)
-      }
-    }
-    self.monitor.start(queue: self.queue)
-  }
-
-  func cancel() {
-    self.monitor.cancel()
-    self.statusDidChange = nil
-  }
-}
-
 /// Keeps the capture start path warm while the app is idle (issue #663).
 ///
-/// Two independent warm-ups, both driven from the same lifecycle:
+/// Three independent warm-ups, all driven from the same lifecycle:
 ///
 /// 1. **Audio input.** A recorder is created and prepared while idle so the
 ///    hotkey path only has to call `record()`. The microphone is never opened
-///    by pre-warming — see `AudioFileManager.prepareWarmRecorder(for:)` for the
+///    by pre-warming — see `CaptureWarmStage.prepare(for:captureIdle:)` for the
 ///    privacy boundary — and the staged recorder is discarded and rebuilt
 ///    whenever the audio route, device selection, recordings directory or
 ///    microphone permission changes.
-/// 2. **Streaming provider endpoint.** A credential-free HTTPS probe for live
-///    clients that use `URLSession.shared`. This warms resolver state and may
-///    seed TLS resumption, but does not claim to pre-connect the WebSocket.
+/// 2. **Streaming provider endpoint** (`StreamingEndpointWarmUp`). A
+///    credential-free HTTPS probe for live clients that use `URLSession.shared`.
+/// 3. **On-device SpeechAnalyzer model** (`SpeechAnalyzerWarmUp`).
 ///
 /// Warm-up is suspended for the duration of a session and resumed when the app
 /// returns to idle, so it never competes with a live capture.
 @MainActor
-final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
+final class CaptureWarmCoordinator {
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
   private let audioInputDeviceManager: AudioInputDeviceManager
   private let audioFileManager: AudioFileManager
-  private let endpointWarmer: StreamingEndpointWarming
-  private let networkMonitor: CaptureWarmNetworkMonitoring
-  private let scheduler: CaptureWarmScheduling
-  private let workspaceNotificationCenter: NotificationCenter
-  private let notificationCenter: NotificationCenter
-  private let now: @MainActor () -> Date
+  private let systemEvents: CaptureWarmSystemEvents
   private let warmAudio: @MainActor (CaptureWarmContext, Bool) async -> Void
   private let invalidateAudio: @MainActor () async -> Void
-  private let warmSpeechAnalyzer: @Sendable (_ modelID: String, _ localeIdentifier: String) async -> Bool
 
-  private var streamTracker = LiveStreamWarmTracker()
+  private let endpoint: StreamingEndpointWarmUp
   private var isSessionActive = false
   private var isStarted = false
   private var isInvalidated = false
-  private var lastNetworkStatus: NWPath.Status?
   private var cancellables: Set<AnyCancellable> = []
-  private var workspaceObservers: [NSObjectProtocol] = []
-  private var observers: [NSObjectProtocol] = []
   private var audioWarmTask: Task<Void, Never>?
   private var audioWarmGeneration = 0
   private var knownRecordingsDirectory: URL?
-  private var endpointProbeTask: Task<Void, Never>?
-  private var warmedSpeechAnalyzerKey: String? {
-    didSet {
-      guard warmedSpeechAnalyzerKey != oldValue else { return }
-      // The model stays loaded for the app's lifetime; Status says so (issue #1471).
-      speechAnalyzerModelHold?.end()
-      speechAnalyzerModelHold = warmedSpeechAnalyzerKey.map { key in
-        SystemResourceRegistry.shared.acquire(
-          kind: .localModel, title: "Apple SpeechAnalyzer model",
-          reason: "Loaded ahead of time so on-device dictation starts quickly. It never opens the microphone.",
-          owner: "CaptureWarmCoordinator", detail: key.replacingOccurrences(of: "|", with: " · ")
-        )
-      }
-    }
-  }
-  private var speechAnalyzerModelHold: SystemResourceToken?
-  private var warmingSpeechAnalyzerKey: String?
-  private var speechAnalyzerWarmTask: Task<Void, Never>?
+  private let speechAnalyzer: SpeechAnalyzerWarmUp
 
   init(
     appSettings: AppSettings,
@@ -140,12 +59,11 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.permissionsManager = permissionsManager
     self.audioInputDeviceManager = audioInputDeviceManager
     self.audioFileManager = audioFileManager
-    self.endpointWarmer = endpointWarmer ?? StreamingEndpointWarmer()
-    self.networkMonitor = networkMonitor ?? SystemCaptureWarmNetworkMonitor()
-    self.scheduler = scheduler ?? SystemCaptureWarmScheduler()
-    self.workspaceNotificationCenter = workspaceNotificationCenter ?? NSWorkspace.shared.notificationCenter
-    self.notificationCenter = notificationCenter ?? .default
-    self.now = now ?? Date.init
+    self.systemEvents = CaptureWarmSystemEvents(
+      workspaceNotificationCenter: workspaceNotificationCenter ?? NSWorkspace.shared.notificationCenter,
+      notificationCenter: notificationCenter ?? .default,
+      networkMonitor: networkMonitor ?? SystemCaptureWarmNetworkMonitor()
+    )
     if let warmAudio {
       self.warmAudio = warmAudio
     } else {
@@ -156,16 +74,21 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.invalidateAudio = invalidateAudio ?? {
       await audioFileManager.invalidateWarmRecorder()
     }
-    self.warmSpeechAnalyzer = warmSpeechAnalyzer ?? Self.prewarmSpeechAnalyzer
+    self.endpoint = StreamingEndpointWarmUp(
+      settings: appSettings,
+      warmer: endpointWarmer ?? StreamingEndpointWarmer(),
+      scheduler: scheduler ?? SystemCaptureWarmScheduler(),
+      now: now ?? Date.init
+    )
+    self.speechAnalyzer = SpeechAnalyzerWarmUp(warm: warmSpeechAnalyzer ?? SpeechAnalyzerWarmUp.prewarm)
+    self.endpoint.onWake = { [weak self] in self?.warmUp() }
   }
 
   func start() {
     guard !self.isStarted else { return }
     self.isStarted = true
     self.observeEnvironmentChanges()
-    self.observeSleepAndWake()
-    self.observeCredentialChanges()
-    self.observeNetworkChanges()
+    self.observeSystemEvents()
 
     let eventSink = CaptureWarmLifecycleSink(coordinator: self)
     let manager = self.audioFileManager
@@ -189,11 +112,11 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
     self.permissionsManager.refresh(.microphone)
     guard self.permissionsManager.status(for: .microphone).isGranted else {
       self.reconcileAudioWarmUp()
-      self.invalidateEndpointWarmUp()
+      self.endpoint.invalidate()
       return
     }
     self.reconcileAudioWarmUp()
-    self.reconcileEndpointWarmUp()
+    self.endpoint.reconcile()
   }
 
   /// Called when a session starts. Returns the context to hand to
@@ -207,13 +130,10 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
 
   func sessionWillBegin() {
     self.isSessionActive = true
-    self.scheduler.cancel()
     self.audioWarmTask?.cancel()
     self.audioWarmTask = nil
-    self.endpointProbeTask?.cancel()
-    self.endpointProbeTask = nil
-    self.cancelSpeechAnalyzerWarmUp()
-    self.streamTracker.invalidate()
+    self.speechAnalyzer.cancel()
+    self.endpoint.invalidate()
   }
 
   /// Called when the app returns to idle after a session.
@@ -227,24 +147,15 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
   func invalidate() async {
     guard !self.isInvalidated else { return }
     self.isInvalidated = true
-    self.scheduler.cancel()
-    self.endpointProbeTask?.cancel()
+    let endpointProbeTask = self.endpoint.probeTask
+    self.endpoint.invalidate()
     self.audioWarmTask?.cancel()
-    let speechAnalyzerWarmTask = self.speechAnalyzerWarmTask
-    self.cancelSpeechAnalyzerWarmUp()
-    self.networkMonitor.cancel()
-    for observer in self.workspaceObservers {
-      self.workspaceNotificationCenter.removeObserver(observer)
-    }
-    self.workspaceObservers.removeAll()
-    for observer in self.observers {
-      self.notificationCenter.removeObserver(observer)
-    }
-    self.observers.removeAll()
+    let speechAnalyzerWarmTask = self.speechAnalyzer.task
+    self.speechAnalyzer.cancel()
+    self.systemEvents.stop()
     self.cancellables.removeAll()
-    self.streamTracker.invalidate()
     await self.audioWarmTask?.value
-    await self.endpointProbeTask?.value
+    await endpointProbeTask?.value
     await speechAnalyzerWarmTask?.value
     await self.audioFileManager.setRecordingLifecycleHandler(nil)
     await self.invalidateAudio()
@@ -295,135 +206,17 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
 
   // MARK: - On-device SpeechAnalyzer model
 
-  /// Loads the selected SpeechAnalyzer model before the first recording, and
-  /// again after a model, locale or permission change (issue #614). The model
-  /// is retained for the app's lifetime, so one successful warm-up per
-  /// selection is enough; a failed one is retried on the next idle trigger.
-  /// It never downloads assets and never opens the microphone.
   private func reconcileSpeechAnalyzerWarmUp() {
     let model = self.appSettings.liveTranscriptionModel
     guard self.appSettings.transcriptionMode == .liveNative,
       AppleLocalModels.isSpeechAnalyzerModel(model),
       self.permissionsManager.status(for: .speechRecognition).isGranted
     else {
-      self.cancelSpeechAnalyzerWarmUp()
-      self.warmedSpeechAnalyzerKey = nil
+      self.speechAnalyzer.forget()
       return
     }
     let locale = self.appSettings.preferredModelLanguage ?? self.appSettings.resolvedPreferredLocaleIdentifier
-    let key = "\(model)|\(locale)"
-    guard self.warmedSpeechAnalyzerKey != key, self.warmingSpeechAnalyzerKey != key else { return }
-    self.cancelSpeechAnalyzerWarmUp()
-    self.warmingSpeechAnalyzerKey = key
-    let warm = self.warmSpeechAnalyzer
-    self.speechAnalyzerWarmTask = Task(priority: .utility) { [weak self] in
-      let succeeded = await warm(model, locale)
-      guard let self, !Task.isCancelled, self.warmingSpeechAnalyzerKey == key else { return }
-      self.warmingSpeechAnalyzerKey = nil
-      self.speechAnalyzerWarmTask = nil
-      if succeeded { self.warmedSpeechAnalyzerKey = key }
-    }
-  }
-
-  /// Model loading must not compete with a capture that is starting.
-  private func cancelSpeechAnalyzerWarmUp() {
-    self.speechAnalyzerWarmTask?.cancel()
-    self.speechAnalyzerWarmTask = nil
-    self.warmingSpeechAnalyzerKey = nil
-  }
-
-  private nonisolated static func prewarmSpeechAnalyzer(modelID: String, localeIdentifier: String) async -> Bool {
-    guard #available(macOS 26.0, *) else { return false }
-    do {
-      try await AppleSpeechAnalyzerWarmup.prewarm(
-        engine: AppleSpeechAnalyzerEngine(modelID: modelID),
-        localeIdentifier: localeIdentifier
-      )
-      return true
-    } catch {
-      if !(error is CancellationError) {
-        SpeakLogger.logger(category: "CaptureWarm").info(
-          "SpeechAnalyzer warm-up skipped: \(error.localizedDescription, privacy: .public)")
-      }
-      return false
-    }
-  }
-
-  // MARK: - Streaming endpoint
-
-  private func reconcileEndpointWarmUp() {
-    let provider = self.currentStreamingProvider()
-    let now = self.now()
-    guard
-      let host = self.streamTracker.hostNeedingWarmUp(
-        for: provider,
-        now: now,
-        enabled: self.appSettings.connectionPreWarmingEnabled
-      )
-    else {
-      self.scheduleEndpointRefresh(for: provider, now: now)
-      return
-    }
-
-    let warmer = self.endpointWarmer
-    self.endpointProbeTask?.cancel()
-    self.endpointProbeTask = Task { [weak self] in
-      let succeeded = await warmer.warmUp(host: host)
-      guard let self, !Task.isCancelled else { return }
-      if succeeded {
-        let completedAt = self.now()
-        if self.streamTracker.markWarmed(host: host, at: completedAt) {
-          self.scheduleEndpointRefresh(for: self.currentStreamingProvider(), now: completedAt)
-        }
-      } else {
-        self.streamTracker.markFailed(host: host)
-        self.scheduleEndpointRetry()
-      }
-    }
-  }
-
-  private func scheduleEndpointRefresh(
-    for provider: LiveTranscriptionProviderID?,
-    now: Date
-  ) {
-    guard let deadline = self.streamTracker.refreshDeadline(
-      for: provider,
-      enabled: self.appSettings.connectionPreWarmingEnabled
-    ) else {
-      self.scheduler.cancel()
-      return
-    }
-    self.scheduleEndpointWake(after: max(0, deadline.timeIntervalSince(now)))
-  }
-
-  private func scheduleEndpointRetry() {
-    self.scheduleEndpointWake(after: 15)
-  }
-
-  private func scheduleEndpointWake(after delay: TimeInterval) {
-    self.scheduler.schedule(after: delay) { [weak self] in
-      self?.warmUp()
-    }
-  }
-
-  private func invalidateEndpointWarmUp() {
-    self.scheduler.cancel()
-    self.endpointProbeTask?.cancel()
-    self.endpointProbeTask = nil
-    self.streamTracker.invalidate()
-  }
-
-  /// The streaming provider a session would use right now, or `nil` when the
-  /// current mode does not stream to a cloud provider.
-  private func currentStreamingProvider() -> LiveTranscriptionProviderID? {
-    guard self.appSettings.transcriptionMode == .liveNative else { return nil }
-    let availability = ModelCredentialResolver.availability(
-      for: self.appSettings.liveTranscriptionModel,
-      purpose: .liveTranscription,
-      storedAPIKeyIdentifiers: self.appSettings.trackedAPIKeyIdentifiers
-    )
-    if case .missing = availability { return nil }
-    return LiveTranscriptionRouting.route(for: self.appSettings.liveTranscriptionModel)?.provider
+    self.speechAnalyzer.warm(model: model, locale: locale)
   }
 
   // MARK: - Observation
@@ -461,8 +254,8 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
         guard let self else { return }
         defer { self.knownRecordingsDirectory = directory }
         guard let previous = self.knownRecordingsDirectory, previous != directory else { return }
-        AudioFileManager.scheduleStagedLeftoverSweep(in: previous)
-        AudioFileManager.scheduleStagedLeftoverSweep(in: directory)
+        RecordingFiles.scheduleStagedLeftoverSweep(in: previous)
+        RecordingFiles.scheduleStagedLeftoverSweep(in: directory)
       }
       .store(in: &self.cancellables)
   }
@@ -483,61 +276,33 @@ final class CaptureWarmCoordinator { // swiftlint:disable:this type_body_length
       .dropFirst()
       .receive(on: RunLoop.main)
       .sink { [weak self] _ in
-        self?.invalidateEndpointWarmUp()
+        self?.endpoint.invalidate()
         self?.warmUp()
       }
       .store(in: &self.cancellables)
   }
 
-  private func observeSleepAndWake() {
-    let willSleep = self.workspaceNotificationCenter.addObserver(
-      forName: NSWorkspace.willSleepNotification,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      Task { @MainActor [weak self] in
-        self?.invalidateEndpointWarmUp()
-      }
-    }
-    let didWake = self.workspaceNotificationCenter.addObserver(
-      forName: NSWorkspace.didWakeNotification,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      Task { @MainActor [weak self] in
-        self?.warmedSpeechAnalyzerKey = nil
-        self?.invalidateEndpointWarmUp()
-        self?.warmUp()
-      }
-    }
-    self.workspaceObservers = [willSleep, didWake]
-  }
-
-  private func observeNetworkChanges() {
-    self.networkMonitor.statusDidChange = { [weak self] status in
-      guard let self else { return }
-      guard self.lastNetworkStatus != status else { return }
-      self.lastNetworkStatus = status
-      self.invalidateEndpointWarmUp()
-      if status == .satisfied {
-        self.warmUp()
-      }
-    }
-    self.networkMonitor.start()
-  }
-
-  private func observeCredentialChanges() {
-    let observer = self.notificationCenter.addObserver(
-      forName: .secureAppStorageDidChange,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      Task { @MainActor [weak self] in
-        self?.invalidateEndpointWarmUp()
-        self?.warmUp()
-      }
-    }
-    self.observers.append(observer)
+  /// Sleep drops the warm endpoint; wake, a credential change or a network
+  /// that comes back re-warms (the SpeechAnalyzer model may not survive sleep).
+  private func observeSystemEvents() {
+    self.systemEvents.start(
+      CaptureWarmSystemEvents.Handlers(
+        willSleep: { [weak self] in self?.endpoint.invalidate() },
+        didWake: { [weak self] in
+          self?.speechAnalyzer.forgetWarmedModel()
+          self?.endpoint.invalidate()
+          self?.warmUp()
+        },
+        networkChanged: { [weak self] isSatisfied in
+          self?.endpoint.invalidate()
+          if isSatisfied { self?.warmUp() }
+        },
+        credentialsChanged: { [weak self] in
+          self?.endpoint.invalidate()
+          self?.warmUp()
+        }
+      )
+    )
   }
 
   fileprivate func handleRecordingLifecycle(_ event: AudioRecordingLifecycleEvent) {
@@ -564,4 +329,4 @@ private final class CaptureWarmLifecycleSink: @unchecked Sendable {
       self?.coordinator?.handleRecordingLifecycle(event)
     }
   }
-} // swiftlint:disable:this file_length
+}

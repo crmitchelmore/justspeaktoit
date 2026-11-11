@@ -23,11 +23,11 @@ Check desktop and mobile layouts (360 px to wide desktop, no horizontal scroll),
 
 Cache policy lives in `_headers`, including explicit HTML/CSS/JS revalidation. Production builds also fingerprint the stylesheet filename and rewrite its HTML reference, so a cached older CSS response cannot break a newly deployed layout. The old `_routes.json` is deliberately excluded: it contains a `routes`/`headers` shape, but Cloudflare uses that filename for Functions `include`/`exclude` routing, not static response headers. This site has no Functions. See [Cloudflare routing](https://developers.cloudflare.com/pages/functions/routing/) and [headers](https://developers.cloudflare.com/pages/configuration/headers/).
 
-- `index.html`: content and download links.
+- `index.html`: content and unified download section across Mac, iOS, Linux and Windows.
 - `site.css`: responsive layout, design tokens, typography and reduced-motion support.
 - `download-architecture.js`: existing architecture detection and safe universal fallback.
-- `voice-motion.js`: the one-shot hero animation; it is progressive enhancement only.
-- `images/`: actual Mac and iPhone app screenshots.
+- `clips.js`: light/dark variant selection and deferred poster loading for narrated clips.
+- `images/`: actual Mac, iPhone, Linux and Windows captures and narrated clips.
 - `qa/`: the owner's noindex manual QA checklist at `/qa`, rendered at build time from `Docs/manual-checks.yml`; see `Docs/manual-qa.md`.
 
 ## Claims and their sources
@@ -36,15 +36,14 @@ Every product claim on the page is traceable to code or a doc in this repository
 
 | Section | Sourced from |
 | --- | --- |
-| Hero, "How it works" | `Sources/SpeakHotKeys/HotKeyTypes.swift` (Fn / custom shortcut, hold + double-tap), `Sources/SpeakApp/TextOutput.swift` and `Docs/mac-background-hotkeys-and-output.md` (captured target, clipboard restore, App Store clipboard-only) |
-| "There is no server in the middle" | `Sources/SpeakCore/SecureStorage.swift`, `Sources/SpeakCore/ModelCredentialRequirement.swift`, `Sources/SpeakCore/AppleLocalModels.swift`, `Sources/SpeakApp/FluidAudioModelManager.swift`, `Docs/PRIVACY.md` |
-| Provider counts | `Sources/SpeakCore/ModelCatalog.swift` (live 13 providers / 19 models; batch 13 providers plus WhisperKit and Parakeet; post-processing 20), `Sources/SpeakApp/TextToSpeech/TTSProtocol.swift` (7 macOS TTS providers, 116 built-in voices), `Sources/SpeakCore/VoiceOutputSettings.swift` (2 on iOS) |
+| Hero, "How it works" | `Sources/SpeakHotKeys/HotKeyTypes.swift` (Fn / custom shortcut, hold + double-tap), `Sources/SpeakApp/TextOutput.swift` and `Docs/mac-background-hotkeys-and-output.md` (captured target, clipboard restore, direct-download Accessibility vs sandboxed clipboard) |
+| "No middleman server" | `Sources/SpeakCore/SecureStorage.swift`, `Sources/SpeakCore/ModelCredentialRequirement.swift`, `Sources/SpeakCore/AppleLocalModels.swift`, `Sources/SpeakApp/FluidAudioModelManager.swift`, `Docs/windows-runtime-bundle.md`, `Docs/linux-packaging.md`, `Docs/PRIVACY.md` |
+| Models | `Sources/SpeakCore/ModelCatalog.swift` (live streaming, batch recorded files, post-processing), `Sources/SpeakApp/TextToSpeech/TTSProtocol.swift` (TTS providers and system voices) |
 | iPhone &amp; iPad | `Sources/SpeakiOS/Activity/TranscriptionIntents.swift`, `JustSpeakToItWidgetExtension/` (Control Center control, Live Activity with a working Stop), `Sources/SpeakiOS/Settings/AppSettings.swift` and `Sources/SpeakiOS/Views/Settings/HardwareTriggerSettingsView.swift` (Hardware Trigger destinations), `Sources/SpeakCore/HandsFreeDictation.swift` |
-| Windows &amp; Linux development | `Docs/windows-development.md` (25 October 2026 x64/ARM64 qualification checkpoint), `Docs/windows-arm64.md`, `Docs/linux-development.md` and `Docs/linux-packaging.md`. Developer qualification is distinct from public distribution. No installer links until verified publication. |
-| Automation | `Docs/automation.md`, `Sources/SpeakAutomationKit/` |
-| Inside the app | `Sources/SpeakApp/Views/Settings/SettingsTab.swift`, `Sources/SpeakApp/Services/ShortcutManager.swift` |
+| Automation | `Docs/automation.md`, `Sources/SpeakAutomationKit/`, `Sources/SpeakiOS/Services/CaptureDeepLink.swift` |
+| Download | `README.md` (Mac Stable DMGs, Homebrew cask, iOS TestFlight beta), `Docs/linux-packaging.md` and `landing-page/_worker.js` (`/linux/flatpak`), `Docs/windows-runtime-bundle.md` and `landing-page/_worker.js` (`/alpha/download/windows-x64`, `/alpha/download/windows-arm64`) |
 
-Counts are stated as counts of the shipped catalogue and the page says so. If `ModelCatalog.swift` gains or loses a provider, update the numbers and the chips together.
+If `ModelCatalog.swift` or `TTSProtocol.swift` gains or loses a provider, update the provider chips to match.
 
 ## Deliberately not on the page
 
@@ -54,10 +53,10 @@ These exist in the tree but are flagged off, unverified, or not user-reachable. 
 - The iOS custom keyboard — issue #661 still has the physical-device matrix open — and in particular direct in-extension capture (`TUIST_IOS_KEYBOARD_DIRECT_CAPTURE` defaults to 0).
 - The iOS home-screen widget, which is still Xcode's template.
 - A share extension or share-sheet audio import: no such target exists. The Shortcuts action *Transcribe Audio File* is the real path.
-- URL-scheme capture or x-callback-url. `Sources/SpeakiOS/Services/DeepLinkRouter.swift` only switches tabs.
-- An Alpha release channel. `appcast.xml` and `appcast-arm64.xml` are architecture feeds, not quality channels.
+- An Alpha release channel for Mac. `appcast.xml` and `appcast-arm64.xml` are architecture feeds, not quality channels.
 - Live provider credit or balance display. Onboarding shows static free-tier text; cost is estimated locally.
 - App Store availability and store badges. Verify before adding either.
+- Android downloads until a public Android release artefact is published.
 - Mac to iPhone history sync: the two platforms use different CloudKit containers, so sync is within a platform family. *Send to Mac* is the cross-device path that genuinely works.
 
 All brand icons come from `scripts/generate-icon.swift`. See `Resources/Brand/README.md` for native sizes, appearance variants and regeneration. The SVG favicon is also used as the header/footer and privacy-page mark; PNG fallbacks, an Apple touch icon and a web manifest cover browser and Home Screen surfaces.

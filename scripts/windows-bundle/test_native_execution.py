@@ -3,7 +3,6 @@
 import base64
 import contextlib
 import datetime
-import importlib.util
 import io
 import json
 import os
@@ -20,15 +19,15 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 
 
+sys.path.insert(0, str(HERE))
+import pe_test_fixtures as FIXTURES  # noqa: E402
+
+
 def load(name, file_name):
-    spec = importlib.util.spec_from_file_location(name, HERE / file_name)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return FIXTURES.load_script(name, HERE / file_name)
 
 
 NATIVE = load("verify_native_execution", "verify-native-execution.py")
-BUNDLE_TESTS = load("test_windows_bundle", "test_windows_bundle.py")
 PE = NATIVE.windows_pe
 AMD64, ARM64 = PE.IMAGE_FILE_MACHINE_AMD64, PE.IMAGE_FILE_MACHINE_ARM64
 
@@ -160,7 +159,7 @@ class ImageAndHostTests(unittest.TestCase):
 
     def write(self, name, **options):
         path = self.root / name
-        path.write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], **options))
+        path.write_bytes(FIXTURES.build_pe(["KERNEL32.dll"], **options))
         return path
 
     def test_images_must_run_natively_on_the_target(self):
@@ -220,7 +219,7 @@ class DiagnosticInventoryTests(unittest.TestCase):
 
     def image(self, name, machine=ARM64):
         path = self.root / name
-        path.write_bytes(BUNDLE_TESTS.build_pe(machine=machine))
+        path.write_bytes(FIXTURES.build_pe(machine=machine))
         return path
 
     def test_fixed_candidates_and_nonwindows_do_not_discover_or_launch_tools(self):
@@ -474,7 +473,7 @@ class ApplicationErrorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             executable = root / "SpeakWindows.exe"
-            executable.write_bytes(BUNDLE_TESTS.build_pe(machine=ARM64))
+            executable.write_bytes(FIXTURES.build_pe(machine=ARM64))
             stdout, stderr = root / "out", root / "err"
             reader = mock.Mock(return_value={"status": "observed", "module": "ntdll.dll"})
             windows = types.SimpleNamespace(name="nt", path=os.path, environ=os.environ)
@@ -502,7 +501,7 @@ class ApplicationErrorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             executable = root / "SpeakWindows.exe"
-            executable.write_bytes(BUNDLE_TESTS.build_pe(machine=ARM64))
+            executable.write_bytes(FIXTURES.build_pe(machine=ARM64))
             for host, label, arguments, polls, code, timeout in [
                     ("nt", "ui-smoke-test", ["--ui-smoke-test"], 2, 0, 30),
                     ("nt", "self-test", ["--self-test"], 2, 1, 30),
@@ -1032,13 +1031,13 @@ foreach ($encoded in ([Console]::In.ReadToEnd() | ConvertFrom-Json -Depth 8)) {
         budget = types.SimpleNamespace(remaining=lambda: 20)
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory).resolve() / "SpeakWindows.exe"
-            data = BUNDLE_TESTS.build_pe(["KERNEL32.dll"], machine=ARM64)
+            data = FIXTURES.build_pe(["KERNEL32.dll"], machine=ARM64)
             path.write_bytes(data)
             digest = NATIVE.hashlib.sha256(data).hexdigest()
             self.assertEqual(NATIVE.diagnostic_identity(str(path), digest, 1 << 20, budget)[2], len(data))
             with self.assertRaises(ValueError):
                 NATIVE.diagnostic_identity(str(path), "a" * 64, 1 << 20, budget)
-            path.write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], machine=AMD64))
+            path.write_bytes(FIXTURES.build_pe(["KERNEL32.dll"], machine=AMD64))
             with self.assertRaises(ValueError):
                 NATIVE.diagnostic_identity(str(path), NATIVE.sha256_file(path), 1 << 20, budget)
             path.write_bytes(data)
@@ -1174,7 +1173,7 @@ class DiagnosticRuntimeClosureTests(unittest.TestCase):
         policy = json.loads((HERE / "runtime-policy.json").read_text(encoding="utf-8"))
         lock = json.loads((HERE / "swift-runtime-lock-arm64.json").read_text(encoding="utf-8"))
         self.names = policy["swiftRuntimeModules"][:14]
-        self.data = BUNDLE_TESTS.build_pe(["KERNEL32.dll"], machine=ARM64, dll=True)
+        self.data = FIXTURES.build_pe(["KERNEL32.dll"], machine=ARM64, dll=True)
         self.rows = []
         for name in self.names:
             (self.source / name).write_bytes(self.data)
@@ -1280,7 +1279,7 @@ class DiagnosticRuntimeClosureTests(unittest.TestCase):
                 if mode == "size": first.write_bytes(self.data + b"x")
                 if mode == "hash": first.write_bytes(self.data[:-1] + bytes([self.data[-1] ^ 1]))
                 if mode in ("foreign", "not-dll"):
-                    data = BUNDLE_TESTS.build_pe(["KERNEL32.dll"], machine=AMD64 if mode == "foreign" else ARM64,
+                    data = FIXTURES.build_pe(["KERNEL32.dll"], machine=AMD64 if mode == "foreign" else ARM64,
                                                 dll=mode == "foreign")
                     first.write_bytes(data)
                     lock = json.loads((self.config / "swift-runtime-lock-arm64.json").read_text(encoding="utf-8"))
@@ -1520,8 +1519,8 @@ class CommandLineTests(unittest.TestCase):
 
     def test_image_evidence_accumulates_and_keeps_its_architecture(self):
         first, second = self.root / "a.exe", self.root / "b.dll"
-        first.write_bytes(BUNDLE_TESTS.build_pe(machine=ARM64))
-        second.write_bytes(BUNDLE_TESTS.build_pe(machine=ARM64, dll=True))
+        first.write_bytes(FIXTURES.build_pe(machine=ARM64))
+        second.write_bytes(FIXTURES.build_pe(machine=ARM64, dll=True))
         with contextlib.redirect_stdout(io.StringIO()) as output:
             NATIVE.main(["--architecture", "arm64", "--evidence", str(self.evidence), "images", str(first)])
             NATIVE.main(["--architecture", "arm64", "--evidence", str(self.evidence), "images", str(second)])
@@ -1533,7 +1532,7 @@ class CommandLineTests(unittest.TestCase):
 
     def test_failures_still_write_evidence(self):
         foreign = self.root / "x64.exe"
-        foreign.write_bytes(BUNDLE_TESTS.build_pe())
+        foreign.write_bytes(FIXTURES.build_pe())
         with self.assertRaises(NATIVE.ExecutionError):
             NATIVE.main(["--architecture", "arm64", "--evidence", str(self.evidence), "images", str(foreign)])
         self.assertEqual(json.loads(self.evidence.read_text(encoding="utf-8"))["images"], [])
@@ -1565,7 +1564,7 @@ class NativeOwnerRoutingTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = pathlib.Path(self.directory.name)
         self.executable = self.root / "SpeakWindows.exe"
-        self.executable.write_bytes(BUNDLE_TESTS.build_pe(machine=ARM64))
+        self.executable.write_bytes(FIXTURES.build_pe(machine=ARM64))
         self.launches = []
 
     def operate(self, code=3221226356, polls=2, ticks=(1000, 11000), frequency=1000,
@@ -1696,10 +1695,10 @@ class NativeOwnerRoutingTests(unittest.TestCase):
 
     def test_optin_wrong_host_target_label_program_arguments_or_timeout_refuses_before_launch(self):
         other = self.root / "Other.exe"
-        other.write_bytes(BUNDLE_TESTS.build_pe(machine=ARM64))
+        other.write_bytes(FIXTURES.build_pe(machine=ARM64))
         x64 = self.root / "x64" / "SpeakWindows.exe"
         x64.parent.mkdir()
-        x64.write_bytes(BUNDLE_TESTS.build_pe(machine=AMD64))
+        x64.write_bytes(FIXTURES.build_pe(machine=AMD64))
         for changes in [dict(host="posix"), dict(architecture="x64", executable=x64),
                         dict(label="self-test"), dict(executable=other), dict(argv=["--self-test"]),
                         dict(argv=["--ui-smoke-test", "private-canary"]), dict(timeout=31),

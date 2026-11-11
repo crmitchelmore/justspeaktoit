@@ -166,6 +166,26 @@ private final class NativeLLMRun: @unchecked Sendable {
         }
     }
 
+    /// Hashes the model bytes the runtime mapped, before it loads them.
+    private static let verifyModel: JSTILlamaVerify = { bytes, count, context in
+        guard let bytes, let run = NativeCallbackContext<NativeLLMRun>.resolve(context) else { return 1 }
+        do {
+            let hasher = try run.digests.makeSHA256()
+            var offset = 0
+            while offset < count {
+                try run.checkCancellation()
+                let length = min(4 * 1_024 * 1_024, count - offset)
+                try hasher.update(UnsafeRawBufferPointer(start: bytes + offset, count: length))
+                offset += length
+            }
+            guard try hasher.finish() == run.digest else { throw LocalModelInstallError.checksumMismatch }
+            return 0
+        } catch {
+            run.verificationError = error
+            return 1
+        }
+    }
+
     func complete(library: URL, request: NativeLLMCompletionRequest) throws -> String {
         let model = request.model
         let file = request.file
@@ -175,31 +195,17 @@ private final class NativeLLMRun: @unchecked Sendable {
         var output: UnsafeMutablePointer<CChar>?
         var error = [CChar](repeating: 0, count: 2_048)
         let errorCapacity = error.count
-        let status = library.path.withCString { library in
-            file.path.withCString { file in
-                system.withCString { system in
-                    user.withCString { user in
-                        jsti_llama_run_complete(
-                            pointer, library, file, model.byteCount, { bytes, count, context in
-                                guard let bytes, let context else { return 1 }
-                                let run = Unmanaged<NativeLLMRun>.fromOpaque(context).takeUnretainedValue()
-                                do {
-                                    let hasher = try run.digests.makeSHA256()
-                                    var offset = 0
-                                    while offset < count {
-                                        try run.checkCancellation()
-                                        let length = min(4 * 1_024 * 1_024, count - offset)
-                                        try hasher.update(UnsafeRawBufferPointer(start: bytes + offset, count: length))
-                                        offset += length
-                                    }
-                                    guard try hasher.finish() == run.digest else {
-                                        throw LocalModelInstallError.checksumMismatch
-                                    }
-                                    return 0
-                                } catch { run.verificationError = error; return 1 }
-                            }, Unmanaged.passUnretained(self).toOpaque(), system, user, temperature,
-                            &output, &error, errorCapacity
-                        )
+        // The C API calls the verifier only before jsti_llama_run_complete returns.
+        let status = NativeCallbackContext.withScoped(self) { context in
+            library.path.withCString { library in
+                file.path.withCString { file in
+                    system.withCString { system in
+                        user.withCString { user in
+                            jsti_llama_run_complete(
+                                pointer, library, file, model.byteCount, Self.verifyModel, context,
+                                system, user, temperature, &output, &error, errorCapacity
+                            )
+                        }
                     }
                 }
             }

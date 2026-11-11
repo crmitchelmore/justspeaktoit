@@ -82,7 +82,8 @@ enum WindowsNative {
             strings.append(pointer)
             return UnsafePointer(pointer)
         }
-        let rows = records.map { record in
+        // The native list refuses more rows than this; History pages stay far below it.
+        let rows = records.prefix(10_000).map { record in
             // The card wording is shared with Linux; the title and detail stay
             // the list's accessible text and the selected row's summary.
             let summary = DesktopHistoryRowSummary(record)

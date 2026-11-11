@@ -24,6 +24,11 @@ final class ForegroundRunOwner {
         case cancelled(settling: (any IOSRecordingSession)?)
     }
 
+    /// A start refused because another run owns capture.
+    struct BusyError: LocalizedError {
+        var errorDescription: String? { "A transcription is already starting, recording or finalising." }
+    }
+
     /// Where an accepted session callback goes.
     struct SessionEvents {
         let partial: (String, Bool, any IOSRecordingSession) -> Void

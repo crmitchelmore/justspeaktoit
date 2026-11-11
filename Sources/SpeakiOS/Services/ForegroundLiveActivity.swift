@@ -25,9 +25,12 @@ struct ForegroundLiveActivity {
     }
 
     /// A partial can arrive from pre-roll before this run has seen its own
-    /// input, and it must not announce active capture.
-    func publishTranscript(_ text: String, presentingCapture: Bool, words: Int, seconds: Int) {
-        if presentingCapture {
+    /// input, and it must not announce active capture. One delivered by the
+    /// drain describes finalisation, never active capture.
+    func publishTranscript(_ text: String, finalising: Bool, presentingCapture: Bool, words: Int, seconds: Int) {
+        if finalising {
+            update(.finalising, snippet: text, words: words, seconds: seconds)
+        } else if presentingCapture {
             update(.recording, snippet: text, words: words, seconds: seconds)
         } else {
             update(.arming, snippet: CapturePresentationGate.preparingMessage, words: 0, seconds: 0)

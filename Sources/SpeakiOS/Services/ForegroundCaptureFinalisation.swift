@@ -28,6 +28,11 @@ final class ForegroundCaptureFinalisation {
         case discarded(TranscriptionResult)
         /// The transcript to publish and deliver.
         case finished(TranscriptionResult)
+
+        var discarded: TranscriptionResult? {
+            if case .discarded(let result) = self { return result }
+            return nil
+        }
     }
 
     /// Drains `session` and decides what its stop delivers.
@@ -69,6 +74,15 @@ final class ForegroundCaptureFinalisation {
         return .finished(result)
     }
 
+    /// Whether a provider error should finalise through the owner rather than
+    /// surface as a bare failure: interruption and microphone change (#936),
+    /// and a pre-ready startup overflow, which stops once (#949).
+    static func requiresControlledStop(_ error: Error) -> Bool {
+        if (error as? iOSTranscriptionError)?.endsCapture == true { return true }
+        if case OpenAIRealtimeError.preReadyAudioOverflow = error { return true }
+        return false
+    }
+
     /// The hands-free lane bounds its drain and cancels capture on timeout.
     static func drain(_ session: any IOSRecordingSession, handsFree: Bool) async throws -> TranscriptionResult {
         guard handsFree else { return try await session.stop() }
@@ -81,10 +95,16 @@ final class ForegroundCaptureFinalisation {
         }
     }
 
+    /// Delivers a finished run's result. Its loss summary, joined with any
+    /// published error, becomes the History entry's error message.
     func deliver(
-        _ result: TranscriptionResult, model: String, errorMessage: String?,
-        offlineIntendedModel: String?, recordingID: UUID?
+        _ result: TranscriptionResult, from session: any IOSRecordingSession, model: String,
+        error publishedError: Error?, offlineIntendedModel: String?
     ) async {
+        let errorMessage = session.recordingLossSummary.map {
+            [$0, publishedError?.localizedDescription].compactMap { $0 }.joined(separator: " ")
+        }
+        let recordingID = session.safetyRecordingID
         // Live shared-state writes are throttled; commit the final transcript
         // once so the copy intents always see the complete text.
         sharedState.updateTranscript(result.text)
@@ -97,6 +117,14 @@ final class ForegroundCaptureFinalisation {
         if let item, let offlineIntendedModel, let recordingID {
             tagOfflineCapture(item, recordingID, offlineIntendedModel)
         }
+    }
+}
+
+extension TranscriptionResult {
+    /// A foreground run's shown text as its result.
+    static func shown(_ text: String, confidence: Double?, duration: Int, model: String) -> Self {
+        TranscriptionResult(text: text, segments: [], confidence: confidence, duration: TimeInterval(duration),
+                            modelIdentifier: model, cost: nil, rawPayload: nil, debugInfo: nil)
     }
 }
 #endif

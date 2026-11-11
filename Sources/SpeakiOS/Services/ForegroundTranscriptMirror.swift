@@ -32,12 +32,13 @@ struct ForegroundTranscriptMirror {
         sharedState.recordingStartTime = startTime
     }
 
-    /// Writes `text` when the throttle admits it, and says whether it did:
-    /// word counting is O(n) too, so callers count only admitted partials.
-    mutating func admit(_ text: String) -> Bool {
-        guard writes.admit(at: Date()) else { return false }
+    /// Writes `text` when the throttle admits it (~1/s, matching the Live
+    /// Activity's own throttle) and returns its word count; `nil` otherwise,
+    /// since App Group writes and word counting are both O(n) per partial.
+    mutating func admit(_ text: String) -> Int? {
+        guard writes.admit(at: Date()) else { return nil }
         sharedState.updateTranscript(text)
-        return true
+        return text.split(separator: " ").count
     }
 
     func endRecording() {

@@ -217,7 +217,7 @@ extension AppleModelStartupTests {
         guard case iOSTranscriptionError.offlineLocalRecognitionUnavailable = error else {
             return XCTFail("Unexpected error: \(error)")
         }
-        XCTAssertTrue(TranscriberCoordinator.requiresControlledStop(error))
+        XCTAssertTrue(ForegroundCaptureFinalisation.requiresControlledStop(error))
         transcriber.cancel()
     }
 

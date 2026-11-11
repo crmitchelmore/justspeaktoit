@@ -13,7 +13,7 @@ typedef struct ConfigurationUpdate {
 } ConfigurationUpdate;
 
 static void configuration_problem(const char *message) {
-    gtk_label_set_text(ui.status, message);
+    gtk_label_set_text(ui.dashboard.status, message);
 }
 
 static void configuration_submit(gint32 action, const char *const *values, gsize count) {

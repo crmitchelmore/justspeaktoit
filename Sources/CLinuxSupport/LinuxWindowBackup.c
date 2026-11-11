@@ -17,8 +17,8 @@ static void recordings_location_chosen(GObject *source, GAsyncResult *result, gp
     GFile *file = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source), result, &error);
     GObject *parent = g_weak_ref_get(&choice->parent);
     gboolean active = parent != NULL && parent == G_OBJECT(ui.window) && !ui.closing &&
-        ui.location_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
-    if (ui.location_chooser == choice->cancelled) g_clear_object(&ui.location_chooser);
+        ui.storage.location_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
+    if (ui.storage.location_chooser == choice->cancelled) g_clear_object(&ui.storage.location_chooser);
     if (active) {
         if (file != NULL) {
             gchar *path = g_file_get_path(file);
@@ -44,11 +44,11 @@ static void recordings_location_chosen(GObject *source, GAsyncResult *result, gp
 
 void on_recordings_choose(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.closing || ui.state != 0 || ui.location_chooser != NULL) return;
+    if (ui.closing || ui.state != 0 || ui.storage.location_chooser != NULL) return;
     LocationChoice *choice = g_new0(LocationChoice, 1);
     g_weak_ref_init(&choice->parent, G_OBJECT(ui.window));
     choice->cancelled = g_cancellable_new();
-    ui.location_chooser = g_object_ref(choice->cancelled);
+    ui.storage.location_chooser = g_object_ref(choice->cancelled);
     refresh_actions();
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, "Choose where new recordings are saved (existing audio is not moved)");
@@ -58,7 +58,7 @@ void on_recordings_choose(GtkButton *button, gpointer data) {
 
 void on_recordings_default(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.closing || ui.state != 0 || ui.location_chooser != NULL) return;
+    if (ui.closing || ui.state != 0 || ui.storage.location_chooser != NULL) return;
     emit(JSTI_EVENT_RECORDINGS_LOCATION, "", 0);
 }
 
@@ -69,7 +69,7 @@ void on_audio_cleanup(GtkButton *button, gpointer data) {
 
 gboolean backup_choice_active(const BackupChoice *choice, GObject *parent) {
     return parent != NULL && parent == G_OBJECT(ui.window) && !ui.closing &&
-        ui.backup_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
+        ui.storage.backup_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
 }
 
 void backup_emit_path(const BackupChoice *choice, const char *path) {
@@ -88,7 +88,7 @@ static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) 
                                 : gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
     GObject *parent = g_weak_ref_get(&choice->parent);
     gboolean active = backup_choice_active(choice, parent);
-    if (ui.backup_chooser == choice->cancelled) g_clear_object(&ui.backup_chooser);
+    if (ui.storage.backup_chooser == choice->cancelled) g_clear_object(&ui.storage.backup_chooser);
     if (active) {
         if (file != NULL) {
             gchar *path = g_file_get_path(file);
@@ -117,14 +117,14 @@ static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) 
 
 void on_backup(GtkButton *button, gpointer data) {
     (void)button;
-    if (ui.closing || ui.state != 0 || ui.backup_chooser != NULL || ui.restore_dialog != NULL) return;
+    if (ui.closing || ui.state != 0 || ui.storage.backup_chooser != NULL || ui.storage.restore_dialog != NULL) return;
     BackupChoice *choice = g_new0(BackupChoice, 1);
     g_weak_ref_init(&choice->parent, G_OBJECT(ui.window));
     choice->cancelled = g_cancellable_new();
-    choice->include_audio = adw_switch_row_get_active(ui.backup_audio) ? 1 : 0;
-    choice->include_profiles = adw_switch_row_get_active(ui.backup_profiles) ? 2 : 0;
+    choice->include_audio = adw_switch_row_get_active(ui.storage.backup_audio) ? 1 : 0;
+    choice->include_profiles = adw_switch_row_get_active(ui.storage.backup_profiles) ? 2 : 0;
     choice->action = GPOINTER_TO_INT(data);
-    ui.backup_chooser = g_object_ref(choice->cancelled);
+    ui.storage.backup_chooser = g_object_ref(choice->cancelled);
     refresh_actions();
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, choice->action == 2 ? "Restore backup (preview before changes)"
@@ -179,28 +179,28 @@ static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) 
         g_free(path);
         g_object_unref(file);
     }
-    g_clear_pointer(&ui.export_text, g_free);
+    g_clear_pointer(&ui.history_page.export_text, g_free);
 }
 
 void on_issue_report(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.state == JSTI_STATE_IDLE && ui.selected_id != NULL &&
-        g_strcmp0(ui.presented_id, ui.selected_id) == 0)
-        emit(JSTI_EVENT_HISTORY_ISSUE_REPORT, ui.selected_id, 0);
+    if (ui.state == JSTI_STATE_IDLE && ui.history_page.selected_id != NULL &&
+        g_strcmp0(ui.history_page.presented_id, ui.history_page.selected_id) == 0)
+        emit(JSTI_EVENT_HISTORY_ISSUE_REPORT, ui.history_page.selected_id, 0);
 }
 
 void on_export(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.selected_id == NULL || ui.export_text != NULL) return;
+    if (ui.history_page.selected_id == NULL || ui.history_page.export_text != NULL) return;
     /* Capture the displayed text and version at the click, before the dialog. */
-    ui.export_text = displayed_transcript();
+    ui.history_page.export_text = displayed_transcript();
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, "Export transcript");
-    gchar *name = g_strdup_printf("Transcript-%s.txt", ui.selected_id);
+    gchar *name = g_strdup_printf("Transcript-%s.txt", ui.history_page.selected_id);
     gtk_file_dialog_set_initial_name(dialog, name);
     g_free(name);
     gtk_file_dialog_save(dialog, ui.window, NULL, export_chosen,
-                         GINT_TO_POINTER(ui.presented_switchable ? ui.presented_variant : 1));
+                         GINT_TO_POINTER(ui.history_page.presented_switchable ? ui.history_page.presented_variant : 1));
     g_object_unref(dialog);
 }
 

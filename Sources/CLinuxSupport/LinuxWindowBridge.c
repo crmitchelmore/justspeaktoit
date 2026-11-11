@@ -13,17 +13,17 @@ void insights_free(gpointer pointer) {
 void insights_apply(gpointer pointer) {
     Insights *insights = pointer;
     /* Order: sessions, errors, recording time, average length, spend. */
-    gtk_label_set_text(ui.hero_sessions, insights->all[0]);
-    gtk_label_set_text(ui.hero_time, insights->all[2]);
-    gtk_label_set_text(ui.hero_spend, insights->all[4]);
-    gtk_label_set_text(ui.insight_sessions, insights->all[0]);
-    gtk_label_set_text(ui.insight_time, insights->all[2]);
-    gtk_label_set_text(ui.insight_average, insights->all[3]);
-    gtk_label_set_text(ui.insight_spend, insights->all[4]);
-    gtk_label_set_text(ui.history_sessions, insights->visible[0]);
-    gtk_label_set_text(ui.history_errors, insights->visible[1]);
-    gtk_label_set_text(ui.history_average, insights->visible[3]);
-    gtk_label_set_text(ui.history_spend, insights->visible[4]);
+    gtk_label_set_text(ui.dashboard.hero_sessions, insights->all[0]);
+    gtk_label_set_text(ui.dashboard.hero_time, insights->all[2]);
+    gtk_label_set_text(ui.dashboard.hero_spend, insights->all[4]);
+    gtk_label_set_text(ui.dashboard.insight_sessions, insights->all[0]);
+    gtk_label_set_text(ui.dashboard.insight_time, insights->all[2]);
+    gtk_label_set_text(ui.dashboard.insight_average, insights->all[3]);
+    gtk_label_set_text(ui.dashboard.insight_spend, insights->all[4]);
+    gtk_label_set_text(ui.history_page.history_sessions, insights->visible[0]);
+    gtk_label_set_text(ui.history_page.history_errors, insights->visible[1]);
+    gtk_label_set_text(ui.history_page.history_average, insights->visible[3]);
+    gtk_label_set_text(ui.history_page.history_spend, insights->visible[4]);
     /* The status notifier's menu shows the dashboard's totals, as the Mac's menu bar extra does. */
     g_free(ui.tray_summary);
     ui.tray_summary = g_strcmp0(insights->all[0], "0") == 0
@@ -55,7 +55,7 @@ int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *vi
 
 static void appearance_apply(gpointer data) {
     ui.suppress = TRUE;
-    adw_combo_row_set_selected(ui.appearance_row, (guint)GPOINTER_TO_INT(data));
+    adw_combo_row_set_selected(ui.general.appearance_row, (guint)GPOINTER_TO_INT(data));
     apply_appearance((guint)GPOINTER_TO_INT(data));
     ui.suppress = FALSE;
 }
@@ -76,12 +76,12 @@ static void about_information_free(gpointer pointer) {
 
 static void about_information_apply(gpointer pointer) {
     AboutInformation *information = pointer;
-    gtk_label_set_text(ui.about_details, information->details);
+    gtk_label_set_text(ui.about.about_details, information->details);
     GtkWidget *child;
-    while ((child = gtk_widget_get_first_child(GTK_WIDGET(ui.about_links))) != NULL)
-        gtk_flow_box_remove(ui.about_links, child);
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(ui.about.about_links))) != NULL)
+        gtk_flow_box_remove(ui.about.about_links, child);
     for (guint i = 0; information->titles[i] != NULL; ++i)
-        gtk_flow_box_insert(ui.about_links, link_button(information->titles[i], information->urls[i]), -1);
+        gtk_flow_box_insert(ui.about.about_links, link_button(information->titles[i], information->urls[i]), -1);
 }
 
 int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count) {
@@ -108,7 +108,7 @@ int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *li
 void post_processing_enabled_apply(gpointer pointer) {
     gboolean suppress = ui.suppress;
     ui.suppress = TRUE;
-    adw_switch_row_set_active(ui.polish_row, *(gint32 *)pointer != 0);
+    adw_switch_row_set_active(ui.polish.polish_row, *(gint32 *)pointer != 0);
     ui.suppress = suppress;
 }
 
@@ -135,10 +135,10 @@ static void login_item_free(gpointer pointer) {
 void login_item_apply(gpointer pointer) {
     LoginItem *item = pointer;
     ui.suppress = TRUE;
-    adw_switch_row_set_active(ui.login_row, item->state == 1 || item->state == 3);
+    adw_switch_row_set_active(ui.general.login_row, item->state == 1 || item->state == 3);
     ui.suppress = FALSE;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.login_row), item->state == 0 || item->state == 1);
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.login_row), item->detail);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.general.login_row), item->state == 0 || item->state == 1);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.general.login_row), item->detail);
 }
 
 int32_t jsti_window_set_login_item(int32_t state, const char *detail) {
@@ -153,10 +153,10 @@ void automation_apply(gpointer pointer) {
     LoginItem *item = pointer;
     gboolean suppressed = ui.suppress;
     ui.suppress = TRUE;
-    adw_switch_row_set_active(ui.automation_row, item->state != 0);
+    adw_switch_row_set_active(ui.general.automation_row, item->state != 0);
     ui.suppress = suppressed;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.automation_row), TRUE);
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.automation_row), item->detail);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.general.automation_row), TRUE);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.general.automation_row), item->detail);
 }
 
 int32_t jsti_window_set_automation(int32_t enabled, const char *detail) {
@@ -287,7 +287,7 @@ int32_t jsti_window_show_page(int32_t page) {
 
 static void style_apply(gpointer data) {
     ui.suppress = TRUE;
-    adw_combo_row_set_selected(ui.style_row, (guint)GPOINTER_TO_INT(data));
+    adw_combo_row_set_selected(ui.output.style_row, (guint)GPOINTER_TO_INT(data));
     ui.suppress = FALSE;
 }
 

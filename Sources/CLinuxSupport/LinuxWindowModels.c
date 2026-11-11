@@ -40,31 +40,31 @@ void models_free(gpointer pointer) {
 }
 
 void filter_models(gint32 keep) {
-    Models *models = ui.model_catalog;
+    Models *models = ui.models.model_catalog;
     if (models == NULL) return;
     gboolean local = jsti_model_filters_local(), live = jsti_model_filters_live();
     ui.suppress = TRUE;
-    if (ui.model_slots != NULL) {
-        for (guint index = 0; index < ui.model_slots->len; index++) g_free(g_array_index(ui.model_slots, Slot, index).id);
-        g_array_unref(ui.model_slots);
+    if (ui.models.model_slots != NULL) {
+        for (guint index = 0; index < ui.models.model_slots->len; index++) g_free(g_array_index(ui.models.model_slots, Slot, index).id);
+        g_array_unref(ui.models.model_slots);
     }
-    ui.model_slots = g_array_new(FALSE, TRUE, sizeof(Slot));
+    ui.models.model_slots = g_array_new(FALSE, TRUE, sizeof(Slot));
     GPtrArray *names = g_ptr_array_new();
     guint position = GTK_INVALID_LIST_POSITION;
     for (guint index = 0; index < models->slots->len; index++) {
         Slot slot = g_array_index(models->slots, Slot, index);
         if (g_str_has_prefix(slot.id, "local/") != local || slot.live != live) continue;
         Slot copy = { .id = g_strdup(slot.id), .global = slot.global, .live = slot.live };
-        g_array_append_val(ui.model_slots, copy);
+        g_array_append_val(ui.models.model_slots, copy);
         g_ptr_array_add(names, g_ptr_array_index(models->names, index));
-        if (slot.global == keep) position = ui.model_slots->len - 1;
+        if (slot.global == keep) position = ui.models.model_slots->len - 1;
     }
-    guint existing = g_list_model_get_n_items(G_LIST_MODEL(ui.model_names));
+    guint existing = g_list_model_get_n_items(G_LIST_MODEL(ui.models.model_names));
     g_ptr_array_add(names, NULL);
-    gtk_string_list_splice(ui.model_names, 0, existing, (const char *const *)names->pdata);
+    gtk_string_list_splice(ui.models.model_names, 0, existing, (const char *const *)names->pdata);
     g_ptr_array_unref(names);
-    adw_combo_row_set_selected(ui.model_row, position != GTK_INVALID_LIST_POSITION ? position :
-                               (ui.model_slots->len > 0 ? 0 : GTK_INVALID_LIST_POSITION));
+    adw_combo_row_set_selected(ui.models.model_row, position != GTK_INVALID_LIST_POSITION ? position :
+                               (ui.models.model_slots->len > 0 ? 0 : GTK_INVALID_LIST_POSITION));
     refresh_azure_row();
     ui.suppress = FALSE;
     refresh_setup();
@@ -72,10 +72,10 @@ void filter_models(gint32 keep) {
 
 void on_model_filter(gboolean local, gboolean live) {
     guint mode = model_mode(local, live);
-    filter_models(ui.preferred_model_slots[mode]);
+    filter_models(ui.models.preferred_model_slots[mode]);
     gint32 selected = selected_model_slot();
     if (selected >= 0) {
-        ui.preferred_model_slots[mode] = selected;
+        ui.models.preferred_model_slots[mode] = selected;
         emit(JSTI_EVENT_SELECT_MODEL, "", selected);
     }
 }
@@ -83,24 +83,24 @@ void on_model_filter(gboolean local, gboolean live) {
 static void models_apply(gpointer pointer) {
     Models *models = pointer;
     gint32 keep = models->selected >= 0 ? models->selected : selected_model_slot();
-    if (ui.model_catalog != NULL) models_free(ui.model_catalog);
-    ui.model_catalog = g_new0(Models, 1);
-    ui.model_catalog->slots = g_array_new(FALSE, TRUE, sizeof(Slot));
-    ui.model_catalog->names = g_ptr_array_new_with_free_func(g_free);
+    if (ui.models.model_catalog != NULL) models_free(ui.models.model_catalog);
+    ui.models.model_catalog = g_new0(Models, 1);
+    ui.models.model_catalog->slots = g_array_new(FALSE, TRUE, sizeof(Slot));
+    ui.models.model_catalog->names = g_ptr_array_new_with_free_func(g_free);
     for (guint index = 0; index < models->slots->len; index++) {
         Slot slot = g_array_index(models->slots, Slot, index);
         Slot copy = { .id = g_strdup(slot.id), .global = slot.global, .live = slot.live };
-        g_array_append_val(ui.model_catalog->slots, copy);
-        g_ptr_array_add(ui.model_catalog->names, g_strdup(g_ptr_array_index(models->names, index)));
+        g_array_append_val(ui.models.model_catalog->slots, copy);
+        g_ptr_array_add(ui.models.model_catalog->names, g_strdup(g_ptr_array_index(models->names, index)));
         if (slot.global == keep) {
             gboolean local = g_str_has_prefix(slot.id, "local/");
             jsti_model_filters_select(local, slot.live);
-            ui.preferred_model_slots[model_mode(local, slot.live)] = keep;
+            ui.models.preferred_model_slots[model_mode(local, slot.live)] = keep;
         }
     }
     filter_models(keep);
-    if (models->status != NULL) gtk_label_set_text(ui.catalog_status, models->status);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.catalog_refresh), !models->refreshing);
+    if (models->status != NULL) gtk_label_set_text(ui.models.catalog_status, models->status);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.models.catalog_refresh), !models->refreshing);
 }
 
 void apply_models(const JSTIModelRow *rows, size_t count, gint32 selected) {
@@ -118,7 +118,7 @@ int32_t jsti_window_set_model_catalog(
 }
 
 void model_preferences_apply(gpointer pointer) {
-    memcpy(ui.preferred_model_slots, pointer, sizeof(ui.preferred_model_slots));
+    memcpy(ui.models.preferred_model_slots, pointer, sizeof(ui.models.preferred_model_slots));
 }
 
 int32_t jsti_window_set_preferred_models(int32_t batch, int32_t live, int32_t local, int32_t local_live) {
@@ -133,15 +133,15 @@ void local_model_preferences_apply(gpointer pointer) {
     for (guint i = 0; i < 2; ++i) {
         if (values[i] < 0 || active == i + 2) continue;
         gboolean found = FALSE;
-        for (guint j = 0; ui.model_catalog != NULL && j < ui.model_catalog->slots->len; ++j) {
-            Slot slot = g_array_index(ui.model_catalog->slots, Slot, j);
+        for (guint j = 0; ui.models.model_catalog != NULL && j < ui.models.model_catalog->slots->len; ++j) {
+            Slot slot = g_array_index(ui.models.model_catalog->slots, Slot, j);
             if (slot.global == values[i] && slot.live == (i != 0) && g_str_has_prefix(slot.id, "local/")) {
                 found = TRUE;
                 break;
             }
         }
-        if (found) ui.preferred_model_slots[i + 2] = values[i];
-        else gtk_label_set_text(ui.status, "Saved Local model choice is unavailable. Reopen the app before switching modes.");
+        if (found) ui.models.preferred_model_slots[i + 2] = values[i];
+        else gtk_label_set_text(ui.dashboard.status, "Saved Local model choice is unavailable. Reopen the app before switching modes.");
     }
 }
 
@@ -168,18 +168,18 @@ static void microphones_free(gpointer pointer) {
 static void microphones_apply(gpointer pointer) {
     Microphones *microphones = pointer;
     ui.suppress = TRUE;
-    g_ptr_array_set_size(ui.microphone_ids, 0);
+    g_ptr_array_set_size(ui.models.microphone_ids, 0);
     guint position = 0;
     for (guint index = 0; index < microphones->ids->len; index++) {
         const char *id = g_ptr_array_index(microphones->ids, index);
-        g_ptr_array_add(ui.microphone_ids, g_strdup(id));
+        g_ptr_array_add(ui.models.microphone_ids, g_strdup(id));
         if (g_strcmp0(id, microphones->selected) == 0) position = index;
     }
-    guint existing = g_list_model_get_n_items(G_LIST_MODEL(ui.microphone_names));
+    guint existing = g_list_model_get_n_items(G_LIST_MODEL(ui.models.microphone_names));
     g_ptr_array_add(microphones->names, NULL);
-    gtk_string_list_splice(ui.microphone_names, 0, existing, (const char *const *)microphones->names->pdata);
+    gtk_string_list_splice(ui.models.microphone_names, 0, existing, (const char *const *)microphones->names->pdata);
     g_ptr_array_set_size(microphones->names, microphones->names->len - 1);
-    adw_combo_row_set_selected(ui.microphone_row, position);
+    adw_combo_row_set_selected(ui.models.microphone_row, position);
     ui.suppress = FALSE;
     refresh_setup();
 }

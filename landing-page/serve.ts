@@ -2,6 +2,7 @@
  * Simple Bun development server for the landing page
  * Run with: bun run serve.ts
  */
+import { pages, renderPage } from "./pages.mjs";
 
 const server = Bun.serve({
   port: 3000,
@@ -14,6 +15,14 @@ const server = Bun.serve({
       path = "/index.html";
     }
     
+    // Pages are rendered as the build renders them, so shared chrome previews correctly.
+    const page = path.slice(1);
+    if (pages.includes(page)) {
+      return new Response(await renderPage(page), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
+      });
+    }
+
     // Try to serve the file
     const filePath = `.${path}`;
     const file = Bun.file(filePath);

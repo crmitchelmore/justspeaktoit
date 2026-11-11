@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { pages, renderPage, renderSource } from './pages.mjs';
 
 const source = fileURLToPath(new URL('.', import.meta.url));
 
@@ -28,6 +29,12 @@ test('deployed styles and motion get new URLs only when their content changes', 
     assert.equal((html.match(/class="brand-wordmark"/g) || []).length, 2, 'Only the existing header/footer wordmarks are accented');
     assert.deepEqual(await readFile(path.join(fixture, 'dist/images/wordmark-white-1.5x.jpg')),
       await readFile(path.join(fixture, 'images/wordmark-white-1.5x.jpg')), 'Preserve the HDR gain map byte-for-byte');
+    for (const page of pages) {
+      const built = await readFile(path.join(fixture, 'dist', page), 'utf8');
+      assert.ok(!built.includes('@include'), `${page} ships rendered, without include markers`);
+      if (page !== 'index.html') assert.equal(built, await renderPage(page), `${page} ships exactly as rendered`);
+    }
+    await assert.rejects(readFile(path.join(fixture, 'dist/partials/legal-top.html')), 'Partials are build inputs only');
     const motion = html.match(/src="\/(voice-motion\.[a-f0-9]{12}\.js)"/)?.[1];
     assert.ok(motion, 'Production HTML must reference fingerprinted motion');
     assert.ok(!html.includes('src="/voice-motion.js"'), 'Do not reuse a stale script URL');
@@ -101,4 +108,23 @@ test('every clip on the page ships narrated light and dark variants with posters
   }
   const videos = html.match(/<video class="clip-video"[^>]*>/g);
   assert.ok(videos.every(tag => tag.includes('preload="none"') && !/\bautoplay\b/.test(tag)), 'Clips never preload or autoplay');
+});
+
+test('the legal pages share one head and navigation, each with its own title and canonical URL', async () => {
+  for (const [page, title, canonical] of [['privacy.html', 'Privacy Policy', '/privacy'], ['support.html', 'Support', '/support']]) {
+    const html = await renderPage(page);
+    assert.ok(html.startsWith('<!DOCTYPE html>\n'));
+    assert.match(html, new RegExp(`<title>${title} — JustSpeakToIt</title>`));
+    assert.match(html, new RegExp(`<link rel="canonical" href="https://justspeaktoit.com${canonical}">`));
+    assert.equal((html.match(/<nav class="nav" aria-label="Primary navigation">/g) || []).length, 1);
+    assert.ok(!html.includes('{{'), `${page} fills every placeholder`);
+  }
+});
+
+test('an include must supply exactly the values its partial uses', async () => {
+  const missing = '<!-- @include legal-top.html title="T" description="D" -->\n<main></main>\n';
+  await assert.rejects(renderSource(missing), /legal-top\.html needs canonical/);
+  const extra = '<!-- @include legal-top.html title="T" description="D" canonical="C" colour="red" -->\n';
+  await assert.rejects(renderSource(extra), /does not use colour/);
+  assert.equal(await renderSource('<p>No includes.</p>\n'), '<p>No includes.</p>\n');
 });

@@ -11,7 +11,7 @@ npm test                        # architecture-aware download behaviour
 npm run build                   # complete deployable site in dist/
 ```
 
-Without Bun, `python3 -m http.server 3000 --directory landing-page` serves the source from the repository root. Python's server does not emulate Cloudflare's extensionless `/privacy` route or `_redirects`; use `/privacy.html` locally.
+Without Bun, run `npm run build`, then `python3 -m http.server 3000 --directory landing-page/dist` from the repository root. Serve `dist/`, not the source: the privacy and support pages share their head, styles and navigation through `partials/legal-top.html`, which `pages.mjs` fills in for the build, the Bun preview and the page tests. Python's server does not emulate Cloudflare's extensionless `/privacy` route or `_redirects`; use `/privacy.html` locally.
 
 Check desktop and mobile layouts (360 px to wide desktop, no horizontal scroll), full-size screenshot links, reduced motion, keyboard focus order, images and the console. Verify explicit Apple Silicon/Intel links and automatic architecture selection. With JavaScript disabled every section still reads, the hero example still shows its sentence, and automatic downloads default safely to the universal build.
 

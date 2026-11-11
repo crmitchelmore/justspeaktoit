@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { loadCatalogue } from './qa/manual-checks.mjs';
 import { renderQaPage } from './qa/render.mjs';
+import { pages, renderPage } from './pages.mjs';
 
 const output = new URL('./dist/', import.meta.url);
 await rm(output, { recursive: true, force: true });
@@ -9,11 +10,15 @@ await mkdir(output, { recursive: true });
 // Keep preview builds complete, including clean privacy URLs and Apple associations.
 // Only Alpha endpoints invoke the Worker; Stable routes stay on static Pages.
 for (const asset of [
-  '_worker.js', '_routes.json', 'index.html', 'privacy.html', 'support.html', 'site.css', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png',
+  '_worker.js', '_routes.json', 'site.css', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png',
   'icon-192.png', 'icon-512.png', 'site.webmanifest',
   'download-architecture.js', 'voice-motion.js', 'clips.js', 'images', '.well-known', '_headers', '_redirects',
 ]) {
   await cp(new URL(asset, import.meta.url), new URL(asset, output), { recursive: true });
+}
+// Pages share chrome through partials (see pages.mjs); only rendered HTML ships.
+for (const page of pages) {
+  await writeFile(new URL(page, output), await renderPage(page));
 }
 
 // New URLs prevent older CDN/browser styles or motion being paired with new HTML.

@@ -30,7 +30,9 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   private var stopGrace: TimeInterval = 0
 
   var stopCompletionTimeout: TimeInterval {
-    ElevenLabsStopPolicy.completionTimeout(grace: stopGrace)
+    LiveStopGracePolicy.completionTimeout(
+      finalisationBudget: ElevenLabsLiveClient.finishDrainBudget, hostDelay: stopGrace
+    )
   }
 
   private let targetSampleRate: Double = 16000
@@ -67,7 +69,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     isStarting = true
     defer { isStarting = false }
     resetStartState()
-    stopGrace = ElevenLabsStopPolicy.boundedGrace(appSettings.liveStopGracePeriod)
+    stopGrace = LiveStopGracePolicy.hostDelay(for: .elevenlabs, grace: appSettings.liveStopGracePeriod)
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.microphonePermissionMissing
     }

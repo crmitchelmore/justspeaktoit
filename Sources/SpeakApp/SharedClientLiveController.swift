@@ -23,10 +23,13 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   private var boundaryDeliveryOwner: DeliveryOwner?
   private var displayedRevision: UInt64 = 0
   private var displayedTranscriptRevision: UInt64 = 0
+  /// The user's stop grace as this run's provider applies it on the host.
+  private var hostStopDelay: TimeInterval = 0
   var stopCompletionTimeout: TimeInterval {
-    guard let budget = (client as? FinalizingStreamingTranscriptionClient)?.finalisationBudget,
-          budget.isFinite, budget > 0 else { return 10 }
-    return max(10, budget + 1)
+    LiveStopGracePolicy.completionTimeout(
+      finalisationBudget: (client as? FinalizingStreamingTranscriptionClient)?.finalisationBudget,
+      hostDelay: hostStopDelay
+    )
   }
 
   private var isStopping = false
@@ -87,6 +90,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       ? DeliveryOwner(delegate: delegate) : nil
     displayedRevision = 0
     displayedTranscriptRevision = 0
+    hostStopDelay = LiveStopGracePolicy.hostDelay(for: route.provider, grace: options.stopGracePeriod)
     isStopping = false
     self.client = client
 
@@ -99,7 +103,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       if let startCaptureAudio {
         try await startCaptureAudio()
       } else {
-        try installAudioTap(route: route, client: client)
+        try audioProcessor.installTap(on: audioEngine.inputNode, sampleRate: route.sampleRate, client: client)
         try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       }
       try Task.checkCancellation()
@@ -121,6 +125,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     if startCaptureAudio == nil { audioEngine.inputNode.removeTap(onBus: 0) }
     audioProcessor.drainConverterTail(to: activeClient)
     audioProcessor.setRunning(false)
+    await applyLiveStopGrace(hostStopDelay)
 
     let whole: String?
     if let finalizing = activeClient as? FinalizingStreamingTranscriptionClient {
@@ -158,11 +163,8 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     }
     isRunning = false
     if snapshot.error == nil, matchesDeliveryOwner(owner) {
-      delegate?.liveTranscriber(self, didFinishWith: TranscriptionResult(
-        text: snapshot.text, segments: finalSnapshot?.segments ?? [], confidence: finalSnapshot?.confidence,
-        duration: finalSnapshot?.duration ?? captureDuration,
-        modelIdentifier: active.modelIdentifier, cost: finalSnapshot?.cost,
-        rawPayload: finalSnapshot?.rawPayload, debugInfo: nil
+      delegate?.liveTranscriber(self, didFinishWith: Self.result(
+        snapshot, projection: finalSnapshot, captureDuration: captureDuration, modelIdentifier: active.modelIdentifier
       ))
     }
     releaseRunOwnership()
@@ -217,37 +219,6 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     }
   }
 
-  private func installAudioTap(
-    route: LiveTranscriptionRoute,
-    client: StreamingTranscriptionClient
-  ) throws {
-    let inputNode = audioEngine.inputNode
-    inputNode.removeTap(onBus: 0)
-    let inputFormat = inputNode.outputFormat(forBus: 0)
-    guard audioInputFormatIsUsable(inputFormat) else {
-      throw TranscriptionManagerError.noUsableAudioInput
-    }
-    guard let targetFormat = AVAudioFormat(
-      commonFormat: .pcmFormatInt16,
-      sampleRate: Double(route.sampleRate),
-      channels: 1,
-      interleaved: true
-    ), AVAudioConverter(from: inputFormat, to: targetFormat) != nil else {
-      throw TranscriptionManagerError.noUsableAudioInput
-    }
-
-    let processor = audioProcessor
-    processor.setRunning(true)
-    try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
-      processor.handleAudioTap(
-        buffer,
-        inputFormat: inputFormat,
-        outputFormat: targetFormat,
-        client: client
-      )
-    }
-  }
-
   private func cleanupAfterFailedStart() async {
     audioEngine.stop()
     if startCaptureAudio == nil { audioEngine.inputNode.removeTap(onBus: 0) }
@@ -294,6 +265,19 @@ private extension SharedClientLiveController {
       self.delegate = delegate
       hadDelegate = delegate != nil
     }
+  }
+
+  static func result(
+    _ snapshot: SharedClientControllerRun.Snapshot, projection: StreamingTranscriptSnapshot?,
+    captureDuration: TimeInterval, modelIdentifier: String
+  ) -> TranscriptionResult {
+    let duration = projection?.duration ?? captureDuration
+    return TranscriptionResult(
+      text: snapshot.text, segments: projection?.segments ?? [], confidence: projection?.confidence,
+      duration: duration, modelIdentifier: modelIdentifier,
+      cost: projection?.cost,
+      rawPayload: projection?.rawPayload, debugInfo: nil
+    )
   }
 
   func releaseRunOwnership() {

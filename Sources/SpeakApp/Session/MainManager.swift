@@ -19,8 +19,8 @@ import os.log
 /// 3. `SessionCaptureRuntime` owns the recording while it captures: level
 ///    metering, silence auto-stop, the audio-arrival gate for the HUD clock and
 ///    start cue, and the one stop in progress.
-/// 4. `endSession` (`+SessionStop`) stops the recorder, then transcribes,
-///    post-processes (`+SessionPipeline`) and delivers (`+Delivery`).
+/// 4. `endSession` (`+SessionStop`) stops the recorder; `SessionCompletionPipeline`
+///    then transcribes and post-processes, and `SessionDelivery` delivers.
 /// 5. Clearing `activeSession` retires the session through `SessionRetirement`.
 ///
 /// `ReprocessingCoordinator` runs the two flows without a recording
@@ -127,6 +127,8 @@ final class MainManager: ObservableObject {
   private(set) lazy var captureRuntime = makeCaptureRuntime()
   /// Admission and capture bring-up for every start.
   private(set) lazy var startPipeline = makeStartPipeline()
+  /// Transcription, post-processing and delivery after every stop.
+  private(set) lazy var completionPipeline = makeCompletionPipeline()
   /// Reprocessing History items and retrying post-processing.
   private(set) lazy var reprocessing = makeReprocessingCoordinator()
 
@@ -354,5 +356,13 @@ extension MainManager: ReprocessingHost {
   func completeRetryDelivery(remedy: DeliverySettingsRemedy?) {
     retryStore.clear()
     pendingDeliveryRemedy = remedy
+  }
+}
+
+// MARK: - Session completion
+
+extension MainManager: SessionCompletionHost {
+  func offerPostProcessingRetry(for session: ActiveSession) -> Bool {
+    retryStore.offer(for: session)
   }
 }

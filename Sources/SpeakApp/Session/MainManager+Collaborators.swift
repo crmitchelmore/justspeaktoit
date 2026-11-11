@@ -103,6 +103,19 @@ extension MainManager {
     return pipeline
   }
 
+  func makeCompletionPipeline() -> SessionCompletionPipeline {
+    let pipeline = SessionCompletionPipeline(
+      settings: appSettings,
+      permissions: capture.permissions,
+      transcription: transcriptionManager,
+      text: text,
+      history: historyManager,
+      hud: hudManager
+    )
+    pipeline.host = self
+    return pipeline
+  }
+
   func makeReprocessingCoordinator() -> ReprocessingCoordinator {
     let coordinator = ReprocessingCoordinator(
       settings: appSettings,

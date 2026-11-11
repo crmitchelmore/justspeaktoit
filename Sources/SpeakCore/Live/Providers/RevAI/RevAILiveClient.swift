@@ -210,43 +210,6 @@ extension RevAILiveClient {
 
     func isCurrent(_ active: RevAILiveRun) -> Bool { active === run && active.phase != .closed }
 
-    /// Ends the run for good: its socket is cancelled, admitted audio and its
-    /// budget are released, callbacks are dropped and every waiter resumes with
-    /// the confirmed transcript.
-    func retire(_ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
-        guard active.phase != .closed else { return }
-        active.phase = .closed
-        let connection = active.connection
-        let waiters = active.delivery.detach()
-        let transcript = active.transcript
-        active.connection = nil
-        active.outgoing.removeAll()
-        active.admittedBytes = 0
-        active.inFlightAudioBytes = 0
-        active.sending = false
-        effects.add {
-            connection?.cancel()
-            waiters.forEach { $0.resume(returning: transcript) }
-        }
-    }
-
-    /// Arms a deadline owned by `active`. It acts only while that run is still
-    /// current, so a late timer cannot touch a stopped or replacement run.
-    func after(
-        _ seconds: TimeInterval, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects,
-        action: @escaping @Sendable (RevAILiveClient, RevAILiveRun, inout LiveDeferredEffects) -> Void
-    ) {
-        let schedule = self.schedule
-        effects.add {
-            schedule(seconds) { [weak self, weak active] in
-                guard let self, let active else { return }
-                self.withState { effects in
-                    if self.isCurrent(active) { action(self, active, &effects) }
-                }
-            }
-        }
-    }
-
     /// Lifecycle events only: never the URL (it carries the access token),
     /// audio or transcript text.
     func log(_ event: String) {
@@ -256,7 +219,7 @@ extension RevAILiveClient {
     }
 }
 
-extension RevAILiveClient: LiveRunFinishing {
+extension RevAILiveClient: LiveRunDeadlines {
     /// Rev AI's `connected` frame, not the handshake, admits audio.
     func connectionOpened(_ active: RevAILiveRun) {
         guard withState({ _ in isCurrent(active) }) else { return }

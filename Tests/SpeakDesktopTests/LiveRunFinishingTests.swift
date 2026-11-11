@@ -80,6 +80,8 @@ private final class FinishingRun: LiveFinishableRun, @unchecked Sendable {
         self.transcript = transcript
         self.delivery.deliveringFailure = deliveringFailure
     }
+
+    func dropOutboundAudio() {}
 }
 
 private final class FinishingClient: LiveRunFinishing, @unchecked Sendable {

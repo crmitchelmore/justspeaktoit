@@ -7,12 +7,15 @@ enum LiveRunPhase { case idle, connecting, streaming, finishing, closed }
 
 /// A run that owns its socket and the callers waiting for its finish.
 protocol LiveFinishableRun: AnyObject {
-    var phase: LiveRunPhase { get }
+    var phase: LiveRunPhase { get set }
     var connection: (any StreamingWebSocketConnection)? { get set }
     /// What a finish caller receives: the run's confirmed text, or nil.
     var transcript: String? { get }
     /// Host callbacks, finish callers and the failure-delivery bookkeeping.
     var delivery: LiveRunDelivery { get set }
+    /// Drops queued and in-flight audio and releases its budget; the run sends
+    /// nothing more.
+    func dropOutboundAudio()
 }
 
 /// How lock-guarded clients whose run owns its socket and finish waiters
@@ -81,6 +84,23 @@ extension LiveRunFinishing {
         }
     }
 
+    /// Ends the run for good: its socket is cancelled, admitted audio and its
+    /// budget are released, callbacks are dropped and every waiter resumes with
+    /// the confirmed transcript.
+    func retire(_ active: FinishRun, _ effects: inout LiveDeferredEffects) {
+        guard active.phase != .closed else { return }
+        active.phase = .closed
+        let connection = active.connection
+        let waiters = active.delivery.detach()
+        let transcript = active.transcript
+        active.connection = nil
+        active.dropOutboundAudio()
+        effects.add {
+            connection?.cancel()
+            waiters.forEach { $0.resume(returning: transcript) }
+        }
+    }
+
     /// Attaches `connection` to `active` and resumes it. Call outside the
     /// lock: the transport may call back synchronously. A run that already
     /// has a socket, or is no longer current, cancels `connection` instead.
@@ -100,5 +120,29 @@ extension LiveRunFinishing {
             self.connectionOpened(active)
         }
         receive(active, connection)
+    }
+}
+
+/// Lock-guarded clients whose deadlines belong to a run (Cartesia, Rev AI).
+protocol LiveRunDeadlines: LiveRunFinishing {
+    var schedule: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void { get }
+}
+
+extension LiveRunDeadlines {
+    /// Arms a deadline owned by `active`. It acts only while that run is still
+    /// current, so a late timer cannot touch a stopped or replacement run.
+    func after(
+        _ seconds: TimeInterval, _ active: FinishRun, _ effects: inout LiveDeferredEffects,
+        action: @escaping @Sendable (Self, FinishRun, inout LiveDeferredEffects) -> Void
+    ) {
+        let schedule = self.schedule
+        effects.add {
+            schedule(seconds) { [weak self, weak active] in
+                guard let self, let active else { return }
+                self.withState { effects in
+                    if self.isCurrent(active) { action(self, active, &effects) }
+                }
+            }
+        }
     }
 }

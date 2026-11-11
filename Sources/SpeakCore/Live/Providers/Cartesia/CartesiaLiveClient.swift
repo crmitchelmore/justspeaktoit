@@ -195,7 +195,7 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
     }
 }
 
-extension CartesiaLiveClient: LiveRunFinishing {}
+extension CartesiaLiveClient: LiveRunDeadlines {}
 
 extension CartesiaLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { lock.withLock { run.phase == .streaming && run.opened } }

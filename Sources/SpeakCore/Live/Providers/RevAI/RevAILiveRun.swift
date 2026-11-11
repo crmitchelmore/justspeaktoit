@@ -61,6 +61,13 @@ final class RevAILiveRun: LiveSendPumpRun, LiveFinishableRun, @unchecked Sendabl
     /// Host callbacks, finish callers and the order a failure is published in.
     var delivery = LiveRunDelivery()
 
+    func dropOutboundAudio() {
+        outgoing.removeAll()
+        admittedBytes = 0
+        inFlightAudioBytes = 0
+        sending = false
+    }
+
     init(sampleRate: Int) {
         maximumBytes = max(Int(Double(max(sampleRate, 1) * 2) * RevAILiveClient.bufferedAudioSeconds), 1)
     }

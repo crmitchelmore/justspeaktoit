@@ -47,22 +47,6 @@ extension MainManager {
     )
   }
 
-  func makeRecordingSummary(from url: URL, fallbackDuration: TimeInterval)
-    -> RecordingSummary {
-    let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
-    let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-    let duration = (try? AVAudioPlayer(contentsOf: url).duration) ?? fallbackDuration
-    let resolvedDuration = duration.isFinite && duration > 0 ? duration : fallbackDuration
-    let startedAt = (attributes[.creationDate] as? Date) ?? Date()
-    return RecordingSummary(
-      id: UUID(),
-      url: url,
-      startedAt: startedAt,
-      duration: resolvedDuration,
-      fileSize: fileSize
-    )
-  }
-
   func makeHistoryDiagnosticContext(includeRequestedContext: Bool = false) -> HistoryDiagnosticContext {
     let health = captureHealth.snapshot()
     let info = Bundle.main.infoDictionary

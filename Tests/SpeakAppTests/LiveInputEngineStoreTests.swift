@@ -296,12 +296,12 @@ final class LiveInputEngineSourceGuardTests: XCTestCase {
 
     func testRecordStart_PreparesTheLiveInputBeforeCapture() throws {
         // Act
-        let text = try source("Session/MainManager+SessionStart.swift")
+        let text = try source("Session/SessionStartPipeline.swift")
 
         // Assert
         XCTAssertTrue(text.contains("prepareStream: prepareStream"))
         XCTAssertTrue(text.contains("liveInputPreparation.prepare()"))
-        XCTAssertTrue(text.contains("transcriptionManager.liveRouteUsesLiveInputEngine"))
+        XCTAssertTrue(text.contains("transcription.liveRouteUsesLiveInputEngine"))
     }
 
     func testSpeechAnalyzerStartFailure_ReturnsItsEngineForTheFallback() throws {

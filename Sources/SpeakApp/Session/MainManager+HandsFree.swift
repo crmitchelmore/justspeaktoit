@@ -28,8 +28,8 @@ extension MainManager {
 
   func makeHandsFreeCoordinator() -> HandsFreeDictationCoordinator {
     HandsFreeDictationCoordinator(
-      permissionsManager: permissionsManager,
-      audioDeviceManager: audioInputDeviceManager,
+      permissionsManager: capture.permissions,
+      audioDeviceManager: capture.devices,
       callbacks: HandsFreeDictationCoordinator.Callbacks(
         startCapture: { [weak self] preRoll in
           guard let self else { return .rejected(.captureFailed) }

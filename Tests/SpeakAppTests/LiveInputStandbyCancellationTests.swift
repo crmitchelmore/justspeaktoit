@@ -83,8 +83,8 @@ final class LiveInputStandbyCancellationTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/SpeakApp/Session")
         let names = [
-            "MainManager.swift", "MainManager+PressPrimer.swift", "KeyPressPrimerRuntime.swift",
-            "MainManager+SessionStart.swift", "MainManager+StartSteps.swift"
+            "MainManager.swift", "MainManager+GestureHandling.swift", "KeyPressPrimerRuntime.swift",
+            "SessionStartPipeline.swift", "SessionStartAdmission.swift", "SessionCaptureRuntime.swift"
         ]
         for name in names {
             let source = try String(contentsOf: appSources.appendingPathComponent(name), encoding: .utf8)

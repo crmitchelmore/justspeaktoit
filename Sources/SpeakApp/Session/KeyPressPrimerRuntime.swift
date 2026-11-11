@@ -258,3 +258,11 @@ final class KeyPressPrimerRuntime {
     pendingRefill = nil
   }
 }
+
+extension HotKeyManager {
+  /// Raw press edges of the hotkey, before any gesture is recognised.
+  @discardableResult
+  func registerPress(handler: @escaping (HotKeyPressEvent) -> Void) -> HotKeyPressListenerToken {
+    engine.registerPress(handler: handler)
+  }
+}

@@ -52,15 +52,13 @@ extension MainManager {
   }
 
   func endSession(trigger: SessionTriggerSource) async {
-    guard !isEndingSession else { return }
-    guard let session = activeSession else { return }
-    isEndingSession = true
-    defer { isEndingSession = false }
+    guard let session = activeSession, captureRuntime.beginEnding() else { return }
+    defer { captureRuntime.finishEnding() }
 
     // Latency checkpoint: user asked to stop (before the optional tail sleep).
     session.stopRequested = Date()
 
-    stopAudioLevelMonitoring()
+    captureRuntime.stop()
 
     let tailDuration = max(appSettings.postRecordingTailDuration, 0)
     if tailDuration > 0 {
@@ -84,7 +82,7 @@ extension MainManager {
         ? try await finishLiveTranscription(for: session)
         : try await transcribeRecording(summary, for: session)
       guard transcribed else { return }
-      let correctedText = applyVoiceCommandsAndLexicon(to: session.transcriptionResult?.text ?? "", for: session)
+      let correctedText = text.applyVoiceCommandsAndLexicon(to: session.transcriptionResult?.text ?? "", for: session)
       guard let processed = await postProcessIfNeeded(correctedText, for: session) else { return }
       await deliver(processed.text, postProcessingFailure: processed.failureMessage, for: session)
     } catch {

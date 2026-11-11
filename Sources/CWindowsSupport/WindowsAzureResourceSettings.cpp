@@ -124,43 +124,23 @@ void apply(HWND window, Dialog &dialog) {
 constexpr jsti::chrome::DialogFrame dialogFrame{
     minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, endpointID, IDOK};
 
-LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
-    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT handled = 0;
-    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
-                                            handled)) return handled;
+bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM, LRESULT &) {
     switch (message) {
-    case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
     case WM_COMMAND:
-        if (HIWORD(wparam) != BN_CLICKED) break;
-        if (LOWORD(wparam) == IDOK) { apply(window, *dialog); return 0; }
-        if (LOWORD(wparam) == IDCANCEL) { close(window); return 0; }
-        return 0;
-    case WM_CLOSE: close(window); return 0;
-    case WM_DESTROY:
-        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
-        return 0;
+        return jsti::chrome::dialogCommand(window, dialog, wparam, apply, close);
     }
-    return DefWindowProcW(window, message, wparam, lparam);
+    return false;
+}
+
+const jsti::chrome::DialogProcedure<Dialog> dialogParts{dialogFrame, layout, refreshFont, createControls, close, handle};
+
+LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    return jsti::chrome::dialogProcedure(dialogParts, window, message, wparam, lparam);
 }
 
 HWND createDialog(HWND owner, Dialog &dialog) {
-    const HINSTANCE instance = GetModuleHandleW(nullptr);
-    WNDCLASSW type{};
-    type.lpfnWndProc = procedure;
-    type.hInstance = instance;
-    type.lpszClassName = L"JustSpeakToItAzureResource";
-    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT frame{0, 0, scale(owner, 600), scale(owner, 350)};
-    AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(owner));
-    RECT bounds{};
-    GetWindowRect(owner, &bounds);
-    return CreateWindowExW(windowExStyle, type.lpszClassName, L"Azure Speech resource — Just Speak to It",
-        windowStyle, bounds.left + scale(owner, 40), bounds.top + scale(owner, 40), frame.right - frame.left,
-        frame.bottom - frame.top, owner, nullptr, instance, &dialog);
+    return jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItAzureResource", procedure, L"Azure Speech resource — Just Speak to It",
+        600, 350, windowStyle, windowExStyle, &dialog);
 }
 
 Configuration snapshot() {

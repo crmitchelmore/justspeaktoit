@@ -1,4 +1,4 @@
-/* Control handlers: recording, models, microphones, output, appearance and History actions. */
+/* Control handlers: recording, models, microphones, output, appearance and voices. */
 #include "LinuxWindowInternal.h"
 #include "LinuxWindowDashboardPage.h"
 #include "LinuxWindowGeneralPage.h"
@@ -68,8 +68,7 @@ void refresh_actions(void) {
     gchar *text = displayed_transcript();
     gboolean has_text = text != NULL && text[0] != '\0';
     g_free(text);
-    gboolean has_record = history_page()->selected_id != NULL;
-    gboolean presented = has_record && g_strcmp0(history_page()->presented_id, history_page()->selected_id) == 0;
+    gboolean presented = history_selection_presented();
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->copy), has_text && !cleanup_preview.visible);
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), has_text && !cleanup_preview.visible);
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->cancel), ui.state == JSTI_STATE_WORKING);
@@ -95,14 +94,7 @@ void refresh_actions(void) {
     gtk_label_set_text(dashboard_page()->live_preview, preview != NULL && preview[0] != '\0' ? preview : "Listening…");
     gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->live_preview), recording);
     g_free(preview);
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->retry), idle && has_record);
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->correction_results), idle && presented);
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->export_button), idle && presented && has_text);
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->issue_button), idle && presented);
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->open_audio), has_record);
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->play), has_record && (idle || history_page()->playback_state != 0));
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->stop_play), has_record && history_page()->playback_state != 0);
-    gtk_button_set_label(history_page()->play, history_page()->playback_state == 1 ? "Pause" : "Play");
+    refresh_history_actions(idle, has_text);
     /* Speaks the presented record's displayed text, so it needs both. */
     gboolean voices = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)) > 0;
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.button), idle && presented && has_text && voices);
@@ -115,13 +107,6 @@ void refresh_actions(void) {
         idle && read_aloud.favorite_indices != NULL && read_aloud.favorite_indices->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button),
         idle && read_aloud.favorite_executable && !read_aloud.favorite_pending);
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->import_button), idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->history_import), idle);
-    gtk_widget_set_sensitive(history_page()->history_filters, idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->history_delete), idle && has_record);
-    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->history_clear),
-        idle && history_page()->all_history_ids != NULL && history_page()->all_history_ids[0] != '\0');
-    if (history_page()->audio_cleanup != NULL) gtk_widget_set_sensitive(GTK_WIDGET(history_page()->audio_cleanup), idle);
     if (storage_page()->recordings_choose != NULL) {
         gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->recordings_choose), idle && storage_page()->location_chooser == NULL);
         gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->recordings_default), idle && storage_page()->location_chooser == NULL);
@@ -138,8 +123,8 @@ void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(models_page()->model_row), idle);
     jsti_model_filters_set_idle(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(models_page()->microphone_row), idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->version), presented && history_page()->presented_switchable && idle);
-    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->version), presented && history_page()->presented_switchable);
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->version), presented && history_presented_switchable() && idle);
+    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->version), presented && history_presented_switchable());
     refresh_setup();
 }
 
@@ -276,85 +261,6 @@ void on_refresh(GtkButton *button, gpointer data) {
     emit(JSTI_EVENT_REFRESH_MODELS, "", 0);
 }
 
-void on_search(GtkSearchEntry *entry, gpointer data) {
-    (void)data;
-    emit(JSTI_EVENT_SEARCH_HISTORY, gtk_editable_get_text(GTK_EDITABLE(entry)), 0);
-}
-
-/* The transcript and actions live in the selected History card, as the Mac
- * expands its selected row. The window holds its own reference, so moving
- * the detail between cards or rebuilding the list never destroys it. */
-void detach_detail(void) {
-    GtkWidget *parent = gtk_widget_get_parent(history_page()->detail);
-    if (parent != NULL) gtk_box_remove(GTK_BOX(parent), history_page()->detail);
-}
-
-void attach_detail(GtkListBoxRow *row) {
-    GtkWidget *card = row != NULL ? gtk_list_box_row_get_child(row) : NULL;
-    if (card != NULL && gtk_widget_get_parent(history_page()->detail) == card) return;
-    detach_detail();
-    if (card != NULL) gtk_box_append(GTK_BOX(card), history_page()->detail);
-}
-
-void on_history_selected(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
-    (void)box; (void)data;
-    attach_detail(row);
-    if (row == NULL) return;
-    gint index = gtk_list_box_row_get_index(row);
-    if (index < 0 || (guint)index >= history_page()->history_ids->len) return;
-    const char *id = g_ptr_array_index(history_page()->history_ids, index);
-    if (g_strcmp0(id, history_page()->selected_id) == 0) return;
-    retire_cleanup_preview();
-    g_free(history_page()->selected_id);
-    history_page()->selected_id = g_strdup(id);
-    /* Stale text never stays under another record's actions. */
-    g_clear_pointer(&history_page()->presented_id, g_free);
-    set_transcript("");
-    history_page()->playback_state = 0;
-    gtk_label_set_text(history_page()->playback_label, "");
-    refresh_actions();
-    emit(JSTI_EVENT_SELECT_HISTORY, id, 0);
-}
-
-void on_version(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object; (void)spec; (void)data;
-    if (history_page()->selected_id == NULL || g_strcmp0(history_page()->presented_id, history_page()->selected_id) != 0) return;
-    guint selected = gtk_drop_down_get_selected(dashboard_page()->version);
-    if ((gint32)selected == history_page()->presented_variant) return;
-    retire_cleanup_preview();
-    history_page()->presented_variant = (gint32)selected;
-    emit(JSTI_EVENT_TRANSCRIPT_VERSION, history_page()->selected_id, (gint32)selected);
-}
-
-void on_retry(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    if (history_page()->selected_id != NULL) emit(JSTI_EVENT_RETRY_HISTORY, history_page()->selected_id, 0);
-}
-
-void on_correction_results(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    if (history_page()->selected_id != NULL && g_strcmp0(history_page()->presented_id, history_page()->selected_id) == 0)
-        emit(72, history_page()->selected_id, 2);
-}
-
-void on_play(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    if (history_page()->selected_id != NULL) emit(JSTI_EVENT_PLAYBACK_TOGGLE, history_page()->selected_id, 0);
-}
-
-void on_stop_play(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    emit(JSTI_EVENT_PLAYBACK_STOP, history_page()->selected_id, 0);
-}
-
-/* The host captures the displayed text with jsti_window_transcript_snapshot
- * while this event runs, so it is the text shown under this record. */
-void on_read_aloud(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    if (history_page()->selected_id == NULL || g_strcmp0(history_page()->presented_id, history_page()->selected_id) != 0) return;
-    emit(JSTI_EVENT_READ_ALOUD, history_page()->selected_id, 0);
-}
-
 void on_voice(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
     if (ui.suppress) return;
@@ -399,7 +305,3 @@ void on_favorite_toggle(GtkButton *button, gpointer data) {
         read_aloud.picker_context != NULL ? read_aloud.picker_context : ui.context);
 }
 
-void on_open_audio(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    if (history_page()->selected_id != NULL) emit(JSTI_EVENT_OPEN_AUDIO, history_page()->selected_id, 0);
-}

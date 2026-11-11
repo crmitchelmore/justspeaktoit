@@ -184,51 +184,47 @@ void importModel(HWND window, Dialog &dialog, bool cancel) {
 constexpr jsti::chrome::DialogFrame dialogFrame{
     minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, listID, IDCANCEL};
 
-LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
-    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT handled = 0;
-    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
-                                            handled)) return handled;
+bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM, LRESULT &) {
     switch (message) {
-    case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
     case refreshMessage: {
         Configuration latest = snapshot();
-        if (latest.revision != dialog->config.revision) {
-            dialog->config = std::move(latest);
-            populate(window, *dialog);
+        if (latest.revision != dialog.config.revision) {
+            dialog.config = std::move(latest);
+            populate(window, dialog);
         }
-        return 0;
+        return true;
     }
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
         case listID:
             if (HIWORD(wparam) == LBN_SELCHANGE) {
                 const LRESULT chosen = SendDlgItemMessageW(window, listID, LB_GETCURSEL, 0, 0);
-                dialog->selected = chosen == LB_ERR ? -1 : static_cast<int>(chosen);
-                updateActions(window, *dialog);
+                dialog.selected = chosen == LB_ERR ? -1 : static_cast<int>(chosen);
+                updateActions(window, dialog);
             }
-            return 0;
-        case downloadID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_DOWNLOAD); return 0;
-        case cancelDownloadID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_CANCEL); return 0;
-        case removeID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_REMOVE); return 0;
-        case importID: if (HIWORD(wparam) == BN_CLICKED) importModel(window, *dialog, false); return 0;
-        case cancelImportID: if (HIWORD(wparam) == BN_CLICKED) importModel(window, *dialog, true); return 0;
+            return true;
+        case downloadID: if (HIWORD(wparam) == BN_CLICKED) act(dialog, JSTI_LOCAL_MODEL_DOWNLOAD); return true;
+        case cancelDownloadID: if (HIWORD(wparam) == BN_CLICKED) act(dialog, JSTI_LOCAL_MODEL_CANCEL); return true;
+        case removeID: if (HIWORD(wparam) == BN_CLICKED) act(dialog, JSTI_LOCAL_MODEL_REMOVE); return true;
+        case importID: if (HIWORD(wparam) == BN_CLICKED) importModel(window, dialog, false); return true;
+        case cancelImportID: if (HIWORD(wparam) == BN_CLICKED) importModel(window, dialog, true); return true;
         case gpuID:
             if (HIWORD(wparam) == BN_CLICKED) {
-                act(*dialog, IsDlgButtonChecked(window, gpuID) == BST_CHECKED ? JSTI_LOCAL_MODEL_GPU_ON
+                act(dialog, IsDlgButtonChecked(window, gpuID) == BST_CHECKED ? JSTI_LOCAL_MODEL_GPU_ON
                                                                                 : JSTI_LOCAL_MODEL_GPU_OFF);
             }
-            return 0;
-        case IDCANCEL: if (HIWORD(wparam) == BN_CLICKED) close(window); return 0;
+            return true;
+        case IDCANCEL: if (HIWORD(wparam) == BN_CLICKED) close(window); return true;
         }
-        break;
-    case WM_CLOSE: close(window); return 0;
-    case WM_DESTROY:
-        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
-        return 0;
+        return false;
     }
-    return DefWindowProcW(window, message, wparam, lparam);
+    return false;
+}
+
+const jsti::chrome::DialogProcedure<Dialog> dialogParts{dialogFrame, layout, refreshFont, createControls, close, handle};
+
+LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    return jsti::chrome::dialogProcedure(dialogParts, window, message, wparam, lparam);
 }
 
 HWND createDialog(HWND owner, Dialog &dialog) {

@@ -43,11 +43,12 @@ struct Dialog {
     bool pending = false;
 };
 
-// The host's latest description, guarded by configurationMutex, and the open
-// editor, if any.
-extern Configuration configuration;
-extern std::mutex configurationMutex;
-extern HWND activeConfiguration;
+// The host's latest description and the open editor, if any, are private to
+// WindowsConfiguration.cpp, behind its mutex. These take the lock; the
+// self-test swaps fixtures in and out with them.
+Configuration hostConfiguration();
+Configuration exchangeConfiguration(Configuration next);
+HWND exchangeActiveEditor(HWND next);
 
 // A control's text.
 std::wstring text(HWND window, int id);

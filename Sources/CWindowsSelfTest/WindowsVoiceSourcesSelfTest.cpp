@@ -14,8 +14,8 @@ bool jsti_voice_usage_self_test(HWND owner, std::string &error);
 bool jsti_voice_discovery_self_test(HWND owner, std::string &error);
 namespace {
 bool markupSelfTest(HWND window, Dialog &source) {
-    MarkupConfiguration original;
-    { std::lock_guard<std::mutex> lock(mutex); original = markupConfiguration; }
+    MarkupConfiguration original = exchangeMarkupConfiguration({});
+    bool passed = !canEditMarkup(source);
     const auto originalText = text(window);
     const int originalSource = source.source;
     MarkupConfiguration fixture;
@@ -31,7 +31,7 @@ bool markupSelfTest(HWND window, Dialog &source) {
         memcpy(output, result.c_str(), result.size() + 1); *utf16 = *scalars = wrapped ? 0 : 9;
         return 0;
     };
-    { std::lock_guard<std::mutex> lock(mutex); markupConfiguration = fixture; }
+    exchangeMarkupConfiguration(fixture);
     source.source = 3; refresh(window, source);
     MarkupDialog helper; helper.owner = window; helper.source = &source; helper.config = fixture;
     std::wstring copied;
@@ -43,7 +43,7 @@ bool markupSelfTest(HWND window, Dialog &source) {
     SetDlgItemTextW(window, textID, draft.c_str());
     SendDlgItemMessageW(window, textID, EM_SETSEL, 2, 4);
     HWND popup = makeMarkupDialog(helper);
-    bool passed = popup != nullptr;
+    passed = popup != nullptr && passed;
     if (popup) {
         SendDlgItemMessageW(popup, markupListID, LB_SETCURSEL, 1, 0);
         SendMessageW(popup, WM_COMMAND, MAKEWPARAM(markupListID, LBN_SELCHANGE), 0);
@@ -83,13 +83,13 @@ bool markupSelfTest(HWND window, Dialog &source) {
         passed = passed && text(window) == L"<fixture>Already wrapped</fixture>" && start == 9 && end == 16;
         SetDlgItemTextW(window, textID, L"Reject");
         passed = !applyMarkup(popup, helper) && text(window) == L"Reject" && passed;
-        { std::lock_guard<std::mutex> lock(mutex); markupConfiguration.enabled = false; }
+        setMarkupEnabled(false);
         refresh(window, source);
         passed = !IsWindowEnabled(GetDlgItem(window, helperID)) &&
             !IsWindowEnabled(GetDlgItem(popup, markupWrapID)) && !applyMarkup(popup, helper) && passed;
         DestroyWindow(popup);
     } else passed = false;
-    { std::lock_guard<std::mutex> lock(mutex); markupConfiguration.enabled = true; }
+    setMarkupEnabled(true);
     for (int readOnlySource : {0, 2}) {
         source.source = readOnlySource; refresh(window, source);
         passed = !IsWindowEnabled(GetDlgItem(window, helperID)) && !canEditMarkup(source) && passed;
@@ -98,7 +98,7 @@ bool markupSelfTest(HWND window, Dialog &source) {
     passed = !IsWindowEnabled(GetDlgItem(window, helperID)) && passed;
     source.importToken.clear();
     passed = jsti_window_set_voice_markup_helper(2, nullptr, 0, nullptr) == -1 && passed;
-    { std::lock_guard<std::mutex> lock(mutex); markupConfiguration = std::move(original); }
+    exchangeMarkupConfiguration(std::move(original));
     source.source = originalSource; SetDlgItemTextW(window, textID, originalText.c_str()); refresh(window, source);
     return passed;
 }
@@ -150,12 +150,10 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
         int calls = 0, source = -1, generated = 0, flags = -1;
         std::string text, record, generateFlags, playedResult;
     } received;
-    GenerationState originalGeneration;
-    FormatState originalFormats;
-    { std::lock_guard<std::mutex> lock(mutex); originalGeneration = generationState;
-      originalFormats = std::move(formatState); formatState = {}; }
+    GenerationState originalGeneration = hostGeneration();
+    FormatState originalFormats = exchangeFormats({});
     Dialog dialog;
-    { std::lock_guard<std::mutex> lock(mutex); dialog.config = configuration; }
+    dialog.config = hostConfiguration();
     dialog.config.callback = [](int32_t action, int32_t source, const char *value,
                                 const char *record, const char *path, void *context) {
         auto &result = *static_cast<Received *>(context);
@@ -168,7 +166,7 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
     dialog.record = "synthetic-record"; dialog.history = L"Synthetic History snapshot";
     HWND window = makeDialog(owner, dialog);
     if (!window) {
-        std::lock_guard<std::mutex> lock(mutex); formatState = std::move(originalFormats);
+        exchangeFormats(std::move(originalFormats));
         error = "Voice sources fixture could not open."; return false;
     }
     const bool history = text(window) == dialog.history && IsWindowEnabled(GetDlgItem(window, readID));
@@ -207,7 +205,7 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
         received.record.empty() && received.text == "Synthetic clipboard snapshot";
     SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, 3, 0); select(window, dialog);
     dialog.importToken = "synthetic-import";
-    { std::lock_guard<std::mutex> lock(mutex); importResult = {window, dialog.importToken, {}, {}, false}; }
+    expectImport(window, dialog.importToken);
     const bool queuedImport = jsti_window_set_voice_text_import("synthetic-import", "Synthetic file text", "") == 0;
     SendMessageW(window, importResultMessage, 0, 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(readID, BN_CLICKED), 0);
@@ -223,12 +221,12 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
         if (!captured && failure[0]) error = failure;
     }
     dialog.importToken = "synthetic-failure";
-    { std::lock_guard<std::mutex> lock(mutex); importResult = {window, dialog.importToken, {}, {}, false}; }
+    expectImport(window, dialog.importToken);
     jsti_window_set_voice_text_import("synthetic-failure", "", "Synthetic read error.");
     SendMessageW(window, importResultMessage, 0, 0);
     const bool failedImport = text(window) == L"Synthetic file text" && IsWindowEnabled(GetDlgItem(window, readID));
     dialog.importToken = "synthetic-edit";
-    { std::lock_guard<std::mutex> lock(mutex); importResult = {window, dialog.importToken, {}, {}, false}; }
+    expectImport(window, dialog.importToken);
     SetDlgItemTextW(window, textID, L"Synthetic user edit");
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(textID, EN_CHANGE), 0);
     const bool editedImport = jsti_window_set_voice_text_import("synthetic-edit", "Late text", "") == 1 &&
@@ -263,8 +261,8 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
             bounds.right <= client.right && bounds.bottom <= client.bottom;
     }
     DestroyWindow(window);
-    { std::lock_guard<std::mutex> lock(mutex); generationState = std::move(originalGeneration);
-      formatState = std::move(originalFormats); }
+    replaceGeneration(std::move(originalGeneration));
+    exchangeFormats(std::move(originalFormats));
     const bool passed = history && typed && unavailable && historySnapshot && typedSnapshot &&
         clipboardSnapshot && fileSnapshot && staleImport && failedImport && editedImport &&
         generatedSnapshot && busyResult && retainedResult && boundedControls && markup && formats;

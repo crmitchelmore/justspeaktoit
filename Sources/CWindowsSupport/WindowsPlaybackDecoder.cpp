@@ -99,27 +99,6 @@ void MediaPlatform::initialise() {
     media = true;
 }
 
-bool localPath(const char *text, std::wstring &path) {
-    if (!jsti::wide(text, path) || path.size() > 32000) return false;
-    std::replace(path.begin(), path.end(), L'/', L'\\');
-    if (path.compare(0, 4, L"\\\\?\\") == 0) path.erase(0, 4);
-    if (path.size() < 4 || !((path[0] >= L'A' && path[0] <= L'Z') ||
-                            (path[0] >= L'a' && path[0] <= L'z')) ||
-        path[1] != L':' || path[2] != L'\\' || path.find_first_of(L":\"<>|?*", 2) != std::wstring::npos) return false;
-    size_t start = 3;
-    while (start < path.size()) {
-        const size_t end = path.find(L'\\', start);
-        const auto part = path.substr(start, end == std::wstring::npos ? end : end - start);
-        if (part.empty() || part == L"." || part == L".." || part.back() == L'.' || part.back() == L' ' ||
-            std::any_of(part.begin(), part.end(), [](wchar_t ch) { return ch < 32; })) return false;
-        if (end == std::wstring::npos) break;
-        start = end + 1;
-        if (start == path.size()) return false;
-    }
-    path.insert(0, L"\\\\?\\");
-    return true;
-}
-
 void openSource(const std::wstring &path, uint64_t limit, jsti::Handle &handle, uint64_t &size) {
     if (handle.value) throw Failure{E_INVALIDARG, "Audio playback input handle is already owned"};
     // Validation can throw after CreateFile succeeds. Retain the candidate
@@ -283,72 +262,6 @@ HRESULT STDMETHODCALLTYPE FileStream::Stat(STATSTG *result, DWORD) {
     result->cbSize.QuadPart = length;
     result->grfMode = STGM_READ | STGM_SHARE_DENY_WRITE;
     return S_OK;
-}
-
-HRESULT STDMETHODCALLTYPE ReaderCallback::QueryInterface(REFIID id, void **result) {
-    if (!result) return E_POINTER;
-    *result = nullptr;
-    if (id != IID_IUnknown && id != IID_IMFSourceReaderCallback) return E_NOINTERFACE;
-    *result = static_cast<IMFSourceReaderCallback *>(this); AddRef(); return S_OK;
-}
-
-HRESULT STDMETHODCALLTYPE ReaderCallback::OnReadSample(HRESULT result, DWORD, DWORD flags, LONGLONG, IMFSample *sample) {
-    std::lock_guard<std::mutex> lock(state->mutex);
-    if (state->closed || !state->pending) return S_OK;
-    state->pending = false;
-    state->ready = true;
-    if (SUCCEEDED(state->result)) state->result = result;
-    state->flags = flags;
-    if (state->sample) state->sample->Release();
-    state->sample = sample;
-    if (sample) sample->AddRef();
-    state->changed.notify_all();
-    return S_OK;
-}
-
-HRESULT STDMETHODCALLTYPE ReaderCallback::OnFlush(DWORD) {
-    std::lock_guard<std::mutex> lock(state->mutex);
-    state->pending = false;
-    state->flushed = true;
-    state->changed.notify_all();
-    return S_OK;
-}
-
-HRESULT STDMETHODCALLTYPE ReaderCallback::OnEvent(DWORD, IMFMediaEvent *event) {
-    HRESULT result = S_OK;
-    if (event) event->GetStatus(&result);
-    if (FAILED(result)) {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        if (!state->closed) { state->result = result; state->changed.notify_all(); }
-    }
-    return S_OK;
-}
-
-HRESULT ReaderResources::close() {
-    if (!reader.value) return S_OK;
-    bool pending;
-    { std::lock_guard<std::mutex> lock(state->mutex); pending = state->pending; state->flushed = false; }
-    HRESULT result = S_OK;
-    if (pending) {
-        result = reader->Flush(MF_SOURCE_READER_ALL_STREAMS);
-        if (SUCCEEDED(result)) {
-            std::unique_lock<std::mutex> lock(state->mutex);
-            if (!state->changed.wait_for(lock, std::chrono::seconds(5), [&] { return state->flushed; })) {
-                result = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
-            }
-        }
-    }
-    IMFSample *sample = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        state->closed = true;
-        sample = state->sample;
-        state->sample = nullptr;
-    }
-    if (sample) sample->Release();
-    reader.value->Release();
-    reader.value = nullptr;
-    return result;
 }
 
 Wake awaitSample(ReadState &state, const std::atomic<bool> &cancelled, std::chrono::seconds timeout) {

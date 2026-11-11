@@ -32,24 +32,6 @@ struct WindowsCredentialVault: DesktopCredentialVault {
     }
 }
 
-extension WindowsLoopbackListener: DesktopLoopbackListener {
-    public func nextRequest(within timeout: Duration) async throws -> Connection? {
-        do {
-            return try await accept(timeout: timeout)
-        } catch Failure.timedOut {
-            return nil
-        }
-    }
-}
-
-extension WindowsLoopbackListener.Connection: DesktopLoopbackRequest {
-    public var head: DesktopLoopbackRequestHead? { DesktopLoopbackRequestHead(parsing: request) }
-
-    public var peer: DesktopLoopbackPeer {
-        peerIsCurrentUser.map { $0 ? .currentUser : .otherUser } ?? .unknown
-    }
-}
-
 /// The window's event context as a sendable value, for the dialog callback.
 private struct WindowsSyncContext: @unchecked Sendable {
     let pointer: UnsafeMutableRawPointer

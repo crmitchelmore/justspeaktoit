@@ -47,11 +47,11 @@ Environment currentEnvironment() {
 
 // ---- worker accounting -------------------------------------------------------
 
+namespace {
+
 std::mutex workerMutex;
 std::condition_variable workerChanged;
 size_t liveWorkers = 0;
-
-namespace {
 
 bool reserveWorker() {
     std::lock_guard<std::mutex> lock(workerMutex);
@@ -61,6 +61,11 @@ bool reserveWorker() {
 }
 
 } // namespace
+
+void releaseWorker() {
+    { std::lock_guard<std::mutex> lock(workerMutex); --liveWorkers; }
+    workerChanged.notify_all();
+}
 
 Environment defaultEnvironment() {
     Environment environment;

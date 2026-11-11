@@ -90,7 +90,7 @@ gboolean apply_import_result(Dialog *dialog, const char *token, const char *valu
 typedef struct { gchar *token, *text, *error; } ImportResult;
 static void apply_import(gpointer data) {
     ImportResult *result = data;
-    apply_import_result(active, result->token, result->text, result->error);
+    apply_import_result(voice_open_dialog(), result->token, result->text, result->error);
 }
 static void free_import(gpointer data) {
     ImportResult *result = data;
@@ -177,6 +177,27 @@ static void export_response(GtkNativeDialog *chooser, int response, gpointer dat
     gtk_native_dialog_destroy(chooser); g_object_unref(chooser);
     g_free(job->text); g_free(job->record); g_free(job->format); release(job->dialog); g_free(job);
 }
+/* The host's audio formats, kept for the next dialog. */
+static FormatState format_state;
+/* The last generation options and result the host reported, kept for the next dialog. */
+static guint generation_flags;
+static gboolean generation_working;
+static gchar *generated_result;
+static gchar *generated_format;
+
+gboolean format_available(guint index) {
+    return format_state.identifiers == NULL ||
+        (index < g_strv_length(format_state.identifiers) && format_state.identifiers[index][0] != '\0');
+}
+void swap_format_state(FormatState *value) {
+    FormatState previous = format_state;
+    format_state = *value; *value = previous;
+}
+void adopt_generation_state(Dialog *dialog) {
+    dialog->result_id = g_strdup(generated_result != NULL ? generated_result : "");
+    dialog->result_format = g_strdup(generated_format != NULL ? generated_format : "wav");
+    dialog->generation_flags = generation_flags; dialog->working = generation_working;
+}
 const char *selected_format(Dialog *dialog) {
     guint selected = gtk_drop_down_get_selected(dialog->format);
     if (format_state.identifiers == NULL || selected >= g_strv_length(format_state.identifiers)) return "";
@@ -245,8 +266,9 @@ void clear_formats(FormatState *value) {
 static void free_formats(gpointer data) { clear_formats(data); g_free(data); }
 static void apply_formats(gpointer data) {
     FormatState *value = data;
-    clear_formats(&format_state); format_state = *value; *value = (FormatState){0};
-    if (active != NULL && active->window != NULL) show_formats(active);
+    swap_format_state(value); clear_formats(value);
+    Dialog *open = voice_open_dialog();
+    if (open != NULL) show_formats(open);
 }
 int32_t jsti_window_set_voice_audio_formats(const char *rows, const char *selected, const char *status) {
     if (rows == NULL || selected == NULL || strlen(rows) > 8192 || strlen(selected) > 256 ||
@@ -310,11 +332,12 @@ void account_voices(GtkButton *button, gpointer data) {
 }
 static void apply_generation_options(gpointer data) {
     generation_flags = *(guint *)data;
-    if (active == NULL || active->window == NULL) return;
-    active->generation_flags = generation_flags; active->applying_options = TRUE;
-    gtk_check_button_set_active(active->auto_play, generation_flags & 1);
-    gtk_check_button_set_active(active->save, generation_flags & 2);
-    active->applying_options = FALSE;
+    Dialog *open = voice_open_dialog();
+    if (open == NULL) return;
+    open->generation_flags = generation_flags; open->applying_options = TRUE;
+    gtk_check_button_set_active(open->auto_play, generation_flags & 1);
+    gtk_check_button_set_active(open->save, generation_flags & 2);
+    open->applying_options = FALSE;
 }
 int32_t jsti_window_set_voice_generation_options(int32_t flags) {
     if (flags < 0 || flags > 3) return -1;
@@ -327,11 +350,12 @@ static void apply_generated_result(gpointer data) {
     g_free(generated_result); generated_result = g_strdup(result->result_id);
     g_free(generated_format); generated_format = g_strdup(result->format);
     generation_working = result->working;
-    if (active == NULL || active->window == NULL) return;
-    g_free(active->result_id); active->result_id = g_strdup(result->result_id);
-    g_free(active->result_format); active->result_format = g_strdup(result->format);
-    active->working = result->working;
-    gtk_label_set_text(active->notice, result->message); refresh(active);
+    Dialog *open = voice_open_dialog();
+    if (open == NULL) return;
+    g_free(open->result_id); open->result_id = g_strdup(result->result_id);
+    g_free(open->result_format); open->result_format = g_strdup(result->format);
+    open->working = result->working;
+    gtk_label_set_text(open->notice, result->message); refresh(open);
 }
 static void free_generated_result(gpointer data) {
     GeneratedResult *result = data;

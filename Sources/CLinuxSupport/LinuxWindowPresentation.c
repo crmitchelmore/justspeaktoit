@@ -17,17 +17,14 @@ static void presentation_free(gpointer pointer) {
 void presentation_apply(gpointer pointer) {
     Presentation *presentation = pointer;
     /* Only the selected record's content may be shown under its actions. */
-    if (g_strcmp0(presentation->id, history_page()->selected_id) != 0) return;
+    if (!history_is_selected(presentation->id)) return;
     ui.suppress = TRUE;
     if (presentation->has_text) {
         set_transcript(presentation->text);
         if (presentation->status != NULL) gtk_label_set_text(dashboard_page()->status, presentation->status);
     }
-    g_free(history_page()->presented_id);
-    history_page()->presented_id = g_strdup(presentation->id);
+    history_mark_presented(presentation->id, presentation->variant, presentation->switchable);
     cleanup_preview.visible = FALSE;
-    history_page()->presented_variant = presentation->variant;
-    history_page()->presented_switchable = presentation->switchable;
     if (presentation->variant >= 0) gtk_drop_down_set_selected(dashboard_page()->version, (guint)presentation->variant);
     ui.suppress = FALSE;
     refresh_actions();
@@ -135,7 +132,7 @@ int32_t jsti_window_set_text_output_policy(
 }
 
 int32_t jsti_window_transcript_snapshot(char *buffer, size_t capacity, size_t *required) {
-    gchar *text = history_page()->export_text != NULL ? g_strdup(history_page()->export_text) : displayed_transcript();
+    gchar *text = history_export_text() != NULL ? g_strdup(history_export_text()) : displayed_transcript();
     size_t length = strlen(text) + 1;
     if (required != NULL) *required = length;
     if (buffer == NULL || capacity < length) {
@@ -148,8 +145,8 @@ int32_t jsti_window_transcript_snapshot(char *buffer, size_t capacity, size_t *r
 }
 
 int32_t jsti_window_transcript_variant(void) {
-    if (history_page()->selected_id == NULL || g_strcmp0(history_page()->presented_id, history_page()->selected_id) != 0) return -1;
-    if (!history_page()->presented_switchable) return history_page()->presented_variant < 0 ? -1 : 1;
+    if (!history_selection_presented()) return -1;
+    if (!history_presented_switchable()) return history_presented_variant() < 0 ? -1 : 1;
     return (int32_t)gtk_drop_down_get_selected(dashboard_page()->version);
 }
 
@@ -168,9 +165,8 @@ static void playback_free(gpointer pointer) {
 
 static void playback_apply(gpointer pointer) {
     Playback *playback = pointer;
-    if (g_strcmp0(playback->id, history_page()->selected_id) != 0) return;
-    history_page()->playback_state = playback->state;
-    gtk_label_set_text(history_page()->playback_label, playback->text != NULL ? playback->text : "");
+    if (!history_is_selected(playback->id)) return;
+    history_show_playback(playback->id, playback->state, playback->text);
     refresh_actions();
 }
 

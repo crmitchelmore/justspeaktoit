@@ -1,6 +1,5 @@
 /* General > Recordings and backup: folder choice, migration backup, audio cleanup, export and import. */
 #include "LinuxWindowInternal.h"
-#include "LinuxWindowHistoryPage.h"
 #include "LinuxWindowStoragePage.h"
 
 static StoragePage storage_state;
@@ -176,40 +175,6 @@ GtkWidget *audio_cleanup_dialog(const char *token, size_t count) {
     adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
     g_signal_connect(dialog, "response", G_CALLBACK(audio_cleanup_response), NULL);
     return dialog;
-}
-
-static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) {
-    gint32 variant = GPOINTER_TO_INT(data);
-    GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, NULL);
-    if (file != NULL) {
-        gchar *path = g_file_get_path(file);
-        if (path != NULL) emit(JSTI_EVENT_EXPORT_HISTORY, path, variant);
-        g_free(path);
-        g_object_unref(file);
-    }
-    g_clear_pointer(&history_page()->export_text, g_free);
-}
-
-void on_issue_report(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    if (ui.state == JSTI_STATE_IDLE && history_page()->selected_id != NULL &&
-        g_strcmp0(history_page()->presented_id, history_page()->selected_id) == 0)
-        emit(JSTI_EVENT_HISTORY_ISSUE_REPORT, history_page()->selected_id, 0);
-}
-
-void on_export(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    if (history_page()->selected_id == NULL || history_page()->export_text != NULL) return;
-    /* Capture the displayed text and version at the click, before the dialog. */
-    history_page()->export_text = displayed_transcript();
-    GtkFileDialog *dialog = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(dialog, "Export transcript");
-    gchar *name = g_strdup_printf("Transcript-%s.txt", history_page()->selected_id);
-    gtk_file_dialog_set_initial_name(dialog, name);
-    g_free(name);
-    gtk_file_dialog_save(dialog, ui.window, NULL, export_chosen,
-                         GINT_TO_POINTER(history_page()->presented_switchable ? history_page()->presented_variant : 1));
-    g_object_unref(dialog);
 }
 
 static void import_chosen(GObject *source, GAsyncResult *result, gpointer data) {

@@ -14,11 +14,6 @@ JSTIAtspiSelection *capture_selection(Session *s, SelectionAdmission *admission)
     }
     return lease;
 }
-JSTIAtspiSelection *jsti_atspi_selection_capture(void) {
-    g_mutex_lock(&state_lock);
-    JSTIAtspiSelection *lease = capture_selection(selection_current, &selection_admission);
-    g_mutex_unlock(&state_lock); return lease;
-}
 static void selection_unref(JSTIAtspiSelection *lease) {
     if (lease == NULL || !g_atomic_int_dec_and_test(&lease->refs)) return;
     SelectionAdmission *admission = lease->admission;
@@ -176,9 +171,9 @@ static gint submit(JSTIAtspiTarget *t, gint kind, const char *input, char *out, 
     JSTIAtspiSelection *selection) {
     if (t == NULL || !request_allowed(t->session->purpose, kind)
         || (kind == 3 && (selection == NULL || selection->target != t))) return 0;
-    g_mutex_lock(&state_lock);
+    atspi_lock();
     if (g_atomic_int_get(&t->cancelled) || g_atomic_int_get(&t->session->stopped)) {
-        g_mutex_unlock(&state_lock);
+        atspi_unlock();
         return kind == 0 && g_atomic_int_get(&t->dispatched) ? -1 : 0;
     }
     Request *r = g_new0(Request, 1);
@@ -191,7 +186,7 @@ static gint submit(JSTIAtspiTarget *t, gint kind, const char *input, char *out, 
     GSource *source = g_idle_source_new();
     g_source_set_callback(source, execute, r, request_free);
     g_source_attach(source, t->session->context); g_source_unref(source);
-    g_mutex_unlock(&state_lock);
+    atspi_unlock();
     g_mutex_lock(&r->lock);
     const gint64 until = g_get_monotonic_time() + BUDGET_US + 500000;
     while (!r->done && g_cond_wait_until(&r->changed, &r->lock, until)) {}
@@ -215,12 +210,12 @@ static gboolean cancel_lease(gpointer data) {
 void jsti_atspi_cancel(JSTIAtspiTarget *t) {
     if (t == NULL) return;
     invalidate(t);
-    g_mutex_lock(&state_lock);
-    if (g_atomic_int_get(&t->session->stopped)) { g_mutex_unlock(&state_lock); return; }
+    atspi_lock();
+    if (g_atomic_int_get(&t->session->stopped)) { atspi_unlock(); return; }
     GSource *source = g_idle_source_new();
     g_source_set_callback(source, cancel_lease, target_ref(t), target_destroy);
     g_source_attach(source, t->session->context); g_source_unref(source);
-    g_mutex_unlock(&state_lock);
+    atspi_unlock();
 }
 int32_t jsti_atspi_insert(JSTIAtspiTarget *t, const char *text) { return submit(t, 0, text, NULL, 0, NULL); }
 int32_t jsti_atspi_begin(JSTIAtspiTarget *t, const char *text) { return submit(t, 1, text, NULL, 0, NULL); }

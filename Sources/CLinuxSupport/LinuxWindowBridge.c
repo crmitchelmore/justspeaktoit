@@ -26,10 +26,7 @@ void insights_apply(gpointer pointer) {
     gtk_label_set_text(dashboard_page()->insight_time, insights->all[2]);
     gtk_label_set_text(dashboard_page()->insight_average, insights->all[3]);
     gtk_label_set_text(dashboard_page()->insight_spend, insights->all[4]);
-    gtk_label_set_text(history_page()->history_sessions, insights->visible[0]);
-    gtk_label_set_text(history_page()->history_errors, insights->visible[1]);
-    gtk_label_set_text(history_page()->history_average, insights->visible[3]);
-    gtk_label_set_text(history_page()->history_spend, insights->visible[4]);
+    history_show_insights(insights->visible[0], insights->visible[1], insights->visible[3], insights->visible[4]);
     /* The status notifier's menu shows the dashboard's totals, as the Mac's menu bar extra does. */
     g_free(ui.tray_summary);
     ui.tray_summary = g_strcmp0(insights->all[0], "0") == 0

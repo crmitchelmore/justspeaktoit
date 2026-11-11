@@ -24,16 +24,16 @@ static gboolean fixture_fence_ready(gpointer data) {
 }
 int32_t jsti_atspi_selection_fixture_idle(void) {
     if (g_strcmp0(g_getenv("JSTI_ATSPI_SELECTION_FIXTURE"), "1") != 0) return 0;
-    g_mutex_lock(&state_lock);
-    Session *s = selection_current;
-    if (s == NULL || g_atomic_int_get(&s->stopped)) { g_mutex_unlock(&state_lock); return 0; }
+    atspi_lock();
+    Session *s = selection_session_locked();
+    if (s == NULL || g_atomic_int_get(&s->stopped)) { atspi_unlock(); return 0; }
     FixtureFence *f = g_new0(FixtureFence, 1);
     f->refs = 2; f->session = session_ref(s); g_mutex_init(&f->lock); g_cond_init(&f->changed);
     GSource *source = g_timeout_source_new(1);
     g_source_set_priority(source, G_PRIORITY_LOW);
     g_source_set_callback(source, fixture_fence_ready, f, fixture_fence_free);
     g_source_attach(source, s->context);
-    g_mutex_unlock(&state_lock);
+    atspi_unlock();
     g_mutex_lock(&f->lock);
     const gint64 deadline = g_get_monotonic_time() + BUDGET_US + 500000;
     while (!f->done && g_cond_wait_until(&f->changed, &f->lock, deadline)) {}
@@ -100,6 +100,11 @@ int32_t jsti_atspi_selection_contract_self_test(void) {
     JSTIAtspiTarget t = {0}; t.session = &s; t.epoch = 7; t.focus = 8; t.owner = ":1.99"; t.path = "/fixture";
     object_event(NULL, t.owner, t.path, OBJECT_EVENT, "TextSelectionChanged", NULL, &t);
     ok &= !current_target(&t);
+    /* The published selection session lives in LinuxAtspi.c: without one, nothing is captured. */
+    atspi_lock();
+    gboolean published = selection_session_locked() != NULL;
+    atspi_unlock();
+    ok &= published || jsti_atspi_selection_capture() == NULL;
     return ok && selection_range_valid(1, 0, LIMIT, LIMIT)
         && selection_range_valid(1, 100000, 100010, 200000)
         && !selection_range_valid(0, 0, 1, 1) && !selection_range_valid(2, 0, 1, 1)

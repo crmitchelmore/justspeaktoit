@@ -117,7 +117,7 @@ void update_apply(gpointer pointer) {
         cleanup_preview.visible = FALSE;
         set_transcript(update->transcript);
         /* Global text is not bound to a record. */
-        g_clear_pointer(&history_page()->presented_id, g_free);
+        history_forget_presentation();
     }
     if (update->state >= 0) ui.state = update->state;
     refresh_actions();
@@ -133,7 +133,7 @@ void cleanup_preview_apply(gpointer pointer) {
         set_transcript(cleanup_preview.text);
         cleanup_preview.visible = TRUE;
         gtk_label_set_text(dashboard_page()->status, "Streaming cleanup preview. The original is saved in History.");
-        g_clear_pointer(&history_page()->presented_id, g_free);
+        history_forget_presentation();
         gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->copy), FALSE);
         gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), FALSE);
     }

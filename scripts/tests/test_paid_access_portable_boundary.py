@@ -18,9 +18,9 @@ DOMAIN = [
     'PaidAccess/PaidAccessSessionLifecycle.swift',
 ]
 ADAPTERS = [
-    'PaidAccess/PaidAccessHTTPClient.swift',
-    'PaidAccess/PaidAudioPayload.swift',
-    'PaidAccess/PaidStoreKitSync.swift',
+    'PaidAccess/Apple/PaidAccessHTTPClient.swift',
+    'PaidAccess/Apple/PaidAudioPayload.swift',
+    'PaidAccess/Apple/PaidStoreKitSync.swift',
 ]
 
 
@@ -46,33 +46,53 @@ class PaidPortableBoundaryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('Portable boundary:', result.stdout)
 
-    def test_excluding_each_shared_paid_contract_is_rejected(self):
-        marker = 'let appleCoreSources: [String] = [\n'
-        self.assertEqual(self.manifest.count(marker), 1)
+    def moved(self, path, destination):
+        """Moves one copied source for the duration of a check."""
+        source = self.root / 'Sources' / 'SpeakCore' / path
+        target = self.root / 'Sources' / 'SpeakCore' / destination
+        source.rename(target)
+        self.addCleanup(target.rename, source)
+        return Path(destination).as_posix()
+
+    def test_moving_each_shared_paid_contract_into_the_apple_folder_is_rejected(self):
         for path in DOMAIN:
             with self.subTest(path=path):
-                result = self.verify(self.manifest.replace(marker, marker + f'    "{path}",\n'))
+                self.moved(path, 'PaidAccess/Apple/' + Path(path).name)
+                result = self.verify(self.manifest)
+                self.doCleanups()
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('Canonical domain sources excluded from portable builds: ' + path, result.stderr)
 
-    def test_admitting_each_apple_paid_adapter_is_rejected(self):
+    def test_moving_each_apple_paid_adapter_out_of_the_apple_folder_is_rejected(self):
         for path in ADAPTERS:
             with self.subTest(path=path):
-                line = f'    "{path}",\n'
-                self.assertEqual(self.manifest.count(line), 1)
-                result = self.verify(self.manifest.replace(line, ''))
+                admitted = self.moved(path, 'PaidAccess/' + Path(path).name)
+                result = self.verify(self.manifest)
+                self.doCleanups()
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn('Apple paid adapters admitted to portable builds: ' + path, result.stderr)
+                self.assertIn('Apple paid adapters admitted to portable builds: ' + admitted, result.stderr)
 
-    def test_folder_entries_exclude_whole_folders_and_reject_stale_or_redundant_entries(self):
+    def test_entries_name_existing_unnested_folders_only(self):
         marker = 'let appleCoreSources: [String] = [\n'
-        result = self.verify(self.manifest.replace(marker, marker + '    "NoSuchFolder",\n'))
+        self.assertEqual(self.manifest.count(marker), 1)
+        cases = {
+            'NoSuchFolder': 'Invalid or stale Apple source exclusion: NoSuchFolder',
+            'AppleUI/SkeletonLoadingViews.swift':
+                'Apple source exclusion AppleUI/SkeletonLoadingViews.swift must name an Apple-only folder, not a file',
+            'PaidAccess': 'Apple source exclusion PaidAccess/Apple is already covered by the PaidAccess folder',
+        }
+        for entry, message in cases.items():
+            with self.subTest(entry=entry):
+                result = self.verify(self.manifest.replace(marker, marker + f'    "{entry}",\n'))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+
+    def test_sync_entries_are_checked_like_core_entries(self):
+        marker = 'let appleSyncSources: [String] = [\n'
+        self.assertEqual(self.manifest.count(marker), 1)
+        result = self.verify(self.manifest.replace(marker, marker + '    "CloudKitWebKeySync.swift",\n'))
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('Invalid or stale Apple source exclusion: NoSuchFolder', result.stderr)
-        redundant = marker + '    "AppleUI/SkeletonLoadingViews.swift",\n'
-        result = self.verify(self.manifest.replace(marker, redundant))
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('already covered by the AppleUI folder', result.stderr)
+        self.assertIn('Apple source exclusion CloudKitWebKeySync.swift must name an Apple-only folder', result.stderr)
 
     def test_swiftui_view_outside_apple_ui_folder_is_rejected(self):
         stray = self.root / 'Sources' / 'SpeakCore' / 'App' / 'StrayView.swift'

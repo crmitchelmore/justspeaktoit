@@ -43,7 +43,7 @@ def program(platform, path, purchase, flag, mutation=None):
     feature = '@MainActor ' + feature.replace(f'static let {flag}', f'static var {flag}')
     models = (ROOT / 'Sources/SpeakCore/PaidAccess/PaidAccessClient.swift').read_text()
     lifecycle = (ROOT / 'Sources/SpeakCore/PaidAccess/PaidAccessSessionLifecycle.swift').read_text()
-    sync = (ROOT / 'Sources/SpeakCore/PaidAccess/PaidStoreKitSync.swift').read_text()
+    sync = (ROOT / 'Sources/SpeakCore/PaidAccess/Apple/PaidStoreKitSync.swift').read_text()
     actual = '\n'.join([feature, block(models, 'public struct PaidAccessSession:'),
                         block(models, 'public protocol PaidAccessSessionStoring:'), lifecycle,
                         'enum PaidStoreKitSync {' + block(sync, 'static func entitlement(') + '}'])

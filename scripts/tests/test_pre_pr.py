@@ -66,7 +66,7 @@ class PlanTests(unittest.TestCase):
 
     def test_public_library_change_runs_the_api_compatibility_job(self):
         with mock.patch.object(pre_pr, 'IS_MAC', True), mock.patch.object(pre_pr, 'pr_title_env', lambda: {}):
-            checks, areas = pre_pr.plan(['Sources/SpeakCore/OpenRouter/OpenRouterAPIClient.swift'], False)
+            checks, areas = pre_pr.plan(['Sources/SpeakCore/OpenRouter/Apple/OpenRouterAPIClient.swift'], False)
             api = {c.id: c for c in checks}['api-compatibility']
             self.assertEqual(api.command[:2], ['bash', 'scripts/ci-api-compatibility.sh'])
             self.assertEqual(api.command[2], pre_pr.merge_base_or('origin/main'))
@@ -88,7 +88,7 @@ class PlanTests(unittest.TestCase):
         self.assertNotIn('apple-build', selected)
 
     def test_swift_change_runs_every_ci_gate_job_with_linux_first(self):
-        selected, areas, checks = ids(['Sources/SpeakCore/Credentials/SecureStorage.swift'])
+        selected, areas, checks = ids(['Sources/SpeakCore/Credentials/Apple/SecureStorage.swift'])
         self.assertEqual(set(areas), {'ci-lint', 'swift', 'public-api'})
         self.assertEqual(selected[0], 'portable-linux')
         self.assertTrue(checks[0].background)
@@ -313,7 +313,7 @@ class SelectionTests(unittest.TestCase):
 
     def test_unreadable_graph_fails_closed(self):
         with mock.patch.object(pre_pr, 'IS_MAC', True), mock.patch.object(pre_pr, 'load_graph', lambda _: None):
-            checks, _ = pre_pr.plan(['Sources/SpeakCore/Credentials/SecureStorage.swift'], False)
+            checks, _ = pre_pr.plan(['Sources/SpeakCore/Credentials/Apple/SecureStorage.swift'], False)
         self.assertTrue({c.id: c for c in checks}['apple-unit-tests'].failure)
 
 

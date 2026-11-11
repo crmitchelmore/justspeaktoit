@@ -112,8 +112,8 @@ once in `SpeakWatchCore`; those package dependencies are module arrows, while th
 
 [Package.swift](../Package.swift) switches to a portable graph on Windows and Linux, and on macOS when
 `SPEAK_PORTABLE_CORE=1` or `SPEAK_WINDOWS_TARGET=1` is set. It compiles the canonical `SpeakCore` sources without
-Apple-only packages; an Apple adapter must be listed in `appleCoreSources` to be left out, so new domain files reach
-every platform. `scripts/verify-portable-core-boundary.py` checks that boundary.
+Apple-only packages; an Apple adapter must live in a folder listed in `appleCoreSources` to be left out, so new
+domain files reach every platform. `scripts/verify-portable-core-boundary.py` checks that boundary.
 Paid-access models, routing, session lifecycle and client/storage protocols remain shared.
 Only its CryptoKit HTTP adapter, AVFoundation WAV converter and StoreKit adapter are
 excluded; the Keychain implementation inside the client contract file is guarded by
@@ -160,11 +160,11 @@ Linux in [linux-development.md](linux-development.md).
 | Concern | Current owner |
 | --- | --- |
 | Model catalogue and placement | [ModelCatalog.swift](../Sources/SpeakCore/ModelCatalog.swift), [ModelRouting.swift](../Sources/SpeakCore/Transcription/ModelRouting.swift) and provider-specific shared catalogues. |
-| Live routes and client construction | [LiveTranscriptionSelection.swift](../Sources/SpeakCore/Live/LiveTranscriptionSelection.swift) and [LiveTranscriptionClientFactory.swift](../Sources/SpeakCore/Live/LiveTranscriptionClientFactory.swift). |
+| Live routes and client construction | [LiveTranscriptionSelection.swift](../Sources/SpeakCore/Live/LiveTranscriptionSelection.swift) and [LiveTranscriptionClientFactory.swift](../Sources/SpeakCore/Live/Apple/LiveTranscriptionClientFactory.swift). |
 | Batch-provider contract and metadata | [TranscriptionProviderRegistry.swift](../Sources/SpeakCore/Transcription/TranscriptionProviderRegistry.swift) defines `TranscriptionProvider` and metadata. The concrete macOS actor is a different file with the same name under [SpeakApp](../Sources/SpeakApp/Transcription/TranscriptionProviderRegistry.swift). |
 | Capture start and opening audio | [RecordingStartSequence.swift](../Sources/SpeakCore/Recording/RecordingStartSequence.swift) contains `RecordingStartSequencer`; [StreamingAudioPreroll.swift](../Sources/SpeakCore/Live/StreamingAudioPreroll.swift) retains ordered opening buffers. |
-| Language, results, keychain and privacy-safe types | `SpeakCore`, including [SecureStorage.swift](../Sources/SpeakCore/Credentials/SecureStorage.swift), [SensitiveHeaderRedactor.swift](../Sources/SpeakCore/History/SensitiveHeaderRedactor.swift) and closed analytics dimensions. |
-| Lexicon | [PersonalLexiconService.swift](../Sources/SpeakCore/Vocabulary/PersonalLexiconService.swift) and `PersonalLexiconStore`. |
+| Language, results, keychain and privacy-safe types | `SpeakCore`, including [SecureStorage.swift](../Sources/SpeakCore/Credentials/Apple/SecureStorage.swift), [SensitiveHeaderRedactor.swift](../Sources/SpeakCore/History/SensitiveHeaderRedactor.swift) and closed analytics dimensions. |
+| Lexicon | [PersonalLexiconService.swift](../Sources/SpeakCore/Vocabulary/Apple/PersonalLexiconService.swift) and `PersonalLexiconStore`. |
 | Extension protocols and stores | Keyboard handoff/delivery, App Group availability, shared recording inbox, Watch capture and complication files in [SpeakCore](../Sources/SpeakCore/). |
 | History presentation | [HistoryPresentation.swift](../Sources/SpeakCore/History/HistoryPresentation.swift) supplies shared display rules; each platform owns its richer persisted record. |
 | Release identities | [ReleaseTrains.json](../Sources/SpeakCore/Resources/ReleaseTrains.json) is canonical; generated Swift exposes the selected train. |
@@ -193,9 +193,23 @@ cross-cutting utilities stay at the top level.
 | `ModelComparison/`, `PaidAccess/`, `SettingsSearch/`, `SpeechInsights/`, `Resources/` | Existing feature folders and bundled resources. |
 | `AppleUI/` | Apple-only SwiftUI views shared by the macOS and iOS apps (skeletons, release notes, credential status, provider fields, balances, OpenRouter audio browser). |
 
-`appleCoreSources` in `Package.swift` lists Apple-only files by their path relative to `Sources/SpeakCore`, or a
-whole Apple-only folder by its name. SwiftUI views live in `AppleUI/` (excluded as a folder), so a new view never edits
-the manifest; `scripts/verify-portable-core-boundary.py` rejects a view declared anywhere else.
+`appleCoreSources` in `Package.swift` lists Apple-only folders only, relative to `Sources/SpeakCore`. Each feature
+keeps its Apple adapters in an `Apple/` subfolder (for example `Keyboard/Apple/`, `Credentials/Apple/`); SwiftUI views
+live in `AppleUI/`, Apple Speech in `AppleSpeech/`, the Apple-only root helpers in `AppleSupport/`, and `SpeechInsights/`
+is Apple-only as a whole. Adding an adapter or a portable file therefore never edits the manifest.
+`scripts/verify-portable-core-boundary.py` rejects a file entry, a stale or nested folder entry, and a SwiftUI view
+declared outside `AppleUI/`. `SpeakSync` follows the same rule: its native CloudKit adapters live in
+`Sources/SpeakSync/AppleCloudKit/` (tests in `Tests/SpeakSyncTests/AppleCloudKit/`), listed as one folder in
+`appleSyncSources` and `appleSyncTestSources`.
+
+### Portable desktop source layout
+
+`Sources/SpeakDesktop` and `Sources/SpeakDesktopHost` are grouped by feature in the same way, so a reader can find one
+capability's files together. SpeakDesktop has `Capture/`, `Comparison/`, `Files/`, `History/`, `LocalModels/`,
+`Migration/`, `Native/`, `Output/`, `Profiles/`, `Recording/`, `Shell/` (settings queue, shortcuts, login item),
+`Transcription/`, `Vocabulary/` and `Voice/`. SpeakDesktopHost has `Controller/` (the host actor, its platform protocol,
+effects, state and shutdown), `Automation/`, `Comparison/`, `Credentials/`, `History/`, `LocalModels/`, `Migration/`,
+`Native/`, `Output/`, `ReadAloud/`, `Recording/`, `Settings/`, `Transcription/` and `Voice/`.
 
 ## macOS runtime
 
@@ -385,7 +399,7 @@ local storage implementations.
 
 CloudKit history sync projects both records onto exactly nine `SyncableHistoryEntry` fields: `id`, `createdAt`,
 `rawTranscription`, `postProcessedText`, `model`, `duration`, `wordCount`, `originPlatform` and `updatedAt`.
-[SyncRecord.swift](../Sources/SpeakSync/SyncRecord.swift) maps that projection. Local diagnostics, error details, costs,
+[SyncRecord.swift](../Sources/SpeakSync/AppleCloudKit/SyncRecord.swift) maps that projection. Local diagnostics, error details, costs,
 model-usage arrays and audio/file references do not join that projection automatically.
 
 `ProviderCredentialCatalogue` owns persisted API-key identity mapping, including Azure's historical

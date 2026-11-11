@@ -11,29 +11,36 @@ import sys
 
 root = Path(__file__).resolve().parents[1]
 manifest = (root / "Package.swift").read_text(encoding="utf-8")
-match = re.search(r"let appleCoreSources: \[String\] = \[(.*?)\n\]", manifest, re.S)
-if not match:
-    sys.exit("Missing explicit appleCoreSources platform boundary")
-entries = re.findall(r'"([^"\n]+)"', match.group(1))
-if len(entries) != len(set(entries)):
-    sys.exit("Duplicate Apple source exclusion")
+
+
+def apple_folders(list_name, source_root):
+    """The Swift files under one manifest list of Apple-only folders.
+
+    Entries name whole folders, never single files, so adding an adapter or a
+    portable file next to one never edits the manifest.
+    """
+    match = re.search(rf"let {list_name}: \[String\] = \[(.*?)\n\]", manifest, re.S)
+    if not match:
+        sys.exit(f"Missing explicit {list_name} platform boundary")
+    entries = re.findall(r'"([^"\n]+)"', match.group(1))
+    if len(entries) != len(set(entries)):
+        sys.exit(f"Duplicate entry in {list_name}")
+    for name in entries:
+        relative = Path(name)
+        target = source_root / relative
+        if relative.is_absolute() or ".." in relative.parts or not target.is_dir() or not any(target.rglob("*.swift")):
+            if name.endswith(".swift") and target.is_file():
+                sys.exit(f"Apple source exclusion {name} must name an Apple-only folder, not a file")
+            sys.exit(f"Invalid or stale Apple source exclusion: {name}")
+    for name in entries:
+        if folder := next((f for f in entries if f != name and Path(name).is_relative_to(f)), None):
+            sys.exit(f"Apple source exclusion {name} is already covered by the {folder} folder")
+    excluded = {path.relative_to(source_root).as_posix() for name in entries for path in (source_root / name).rglob("*.swift")}
+    return entries, excluded
+
+
 source_root = root / "Sources" / "SpeakCore"
-# An entry is either one Apple adapter file or a whole Apple-only folder.
-excluded_files = [name for name in entries if name.endswith(".swift")]
-excluded_folders = [name for name in entries if not name.endswith(".swift")]
-for name in entries:
-    relative = Path(name)
-    target = source_root / relative
-    exists = target.is_file() if name.endswith(".swift") else target.is_dir() and any(target.rglob("*.swift"))
-    if relative.is_absolute() or ".." in relative.parts or not exists:
-        sys.exit(f"Invalid or stale Apple source exclusion: {name}")
-for name in excluded_files:
-    if folder := next((f for f in excluded_folders if Path(name).is_relative_to(f)), None):
-        sys.exit(f"Apple source exclusion {name} is already covered by the {folder} folder")
-excluded = excluded_files + [
-    path.relative_to(source_root).as_posix()
-    for folder in excluded_folders for path in (source_root / folder).rglob("*.swift")
-]
+excluded_folders, excluded = apple_folders("appleCoreSources", source_root)
 portable = manifest.split("let portablePackage = Package(", 1)[1].split(
     "let package = portableCoreBuild", 1
 )[0]
@@ -60,27 +67,20 @@ for path in sorted(source_root.rglob("*.swift")):
 # Paid domain/session contracts stay shared; only the existing Apple I/O
 # adapters are excluded. Keychain storage inside the shared client file is
 # guarded by SPEAK_PORTABLE_CORE, also for portable builds on a macOS host.
-paid_apple_adapters = {"PaidAccess/PaidAccessHTTPClient.swift", "PaidAccess/PaidAudioPayload.swift",
-                       "PaidAccess/PaidStoreKitSync.swift"}
-if admitted := paid_apple_adapters & included:
+paid_apple_adapters = {"PaidAccessHTTPClient.swift", "PaidAudioPayload.swift", "PaidStoreKitSync.swift"}
+if admitted := {path for path in included if Path(path).name in paid_apple_adapters}:
     sys.exit("Apple paid adapters admitted to portable builds: " + ", ".join(sorted(admitted)))
 
 # SpeakSync follows the same rule: portable by default, with only the native
-# CloudKit adapters excluded by name.
-sync_match = re.search(r"let appleSyncSources: \[String\] = \[(.*?)\n\]", manifest, re.S)
-if not sync_match or "exclude: appleSyncSources" not in portable:
+# CloudKit adapters excluded by folder.
+if "exclude: appleSyncSources" not in portable:
     sys.exit("Missing explicit appleSyncSources platform boundary")
-sync_excluded = re.findall(r'"([^"\n]+\.swift)"', sync_match.group(1))
 sync_root = root / "Sources" / "SpeakSync"
-if len(sync_excluded) != len(set(sync_excluded)):
-    sys.exit("Duplicate Apple sync source exclusion")
-for name in sync_excluded:
-    if not (sync_root / name).is_file():
-        sys.exit(f"Invalid or stale Apple sync source exclusion: {name}")
+_, sync_excluded = apple_folders("appleSyncSources", sync_root)
 sync_sources = {path.relative_to(sync_root).as_posix() for path in sync_root.rglob("*.swift")}
 sync_required = {"SyncSchema.swift", "SyncRecordCodecs.swift", "HistorySyncCoordinator.swift",
                  "CloudKitWebSyncTransports.swift", "CloudKitWebKeySync.swift"}
-if missing := sync_required - (sync_sources - set(sync_excluded)):
+if missing := sync_required - (sync_sources - sync_excluded):
     sys.exit("Shared sync sources excluded from portable builds: " + ", ".join(sorted(missing)))
 
 # The shared desktop layers stay free of any one host's native modules, so the
@@ -93,5 +93,5 @@ for shared in ("SpeakDesktop", "SpeakDesktopHost"):
         if leaked := imports & native_modules:
             sys.exit(f"{path.relative_to(root)} imports host-native modules: {', '.join(sorted(leaked))}")
 print(f"Portable boundary: {len(included)} shared Swift sources, {len(excluded)} Apple-only "
-      f"({len(excluded_files)} files, {len(excluded_folders)} folders); "
+      f"in {len(excluded_folders)} folders; "
       f"sync: {len(sync_sources) - len(sync_excluded)} shared, {len(sync_excluded)} Apple-only")

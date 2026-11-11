@@ -303,7 +303,7 @@ and Record; the status line sits at the bottom of every page.
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows shows the same figures.
-- Colours are the brand tokens in `SpeakCore/App/BrandColors.swift`; everything else
+- Colours are the brand tokens in `SpeakCore/App/Apple/BrandColors.swift`; everything else
   follows libadwaita, so the window honours the desktop's light or dark style.
   **General › Appearance** overrides it (Follow the system, Light, Dark), saved
   as `appearance` in `settings.json` and shared with Windows.

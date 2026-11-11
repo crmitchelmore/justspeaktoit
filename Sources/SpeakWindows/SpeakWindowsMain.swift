@@ -6,7 +6,7 @@ import SpeakDesktop
 import SpeakDesktopHost
 import SpeakWindowsPlatform
 
-final class WindowsEventContext {
+final class WindowsEventContext: DesktopNativeEventHolder {
     let controller: WindowsAppController
     let smokeTest: Bool
     fileprivate let issueReportTasks = WindowsIssueReportTasks()
@@ -39,22 +39,7 @@ final class WindowsEventContext {
         self.copies = DesktopTranscriptCopyDispatcher { text, variant in
             await controller.copyTranscript(text, variant: variant)
         }
-        self.historyEvents = DesktopEventDispatcher(coalescing: DesktopHistoryEvent.coalesce) { event in
-            switch event {
-            case .selection(let identifier): await controller.selectHistory(identifier)
-            case .version(let identifier, let variant):
-                await controller.selectTranscriptVariant(variant, identifier: identifier)
-            case .playPause(let identifier): await controller.playbackToggle(identifier)
-            case .stop: await controller.playbackStop()
-            case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
-            case .filter(let payload): await controller.applyHistoryFilters(payload)
-            case .voiceRead, .voiceExport, .voiceImport, .voiceImportCancel,
-                 .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport:
-                await controller.performVoiceEvent(event) {
-                    WindowsNative.voiceTextImported($1, requestID: $0)
-                }
-            }
-        }
+        self.historyEvents = Self.makeHistoryEvents(controller)
         callbacks = NativeCallbackContext(self)
     }
 

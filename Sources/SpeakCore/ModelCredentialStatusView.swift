@@ -1,23 +1,34 @@
-#if os(iOS)
-import SpeakCore
 import SwiftUI
 
-struct IOSModelCredentialStatusView: View {
+/// Compact key-readiness indicator shown next to a model or voice choice on
+/// macOS and iOS. Apple-only: classified in Package.swift `appleCoreSources`.
+public struct ModelCredentialStatusView: View {
     let availability: ModelCredentialAvailability
-    var showsText = false
+    var showsText: Bool
 
-    var body: some View {
-        Group {
-            if showsText {
-                Label(label, systemImage: systemImage)
-            } else {
-                Image(systemName: systemImage)
-            }
+    public init(availability: ModelCredentialAvailability, showsText: Bool = false) {
+        self.availability = availability
+        self.showsText = showsText
+    }
+
+    public var body: some View {
+        content
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityIdentifier(accessibilityIdentifier)
+            #if os(macOS)
+            .help(accessibilityLabel)
+            #endif
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if showsText {
+            Label(label, systemImage: systemImage)
+        } else {
+            Image(systemName: systemImage)
         }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(tint)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     private var label: String {
@@ -75,4 +86,3 @@ struct IOSModelCredentialStatusView: View {
         }
     }
 }
-#endif

@@ -166,7 +166,7 @@ public struct HistoryView: View {
             }
             Section {
                 ForEach(0..<5, id: \.self) { _ in
-                    iOSHistoryItemSkeleton()
+                    HistoryItemSkeleton()
                 }
             }
         }

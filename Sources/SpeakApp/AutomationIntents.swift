@@ -269,15 +269,11 @@ struct GetLastTranscriptionIntent: AppIntent {
     if environment.history.items.isEmpty {
       await environment.history.loadFromDisk()
     }
-    let text = environment.history.items.lazy
-      .compactMap { item in
-        AutomationIntentSupport.bestTranscript(
-          raw: item.rawTranscription,
-          polished: item.postProcessedTranscription
-        )
-      }
-      .first
-    guard let text else {
+    guard let text = AutomationIntentSupport.mostRecentTranscript(
+      in: environment.history.items,
+      raw: \.rawTranscription,
+      polished: \.postProcessedTranscription
+    ) else {
       throw AutomationIntentError.noTranscriptionYet
     }
     return .result(value: text)
@@ -321,10 +317,10 @@ struct PolishTextIntent: AppIntent {
       userMessage: request.userMessage,
       usesCustomPrompt: request.isCustomPrompt
     )
-    guard !polished.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    guard let output = AutomationIntentSupport.nonBlankPolishOutput(polished) else {
       throw AutomationIntentError.noPolishOutput
     }
-    return .result(value: polished)
+    return .result(value: output)
   }
 }
 

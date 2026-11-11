@@ -46,7 +46,7 @@ struct PostProcessingModelPickerRows: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    IOSModelCredentialStatusView(
+                    ModelCredentialStatusView(
                         availability: ModelCredentialResolver.availability(
                             for: groups.openRouter[0].id,
                             purpose: .postProcessing,
@@ -129,7 +129,7 @@ private struct PostProcessingModelRow: View {
 
                 Spacer()
 
-                IOSModelCredentialStatusView(
+                ModelCredentialStatusView(
                     availability: ModelCredentialResolver.availability(
                         for: model.id,
                         purpose: .postProcessing,

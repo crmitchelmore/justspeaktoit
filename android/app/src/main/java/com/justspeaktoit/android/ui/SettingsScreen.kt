@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -70,6 +71,9 @@ import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.dictation.DictationUiState
+import com.justspeaktoit.android.resources.SystemResourceHold
+import com.justspeaktoit.android.resources.SystemResourceRegistry
+import com.justspeaktoit.android.resources.SystemResourceSummary
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
 import com.justspeaktoit.android.settings.SettingsSearchEntry
 import com.justspeaktoit.android.settings.SettingsSearchIndex
@@ -83,6 +87,8 @@ class SettingsActions(
     val onChooseModel: (CloudModel) -> Unit,
     val onCleanupChanged: (Boolean) -> Unit,
     val onKeepAudioOnCancelChanged: (Boolean) -> Unit,
+    val onReleaseResource: (String) -> Unit = {},
+    val onReleaseEverything: () -> Unit = {},
 )
 
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
@@ -234,6 +240,10 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
             Text(stringResource(R.string.settings_keep_audio_note), style = MaterialTheme.typography.bodyMedium)
 
             HorizontalDivider()
+            SectionTitle(R.string.settings_resources_title, anchor("android.resourcesInUse"))
+            ResourcesInUse(state.resourcesInUse, actions)
+
+            HorizontalDivider()
             SectionTitle(R.string.settings_keys_title, anchor("android.apiKeys"))
             Text(stringResource(R.string.settings_keys_note), style = MaterialTheme.typography.bodyMedium)
             if (state.keyStoreError) {
@@ -271,6 +281,68 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
             }
         }
     }
+}
+
+/** Mirrors the desktop Status card: each hold with why and since when, and a way to release it. */
+@Composable
+private fun ResourcesInUse(holds: List<SystemResourceHold>, actions: SettingsActions) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(holds.isEmpty()) {
+        while (holds.isNotEmpty()) {
+            now = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    Text(stringResource(R.string.settings_resources_note), style = MaterialTheme.typography.bodyMedium)
+    Text(
+        SystemResourceSummary.headline(holds),
+        style = MaterialTheme.typography.bodyLarge,
+        modifier = Modifier
+            .testTag(AutomationIds.RESOURCES_HEADLINE)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+    )
+    holds.forEach { hold ->
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(hold.title, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "${hold.kind.displayName} · ${SystemResourceSummary.duration(hold.sinceMs, now)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(hold.reason, style = MaterialTheme.typography.bodySmall)
+            }
+            val releaseTitle = hold.releaseTitle
+            if (releaseTitle != null) {
+                val label = if (hold.isReleasing) {
+                    stringResource(R.string.settings_resources_releasing)
+                } else {
+                    releaseTitle
+                }
+                val description = stringResource(R.string.settings_resources_release_label, label, hold.title)
+                TextButton(
+                    onClick = { actions.onReleaseResource(hold.id) },
+                    enabled = !hold.isReleasing,
+                    modifier = Modifier
+                        .testTag(AutomationIds.resourceRelease(hold.kind, hold.owner))
+                        .semantics { contentDescription = description },
+                ) { Text(label) }
+            }
+        }
+    }
+    val canReleaseEverything = holds.any {
+        it.isReleasable && !it.isReleasing && it.kind in SystemResourceRegistry.RELEASE_EVERYTHING_KINDS
+    }
+    Button(
+        onClick = actions.onReleaseEverything,
+        enabled = canReleaseEverything,
+        modifier = Modifier.testTag(AutomationIds.RESOURCES_RELEASE_EVERYTHING),
+    ) { Text(stringResource(R.string.settings_resources_release_everything)) }
+    Text(
+        stringResource(R.string.settings_resources_release_everything_hint),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

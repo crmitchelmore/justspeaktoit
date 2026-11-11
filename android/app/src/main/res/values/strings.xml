@@ -95,6 +95,12 @@
     <string name="settings_cleanup_needs_key">Add an OpenRouter key to use cleanup.</string>
     <string name="settings_keep_audio_title">Keep audio when a recording is cancelled</string>
     <string name="settings_keep_audio_note">Cancelled cloud recordings stay in History so you can transcribe them later.</string>
+    <string name="settings_resources_title">System resources in use</string>
+    <string name="settings_resources_note">What the app holds right now, why, and since when. Release stops it.</string>
+    <string name="settings_resources_releasing">Releasing…</string>
+    <string name="settings_resources_release_label">%1$s: %2$s</string>
+    <string name="settings_resources_release_everything">Release everything</string>
+    <string name="settings_resources_release_everything_hint">Stops recordings, cloud requests and keyboard listening.</string>
     <string name="settings_search_hint">Search settings</string>
     <string name="settings_search_clear">Clear search</string>
     <string name="settings_search_recent">Recent</string>

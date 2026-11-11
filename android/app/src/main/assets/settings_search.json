@@ -54,6 +54,27 @@
       "title" : "Keep audio when a recording is cancelled"
     },
     {
+      "id" : "android.resourcesInUse",
+      "keywords" : [
+        "status",
+        "resources",
+        "microphone in use",
+        "mic stuck",
+        "release",
+        "release everything",
+        "stop recording",
+        "orange dot",
+        "privacy indicator"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+
+      ],
+      "summary" : "See what the app holds now, such as the microphone or a cloud request, and release it.",
+      "title" : "System resources in use"
+    },
+    {
       "id" : "android.apiKeys",
       "keywords" : [
         "credentials",

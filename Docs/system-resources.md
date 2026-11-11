@@ -59,6 +59,22 @@ add a small adapter to the platform monitor instead
   active `IAudioSessionManager2` session owned by this process on any active
   capture endpoint (`jsti_audio_process_capturing`). The same monitor polls it
   every 2 seconds.
+- **Android**: Settings › *System resources in use* (issue #1473). Kotlin
+  can't read the Swift model, so `resources/SystemResources.kt` mirrors the
+  kinds, the release semantics and the summary wording, and
+  `SystemResourceRegistryTest` fails when they drift from SpeakCore. The
+  dictation screen holds the microphone while it captures (and until a Cloud
+  recorder has really stopped), each cloud request holds a provider
+  connection, and the dictation keyboard holds the microphone while it
+  listens. Every one can be released, and Settings stays reachable while
+  dictating so the main screen's holds can be. Releasing a cloud request is
+  a cancel, not a failure: History keeps the entry unchanged, and a
+  dictation's recording is kept in History as cancelled when "Keep audio
+  when a recording is cancelled" is on, or discarded when it is off. There is no unattributed-use auditor
+  yet: `AudioManager.getActiveRecordingConfigurations()` reports only this
+  app's own recordings, and the speech-service recognisers record in another
+  process, so it can't see most sessions. The system privacy indicator covers
+  the rest.
 
 On desktop, Release Everything stops recordings, playback, listening and
 warm-ups. The hotkey keeps working.

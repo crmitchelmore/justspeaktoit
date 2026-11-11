@@ -17,6 +17,8 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.justspeaktoit.android.MainActivity
 import com.justspeaktoit.android.R
 import com.justspeaktoit.android.dictation.AndroidSpeechEngine
@@ -25,6 +27,9 @@ import com.justspeaktoit.android.dictation.DictationReducer
 import com.justspeaktoit.android.dictation.DictationState
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.RecognizerAvailability
+import com.justspeaktoit.android.resources.SystemResourceKind
+import com.justspeaktoit.android.resources.SystemResourceRegistry
+import com.justspeaktoit.android.resources.SystemResourceToken
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.ui.label
 import com.justspeaktoit.android.ui.message
@@ -64,6 +69,7 @@ class DictationKeyboardService : InputMethodService() {
     private var disclosing = false
 
     private var status: TextView? = null
+    private var microphoneHold: SystemResourceToken? = null
     private var mic: ImageButton? = null
 
     override fun onCreate() {
@@ -73,6 +79,8 @@ class DictationKeyboardService : InputMethodService() {
 
     override fun onDestroy() {
         engine.close()
+        microphoneHold?.end()
+        microphoneHold = null
         super.onDestroy()
     }
 
@@ -119,9 +127,24 @@ class DictationKeyboardService : InputMethodService() {
         render()
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            // The IME window is transparent, so without this the app behind shows through the keys.
+            setBackgroundColor(themeColor(android.R.attr.colorBackground, Color.BLACK))
             addView(statusView)
             addView(row)
+            // Android 15 draws the keyboard edge to edge: keep the keys clear of the navigation bar.
+            ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
+                val bottom = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+                view.setPadding(0, 0, 0, bottom)
+                insets
+            }
         }
+    }
+
+    private fun themeColor(attr: Int, fallback: Int): Int {
+        val value = TypedValue()
+        val isColor = theme.resolveAttribute(attr, value, true) &&
+            value.type in TypedValue.TYPE_FIRST_COLOR_INT..TypedValue.TYPE_LAST_COLOR_INT
+        return if (isColor) value.data else fallback
     }
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
@@ -263,7 +286,26 @@ class DictationKeyboardService : InputMethodService() {
             is DictationState.Failed -> removeOwnComposingText()
             else -> Unit
         }
+        reconcileMicrophoneHold()
         render()
+    }
+
+    /** Lists the keyboard's capture in Settings > System resources in use, with a way to stop it. */
+    private fun reconcileMicrophoneHold() {
+        if (!state.holdsMicrophone) {
+            microphoneHold?.end()
+            microphoneHold = null
+            return
+        }
+        if (microphoneHold != null) return
+        microphoneHold = SystemResourceRegistry.shared.acquire(
+            kind = SystemResourceKind.Microphone,
+            title = "Keyboard dictation",
+            reason = "Listening for text to type into the current field",
+            owner = "DictationKeyboardService",
+            releaseTitle = "Stop listening",
+            release = { cancelSession() },
+        )
     }
 
     private fun render() {

@@ -37,8 +37,8 @@ int jsti_window_configure_about(const char *details, const JSTIAboutLink *links,
     }
     std::lock_guard<std::mutex> lock(state.mutex);
     if (state.running) return -1;
-    state.aboutDetails = std::move(information);
-    state.aboutLinks = std::move(copied);
+    state.about.aboutDetails = std::move(information);
+    state.about.aboutLinks = std::move(copied);
     return 0;
 }
 
@@ -90,7 +90,7 @@ void jsti_window_action_command(HWND window, int run, const char *page) {
 int jsti_window_set_automation(int enabled) {
     if (enabled != 0 && enabled != 1) return -1;
     std::lock_guard<std::mutex> lock(state.mutex);
-    state.automationEnabled = enabled == 1;
+    state.general.automationEnabled = enabled == 1;
     if (state.window && !state.posted) state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
     return 0;
 }
@@ -99,9 +99,9 @@ int jsti_window_set_login_item(int value, const char *detail) {
     std::wstring note;
     if (value < jsti::login::off || value > jsti::login::unavailable || !jsti::wide(detail, note)) return -1;
     std::lock_guard<std::mutex> lock(state.mutex);
-    state.loginItem = value;
-    state.loginItemPending = false;
-    state.loginItemDetail.swap(note);
+    state.general.loginItem = value;
+    state.general.loginItemPending = false;
+    state.general.loginItemDetail.swap(note);
     if (state.window && !state.posted) state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
     return 0;
 }
@@ -146,8 +146,8 @@ int jsti_window_update(const char *status, const char *transcript, int recording
         recording < -1 || recording > 2) return -1;
     std::lock_guard<std::mutex> lock(state.mutex);
     if (!state.window) return -1;
-    if (status) { state.status = std::move(wideStatus); state.statusChanged = true; }
-    if (transcript) { state.transcript = std::move(wideTranscript); state.transcriptChanged = true; }
+    if (status) { state.dashboard.status = std::move(wideStatus); state.dashboard.statusChanged = true; }
+    if (transcript) { state.dashboard.transcript = std::move(wideTranscript); state.dashboard.transcriptChanged = true; }
     if (recording >= 0) {
         state.recording = recording;
         jsti::globalEscape::publish(recording);
@@ -204,9 +204,9 @@ int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visibl
         std::lock_guard<std::mutex> lock(state.mutex);
         if (!state.window) return -1;
         for (int group = 0; group < 2; ++group) {
-            for (int index = 0; index < 5; ++index) state.insights[group][index] = std::move(values[group][index]);
+            for (int index = 0; index < 5; ++index) state.dashboard.insights[group][index] = std::move(values[group][index]);
         }
-        state.insightsChanged = true;
+        state.dashboard.insightsChanged = true;
         if (!state.posted) {
             state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
             if (!state.posted) return -1;

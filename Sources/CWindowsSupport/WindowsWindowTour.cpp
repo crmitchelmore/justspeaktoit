@@ -83,20 +83,20 @@ void tourShow(HWND window, int step) {
 }
 
 void tourStep(HWND window) {
-    if (state.tourStep < 0 || state.tourStep >= tourSteps) return;
+    if (state.tour.tourStep < 0 || state.tour.tourStep >= tourSteps) return;
     char name[64];
-    snprintf(name, sizeof name, "%02d-%s.bmp", state.tourStep + 1, tourName(state.tourStep).c_str());
-    const std::string path = jsti::utf8(state.tourDirectory) + "\\" + name;
+    snprintf(name, sizeof name, "%02d-%s.bmp", state.tour.tourStep + 1, tourName(state.tour.tourStep).c_str());
+    const std::string path = jsti::utf8(state.tour.tourDirectory) + "\\" + name;
     char error[512] = {};
     std::string hudError;
     std::wstring widePath;
-    if (state.tourStep == tourHistoryFilters || state.tourStep == tourDarkHistoryFilters) {
+    if (state.tour.tourStep == tourHistoryFilters || state.tour.tourStep == tourDarkHistoryFilters) {
         HWND filters = jsti_history_filters_window();
         if (jsti_owned_window_save_snapshot(filters, path.c_str(), error, sizeof error) != 0) {
             emit(window, JSTI_EVENT_ERROR, error);
         }
         if (filters) DestroyWindow(filters);
-    } else if (state.tourStep >= tourHUDRecording && state.tourStep <= tourCompactCompleted) {
+    } else if (state.tour.tourStep >= tourHUDRecording && state.tour.tourStep <= tourCompactCompleted) {
         // The HUD is its own layered window; it is drawn straight to the file.
         if (!jsti::wide(path.c_str(), widePath) || !jsti::hud::saveSnapshot(widePath, hudError)) {
             emit(window, JSTI_EVENT_ERROR, hudError.empty() ? "The HUD snapshot path is invalid." : hudError.c_str());
@@ -104,11 +104,11 @@ void tourStep(HWND window) {
     } else if (jsti_window_save_snapshot(path.c_str(), error, sizeof error) != 0) {
         emit(window, JSTI_EVENT_ERROR, error);
     }
-    ++state.tourStep;
-    if (state.tourStep < tourSteps) tourShow(window, state.tourStep);
+    ++state.tour.tourStep;
+    if (state.tour.tourStep < tourSteps) tourShow(window, state.tour.tourStep);
     else {
         std::string comparisonError;
-        if (!jsti_comparison_self_test(window, comparisonError, jsti::utf8(state.tourDirectory)))
+        if (!jsti_comparison_self_test(window, comparisonError, jsti::utf8(state.tour.tourDirectory)))
             emit(window, JSTI_EVENT_ERROR, comparisonError.c_str());
         PostMessageW(window, WM_CLOSE, 0, 0);
     }

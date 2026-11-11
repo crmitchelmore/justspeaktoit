@@ -143,8 +143,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         size_t count;
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            token.swap(state.audioCleanupToken);
-            count = state.audioCleanupCount;
+            token.swap(state.history.audioCleanupToken);
+            count = state.history.audioCleanupCount;
         }
         if (token.empty()) return 0;
         bool confirmed = false;
@@ -179,9 +179,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         break;
     case tourMessage: {
         std::unique_ptr<std::wstring> directory(reinterpret_cast<std::wstring *>(lparam));
-        if (!directory || state.tourStep >= 0) return 0;
-        state.tourDirectory = *directory;
-        state.tourStep = 0;
+        if (!directory || state.tour.tourStep >= 0) return 0;
+        state.tour.tourDirectory = *directory;
+        state.tour.tourStep = 0;
         tourShow(window, 0);
         return 0;
     }
@@ -240,9 +240,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case WM_COMMAND:
         if (LOWORD(wparam) >= aboutLinkBaseID && LOWORD(wparam) < aboutLinkBaseID + 8) {
             const size_t index = LOWORD(wparam) - aboutLinkBaseID;
-            if (HIWORD(wparam) == BN_CLICKED && state.page == aboutPage && index < state.aboutLinks.size()) {
+            if (HIWORD(wparam) == BN_CLICKED && state.page == aboutPage && index < state.about.aboutLinks.size()) {
                 const auto result = reinterpret_cast<INT_PTR>(
-                    ShellExecuteW(window, L"open", state.aboutLinks[index].url.c_str(), nullptr, nullptr, SW_SHOWNORMAL)
+                    ShellExecuteW(window, L"open", state.about.aboutLinks[index].url.c_str(), nullptr, nullptr, SW_SHOWNORMAL)
                 );
                 if (result <= 32) showFailure(window, "Could not open your browser. Check your default browser settings.");
             }
@@ -317,7 +317,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case automationID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             bool enabled;
-            { std::lock_guard<std::mutex> lock(state.mutex); enabled = state.automationEnabled; }
+            { std::lock_guard<std::mutex> lock(state.mutex); enabled = state.general.automationEnabled; }
             emit(window, JSTI_EVENT_AUTOMATION_TOGGLED, enabled ? "0" : "1");
             return 0;
         }
@@ -326,9 +326,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             bool requested;
             {
                 std::lock_guard<std::mutex> lock(state.mutex);
-                const int login = state.loginItem;
-                if (state.loginItemPending || (login != jsti::login::off && login != jsti::login::on)) return 0;
-                state.loginItemPending = true;
+                const int login = state.general.loginItem;
+                if (state.general.loginItemPending || (login != jsti::login::off && login != jsti::login::on)) return 0;
+                state.general.loginItemPending = true;
                 requested = login == jsti::login::off;
             }
             // Shows the choice at once; the host's answer settles it.
@@ -395,7 +395,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         case issueReportID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, issueReportID) &&
-                state.historyPresentationReady) emitHistory(window, JSTI_EVENT_HISTORY_ISSUE_REPORT);
+                state.history.historyPresentationReady) emitHistory(window, JSTI_EVENT_HISTORY_ISSUE_REPORT);
             return 0;
         case retryID: emitHistory(window, JSTI_EVENT_HISTORY_RETRY); return 0;
         case exportID:
@@ -414,9 +414,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         case voiceSourcesID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, voiceSourcesID) && IsWindowEnabled(window)) {
-                const std::string transcript = state.historyPresentationReady
+                const std::string transcript = state.history.historyPresentationReady
                     ? jsti::utf8(controlText(GetDlgItem(window, transcriptID))) : "";
-                const std::string record = state.historyPresentationReady ? state.selectedHistoryID : "";
+                const std::string record = state.history.historyPresentationReady ? state.history.selectedHistoryID : "";
                 jsti_show_voice_sources(window, record.c_str(), transcript.c_str());
             }
             return 0;
@@ -444,8 +444,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 {
                     std::lock_guard<std::mutex> lock(state.mutex);
                     nowSelected = selectedHistory(window);
-                    state.selectedHistoryID = nowSelected;
-                    ++state.historyInteractionRevision;
+                    state.history.selectedHistoryID = nowSelected;
+                    ++state.history.historyInteractionRevision;
                     recording = state.recording;
                 }
                 invalidateHistoryPresentation(window, true);
@@ -479,8 +479,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case historyDeleteID: {
             if (!idleControl(window, historyDeleteID)) return 0;
             const LRESULT selected = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
-            if (selected == LB_ERR || static_cast<size_t>(selected) >= state.displayedHistory.size()) return 0;
-            const std::string id = state.displayedHistory[static_cast<size_t>(selected)].id;
+            if (selected == LB_ERR || static_cast<size_t>(selected) >= state.history.displayedHistory.size()) return 0;
+            const std::string id = state.history.displayedHistory[static_cast<size_t>(selected)].id;
             const int answer = MessageBoxW(window,
                 L"Delete this History entry? Its saved recording file will be kept.\n\n"
                 L"This cannot be undone. If History sync is enabled, its synced text will also be deleted.",
@@ -514,15 +514,15 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case variantID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {
                 const LRESULT chosen = SendDlgItemMessageW(window, variantID, CB_GETCURSEL, 0, 0);
-                if (!idleControl(window, variantID) || !state.variantSwitchable || (chosen != 0 && chosen != 1)) {
-                    SendDlgItemMessageW(window, variantID, CB_SETCURSEL, state.displayedVariant < 0
-                        ? static_cast<WPARAM>(-1) : static_cast<WPARAM>(state.displayedVariant), 0);
+                if (!idleControl(window, variantID) || !state.history.variantSwitchable || (chosen != 0 && chosen != 1)) {
+                    SendDlgItemMessageW(window, variantID, CB_SETCURSEL, state.history.displayedVariant < 0
+                        ? static_cast<WPARAM>(-1) : static_cast<WPARAM>(state.history.displayedVariant), 0);
                     return 0;
                 }
                 retireCleanupPreview();
-                { std::lock_guard<std::mutex> lock(state.mutex); ++state.historyInteractionRevision; }
-                state.displayedVariant = static_cast<int>(chosen);
-                state.requestedVariant = state.displayedVariant;
+                { std::lock_guard<std::mutex> lock(state.mutex); ++state.history.historyInteractionRevision; }
+                state.history.displayedVariant = static_cast<int>(chosen);
+                state.history.requestedVariant = state.history.displayedVariant;
                 invalidateHistoryPresentation(window, false);
                 emitHistory(window, JSTI_EVENT_TRANSCRIPT_VARIANT);
             }
@@ -531,7 +531,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             if (HIWORD(wparam) == CBN_SELCHANGE) {
                 if (!idleControl(window, microphoneID)) { populateMicrophones(window); return 0; }
                 const std::string device = selectedMicrophone(window);
-                state.microphoneSelection = device;
+                state.models.microphoneSelection = device;
                 emit(window, JSTI_EVENT_MICROPHONE_CHANGED, device.c_str());
                 refreshSetup(window);
             }
@@ -544,15 +544,15 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case modelID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {
                 if (!idleControl(window, modelID)) {
-                    const auto previous = std::find(state.filteredModels.begin(), state.filteredModels.end(),
-                                                     state.preferredModels[state.activeMode]);
-                    if (previous != state.filteredModels.end()) SendDlgItemMessageW(window, modelID, CB_SETCURSEL,
-                        static_cast<WPARAM>(previous - state.filteredModels.begin()), 0);
+                    const auto previous = std::find(state.models.filteredModels.begin(), state.models.filteredModels.end(),
+                                                     state.models.preferredModels[state.models.activeMode]);
+                    if (previous != state.models.filteredModels.end()) SendDlgItemMessageW(window, modelID, CB_SETCURSEL,
+                        static_cast<WPARAM>(previous - state.models.filteredModels.begin()), 0);
                     return 0;
                 }
                 const int selected = selection(window);
                 if (selected < 0) return 0;
-                state.preferredModels[state.activeMode] = selected;
+                state.models.preferredModels[state.models.activeMode] = selected;
                 SetDlgItemTextW(window, keyID, L"");
                 emit(window, JSTI_EVENT_MODEL_CHANGED);
                 refreshSetup(window);
@@ -571,14 +571,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                     return 0;
                 }
                 // Keep Batch or Live when the other source offers it.
-                const int same = static_cast<int>(source) * 2 + state.activeMode % 2;
-                const int other = static_cast<int>(source) * 2 + (1 - state.activeMode % 2);
-                const int mode = state.preferredModels[same] >= 0 ? same : other;
-                if (state.preferredModels[mode] < 0) {
+                const int same = static_cast<int>(source) * 2 + state.models.activeMode % 2;
+                const int other = static_cast<int>(source) * 2 + (1 - state.models.activeMode % 2);
+                const int mode = state.models.preferredModels[same] >= 0 ? same : other;
+                if (state.models.preferredModels[mode] < 0) {
                     SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, activeSource(), 0);
                     return 0;
                 }
-                state.activeMode = mode;
+                state.models.activeMode = mode;
                 if (!populateModels(window)) { showFailure(window, "Windows could not display this source's models."); return 0; }
                 SetDlgItemTextW(window, keyID, L"");
                 emit(window, JSTI_EVENT_MODEL_CHANGED);
@@ -588,14 +588,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case modeID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {
                 if (!idleControl(window, modeID)) {
-                    SendDlgItemMessageW(window, modeID, CB_SETCURSEL, state.activeMode % 2, 0);
+                    SendDlgItemMessageW(window, modeID, CB_SETCURSEL, state.models.activeMode % 2, 0);
                     return 0;
                 }
                 const LRESULT choice = SendDlgItemMessageW(window, modeID, CB_GETCURSEL, 0, 0);
                 if (choice != 0 && choice != 1) return 0;
                 const int mode = activeSource() * 2 + static_cast<int>(choice);
-                if (state.preferredModels[mode] < 0) return 0;
-                state.activeMode = mode;
+                if (state.models.preferredModels[mode] < 0) return 0;
+                state.models.activeMode = mode;
                 if (!populateModels(window)) { showFailure(window, "Windows could not display this mode's models."); return 0; }
                 SetDlgItemTextW(window, keyID, L"");
                 emit(window, JSTI_EVENT_MODEL_CHANGED);
@@ -637,7 +637,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         jsti_action_shortcuts_stop();
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            state.window = nullptr; state.posted = false; state.audioCleanupToken.clear(); state.migrationReport.clear();
+            state.window = nullptr; state.posted = false; state.history.audioCleanupToken.clear(); state.history.migrationReport.clear();
             state.sidebarDelivery.retire();
             state.densityDelivery.retire();
             state.shellDelivery.retire();

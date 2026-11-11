@@ -5,13 +5,13 @@ namespace jsti_window {
 
 std::string historyManagementIDs() {
     std::lock_guard<std::mutex> lock(state.mutex);
-    return state.allHistoryIDs;
+    return state.history.allHistoryIDs;
 }
 
 std::string selectedHistory(HWND window) {
     const LRESULT index = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
-    if (index == LB_ERR || static_cast<size_t>(index) >= state.displayedHistory.size()) return {};
-    return state.displayedHistory[static_cast<size_t>(index)].id;
+    if (index == LB_ERR || static_cast<size_t>(index) >= state.history.displayedHistory.size()) return {};
+    return state.history.displayedHistory[static_cast<size_t>(index)].id;
 }
 
 bool searching(HWND window) { return GetWindowTextLengthW(GetDlgItem(window, searchID)) > 0; }
@@ -19,20 +19,20 @@ bool searching(HWND window) { return GetWindowTextLengthW(GetDlgItem(window, sea
 // The variant control never infers a version: it shows only what the host
 // reported for the selected record, and a user choice is echoed back by event.
 void applyVariant(HWND window, int selected, bool switchable, int recording) {
-    state.displayedVariant = selected == 0 || selected == 1 ? selected : -1;
-    state.variantSwitchable = switchable && state.displayedVariant >= 0;
+    state.history.displayedVariant = selected == 0 || selected == 1 ? selected : -1;
+    state.history.variantSwitchable = switchable && state.history.displayedVariant >= 0;
     SendDlgItemMessageW(window, variantID, CB_SETCURSEL,
-        state.displayedVariant < 0 ? static_cast<WPARAM>(-1) : static_cast<WPARAM>(state.displayedVariant), 0);
-    EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
+        state.history.displayedVariant < 0 ? static_cast<WPARAM>(-1) : static_cast<WPARAM>(state.history.displayedVariant), 0);
+    EnableWindow(GetDlgItem(window, variantID), state.history.variantSwitchable && recording == 0);
 }
 
 // Play/Pause is available for a selected idle record, or whenever a playback
 // is active so it can always be paused; Stop only while a playback is active.
 // The label follows the state the host acknowledged, never a click.
 void updatePlaybackControls(HWND window, bool selected, int recording) {
-    const bool active = state.displayedPlayback != playbackIdle;
+    const bool active = state.history.displayedPlayback != playbackIdle;
     SetDlgItemTextW(window, playPauseID,
-        state.displayedPlayback == playbackPreparing || state.displayedPlayback == playbackPlaying ? L"Pause" : L"Play");
+        state.history.displayedPlayback == playbackPreparing || state.history.displayedPlayback == playbackPlaying ? L"Pause" : L"Play");
     EnableWindow(GetDlgItem(window, playPauseID), (selected && recording == 0) || active);
     EnableWindow(GetDlgItem(window, stopPlaybackID), active || (state.page == voicePage && recording == 0));
 }
@@ -40,19 +40,19 @@ void updatePlaybackControls(HWND window, bool selected, int recording) {
 // The playback display never infers progress: it shows only what the host
 // reported for the selected record, and controls are echoed back by event.
 void applyPlayback(HWND window, int playback, const std::wstring &text, bool selected, int recording) {
-    state.displayedPlayback = playback >= playbackIdle && playback <= playbackPaused ? playback : playbackIdle;
+    state.history.displayedPlayback = playback >= playbackIdle && playback <= playbackPaused ? playback : playbackIdle;
     SetDlgItemTextW(window, playbackTimeID, text.empty() ? playbackIdleText : text.c_str());
     updatePlaybackControls(window, selected, recording);
 }
 
 void updateHistoryControls(HWND window, int recording) {
     const LRESULT index = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
-    const bool selected = index != LB_ERR && static_cast<size_t>(index) < state.displayedHistory.size();
+    const bool selected = index != LB_ERR && static_cast<size_t>(index) < state.history.displayedHistory.size();
     const bool filtering = searching(window) || jsti_history_filters_active();
-    if (!selected && state.displayedPlayback != playbackIdle) applyPlayback(window, playbackIdle, L"", false, recording);
+    if (!selected && state.history.displayedPlayback != playbackIdle) applyPlayback(window, playbackIdle, L"", false, recording);
     else updatePlaybackControls(window, selected, recording);
-    SetDlgItemTextW(window, historyDetailID, selected ? state.displayedHistory[static_cast<size_t>(index)].detail.c_str()
-        : (state.displayedHistory.empty()
+    SetDlgItemTextW(window, historyDetailID, selected ? state.history.displayedHistory[static_cast<size_t>(index)].detail.c_str()
+        : (state.history.displayedHistory.empty()
             ? (filtering ? L"No saved recordings match this search or filter." : L"Your saved recordings will appear here.")
             : L"Select a saved recording."));
     EnableWindow(GetDlgItem(window, historyID), recording == 0);
@@ -70,23 +70,23 @@ void updateHistoryControls(HWND window, int recording) {
     SetDlgItemTextW(window, historyFiltersID, jsti_history_filters_label().c_str());
     EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
     for (int id : {retryID, openAudioID}) EnableWindow(GetDlgItem(window, id), selected && recording == 0);
-    EnableWindow(GetDlgItem(window, historyCorrectionsID), selected && recording == 0 && state.historyPresentationReady);
-    EnableWindow(GetDlgItem(window, exportID), selected && recording == 0 && state.historyPresentationReady);
-    EnableWindow(GetDlgItem(window, issueReportID), selected && recording == 0 && state.historyPresentationReady);
-    EnableWindow(GetDlgItem(window, readAloudID), selected && recording == 0 && state.historyPresentationReady &&
+    EnableWindow(GetDlgItem(window, historyCorrectionsID), selected && recording == 0 && state.history.historyPresentationReady);
+    EnableWindow(GetDlgItem(window, exportID), selected && recording == 0 && state.history.historyPresentationReady);
+    EnableWindow(GetDlgItem(window, issueReportID), selected && recording == 0 && state.history.historyPresentationReady);
+    EnableWindow(GetDlgItem(window, readAloudID), selected && recording == 0 && state.history.historyPresentationReady &&
         jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceSourcesID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, voiceCredentialID), recording == 0 && jsti_voice_credentials_available());
-    EnableWindow(GetDlgItem(window, copyID), state.historyPresentationReady && (!selected || recording == 0));
+    EnableWindow(GetDlgItem(window, copyID), state.history.historyPresentationReady && (!selected || recording == 0));
     if (!selected) applyVariant(window, -1, false, recording);
-    else EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
+    else EnableWindow(GetDlgItem(window, variantID), state.history.variantSwitchable && recording == 0);
 }
 
 // Clear stale text synchronously, before the async host sees this UI event.
 void invalidateHistoryPresentation(HWND window, bool resetVersion) {
-    state.historyPresentationReady = false;
-    if (resetVersion) state.requestedVariant = -1;
+    state.history.historyPresentationReady = false;
+    if (resetVersion) state.history.requestedVariant = -1;
     SetDlgItemTextW(window, transcriptID, L"");
     SetDlgItemTextW(window, statusID, selectedHistory(window).empty()
         ? L"Select a saved recording." : L"Loading saved transcript…");
@@ -113,7 +113,7 @@ std::wstring searchText(HWND window) {
 // Every keystroke reports the whole current query; the host coalesces bursts
 // and answers with a replacement snapshot, so no filtering happens here.
 void searchChanged(HWND window) {
-    if (state.suppressSearchEvents) return;
+    if (state.history.suppressSearchEvents) return;
     int recording;
     { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
     EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
@@ -123,9 +123,9 @@ void searchChanged(HWND window) {
 
 void clearSearch(HWND window) {
     if (!searching(window)) return;
-    state.suppressSearchEvents = true;
+    state.history.suppressSearchEvents = true;
     SetDlgItemTextW(window, searchID, L"");
-    state.suppressSearchEvents = false;
+    state.history.suppressSearchEvents = false;
     searchChanged(window);
     if (GetActiveWindow() == window) SetFocus(GetDlgItem(window, searchID));
 }
@@ -135,7 +135,7 @@ int jsti_window_set_history_management(const char *identifiers) {
     std::wstring checked;
     if (!identifiers || !jsti::wide(identifiers, checked)) return -1;
     std::lock_guard<std::mutex> lock(state.mutex);
-    state.allHistoryIDs = identifiers;
+    state.history.allHistoryIDs = identifiers;
     if (state.window && !state.posted) {
         state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
         if (!state.posted) return -1;
@@ -172,11 +172,11 @@ int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char
         if (selectedID && !jsti::wide(selectedID, checkedSelection)) return -1;
         std::lock_guard<std::mutex> lock(state.mutex);
         if (!state.window) return -1;
-        state.pendingHistory = std::move(copied);
-        state.historySelectionProvided = selectedID != nullptr;
-        state.pendingHistoryRevision = state.historyInteractionRevision;
-        state.pendingHistorySelection = selectedID ? selectedID : "";
-        state.historyChanged = true;
+        state.history.pendingHistory = std::move(copied);
+        state.history.historySelectionProvided = selectedID != nullptr;
+        state.history.pendingHistoryRevision = state.history.historyInteractionRevision;
+        state.history.pendingHistorySelection = selectedID ? selectedID : "";
+        state.history.historyChanged = true;
         if (!state.posted) {
             state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
             if (!state.posted) return -1;
@@ -195,10 +195,10 @@ int jsti_window_set_transcript_variant(const char *recordID, int selected, int c
         std::string record = recordID ? recordID : "";
         std::lock_guard<std::mutex> lock(state.mutex);
         if (!state.window) return -1;
-        state.pendingVariant = record.empty() ? -1 : selected;
-        state.pendingVariantRecord = std::move(record);
-        state.pendingVariantSwitchable = canSwitch != 0;
-        state.variantChanged = true;
+        state.history.pendingVariant = record.empty() ? -1 : selected;
+        state.history.pendingVariantRecord = std::move(record);
+        state.history.pendingVariantSwitchable = canSwitch != 0;
+        state.history.variantChanged = true;
         if (!state.posted) {
             state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
             if (!state.posted) return -1;
@@ -221,8 +221,8 @@ int jsti_window_set_history_presentation(const char *recordID, int selected, int
         presentation.switchable = canSwitch != 0;
         std::lock_guard<std::mutex> lock(state.mutex);
         if (!state.window) return -1;
-        state.pendingPresentation = std::move(presentation);
-        state.presentationChanged = true;
+        state.history.pendingPresentation = std::move(presentation);
+        state.history.presentationChanged = true;
         if (!state.posted) {
             state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
             if (!state.posted) return -1;
@@ -238,7 +238,7 @@ int jsti_window_transcript_snapshot(char *text, size_t capacity, size_t *require
     int recording;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; recording = state.recording; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) return -1;
-    if (!state.historyPresentationReady || (!selectedHistory(window).empty() && recording != 0)) return -1;
+    if (!state.history.historyPresentationReady || (!selectedHistory(window).empty() && recording != 0)) return -1;
     try {
         constexpr size_t maximum = 8 * 1024 * 1024;
         HWND control = GetDlgItem(window, transcriptID);
@@ -261,7 +261,7 @@ int jsti_window_transcript_variant(void) {
     HWND window;
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) return -1;
-    return selectedHistory(window).empty() ? -1 : state.displayedVariant;
+    return selectedHistory(window).empty() ? -1 : state.history.displayedVariant;
 }
 
 int jsti_window_set_playback(const char *recordID, int playback, const char *timeText) {
@@ -273,10 +273,10 @@ int jsti_window_set_playback(const char *recordID, int playback, const char *tim
         std::string record = recordID ? recordID : "";
         std::lock_guard<std::mutex> lock(state.mutex);
         if (!state.window) return -1;
-        state.pendingPlaybackState = record.empty() ? playbackIdle : playback;
-        state.pendingPlaybackRecord = std::move(record);
-        state.pendingPlaybackText = std::move(text);
-        state.playbackChanged = true;
+        state.history.pendingPlaybackState = record.empty() ? playbackIdle : playback;
+        state.history.pendingPlaybackRecord = std::move(record);
+        state.history.pendingPlaybackText = std::move(text);
+        state.history.playbackChanged = true;
         if (!state.posted) {
             state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
             if (!state.posted) return -1;

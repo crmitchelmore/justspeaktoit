@@ -326,16 +326,16 @@ void drawHistoryItem(HWND window, const DRAWITEMSTRUCT &item) {
     HBRUSH background = CreateSolidBrush(palette.window);
     FillRect(dc, &area, background);
     DeleteObject(background);
-    if (item.itemID == static_cast<UINT>(-1) || item.itemID >= state.displayedHistory.size()) return;
+    if (item.itemID == static_cast<UINT>(-1) || item.itemID >= state.history.displayedHistory.size()) return;
     // Drawing the last row of a scrolled list means it scrolled into view: ask
     // the host for the next page of matches once per list. The host ignores it
     // when none remain; a list that fits without scrolling was never cut short.
-    if (item.itemID + 1 == state.displayedHistory.size() && !state.historyMoreRequested &&
+    if (item.itemID + 1 == state.history.displayedHistory.size() && !state.history.historyMoreRequested &&
         SendMessageW(item.hwndItem, LB_GETTOPINDEX, 0, 0) > 0) {
-        state.historyMoreRequested = true;
+        state.history.historyMoreRequested = true;
         emit(window, JSTI_EVENT_HISTORY_LOAD_MORE);
     }
-    const HistoryRow &row = state.displayedHistory[item.itemID];
+    const HistoryRow &row = state.history.displayedHistory[item.itemID];
     RECT card{area.left + s(2), area.top + s(5), area.right - s(4), area.bottom - s(5)};
     const bool selected = (item.itemState & ODS_SELECTED) != 0;
     chrome::fillRound(dc, card, s(20), palette.card);

@@ -214,9 +214,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             !add(L"BUTTON", L"Re&check", BS_PUSHBUTTON | WS_TABSTOP, recheckID) ||
             !add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, closeID)) return -1;
         SendDlgItemMessageW(window, keyID, EM_SETLIMITTEXT, 8192, 0);
-        form->font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL,
-            FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        form->font = jsti::chrome::dialogFont(window);
         for (int id = labelID; id <= closeID; ++id)
             SendDlgItemMessageW(window, id, WM_SETFONT, reinterpret_cast<WPARAM>(form->font), TRUE);
         layout(window);
@@ -250,12 +248,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         layout(window); return 0;
     }
-    case WM_GETMINMAXINFO: {
-        RECT size{0, 0, scale(window, 620), scale(window, 480)};
-        AdjustWindowRectExForDpi(&size, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_CONTROLPARENT, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {size.right - size.left, size.bottom - size.top};
+    case WM_GETMINMAXINFO:
+        jsti::chrome::minimumTrackSize(window, lparam, 620, 480, WS_OVERLAPPEDWINDOW, WS_EX_CONTROLPARENT);
         return 0;
-    }
     case WM_CLOSE: DestroyWindow(window); return 0;
     case WM_DESTROY:
         cancel(*form);

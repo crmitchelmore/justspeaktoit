@@ -87,8 +87,7 @@ void layout(HWND window) {
     MoveWindow(GetDlgItem(window, closeID), bounds.right - margin - button, top, button, scale(window, 36), TRUE);
 }
 void font(HWND window, Dialog &dialog) {
-    HFONT next = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    HFONT next = jsti::chrome::dialogFont(window);
     if (!next) return;
     for (int id = titleID; id <= closeID; ++id)
         SendDlgItemMessageW(window, id, WM_SETFONT, reinterpret_cast<WPARAM>(next), TRUE);
@@ -190,16 +189,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case DM_GETDEFID: return MAKELRESULT(saveID, DC_HASDEFID);
     case WM_ACTIVATE: jsti::chrome::rememberFocus(window, wparam, dialog->focus, keyID); return 0;
     case WM_SIZE: layout(window); return 0;
-    case WM_GETMINMAXINFO: {
-        RECT size{0, 0, scale(window, 540), scale(window, 460)};
-        AdjustWindowRectExForDpi(&size, style, FALSE, extended, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {size.right - size.left, size.bottom - size.top};
+    case WM_GETMINMAXINFO:
+        jsti::chrome::minimumTrackSize(window, lparam, 540, 460, style, extended);
         return 0;
-    }
     case WM_DPICHANGED: {
-        const auto bounds = reinterpret_cast<const RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        jsti::chrome::applySuggestedBounds(window, lparam);
         font(window, *dialog); layout(window); return 0;
     }
     case WM_CLOSE: DestroyWindow(window); return 0;

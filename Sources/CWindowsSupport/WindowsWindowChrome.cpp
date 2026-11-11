@@ -194,6 +194,44 @@ void applySuggestedBounds(HWND window, LPARAM lparam) {
         bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
+HFONT dialogFont(HWND window) {
+    return CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+}
+
+void refreshDialogFont(HWND window, const std::vector<HWND> &controls, HFONT &font) {
+    HFONT next = dialogFont(window);
+    if (!next) return;
+    for (HWND control : controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(next), TRUE);
+    if (font) DeleteObject(font);
+    font = next;
+}
+
+bool addControl(HWND parent, const wchar_t *type, const wchar_t *text, DWORD style, int id, DWORD exStyle) {
+    return CreateWindowExW(exStyle, type, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 1, 1, parent,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr) != nullptr;
+}
+
+HWND createOwnedDialog(HWND owner, const wchar_t *className, WNDPROC procedure, const wchar_t *title,
+                       int clientWidth, int clientHeight, DWORD style, DWORD exStyle, void *instance) {
+    const HINSTANCE module = GetModuleHandleW(nullptr);
+    WNDCLASSW type{};
+    type.lpfnWndProc = procedure;
+    type.hInstance = module;
+    type.lpszClassName = className;
+    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
+    RECT frame{0, 0, scale(owner, clientWidth), scale(owner, clientHeight)};
+    AdjustWindowRectExForDpi(&frame, style, FALSE, exStyle, GetDpiForWindow(owner));
+    RECT bounds{};
+    GetWindowRect(owner, &bounds);
+    return CreateWindowExW(exStyle, className, title, style, bounds.left + scale(owner, 40),
+        bounds.top + scale(owner, 40), frame.right - frame.left, frame.bottom - frame.top, owner, nullptr, module,
+        instance);
+}
+
 void rememberFocus(HWND window, WPARAM wparam, HWND &focus, int fallback) {
     if (LOWORD(wparam) == WA_INACTIVE) { focus = GetFocus(); return; }
     SetFocus(focus && IsChild(window, focus) ? focus : GetDlgItem(window, fallback));

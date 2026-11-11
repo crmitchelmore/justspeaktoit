@@ -251,9 +251,8 @@ LRESULT formMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_CREATE: {
         const auto add = [&](const wchar_t *type, const wchar_t *text, DWORD style, int id) {
-            return CreateWindowExW(std::wcscmp(type, L"EDIT") == 0 ? WS_EX_CLIENTEDGE : 0, type, text,
-                WS_CHILD | WS_VISIBLE | style, 0, 0, 1, 1, window,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr) != nullptr;
+            return jsti::chrome::addControl(window, type, text, style, id,
+                std::wcscmp(type, L"EDIT") == 0 ? WS_EX_CLIENTEDGE : 0);
         };
         const DWORD editor = ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP;
         if (!add(L"STATIC", L"Review these allowlisted details before sharing. No audio, transcript or raw logs. "

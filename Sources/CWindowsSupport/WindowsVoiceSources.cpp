@@ -221,8 +221,7 @@ LRESULT CALLBACK markupProcedure(HWND window, UINT message, WPARAM wparam, LPARA
         return 0;
     }
     if (message == WM_DPICHANGED) {
-        HFONT font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        HFONT font = jsti::chrome::dialogFont(window);
         if (font) {
             for (HWND child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
                 SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
@@ -495,8 +494,7 @@ bool create(HWND window, Dialog &dialog) {
         !add(L"BUTTON", L"&Export text...", BS_PUSHBUTTON | WS_TABSTOP, exportID) ||
         !add(L"BUTTON", L"&Stop", BS_PUSHBUTTON | WS_TABSTOP, stopID) ||
         !add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, IDCANCEL)) return false;
-    dialog.font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    dialog.font = jsti::chrome::dialogFont(window);
     for (HWND child : dialog.controls) SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(dialog.font), TRUE);
     SendDlgItemMessageW(window, textID, EM_SETLIMITTEXT, 200000, 0);
     for (const auto &name : dialog.config.names) {
@@ -557,18 +555,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     }
     case WM_CREATE: return create(window, *dialog) ? 0 : -1;
     case WM_SIZE: layout(window); return 0;
-    case WM_GETMINMAXINFO: {
-        RECT size{0, 0, scale(window, 620), scale(window, 540)};
-        AdjustWindowRectExForDpi(&size, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_CONTROLPARENT, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {size.right - size.left, size.bottom - size.top};
+    case WM_GETMINMAXINFO:
+        jsti::chrome::minimumTrackSize(window, lparam, 620, 540, WS_OVERLAPPEDWINDOW, WS_EX_CONTROLPARENT);
         return 0;
-    }
     case WM_DPICHANGED: {
-        const auto bounds = reinterpret_cast<const RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
-        HFONT font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        jsti::chrome::applySuggestedBounds(window, lparam);
+        HFONT font = jsti::chrome::dialogFont(window);
         if (font) {
             for (HWND child : dialog->controls) SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
             if (dialog->font) DeleteObject(dialog->font);

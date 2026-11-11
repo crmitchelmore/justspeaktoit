@@ -3,6 +3,7 @@
 #include "WindowsSupportInternal.hpp"
 
 #include <string>
+#include <vector>
 
 // The desktop window's look: the Mac app's brand tokens (SpeakCore
 // BrandColors), its card and hero shapes, and light or dark surfaces that
@@ -55,6 +56,18 @@ Instance *dialogInstance(HWND window, UINT message, LPARAM lparam) {
 void minimumTrackSize(HWND window, LPARAM lparam, int clientWidth, int clientHeight, DWORD style, DWORD exStyle);
 // WM_DPICHANGED: moves the window to the bounds Windows suggests.
 void applySuggestedBounds(HWND window, LPARAM lparam);
+// The dialogs' body font: 10-point Segoe UI at the window's DPI, or nullptr.
+HFONT dialogFont(HWND window);
+// Gives `controls` a fresh dialogFont and frees the one in `font`, which it replaces.
+// Keeps the current font when a new one cannot be created.
+void refreshDialogFont(HWND window, const std::vector<HWND> &controls, HFONT &font);
+// A visible child control at 1x1 for the dialog's layout to place; false when refused.
+bool addControl(HWND parent, const wchar_t *type, const wchar_t *text, DWORD style, int id, DWORD exStyle = 0);
+// Registers `className` once and opens a dialog of the given logical client size
+// 40 logical pixels below and right of the owner's top-left corner, with
+// `instance` as its lpParam. nullptr when the class or window cannot be created.
+HWND createOwnedDialog(HWND owner, const wchar_t *className, WNDPROC procedure, const wchar_t *title,
+                       int clientWidth, int clientHeight, DWORD style, DWORD exStyle, void *instance);
 // WM_ACTIVATE: remembers the focused control on deactivation and restores it,
 // or the control `fallback`, on activation.
 void rememberFocus(HWND window, WPARAM wparam, HWND &focus, int fallback);

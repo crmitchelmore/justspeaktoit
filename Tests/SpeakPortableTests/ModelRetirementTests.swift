@@ -93,7 +93,9 @@ final class ModelRetirementTests: XCTestCase {
             let day = retirement.shutdownDate
             let eve = day.addingTimeInterval(-1)
             let successor = try XCTUnwrap(retirement.successorID)
-            let before = ModelRetirements.current(ModelCatalog.postProcessing, at: eve)
+            // `postProcessing` already hides models shut down before today, so add the raw native list.
+            let before = ModelRetirements.current(
+                NativeTextModels.postProcessing + ModelCatalog.postProcessing, at: eve)
             XCTAssertTrue(before.first { $0.id == retirement.id }?.description?.contains(retirement.notice) == true)
             XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(retirement.id, at: eve), retirement.id)
             let after = Set(ModelRetirements.current(ModelCatalog.postProcessing, at: day).map(\.id))

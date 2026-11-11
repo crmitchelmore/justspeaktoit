@@ -269,7 +269,14 @@ final class ModulateLiveController: NSObject, LiveTranscriptionController {
     outputFormat: AVAudioFormat,
     transcriber: ModulateLiveTranscriber
   ) throws {
-    audioProcessor.setRunning(true)
+    // Lost capture audio ends the session like a stream error, keeping the
+    // utterances received so far as recovery text.
+    audioProcessor.setRunning(true) { [weak self, weak transcriber] error in
+      Task { @MainActor [weak self, weak transcriber] in
+        guard let self, LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
+        self.handleStreamingError(error)
+      }
+    }
     let processor = audioProcessor
     let log = logger
     try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
@@ -397,11 +404,14 @@ private extension ModulateLiveController {
     )
     private var isRunning: Bool = false
     private let conversion = LivePCM16Conversion()
+    private var conversionFailure: LivePCMConversionFailureReport?
     private var pendingPCMData = Data()
 
-    func setRunning(_ running: Bool) {
+    /// Starting arms `onConversionFailure` for the run's first conversion failure.
+    func setRunning(_ running: Bool, onConversionFailure: (@Sendable (Error) -> Void)? = nil) {
       queue.sync {
         isRunning = running
+        conversionFailure = running ? onConversionFailure.map(LivePCMConversionFailureReport.init) : nil
         if !running {
           conversion.reset()
           copyBufferPool.removeAll()
@@ -477,7 +487,10 @@ private extension ModulateLiveController {
       do {
         pendingPCMData.append(try conversion.pcm16(from: buffer, to: outputFormat))
       } catch {
+        guard let report = conversionFailure else { return }
+        conversionFailure = nil
         logger.error("Modulate audio conversion failed: \(error.localizedDescription, privacy: .public)")
+        report(error)
         return
       }
 

@@ -470,6 +470,7 @@ private extension SharedClientLiveTranscriber {
         let nativeSampleRate = nativeFormat.sampleRate
         let signal = firstInputSignal
         let captureID = activeCaptureID
+        let conversionFailure = makeConversionFailureReport(captureID: captureID)
         // The safety writer opens before the tap and the engine, so the file
         // covers the very first buffers instead of starting a beat late
         // (issue #992); a writer failure is reported, never fatal (issue #950).
@@ -487,7 +488,7 @@ private extension SharedClientLiveTranscriber {
                 self.audioRecorder.writeBuffer(copied)
                 self.convertAndSend(
                     buffer: copied, nativeSampleRate: nativeSampleRate,
-                    conversion: conversion, client: client
+                    conversion: conversion, client: client, onFailure: conversionFailure
                 )
             }
         }
@@ -529,11 +530,26 @@ private extension SharedClientLiveTranscriber {
         return (targetFormat, converter)
     }
 
+    /// Lost capture audio fails this run like a provider error: reported once,
+    /// with the text received so far kept for recovery.
+    func makeConversionFailureReport(captureID: UUID?) -> LivePCMConversionFailureReport {
+        let state = transcriptState
+        let enqueue = enqueueClientUpdate
+        return LivePCMConversionFailureReport { [weak self] error in
+            guard let state, let snapshot = state.fail(error) else { return }
+            enqueue { [weak self] in
+                guard let self, self.activeCaptureID == captureID else { return }
+                self.apply(snapshot, from: state)
+            }
+        }
+    }
+
     nonisolated func convertAndSend(
         buffer: AVAudioPCMBuffer,
         nativeSampleRate: Double,
         conversion: Conversion,
-        client: StreamingTranscriptionClient?
+        client: StreamingTranscriptionClient?,
+        onFailure: LivePCMConversionFailureReport
     ) {
         let ratio = conversion.targetSampleRate / nativeSampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
@@ -556,8 +572,13 @@ private extension SharedClientLiveTranscriber {
             outStatus.pointee = .haveData
             return buffer
         }
-        guard status != .error, let data = Self.pcm16Data(from: outputBuffer) else { return }
-        guard let client else { return }
+        guard status != .error, conversionError == nil else {
+            onFailure(LivePCMConversionError.conversionFailed(
+                domain: conversionError?.domain, code: conversionError?.code
+            ))
+            return
+        }
+        guard let data = Self.pcm16Data(from: outputBuffer), let client else { return }
         unansweredAudio.record()
         client.sendAudio(data)
     }

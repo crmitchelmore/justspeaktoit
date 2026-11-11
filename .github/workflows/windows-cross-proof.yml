@@ -2,34 +2,8 @@ name: macOS to Windows Swift Proof
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main]
-    # Pull requests build this platform only when its own sources, native
-    # dependencies, packaging or workflow change. Shared Swift is proven on
-    # pull requests by ci.yml's required Portable Swift (Linux) gate; the full
-    # path set below runs on merge-batch heads and main.
-    paths:
-      - .gitattributes
-      - Package.swift
-      - Resources/Desktop/**
-      - scripts/generate-desktop-icons.py
-      - scripts/tests/test_desktop_icons.py
-      - Sources/CLlamaCpp/**
-      - Sources/CMigrationArchive/**
-      - Sources/CRecordingFileSupport/**
-      - Sources/SpeakWindows/**
-      - Sources/SpeakWindowsPlatform/**
-      - Sources/CWindowsSupport/**
-      - Sources/CWindowsAutomation/**
-      - Tests/SpeakWindowsPlatformTests/**
-      - scripts/windows-cross/**
-      - scripts/windows-cloudkit/**
-      - scripts/windows-bundle/**
-      - scripts/windows-package/**
-      - scripts/windows-local-runtime/**
-      - Resources/AppIcon.iconset/**
-      - .github/workflows/windows-cross-proof.yml
-      - .github/workflows/windows-local-runtime.yml
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
   push:
     branches: [main, 'merge-batch/**']
     paths:

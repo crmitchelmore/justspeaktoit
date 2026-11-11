@@ -30,12 +30,8 @@ on:
       - scripts/windows-bundle/BundleCLI.ps1
       - scripts/windows-installer-release.mjs
       - .github/workflows/windows-installer.yml
-  pull_request:
-    paths:
-      - scripts/windows-package/**
-      - scripts/windows-bundle/BundleCLI.ps1
-      - scripts/windows-installer-release.mjs
-      - .github/workflows/windows-installer.yml
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
 permissions:
   contents: read
 concurrency:

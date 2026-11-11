@@ -265,6 +265,7 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
   failures whose head had a passing record. The target is under 1%.
 - The machine-readable result is `.build/pre-pr/summary.json`; per-check logs
   are in `.build/pre-pr/logs/`.
+- Runs are serialised machine-wide per user (`~/.cache/jsti-pre-pr.lock`) so parallel agents don't overload the Mac into timing flakes; a waiting run says who holds the lock. `JSTI_PRE_PR_LOCK=off` disables it.
 - Opt in to running it on every push with `scripts/install-pre-pr-hook`
   (`make install-hooks`). Bypass once with `JSTI_SKIP_PRE_PR=1`.
 
@@ -294,7 +295,7 @@ version/baseline authority. `VERSION` is a build hint only.
 ### PR merge unblock checklist
 - The `main` ruleset does not require branches to be up to date. A PR that is only `BEHIND` can merge as-is: do not rebase or merge `main` into it, because every push restarts all of its CI and takes a scarce hosted macOS slot. Update a branch from `main` only on a real conflict (`mergeStateStatus` `DIRTY`) or when a fix it needs has landed on `main`.
 - Main CI runs every gate after the merge and opens a `ci-main-failure` issue if one fails, so it catches the rare semantic conflict a stale branch misses.
-- Merge first, verify on main. On a same-repository pull request the `CI Gate` checks only the passing `scripts/pre-pr` record for its exact head; Lint, Workers, Linux, macOS, iOS, journeys and API run on main after the merge (and on Dependabot or fork PRs, which carry no trusted record). Add `ci:full` to run every gate on a PR.
+- Merge first, verify on main. On a same-repository pull request every other CI job is skipped and the `CI Gate` job itself checks the passing `scripts/pre-pr` record for its exact head (one hosted-runner wait); auxiliary workflows (Linux, Windows, Android, Flatpak, CodeQL, site media) no longer run on pull requests; Lint, Workers, Linux, macOS, iOS, journeys and API run on main after the merge (and on Dependabot or fork PRs, which carry no trusted record). Add `ci:full` to run every gate on a PR.
 - A red main is handled by `.github/workflows/auto-revert.yml`: flake-prone failures are re-run once; then the suspects and failure log go on the `CI failing on main` issue (labels `ci-main-failure`, `agent-fix`) for an agent to fix forward with a normal PR. If main is still red 2 hours after turning red, or 3 more commits merge first, the suspects are reverted by a bot PR whose `CI Gate` admits only an exact revert; each culprit PR gets the `auto-reverted` label and a draft `reland/<pr>` PR. Kill switch: repository variable `JSTI_AUTO_REVERT=off`.
 - If `gh pr merge` says “required status checks are expected” while checks look green, a required job is still queued or the run was cancelled; wait for it or re-run it rather than pushing.
 - After each push, re-check unresolved review threads (especially CodeRabbit), as new threads can be created on updated diffs and still block merge.

@@ -33,13 +33,8 @@ on:
   # Pull requests build the Flatpak only when its own packaging changes;
   # "Linux Desktop" proves shared and Linux source on pull requests, and every
   # push to main still builds the full Flatpak.
-  pull_request:
-    paths:
-      - packaging/linux/**
-      - scripts/linux-flatpak-checks.sh
-      - scripts/linux-flatpak-qualification.py
-      - scripts/tests/test_linux_flatpak_sources.py
-      - .github/workflows/linux-flatpak.yml
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
   workflow_dispatch:
     inputs:
       qualification_run_id:

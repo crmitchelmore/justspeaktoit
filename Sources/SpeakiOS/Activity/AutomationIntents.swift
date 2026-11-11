@@ -53,7 +53,12 @@ enum AutomationIntentError: LocalizedError {
 struct StopDictationIntent: AudioRecordingIntent {
     static var title: LocalizedStringResource = "Stop Dictation and Get Text"
     static var description = IntentDescription(
-        "Stops the current recording and returns the final transcript for use in later Shortcut actions."
+        """
+        Stops a recording started with Start Recording or Toggle Recording and returns the transcript \
+        to the next action. Needs an unlocked iPhone.
+        """,
+        categoryName: "Recording",
+        searchKeywords: ["finish", "end", "transcription", "get text"]
     )
 
     static var openAppWhenRun: Bool = false
@@ -149,7 +154,8 @@ struct StopDictationIntent: AudioRecordingIntent {
 struct TranscribeAudioFileIntent: AppIntent {
     static var title: LocalizedStringResource = "Transcribe Audio File"
     static var description = IntentDescription(
-        "Transcribes an audio file with your configured batch model and returns the text."
+        "Transcribes an audio file with your batch model and returns the text.",
+        categoryName: "Transcripts"
     )
 
     static var openAppWhenRun: Bool = false
@@ -288,7 +294,8 @@ struct TranscribeAudioFileIntent: AppIntent {
 struct GetLastTranscriptionIntent: AppIntent {
     static var title: LocalizedStringResource = "Get Last Transcription"
     static var description = IntentDescription(
-        "Returns the most recent transcription from history, preferring the polished text."
+        "Returns the latest transcript from History as plain text, polished when available.",
+        categoryName: "Transcripts"
     )
 
     static var openAppWhenRun: Bool = false
@@ -319,7 +326,8 @@ struct GetLastTranscriptionIntent: AppIntent {
 struct PolishTextIntent: AppIntent {
     static var title: LocalizedStringResource = "Polish Text"
     static var description = IntentDescription(
-        "Cleans up text with your post-processing model. A custom prompt overrides the cleanup instructions."
+        "Cleans up text with your post-processing model. A custom prompt overrides the cleanup instructions.",
+        categoryName: "Transcripts"
     )
 
     static var openAppWhenRun: Bool = false

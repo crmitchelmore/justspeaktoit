@@ -70,6 +70,9 @@ final class SettingsCredentialUITests: XCTestCase {
     private func openAlibaba(_ app: XCUIApplication) throws {
         app.buttons["settingsNavLink"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 15))
+        let providers = app.buttons["settingsPage.apiKeys"]
+        try reveal(providers, in: app)
+        providers.tap()
         let manage = app.buttons["Manage Keys"]
         try reveal(manage, in: app)
         manage.tap()

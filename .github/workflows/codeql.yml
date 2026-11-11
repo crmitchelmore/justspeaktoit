@@ -13,8 +13,8 @@ on:
       - '.github/actions/**'
       - 'Package.swift'
       - 'Package.resolved'
-  pull_request:
-    branches: [main]
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
   schedule:
     - cron: '30 5 * * *' # Daily at 5:30 UTC
 

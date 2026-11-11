@@ -1,6 +1,7 @@
 name: Dependabot policy checks
 on:
-  pull_request:
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
   workflow_dispatch:
 permissions:
   contents: read

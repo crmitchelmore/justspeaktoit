@@ -239,20 +239,19 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
       }
     }
 
-    if !item.errors.isEmpty {
-      Divider()
+    // Successful requests can be reported too: wrong text, a slow request or the wrong model.
+    Divider()
 
-      Button {
-        openGitHubIssue()
-      } label: {
-        Label("Review Issue Report…", systemImage: "ladybug")
-      }
+    Button {
+      openGitHubIssue()
+    } label: {
+      Label("Review Issue Report…", systemImage: "ladybug")
+    }
 
-      Button {
-        copyIssueReport()
-      } label: {
-        Label("Review Before Copying…", systemImage: "doc.on.clipboard")
-      }
+    Button {
+      copyIssueReport()
+    } label: {
+      Label("Review Before Copying…", systemImage: "doc.on.clipboard")
     }
 
     Divider()
@@ -999,6 +998,17 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
         }
         .disabled(environment.main.isBusy)
         .speakTooltip(reprocessTooltip)
+      }
+      // Failed entries offer this in their Errors section.
+      if item.errors.isEmpty {
+        Button {
+          openGitHubIssue()
+        } label: {
+          Label("Review Issue Report…", systemImage: "ladybug")
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("historyReviewIssueReport")
+        .speakTooltip("Report wrong text, a slow request or the wrong model. Review the exact public draft first.")
       }
       if environment.main.isBusy {
         ProgressView()

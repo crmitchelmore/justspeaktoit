@@ -12,17 +12,8 @@ on:
       - Sources/SpeakCore/ModelRetirements.swift
       - Sources/SpeakCore/ProviderCredentialCatalogue.swift
       - Sources/SpeakCore/OpenAITranscriptionModels.swift
-  pull_request:
-    paths:
-      - android/**
-      - .github/workflows/android.yml
-      # Parity tests read these shared Swift definitions.
-      - Sources/SpeakCore/TranscriptCleanupPolicy.swift
-      - Sources/SpeakCore/ModelCatalog.swift
-      - Sources/SpeakCore/ModelRetirements.swift
-      - Sources/SpeakCore/ProviderCredentialCatalogue.swift
-      - Sources/SpeakCore/OpenAITranscriptionModels.swift
-
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
 permissions:
   contents: read
 

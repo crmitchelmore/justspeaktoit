@@ -28,6 +28,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
 
     func testActionButtonDestinationCanBeConfigured() {
         openSettings()
+        openSettingsPage("recording")
 
         let hardwareTriggerLink = app.buttons["hardwareTriggerSettingsLink"]
         XCTAssertTrue(scrollUpUntilExists(hardwareTriggerLink), "hardwareTriggerSettingsLink not found in Settings")
@@ -60,6 +61,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
 
     func testModelPickersExposeCredentialReadiness() {
         openSettings()
+        openSettingsPage("transcription")
 
         let locationPicker = app.segmentedControls["transcriptionLocationPicker"]
         XCTAssertTrue(scrollUpUntilExists(locationPicker), "transcriptionLocationPicker not found in Settings")
@@ -105,6 +107,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
     #if IOS_KEYBOARD_FEATURE
     func testKeyboardOnboardingExplainsSupportedSetup() {
         openSettings()
+        openSettingsPage("recording")
 
         let keyboardSetupLink = app.buttons["keyboardSetupLink"]
         XCTAssertTrue(scrollUpUntilExists(keyboardSetupLink), "keyboardSetupLink not found in Settings")
@@ -124,6 +127,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
     #else
     func testKeyboardOnboardingIsHiddenWhenFeatureIsDisabled() {
         openSettings()
+        openSettingsPage("recording")
 
         // Proving absence is the one place a long wait is pure cost.
         XCTAssertFalse(
@@ -157,6 +161,13 @@ final class ActionButtonSettingsUITests: XCTestCase {
     /// Waits for `element`, swiping up between attempts. The first wait covers a
     /// screen that is still laying out; the settle wait covers the scroll
     /// animation. Both return as soon as the element exists.
+    /// Opens a Settings sub-page from the root list (#1470).
+    private func openSettingsPage(_ page: String) {
+        let link = app.buttons["settingsPage.\(page)"]
+        XCTAssertTrue(scrollUpUntilExists(link), "settingsPage.\(page) not found in Settings")
+        link.tap()
+    }
+
     private func scrollUpUntilExists(
         _ element: XCUIElement,
         initialTimeout: TimeInterval = 5,

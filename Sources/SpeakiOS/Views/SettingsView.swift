@@ -116,6 +116,9 @@ public struct SettingsView: View {
 
     private var settingsForm: some View {
         Form {
+            SearchableSettingsSection("System resources in use") {
+                SystemResourcesStatusRows(monitor: IOSSystemResourceMonitor.shared)
+            }
             SearchableSettingsSection("Appearance") {
                 Picker("Layout Density", selection: $settings.visualDensity) {
                     ForEach(AppVisualDensity.allCases) { density in

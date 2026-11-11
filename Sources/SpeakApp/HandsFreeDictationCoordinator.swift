@@ -40,6 +40,8 @@ final class HandsFreeDictationCoordinator {
   private var armTask: Task<Void, Never>?
   private var finalisationTask: Task<Void, Never>?
   private var armID: UUID?
+  /// Lists the armed microphone in Status (issue #1471).
+  private var resourceHold: SystemResourceToken?
   /// Observers for the events that mean the user left: sleep and fast user
   /// switching come from the workspace centre, screen lock from the
   /// distributed one.
@@ -247,6 +249,12 @@ final class HandsFreeDictationCoordinator {
       audioEngine = engine
       detectorSession = session
       observeEngineConfigurationChange(engine, armID: armID)
+      resourceHold = SystemResourceRegistry.shared.acquire(
+        kind: .microphone, title: "Hands-free listening",
+        reason: "Armed: waiting for you to speak. Disarms on sleep or screen lock.",
+        owner: "HandsFreeDictationCoordinator", releaseTitle: "Disarm",
+        release: { [weak self] in await self?.disarm() }
+      )
     } catch {
       engine.stop()
       inputNode.removeTap(onBus: 0)
@@ -280,6 +288,8 @@ final class HandsFreeDictationCoordinator {
     audioEngine?.stop()
     audioEngine?.inputNode.removeTap(onBus: 0)
     audioEngine = nil
+    resourceHold?.end()
+    resourceHold = nil
 
     if #available(macOS 26.0, *), let session = detectorSession as? AppleSpeechDetectorSession {
       await session.cancel()

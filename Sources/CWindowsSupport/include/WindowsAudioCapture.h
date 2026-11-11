@@ -100,7 +100,6 @@ int jsti_owned_capture_open_fixture(JSTIOwnedCapture **owner, const char *run_id
                                     uint32_t sample_rate, uint32_t frame_ms, JSTIAudioCallback audio,
                                     JSTIAudioErrorCallback failure, void *context,
                                     JSTIOwnedCaptureReceipt *receipt, char *error, size_t capacity);
-int jsti_owned_capture_self_test(char *error, size_t capacity);
 
 #ifdef __cplusplus
 }

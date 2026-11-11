@@ -42,6 +42,15 @@ int jsti_audio_playback_self_test(char *error, size_t error_capacity);
  * directory repair, existing-file preservation and junction refusal. */
 int jsti_private_storage_self_test(char *error, size_t error_capacity);
 
+/* Deterministic native checks: Unicode, 16/24 kHz frame boundaries, silence,
+ * fixed queue capacity, writer drain, capture creation and sample-rate
+ * validation, invalid insertion targets. Does not use microphone, clipboard or
+ * real credentials. */
+int jsti_native_self_test(char *error, size_t error_capacity);
+
+/* Owned-capture receipts, quiesce and retirement on synthetic fixtures. */
+int jsti_owned_capture_self_test(char *error, size_t capacity);
+
 #ifdef __cplusplus
 }
 #endif

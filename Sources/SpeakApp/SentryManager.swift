@@ -4,8 +4,34 @@ import SpeakCore
 import Sentry
 #endif
 
-/// Manages Sentry crash reporting and error tracking
+/// Manages Sentry crash reporting and error tracking.
+///
+/// The iOS app compiles this file and `SentryEventScrubber.swift` too (see
+/// `Project.swift`), so both platforms share one collection contract and one
+/// credential scrubber; only the destination differs.
 enum SentryManager {
+    /// The Sentry project and release package a platform reports to.
+    struct Destination: Equatable {
+        let dsn: String
+        let releasePackage: String
+    }
+
+    static let macOSDestination = Destination(
+        dsn: "https://6da8db9be62a737d295a727db0f6ce7e@o4510682832240640.ingest.de.sentry.io/4510790595903568",
+        releasePackage: "justspeaktoit-mac"
+    )
+
+    static let iOSDestination = Destination(
+        dsn: "https://0fe99ac203c91b80d4dfb0630ad7be7e@o4510682832240640.ingest.de.sentry.io/4510687487197264",
+        releasePackage: "justspeaktoit-ios"
+    )
+
+    #if os(iOS)
+    static let destination = iOSDestination
+    #else
+    static let destination = macOSDestination
+    #endif
+
     #if canImport(Sentry)
     typealias LogLevel = SentryLevel
     typealias PerformanceSpan = Span
@@ -38,14 +64,12 @@ enum SentryManager {
     /// widen collection without a diff here and a failing test.
     /// - Parameter options: The options object the SDK is about to start with
     static func configure(_ options: Sentry.Options) {
-        let dsn = "https://6da8db9be62a737d295a727db0f6ce7e@o4510682832240640"
-            + ".ingest.de.sentry.io/4510790595903568"
-        options.dsn = dsn
+        options.dsn = destination.dsn
         // Set app version from bundle
         if let info = Bundle.main.infoDictionary,
            let version = info["CFBundleShortVersionString"] as? String,
            let build = info["CFBundleVersion"] as? String {
-            options.releaseName = "justspeaktoit-mac@\(version)+\(build)"
+            options.releaseName = "\(destination.releasePackage)@\(version)+\(build)"
             options.dist = build
         }
         let isTestRun = NSClassFromString("XCTestCase") != nil
@@ -106,8 +130,9 @@ enum SentryManager {
     }
 
     /// The only host whose failed requests are captured automatically. The app
-    /// sends no credential to it.
-    static let failedRequestTarget = "justspeaktoit.com"
+    /// sends no credential to it. The scheme separator excludes subdomains:
+    /// `api.justspeaktoit.com` carries account and billing routes.
+    static let failedRequestTarget = "://justspeaktoit.com"
     #endif
 
     /// Capture an error with optional context

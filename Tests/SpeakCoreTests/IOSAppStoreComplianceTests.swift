@@ -160,4 +160,26 @@ final class IOSAppStoreComplianceTests: XCTestCase {
             "Post-processing and voice output send transcript text to third-party providers"
         )
     }
+
+    /// The app reports crashes to Sentry, so the manifest (and the App Store
+    /// nutrition label it must agree with) declares diagnostics, unlinked.
+    func testAppPrivacyManifest_declaresSentryDiagnosticsUnlinked() throws {
+        let privacy = try plist(at: "SpeakiOSApp/PrivacyInfo.xcprivacy")
+        let collected = try XCTUnwrap(privacy["NSPrivacyCollectedDataTypes"] as? [[String: Any]])
+        for type in ["NSPrivacyCollectedDataTypeCrashData", "NSPrivacyCollectedDataTypePerformanceData"] {
+            let entry = try XCTUnwrap(collected.first { $0["NSPrivacyCollectedDataType"] as? String == type }, type)
+            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeLinked"] as? Bool, false, type)
+            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeTracking"] as? Bool, false, type)
+        }
+    }
+
+    /// The iOS app compiles the Mac's Sentry configuration and credential
+    /// scrubber rather than a copy, so the two cannot drift apart.
+    func testIOSApp_compilesTheSharedSentryConfigurationAndScrubber() throws {
+        let manifest = try contents(of: "Project.swift")
+        XCTAssertTrue(manifest.contains("\"Sources/SpeakApp/SentryManager.swift\""))
+        XCTAssertTrue(manifest.contains("\"Sources/SpeakApp/SentryEventScrubber.swift\""))
+        let launch = try contents(of: "SpeakiOSApp/SpeakiOSApp.swift")
+        XCTAssertTrue(launch.contains("SentryManager.start()"))
+    }
 }

@@ -1,0 +1,4314 @@
+[
+  {
+    "browser": "chromium",
+    "page": "/",
+    "scheme": "light",
+    "issues": [
+      "axe: label-content-name-mismatch(serious)"
+    ],
+    "screenshots": [
+      "screenshots/chromium-home-light-01-skiplink.png",
+      "screenshots/chromium-home-light-focus-001.png",
+      "screenshots/chromium-home-light-focus-002.png",
+      "screenshots/chromium-home-light-focus-003.png",
+      "screenshots/chromium-home-light-focus-005.png",
+      "screenshots/chromium-home-light-focus-008.png",
+      "screenshots/chromium-home-light-focus-031.png",
+      "screenshots/chromium-home-light-focus-061.png",
+      "screenshots/chromium-home-light-axe-fail.png"
+    ],
+    "axe": {
+      "violations": [
+        {
+          "id": "label-content-name-mismatch",
+          "impact": "serious",
+          "help": "Elements must have their visible text as part of their accessible name",
+          "nodes": [
+            ".hero-actions > .button[data-auto-mac-download=\"\"][data-detected-architecture=\"unknown\"]",
+            ".cta-actions > .button[data-auto-mac-download=\"\"][data-detected-architecture=\"unknown\"]"
+          ],
+          "count": 2
+        }
+      ],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 186
+        }
+      ],
+      "passes": 39,
+      "seriousOrCritical": 1
+    },
+    "candidates": 62,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "Open source, MIT licensed\n↗"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "How it works",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "Your data",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "Models",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "iPhone & iPad",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "a",
+        "text": "Windows & Linux",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "Automation",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "a",
+        "text": "Download",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 9,
+        "tag": "a",
+        "text": "Open source, MIT licensed ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 10,
+        "tag": "a",
+        "text": "↓ Download for Mac",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 11,
+        "tag": "a",
+        "text": "Also on iPhone & iPad",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 12,
+        "tag": "a",
+        "text": "New: Windows & Linux beta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 13,
+        "tag": "a",
+        "text": "Apple Silicon",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 14,
+        "tag": "a",
+        "text": "Intel (universal)",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 15,
+        "tag": "a",
+        "text": "Open the full-size Mac screenshot",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 16,
+        "tag": "a",
+        "text": "View full size ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 17,
+        "tag": "a",
+        "text": "Read the source ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 18,
+        "tag": "video",
+        "text": "Dictating into a text field on a Mac, then finding the text ",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 19,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 20,
+        "tag": "video",
+        "text": "The Corrections page on Mac listing preferred spellings for ",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 21,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 22,
+        "tag": "video",
+        "text": "History on Mac and Linux: every past dictation with its mode",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 23,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 24,
+        "tag": "a",
+        "text": "The full privacy policy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 25,
+        "tag": "video",
+        "text": "Transcription and clean-up settings: on-device models alongs",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 26,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 27,
+        "tag": "a",
+        "text": "Missing a model? Open a request →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 28,
+        "tag": "a",
+        "text": "The full provider list →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 29,
+        "tag": "video",
+        "text": "The iPhone app: tap record, see the words, copy them, then o",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 30,
+        "tag": "a",
+        "text": "Full-size History screenshot ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 31,
+        "tag": "video",
+        "text": "The Windows beta: dashboard, recording overlay, completed ov",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 32,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 33,
+        "tag": "video",
+        "text": "The Linux beta: GTK dashboard, recording overlay, History an",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 34,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 35,
+        "tag": "a",
+        "text": "Windows x64 (.zip) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 36,
+        "tag": "a",
+        "text": "Windows ARM64 (.zip) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 37,
+        "tag": "a",
+        "text": "Linux x86_64 (Flatpak, auto-updates) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 38,
+        "tag": "a",
+        "text": "Running the Windows bundle →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 39,
+        "tag": "a",
+        "text": "Installing the Flatpak →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 40,
+        "tag": "a",
+        "text": "Read the automation guide →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 41,
+        "tag": "a",
+        "text": "Open the full-size Mac dashboard screenshot",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 42,
+        "tag": "a",
+        "text": "View full size ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 43,
+        "tag": "a",
+        "text": "The repository ↗ The whole app — Mac, iOS, the shared core a",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 44,
+        "tag": "a",
+        "text": "Request a model ↗ A provider you already pay for and cannot ",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 45,
+        "tag": "a",
+        "text": "Chris's blog ↗ mitchelmore.uk — notes on building this and o",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 46,
+        "tag": "a",
+        "text": "Pasta ↗ The other app. A calmer clipboard manager for the Ma",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 47,
+        "tag": "a",
+        "text": "Download for Mac ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 48,
+        "tag": "a",
+        "text": "Apple Silicon",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 49,
+        "tag": "a",
+        "text": "Intel (universal)",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 50,
+        "tag": "a",
+        "text": "How to get it on iPhone and iPad ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 51,
+        "tag": "a",
+        "text": "New: Windows and Linux beta builds",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 52,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 53,
+        "tag": "a",
+        "text": "Chris Mitchelmore",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 54,
+        "tag": "a",
+        "text": "Pasta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 55,
+        "tag": "a",
+        "text": "GitHub",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 56,
+        "tag": "a",
+        "text": "Releases",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 57,
+        "tag": "a",
+        "text": "Privacy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 58,
+        "tag": "a",
+        "text": "Blog",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 59,
+        "tag": "a",
+        "text": "Pasta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 60,
+        "tag": "a",
+        "text": "Support",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 61,
+        "tag": "a",
+        "text": "Back to top ↑",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [
+      "Dictating into a text field on a Mac, then finding the text : 3 stops",
+      "The Corrections page on Mac listing preferred spellings for : 3 stops",
+      "History on Mac and Linux: every past dictation with its mode: 3 stops",
+      "Transcription and clean-up settings: on-device models alongs: 3 stops",
+      "The iPhone app: tap record, see the words, copy them, then o: 3 stops",
+      "The Windows beta: dashboard, recording overlay, completed ov: 3 stops",
+      "The Linux beta: GTK dashboard, recording overlay, History an: 3 stops"
+    ],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Enter on in-page link #how",
+        "hash": "#how",
+        "ok": true
+      },
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "chromium",
+    "page": "/",
+    "scheme": "dark",
+    "issues": [
+      "axe: label-content-name-mismatch(serious)"
+    ],
+    "screenshots": [
+      "screenshots/chromium-home-dark-01-skiplink.png",
+      "screenshots/chromium-home-dark-focus-001.png",
+      "screenshots/chromium-home-dark-focus-002.png",
+      "screenshots/chromium-home-dark-focus-003.png",
+      "screenshots/chromium-home-dark-focus-005.png",
+      "screenshots/chromium-home-dark-focus-008.png",
+      "screenshots/chromium-home-dark-focus-031.png",
+      "screenshots/chromium-home-dark-focus-061.png",
+      "screenshots/chromium-home-dark-axe-fail.png"
+    ],
+    "axe": {
+      "violations": [
+        {
+          "id": "label-content-name-mismatch",
+          "impact": "serious",
+          "help": "Elements must have their visible text as part of their accessible name",
+          "nodes": [
+            ".hero-actions > .button[data-auto-mac-download=\"\"][data-detected-architecture=\"unknown\"]",
+            ".cta-actions > .button[data-auto-mac-download=\"\"][data-detected-architecture=\"unknown\"]"
+          ],
+          "count": 2
+        }
+      ],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 186
+        }
+      ],
+      "passes": 39,
+      "seriousOrCritical": 1
+    },
+    "candidates": 62,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "Open source, MIT licensed\n↗"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "How it works",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "Your data",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "Models",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "iPhone & iPad",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "a",
+        "text": "Windows & Linux",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "Automation",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "a",
+        "text": "Download",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 9,
+        "tag": "a",
+        "text": "Open source, MIT licensed ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 10,
+        "tag": "a",
+        "text": "↓ Download for Mac",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 11,
+        "tag": "a",
+        "text": "Also on iPhone & iPad",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 12,
+        "tag": "a",
+        "text": "New: Windows & Linux beta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 13,
+        "tag": "a",
+        "text": "Apple Silicon",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 14,
+        "tag": "a",
+        "text": "Intel (universal)",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 15,
+        "tag": "a",
+        "text": "Open the full-size Mac screenshot",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 16,
+        "tag": "a",
+        "text": "View full size ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 17,
+        "tag": "a",
+        "text": "Read the source ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 18,
+        "tag": "video",
+        "text": "Dictating into a text field on a Mac, then finding the text ",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 19,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 20,
+        "tag": "video",
+        "text": "The Corrections page on Mac listing preferred spellings for ",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 21,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 22,
+        "tag": "video",
+        "text": "History on Mac and Linux: every past dictation with its mode",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 23,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 24,
+        "tag": "a",
+        "text": "The full privacy policy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 25,
+        "tag": "video",
+        "text": "Transcription and clean-up settings: on-device models alongs",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 26,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 27,
+        "tag": "a",
+        "text": "Missing a model? Open a request →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 28,
+        "tag": "a",
+        "text": "The full provider list →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 29,
+        "tag": "video",
+        "text": "The iPhone app: tap record, see the words, copy them, then o",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 30,
+        "tag": "a",
+        "text": "Full-size History screenshot ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 31,
+        "tag": "video",
+        "text": "The Windows beta: dashboard, recording overlay, completed ov",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 32,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 33,
+        "tag": "video",
+        "text": "The Linux beta: GTK dashboard, recording overlay, History an",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 3
+      },
+      {
+        "idx": 34,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 35,
+        "tag": "a",
+        "text": "Windows x64 (.zip) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 36,
+        "tag": "a",
+        "text": "Windows ARM64 (.zip) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 37,
+        "tag": "a",
+        "text": "Linux x86_64 (Flatpak, auto-updates) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 38,
+        "tag": "a",
+        "text": "Running the Windows bundle →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 39,
+        "tag": "a",
+        "text": "Installing the Flatpak →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 40,
+        "tag": "a",
+        "text": "Read the automation guide →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 41,
+        "tag": "a",
+        "text": "Open the full-size Mac dashboard screenshot",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 42,
+        "tag": "a",
+        "text": "View full size ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 43,
+        "tag": "a",
+        "text": "The repository ↗ The whole app — Mac, iOS, the shared core a",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 44,
+        "tag": "a",
+        "text": "Request a model ↗ A provider you already pay for and cannot ",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 45,
+        "tag": "a",
+        "text": "Chris's blog ↗ mitchelmore.uk — notes on building this and o",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 46,
+        "tag": "a",
+        "text": "Pasta ↗ The other app. A calmer clipboard manager for the Ma",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 47,
+        "tag": "a",
+        "text": "Download for Mac ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 48,
+        "tag": "a",
+        "text": "Apple Silicon",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 49,
+        "tag": "a",
+        "text": "Intel (universal)",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 50,
+        "tag": "a",
+        "text": "How to get it on iPhone and iPad ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 51,
+        "tag": "a",
+        "text": "New: Windows and Linux beta builds",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 52,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 53,
+        "tag": "a",
+        "text": "Chris Mitchelmore",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 54,
+        "tag": "a",
+        "text": "Pasta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 55,
+        "tag": "a",
+        "text": "GitHub",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 56,
+        "tag": "a",
+        "text": "Releases",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 57,
+        "tag": "a",
+        "text": "Privacy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 58,
+        "tag": "a",
+        "text": "Blog",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 59,
+        "tag": "a",
+        "text": "Pasta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 60,
+        "tag": "a",
+        "text": "Support",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 61,
+        "tag": "a",
+        "text": "Back to top ↑",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [
+      "Dictating into a text field on a Mac, then finding the text : 3 stops",
+      "The Corrections page on Mac listing preferred spellings for : 3 stops",
+      "History on Mac and Linux: every past dictation with its mode: 3 stops",
+      "Transcription and clean-up settings: on-device models alongs: 3 stops",
+      "The iPhone app: tap record, see the words, copy them, then o: 3 stops",
+      "The Windows beta: dashboard, recording overlay, completed ov: 3 stops",
+      "The Linux beta: GTK dashboard, recording overlay, History an: 3 stops"
+    ],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Enter on in-page link #how",
+        "hash": "#how",
+        "ok": true
+      },
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "chromium",
+    "page": "/privacy",
+    "scheme": "light",
+    "issues": [],
+    "screenshots": [
+      "screenshots/chromium-privacy-light-01-skiplink.png",
+      "screenshots/chromium-privacy-light-focus-001.png",
+      "screenshots/chromium-privacy-light-focus-002.png",
+      "screenshots/chromium-privacy-light-focus-003.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 39
+        }
+      ],
+      "passes": 31,
+      "seriousOrCritical": 0
+    },
+    "candidates": 4,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "hello@justspeaktoit.com"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "Back to the app",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "chromium",
+    "page": "/privacy",
+    "scheme": "dark",
+    "issues": [],
+    "screenshots": [
+      "screenshots/chromium-privacy-dark-01-skiplink.png",
+      "screenshots/chromium-privacy-dark-focus-001.png",
+      "screenshots/chromium-privacy-dark-focus-002.png",
+      "screenshots/chromium-privacy-dark-focus-003.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 39
+        }
+      ],
+      "passes": 31,
+      "seriousOrCritical": 0
+    },
+    "candidates": 4,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "hello@justspeaktoit.com"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "Back to the app",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "chromium",
+    "page": "/support",
+    "scheme": "light",
+    "issues": [],
+    "screenshots": [
+      "screenshots/chromium-support-light-01-skiplink.png",
+      "screenshots/chromium-support-light-focus-001.png",
+      "screenshots/chromium-support-light-focus-002.png",
+      "screenshots/chromium-support-light-focus-003.png",
+      "screenshots/chromium-support-light-focus-004.png",
+      "screenshots/chromium-support-light-focus-005.png",
+      "screenshots/chromium-support-light-focus-008.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 24
+        }
+      ],
+      "passes": 29,
+      "seriousOrCritical": 0
+    },
+    "candidates": 9,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "hello@justspeaktoit.com"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "Back to the app",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "report a bug on GitHub",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "privacy policy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "Home",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "a",
+        "text": "Privacy policy",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "chromium",
+    "page": "/support",
+    "scheme": "dark",
+    "issues": [],
+    "screenshots": [
+      "screenshots/chromium-support-dark-01-skiplink.png",
+      "screenshots/chromium-support-dark-focus-001.png",
+      "screenshots/chromium-support-dark-focus-002.png",
+      "screenshots/chromium-support-dark-focus-003.png",
+      "screenshots/chromium-support-dark-focus-004.png",
+      "screenshots/chromium-support-dark-focus-005.png",
+      "screenshots/chromium-support-dark-focus-008.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 24
+        }
+      ],
+      "passes": 29,
+      "seriousOrCritical": 0
+    },
+    "candidates": 9,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "hello@justspeaktoit.com"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "Back to the app",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "report a bug on GitHub",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "privacy policy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "Home",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "a",
+        "text": "Privacy policy",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "chromium",
+    "page": "/qa",
+    "scheme": "light",
+    "issues": [
+      "Keyboard action failed: ArrowRight from Pass selects Fail and keeps focus in the group",
+      "Keyboard action failed: ArrowRight again reaches Skip",
+      "Keyboard action failed: With Fail selected, the next Tab reaches the note field"
+    ],
+    "screenshots": [
+      "screenshots/chromium-qa-light-01-skiplink.png",
+      "screenshots/chromium-qa-light-focus-001.png",
+      "screenshots/chromium-qa-light-focus-002.png",
+      "screenshots/chromium-qa-light-focus-003.png",
+      "screenshots/chromium-qa-light-focus-005.png",
+      "screenshots/chromium-qa-light-focus-008.png",
+      "screenshots/chromium-qa-light-focus-019.png",
+      "screenshots/chromium-qa-light-focus-038.png",
+      "screenshots/chromium-qa-light-qa-radio-keyboard.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [],
+      "passes": 38,
+      "seriousOrCritical": 0
+    },
+    "candidates": 39,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to checklist",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "Mac"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to checklist",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Mac",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "iPhone",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "Apple Watch + iPhone",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "Decisions",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 9,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 10,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 11,
+        "tag": "summary",
+        "text": "Optional: 16 more · ~192 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 12,
+        "tag": "a",
+        "text": "#934",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 13,
+        "tag": "a",
+        "text": "#1117",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 14,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 15,
+        "tag": "a",
+        "text": "#934",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 16,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 17,
+        "tag": "a",
+        "text": "#1117",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 18,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 19,
+        "tag": "a",
+        "text": "#1014",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 20,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 21,
+        "tag": "a",
+        "text": "#935",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 22,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 23,
+        "tag": "a",
+        "text": "#935",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 24,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 25,
+        "tag": "a",
+        "text": "#1016",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 26,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 27,
+        "tag": "a",
+        "text": "#994",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 28,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 29,
+        "tag": "a",
+        "text": "#1469",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 30,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 31,
+        "tag": "a",
+        "text": "#1382",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 32,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 33,
+        "tag": "summary",
+        "text": "Optional: 10 more · ~57 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 34,
+        "tag": "a",
+        "text": "#963",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 35,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 36,
+        "tag": "summary",
+        "text": "Optional: 4 more · ~24 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 37,
+        "tag": "summary",
+        "text": "Optional: 1 more · ~2 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 38,
+        "tag": "button",
+        "text": "Clear",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Enter on in-page link #session-mac",
+        "hash": "#session-mac",
+        "ok": true
+      },
+      {
+        "action": "Enter on <summary>",
+        "ok": true
+      },
+      {
+        "action": "Escape while <summary> focused keeps focus",
+        "ok": true
+      },
+      {
+        "action": "Space on first Pass radio marks the check Pass",
+        "ok": true
+      },
+      {
+        "action": "ArrowRight from Pass selects Fail and keeps focus in the group",
+        "value": "",
+        "ok": false
+      },
+      {
+        "action": "ArrowRight again reaches Skip",
+        "value": "",
+        "ok": false
+      },
+      {
+        "action": "With Fail selected, the next Tab reaches the note field",
+        "value": "A",
+        "ok": false
+      },
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "chromium",
+    "page": "/qa",
+    "scheme": "dark",
+    "issues": [
+      "Keyboard action failed: ArrowRight from Pass selects Fail and keeps focus in the group",
+      "Keyboard action failed: ArrowRight again reaches Skip",
+      "Keyboard action failed: With Fail selected, the next Tab reaches the note field"
+    ],
+    "screenshots": [
+      "screenshots/chromium-qa-dark-01-skiplink.png",
+      "screenshots/chromium-qa-dark-focus-001.png",
+      "screenshots/chromium-qa-dark-focus-002.png",
+      "screenshots/chromium-qa-dark-focus-003.png",
+      "screenshots/chromium-qa-dark-focus-005.png",
+      "screenshots/chromium-qa-dark-focus-008.png",
+      "screenshots/chromium-qa-dark-focus-019.png",
+      "screenshots/chromium-qa-dark-focus-038.png",
+      "screenshots/chromium-qa-dark-qa-radio-keyboard.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [],
+      "passes": 38,
+      "seriousOrCritical": 0
+    },
+    "candidates": 39,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to checklist",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "Mac"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to checklist",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Mac",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "iPhone",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "Apple Watch + iPhone",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "Decisions",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 9,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 10,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 11,
+        "tag": "summary",
+        "text": "Optional: 16 more · ~192 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 12,
+        "tag": "a",
+        "text": "#934",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 13,
+        "tag": "a",
+        "text": "#1117",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 14,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 15,
+        "tag": "a",
+        "text": "#934",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 16,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 17,
+        "tag": "a",
+        "text": "#1117",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 18,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 19,
+        "tag": "a",
+        "text": "#1014",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 20,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 21,
+        "tag": "a",
+        "text": "#935",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 22,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 23,
+        "tag": "a",
+        "text": "#935",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 24,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 25,
+        "tag": "a",
+        "text": "#1016",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 26,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 27,
+        "tag": "a",
+        "text": "#994",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 28,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 29,
+        "tag": "a",
+        "text": "#1469",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 30,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 31,
+        "tag": "a",
+        "text": "#1382",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 32,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 33,
+        "tag": "summary",
+        "text": "Optional: 10 more · ~57 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 34,
+        "tag": "a",
+        "text": "#963",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 35,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 36,
+        "tag": "summary",
+        "text": "Optional: 4 more · ~24 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 37,
+        "tag": "summary",
+        "text": "Optional: 1 more · ~2 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 38,
+        "tag": "button",
+        "text": "Clear",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Enter on in-page link #session-mac",
+        "hash": "#session-mac",
+        "ok": true
+      },
+      {
+        "action": "Enter on <summary>",
+        "ok": true
+      },
+      {
+        "action": "Escape while <summary> focused keeps focus",
+        "ok": true
+      },
+      {
+        "action": "Space on first Pass radio marks the check Pass",
+        "ok": true
+      },
+      {
+        "action": "ArrowRight from Pass selects Fail and keeps focus in the group",
+        "value": "",
+        "ok": false
+      },
+      {
+        "action": "ArrowRight again reaches Skip",
+        "value": "",
+        "ok": false
+      },
+      {
+        "action": "With Fail selected, the next Tab reaches the note field",
+        "value": "A",
+        "ok": false
+      },
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "firefox",
+    "page": "/",
+    "scheme": "light",
+    "issues": [
+      "axe: label-content-name-mismatch(serious)"
+    ],
+    "screenshots": [
+      "screenshots/firefox-home-light-01-skiplink.png",
+      "screenshots/firefox-home-light-focus-001.png",
+      "screenshots/firefox-home-light-focus-002.png",
+      "screenshots/firefox-home-light-focus-003.png",
+      "screenshots/firefox-home-light-focus-005.png",
+      "screenshots/firefox-home-light-focus-008.png",
+      "screenshots/firefox-home-light-focus-031.png",
+      "screenshots/firefox-home-light-focus-061.png",
+      "screenshots/firefox-home-light-axe-fail.png"
+    ],
+    "axe": {
+      "violations": [
+        {
+          "id": "label-content-name-mismatch",
+          "impact": "serious",
+          "help": "Elements must have their visible text as part of their accessible name",
+          "nodes": [
+            ".hero-actions > .button[data-auto-mac-download=\"\"][data-detected-architecture=\"unknown\"]",
+            ".cta-actions > .button[data-auto-mac-download=\"\"][data-detected-architecture=\"unknown\"]"
+          ],
+          "count": 2
+        }
+      ],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 186
+        }
+      ],
+      "passes": 39,
+      "seriousOrCritical": 1
+    },
+    "candidates": 62,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "Open source, MIT licensed\n↗"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "How it works",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "Your data",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "Models",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "iPhone & iPad",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "a",
+        "text": "Windows & Linux",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "Automation",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "a",
+        "text": "Download",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 9,
+        "tag": "a",
+        "text": "Open source, MIT licensed ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 10,
+        "tag": "a",
+        "text": "↓ Download for Mac",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 11,
+        "tag": "a",
+        "text": "Also on iPhone & iPad",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 12,
+        "tag": "a",
+        "text": "New: Windows & Linux beta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 13,
+        "tag": "a",
+        "text": "Apple Silicon",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 14,
+        "tag": "a",
+        "text": "Intel (universal)",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 15,
+        "tag": "a",
+        "text": "Open the full-size Mac screenshot",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 16,
+        "tag": "a",
+        "text": "View full size ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 17,
+        "tag": "a",
+        "text": "Read the source ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 18,
+        "tag": "video",
+        "text": "Dictating into a text field on a Mac, then finding the text ",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 19,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 20,
+        "tag": "video",
+        "text": "The Corrections page on Mac listing preferred spellings for ",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 21,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 22,
+        "tag": "video",
+        "text": "History on Mac and Linux: every past dictation with its mode",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 23,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 24,
+        "tag": "a",
+        "text": "The full privacy policy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 25,
+        "tag": "video",
+        "text": "Transcription and clean-up settings: on-device models alongs",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 26,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 27,
+        "tag": "a",
+        "text": "Missing a model? Open a request →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 28,
+        "tag": "a",
+        "text": "The full provider list →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 29,
+        "tag": "video",
+        "text": "The iPhone app: tap record, see the words, copy them, then o",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 7
+      },
+      {
+        "idx": 30,
+        "tag": "a",
+        "text": "Full-size History screenshot ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 31,
+        "tag": "video",
+        "text": "The Windows beta: dashboard, recording overlay, completed ov",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 32,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 33,
+        "tag": "video",
+        "text": "The Linux beta: GTK dashboard, recording overlay, History an",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 34,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 35,
+        "tag": "a",
+        "text": "Windows x64 (.zip) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 36,
+        "tag": "a",
+        "text": "Windows ARM64 (.zip) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 37,
+        "tag": "a",
+        "text": "Linux x86_64 (Flatpak, auto-updates) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 38,
+        "tag": "a",
+        "text": "Running the Windows bundle →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 39,
+        "tag": "a",
+        "text": "Installing the Flatpak →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 40,
+        "tag": "a",
+        "text": "Read the automation guide →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 41,
+        "tag": "a",
+        "text": "Open the full-size Mac dashboard screenshot",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 42,
+        "tag": "a",
+        "text": "View full size ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 43,
+        "tag": "a",
+        "text": "The repository ↗ The whole app — Mac, iOS, the shared core a",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 44,
+        "tag": "a",
+        "text": "Request a model ↗ A provider you already pay for and cannot ",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 45,
+        "tag": "a",
+        "text": "Chris's blog ↗ mitchelmore.uk — notes on building this and o",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 46,
+        "tag": "a",
+        "text": "Pasta ↗ The other app. A calmer clipboard manager for the Ma",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 47,
+        "tag": "a",
+        "text": "Download for Mac ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 48,
+        "tag": "a",
+        "text": "Apple Silicon",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 49,
+        "tag": "a",
+        "text": "Intel (universal)",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 50,
+        "tag": "a",
+        "text": "How to get it on iPhone and iPad ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 51,
+        "tag": "a",
+        "text": "New: Windows and Linux beta builds",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 52,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 53,
+        "tag": "a",
+        "text": "Chris Mitchelmore",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 54,
+        "tag": "a",
+        "text": "Pasta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 55,
+        "tag": "a",
+        "text": "GitHub",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 56,
+        "tag": "a",
+        "text": "Releases",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 57,
+        "tag": "a",
+        "text": "Privacy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 58,
+        "tag": "a",
+        "text": "Blog",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 59,
+        "tag": "a",
+        "text": "Pasta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 60,
+        "tag": "a",
+        "text": "Support",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 61,
+        "tag": "a",
+        "text": "Back to top ↑",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [
+      "Dictating into a text field on a Mac, then finding the text : 8 stops",
+      "The Corrections page on Mac listing preferred spellings for : 8 stops",
+      "History on Mac and Linux: every past dictation with its mode: 8 stops",
+      "Transcription and clean-up settings: on-device models alongs: 8 stops",
+      "The iPhone app: tap record, see the words, copy them, then o: 7 stops",
+      "The Windows beta: dashboard, recording overlay, completed ov: 8 stops",
+      "The Linux beta: GTK dashboard, recording overlay, History an: 8 stops"
+    ],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Enter on in-page link #how",
+        "hash": "#how",
+        "ok": true
+      },
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "firefox",
+    "page": "/",
+    "scheme": "dark",
+    "issues": [
+      "axe: label-content-name-mismatch(serious)"
+    ],
+    "screenshots": [
+      "screenshots/firefox-home-dark-01-skiplink.png",
+      "screenshots/firefox-home-dark-focus-001.png",
+      "screenshots/firefox-home-dark-focus-002.png",
+      "screenshots/firefox-home-dark-focus-003.png",
+      "screenshots/firefox-home-dark-focus-005.png",
+      "screenshots/firefox-home-dark-focus-008.png",
+      "screenshots/firefox-home-dark-focus-031.png",
+      "screenshots/firefox-home-dark-focus-061.png",
+      "screenshots/firefox-home-dark-axe-fail.png"
+    ],
+    "axe": {
+      "violations": [
+        {
+          "id": "label-content-name-mismatch",
+          "impact": "serious",
+          "help": "Elements must have their visible text as part of their accessible name",
+          "nodes": [
+            ".hero-actions > .button[data-auto-mac-download=\"\"][data-detected-architecture=\"unknown\"]",
+            ".cta-actions > .button[data-auto-mac-download=\"\"][data-detected-architecture=\"unknown\"]"
+          ],
+          "count": 2
+        }
+      ],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 186
+        }
+      ],
+      "passes": 39,
+      "seriousOrCritical": 1
+    },
+    "candidates": 62,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "Open source, MIT licensed\n↗"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "How it works",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "Your data",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "Models",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "iPhone & iPad",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "a",
+        "text": "Windows & Linux",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "Automation",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "a",
+        "text": "Download",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 9,
+        "tag": "a",
+        "text": "Open source, MIT licensed ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 10,
+        "tag": "a",
+        "text": "↓ Download for Mac",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 11,
+        "tag": "a",
+        "text": "Also on iPhone & iPad",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 12,
+        "tag": "a",
+        "text": "New: Windows & Linux beta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 13,
+        "tag": "a",
+        "text": "Apple Silicon",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 14,
+        "tag": "a",
+        "text": "Intel (universal)",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 15,
+        "tag": "a",
+        "text": "Open the full-size Mac screenshot",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 16,
+        "tag": "a",
+        "text": "View full size ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 17,
+        "tag": "a",
+        "text": "Read the source ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 18,
+        "tag": "video",
+        "text": "Dictating into a text field on a Mac, then finding the text ",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 19,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 20,
+        "tag": "video",
+        "text": "The Corrections page on Mac listing preferred spellings for ",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 21,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 22,
+        "tag": "video",
+        "text": "History on Mac and Linux: every past dictation with its mode",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 23,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 24,
+        "tag": "a",
+        "text": "The full privacy policy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 25,
+        "tag": "video",
+        "text": "Transcription and clean-up settings: on-device models alongs",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 26,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 27,
+        "tag": "a",
+        "text": "Missing a model? Open a request →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 28,
+        "tag": "a",
+        "text": "The full provider list →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 29,
+        "tag": "video",
+        "text": "The iPhone app: tap record, see the words, copy them, then o",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 7
+      },
+      {
+        "idx": 30,
+        "tag": "a",
+        "text": "Full-size History screenshot ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 31,
+        "tag": "video",
+        "text": "The Windows beta: dashboard, recording overlay, completed ov",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 32,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 33,
+        "tag": "video",
+        "text": "The Linux beta: GTK dashboard, recording overlay, History an",
+        "indicator": true,
+        "inViewport": true,
+        "nativeStops": 8
+      },
+      {
+        "idx": 34,
+        "tag": "a",
+        "text": "MP4 ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 35,
+        "tag": "a",
+        "text": "Windows x64 (.zip) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 36,
+        "tag": "a",
+        "text": "Windows ARM64 (.zip) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 37,
+        "tag": "a",
+        "text": "Linux x86_64 (Flatpak, auto-updates) ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 38,
+        "tag": "a",
+        "text": "Running the Windows bundle →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 39,
+        "tag": "a",
+        "text": "Installing the Flatpak →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 40,
+        "tag": "a",
+        "text": "Read the automation guide →",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 41,
+        "tag": "a",
+        "text": "Open the full-size Mac dashboard screenshot",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 42,
+        "tag": "a",
+        "text": "View full size ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 43,
+        "tag": "a",
+        "text": "The repository ↗ The whole app — Mac, iOS, the shared core a",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 44,
+        "tag": "a",
+        "text": "Request a model ↗ A provider you already pay for and cannot ",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 45,
+        "tag": "a",
+        "text": "Chris's blog ↗ mitchelmore.uk — notes on building this and o",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 46,
+        "tag": "a",
+        "text": "Pasta ↗ The other app. A calmer clipboard manager for the Ma",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 47,
+        "tag": "a",
+        "text": "Download for Mac ↓",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 48,
+        "tag": "a",
+        "text": "Apple Silicon",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 49,
+        "tag": "a",
+        "text": "Intel (universal)",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 50,
+        "tag": "a",
+        "text": "How to get it on iPhone and iPad ↗",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 51,
+        "tag": "a",
+        "text": "New: Windows and Linux beta builds",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 52,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 53,
+        "tag": "a",
+        "text": "Chris Mitchelmore",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 54,
+        "tag": "a",
+        "text": "Pasta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 55,
+        "tag": "a",
+        "text": "GitHub",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 56,
+        "tag": "a",
+        "text": "Releases",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 57,
+        "tag": "a",
+        "text": "Privacy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 58,
+        "tag": "a",
+        "text": "Blog",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 59,
+        "tag": "a",
+        "text": "Pasta",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 60,
+        "tag": "a",
+        "text": "Support",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 61,
+        "tag": "a",
+        "text": "Back to top ↑",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [
+      "Dictating into a text field on a Mac, then finding the text : 8 stops",
+      "The Corrections page on Mac listing preferred spellings for : 8 stops",
+      "History on Mac and Linux: every past dictation with its mode: 8 stops",
+      "Transcription and clean-up settings: on-device models alongs: 8 stops",
+      "The iPhone app: tap record, see the words, copy them, then o: 7 stops",
+      "The Windows beta: dashboard, recording overlay, completed ov: 8 stops",
+      "The Linux beta: GTK dashboard, recording overlay, History an: 8 stops"
+    ],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Enter on in-page link #how",
+        "hash": "#how",
+        "ok": true
+      },
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "firefox",
+    "page": "/privacy",
+    "scheme": "light",
+    "issues": [],
+    "screenshots": [
+      "screenshots/firefox-privacy-light-01-skiplink.png",
+      "screenshots/firefox-privacy-light-focus-001.png",
+      "screenshots/firefox-privacy-light-focus-002.png",
+      "screenshots/firefox-privacy-light-focus-003.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 39
+        }
+      ],
+      "passes": 31,
+      "seriousOrCritical": 0
+    },
+    "candidates": 4,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "hello@justspeaktoit.com"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "Back to the app",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "firefox",
+    "page": "/privacy",
+    "scheme": "dark",
+    "issues": [],
+    "screenshots": [
+      "screenshots/firefox-privacy-dark-01-skiplink.png",
+      "screenshots/firefox-privacy-dark-focus-001.png",
+      "screenshots/firefox-privacy-dark-focus-002.png",
+      "screenshots/firefox-privacy-dark-focus-003.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 39
+        }
+      ],
+      "passes": 31,
+      "seriousOrCritical": 0
+    },
+    "candidates": 4,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "hello@justspeaktoit.com"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "Back to the app",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "firefox",
+    "page": "/support",
+    "scheme": "light",
+    "issues": [],
+    "screenshots": [
+      "screenshots/firefox-support-light-01-skiplink.png",
+      "screenshots/firefox-support-light-focus-001.png",
+      "screenshots/firefox-support-light-focus-002.png",
+      "screenshots/firefox-support-light-focus-003.png",
+      "screenshots/firefox-support-light-focus-004.png",
+      "screenshots/firefox-support-light-focus-005.png",
+      "screenshots/firefox-support-light-focus-008.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 24
+        }
+      ],
+      "passes": 29,
+      "seriousOrCritical": 0
+    },
+    "candidates": 9,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "hello@justspeaktoit.com"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "Back to the app",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "report a bug on GitHub",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "privacy policy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "Home",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "a",
+        "text": "Privacy policy",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "firefox",
+    "page": "/support",
+    "scheme": "dark",
+    "issues": [],
+    "screenshots": [
+      "screenshots/firefox-support-dark-01-skiplink.png",
+      "screenshots/firefox-support-dark-focus-001.png",
+      "screenshots/firefox-support-dark-focus-002.png",
+      "screenshots/firefox-support-dark-focus-003.png",
+      "screenshots/firefox-support-dark-focus-004.png",
+      "screenshots/firefox-support-dark-focus-005.png",
+      "screenshots/firefox-support-dark-focus-008.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [
+        {
+          "id": "color-contrast",
+          "impact": "serious",
+          "count": 24
+        }
+      ],
+      "passes": 29,
+      "seriousOrCritical": 0
+    },
+    "candidates": 9,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to content",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "hello@justspeaktoit.com"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to content",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Just Speak to It",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "Back to the app",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "report a bug on GitHub",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "privacy policy",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "a",
+        "text": "hello@justspeaktoit.com",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "Home",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "a",
+        "text": "Privacy policy",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "firefox",
+    "page": "/qa",
+    "scheme": "light",
+    "issues": [
+      "Keyboard action failed: ArrowRight from Pass selects Fail and keeps focus in the group",
+      "Keyboard action failed: ArrowRight again reaches Skip",
+      "Keyboard action failed: With Fail selected, the next Tab reaches the note field"
+    ],
+    "screenshots": [
+      "screenshots/firefox-qa-light-01-skiplink.png",
+      "screenshots/firefox-qa-light-focus-001.png",
+      "screenshots/firefox-qa-light-focus-002.png",
+      "screenshots/firefox-qa-light-focus-003.png",
+      "screenshots/firefox-qa-light-focus-005.png",
+      "screenshots/firefox-qa-light-focus-008.png",
+      "screenshots/firefox-qa-light-focus-019.png",
+      "screenshots/firefox-qa-light-focus-038.png",
+      "screenshots/firefox-qa-light-qa-radio-keyboard.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [],
+      "passes": 38,
+      "seriousOrCritical": 0
+    },
+    "candidates": 39,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to checklist",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "Mac"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to checklist",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Mac",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "iPhone",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "Apple Watch + iPhone",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "Decisions",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 9,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 10,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 11,
+        "tag": "summary",
+        "text": "Optional: 16 more · ~192 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 12,
+        "tag": "a",
+        "text": "#934",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 13,
+        "tag": "a",
+        "text": "#1117",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 14,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 15,
+        "tag": "a",
+        "text": "#934",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 16,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 17,
+        "tag": "a",
+        "text": "#1117",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 18,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 19,
+        "tag": "a",
+        "text": "#1014",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 20,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 21,
+        "tag": "a",
+        "text": "#935",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 22,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 23,
+        "tag": "a",
+        "text": "#935",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 24,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 25,
+        "tag": "a",
+        "text": "#1016",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 26,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 27,
+        "tag": "a",
+        "text": "#994",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 28,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 29,
+        "tag": "a",
+        "text": "#1469",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 30,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 31,
+        "tag": "a",
+        "text": "#1382",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 32,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 33,
+        "tag": "summary",
+        "text": "Optional: 10 more · ~57 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 34,
+        "tag": "a",
+        "text": "#963",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 35,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 36,
+        "tag": "summary",
+        "text": "Optional: 4 more · ~24 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 37,
+        "tag": "summary",
+        "text": "Optional: 1 more · ~2 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 38,
+        "tag": "button",
+        "text": "Clear",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Enter on in-page link #session-mac",
+        "hash": "#session-mac",
+        "ok": true
+      },
+      {
+        "action": "Enter on <summary>",
+        "ok": true
+      },
+      {
+        "action": "Escape while <summary> focused keeps focus",
+        "ok": true
+      },
+      {
+        "action": "Space on first Pass radio marks the check Pass",
+        "ok": true
+      },
+      {
+        "action": "ArrowRight from Pass selects Fail and keeps focus in the group",
+        "value": "",
+        "ok": false
+      },
+      {
+        "action": "ArrowRight again reaches Skip",
+        "value": "",
+        "ok": false
+      },
+      {
+        "action": "With Fail selected, the next Tab reaches the note field",
+        "value": "A",
+        "ok": false
+      },
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  },
+  {
+    "browser": "firefox",
+    "page": "/qa",
+    "scheme": "dark",
+    "issues": [
+      "Keyboard action failed: ArrowRight from Pass selects Fail and keeps focus in the group",
+      "Keyboard action failed: ArrowRight again reaches Skip",
+      "Keyboard action failed: With Fail selected, the next Tab reaches the note field"
+    ],
+    "screenshots": [
+      "screenshots/firefox-qa-dark-01-skiplink.png",
+      "screenshots/firefox-qa-dark-focus-001.png",
+      "screenshots/firefox-qa-dark-focus-002.png",
+      "screenshots/firefox-qa-dark-focus-003.png",
+      "screenshots/firefox-qa-dark-focus-005.png",
+      "screenshots/firefox-qa-dark-focus-008.png",
+      "screenshots/firefox-qa-dark-focus-019.png",
+      "screenshots/firefox-qa-dark-focus-038.png",
+      "screenshots/firefox-qa-dark-qa-radio-keyboard.png"
+    ],
+    "axe": {
+      "violations": [],
+      "incomplete": [],
+      "passes": 38,
+      "seriousOrCritical": 0
+    },
+    "candidates": 39,
+    "unnamed": [],
+    "positiveTabindex": [],
+    "skipLink": {
+      "firstFocus": "Skip to checklist",
+      "visible": true,
+      "indicator": true,
+      "hashAfterEnter": "#main",
+      "nextFocusAfterSkip": {
+        "inMain": true,
+        "text": "Mac"
+      }
+    },
+    "forward": [
+      {
+        "idx": 0,
+        "tag": "a",
+        "text": "Skip to checklist",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 1,
+        "tag": "a",
+        "text": "Mac",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 2,
+        "tag": "a",
+        "text": "iPhone",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 3,
+        "tag": "a",
+        "text": "Apple Watch + iPhone",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 4,
+        "tag": "a",
+        "text": "Decisions",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 5,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 6,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 7,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 8,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 9,
+        "tag": "a",
+        "text": "#664",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 10,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 11,
+        "tag": "summary",
+        "text": "Optional: 16 more · ~192 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 12,
+        "tag": "a",
+        "text": "#934",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 13,
+        "tag": "a",
+        "text": "#1117",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 14,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 15,
+        "tag": "a",
+        "text": "#934",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 16,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 17,
+        "tag": "a",
+        "text": "#1117",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 18,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 19,
+        "tag": "a",
+        "text": "#1014",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 20,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 21,
+        "tag": "a",
+        "text": "#935",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 22,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 23,
+        "tag": "a",
+        "text": "#935",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 24,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 25,
+        "tag": "a",
+        "text": "#1016",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 26,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 27,
+        "tag": "a",
+        "text": "#994",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 28,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 29,
+        "tag": "a",
+        "text": "#1469",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 30,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 31,
+        "tag": "a",
+        "text": "#1382",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 32,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 33,
+        "tag": "summary",
+        "text": "Optional: 10 more · ~57 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 34,
+        "tag": "a",
+        "text": "#963",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 35,
+        "tag": "input",
+        "text": "pass",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 36,
+        "tag": "summary",
+        "text": "Optional: 4 more · ~24 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 37,
+        "tag": "summary",
+        "text": "Optional: 1 more · ~2 min",
+        "indicator": true,
+        "inViewport": true
+      },
+      {
+        "idx": 38,
+        "tag": "button",
+        "text": "Clear",
+        "indicator": true,
+        "inViewport": true
+      }
+    ],
+    "unreached": [],
+    "extraStops": [],
+    "nativeVideoStops": [],
+    "orderMonotonic": true,
+    "reverseMatches": true,
+    "enter": [
+      {
+        "action": "Enter on in-page link #session-mac",
+        "hash": "#session-mac",
+        "ok": true
+      },
+      {
+        "action": "Enter on <summary>",
+        "ok": true
+      },
+      {
+        "action": "Escape while <summary> focused keeps focus",
+        "ok": true
+      },
+      {
+        "action": "Space on first Pass radio marks the check Pass",
+        "ok": true
+      },
+      {
+        "action": "ArrowRight from Pass selects Fail and keeps focus in the group",
+        "value": "",
+        "ok": false
+      },
+      {
+        "action": "ArrowRight again reaches Skip",
+        "value": "",
+        "ok": false
+      },
+      {
+        "action": "With Fail selected, the next Tab reaches the note field",
+        "value": "A",
+        "ok": false
+      },
+      {
+        "action": "Escape on a focused control keeps focus",
+        "ok": true
+      }
+    ],
+    "consoleErrors": []
+  }
+]

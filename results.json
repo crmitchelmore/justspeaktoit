@@ -1,0 +1,24 @@
+[
+  {
+    "id": "mac-website-voiceover",
+    "result": "fail",
+    "confidence": "high",
+    "note": "Linux agent QA, 2026-11-11, Playwright Chromium + Firefox, light and dark, 1280x900, axe-core wcag2a/2aa/21aa/22aa/best-practice on /, /privacy, /support, /qa (16 runs). Production FAILS on two real defects: (1) home 'Download for Mac' buttons get aria-label 'Download Just Speak to It for <arch>' from download-architecture.js, so the name omits the visible text (axe label-content-name-mismatch, serious, 2 nodes, WCAG 2.5.3); (2) /qa: arrowing Pass->Fail moves focus into the note textarea, so keyboard/screen-reader users cannot arrow on to Skip (WCAG 3.2.2). Everything else is clean on production: skip link is the first Tab stop and visible on every page, Enter on it moves the next Tab into main; every focusable element (62/4/9/39) reached by Tab with a visible focus outline, DOM-ordered, no positive tabindex, all named; Shift+Tab mirrors Tab; no keyboard trap (each <video controls> adds native control stops, 3 in Chromium/8 in Firefox, with native focus rings, and focus exits); Enter activates in-page links and <summary>; Escape never drops focus; no console errors. axe 'incomplete' is only color-contrast over gradients/video (manual review). Fix PR verified on a local build: axe 0 violations and keyboard pass clean in both browsers/schemes. Not verifiable here: VoiceOver rotor, Safari Tab/Option-Tab behaviour and macOS appearance switch stay owner review; Orca not installed so no spoken-output pass. Raw data: reports/*.json, harness reports/audit.mjs.",
+    "screenshots": [
+      "screenshots/download-label-in-name-prod-defect.png",
+      "screenshots/download-label-in-name-fixed-local.png",
+      "screenshots/qa-arrow-keys-prod-defect.png",
+      "screenshots/qa-arrow-keys-fixed-local.png",
+      "screenshots/chromium-home-light-01-skiplink.png",
+      "screenshots/firefox-home-dark-01-skiplink.png",
+      "screenshots/chromium-privacy-light-01-skiplink.png",
+      "screenshots/firefox-support-dark-01-skiplink.png",
+      "screenshots/chromium-qa-light-01-skiplink.png",
+      "screenshots/chromium-home-light-focus-001.png",
+      "screenshots/chromium-home-light-focus-031.png",
+      "screenshots/firefox-home-light-focus-008.png",
+      "screenshots/firefox-home-video-focus-probe.png",
+      "screenshots/chromium-home-light-axe-fail.png"
+    ]
+  }
+]

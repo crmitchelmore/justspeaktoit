@@ -21,7 +21,7 @@ final class KeyboardHandoffStartFailureTests: XCTestCase {
 
     func testAudioCause_unwrapsTranscriberAndConfigurationErrors() {
         let wrapped = iOSTranscriptionError.audioSessionFailed(configurationError())
-        let cause = KeyboardInstantDictationCoordinator.audioCause(of: wrapped) as NSError
+        let cause = KeyboardHandoffRecording.audioCause(of: wrapped) as NSError
         XCTAssertEqual(cause.code, refusal.code)
         XCTAssertEqual(
             KeyboardHandoffStartDiagnosis.failureCode(
@@ -32,13 +32,13 @@ final class KeyboardHandoffStartFailureTests: XCTestCase {
     }
 
     func testAudioCause_unwrapsBareConfigurationError() {
-        let cause = KeyboardInstantDictationCoordinator.audioCause(of: configurationError()) as NSError
+        let cause = KeyboardHandoffRecording.audioCause(of: configurationError()) as NSError
         XCTAssertEqual(cause.code, refusal.code)
     }
 
     func testAudioCause_leavesOtherErrorsAlone() {
         let other = NSError(domain: "provider", code: 7)
-        XCTAssertEqual(KeyboardInstantDictationCoordinator.audioCause(of: other) as NSError, other)
+        XCTAssertEqual(KeyboardHandoffRecording.audioCause(of: other) as NSError, other)
     }
 
     func testDeactivate_keepsSessionWhileReadinessHoldsIt() {

@@ -18,10 +18,17 @@ final class SharedClientParityFixture {
     let controller: SharedClientLiveController
     private(set) var client: StreamingTranscriptionClient?
 
+    struct Context {
+        let route: LiveTranscriptionRoute
+        let language: String?
+        let options: LiveClientOptions
+        let socket: SharedClientParitySocket
+        let clock: AssemblyAIControllerClock
+    }
+
     init(
-        model: String, stopGrace: TimeInterval = 0,
-        makeClient: @escaping (LiveTranscriptionRoute, LiveClientOptions, SharedClientParitySocket,
-                               AssemblyAIControllerClock) -> StreamingTranscriptionClient
+        model: String, language: String? = nil, stopGrace: TimeInterval = 0,
+        makeClient: @escaping (Context) -> StreamingTranscriptionClient
     ) throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "shared-client-parity.\(UUID().uuidString)"))
         settings = AppSettings(defaults: defaults)
@@ -34,10 +41,12 @@ final class SharedClientParityFixture {
                 keychainService: "com.justspeaktoit.tests.shared-parity.\(UUID().uuidString)"
             ), appSettings: settings
         )
-        controller.configure(language: nil, model: model)
+        controller.configure(language: language, model: model)
         let socket = socket, clock = clock, updates = updates
-        controller.configuredClientFactory = { [weak self] route, _, options in
-            let client = makeClient(route, options, socket, clock)
+        controller.configuredClientFactory = { [weak self] route, language, options in
+            let client = makeClient(Context(
+                route: route, language: language, options: options, socket: socket, clock: clock
+            ))
             self?.client = client
             return client
         }

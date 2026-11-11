@@ -132,3 +132,34 @@ final class KeySyncFetchAccumulator: @unchecked Sendable {
         )
     }
 }
+
+extension CloudKitKeySync {
+    /// Bridges a fetch operation into async/await. Task cancellation cancels the
+    /// operation and resumes the continuation promptly; the gate guarantees the
+    /// continuation resumes exactly once even when cancellation and CloudKit
+    /// completion race.
+    nonisolated static func awaitFetchCompletion(of operation: any KeySyncFetchOperationRunning) async throws {
+        let gate = KeySyncFetchCompletionGate()
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                guard gate.register(continuation) else {
+                    // Cancellation already resumed the continuation; never
+                    // start the operation whose completion would be discarded.
+                    operation.cancel()
+                    return
+                }
+                operation.run { result in
+                    gate.finish(with: result)
+                }
+                if Task.isCancelled {
+                    operation.cancel()
+                    gate.finish(with: .failure(CancellationError()))
+                }
+            }
+        } onCancel: {
+            operation.cancel()
+            gate.finish(with: .failure(CancellationError()))
+        }
+    }
+}

@@ -24,9 +24,8 @@ enum SonioxLiveError: LocalizedError {
 // MARK: - Provider
 
 // Soniox v6 supports real-time streaming and asynchronous batch transcription.
-struct SonioxTranscriptionProvider: TranscriptionProvider {
-    private let client: SonioxBatchClient
-    var metadata: TranscriptionProviderMetadata { client.metadata }
+struct SonioxTranscriptionProvider: SharedBatchClientProvider {
+    let batchClient: SonioxBatchClient
 
     init(
         session: URLSession = .shared,
@@ -43,14 +42,14 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
                 logger.error("Failed to clean up Soniox async resources: \(message, privacy: .public)")
             }
         )
-        self.client = independentCleanup ? client.withIndependentCleanup() : client
+        batchClient = independentCleanup ? client.withIndependentCleanup() : client
     }
 
     func transcribeFile(
         at url: URL, apiKey: String, model: String, language: String?
     ) async throws -> TranscriptionResult {
         do {
-            return try await client.transcribeFile(at: url, apiKey: apiKey, model: model, language: language)
+            return try await batchClient.transcribeFile(at: url, apiKey: apiKey, model: model, language: language)
         } catch let error as SonioxBatchError {
             switch error {
             case .unsupportedModel: throw SonioxLiveError.batchNotSupported
@@ -60,9 +59,7 @@ struct SonioxTranscriptionProvider: TranscriptionProvider {
         }
     }
 
-    func validateAPIKey(_ key: String) async -> APIKeyValidationResult { await client.validateAPIKey(key) }
-    func requiresAPIKey(for model: String) -> Bool { client.requiresAPIKey(for: model) }
     func supportedModels() -> [ModelCatalog.Option] {
-        ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id) + client.supportedModels()
+        ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id) + batchClient.supportedModels()
     }
 }

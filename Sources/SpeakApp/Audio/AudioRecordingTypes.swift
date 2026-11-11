@@ -25,6 +25,23 @@ enum AudioRecordingLifecycleEvent: Sendable {
 struct RecordingStart: Sendable {
   let url: URL
   let usedWarmRecorder: Bool
+  /// `systemUptime` at the moment the recorder proved it was capturing, taken
+  /// on the recorder's actor so a busy main thread cannot inflate it (#611).
+  var liveUptime: TimeInterval?
+  /// How long `record()` took to prove capture.
+  var recorderOpenMilliseconds: Int?
+}
+
+/// Main-actor state a capture start needs, read before the recorder's actor
+/// takes over (#611). The HUD panel is presented on the main run loop as a
+/// session starts, so each main-actor hop inside `startRecording` used to wait
+/// for that render before the microphone could open.
+struct CaptureStartPreflight: Sendable {
+  let microphoneGranted: Bool
+  let recordingsDirectory: URL
+  /// The preferred-input session, begun only when the microphone is granted.
+  /// `startRecording(preflight:)` owns it from then on and ends it on failure.
+  let inputSession: AudioInputDeviceManager.SessionContext?
 }
 
 enum AudioFileManagerError: LocalizedError {

@@ -176,12 +176,26 @@ final class SessionStartPipeline {
         // beside the primer's open microphone.
         await owners.keyPressPrimer.closeBeforeStart(primedInput)
       }
-      let showsHUD = showRecordingHUDIfNeeded(for: request.trigger)
+      let showsHUD = showsRecordingHUD(for: request.trigger)
+      // The panel renders on the main run loop, which the capture start used to
+      // wait behind (#611). Show it up front only when a slow input-node build
+      // needs covering; otherwise it renders while the recorder opens.
+      let showsHUDBeforeInputBuild = showsHUD
+        && StartingHUDTiming.presentsBeforeInputBuild(
+          buildsInputNode: prepareStream != nil, hasPrimedInput: request.primedInput != nil
+        )
+      if showsHUDBeforeInputBuild {
+        presentStartingHUD()
+      }
       let sequencer = RecordingStartSequencer(
         isSessionCurrent: { [weak host] in host?.activeSession === session },
         prepareStream: prepareStream,
         discardPreparedStream: { await liveInputPreparation.finish(startFailed: true) },
-        startCapture: makeStartCaptureStep(for: session, warmContext: warmContext, showsHUD: showsHUD, host: host),
+        startCapture: makeStartCaptureStep(
+          for: session, warmContext: warmContext,
+          hud: HUDDuringStart(shows: showsHUD, presentsWhileOpening: showsHUD && !showsHUDBeforeInputBuild),
+          host: host
+        ),
         discardCapture: { [weak self] in await self?.discardStartedCapture() },
         startStream: startStream,
         discardStream: { [transcription] in transcription.cancelLiveTranscription() },
@@ -215,23 +229,31 @@ final class SessionStartPipeline {
     }
   }
 
-  /// Shows the HUD as "Getting ready" when this session shows one. Returns
-  /// whether it does.
-  private func showRecordingHUDIfNeeded(for trigger: SessionTriggerSource) -> Bool {
+  /// Whether this session shows the HUD.
+  private func showsRecordingHUD(for trigger: SessionTriggerSource) -> Bool {
     // A hands-free capture always moves the HUD to the recording pane, even
     // when the user hides the HUD for their own sessions: the armed pane
     // otherwise claims the app only listens while it in fact records.
     // Showing that the microphone captures is a privacy duty, not a taste.
-    let showsHUD = settings.showHUDDuringSessions || trigger == .handsFree
-    guard showsHUD else { return false }
-    // Up straight away as "Getting ready"; its clock starts only when the
-    // microphone delivers real audio, never while words can't be heard.
-    // Uses the cached microphone status: each TCC query costs 13-35 ms
-    // before capture (#611), and `startRecording` makes the authoritative
-    // check moments later; the HUD health is refreshed once capture is live.
+    settings.showHUDDuringSessions || trigger == .handsFree
+  }
+
+  /// Shows the HUD as "Getting ready"; its clock starts only when the
+  /// microphone delivers real audio, never while words can't be heard. Uses
+  /// the cached microphone status: each TCC query costs 13-35 ms before
+  /// capture (#611), and the capture start makes the authoritative check; the
+  /// HUD health is refreshed once capture is live.
+  private func presentStartingHUD() {
     hud.updateCaptureHealth(owners.captureHealth.snapshot())
     hud.beginRecording(profileName: owners.profileApplier.activeProfileName, awaitingAudio: true)
-    return true
+  }
+
+  /// How the capture step treats the HUD.
+  private struct HUDDuringStart {
+    /// The session shows the HUD, so its health is refreshed once capture is live.
+    let shows: Bool
+    /// The HUD is presented while the recorder opens rather than before.
+    let presentsWhileOpening: Bool
   }
 
   /// The sequencer step that opens the live stream, nil for batch modes.
@@ -263,12 +285,22 @@ final class SessionStartPipeline {
   private func makeStartCaptureStep(
     for session: ActiveSession,
     warmContext: CaptureWarmContext?,
-    showsHUD: Bool,
+    hud presentation: HUDDuringStart,
     host: SessionStartHost
   ) -> RecordingStartSequencer.Step {
     { [weak self, weak host] in
       guard let self else { return }
-      let recording = try await self.capture.audioFiles.startRecording(warmContext: warmContext, owner: .dictation)
+      let audioFiles = self.capture.audioFiles
+      // Main-actor reads happen here, before the hop, so the recorder's
+      // actor never waits for the main thread on its way to `record()`.
+      let preflight = await audioFiles.makeStartPreflight()
+      async let startedRecording = audioFiles.startRecording(
+        warmContext: warmContext, owner: .dictation, preflight: preflight
+      )
+      if presentation.presentsWhileOpening {
+        self.presentStartingHUD()
+      }
+      let recording = try await startedRecording
       // The stop could have landed while `startRecording()` was suspended.
       // Publish nothing for a session that is already over — throw away the
       // capture that just came up instead.
@@ -276,12 +308,12 @@ final class SessionStartPipeline {
         await self.discardStartedCapture()
         throw RecordingStartAbort.sessionEnded
       }
-      Self.recordCaptureStart(for: session, wasWarm: recording.usedWarmRecorder, logger: self.logger)
+      Self.recordCaptureStart(for: session, recording: recording, logger: self.logger)
       host.captureDidStart(for: session)
       session.events.append(
         HistoryEvent(kind: .recordingStarted, description: "Recording started via \(session.gesture.rawValue)")
       )
-      if showsHUD {
+      if presentation.shows {
         self.hud.updateCaptureHealth(self.owners.captureHealth.snapshot())
       }
       self.owners.captureRuntime.begin(session)
@@ -318,11 +350,14 @@ final class SessionStartPipeline {
   ///
   /// Called from the capture step, so the checkpoint is taken the moment
   /// capture is *proven* live rather than when it was requested.
-  static func recordCaptureStart(for session: ActiveSession, wasWarm: Bool, logger: Logger) {
-    session.captureStarted = Date()
-    session.captureStartedUptime = ProcessInfo.processInfo.systemUptime
+  static func recordCaptureStart(for session: ActiveSession, recording: RecordingStart, logger: Logger) {
+    let nowUptime = ProcessInfo.processInfo.systemUptime
+    let liveUptime = min(recording.liveUptime ?? nowUptime, nowUptime)
+    session.captureStarted = Date().addingTimeInterval(liveUptime - nowUptime)
+    session.captureStartedUptime = liveUptime
+    session.recorderOpenMilliseconds = recording.recorderOpenMilliseconds
     if let coldStartMs = session.captureStartMilliseconds {
-      let path = wasWarm ? "pre-warmed" : "cold"
+      let path = recording.usedWarmRecorder ? "pre-warmed" : "cold"
       logger.info("Latency: capture started \(coldStartMs)ms after trigger (\(path, privacy: .public))")
     }
     if let keyDownMs = session.keyDownToCaptureMilliseconds {
@@ -334,8 +369,11 @@ final class SessionStartPipeline {
   /// so a clipped-start report can be diagnosed from the session alone
   /// (issue #641).
   static func recordStartTimeline(_ timeline: RecordingStartTimeline, for session: ActiveSession, logger: Logger) {
-    let summary = timeline.diagnosticSummary
+    var summary = timeline.diagnosticSummary
     guard !summary.isEmpty else { return }
+    if let recorderOpenMs = session.recorderOpenMilliseconds {
+      summary += ", recorder open \(SessionLatencyMetrics.formattedMilliseconds(recorderOpenMs))"
+    }
     logger.info("Recording start timeline: \(summary, privacy: .public)")
     session.events.append(HistoryEvent(kind: .recordingStarted, description: "Start timeline — \(summary)"))
   }

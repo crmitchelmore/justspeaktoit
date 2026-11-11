@@ -30,9 +30,6 @@ const AGGREGATE_JOBS = new Set(['CI Gate', 'Build & Test (macOS)', 'Report merge
 const DETERMINISTIC_JOBS = new Set(['Lint', 'Portable Swift (Linux)', 'Public API compatibility',
     'Paid Access Worker', 'Detect Release-Relevant Changes', 'Pre-PR evidence (blocking)']);
 const DETERMINISTIC_STEP = /^(Build|Compile)\b/i;
-// Paths no Apple, Linux or Windows CI job reads (ci.yml's `apple` filter).
-const NON_APPLE = [/^android\//, /^Docs\//, /\.md$/, /^landing-page\//, /^workers\//,
-    /^\.github\/workflows\/(android|deploy-landing-page)\.yml$/];
 
 export function classifyFailure(jobs) {
     const failed = jobs.filter(job => job.conclusion === 'failure' && !AGGREGATE_JOBS.has(job.name));
@@ -41,10 +38,12 @@ export function classifyFailure(jobs) {
     return { failed: failed.map(job => job.name), deterministic };
 }
 
-export function canAffect(files, failedJobs) {
+// appleRelevant(file): whether an Apple, Linux or Windows CI job reads the file (the `apple` route in
+// scripts/ci/routing.json). It is passed in because `verify` runs from a lone copy of this file.
+export function canAffect(files, failedJobs, appleRelevant) {
     return failedJobs.some(job => job === 'Paid Access Worker'
         ? files.some(file => file.startsWith('workers/'))
-        : files.some(file => !NON_APPLE.some(pattern => pattern.test(file))));
+        : files.some(appleRelevant));
 }
 
 export function revertedShas(message) {
@@ -53,11 +52,11 @@ export function revertedShas(message) {
 }
 
 // commits: newest first, {sha, message, files}. Returns the shas to revert.
-export function selectCulprits(commits, failedJobs, alreadyReverted = new Set()) {
+export function selectCulprits(commits, failedJobs, appleRelevant, alreadyReverted = new Set()) {
     const reverted = new Set(alreadyReverted);
     for (const commit of commits) for (const sha of revertedShas(commit.message)) reverted.add(sha);
     const suspects = commits.filter(commit => revertedShas(commit.message).length === 0 && !reverted.has(commit.sha));
-    const narrowed = suspects.filter(commit => canAffect(commit.files, failedJobs));
+    const narrowed = suspects.filter(commit => canAffect(commit.files, failedJobs, appleRelevant));
     return (narrowed.length ? narrowed : suspects).map(commit => commit.sha);
 }
 
@@ -91,7 +90,7 @@ function output(values) {
     process.stdout.write(lines);
 }
 
-function plan(repo, runId) {
+function plan(repo, runId, appleRelevant) {
     const skip = reason => { output({ action: 'skip', reason }); console.log(`::notice::${reason}`); };
     const runs = [];
     for (let page = 1; page <= 3; page++) {
@@ -120,7 +119,7 @@ function plan(repo, runId) {
             files: git('diff-tree', '--no-commit-id', '--name-only', '-r', '--root', sha).split('\n').filter(Boolean),
         }));
         const since = git('log', '--first-parent', '--format=%B', `${run.head_sha}..origin/main`);
-        return { failed, range, culprits: selectCulprits(commits, failed, new Set(revertedShas(since))) };
+        return { failed, range, culprits: selectCulprits(commits, failed, appleRelevant, new Set(revertedShas(since))) };
     };
     let { failed, culprits, range } = attribute(green.head_sha, firstRed);
     let blamed = firstRed;
@@ -168,7 +167,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const [command, ...args] = process.argv.slice(2);
     const option = name => args[args.indexOf(`--${name}`) + 1];
     const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/justspeaktoit';
-    if (command === 'plan') plan(repo, args.includes('--run') ? option('run') : null);
+    if (command === 'plan') {
+        const { routeMatches } = await import('./routing.mjs');
+        plan(repo, args.includes('--run') ? option('run') : null, file => routeMatches('apple', file));
+    }
     else if (command === 'verify') verify();
     else { console.error('usage: auto-revert.mjs plan [--run <id>] | verify'); process.exit(2); }
 }

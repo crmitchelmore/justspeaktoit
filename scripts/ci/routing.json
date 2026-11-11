@@ -1,5 +1,5 @@
 {
-  "$comment": "The one definition of which changed paths start which checks. scripts/pre-pr reads it directly. Workflow `paths:` filters cannot read a file, so each route lists the YAML lists it is copied into; `python3 scripts/ci/routing.py --write` rewrites them and `python3 scripts/ci/routing.py` (run by make test-tooling) fails when they drift. Patterns use GitHub's path-filter globs: `**` spans directories, `*` stays inside one.",
+  "$comment": "The one definition of which changed paths start which checks. scripts/pre-pr (through routing.py) and auto-revert.mjs (through routing.mjs) read it directly. Workflow `paths:` filters cannot read a file, so each route lists the YAML lists it is copied into; `python3 scripts/ci/routing.py --write` rewrites them and `python3 scripts/ci/routing.py` (run by make test-tooling) fails when they drift. Patterns use GitHub's path-filter globs: `**` spans directories, `*` stays inside one.",
   "routes": {
     "apple": {
       "description": "CI Lint and the tooling tests: every path outside docs, the website, the native Android app and the Workers package.",

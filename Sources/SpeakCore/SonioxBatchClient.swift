@@ -138,7 +138,8 @@ public struct SonioxBatchClient: TranscriptionProvider {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         let uploadBodyURL = try self.multipartStaging.writeMultipart(
-            sourceURL: url, providerID: metadata.id, boundary: boundary, fields: [], mimeType: self.mimeType(for: url)
+            sourceURL: url, providerID: metadata.id, boundary: boundary, fields: [],
+            mimeType: SharedMultipartUploadStaging.audioContentType(for: url)
         )
         defer { self.multipartStaging.removeUploadBodyFile(at: uploadBodyURL) }
 
@@ -243,24 +244,6 @@ public struct SonioxBatchClient: TranscriptionProvider {
             throw TranscriptionProviderError.httpError(http.statusCode, body)
         }
         return data
-    }
-
-    private func mimeType(for url: URL) -> String {
-        let mimeTypes = [
-            "aac": "audio/aac",
-            "aiff": "audio/aiff",
-            "aif": "audio/aiff",
-            "flac": "audio/flac",
-            "mov": "video/quicktime",
-            "mp3": "audio/mpeg",
-            "mp4": "audio/mp4",
-            "m4a": "audio/mp4",
-            "ogg": "audio/ogg",
-            "opus": "audio/opus",
-            "wav": "audio/wav",
-            "webm": "audio/webm"
-        ]
-        return mimeTypes[url.pathExtension.lowercased()] ?? "application/octet-stream"
     }
 
     private func extractModelName(from model: String) -> String {

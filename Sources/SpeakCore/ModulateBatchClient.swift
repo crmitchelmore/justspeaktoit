@@ -47,7 +47,8 @@ public struct ModulateBatchClient: TranscriptionProvider {
     let fields = usesFeatureFlags(for: model) ? featureConfiguration.multipartFields : []
     let upload = try multipartStaging.writeMultipart(
       sourceURL: url, providerID: metadata.id, boundary: boundary, fields: [],
-      mimeType: mimeType(for: url), fileField: "upload_file", trailingFields: fields
+      mimeType: SharedMultipartUploadStaging.audioContentType(for: url), fileField: "upload_file",
+      trailingFields: fields
     )
     defer { multipartStaging.removeUploadBodyFile(at: upload) }
     let redirects = BatchTranscriptionJob.OriginBoundRedirects(origin: baseURL)
@@ -97,24 +98,6 @@ public struct ModulateBatchClient: TranscriptionProvider {
 
   private func usesFeatureFlags(for model: String) -> Bool {
     !isEnglishFastModel(model)
-  }
-
-  private func mimeType(for url: URL) -> String {
-    let mimeTypes = [
-      "aac": "audio/aac",
-      "aiff": "audio/aiff",
-      "aif": "audio/aiff",
-      "flac": "audio/flac",
-      "mov": "video/quicktime",
-      "mp3": "audio/mpeg",
-      "mp4": "audio/mp4",
-      "m4a": "audio/mp4",
-      "ogg": "audio/ogg",
-      "opus": "audio/opus",
-      "wav": "audio/wav",
-      "webm": "audio/webm"
-    ]
-    return mimeTypes[url.pathExtension.lowercased()] ?? "application/octet-stream"
   }
 
   private func buildBatchResult(

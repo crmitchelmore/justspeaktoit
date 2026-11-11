@@ -68,34 +68,8 @@ public struct CartesiaBatchClient: Sendable {
         body.appendString("--\(boundary)\r\n")
         body.appendString("Content-Disposition: form-data; name=\"file\"; filename=\"recording.\(extensionName)\"\r\n")
         body.appendString("Content-Type: \(mimeType)\r\n\r\n")
-        let file = try Self.writeUpload(source: url, header: body, boundary: boundary)
+        let file = try BatchTranscriptionJob.writeMultipartSnapshot(header: body, source: url, boundary: boundary)
         return (request, file)
-    }
-
-    /// Build a stable multipart snapshot with a fixed 64 KiB copy buffer.
-    /// No recording-sized Data is retained in the request or upload operation.
-    private static func writeUpload(source: URL, header: Data, boundary: String) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                                attributes: [.posixPermissions: 0o700])
-        let file = directory.appendingPathComponent("upload.multipart")
-        do {
-            try header.write(to: file)
-            let input = try FileHandle(forReadingFrom: source)
-            defer { try? input.close() }
-            let output = try FileHandle(forWritingTo: file)
-            defer { try? output.close() }
-            try output.seekToEnd()
-            while let chunk = try input.read(upToCount: 65_536), !chunk.isEmpty {
-                try Task.checkCancellation()
-                try output.write(contentsOf: chunk)
-            }
-            try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
-            return file
-        } catch {
-            try? FileManager.default.removeItem(at: directory)
-            throw error
-        }
     }
 
     static func decode(_ data: Data) throws -> TranscriptionResult {

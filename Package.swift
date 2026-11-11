@@ -371,7 +371,7 @@ if windowsTargetBuild {
         ),
         .testTarget(
             name: "SpeakAutomationKitTests",
-            dependencies: ["SpeakAutomationKit", "SpeakCore"],
+            dependencies: ["SpeakAutomationKit", "SpeakCore", "SpeakTestSupport"],
             path: "Tests/SpeakAutomationKitTests"
         ),
         .testTarget(
@@ -397,10 +397,14 @@ if !windowsTargetBuild {
         .target(name: "SpeakAutomationKit", dependencies: ["SpeakCore", "CLinuxAutomation"]),
         .target(name: "SpeakLinuxAutomation", dependencies: ["SpeakCore", "SpeakAutomationKit", "CLinuxAutomation"]),
         .executableTarget(name: "SpeakCLI", dependencies: ["SpeakCore", "SpeakAutomationKit"]),
-        .testTarget(name: "SpeakAutomationKitTests", dependencies: ["SpeakAutomationKit", "SpeakCore"]),
+        .testTarget(
+            name: "SpeakAutomationKitTests", dependencies: ["SpeakAutomationKit", "SpeakCore", "SpeakTestSupport"]
+        ),
         .testTarget(
             name: "SpeakLinuxAutomationTests",
-            dependencies: ["SpeakLinuxAutomation", "SpeakAutomationKit", "SpeakCore", "CLinuxAutomation"]
+            dependencies: [
+                "SpeakLinuxAutomation", "SpeakAutomationKit", "SpeakCore", "CLinuxAutomation", "SpeakTestSupport"
+            ]
         )
     ])
 }
@@ -680,7 +684,7 @@ let package = portableCoreBuild ? portablePackage : Package(
         ),
         .testTarget(
             name: "SpeakAutomationKitTests",
-            dependencies: ["SpeakAutomationKit", "SpeakCore"]
+            dependencies: ["SpeakAutomationKit", "SpeakCore", "SpeakTestSupport"]
         )
     ]
 )

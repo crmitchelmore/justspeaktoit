@@ -1,0 +1,448 @@
+{
+ "targets": [
+  {
+   "name": "CMigrationArchive",
+   "type": "regular",
+   "path": null,
+   "dependencies": []
+  },
+  {
+   "name": "CRecordingFileSupport",
+   "type": "regular",
+   "path": null,
+   "dependencies": []
+  },
+  {
+   "name": "SpeakFeedbackResources",
+   "type": "regular",
+   "path": "Resources",
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakCore",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "CLlamaCpp",
+   "type": "regular",
+   "path": null,
+   "dependencies": []
+  },
+  {
+   "name": "SpeakDesktop",
+   "type": "regular",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakCore",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "CMigrationArchive",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "CRecordingFileSupport",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "CLlamaCpp",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakDesktopTests",
+   "type": "test",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakDesktop",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakCore",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakTestSupport",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakFeedbackResources",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakHotKeys",
+   "type": "regular",
+   "path": "Sources/SpeakHotKeys",
+   "dependencies": []
+  },
+  {
+   "name": "SpeakWatchCore",
+   "type": "regular",
+   "path": "Sources/SpeakWatchCore",
+   "dependencies": []
+  },
+  {
+   "name": "CAppleAudioSupport",
+   "type": "regular",
+   "path": "Sources/CAppleAudioSupport",
+   "dependencies": []
+  },
+  {
+   "name": "SpeakCore",
+   "type": "regular",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakWatchCore",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "CAppleAudioSupport",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakSync",
+   "type": "regular",
+   "path": "Sources/SpeakSync",
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakCore",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakiOSLib",
+   "type": "regular",
+   "path": "Sources/SpeakiOS",
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakCore",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakSync",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakAutomationKit",
+   "type": "regular",
+   "path": "Sources/SpeakAutomationKit",
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakCore",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakCLI",
+   "type": "executable",
+   "path": "Sources/SpeakCLI",
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakAutomationKit",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakCore",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakApp",
+   "type": "executable",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakCore",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakSync",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakHotKeys",
+      null
+     ]
+    },
+    {
+     "product": [
+      "ZIPFoundation",
+      null
+     ]
+    },
+    {
+     "product": [
+      "PermissionFlow",
+      null
+     ]
+    },
+    {
+     "product": [
+      "FluidAudio",
+      null
+     ]
+    },
+    {
+     "product": [
+      "WhisperKit",
+      null
+     ]
+    },
+    {
+     "product": [
+      "Sparkle",
+      null
+     ]
+    },
+    {
+     "product": [
+      "Sentry",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakHotKeysDemo",
+   "type": "executable",
+   "path": "Sources/SpeakHotKeysDemo",
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakHotKeys",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakTestSupport",
+   "type": "regular",
+   "path": "Tests/SpeakTestSupport",
+   "dependencies": []
+  },
+  {
+   "name": "SpeakCoreTests",
+   "type": "test",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakCore",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakTestSupport",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakWatchCoreTests",
+   "type": "test",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakWatchCore",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakHotKeysTests",
+   "type": "test",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakHotKeys",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakSyncTests",
+   "type": "test",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakSync",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakTestSupport",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakAppTests",
+   "type": "test",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakApp",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakDesktop",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakAutomationKit",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakHotKeys",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakTestSupport",
+      null
+     ]
+    },
+    {
+     "product": [
+      "Sentry",
+      null
+     ]
+    },
+    {
+     "product": [
+      "WhisperKit",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakAppSnapshotTests",
+   "type": "test",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakApp",
+      null
+     ]
+    },
+    {
+     "product": [
+      "SnapshotTesting",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakiOSTests",
+   "type": "test",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakiOSLib",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakTestSupport",
+      null
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SpeakAutomationKitTests",
+   "type": "test",
+   "path": null,
+   "dependencies": [
+    {
+     "byName": [
+      "SpeakAutomationKit",
+      null
+     ]
+    },
+    {
+     "byName": [
+      "SpeakCore",
+      null
+     ]
+    }
+   ]
+  }
+ ]
+}

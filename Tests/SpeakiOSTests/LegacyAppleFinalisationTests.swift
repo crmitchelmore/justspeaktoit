@@ -257,7 +257,7 @@ private final class Fixture {
         self.transcriber.modelID = AppleLocalModels.legacySpeechModelID
         // Weak captures: the transcriber's tasks can call back after the test
         // has released this fixture.
-        self.transcriber.legacyRecognitionStart = { [weak self] callback in
+        self.transcriber.legacyRecognition.recognitionStart = { [weak self] callback in
             self?.callbacks.append(callback)
             return LegacyAppleRecognitionTask(
                 endAudio: { [weak self] in
@@ -272,7 +272,7 @@ private final class Fixture {
             )
         }
         if !useRealDeadline {
-            self.transcriber.scheduleLegacyDeadline = { [weak self] completion in
+            self.transcriber.legacyRecognition.finalisation.scheduleDeadline = { [weak self] completion in
                 self?.deadlines.append(completion)
                 return { [weak self] in self?.deadlineCancellations += 1 }
             }

@@ -111,6 +111,35 @@ final class PaidAccessFlowTests: XCTestCase {
         XCTAssertFalse(flow.state.isBusy)
     }
 
+    func testSignedInOperation_leftAccountDoesNotReportMissingSession() async {
+        let store = GatedSessionStore()
+        let flow = PaidAccessFlow(client: FlowClient(entitlement: .failure(.notSignedIn)), sessionStore: store)
+        let operation = Task { await flow.withSignedInOperation(clearingError: true) { _, _ in } }
+        await store.waitUntilLoading()
+
+        _ = flow.sessions.clear()
+        flow.report("replacement account")
+        await store.release()
+        await operation.value
+
+        XCTAssertEqual(flow.state.lastError, "replacement account")
+        XCTAssertFalse(flow.state.isBusy)
+    }
+
+    func testReportForGeneration_dropsALeftAccountsMessage() {
+        let flow = PaidAccessFlow(
+            client: FlowClient(entitlement: .failure(.notSignedIn)),
+            sessionStore: FlowSessionStore(nil)
+        )
+        let left = flow.generation
+        _ = flow.sessions.clear()
+
+        flow.report("stale", for: left)
+        XCTAssertNil(flow.state.lastError)
+        flow.report("current", for: flow.generation)
+        XCTAssertEqual(flow.state.lastError, "current")
+    }
+
     func testOperation_onlyTheNewestEndsBusy() {
         let flow = PaidAccessFlow(
             client: FlowClient(entitlement: .failure(.notSignedIn)),
@@ -162,6 +191,39 @@ private actor FlowSessionStore: PaidAccessSessionStoring {
     func loadSession() async -> PaidAccessSession? { session }
     func saveSession(_ session: PaidAccessSession) async throws { self.session = session }
     func clearSession() async { session = nil }
+}
+
+/// Holds the first session load until released, so a test can leave the
+/// account while an operation is still looking for its session.
+private actor GatedSessionStore: PaidAccessSessionStoring {
+    private var gated = true
+    private var loading = false
+    private var entered: CheckedContinuation<Void, Never>?
+    private var gate: CheckedContinuation<Void, Never>?
+
+    func loadSession() async -> PaidAccessSession? {
+        if gated {
+            gated = false
+            loading = true
+            entered?.resume()
+            entered = nil
+            await withCheckedContinuation { gate = $0 }
+        }
+        return nil
+    }
+
+    func waitUntilLoading() async {
+        guard !loading else { return }
+        await withCheckedContinuation { entered = $0 }
+    }
+
+    func release() {
+        gate?.resume()
+        gate = nil
+    }
+
+    func saveSession(_ session: PaidAccessSession) async throws {}
+    func clearSession() async {}
 }
 
 private final class FlowClient: PaidAccessClienting, @unchecked Sendable {

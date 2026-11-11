@@ -2,7 +2,7 @@ import Foundation
 
 /// Immutable local history value. Existing stores keep encoding their platform adapters.
 /// Local URLs, diagnostics and network payloads are not a cross-device disclosure policy.
-public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable { // swiftlint:disable:this type_body_length
+public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
     public static let currentSchemaVersion = 1
     public let schemaVersion: Int
     public let id: UUID
@@ -35,85 +35,9 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable { // swif
     public let originPlatform: String
     public let errorMessage: String?
 
-    public init(
-        id: UUID = UUID(),
-        createdAt: Date = Date(),
-        updatedAt: Date? = nil,
-        modelsUsed: [String] = [],
-        modelUsages: [ApplicationModelUsage] = [],
-        rawTranscription: String? = nil,
-        postProcessedTranscription: String? = nil,
-        recordingDuration: TimeInterval,
-        cost: ApplicationHistoryCost? = nil,
-        audioFileURL: URL? = nil,
-        networkExchanges: [ApplicationHistoryNetworkExchange] = [],
-        events: [ApplicationHistoryEvent] = [],
-        phaseTimestamps: ApplicationPhaseTimestamps? = nil,
-        trigger: ApplicationHistoryTrigger? = nil,
-        personalCorrections: PersonalLexiconHistorySummary? = nil,
-        errors: [ApplicationHistoryError] = [],
-        source: ApplicationHistoryItemSource? = nil,
-        postProcessingPrompt: ApplicationPostProcessingPromptPayload? = nil,
-        diagnosticContext: ApplicationHistoryDiagnosticContext? = nil,
-        latency: SessionLatencyMetrics? = nil,
-        desktopHistory: AnyCodable? = nil,
-        model: String? = nil,
-        wordCount: Int? = nil,
-        originPlatform: String = "macos",
-        errorMessage: String? = nil
-    ) {
-        self.init(
-            id: id, createdAt: createdAt, updatedAt: updatedAt, modelsUsed: modelsUsed, modelUsages: modelUsages,
-            rawTranscription: rawTranscription, postProcessedTranscription: postProcessedTranscription,
-            recordingDuration: recordingDuration, cost: cost, audioFileURL: audioFileURL,
-            networkExchanges: networkExchanges, events: events, phaseTimestamps: phaseTimestamps,
-            trigger: trigger, personalCorrections: personalCorrections, errors: errors, source: source,
-            postProcessingPrompt: postProcessingPrompt, diagnosticContext: diagnosticContext, latency: latency,
-            desktopHistory: desktopHistory, model: model, wordCount: wordCount, originPlatform: originPlatform,
-            errorMessage: errorMessage, requestContext: nil
-        )
-    }
-
-    public init(
-        id: UUID = UUID(),
-        createdAt: Date = Date(),
-        updatedAt: Date? = nil,
-        modelsUsed: [String] = [],
-        modelUsages: [ApplicationModelUsage] = [],
-        rawTranscription: String? = nil,
-        postProcessedTranscription: String? = nil,
-        recordingDuration: TimeInterval,
-        cost: ApplicationHistoryCost? = nil,
-        audioFileURL: URL? = nil,
-        networkExchanges: [ApplicationHistoryNetworkExchange] = [],
-        events: [ApplicationHistoryEvent] = [],
-        phaseTimestamps: ApplicationPhaseTimestamps? = nil,
-        trigger: ApplicationHistoryTrigger? = nil,
-        personalCorrections: PersonalLexiconHistorySummary? = nil,
-        errors: [ApplicationHistoryError] = [],
-        source: ApplicationHistoryItemSource? = nil,
-        postProcessingPrompt: ApplicationPostProcessingPromptPayload? = nil,
-        diagnosticContext: ApplicationHistoryDiagnosticContext? = nil,
-        latency: SessionLatencyMetrics? = nil,
-        desktopHistory: AnyCodable? = nil,
-        model: String? = nil,
-        wordCount: Int? = nil,
-        originPlatform: String = "macos",
-        errorMessage: String? = nil,
-        requestContext: RequestDiagnosticContext?
-    ) {
-        self.init(
-            id: id, createdAt: createdAt, updatedAt: updatedAt, modelsUsed: modelsUsed, modelUsages: modelUsages,
-            rawTranscription: rawTranscription, postProcessedTranscription: postProcessedTranscription,
-            recordingDuration: recordingDuration, cost: cost, audioFileURL: audioFileURL,
-            networkExchanges: networkExchanges, events: events, phaseTimestamps: phaseTimestamps,
-            trigger: trigger, personalCorrections: personalCorrections, errors: errors, source: source,
-            postProcessingPrompt: postProcessingPrompt, diagnosticContext: diagnosticContext, latency: latency,
-            desktopHistory: desktopHistory, model: model, wordCount: wordCount, originPlatform: originPlatform,
-            errorMessage: errorMessage, requestContext: requestContext, requestFailure: nil
-        )
-    }
-
+    /// The one initialiser; every field but the duration has a default.
+    /// `HistoryRecord+SourceCompatibility.swift` keeps the shorter published
+    /// signatures for existing binaries and API checks.
     public init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
@@ -141,7 +65,7 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable { // swif
         originPlatform: String = "macos",
         errorMessage: String? = nil,
         requestContext: RequestDiagnosticContext? = nil,
-        requestFailure: RequestDiagnosticContext.Failure?
+        requestFailure: RequestDiagnosticContext.Failure? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.id = id

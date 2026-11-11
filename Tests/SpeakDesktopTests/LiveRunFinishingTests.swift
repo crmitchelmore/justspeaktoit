@@ -73,15 +73,15 @@ private final class FinishingRun: LiveFinishableRun, @unchecked Sendable {
     var phase: LiveRunPhase
     var connection: (any StreamingWebSocketConnection)?
     var transcript: String?
-    var waiters: [CheckedContinuation<String?, Never>] = []
-    var lateWaiters: [CheckedContinuation<String?, Never>] = []
-    var deliveringFailure: Bool
+    var delivery = LiveRunDelivery()
 
     init(phase: LiveRunPhase, transcript: String?, deliveringFailure: Bool) {
         self.phase = phase
         self.transcript = transcript
-        self.deliveringFailure = deliveringFailure
+        self.delivery.deliveringFailure = deliveringFailure
     }
+
+    func dropOutboundAudio() {}
 }
 
 private final class FinishingClient: LiveRunFinishing, @unchecked Sendable {
@@ -97,8 +97,8 @@ private final class FinishingClient: LiveRunFinishing, @unchecked Sendable {
     var finishesBegun: Int { lock.withLock { counts.finishesBegun } }
     var received: Int { lock.withLock { counts.received } }
     var opened: Int { lock.withLock { counts.opened } }
-    var waiterCount: Int { lock.withLock { run.waiters.count } }
-    var lateWaiterCount: Int { lock.withLock { run.lateWaiters.count } }
+    var waiterCount: Int { lock.withLock { run.delivery.waiters.count } }
+    var lateWaiterCount: Int { lock.withLock { run.delivery.lateWaiters.count } }
 
     func withState<Value>(_ body: (inout LiveDeferredEffects) -> Value) -> Value {
         LiveDeferredEffects.applying(under: lock, body)
@@ -126,16 +126,16 @@ private final class FinishingClient: LiveRunFinishing, @unchecked Sendable {
 
     func resumeWaiters(with text: String?) {
         let waiters = lock.withLock { () -> [CheckedContinuation<String?, Never>] in
-            defer { run.waiters.removeAll() }
-            return run.waiters
+            defer { run.delivery.waiters.removeAll() }
+            return run.delivery.waiters
         }
         waiters.forEach { $0.resume(returning: text) }
     }
 
     func resumeLateWaiters(with text: String?) {
         let waiters = lock.withLock { () -> [CheckedContinuation<String?, Never>] in
-            defer { run.lateWaiters.removeAll() }
-            return run.lateWaiters
+            defer { run.delivery.lateWaiters.removeAll() }
+            return run.delivery.lateWaiters
         }
         waiters.forEach { $0.resume(returning: text) }
     }

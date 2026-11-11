@@ -77,15 +77,15 @@ extension RevAILiveClient {
     private func showPartial(_ text: String, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
         guard !text.isEmpty else {
             active.openPartial = nil
-            active.withheldPartial = nil
+            active.delivery.withheldInterim = nil
             return
         }
         active.openPartial = text
         guard active.phase != .finishing else {
-            active.withheldPartial = text
+            active.delivery.withheldInterim = text
             return
         }
-        deliver(text, isFinal: false, active, &effects)
+        deliverTranscript(text, isFinal: false, active, &effects)
     }
 
     /// A final ends its segment, with or without words, and is confirmed once,
@@ -94,27 +94,14 @@ extension RevAILiveClient {
     /// during it into its return instead of delivering them.
     private func confirm(_ text: String, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
         active.openPartial = nil
-        active.withheldPartial = nil
+        active.delivery.withheldInterim = nil
         guard !text.isEmpty else { return }
         active.accumulated.append(final: text)
         guard active.phase != .finishing else {
-            active.withheldFinals.append(text)
+            active.delivery.withheldFinals.append(text)
             return
         }
-        deliver(text, isFinal: true, active, &effects)
-    }
-
-    /// Hands a transcript to the host outside the lock and counts it until the
-    /// callback returns, so a failure decided meanwhile is reported after it.
-    private func deliver(
-        _ text: String, isFinal: Bool, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects
-    ) {
-        guard let callback = active.onTranscript else { return }
-        active.transcriptsInFlight += 1
-        effects.add {
-            callback(text, isFinal)
-            self.withState { effects in self.transcriptReturned(active, &effects) }
-        }
+        deliverTranscript(text, isFinal: true, active, &effects)
     }
 
     /// The receive failed: the server closed the stream or the transport

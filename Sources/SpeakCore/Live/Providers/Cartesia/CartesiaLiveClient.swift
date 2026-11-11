@@ -123,8 +123,8 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
                 run = active
             }
             active.phase = .connecting
-            active.onTranscript = onTranscript
-            active.onError = onError
+            active.delivery.onTranscript = onTranscript
+            active.delivery.onError = onError
             guard !apiKey.isEmpty else {
                 fail(active, StreamingClientError.missingAPIKey(provider: "Cartesia"), &effects)
                 return nil
@@ -195,7 +195,7 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
     }
 }
 
-extension CartesiaLiveClient: LiveRunFinishing {}
+extension CartesiaLiveClient: LiveRunDeadlines {}
 
 extension CartesiaLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { lock.withLock { run.phase == .streaming && run.opened } }

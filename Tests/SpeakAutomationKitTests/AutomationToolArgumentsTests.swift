@@ -23,10 +23,12 @@ final class AutomationToolArgumentsTests: XCTestCase {
 
     func testEveryToolSchema_isExactlyTheCLIFlagsAndPositionalArgument() throws {
         for tool in MCPRequestHandler.toolDefinitions {
-            let name = try XCTUnwrap(tool["name"] as? String)
+            let name = tool.name
             let command = try XCTUnwrap(AutomationCommand(rawValue: name))
-            let schema = try XCTUnwrap(tool["inputSchema"] as? [String: Any])
-            let advertised = Set((schema["properties"] as? [String: Any] ?? [:]).keys)
+            guard case .object(let properties)? = tool.inputSchema["properties"] else {
+                return XCTFail("\(name) has no properties")
+            }
+            let advertised = Set(properties.keys)
             let options = try XCTUnwrap(CommandLineParser.options[command], name)
             var flagged = Set(options.compactMap(\.argument?.rawValue))
             if let positional = CommandLineParser.positionalArgument[command] { flagged.insert(positional.rawValue) }

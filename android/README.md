@@ -82,8 +82,12 @@ app/src/main/java/com/justspeaktoit/android/
 │   ├── RecognizerAvailability.kt  # pure availability and language resolution
 │   ├── AndroidSpeechEngine.kt     # SpeechEngine: SpeechRecognizer adapter (main thread)
 │   ├── CloudCapture.kt      # owns the Cloud recording and deadline-bounded, abortable blocking IO
+│   ├── RecorderRetirement.kt      # process-wide bound on recorder stops that outlive their owner
+│   ├── DictationEngineSelector.kt # mode, cloud model, availability and the plan a session follows
+│   ├── DictationSessionController.kt  # session lifecycle, microphone hold and cleanup
+│   ├── SessionRequests.kt   # provider requests: key reads, deadlines and failure mapping
 │   ├── SharedAudioSource.kt # reads audio shared by other apps (content:// only)
-│   └── DictationViewModel.kt      # orchestration; collaborators injected, production wiring in Factory
+│   └── DictationViewModel.kt      # projects its owners into UI state; production wiring in Factory
 ├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
 ├── history/                 # transcript history, retention and atomic storage
 ├── settings/                # non-secret preferences
@@ -95,7 +99,8 @@ app/src/main/java/com/justspeaktoit/android/
 Policy lives in plain Kotlin so it is unit-tested on the JVM; Android classes stay in the
 adapters and UI. The ViewModel takes its engine, recorder factory, cloud client, history,
 preferences and secret store as interfaces, so `DictationViewModelTest` drives the real
-ViewModel with fakes.
+ViewModel with fakes; `DictationEngineSelectorTest` and `DictationSessionControllerTest` drive its
+owners directly.
 
 Shared catalogues are generated from `Sources/SpeakCore`, never parsed from Swift:
 `assets/settings_search.json` (settings search) and `assets/cloud_catalog.json` (cloud providers,

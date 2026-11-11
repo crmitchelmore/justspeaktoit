@@ -43,6 +43,7 @@ internal class FakeEngine : SpeechEngine {
     var answerChecks = true
     private var pendingCheck: Pair<String, (LanguageResolution) -> Unit>? = null
     val started = CopyOnWriteArrayList<RecognitionMode>()
+    val startedLanguages = CopyOnWriteArrayList<String>()
     var onEvent: ((DictationEvent) -> Unit)? = null
     @Volatile var stops = 0
     @Volatile var cancels = 0
@@ -74,6 +75,7 @@ internal class FakeEngine : SpeechEngine {
         onLevel: (Float) -> Unit,
     ) {
         started += mode
+        startedLanguages += languageTag
         this.onEvent = onEvent
     }
 

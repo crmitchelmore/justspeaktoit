@@ -112,6 +112,15 @@ final class LivePCMBufferPool: @unchecked Sendable {
     return allocated
   }
 
+  /// Copies a tap buffer into a pooled buffer for the processing queue, or
+  /// returns `nil` (dropping the chunk) when it is empty or the pool is full.
+  func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+    guard buffer.frameLength > 0,
+          let copy = self.buffer(format: buffer.format, frameCapacity: buffer.frameLength) else { return nil }
+    LivePCMCopy.copy(buffer, into: copy)
+    return copy
+  }
+
   func recycle(_ buffer: AVAudioPCMBuffer) {
     lock.lock()
     defer { lock.unlock() }

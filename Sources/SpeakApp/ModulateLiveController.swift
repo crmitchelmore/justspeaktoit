@@ -396,16 +396,14 @@ private extension ModulateLiveController {
       label: "modulate"
     )
     private var isRunning: Bool = false
-    private let converterCache = LiveConverterCache()
-    private var reusableOutputBuffer: AVAudioPCMBuffer?
+    private let conversion = LivePCM16Conversion()
     private var pendingPCMData = Data()
 
     func setRunning(_ running: Bool) {
       queue.sync {
         isRunning = running
         if !running {
-          converterCache.reset()
-          reusableOutputBuffer = nil
+          conversion.reset()
           copyBufferPool.removeAll()
           pendingPCMData.removeAll(keepingCapacity: false)
         }
@@ -417,7 +415,7 @@ private extension ModulateLiveController {
     /// drained, so the cache releases it rather than reusing it.
     func drainConverterTail() {
       queue.sync {
-        guard let tail = converterCache.drainPCM16() else { return }
+        guard let tail = conversion.drainPCM16() else { return }
         pendingPCMData.append(tail)
       }
     }
@@ -454,7 +452,7 @@ private extension ModulateLiveController {
       transcriber: ModulateLiveTranscriber,
       logger: Logger
     ) {
-      guard let copied = copyPCMBuffer(buffer) else { return }
+      guard let copied = copyBufferPool.copy(buffer) else { return }
       queue.async { [weak self] in
         guard let self else { return }
         defer { self.copyBufferPool.recycle(copied) }
@@ -469,23 +467,6 @@ private extension ModulateLiveController {
       }
     }
 
-    private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-      let frameLength = buffer.frameLength
-      guard let copy = copyBufferPool.buffer(format: buffer.format, frameCapacity: frameLength) else {
-        return nil
-      }
-      copy.frameLength = frameLength
-      let src = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: buffer.audioBufferList))
-      let dst = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: copy.audioBufferList))
-      for idx in 0..<min(src.count, dst.count) {
-        let srcBuffer = src[idx]
-        guard let srcData = srcBuffer.mData, let dstData = dst[idx].mData else { continue }
-        dstData.copyMemory(from: srcData, byteCount: Int(srcBuffer.mDataByteSize))
-        dst[idx].mDataByteSize = srcBuffer.mDataByteSize
-      }
-      return copy
-    }
-
     private func processAndSendAudio(
       _ buffer: AVAudioPCMBuffer,
       from inputFormat: AVAudioFormat,
@@ -493,46 +474,12 @@ private extension ModulateLiveController {
       transcriber: ModulateLiveTranscriber,
       logger: Logger
     ) {
-      guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
-        logger.error("Failed to create Modulate audio converter")
+      do {
+        pendingPCMData.append(try conversion.pcm16(from: buffer, to: outputFormat))
+      } catch {
+        logger.error("Modulate audio conversion failed: \(error.localizedDescription, privacy: .public)")
         return
       }
-
-      let ratio = outputFormat.sampleRate / inputFormat.sampleRate
-      let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-
-      let outputBuffer: AVAudioPCMBuffer
-      if let reusable = reusableOutputBuffer, reusable.frameCapacity >= outputFrameCapacity {
-        reusable.frameLength = 0
-        outputBuffer = reusable
-      } else {
-        guard let newBuffer = AVAudioPCMBuffer(
-          pcmFormat: outputFormat,
-          frameCapacity: outputFrameCapacity
-        ) else { return }
-        reusableOutputBuffer = newBuffer
-        outputBuffer = newBuffer
-      }
-
-      // No `converter.reset()` between chunks: `LiveConverterCache` owns the
-      // retained converter and its end-of-stream drain (see issue #849).
-      var error: NSError?
-      var didProvideInput = false
-      let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
-        guard !didProvideInput else {
-          outStatus.pointee = .noDataNow
-          return nil
-        }
-        didProvideInput = true
-        outStatus.pointee = .haveData
-        return buffer
-      }
-
-      guard status != .error, error == nil else { return }
-      guard let int16Data = outputBuffer.int16ChannelData else { return }
-      let frameLength = Int(outputBuffer.frameLength)
-      let data = Data(bytes: int16Data[0], count: frameLength * 2)
-      pendingPCMData.append(data)
 
       var offset = 0
       while pendingPCMData.count - offset >= Self.preferredChunkBytes {

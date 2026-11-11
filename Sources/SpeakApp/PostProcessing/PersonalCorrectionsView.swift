@@ -1,18 +1,14 @@
 import SpeakCore
 import SwiftUI
 
-// The correction editor intentionally keeps its tightly coupled form sections
-// together so draft focus, validation, and preview state stay local.
-// swiftlint:disable file_length type_body_length
+/// The Corrections page. It owns the rule draft, its focus and the save alert;
+/// each card is a subview that reports failures back through `showError`.
 struct PersonalCorrectionsView: View {
   @EnvironmentObject private var lexicon: PersonalLexiconService
-  @EnvironmentObject private var autoCorrectionTracker: AutoCorrectionTracker
-  @EnvironmentObject private var settings: AppSettings
   @Environment(\.appVisualDensity) private var density
-  @State private var draft = RuleDraft()
+  @State private var draft = PersonalCorrectionRuleDraft()
   @State private var alertMessage: String?
   @State private var showAdvancedOptions: Bool = false
-  @State private var previewText: String = "Hey love, Susie and I will join the meeting at 3pm."
   @FocusState private var focusedField: Field?
 
   enum Field: Hashable {
@@ -26,11 +22,17 @@ struct PersonalCorrectionsView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: density.isCompact ? density.sectionSpacing : 28) {
         hero
-        autoCorrectionsSection
+        AutoCorrectionsSection(onError: showError)
         postProcessingInfoBanner
-        editorCard
-        existingRulesSection
-        previewSection
+        PersonalCorrectionEditorCard(
+          draft: $draft,
+          showAdvancedOptions: $showAdvancedOptions,
+          focusedField: $focusedField,
+          onSave: saveDraft,
+          onReset: resetDraft
+        )
+        SavedCorrectionRulesSection(onEdit: beginEditing, onError: showError)
+        PersonalCorrectionsPreviewSection(previewTags: draft.previewTags)
       }
       .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
@@ -163,471 +165,28 @@ struct PersonalCorrectionsView: View {
     )
   }
 
-  // MARK: - Auto-Corrections Section
-
-  private var autoCorrectionsSection: some View {
-    VStack(alignment: .leading, spacing: density.groupSpacing) {
-      HStack {
-        VStack(alignment: .leading, spacing: 4) {
-          HStack(spacing: 8) {
-            Image(systemName: "wand.and.stars")
-              .foregroundStyle(Color.brandAccent)
-            Text("Auto-Corrections")
-              .font(.headline)
-          }
-          Text("Learn from your edits after transcription")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
-        Toggle("", isOn: $settings.autoCorrectionsEnabled)
-          .labelsHidden()
-          .accessibilityLabel("Learn corrections automatically")
-          .accessibilityIdentifier("autoCorrectionsToggle")
-      }
-
-      if settings.autoCorrectionsEnabled {
-        VStack(alignment: .leading, spacing: density.inlineSpacing) {
-          HStack {
-            Text("Promotion threshold:")
-              .font(.callout)
-            Stepper(
-              "\(settings.autoCorrectionsPromotionThreshold) occurrences",
-              value: $settings.autoCorrectionsPromotionThreshold,
-              in: AutoCorrectionLearningPolicy.promotionThresholdRange
-            )
-            .font(.callout)
-          }
-
-          if !autoCorrectionTracker.candidates.isEmpty {
-            Divider()
-
-            VStack(alignment: .leading, spacing: density.inlineSpacing) {
-              HStack {
-                Text("Candidate Corrections")
-                  .font(.subheadline.bold())
-                Text("(\(autoCorrectionTracker.candidates.count))")
-                  .font(.subheadline)
-                  .foregroundStyle(.secondary)
-                Spacer()
-                if autoCorrectionTracker.candidates.count > 0 {
-                  Button("Clear All", role: .destructive) {
-                    Task {
-                      do {
-                        try await autoCorrectionTracker.clearAllCandidates()
-                      } catch {
-                        alertMessage = error.localizedDescription
-                      }
-                    }
-                  }
-                  .font(.caption)
-                  .buttonStyle(.borderless)
-                }
-              }
-
-              ForEach(autoCorrectionTracker.candidates.prefix(10)) { candidate in
-                candidateRow(candidate)
-              }
-
-              if autoCorrectionTracker.candidates.count > 10 {
-                Text("...and \(autoCorrectionTracker.candidates.count - 10) more")
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
-            }
-          } else if autoCorrectionTracker.isMonitoring {
-            HStack(spacing: 8) {
-              ProgressView()
-                .scaleEffect(0.7)
-              Text("Monitoring for corrections…")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-          }
-        }
-      }
-    }
-    .padding(density.isCompact ? density.cardPadding : 20)
-    .background(
-      RoundedRectangle(cornerRadius: density.isCompact ? 8 : 16, style: .continuous)
-        .fill(Color.brandAccent.opacity(0.06))
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: density.isCompact ? 8 : 16, style: .continuous)
-        .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
-    )
+  private func beginEditing(_ rule: PersonalLexiconRule) {
+    draft = PersonalCorrectionRuleDraft(rule: rule)
+    showAdvancedOptions = draft.requiresAdvancedOptions
+    focusedField = .canonical
   }
 
-  private func candidateRow(_ candidate: AutoCorrectionCandidate) -> some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 6) {
-          Text(candidate.original)
-            .strikethrough()
-            .foregroundStyle(.secondary)
-          Image(systemName: "arrow.right")
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-          Text(candidate.corrected)
-            .fontWeight(.medium)
-        }
-        .font(.callout)
-
-        HStack(spacing: 8) {
-          Text("Seen \(candidate.seenCount)×")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-          if !candidate.sourceApps.isEmpty {
-            Text("in \(candidate.sourceApps.joined(separator: ", "))")
-              .font(.caption2)
-              .foregroundStyle(.tertiary)
-          }
-        }
-      }
-
-      Spacer()
-
-      candidateActions(candidate)
-    }
-    .padding(.vertical, 6)
-    .padding(.horizontal, 10)
-    .background(
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .fill(Color(nsColor: .controlBackgroundColor))
-    )
-  }
-
-  private func candidateActions(_ candidate: AutoCorrectionCandidate) -> some View {
-    HStack(spacing: 8) {
-      Button {
-        Task {
-          do {
-            try await autoCorrectionTracker.promoteCandidate(candidate)
-          } catch {
-            alertMessage = error.localizedDescription
-          }
-        }
-      } label: {
-        Image(systemName: "checkmark.circle")
-      }
-      .buttonStyle(.borderless)
-      .help("Add as correction rule")
-      .accessibilityLabel("Add as correction rule: \(candidate.original) to \(candidate.corrected)")
-      .accessibilityIdentifier("autoCorrectionPromote-\(candidate.id)")
-
-      Button {
-        Task {
-          do {
-            try await autoCorrectionTracker.dismissCandidate(id: candidate.id)
-          } catch {
-            alertMessage = error.localizedDescription
-          }
-        }
-      } label: {
-        Image(systemName: "xmark.circle")
-      }
-      .buttonStyle(.borderless)
-      .foregroundStyle(.secondary)
-      .help("Dismiss")
-      .accessibilityLabel("Dismiss candidate \(candidate.original)")
-      .accessibilityIdentifier("autoCorrectionDismiss-\(candidate.id)")
-    }
-  }
-
-  private var editorCard: some View {
-    VStack(alignment: .leading, spacing: density.sectionSpacing) {
-      headerRow
-
-      VStack(alignment: .leading, spacing: density.inlineSpacing) {
-        LabeledContent("Correct spelling") {
-          TextField("e.g. Susy", text: $draft.canonical)
-            .textFieldStyle(.roundedBorder)
-            .focused($focusedField, equals: Field.canonical)
-        }
-        LabeledContent("Heard as") {
-          TextField("e.g. Susie, Suzie", text: $draft.aliasesText, axis: .vertical)
-            .lineLimit(2...4)
-            .textFieldStyle(.roundedBorder)
-            .focused($focusedField, equals: Field.aliases)
-        }
-
-        DisclosureGroup("Advanced options", isExpanded: $showAdvancedOptions) {
-          Picker("Activation", selection: $draft.activation) {
-            ForEach(PersonalLexiconRule.Activation.allCases, id: \.self) { activation in
-              Text(label(for: activation)).tag(activation)
-            }
-          }
-          .pickerStyle(.segmented)
-          Picker("Confidence", selection: $draft.confidence) {
-            ForEach(PersonalLexiconConfidence.allCases, id: \.self) { confidence in
-              Text(label(for: confidence)).tag(confidence)
-            }
-          }
-          .pickerStyle(.segmented)
-          LabeledContent("Only apply when tags match") {
-            TextField("partner, project", text: $draft.contextTagsText)
-              .textFieldStyle(.roundedBorder)
-              .focused($focusedField, equals: Field.contextTags)
-          }
-          LabeledContent("Notes") {
-            TextField("Optional context", text: $draft.notes, axis: .vertical)
-              .lineLimit(1...3)
-              .textFieldStyle(.roundedBorder)
-              .focused($focusedField, equals: Field.notes)
-          }
-        }
-      }
-
-      HStack(spacing: density.inlineSpacing) {
-        Button(draft.isEditing ? "Update Rule" : "Add Rule", action: saveDraft)
-          .buttonStyle(.borderedProminent)
-          .disabled(!draft.isSavable)
-        Button("Reset", role: .cancel, action: resetDraft)
-          .buttonStyle(.bordered)
-        if draft.isEditing {
-          Text("Editing \(draft.canonicalDisplay)")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
-      }
-    }
-    .padding(density.isCompact ? density.cardPadding : 28)
-    .background(
-      RoundedRectangle(
-        cornerRadius: density.isCompact ? density.cardCornerRadius : 26,
-        style: .continuous
-      )
-        .fill(.ultraThinMaterial)
-    )
-    .overlay(
-      RoundedRectangle(
-        cornerRadius: density.isCompact ? density.cardCornerRadius : 26,
-        style: .continuous
-      )
-        .stroke(Color.brandAccentWarm.opacity(0.15), lineWidth: 1)
-    )
-  }
-
-  private var headerRow: some View {
-    HStack(alignment: .top) {
-      VStack(alignment: .leading, spacing: density.isCompact ? 1 : 6) {
-        Text(draft.isEditing ? "Edit correction" : "New correction")
-          .font(density.isCompact ? .caption.weight(.semibold) : .title3.bold())
-        if !density.isCompact {
-          Text(
-            "Aliases support full words only. Automatic rules run when tags match; "
-              + "manual rules stay as review-only suggestions."
-          )
-          .foregroundStyle(.secondary)
-          .font(.footnote)
-        }
-      }
-      Spacer()
-    }
-  }
-
-  private var existingRulesSection: some View {
-    VStack(alignment: .leading, spacing: density.groupSpacing) {
-      Text("Saved rules")
-        .font(density.isCompact ? .caption.weight(.semibold) : .title3.bold())
-      if lexicon.rules.isEmpty {
-        Text("No corrections yet. Add your preferred spellings above.")
-          .foregroundStyle(.secondary)
-          .italic()
-      } else {
-        LazyVStack(spacing: density.isCompact ? density.sectionSpacing : 16) {
-          ForEach(lexicon.rules) { rule in
-            ruleRow(rule)
-          }
-        }
-      }
-    }
-  }
-
-  private func ruleRow(_ rule: PersonalLexiconRule) -> some View {
-    VStack(alignment: .leading, spacing: density.isCompact ? 4 : 10) {
-      HStack(alignment: .top) {
-        VStack(alignment: .leading, spacing: 4) {
-          HStack(spacing: 6) {
-            Text(rule.canonical)
-              .font(.headline)
-            if rule.source == .automatic {
-              Text("AUTO")
-                .font(.caption2.bold())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(Color.brandAccent.opacity(0.15)))
-                .foregroundStyle(Color.brandAccent)
-            }
-          }
-          if !rule.aliases.isEmpty {
-            Text("Heard as: \(rule.aliases.joined(separator: ", "))")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-          }
-        }
-        Spacer()
-        Text(label(for: rule.activation))
-          .font(.caption)
-          .padding(.horizontal, 10)
-          .padding(.vertical, 4)
-          .background(Capsule().fill(Color.secondary.opacity(0.1)))
-      }
-
-      if !rule.contextTags.isEmpty {
-        HStack(spacing: 6) {
-          Text("Tags:")
-            .font(.caption.bold())
-          Text(rule.contextTags.sorted().joined(separator: ", "))
-            .font(.caption)
-        }
-      }
-
-      if let notes = rule.notes, !notes.isEmpty {
-        Text(notes)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-
-      ruleRowActions(rule)
-    }
-    .padding(density.isCompact ? density.cardPadding : 20)
-    .background(
-      RoundedRectangle(cornerRadius: density.isCompact ? 8 : 22, style: .continuous)
-        .fill(Color(nsColor: .controlBackgroundColor))
-    )
-  }
-
-  private func ruleRowActions(_ rule: PersonalLexiconRule) -> some View {
-    HStack(spacing: 12) {
-      Button("Edit") {
-        draft = RuleDraft(rule: rule)
-        showAdvancedOptions = draft.requiresAdvancedOptions
-        focusedField = .canonical
-      }
-      .buttonStyle(.bordered)
-      Button("Delete", role: .destructive) {
-        Task {
-          do {
-            try await lexicon.deleteRule(id: rule.id)
-          } catch {
-            alertMessage = error.localizedDescription
-          }
-        }
-      }
-      .buttonStyle(.bordered)
-      Spacer()
-      Text("Updated \(rule.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-    }
-  }
-
-  private var previewSection: some View {
-    let context = PersonalLexiconContext(tags: draft.previewTags, destinationApplication: "Preview", recentTranscriptWindow: previewText)
-    let preview = lexicon.apply(to: previewText, context: context)
-
-    return VStack(alignment: .leading, spacing: density.groupSpacing) {
-      Text("Preview")
-        .font(density.isCompact ? .caption.weight(.semibold) : .title3.bold())
-      TextEditor(text: $previewText)
-        .frame(minHeight: density.isCompact ? 64 : 120)
-        .padding(density.isCompact ? 5 : 12)
-        .background(
-          RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color(nsColor: .textBackgroundColor))
-        )
-      VStack(alignment: .leading, spacing: density.inlineSpacing) {
-        Text("Transformed")
-          .font(.caption.bold())
-        Text(preview.transformedText)
-          .padding(density.isCompact ? 5 : 12)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-              .fill(Color(nsColor: .underPageBackgroundColor))
-          )
-      }
-
-      if !preview.applied.isEmpty {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Applied corrections")
-            .font(.caption.bold())
-          ForEach(preview.applied, id: \.id) { record in
-            correctionRow(record)
-          }
-        }
-      }
-
-      if !preview.suggestions.isEmpty {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Suggestions")
-            .font(.caption.bold())
-          ForEach(preview.suggestions, id: \.id) { record in
-            correctionRow(record)
-          }
-        }
-      }
-    }
-    .padding(density.cardPadding)
-    .background(
-      RoundedRectangle(
-        cornerRadius: density.isCompact ? density.cardCornerRadius : 24,
-        style: .continuous
-      )
-        .fill(.ultraThinMaterial)
-    )
-  }
-
-  private func correctionRow(_ record: PersonalLexiconCorrectionRecord) -> some View {
-    HStack(spacing: 8) {
-      Image(systemName: record.wasApplied ? "wand.and.stars" : "questionmark.circle")
-        .foregroundStyle(record.wasApplied ? Color.green : Color.orange)
-      VStack(alignment: .leading, spacing: 2) {
-        Text("\(record.alias) -> \(record.canonical) (\(record.occurrences)x)")
-          .font(.caption)
-        if let reason = record.reason {
-          Text(reason)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
-      }
-      Spacer()
-      Text(label(for: record.confidence))
-        .font(.caption2)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(Capsule().fill(Color.secondary.opacity(0.12)))
-    }
+  private func showError(_ error: Error) {
+    alertMessage = error.localizedDescription
   }
 
   private func saveDraft() {
     guard draft.isSavable else { return }
-    let aliases = draft.aliases
-    let tags = draft.tags
-    let notes = draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-    let trimmedNotes = notes.isEmpty ? nil : notes
+    let draft = draft
 
     if let ruleID = draft.id, let existing = lexicon.rules.first(where: { $0.id == ruleID }) {
-      let updated = PersonalLexiconRule(
-        id: existing.id,
-        displayName: draft.generatedDisplayName,
-        canonical: draft.canonical,
-        aliases: aliases,
-        activation: draft.activation,
-        contextTags: tags,
-        confidence: draft.confidence,
-        notes: trimmedNotes,
-        createdAt: existing.createdAt,
-        updatedAt: Date()
-      )
+      let updated = draft.updatedRule(from: existing, updatedAt: Date())
       Task {
         do {
           try await lexicon.updateRule(updated)
           resetDraft()
         } catch {
-          alertMessage = error.localizedDescription
+          showError(error)
         }
       }
     } else {
@@ -636,115 +195,23 @@ struct PersonalCorrectionsView: View {
           _ = try await lexicon.addRule(
             displayName: draft.generatedDisplayName,
             canonical: draft.canonical,
-            aliases: aliases,
+            aliases: draft.aliases,
             activation: draft.activation,
-            contextTags: tags,
+            contextTags: draft.tags,
             confidence: draft.confidence,
-            notes: trimmedNotes
+            notes: draft.trimmedNotes
           )
           resetDraft()
         } catch {
-          alertMessage = error.localizedDescription
+          showError(error)
         }
       }
     }
   }
 
   private func resetDraft() {
-    draft = RuleDraft()
+    draft = PersonalCorrectionRuleDraft()
     showAdvancedOptions = false
     focusedField = nil
   }
-
-  private func label(for activation: PersonalLexiconRule.Activation) -> String {
-    switch activation {
-    case .automatic:
-      return "Automatic"
-    case .requireContextMatch:
-      return "Context match"
-    case .manual:
-      return "Manual"
-    }
-  }
-
-  private func label(for confidence: PersonalLexiconConfidence) -> String {
-    switch confidence {
-    case .high:
-      return "High"
-    case .medium:
-      return "Medium"
-    case .low:
-      return "Low"
-    }
-  }
 }
-
-private struct RuleDraft {
-  var id: UUID?
-  var canonical: String = ""
-  var aliasesText: String = ""
-  var activation: PersonalLexiconRule.Activation = .automatic
-  var contextTagsText: String = ""
-  var confidence: PersonalLexiconConfidence = .high
-  var notes: String = ""
-
-  var isEditing: Bool { id != nil }
-
-  var canonicalDisplay: String {
-    let trimmed = canonical.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? "New correction" : trimmed
-  }
-
-  var aliases: [String] {
-    tokenize(aliasesText)
-  }
-
-  var tags: Set<String> {
-    Set(tokenize(contextTagsText))
-  }
-
-  var generatedDisplayName: String {
-    if let firstAlias = aliases.first?.trimmingCharacters(in: .whitespacesAndNewlines), !firstAlias.isEmpty {
-      return "\(canonicalDisplay) (\(firstAlias))"
-    }
-    return canonicalDisplay
-  }
-
-  var isSavable: Bool {
-    !canonical.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      && !aliases.isEmpty
-  }
-
-  var previewTags: Set<String> {
-    tags
-  }
-
-  var requiresAdvancedOptions: Bool {
-    if activation != .automatic { return true }
-    if confidence != .high { return true }
-    if !tags.isEmpty { return true }
-    let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !trimmedNotes.isEmpty { return true }
-    return false
-  }
-
-  init() {}
-
-  init(rule: PersonalLexiconRule) {
-    id = rule.id
-    canonical = rule.canonical
-    aliasesText = rule.aliases.joined(separator: ", ")
-    activation = rule.activation
-    contextTagsText = rule.contextTags.sorted().joined(separator: ", ")
-    confidence = rule.confidence
-    notes = rule.notes ?? ""
-  }
-}
-
-private func tokenize(_ text: String) -> [String] {
-  text
-    .split(whereSeparator: { ",\n".contains($0) })
-    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-    .filter { !$0.isEmpty }
-}
-// swiftlint:enable file_length type_body_length

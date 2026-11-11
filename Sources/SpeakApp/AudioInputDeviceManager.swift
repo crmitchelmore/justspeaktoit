@@ -42,52 +42,21 @@ final class AudioInputDeviceManager: ObservableObject {
 
   private let appSettings: AppSettings
   private let logger = SpeakLogger.logger(category: "AudioInput")
-  private var devicesListener: AudioObjectPropertyListenerBlock?
-  private var defaultDeviceListener: AudioObjectPropertyListenerBlock?
+  private let listenerRegistrar: any CoreAudioPropertyListenerRegistrar
+  /// Device-list and default-input listeners. Each retires synchronously when
+  /// this manager goes away (see `CoreAudioPropertyListener`).
+  private var hardwareListeners: [CoreAudioPropertyListener] = []
   private var sessionTracker = AudioInputDeviceSessionTracker()
 
-  init(appSettings: AppSettings) {
+  init(
+    appSettings: AppSettings,
+    listenerRegistrar: any CoreAudioPropertyListenerRegistrar = SystemCoreAudioPropertyListenerRegistrar()
+  ) {
     self.appSettings = appSettings
+    self.listenerRegistrar = listenerRegistrar
     selectedDeviceUID = appSettings.preferredAudioInputUID
     refreshDevices()
     startObservingHardwareChanges()
-  }
-
-  deinit {
-    let devicesListener = self.devicesListener
-    let defaultDeviceListener = self.defaultDeviceListener
-    self.devicesListener = nil
-    self.defaultDeviceListener = nil
-
-    Task { @MainActor in
-      if let devicesListener {
-        var address = AudioObjectPropertyAddress(
-          mSelector: kAudioHardwarePropertyDevices,
-          mScope: kAudioObjectPropertyScopeGlobal,
-          mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectRemovePropertyListenerBlock(
-          AudioObjectID(kAudioObjectSystemObject),
-          &address,
-          DispatchQueue.main,
-          devicesListener
-        )
-      }
-
-      if let defaultDeviceListener {
-        var address = AudioObjectPropertyAddress(
-          mSelector: kAudioHardwarePropertyDefaultInputDevice,
-          mScope: kAudioObjectPropertyScopeGlobal,
-          mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectRemovePropertyListenerBlock(
-          AudioObjectID(kAudioObjectSystemObject),
-          &address,
-          DispatchQueue.main,
-          defaultDeviceListener
-        )
-      }
-    }
   }
 
   var currentSelectionDisplayName: String {
@@ -282,43 +251,28 @@ final class AudioInputDeviceManager: ObservableObject {
   }
 
   private func startObservingHardwareChanges() {
-    let queue = DispatchQueue.main
-
-    var devicesAddress = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwarePropertyDevices,
-      mScope: kAudioObjectPropertyScopeGlobal,
-      mElement: kAudioObjectPropertyElementMain
-    )
-
-    devicesListener = { [weak self] _, _ in
-      self?.refreshDevices()
-    }
-
-    if let devicesListener {
-      AudioObjectAddPropertyListenerBlock(
-        AudioObjectID(kAudioObjectSystemObject),
-        &devicesAddress,
-        queue,
-        devicesListener
-      )
-    }
-
-    var defaultAddress = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwarePropertyDefaultInputDevice,
-      mScope: kAudioObjectPropertyScopeGlobal,
-      mElement: kAudioObjectPropertyElementMain
-    )
-
-    defaultDeviceListener = { [weak self] _, _ in
-      self?.refreshDevices()
-    }
-
-    if let defaultDeviceListener {
-      AudioObjectAddPropertyListenerBlock(
-        AudioObjectID(kAudioObjectSystemObject),
-        &defaultAddress,
-        queue,
-        defaultDeviceListener
+    let logger = self.logger
+    hardwareListeners = [kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice].map { selector in
+      CoreAudioPropertyListener(
+        address: AudioObjectPropertyAddress(
+          mSelector: selector,
+          mScope: kAudioObjectPropertyScopeGlobal,
+          mElement: kAudioObjectPropertyElementMain
+        ),
+        queue: .main,
+        registrar: listenerRegistrar,
+        onFailure: { operation, address, status in
+          let action = operation.rawValue
+          let selector = address.mSelector
+          logger.error(
+            "Core Audio listener \(action, privacy: .public) failed: selector \(selector), OSStatus \(status)"
+          )
+        },
+        handler: { [weak self] in
+          MainActor.assumeIsolated {
+            self?.refreshDevices()
+          }
+        }
       )
     }
   }

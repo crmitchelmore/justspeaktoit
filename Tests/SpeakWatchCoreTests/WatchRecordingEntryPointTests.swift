@@ -40,6 +40,7 @@ final class WatchRecordingEntryPointTests: XCTestCase {
             "swiftc", "-j", "4", "-emit-library", "-emit-module", "-module-name", "SpeakWatchCore",
             "-emit-module-path", directory.appendingPathComponent("SpeakWatchCore.swiftmodule").path,
             root.appendingPathComponent("Sources/SpeakWatchCore/WatchCaptureProtocol.swift").path,
+            root.appendingPathComponent("Sources/SpeakWatchCore/WatchCaptureQueue.swift").path,
             root.appendingPathComponent("Sources/SpeakWatchCore/WatchRecordingToggleSerialiser.swift").path,
             "-o", directory.appendingPathComponent("libSpeakWatchCore.dylib").path
         ])

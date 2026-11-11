@@ -1,3 +1,4 @@
+import SpeakWatchCore
 import SwiftUI
 
 /// Root watch UI: one big record button plus the recent-capture list with

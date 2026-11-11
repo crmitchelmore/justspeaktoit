@@ -1,185 +1,17 @@
-// swiftlint:disable file_length
 import Foundation
 import SpeakCore
 import SpeakDesktop
 
-// Host actor state (settings, recording, correction learning, vocabulary) stays one cohesive inventory.
-// swiftlint:disable:next type_body_length
+// The host actor's stored state. Its value types live beside it
+// (DesktopHostControllerSettings, DesktopHostRecordingValues), and related
+// fields are grouped into domain state (DesktopHostControllerState).
 package actor DesktopHostController<Platform: DesktopHostPlatform> {
-    package struct SettingsValues: Codable, Sendable {
-        package var model = ModelCatalog.defaultBatchTranscriptionModel
-        package var postProcessing: DesktopPostProcessing.Options?
-        package var microphoneDeviceID: String?
-        package var batchModel: String?
-        package var liveModel: String?
-        // Absent keys keep the native smart insert-at-cursor default.
-        package var textOutput: Platform.TextOutputOptions?
-        package var hotKey: Platform.HotKeySettings?
-        package var voiceOutput: Platform.VoiceOutputSettings?
-        package var automationEnabled: Bool?
-        /// Device-local approval, never included in portable configuration.
-        package var automationLocalConsent: Bool?
-        package var localModel: String?
-        /// Last on-device live model (`local/streaming/whisperkit/...`).
-        package var localLiveModel: String?
-        package var localUseGPU: Bool?
-        /// Device-local Azure resource, under the Apple apps' key.
-        package var azureSpeechResourceEndpoint: String?
-        package var appearance: DesktopAppearance?
-        /// Last reached registration for hosts that cannot read it back.
-        package var runAtLogin: Bool?
-        package var configuration: DesktopConfiguration?
-        /// Device-local approval; portable imports cannot grant service access.
-        package var livePolishApproved: Bool?
-    }
-
-    @dynamicMemberLookup
-    package struct Settings: Codable, Sendable {
-        private var values = SettingsValues()
-        private var preserved: [String: AnyCodable] = [:]
-        var archiveModelKeys: Set<String> = []
-        var nativeSourceRoots: [String: AnyCodable] = [:]
-        package var archiveUnknownKeys: Set<String> { Set(preserved.keys) }
-        package init() {}
-
-        package subscript<Value>(dynamicMember keyPath: WritableKeyPath<SettingsValues, Value>) -> Value {
-            get { values[keyPath: keyPath] }
-            set {
-                values[keyPath: keyPath] = newValue
-                noteArchiveWrite(keyPath)
-            }
-        }
-
-        // swiftlint:disable:next function_body_length
-        package init(from decoder: Decoder) throws {
-            values = try SettingsValues(from: decoder)
-            let container = try decoder.singleValueContainer()
-            let all = try container.decode([String: AnyCodable].self)
-            captureArchivePresence(all)
-            try adoptStoredStreamingPreference(all)
-            var configuration = values.configuration?.values ?? [:]
-            let warmKey = DesktopConnectionPreWarming.preferenceKey
-            if configuration[warmKey] == nil { configuration[warmKey] = all[warmKey] }
-            configuration.removeValue(forKey: DesktopConnectionPreWarming.approvalProjectionKey)
-            if values.configuration != nil || configuration[warmKey] != nil {
-                values.configuration = try DesktopConfiguration(values: configuration)
-            }
-            let known: Set<String> = [
-                "model", "postProcessing", "microphoneDeviceID", "batchModel", "liveModel", "textOutput",
-                "hotKey", "voiceOutput", "automationEnabled", "automationLocalConsent", "localModel", "localUseGPU",
-                "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration", "livePolishApproved",
-                "localLiveModel",
-                DesktopConnectionPreWarming.preferenceKey, DesktopConnectionPreWarming.approvalProjectionKey
-            ]
-            preserved = all.filter { !known.contains($0.key) }
-            try adoptStoredPreferences(DesktopConfiguration.pronunciationPreferenceKeys)
-            try adoptStoredPreferences(DesktopConfiguration.modulatePreferenceKeys)
-            let voiceKeys = VoiceSelectionPreference.keys.intersection(Platform.voiceConfigurationKeys)
-            if !voiceKeys.isDisjoint(with: preserved.keys)
-                || !voiceKeys.isDisjoint(with: (values.configuration?.values ?? [:]).keys) {
-                var configuration = values.configuration?.values ?? [:]
-                let claimed = voiceKeys.union(
-                    [VoiceSynthesisPreference.quality.key.rawValue].filter {
-                        Platform.voiceConfigurationKeys.contains($0)
-                    })
-                for key in claimed {
-                    if configuration[key] == nil { configuration[key] = preserved[key] }
-                    preserved.removeValue(forKey: key)
-                }
-                values.configuration = try DesktopConfiguration(values: configuration)
-            }
-            guard Platform.self is any DesktopHostAutomationPlatform.Type else { return }
-            let key = ApplicationPreferenceKey.enableAutomationServer.rawValue
-            preserved.removeValue(forKey: key)
-            if let canonical = values.configuration?.values[key] {
-                guard case .bool = canonical.storage else {
-                    throw DesktopConfigurationError.invalidField("Automation")
-                }
-            }
-            let desired = all[key] ?? values.automationEnabled.map { AnyCodable(.bool($0)) }
-            if values.configuration?.values[key] == nil, let desired {
-                guard case .bool = desired.storage else {
-                    throw DesktopConfigurationError.invalidField("Automation")
-                }
-                var configuration = values.configuration?.values ?? [:]
-                configuration[key] = desired
-                values.configuration = try DesktopConfiguration(values: configuration)
-            }
-        }
-
-        private mutating func adoptStoredPreferences(_ keys: Set<String>) throws {
-            guard !keys.isDisjoint(with: preserved.keys) else { return }
-            var configuration = values.configuration?.values ?? [:]
-            for key in keys {
-                if configuration[key] == nil { configuration[key] = preserved[key] }
-                preserved.removeValue(forKey: key)
-            }
-            values.configuration = try DesktopConfiguration(values: configuration)
-        }
-
-        private mutating func adoptStoredStreamingPreference(_ all: [String: AnyCodable]) throws {
-            let key = DesktopPostProcessingConfiguration.streamingKey
-            guard let configuration = values.configuration, let legacy = configuration.values[key] else { return }
-            let explicit: Bool
-            if case .object(let stored)? = all["postProcessing"]?.storage {
-                explicit = stored["streamingEnabled"] != nil
-            } else { explicit = false }
-            if !explicit {
-                _ = try DesktopPostProcessingConfiguration.importOptions(
-                    from: DesktopConfiguration(values: [key: legacy]), into: &values.postProcessing
-                )
-            }
-            values.configuration = try DesktopConfiguration(values: configuration.values.filter { $0.key != key })
-        }
-
-        package func encode(to encoder: Encoder) throws {
-            let known = try JSONDecoder().decode(
-                [String: AnyCodable].self, from: JSONEncoder().encode(values)
-            )
-            var container = encoder.singleValueContainer()
-            try container.encode(preserved.merging(known) { _, current in current })
-        }
-    }
-
-    /// Target, profile and text output are fixed when recording starts; a
-    /// later settings change applies only to later recordings.
-    package struct Recording {
-        package let capture: any DesktopRecordingCapture
-        package let context: DesktopCaptureContext
-        package let file: PCMRecordingFile
-        package let handsFree: Bool
-        package var record: DesktopRecordingStore.Record
-        package let target: Platform.InsertionTarget?
-        package let live: DesktopLiveSession?
-        package let profile: DesktopProfileSession
-        package let options: DesktopHostRecordingConfiguration
-        package let textOutput: Platform.TextOutputOptions
-        /// What started this session; a shortcut gesture stops only its own kind.
-        package let trigger: HotKeySessionTrigger
-    }
-
-    package struct StoppedRecording: Sendable {
-        package let record: DesktopRecordingStore.Record
-        package let duration: TimeInterval
-        package let target: Platform.InsertionTarget?
-        package let live: DesktopLiveSession?
-        package let profile: DesktopProfileSession
-        /// Legacy-path snapshot; owned dictation freezes its inputs in `input`.
-        package var options: DesktopHostRecordingConfiguration?
-        package let textOutput: Platform.TextOutputOptions
-        package var input: DesktopHostRecordingInput?
-        package var output: DesktopHostRecordingOutput<Platform> { .init(options: textOutput, target: target) }
-        /// Frozen at Record; nil only for directly constructed finishes.
-        package var voiceCommands: DesktopHostVoiceCommandPolicy? { input?.voiceCommands ?? options?.voiceCommands }
-    }
-
     package nonisolated let directory: URL
     package let effects: any DesktopHostEffects<Platform>
     package nonisolated let store: DesktopRecordingStore
     let uploadStaging: SharedMultipartUploadStaging
     package let modelCatalog: OpenRouterAudioCatalogStore
-    var modelDiscoveryTask: Task<Void, Never>?
-    var modelCatalogRevision: UInt64 = 0
+    var modelDiscovery = DesktopHostModelDiscoveryState()
     let profileStore: DesktopDictationProfileStore
     package var profiles: [DictationProfile] {
         didSet { invalidateConnectionPreWarming(resetCapture: true) }
@@ -196,24 +28,10 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             if !correctionLearningEnabled { revokeCorrectionLearningConsent() }
         }
     }
-    var correctionObservation: DesktopCorrectionObservation?
-    var correctionObservationTask: Task<Void, Never>?
-    var correctionObservationWait: @Sendable (Double) async throws -> Void = {
-        try await Task.sleep(for: .seconds($0))
-    }
-    var correctionLearningRevision: UInt64 = 0
-    var correctionLearningApproved = false
-    var observationalCorrectionConsent = false
-    var correctionLearningNotice: String?
+    var correctionLearning = DesktopHostCorrectionLearningState()
     var vocabularyLoad: Task<DesktopVocabulary, Error>?
     var configurationEditor: DesktopHostConfigurationEditorState?
-    var connectionWarmApproved = false
-    var connectionWarmGeneration = UUID()
-    var connectionWarmTracker = LiveStreamWarmTracker()
-    var connectionWarmCapture: DesktopHostConnectionWarmCapture?
-    var connectionWarmTask: (id: UUID, task: Task<Void, Never>)?
-    var connectionWarmPending = false
-    var connectionWarmCredentialWork = 0
+    var connectionWarm = DesktopHostConnectionWarmState()
     var capturePreparation: (deviceID: String, value: any DesktopCapturePreparation)?
     var shortcutPressMicrophone: (id: UUID, capture: any DesktopRecordingCapture)?
     package var recording: Recording?
@@ -230,7 +48,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         didSet {
             if closed {
                 configurationEditor = nil
-                connectionWarmApproved = false
+                connectionWarm.approved = false
                 invalidateConnectionPreWarming(resetCapture: true)
                 revokeCorrectionLearningConsent()
                 capturedCleanup.removeAll()
@@ -338,15 +156,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var folderRevealTask: Task<Void, Error>?
     var recordingLocation = DesktopHostRecordingLocationState()
     var audioCleanupTask: Task<Void, Never>?
-    var migrationExportTask: Task<Void, Never>?
-    var migrationExportWorker: Task<DesktopMigrationBackup.Outcome, Never>?
-    var migrationInspectionTask: Task<Void, Never>?
-    var migrationInspectionWorker: Task<DesktopMigrationInspection.Outcome, Never>?
     var audioCleanupConfirmation: (id: UUID, snapshot: DesktopRecordingAudioSnapshot)?
-    var migrationRestoreTask: Task<Void, Never>?
-    var migrationRestoreWorker: Task<DesktopMigrationRestore.Preparation, Never>?
-    var migrationRestoreApplyWorker: Task<DesktopMigrationRestore.Outcome, Never>?
-    var migrationRestoreConfirmation: (id: UUID, plan: DesktopMigrationRestore.Plan)?
+    var migrationWork = DesktopHostMigrationWork()
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
     /// The recording the HUD follows, from Record until its result.
@@ -445,82 +256,4 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// Self-test only: startup without model discovery, which could reach the
     /// network with a real saved credential.
     package func markReadyForSelfTest() { isReady = true }
-}
-
-extension DesktopHostController {
-    func captureFailed(_ message: String, recordingID: UUID) async {
-        if !closed, ownedDictation?.id == recordingID {
-            await stopOwnedDictation(requestID: recordingID, reason: message)
-            return
-        }
-        guard !closed, recording?.record.id == recordingID else { return }
-        invalidateConnectionPreWarming(resetCapture: true)
-        if recording?.handsFree == true, let runID = handsFreeRun?.id {
-            await failHandsFree(message, runID: runID)
-            return
-        }
-        await recordingFeedback?.cancelRecording(recordingID)
-        beginBusyOperation()
-        defer {
-            capturedCleanup.removeValue(forKey: recordingID)
-            finishBusyOperation()
-        }
-        var record = recording?.record
-        let live = recording?.live
-        var stopped: StoppedRecording?
-        var failure = message
-        do { stopped = try stopCapture() } catch {
-            failure += " Capture cleanup failed: \(error.localizedDescription)"
-        }
-        if let live, var partial = record {
-            let snapshot = live.cancel()
-            partial.result = liveResult(snapshot.text, record: partial, duration: stopped?.duration ?? 0)
-            record = partial
-        }
-        record?.failure = failure
-        do { if let record { try await saveRecord(record) } } catch {
-            update("\(message) History error: \(error.localizedDescription)", state: 0)
-            return
-        }
-        if let record { await presentCancelledRecording(record) } else {
-            reportFailure("Recording stopped and retained: \(message)", for: recordingID, headline: "Recording stopped")
-        }
-    }
-
-    package func importAudio(path: String, modelIndex: Int) async {
-        guard isReady, !busy, !closed, recording == nil,
-              DesktopHostModels.all.indices.contains(modelIndex),
-              !DesktopHostModels.isLive(DesktopHostModels.all[modelIndex].id),
-              !DesktopHostModels.isLocalLive(DesktopHostModels.all[modelIndex].id) else { return }
-        cancelOutput()
-        guard selectModel(modelIndex) else { return }
-        busy = true
-        activeOperations += 1
-        defer { busy = false; finishOperation() }
-        do {
-            try await playback.stopAndWait()
-            guard !closed else { return }
-            _ = try requireCredentialOrLocalModel(settings.model)
-            let localModel = beginLocalUse(settings.model) // Held across the save until transcription ends.
-            defer { endLocalUse(localModel) }
-            let source = URL(fileURLWithPath: path)
-            try DesktopHostImport.validate(source)
-            let id = UUID()
-            let filename = id.uuidString + "." + source.pathExtension
-            let destination = directory.appendingPathComponent("History").appendingPathComponent(filename)
-            try FileManager.default.copyItem(at: source, to: destination)
-            var record = DesktopRecordingStore.Record(id: id, audioFilename: filename, modelIdentifier: settings.model)
-            record.languageIdentifier = settings.configuration?.language
-            try await saveRecord(record)
-            if closed {
-                var cancelled = record
-                cancelled.failure = "Import cancelled when the app closed. Audio retained."
-                try await saveRecord(cancelled)
-                return
-            }
-            // An import has no recording hotkey, so it never outputs automatically.
-            await transcribe(record, duration: 0, output: nil)
-        } catch { update(error.localizedDescription, state: 0) }
-    }
-
 }

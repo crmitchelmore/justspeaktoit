@@ -31,7 +31,7 @@ extension DesktopHostController {
         values[VoiceAudioFormat.preferenceKey] = projected.values[VoiceAudioFormat.preferenceKey]
         let qualityKey = VoiceSynthesisPreference.quality.key.rawValue
         values[qualityKey] = projected.values[qualityKey]
-        values[DesktopConnectionPreWarming.approvalProjectionKey] = AnyCodable(.bool(connectionWarmApproved))
+        values[DesktopConnectionPreWarming.approvalProjectionKey] = AnyCodable(.bool(connectionWarm.approved))
         if values[qualityKey] == nil, let voice = settings.voiceOutput as? DesktopVoiceOutputSettings {
             values[qualityKey] = AnyCodable(.string(voice.qualityForNativeEditor))
         }
@@ -136,7 +136,7 @@ extension DesktopHostController {
         invalidateConnectionPreWarming(resetCapture: true)
         let approved = configuration.enabled(DesktopConnectionPreWarming.approvalProjectionKey)
             && configuration.enabled(DesktopConnectionPreWarming.preferenceKey)
-            && (intent == .apply || connectionWarmApproved)
+            && (intent == .apply || connectionWarm.approved)
         let configuration = try DesktopConnectionPreWarming.removingApproval(from: configuration)
         var changed = settings
         var voice = changed.voiceOutput
@@ -167,7 +167,7 @@ extension DesktopHostController {
         }
         let previousVoice = settings.voiceOutput
         try await persistAutomationAwareSettings(changed)
-        connectionWarmApproved = approved
+        connectionWarm.approved = approved
         reconcileSonioxRegionChange(previousVoice)
         reconcileVoiceQualityChange(previousVoice)
         let cleanup = await disarmHandsFreeForConfiguration()
@@ -177,7 +177,7 @@ extension DesktopHostController {
         let approval = intent == .persistOnly && changed.livePolishApproved != true
             && configuration.text("speedMode") == SpeedModeID.livePolish.rawValue
             ? " Auto-Clean is not authorized; use Apply preferences to enable cleanup requests." : ""
-        let preparation = connectionWarmApproved
+        let preparation = connectionWarm.approved
             ? " Connection preparation approved until exit, after successful capture only; not live or streaming."
             : configuration.enabled(DesktopConnectionPreWarming.preferenceKey)
                 // swiftlint:disable:next line_length
@@ -264,7 +264,7 @@ extension DesktopHostController {
         let previous = settings
         let previousVoice = settings.voiceOutput
         try await persistAutomationAwareSettings(changed)
-        connectionWarmApproved = false
+        connectionWarm.approved = false
         await configureCleanupDiscovery(refresh: false)
         reconcileSonioxRegionChange(previousVoice)
         reconcileVoiceQualityChange(previousVoice)

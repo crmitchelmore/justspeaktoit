@@ -29,7 +29,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         })
         await target.controller.beginMigrationRestore(source.destination, using: restorer)
         await finish(target)
-        let pending = await target.controller.migrationRestoreConfirmation
+        let pending = await target.controller.migrationWork.restoreConfirmation
         let token = try XCTUnwrap(pending?.id).uuidString
         let prior = try await target.controller.store.records()
         XCTAssertTrue(prior.isEmpty)
@@ -65,11 +65,11 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         await finish(fixture)
         let store = await fixture.controller.profileStore
         XCTAssertTrue(try store.load().isEmpty)
-        let pending = await fixture.controller.migrationRestoreConfirmation
+        let pending = await fixture.controller.migrationWork.restoreConfirmation
         let token = try XCTUnwrap(pending?.id).uuidString
         await fixture.controller.answerMigrationRestore(UUID().uuidString, choice: 1, using: restorer)
         XCTAssertTrue(try store.load().isEmpty)
-        let stillPending = await fixture.controller.migrationRestoreConfirmation
+        let stillPending = await fixture.controller.migrationWork.restoreConfirmation
         XCTAssertEqual(stillPending?.id.uuidString, token)
         await fixture.controller.answerMigrationRestore(token, choice: 1, using: restorer)
         await finish(fixture)
@@ -94,12 +94,12 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         let restorer = try restorer(fixture)
         await fixture.controller.beginMigrationRestore(fixture.destination, using: restorer)
         await finish(fixture)
-        let pending = await fixture.controller.migrationRestoreConfirmation
+        let pending = await fixture.controller.migrationWork.restoreConfirmation
         let token = try XCTUnwrap(pending?.id).uuidString
         await fixture.controller.answerMigrationRestore(token, choice: 0, using: restorer)
         let store = await fixture.controller.profileStore
         XCTAssertTrue(try store.load().isEmpty)
-        let remaining = await fixture.controller.migrationRestoreConfirmation
+        let remaining = await fixture.controller.migrationWork.restoreConfirmation
         XCTAssertNil(remaining)
         XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("Restore cancelled. Nothing was changed.") == true)
         await fixture.controller.close()
@@ -112,7 +112,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         let restorer = try restorer(fixture, confirm: { _, _, offers in XCTAssertFalse(offers) })
         await fixture.controller.beginMigrationRestore(fixture.destination, using: restorer)
         await finish(fixture)
-        let pending = await fixture.controller.migrationRestoreConfirmation
+        let pending = await fixture.controller.migrationWork.restoreConfirmation
         let token = try XCTUnwrap(pending?.id).uuidString
         await fixture.controller.answerMigrationRestore(token, choice: 2, using: restorer)
         let store = await fixture.controller.profileStore
@@ -131,7 +131,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         await fixture.controller.beginMigrationRestore(fixture.destination, using: restorer)
         await finish(fixture)
         XCTAssertEqual(try store.load().map(\.name), ["Existing"])
-        let pending = await fixture.controller.migrationRestoreConfirmation
+        let pending = await fixture.controller.migrationWork.restoreConfirmation
         let token = try XCTUnwrap(pending?.id).uuidString
         await fixture.controller.answerMigrationRestore(token, choice: 2, using: restorer)
         await finish(fixture)
@@ -156,7 +156,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
             await fixture.controller.beginMigrationRestore(fixture.destination, using: restorer)
         }.value
         await fulfillment(of: [entered], timeout: 10)
-        let task = await fixture.controller.migrationRestoreTask
+        let task = await fixture.controller.migrationWork.restoreTask
         let report = await queue.read { await fixture.controller.close() }.value
         XCTAssertEqual(report.unfinishedOperations, 1)
         gate.release()
@@ -176,7 +176,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         })
         await fixture.controller.beginMigrationRestore(fixture.destination, using: restorer)
         await finish(fixture)
-        let pending = await fixture.controller.migrationRestoreConfirmation
+        let pending = await fixture.controller.migrationWork.restoreConfirmation
         let busy = await fixture.controller.busy
         let operations = await fixture.controller.activeOperations
         XCTAssertNil(pending)
@@ -189,7 +189,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
     }
 
     private func finish(_ fixture: BackupHostFixture) async {
-        let task = await fixture.controller.migrationRestoreTask
+        let task = await fixture.controller.migrationWork.restoreTask
         await task?.value
     }
 

@@ -21,52 +21,52 @@ extension DesktopHostController {
     func acknowledgeConnectionWarmCapture(
         generation: UUID, recordID: UUID, model: String, options: DesktopPostProcessing.Options
     ) {
-        guard !closed, generation == connectionWarmGeneration else { return }
-        connectionWarmCapture = .init(recordID: recordID, model: model, options: options)
+        guard !closed, generation == connectionWarm.generation else { return }
+        connectionWarm.capture = .init(recordID: recordID, model: model, options: options)
     }
 
     /// Reuses the real cleanup workflow's credential check; idle preparation
     /// never reads the vault or receives the key.
     func acknowledgeConnectionWarmCleanupCredential(recordID: UUID, model: String, available: Bool) {
-        guard var captured = connectionWarmCapture, captured.recordID == recordID,
+        guard var captured = connectionWarm.capture, captured.recordID == recordID,
               captured.options.modelIdentifier == model else { return }
         captured.credentialsReady = available
-        connectionWarmCapture = captured
+        connectionWarm.capture = captured
     }
 
     func invalidateConnectionPreWarming(resetCapture: Bool) {
-        connectionWarmGeneration = UUID()
-        connectionWarmPending = false
-        connectionWarmTask?.task.cancel()
-        connectionWarmTracker.invalidate()
+        connectionWarm.generation = UUID()
+        connectionWarm.pending = false
+        connectionWarm.task?.task.cancel()
+        connectionWarm.tracker.invalidate()
         if resetCapture {
-            connectionWarmCapture = nil
+            connectionWarm.capture = nil
             refreshCapturePreparation()
             endShortcutPressMicrophone()
         }
     }
 
     func pauseConnectionPreWarming() {
-        guard connectionWarmTask != nil else { return }
+        guard connectionWarm.task != nil else { return }
         invalidateConnectionPreWarming(resetCapture: false)
     }
 
     func beginConnectionWarmCredentialWork() {
-        connectionWarmCredentialWork += 1
+        connectionWarm.credentialWork += 1
         invalidateConnectionPreWarming(resetCapture: true)
     }
 
     func endConnectionWarmCredentialWork() {
-        connectionWarmCredentialWork -= 1
+        connectionWarm.credentialWork -= 1
         invalidateConnectionPreWarming(resetCapture: true)
     }
 
     var connectionWarmEligible: Bool {
-        guard isReady, !closed, !busy, activeOperations == 0, connectionWarmCredentialWork == 0,
+        guard isReady, !closed, !busy, activeOperations == 0, connectionWarm.credentialWork == 0,
               recording == nil, handsFreeRun == nil,
               ownedCaptureStartup == nil, ownedDictation == nil, ownedDictationAdmission == nil,
-              microphoneWarning == nil, connectionWarmApproved,
-              let capture = connectionWarmCapture,
+              microphoneWarning == nil, connectionWarm.approved,
+              let capture = connectionWarm.capture,
               capture.credentialsReady,
               DesktopLiveTranscription.route(forID: capture.model) == nil,
               capture.options.mode == .remote, !capture.options.streamingEnabled,
@@ -80,13 +80,13 @@ extension DesktopHostController {
     /// No timer or retry: only a real idle transition can admit one probe.
     func reconcileConnectionPreWarming() {
         guard connectionWarmEligible else { return }
-        guard connectionWarmTask == nil else { connectionWarmPending = true; return }
+        guard connectionWarm.task == nil else { connectionWarm.pending = true; return }
         guard let host = OpenRouterConnectionWarmer.origin.host,
-              connectionWarmTracker.hostNeedingWarmUp(using: .endpointProbe(host: host), now: Date()) != nil else {
+              connectionWarm.tracker.hostNeedingWarmUp(using: .endpointProbe(host: host), now: Date()) != nil else {
             return
         }
         let id = UUID()
-        let generation = connectionWarmGeneration
+        let generation = connectionWarm.generation
         let effects = effects
         let task = Task { [weak self] in
             let succeeded: Bool
@@ -100,18 +100,18 @@ extension DesktopHostController {
             }
             await self?.finishConnectionPreWarming(id: id, generation: generation, host: host, succeeded: succeeded)
         }
-        connectionWarmTask = (id, task)
+        connectionWarm.task = (id, task)
     }
 
     private func finishConnectionPreWarming(id: UUID, generation: UUID, host: String, succeeded: Bool) {
-        guard connectionWarmTask?.id == id else { return }
-        connectionWarmTask = nil
-        let pending = connectionWarmPending
-        connectionWarmPending = false
-        if generation == connectionWarmGeneration, connectionWarmEligible {
-            if succeeded { connectionWarmTracker.markWarmed(host: host, at: Date()) } else {
-                connectionWarmTracker.markFailed(host: host)
-                connectionWarmCapture = nil
+        guard connectionWarm.task?.id == id else { return }
+        connectionWarm.task = nil
+        let pending = connectionWarm.pending
+        connectionWarm.pending = false
+        if generation == connectionWarm.generation, connectionWarmEligible {
+            if succeeded { connectionWarm.tracker.markWarmed(host: host, at: Date()) } else {
+                connectionWarm.tracker.markFailed(host: host)
+                connectionWarm.capture = nil
                 update("Connection preparation failed. Cleanup will connect normally; no idle retry was scheduled.")
             }
         }

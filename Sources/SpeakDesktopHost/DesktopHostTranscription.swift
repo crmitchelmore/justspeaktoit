@@ -185,18 +185,18 @@ extension DesktopHostController {
             await captureFailed(Self.userCancelledRecordingReason, recordingID: active.record.id)
             return
         }
-        if let inspection = migrationInspectionWorker {
+        if let inspection = migrationWork.inspectionWorker {
             inspection.cancel()
             update("Stopping backup inspection... No application data will be changed.", state: 2)
             return
         }
-        if migrationRestoreWorker != nil || migrationRestoreApplyWorker != nil {
-            migrationRestoreWorker?.cancel()
-            migrationRestoreApplyWorker?.cancel()
+        if migrationWork.restoreWorker != nil || migrationWork.restoreApplyWorker != nil {
+            migrationWork.restoreWorker?.cancel()
+            migrationWork.restoreApplyWorker?.cancel()
             update("Stopping restore... Any change is put back.", state: 2)
             return
         }
-        if let export = migrationExportWorker {
+        if let export = migrationWork.exportWorker {
             export.cancel()
             update("Stopping History backup... Existing files will be kept.", state: 2)
             return

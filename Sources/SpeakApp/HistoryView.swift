@@ -129,6 +129,18 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
   /// history several times per render; recomputed when the source items or any
   /// filter input change.
   @State private var filteredItems: [HistoryItem] = []
+  /// Rows are built a page at a time; filtering above still covers all history.
+  @State private var pageWindow = HistoryPageWindow()
+
+  private var displayedItems: ArraySlice<HistoryItem> {
+    filteredItems.prefix(pageWindow.visibleCount(of: filteredItems.count))
+  }
+
+  /// A new search or filter starts again from the first page of its matches.
+  private func filtersChanged() {
+    pageWindow.reset()
+    recomputeFilteredItems()
+  }
 
   private func recomputeFilteredItems() {
     var filter = HistoryFilter.none
@@ -154,7 +166,7 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
     showErrorsOnly = false
     dateRangeEnabled = false
     selectedModelFilter = nil
-    recomputeFilteredItems()
+    filtersChanged()
   }
 
   /// All unique models used across history items, cached to avoid re-computing on every render.
@@ -183,14 +195,17 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
             }
           } else {
             LazyVStack(spacing: density.sectionSpacing) {
-              ForEach(filteredItems) { item in
+              ForEach(displayedItems) { item in
                 HistoryListRow(item: item) { issueReportItem = $0 }
                   .id(item.id)
+              }
+              if pageWindow.hasMore(total: filteredItems.count) {
+                loadMoreFooter
               }
             }
             // Animate on IDs so the animation diff doesn't have to compare
             // full HistoryItem values (network exchanges, events, ...).
-            .animation(.spring(response: 0.28, dampingFraction: 0.88), value: filteredItems.map(\.id))
+            .animation(.spring(response: 0.28, dampingFraction: 0.88), value: displayedItems.map(\.id))
           }
         }
         .padding(density.pagePadding)
@@ -231,12 +246,12 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
       .onReceive(environment.history.$loadState) { state in
         historyLoadState = state
       }
-      .onChange(of: searchText) { _, _ in recomputeFilteredItems() }
-      .onChange(of: showErrorsOnly) { _, _ in recomputeFilteredItems() }
-      .onChange(of: selectedModelFilter) { _, _ in recomputeFilteredItems() }
-      .onChange(of: dateRangeEnabled) { _, _ in recomputeFilteredItems() }
-      .onChange(of: startDate) { _, _ in recomputeFilteredItems() }
-      .onChange(of: endDate) { _, _ in recomputeFilteredItems() }
+      .onChange(of: searchText) { _, _ in filtersChanged() }
+      .onChange(of: showErrorsOnly) { _, _ in filtersChanged() }
+      .onChange(of: selectedModelFilter) { _, _ in filtersChanged() }
+      .onChange(of: dateRangeEnabled) { _, _ in filtersChanged() }
+      .onChange(of: startDate) { _, _ in filtersChanged() }
+      .onChange(of: endDate) { _, _ in filtersChanged() }
 
     }
     .background(
@@ -660,6 +675,24 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
       RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
         .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
     )
+  }
+
+  /// Loads the next page when scrolled into view. Its identity follows the
+  /// window, so it fires again if it is still on screen after a page loads.
+  private var loadMoreFooter: some View {
+    HStack(spacing: 8) {
+      ProgressView()
+        .controlSize(.small)
+      Text("Showing \(displayedItems.count) of \(filteredItems.count) sessions")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 8)
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("historyLoadMoreFooter")
+    .id("history-load-more-\(pageWindow.limit)")
+    .onAppear { pageWindow.loadMore(total: filteredItems.count) }
   }
 
   private var skeletonLoadingView: some View {

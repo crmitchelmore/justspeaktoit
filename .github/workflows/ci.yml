@@ -821,19 +821,7 @@ jobs:
         env:
           TUIST_IOS_KEYBOARD: "1"
           TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
-        run: |
-          set -o pipefail
-          scripts/retry-network.sh tuist generate --no-open
-          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
-            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakKeyboard
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme JustSpeakKeyboard \
-            -destination generic/platform=iOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
+        run: scripts/ci/xcode-unsigned-build.sh JustSpeakKeyboard generic/platform=iOS
 
       - name: Build Keyboard Extension, direct-capture shape (unsigned)
         # The direct-capture shape only exists behind two flags, so its `#if
@@ -844,45 +832,18 @@ jobs:
         env:
           TUIST_IOS_KEYBOARD: "1"
           TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "1"
-        run: |
-          set -o pipefail
-          scripts/retry-network.sh tuist generate --no-open
-          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
-            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakKeyboard
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme JustSpeakKeyboard \
-            -destination generic/platform=iOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
+        run: scripts/ci/xcode-unsigned-build.sh JustSpeakKeyboard generic/platform=iOS
 
       - name: Build watchOS App (feature-flagged)
         # Keep unsigned device builds together, outside the simulator test budget.
         # The containing iOS build also verifies watch companion embedding.
+        env:
+          TUIST_WATCH_APP: "1"
+          TUIST_IOS_KEYBOARD: "1"
+          TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
         run: |
-          set -o pipefail
-          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 scripts/retry-network.sh tuist generate --no-open
-          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
-            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakWatchApp
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme JustSpeakWatchApp \
-            -destination generic/platform=watchOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
-
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme SpeakiOS \
-            -destination generic/platform=iOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
+          scripts/ci/xcode-unsigned-build.sh JustSpeakWatchApp generic/platform=watchOS
+          scripts/ci/xcode-unsigned-build.sh --no-generate SpeakiOS generic/platform=iOS
 
   # Pull requests must carry a passing `scripts/pre-pr` record for the exact
   # head (or its tree) in the current PR body, so a failure that pre-pr would

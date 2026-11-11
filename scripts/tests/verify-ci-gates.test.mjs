@@ -333,11 +333,13 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(devices, /Build Keyboard Extension, hand-off shape/);
   assert.match(devices, /Build Keyboard Extension, direct-capture shape/);
   assert.match(devices, /Build watchOS App \(feature-flagged\)/);
-  assert.match(devices, /TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 scripts\/retry-network.sh tuist generate/);
-  assert.match(devices, /-scheme JustSpeakWatchApp/);
-  assert.match(devices, /-destination generic\/platform=watchOS/);
-  assert.match(devices, /-scheme SpeakiOS/);
-  assert.match(devices, /-destination generic\/platform=iOS/);
+  const watch = devices.split('name: Build watchOS App (feature-flagged)')[1];
+  assert.match(watch, /TUIST_WATCH_APP: "1"\n\s+TUIST_IOS_KEYBOARD: "1"\n\s+TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"/);
+  assert.match(watch, /scripts\/ci\/xcode-unsigned-build\.sh JustSpeakWatchApp generic\/platform=watchOS\n/);
+  assert.match(watch, /scripts\/ci\/xcode-unsigned-build\.sh --no-generate SpeakiOS generic\/platform=iOS\n/);
+  for (const shape of ['0', '1']) {
+    assert.match(devices, new RegExp(`TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "${shape}"\\n\\s+run: scripts/ci/xcode-unsigned-build\\.sh JustSpeakKeyboard generic/platform=iOS\\n`));
+  }
 });
 
 test('iOS selection prefers an available Pro before starting preparation', () => {
@@ -735,8 +737,10 @@ test('network-bound package resolution and Tuist generation retry before Apple b
     assert.ok(resolve < body.search(/run: (?:SWIFT_FLAGS=.*make build|swift build -c release)/),
       `${id}: resolution must precede the build`);
   }
-  for (const id of ['build-ios-test-products', 'build-ios-keyboard']) {
-    const body = jobBodies[id];
+  const unsignedBuild = readFileSync(new URL('../ci/xcode-unsigned-build.sh', import.meta.url), 'utf8')
+    .replaceAll('"$retry"', retry);
+  for (const [id, body] of [['build-ios-test-products', jobBodies['build-ios-test-products']],
+      ['build-ios-keyboard (scripts/ci/xcode-unsigned-build.sh)', unsignedBuild]]) {
     assert.doesNotMatch(body.replaceAll(`${retry} tuist generate`, ''), /tuist generate/, `${id}: every generate retries`);
     assert.equal((body.match(/xcodebuild -resolvePackageDependencies/g) || []).length,
       (body.match(/tuist generate/g) || []).length, `${id}: resolve after each generate`);

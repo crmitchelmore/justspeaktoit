@@ -5,10 +5,8 @@ import Foundation
 /// generations, deadlines, callbacks and finish waiters all belong to the run,
 /// so a stopped or replaced run cannot be changed by a late transport, timer or
 /// host callback, and a late send completion cannot release a newer run's budget.
-final class RevAILiveRun: LiveSendPumpRun, @unchecked Sendable {
-    /// `idle` exists only before the client's first `start()` and holds audio
-    /// offered that early; later runs begin at `connecting`.
-    enum Phase { case idle, connecting, streaming, finishing, closed }
+final class RevAILiveRun: LiveSendPumpRun, LiveFinishableRun, @unchecked Sendable {
+    typealias Phase = LiveRunPhase
 
     var phase = Phase.idle
     var connection: (any StreamingWebSocketConnection)?

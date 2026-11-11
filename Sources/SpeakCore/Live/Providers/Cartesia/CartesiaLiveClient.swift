@@ -141,7 +141,7 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
             return (active, request)
         }
         guard let opening else { return }
-        connect(opening.0, request: opening.1)
+        attach(makeConnection(opening.1), to: opening.0)
     }
 
     /// Capture chunks are repacked into 100 ms frames, so a chunk need not hold
@@ -183,71 +183,10 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
     /// before returning, also to callers that join while the error is being
     /// delivered. Concurrent callers share one outcome; cancelling the calling
     /// task aborts the session.
-    public func finishAndWait() async -> String? {
-        let active: CartesiaLiveRun = withState { _ in run }
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                withState { effects in join(active, continuation, &effects) }
-            }
-        } onCancel: { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.withState { effects in if self.isCurrent(active) { self.retire(active, &effects) } }
-        }
-    }
+    public func finishAndWait() async -> String? { await finishActiveRun() }
 
-    // MARK: - Session
-
-    private func join(
-        _ active: CartesiaLiveRun, _ continuation: CheckedContinuation<String?, Never>,
-        _ effects: inout LiveDeferredEffects
-    ) {
-        let transcript = active.transcript
-        switch active.phase {
-        case .connecting, .streaming, .finishing:
-            guard !Task.isCancelled else {
-                retire(active, &effects)
-                effects.add { continuation.resume(returning: transcript) }
-                return
-            }
-            active.waiters.append(continuation)
-            beginFinish(active, &effects)
-        case .idle:
-            // Never started, so nothing was sent and nothing can be finished.
-            retire(active, &effects)
-            effects.add { continuation.resume(returning: transcript) }
-        case .closed:
-            // A failure still being published keeps late callers until its
-            // error is out, exactly like callers that were already waiting.
-            guard !active.deliveringFailure else {
-                active.lateWaiters.append(continuation)
-                return
-            }
-            effects.add { continuation.resume(returning: transcript) }
-        }
-    }
-
-    /// The connection is built and resumed outside the lock: the factory and
-    /// the transport may call back synchronously.
-    private func connect(_ active: CartesiaLiveRun, request: URLRequest) {
-        let connection = makeConnection(request)
-        let attached: Bool = withState { _ in
-            guard isCurrent(active), active.connection == nil else { return false }
-            active.connection = connection
-            return true
-        }
-        guard attached else {
-            connection.cancel()
-            return
-        }
-        log("WebSocket connecting")
-        connection.resume { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.markOpened(active)
-        }
-        receive(active, connection)
-    }
-
-    private func markOpened(_ active: CartesiaLiveRun) {
+    /// Audio waits for the handshake, never for a task state.
+    func connectionOpened(_ active: CartesiaLiveRun) {
         let outbound: CartesiaOutbound? = withState { effects in
             guard recordOpen(active) else { return nil }
             return claim(active, &effects)
@@ -255,6 +194,8 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
         if let outbound { drive(outbound) }
     }
 }
+
+extension CartesiaLiveClient: LiveRunFinishing {}
 
 extension CartesiaLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { lock.withLock { run.phase == .streaming && run.opened } }

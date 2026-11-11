@@ -57,6 +57,12 @@ Android and the website have their own sections below.
   announcement, iOS through `RecordingServiceState.accessibilityAnnouncement`,
   hands-free through its coordinator. Mark live text and meters
   `.updatesFrequently`.
+- **Toggles in agent trees.** XCUITest-based trees (agent-device, Accessibility
+  Inspector's hierarchy) list a SwiftUI `Toggle` as a labelled switch with an
+  unnamed `0`/`1` switch inside it: the embedded `UISwitch`. VoiceOver visits
+  the toggle once, as one element with its label and value, so this is not a
+  duplicate. Target the outer, labelled switch, and keep using the native
+  `Toggle` rather than rebuilding it to hide the inner switch.
 - **Custom controls.** Prefer `Button` over `.onTapGesture`. If a gesture is
   needed, add `.accessibilityAddTraits(.isButton)` or an
   `.accessibilityAction`. Combine row content with
@@ -82,6 +88,7 @@ Lint job) and in `make test-tooling`. It fails on:
 | `icon-only-control` | `Button`/`Menu`/`Link` whose label is only an `Image`, with no `.accessibilityLabel` |
 | `icon-only-missing-id` | a labelled icon-only control without `.accessibilityIdentifier` |
 | `empty-control-label` | `Toggle("")`, `Picker("")`, `TextField("")` and similar without `.accessibilityLabel` |
+| `unlabelled-segmented-picker` | an iOS `Picker` with `.pickerStyle(.segmented)` and no `.accessibilityLabel` or `.accessibilityIdentifier`; UIKit's segmented control drops the Picker title, so the control has no name (macOS keeps it) |
 | `tap-without-trait` | `.onTapGesture`/`.onLongPressGesture` without the button trait or an accessibility action |
 
 Run it locally with `make lint-accessibility`. For a deliberate exception put

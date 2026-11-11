@@ -51,6 +51,18 @@ class AppleAccessibilityCheckTests(unittest.TestCase):
         self.assertEqual(["empty-control-label"], rules('Toggle("", isOn: $on)\n.labelsHidden()'))
         self.assertEqual([], rules('Toggle("", isOn: $on)\n.labelsHidden()\n.accessibilityLabel("Enabled")'))
 
+    def test_ios_segmented_picker_needs_label_and_identifier(self):
+        def ios_rules(body, path="Sources/SpeakiOS/V.swift"):
+            source = "import SwiftUI\nstruct V: View { var body: some View {\n" + body + "\n}}\n"
+            return [finding.rule for finding in CHECK.scan_source(path, source)]
+
+        picker = 'Picker("Mode", selection: $mode) {\n  Text("A").tag(0)\n}\n.pickerStyle(.segmented)'
+        self.assertEqual(["unlabelled-segmented-picker"], ios_rules(picker))
+        self.assertEqual(["unlabelled-segmented-picker"], ios_rules(picker + '\n.accessibilityIdentifier("mode")'))
+        self.assertEqual([], ios_rules(picker + '\n.accessibilityLabel("Mode")\n.accessibilityIdentifier("mode")'))
+        self.assertEqual([], ios_rules(picker.replace("segmented", "navigationLink")))
+        self.assertEqual([], ios_rules(picker, path="Sources/SpeakApp/V.swift"))
+
     def test_tap_gesture_needs_trait_or_action(self):
         self.assertEqual(["tap-without-trait"], rules('Text("x")\n.onTapGesture { go() }'))
         self.assertEqual([], rules('Text("x")\n.onTapGesture { go() }\n.accessibilityAddTraits(.isButton)'))

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import SpeakTestSupport
 import XCTest
 
@@ -26,7 +27,7 @@ final class ModulateIntegrationTests: XCTestCase {
   }
 
   func testFeatureConfigurationBuildsExpectedQueryItems() {
-    let configuration = ModulateFeatureConfiguration(
+    let configuration = ModulateTranscriptionFeatures(
       speakerDiarization: true,
       emotionSignal: true,
       accentSignal: false,
@@ -61,7 +62,7 @@ final class ModulateIntegrationTests: XCTestCase {
     defaults.set(true, forKey: AppSettings.DefaultsKey.modulateAccentSignal.rawValue)
     defaults.set(false, forKey: AppSettings.DefaultsKey.modulatePIIPhiTagging.rawValue)
 
-    let configuration = ModulateFeatureConfiguration(defaults: defaults)
+    let configuration = ModulateTranscriptionFeatures(defaults: defaults)
 
     XCTAssertFalse(configuration.speakerDiarization)
     XCTAssertTrue(configuration.emotionSignal)
@@ -70,14 +71,14 @@ final class ModulateIntegrationTests: XCTestCase {
   }
 
   func testFormattedTranscriptAddsSpeakerLabelsWhenMultipleSpeakersPresent() {
-    let configuration = ModulateFeatureConfiguration(
+    let configuration = ModulateTranscriptionFeatures(
       speakerDiarization: true,
       emotionSignal: false,
       accentSignal: false,
       piiPhiTagging: false
     )
     let utterances = [
-      ModulateUtterance(
+      ModulateBatchUtterance(
         utteranceUUID: UUID(),
         text: "Hello there",
         startMs: 0,
@@ -87,7 +88,7 @@ final class ModulateIntegrationTests: XCTestCase {
         emotion: nil,
         accent: nil
       ),
-      ModulateUtterance(
+      ModulateBatchUtterance(
         utteranceUUID: UUID(),
         text: "Hi!",
         startMs: 900,
@@ -105,14 +106,14 @@ final class ModulateIntegrationTests: XCTestCase {
   }
 
   func testSegmentTextOmitsSpeakerLabelWhenOnlyOneSpeakerDetected() {
-    let configuration = ModulateFeatureConfiguration(
+    let configuration = ModulateTranscriptionFeatures(
       speakerDiarization: true,
       emotionSignal: false,
       accentSignal: false,
       piiPhiTagging: false
     )
     let utterances = [
-      ModulateUtterance(
+      ModulateBatchUtterance(
         utteranceUUID: UUID(),
         text: "Only me",
         startMs: 0,

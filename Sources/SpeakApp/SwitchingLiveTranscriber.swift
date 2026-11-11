@@ -211,8 +211,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   /// `LiveTranscriptionProviderID` so a newly catalogued provider fails to
   /// compile here until the Mac decides how it streams. Every provider runs on
   /// the shared SpeakCore client except OpenAI, whose Apple hosts sequence the
-  /// Realtime commit themselves, and Modulate, whose Mac result keeps diarised
-  /// utterance formatting, timings and the raw payload the shared client lacks.
+  /// Realtime commit themselves.
   private func cloudController(for model: String) -> (any LiveTranscriptionController)? {
     guard let provider = Self.cloudProvider(for: model) else { return nil }
     switch provider {
@@ -220,9 +219,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     // OpenAI's only live transcription transport is the Realtime WebSocket
     // API, so any openai/* live model is handled by the realtime controller.
     case .openai: return controllers.openAIRealtime
-    case .modulate: return controllers.modulate
     case .assemblyai, .cartesia, .deepgram, .elevenlabs, .gladia, .google, .xai, .azure, .alibaba, .meta,
-         .speechmatics, .revai, .mistral, .reson8, .soniox:
+         .speechmatics, .revai, .mistral, .reson8, .soniox, .modulate:
       return controllers.sharedClient
     }
   }
@@ -393,7 +391,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private struct ControllerSet {
     let native: NativeOSXLiveTranscriber
     let speechAnalyzer: AppleSpeechAnalyzerLiveController
-    let modulate: ModulateLiveController
     let openAIRealtime: OpenAIRealtimeLiveController
     let sharedClient: SharedClientLiveController
     let fluidAudio: FluidAudioParakeetLiveController
@@ -418,12 +415,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         permissionsManager: permissionsManager,
         appSettings: appSettings,
         audioDeviceManager: audioDeviceManager
-      )
-      modulate = ModulateLiveController(
-        appSettings: appSettings,
-        permissionsManager: permissionsManager,
-        audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
       )
       openAIRealtime = OpenAIRealtimeLiveController(
         appSettings: appSettings,
@@ -463,7 +454,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       var controllers: [any LiveTranscriptionController] = [
         native,
         speechAnalyzer,
-        modulate,
         openAIRealtime,
         sharedClient,
         whisperKit,

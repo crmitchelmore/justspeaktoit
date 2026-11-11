@@ -3,8 +3,6 @@
 
 namespace jsti_window {
 
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
-
 // The Mac's 232-point sidebar, widened when a page title (semibold, as when
 // selected) plus the Ctrl+digit hint's space would clip in the current font
 // and DPI. The hint's space is always reserved so the width does not change

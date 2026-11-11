@@ -503,7 +503,7 @@ void invalidateHistoryPresentation(HWND window, bool resetVersion);
 void emitHistory(HWND window, int event);
 void searchChanged(HWND window);
 void clearSearch(HWND window);
-int scale(HWND window, int value);
+using jsti::chrome::scale;
 int measuredSidebarWidth(HWND window);
 int minimumWindowWidth(HWND window);
 int minimumWindowHeight(HWND window);

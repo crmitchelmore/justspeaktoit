@@ -44,7 +44,7 @@ struct Dialog {
     int scrollOffset = 0;
     bool pending = false;
 };
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 
 void updateDependencies(HWND window, const Dialog &dialog) {
     if (dialog.pending) {
@@ -285,11 +285,7 @@ void apply(HWND window, Dialog &dialog, int action) {
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     LRESULT themed = 0;
     if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
@@ -319,9 +315,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         layout(window, *dialog);
         return 0;
     case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        jsti::chrome::applySuggestedBounds(window, lparam);
         if (dialog->font) DeleteObject(dialog->font);
         dialog->font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");

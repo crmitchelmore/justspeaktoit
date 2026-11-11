@@ -105,7 +105,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         // than inheriting the OpenRouter wording.
         XCTAssertEqual(
             SettingsView.batchAPIKeyPrompt(for: XAISpeechToText.batchCatalogID),
-            "Add your xAI API key below to use this model."
+            "Add your xAI API key in Providers & API Keys to use this model."
         )
     }
 
@@ -124,7 +124,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
 
         XCTAssertEqual(
             SettingsView.batchAPIKeyPrompt(for: AzureTranscriptionModels.mai2),
-            "Add your Azure Speech API key below to use this model."
+            "Add your Azure Speech API key in Providers & API Keys to use this model."
         )
     }
 

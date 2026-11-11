@@ -120,7 +120,15 @@ def remote(tree: Path, base: str | None = None, poll: float = 20.0, job: str = '
         deadline = time.monotonic() + TIMEOUT_MINUTES * 60
         run, last = None, None
         while time.monotonic() < deadline:
-            run = find_run(sha)
+            try:
+                run = find_run(sha)
+            except SystemExit as error:
+                # A dropped connection while polling must not fail a run that is still going.
+                if isinstance(error.code, int):
+                    raise
+                print(f'{error}; polling again', file=sys.stderr, flush=True)
+                time.sleep(poll)
+                continue
             if run and run['status'] == 'completed':
                 break
             state = run['status'] if run else 'not registered'

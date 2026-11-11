@@ -1,25 +1,27 @@
 /* Self-tests for sidebar navigation, action shortcuts and command forwarding. */
 #include "LinuxWindowSelfTestInternal.h"
-#include "../CLinuxSupport/LinuxWindowDashboardPage.h"
-#include "../CLinuxSupport/LinuxWindowVoicePage.h"
+#include "../CLinuxSupport/LinuxWindowDashboardState.h"
+#include "../CLinuxSupport/LinuxWindowHistoryState.h"
+#include "../CLinuxSupport/LinuxWindowNavigationState.h"
+#include "../CLinuxSupport/LinuxWindowVoiceState.h"
 
 gboolean sidebar_navigation_self_test(void) {
     SidebarUpdate saved = { 0 }, fixture = { 0 };
     const gint original_page = ui.page;
-    const gboolean configured = sidebar_shortcuts.configured;
+    const gboolean configured = sidebar_shortcuts_state()->configured;
     for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
-        saved.digits[page] = sidebar_shortcuts.digits[page];
-        saved.hints[page] = g_strdup(gtk_label_get_text(GTK_LABEL(sidebar_shortcuts.hints[page])));
+        saved.digits[page] = sidebar_shortcuts_state()->digits[page];
+        saved.hints[page] = g_strdup(gtk_label_get_text(GTK_LABEL(sidebar_shortcuts_state()->hints[page])));
         fixture.digits[page] = -1;
     }
-    saved.show_hints = gtk_widget_get_visible(sidebar_shortcuts.hints[JSTI_PAGE_DASHBOARD]);
+    saved.show_hints = gtk_widget_get_visible(sidebar_shortcuts_state()->hints[JSTI_PAGE_DASHBOARD]);
     fixture.digits[JSTI_PAGE_DASHBOARD] = 1;
     fixture.hints[JSTI_PAGE_DASHBOARD] = (gchar *)"Ctrl+1";
     fixture.digits[JSTI_PAGE_PROFILES] = 9;
     fixture.hints[JSTI_PAGE_PROFILES] = (gchar *)"Ctrl+9";
     fixture.show_hints = TRUE;
     sidebar_update_apply(&fixture);
-    GtkWidget *hint = sidebar_shortcuts.hints[JSTI_PAGE_DASHBOARD];
+    GtkWidget *hint = sidebar_shortcuts_state()->hints[JSTI_PAGE_DASHBOARD];
     gboolean okay = gtk_widget_get_visible(hint) &&
         g_strcmp0(gtk_label_get_text(GTK_LABEL(hint)), "Ctrl+1") == 0;
     show_page(JSTI_PAGE_HISTORY);
@@ -33,7 +35,7 @@ gboolean sidebar_navigation_self_test(void) {
     g_object_ref_sink(entry);
     okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, entry) && ui.page == JSTI_PAGE_HISTORY;
     g_object_unref(entry);
-    okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, GTK_WIDGET(dashboard_page()->transcript));
+    okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, GTK_WIDGET(history_page()->transcript));
     GtkWidget *row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_DASHBOARD));
     gtk_widget_set_sensitive(row, FALSE);
     okay = okay && !sidebar_navigate(GDK_KEY_1, GDK_CONTROL_MASK, NULL) && ui.page == JSTI_PAGE_HISTORY;
@@ -45,7 +47,7 @@ gboolean sidebar_navigation_self_test(void) {
     const JSTISidebarShortcut invalid[] = { { "dashboard", 1, "Ctrl+1" }, { "history", 1, "Ctrl+1" } };
     okay = okay && jsti_window_set_sidebar_shortcuts(invalid, 2, 1) == -1;
     sidebar_update_apply(&saved);
-    sidebar_shortcuts.configured = configured;
+    sidebar_shortcuts_state()->configured = configured;
     for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) g_free(saved.hints[page]);
     show_page(original_page);
     return okay;
@@ -76,7 +78,7 @@ gboolean action_execution_self_test(void) {
     ui.context = &capture;
     gboolean okay = TRUE;
     for (gint page = 0; page < JSTI_PAGE_COUNT; ++page)
-        okay = okay && action_shortcut_run(2, page_info[page].name, 0) && ui.page == page;
+        okay = okay && action_shortcut_run(2, page_name(page), 0) && ui.page == page;
     GtkWidget *history = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_HISTORY));
     gboolean history_sensitive = gtk_widget_get_sensitive(history);
     gtk_widget_set_sensitive(history, FALSE);

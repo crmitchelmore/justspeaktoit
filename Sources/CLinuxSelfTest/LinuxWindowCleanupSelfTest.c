@@ -1,9 +1,9 @@
 /* Self-tests for post-processing, local cleanup sources, cleanup preview and migration restore. */
 #include "LinuxWindowSelfTestInternal.h"
-#include "../CLinuxSupport/LinuxWindowDashboardPage.h"
+#include "../CLinuxSupport/LinuxWindowDashboardState.h"
 #include "../CLinuxSupport/LinuxWindowHistoryState.h"
-#include "../CLinuxSupport/LinuxWindowPolishPage.h"
-#include "../CLinuxSupport/LinuxWindowStoragePage.h"
+#include "../CLinuxSupport/LinuxWindowPolishState.h"
+#include "../CLinuxSupport/LinuxWindowStorageState.h"
 
 gboolean post_processing_self_test(void) {
     if (polish_page()->polish_catalog == NULL || polish_page()->polish_local_notice == NULL) return FALSE;
@@ -226,10 +226,10 @@ int32_t local_cleanup_sources_self_test(char *error, size_t capacity) {
 
 gboolean cleanup_preview_self_test(void) {
     gchar *original = displayed_transcript();
-    gchar *status = g_strdup(gtk_label_get_text(dashboard_page()->status));
+    gchar *status = g_strdup(gtk_label_get_text(ui.status));
     gchar *presented = g_strdup(history_page()->presented_id);
     gint32 state = ui.state, page = ui.page;
-    gboolean visible = cleanup_preview.visible;
+    gboolean visible = cleanup_preview_visible();
     jsti_window_event_fn callback = ui.callback;
     ui.callback = NULL;
     ui.state = JSTI_STATE_WORKING;
@@ -240,7 +240,7 @@ gboolean cleanup_preview_self_test(void) {
     cleanup_preview_apply(NULL);
     gchar *actual = displayed_transcript();
     okay = okay && g_strcmp0(actual, "latest") == 0 &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(dashboard_page()->copy)) && !gtk_widget_get_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy));
+        !gtk_widget_get_sensitive(GTK_WIDGET(history_page()->copy)) && !gtk_widget_get_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy));
     g_free(actual);
     show_page(JSTI_PAGE_GENERAL);
     show_page(JSTI_PAGE_DASHBOARD);
@@ -266,11 +266,11 @@ gboolean cleanup_preview_self_test(void) {
         jsti_window_cleanup_preview("\xff", second) == -1;
     g_free(oversized);
     set_transcript(original);
-    gtk_label_set_text(dashboard_page()->status, status);
+    gtk_label_set_text(ui.status, status);
     g_free(history_page()->presented_id);
     history_page()->presented_id = presented;
     ui.state = state;
-    cleanup_preview.visible = visible;
+    cleanup_preview_set_visible(visible);
     show_page(page);
     ui.callback = callback;
     refresh_actions();

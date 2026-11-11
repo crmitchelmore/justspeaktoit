@@ -1,17 +1,14 @@
-/* Settings page builders: Voice output, General, Transcription, Post-processing, Keyboard, iCloud and About. */
-#include "LinuxWindowInternal.h"
-#include "LinuxWindowAboutPage.h"
+/* Settings pages: Voice output, General, Transcription, Keyboard, iCloud and
+ * About, composed from each section's owner. Owns the Voice, General and About
+ * page state (LinuxWindow{Voice,General,About}State.h). */
+#include "LinuxWindowAboutState.h"
 #include "LinuxWindowDashboardPage.h"
-#include "LinuxWindowGeneralPage.h"
+#include "LinuxWindowGeneralState.h"
 #include "LinuxWindowHistoryPage.h"
 #include "LinuxWindowModelsPage.h"
 #include "LinuxWindowOutputPage.h"
-#include "LinuxWindowPolishPage.h"
 #include "LinuxWindowStoragePage.h"
-#include "LinuxWindowVoicePage.h"
-
-static OutputPage output_state;
-OutputPage *output_page(void) { return &output_state; }
+#include "LinuxWindowVoiceState.h"
 
 static VoicePage voice_state;
 VoicePage *voice_page(void) { return &voice_state; }
@@ -67,55 +64,107 @@ GtkWidget *build_voice_output(void) {
     return page;
 }
 
+void voice_page_refresh_actions(gboolean idle, gboolean readable, gboolean voices) {
+    gtk_widget_set_sensitive(GTK_WIDGET(voice_page()->voice_read), readable);
+    gtk_widget_set_sensitive(GTK_WIDGET(voice_page()->voice_stop), !ui.closing);
+    gtk_widget_set_sensitive(GTK_WIDGET(voice_page()->voice_sources), idle && voices);
+}
+
+static void apply_appearance(guint appearance) {
+    static const AdwColorScheme schemes[] = { ADW_COLOR_SCHEME_DEFAULT, ADW_COLOR_SCHEME_FORCE_LIGHT,
+                                              ADW_COLOR_SCHEME_FORCE_DARK };
+    if (appearance < G_N_ELEMENTS(schemes)) {
+        adw_style_manager_set_color_scheme(adw_style_manager_get_default(), schemes[appearance]);
+    }
+}
+
+static void on_appearance(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    guint appearance = adw_combo_row_get_selected(general_page()->appearance_row);
+    apply_appearance(appearance);
+    emit(JSTI_EVENT_APPEARANCE, "", (gint32)appearance);
+}
+
+/* Launch at login. The switch waits, insensitive, for the state the desktop
+ * reached, which jsti_window_set_login_item reports. */
+static void on_login_item(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    if (ui.suppress) return;
+    gtk_widget_set_sensitive(GTK_WIDGET(general_page()->login_row), FALSE);
+    emit(JSTI_EVENT_LOGIN_ITEM, "", adw_switch_row_get_active(general_page()->login_row) ? 1 : 0);
+}
+
+static void on_automation(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    if (ui.suppress) return;
+    gtk_widget_set_sensitive(GTK_WIDGET(general_page()->automation_row), FALSE);
+    emit(JSTI_EVENT_AUTOMATION, "", adw_switch_row_get_active(general_page()->automation_row) ? 1 : 0);
+}
+
+static void appearance_apply(gpointer data) {
+    ui.suppress = TRUE;
+    adw_combo_row_set_selected(general_page()->appearance_row, (guint)GPOINTER_TO_INT(data));
+    apply_appearance((guint)GPOINTER_TO_INT(data));
+    ui.suppress = FALSE;
+}
+
+int32_t jsti_window_set_appearance(int32_t appearance) {
+    if (appearance < 0 || appearance > 2) return -1;
+    return post(appearance_apply, GINT_TO_POINTER(appearance), NULL);
+}
+
+static void login_item_free(gpointer pointer) {
+    LoginItem *item = pointer;
+    g_free(item->detail);
+    g_free(item);
+}
+
+/* The shared DesktopLoginItemState: 0 off, 1 on, 2 off by the system,
+ * 3 on by policy, 4 unavailable. Only 0 and 1 can be changed here. */
+void login_item_apply(gpointer pointer) {
+    LoginItem *item = pointer;
+    ui.suppress = TRUE;
+    adw_switch_row_set_active(general_page()->login_row, item->state == 1 || item->state == 3);
+    ui.suppress = FALSE;
+    gtk_widget_set_sensitive(GTK_WIDGET(general_page()->login_row), item->state == 0 || item->state == 1);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(general_page()->login_row), item->detail);
+}
+
+int32_t jsti_window_set_login_item(int32_t state, const char *detail) {
+    if (state < 0 || state > 4 || detail == NULL || !g_utf8_validate(detail, -1, NULL)) return -1;
+    LoginItem *item = g_new0(LoginItem, 1);
+    item->state = state;
+    item->detail = g_strdup(detail);
+    return post(login_item_apply, item, login_item_free);
+}
+
+void automation_apply(gpointer pointer) {
+    LoginItem *item = pointer;
+    gboolean suppressed = ui.suppress;
+    ui.suppress = TRUE;
+    adw_switch_row_set_active(general_page()->automation_row, item->state != 0);
+    ui.suppress = suppressed;
+    gtk_widget_set_sensitive(GTK_WIDGET(general_page()->automation_row), TRUE);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(general_page()->automation_row), item->detail);
+}
+
+int32_t jsti_window_set_automation(int32_t enabled, const char *detail) {
+    if ((enabled != 0 && enabled != 1) || detail == NULL || !g_utf8_validate(detail, -1, NULL)) return -1;
+    LoginItem *item = g_new0(LoginItem, 1);
+    item->state = enabled;
+    item->detail = g_strdup(detail);
+    return post(automation_apply, item, login_item_free);
+}
+
 GtkWidget *build_general(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     ui.configuration_columns[0] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
         "General", "Choose the microphone, where finished text goes, whether the app starts at login, and how "
         "it looks."));
-    GtkWidget *microphone = group("Microphone");
-    models_page()->microphone_names = gtk_string_list_new(NULL);
-    models_page()->microphone_ids = g_ptr_array_new_with_free_func(g_free);
-    models_page()->microphone_row = ADW_COMBO_ROW(adw_combo_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(models_page()->microphone_row), "Preferred microphone");
-    adw_combo_row_set_model(models_page()->microphone_row, G_LIST_MODEL(models_page()->microphone_names));
-    g_signal_connect(models_page()->microphone_row, "notify::selected", G_CALLBACK(on_microphone), NULL);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(microphone), GTK_WIDGET(models_page()->microphone_row));
-    gtk_box_append(GTK_BOX(column), microphone);
+    gtk_box_append(GTK_BOX(column), microphone_group());
 
-    GtkWidget *output = group("Output");
-    output_page()->output_group = ADW_PREFERENCES_GROUP(output);
-    adw_preferences_group_set_description(
-        ADW_PREFERENCES_GROUP(output),
-        "Checking paste and clipboard support for this desktop.");
-    const char *methods[] = { "Paste into the focused app", "Copy to the clipboard only", NULL };
-    output_page()->output_row = ADW_COMBO_ROW(adw_combo_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(output_page()->output_row), "Text output");
-    adw_combo_row_set_model(output_page()->output_row, G_LIST_MODEL(gtk_string_list_new(methods)));
-    g_signal_connect(output_page()->output_row, "notify::selected", G_CALLBACK(on_text_output), NULL);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(output_page()->output_row));
-    output_page()->restore_row = ADW_SWITCH_ROW(adw_switch_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(output_page()->restore_row), "Restore the clipboard after pasting");
-    adw_switch_row_set_active(output_page()->restore_row, TRUE);
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(output_page()->restore_row),
-                               "Previous text only, while Just Speak to It still owns the X11 selection.");
-    gtk_widget_set_visible(GTK_WIDGET(output_page()->restore_row), FALSE);
-    g_signal_connect(output_page()->restore_row, "notify::active", G_CALLBACK(on_text_output), NULL);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(output_page()->restore_row));
-    output_page()->app_switch_row = ADW_COMBO_ROW(adw_combo_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(output_page()->app_switch_row), "App-switch delivery");
-    gtk_widget_set_sensitive(GTK_WIDGET(output_page()->app_switch_row), FALSE);
-    g_signal_connect(output_page()->app_switch_row, "notify::selected", G_CALLBACK(on_text_output), NULL);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(output_page()->app_switch_row));
-    output_page()->app_switch_help = GTK_LABEL(gtk_label_new(NULL));
-    gtk_label_set_wrap(output_page()->app_switch_help, TRUE);
-    gtk_label_set_xalign(output_page()->app_switch_help, 0);
-    gtk_widget_set_margin_top(GTK_WIDGET(output_page()->app_switch_help), 8);
-    gtk_widget_set_margin_bottom(GTK_WIDGET(output_page()->app_switch_help), 8);
-    gtk_widget_set_margin_start(GTK_WIDGET(output_page()->app_switch_help), 12);
-    gtk_widget_set_margin_end(GTK_WIDGET(output_page()->app_switch_help), 12);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(output_page()->app_switch_help));
-    gtk_box_append(GTK_BOX(column), output);
+    gtk_box_append(GTK_BOX(column), output_group());
     gtk_box_append(GTK_BOX(column), jsti_api_keys_group_new(ui.window));
 
     GtkWidget *startup = group("Startup");
@@ -147,75 +196,7 @@ GtkWidget *build_general(void) {
     g_signal_connect(general_page()->appearance_row, "notify::selected", G_CALLBACK(on_appearance), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(appearance), GTK_WIDGET(general_page()->appearance_row));
     gtk_box_append(GTK_BOX(column), appearance);
-    GtkWidget *housekeeping = group("Housekeeping");
-    GtkWidget *folder = adw_action_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(folder), "Recording storage");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(folder), "Open the folder containing saved audio and History data.");
-    storage_page()->recordings_folder = GTK_BUTTON(gtk_button_new_with_mnemonic("_Open folder"));
-    gtk_widget_set_valign(GTK_WIDGET(storage_page()->recordings_folder), GTK_ALIGN_CENTER);
-    g_signal_connect(storage_page()->recordings_folder, "clicked", G_CALLBACK(on_recordings_folder), NULL);
-    adw_action_row_add_suffix(ADW_ACTION_ROW(folder), GTK_WIDGET(storage_page()->recordings_folder));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), folder);
-    GtkWidget *location = adw_action_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(location), "New recordings folder");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(location),
-        "Save new audio in a local folder you choose. Existing recordings are never moved or deleted.");
-    storage_page()->recordings_choose = GTK_BUTTON(gtk_button_new_with_mnemonic("_Choose…"));
-    gtk_widget_set_valign(GTK_WIDGET(storage_page()->recordings_choose), GTK_ALIGN_CENTER);
-    g_signal_connect(storage_page()->recordings_choose, "clicked", G_CALLBACK(on_recordings_choose), NULL);
-    adw_action_row_add_suffix(ADW_ACTION_ROW(location), GTK_WIDGET(storage_page()->recordings_choose));
-    storage_page()->recordings_default = GTK_BUTTON(gtk_button_new_with_mnemonic("Use _default"));
-    gtk_widget_set_valign(GTK_WIDGET(storage_page()->recordings_default), GTK_ALIGN_CENTER);
-    g_signal_connect(storage_page()->recordings_default, "clicked", G_CALLBACK(on_recordings_default), NULL);
-    adw_action_row_add_suffix(ADW_ACTION_ROW(location), GTK_WIDGET(storage_page()->recordings_default));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), location);
-    GtkWidget *cleanup = adw_action_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(cleanup), "Saved recordings");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(cleanup), "Delete saved audio without removing History entries.");
-    adw_action_row_add_suffix(ADW_ACTION_ROW(cleanup), history_audio_cleanup_button());
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), cleanup);
-    gtk_box_append(GTK_BOX(column), housekeeping);
-    GtkWidget *backup = group("Data backup");
-    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(backup),
-        "Save History text with optional saved audio and app profiles in a ZIP backup. "
-        "ZIPs are not encrypted. Settings and credentials are not included; existing files are never replaced.");
-    storage_page()->backup_audio = ADW_SWITCH_ROW(adw_switch_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(storage_page()->backup_audio), "Include saved recording audio");
-    adw_switch_row_set_active(storage_page()->backup_audio, TRUE);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), GTK_WIDGET(storage_page()->backup_audio));
-    storage_page()->backup_profiles = ADW_SWITCH_ROW(adw_switch_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(storage_page()->backup_profiles), "Include app profiles");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(storage_page()->backup_profiles), "Includes per-app overrides and prompts.");
-    adw_switch_row_set_active(storage_page()->backup_profiles, FALSE);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), GTK_WIDGET(storage_page()->backup_profiles));
-    GtkWidget *backup_row = adw_action_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(backup_row), "Save a ZIP backup");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(backup_row),
-        "Turn off both optional categories for a History-only backup.");
-    storage_page()->backup_export = GTK_BUTTON(gtk_button_new_with_mnemonic("Save _backup…"));
-    gtk_widget_set_valign(GTK_WIDGET(storage_page()->backup_export), GTK_ALIGN_CENTER);
-    g_signal_connect(storage_page()->backup_export, "clicked", G_CALLBACK(on_backup), NULL);
-    adw_action_row_add_suffix(ADW_ACTION_ROW(backup_row), GTK_WIDGET(storage_page()->backup_export));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), backup_row);
-    GtkWidget *inspect_row = adw_action_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(inspect_row), "Inspect a ZIP backup");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(inspect_row),
-        "Review categories and archive notices without importing any data.");
-    storage_page()->backup_inspect = GTK_BUTTON(gtk_button_new_with_mnemonic("_Inspect…"));
-    gtk_widget_set_valign(GTK_WIDGET(storage_page()->backup_inspect), GTK_ALIGN_CENTER);
-    g_signal_connect(storage_page()->backup_inspect, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(1));
-    adw_action_row_add_suffix(ADW_ACTION_ROW(inspect_row), GTK_WIDGET(storage_page()->backup_inspect));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), inspect_row);
-    GtkWidget *restore_row = adw_action_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(restore_row), "Restore a ZIP backup");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(restore_row),
-        "Preview and confirm History text and app profiles. Settings, audio and credentials stay unchanged.");
-    storage_page()->backup_restore = GTK_BUTTON(gtk_button_new_with_mnemonic("_Restore..."));
-    gtk_widget_set_valign(GTK_WIDGET(storage_page()->backup_restore), GTK_ALIGN_CENTER);
-    g_signal_connect(storage_page()->backup_restore, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(2));
-    adw_action_row_add_suffix(ADW_ACTION_ROW(restore_row), GTK_WIDGET(storage_page()->backup_restore));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), restore_row);
-    gtk_box_append(GTK_BOX(column), backup);
+    storage_groups_add(column);
     return page;
 }
 
@@ -229,45 +210,7 @@ GtkWidget *build_transcription(void) {
     ui.configuration_columns[1] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
         "Transcription", "Pick the speech model for new recordings, on this computer or with your own provider key."));
-    GtkWidget *models = group("Model");
-    jsti_model_filters_add(models, on_model_filter);
-    models_page()->model_names = gtk_string_list_new(NULL);
-    models_page()->model_row = ADW_COMBO_ROW(adw_combo_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(models_page()->model_row), "Transcription model");
-    adw_combo_row_set_model(models_page()->model_row, G_LIST_MODEL(models_page()->model_names));
-    adw_combo_row_set_enable_search(models_page()->model_row, TRUE);
-    g_signal_connect(models_page()->model_row, "notify::selected", G_CALLBACK(on_model), NULL);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), GTK_WIDGET(models_page()->model_row));
-
-    models_page()->key_row = ADW_PASSWORD_ENTRY_ROW(adw_password_entry_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(models_page()->key_row), "API key for the selected provider");
-    adw_entry_row_set_show_apply_button(ADW_ENTRY_ROW(models_page()->key_row), TRUE);
-    g_signal_connect(models_page()->key_row, "apply", G_CALLBACK(on_key_apply), NULL);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), GTK_WIDGET(models_page()->key_row));
-
-    /* Recorded audio falls back to the key's region; live Azure needs this. */
-    models_page()->azure_row = ADW_ENTRY_ROW(adw_entry_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(models_page()->azure_row),
-                                  "Azure Speech resource endpoint (https://…cognitiveservices.azure.com)");
-    adw_entry_row_set_show_apply_button(models_page()->azure_row, TRUE);
-    adw_entry_row_set_input_purpose(models_page()->azure_row, GTK_INPUT_PURPOSE_URL);
-    g_signal_connect(models_page()->azure_row, "apply", G_CALLBACK(on_azure_apply), NULL);
-    gtk_widget_set_visible(GTK_WIDGET(models_page()->azure_row), FALSE);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), GTK_WIDGET(models_page()->azure_row));
-
-    GtkWidget *catalog = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_margin_top(catalog, 8);
-    models_page()->catalog_status = GTK_LABEL(gtk_label_new(""));
-    gtk_label_set_wrap(models_page()->catalog_status, TRUE);
-    gtk_label_set_xalign(models_page()->catalog_status, 0);
-    gtk_widget_set_hexpand(GTK_WIDGET(models_page()->catalog_status), TRUE);
-    gtk_widget_add_css_class(GTK_WIDGET(models_page()->catalog_status), "dim-label");
-    models_page()->catalog_refresh = GTK_BUTTON(gtk_button_new_with_label("Refresh models"));
-    g_signal_connect(models_page()->catalog_refresh, "clicked", G_CALLBACK(on_refresh), NULL);
-    gtk_box_append(GTK_BOX(catalog), GTK_WIDGET(models_page()->catalog_status));
-    gtk_box_append(GTK_BOX(catalog), GTK_WIDGET(models_page()->catalog_refresh));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), catalog);
-    gtk_box_append(GTK_BOX(column), models);
+    gtk_box_append(GTK_BOX(column), models_group());
     gtk_box_append(GTK_BOX(column), jsti_local_models_group_new());
     GtkWidget *comparison = group("Compare Models");
     GtkWidget *compare = gtk_button_new_with_label("Compare Models…");
@@ -277,105 +220,12 @@ GtkWidget *build_transcription(void) {
     return page;
 }
 
-GtkWidget *build_post_processing(void) {
-    GtkWidget *column, *page = jsti_page_new(&column);
-    ui.configuration_columns[2] = column;
-    gtk_box_append(GTK_BOX(column), settings_hero(
-        "Post-processing", "Clean up transcripts locally or through OpenRouter. The original is always kept."));
-    GtkWidget *polish = group("Clean-up");
-    polish_page()->polish_row = ADW_SWITCH_ROW(adw_switch_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_row), "Enable post-processing");
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_row));
-    polish_page()->polish_location_row = ADW_COMBO_ROW(adw_combo_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_location_row), "Model source");
-    const char *locations[] = {"Local", "Remote", "Choose a source…", NULL};
-    GtkStringList *location_names = gtk_string_list_new(locations);
-    adw_combo_row_set_model(polish_page()->polish_location_row, G_LIST_MODEL(location_names));
-    g_object_unref(location_names);
-    adw_combo_row_set_selected(polish_page()->polish_location_row, 2);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_location_row));
-    AdwActionRow *mode = ADW_ACTION_ROW(adw_action_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(mode), "Finished-transcript cleanup");
-    adw_action_row_set_subtitle(mode,
-        "Remote cleanup can stream previews when enabled in preferences. Local cleanup completes in one step.");
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(mode));
-    polish_page()->polish_models = gtk_string_list_new(NULL);
-    polish_page()->polish_slots = g_array_new(FALSE, FALSE, sizeof(gint32));
-    polish_page()->polish_local_index = -1;
-    polish_page()->polish_remote_selected = -1;
-    polish_page()->polish_local_selected = -1;
-    polish_page()->polish_model_row = ADW_COMBO_ROW(adw_combo_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_model_row), "Polishing model");
-    adw_combo_row_set_model(polish_page()->polish_model_row, G_LIST_MODEL(polish_page()->polish_models));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_model_row));
-    polish_page()->polish_directives_row = ADW_SWITCH_ROW(adw_switch_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_directives_row), "Include personal lexicon directives");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(polish_page()->polish_directives_row),
-        "Use saved spelling and name instructions with downloaded or remote language models.");
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_directives_row));
-    polish_page()->polish_tags_row = ADW_SWITCH_ROW(adw_switch_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_tags_row), "Include lexicon context tags");
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(polish_page()->polish_tags_row),
-        "Use saved context tags with downloaded or remote language models.");
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_tags_row));
-    GtkWidget *prompt_label = gtk_label_new("Custom system instructions (optional)");
-    gtk_label_set_xalign(GTK_LABEL(prompt_label), 0);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), prompt_label);
-    polish_page()->polish_prompt_row = GTK_TEXT_VIEW(gtk_text_view_new());
-    gtk_text_view_set_wrap_mode(polish_page()->polish_prompt_row, GTK_WRAP_WORD_CHAR);
-    gtk_text_view_set_top_margin(polish_page()->polish_prompt_row, 10);
-    gtk_text_view_set_bottom_margin(polish_page()->polish_prompt_row, 10);
-    gtk_text_view_set_left_margin(polish_page()->polish_prompt_row, 10);
-    gtk_text_view_set_right_margin(polish_page()->polish_prompt_row, 10);
-    gtk_accessible_update_property(GTK_ACCESSIBLE(polish_page()->polish_prompt_row),
-        GTK_ACCESSIBLE_PROPERTY_LABEL, "Custom system instructions", -1);
-    GtkWidget *prompt_scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(prompt_scroll), 140);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(prompt_scroll), GTK_WIDGET(polish_page()->polish_prompt_row));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), prompt_scroll);
-    polish_page()->polish_key_row = ADW_PASSWORD_ENTRY_ROW(adw_password_entry_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_key_row), "New key for the selected model's provider (leave empty to keep)");
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_key_row));
-    g_signal_connect(polish_page()->polish_location_row, "notify::selected", G_CALLBACK(on_polish_location), NULL);
-    g_signal_connect(polish_page()->polish_model_row, "notify::selected", G_CALLBACK(on_polish_model), NULL);
-    GtkWidget *polish_apply = gtk_button_new_with_label("Apply");
-    gtk_widget_add_css_class(polish_apply, "suggested-action");
-    gtk_widget_set_halign(polish_apply, GTK_ALIGN_END);
-    gtk_widget_set_margin_top(polish_apply, 8);
-    g_signal_connect(polish_apply, "clicked", G_CALLBACK(on_polish_apply), NULL);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), polish_apply);
-    gtk_box_append(GTK_BOX(column), polish);
-    polish_page()->polish_local_group = jsti_local_cleanup_group_new();
-    gtk_widget_set_visible(polish_page()->polish_local_group, FALSE);
-    gtk_box_append(GTK_BOX(column), polish_page()->polish_local_group);
-    return page;
-}
-
 GtkWidget *build_keyboard(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     ui.configuration_columns[3] = column;
     gtk_box_append(GTK_BOX(column), settings_hero(
         "Keyboard", "Start and stop dictation from anywhere with a global shortcut."));
-    GtkWidget *shortcut = group("Shortcut");
-    adw_preferences_group_set_description(
-        ADW_PREFERENCES_GROUP(shortcut),
-        "Where the desktop offers no shortcut portal, bind the command justspeaktoit --toggle to a key in your "
-        "desktop's keyboard settings. With the app already running, --speak-clipboard reads clipboard text aloud "
-        "and --paste-last-history delivers the newest History text without raising this window. "
-        "The running app also accepts --stop-speech, --pause-resume-speech and --quick-voice-1 "
-        "(or --quick-voice-2 / --quick-voice-3).");
-    output_page()->shortcut_row = ADW_ACTION_ROW(adw_action_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(output_page()->shortcut_row), "Keyboard shortcut");
-    adw_action_row_set_subtitle(output_page()->shortcut_row, "Checking the desktop…");
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(shortcut), GTK_WIDGET(output_page()->shortcut_row));
-    const char *styles[] = { "Press to toggle", "Hold to record", "Double-tap to toggle",
-                             "Hold, or double-tap to toggle", NULL };
-    output_page()->style_row = ADW_COMBO_ROW(adw_combo_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(output_page()->style_row), "Activation");
-    adw_combo_row_set_model(output_page()->style_row, G_LIST_MODEL(gtk_string_list_new(styles)));
-    g_signal_connect(output_page()->style_row, "notify::selected", G_CALLBACK(on_style), NULL);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(shortcut), GTK_WIDGET(output_page()->style_row));
-    gtk_box_append(GTK_BOX(column), shortcut);
+    gtk_box_append(GTK_BOX(column), shortcut_group());
     gtk_box_append(GTK_BOX(column), jsti_action_shortcuts_group_new(ui.window));
     return page;
 }
@@ -394,7 +244,7 @@ static void open_link_finished(GObject *source, GAsyncResult *result, gpointer d
     if (!gtk_uri_launcher_launch_finish(GTK_URI_LAUNCHER(source), result, &error)) {
         g_warning("Could not open the browser: %s", error->message);
         if (ui.window != NULL && !ui.closing) {
-            gtk_label_set_text(dashboard_page()->status, "Could not open your browser. Check your default browser settings.");
+            gtk_label_set_text(ui.status, "Could not open your browser. Check your default browser settings.");
         }
         g_error_free(error);
     }
@@ -452,13 +302,13 @@ gboolean action_shortcut_run(gint run, const char *page, gint slot) {
     if (ui.closing || !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
     switch (run) {
     case 1:
-        if (!gtk_widget_is_sensitive(GTK_WIDGET(dashboard_page()->record))) return FALSE;
+        if (!dashboard_can_record()) return FALSE;
         on_record(NULL, NULL);
         return TRUE;
     case 2:
         for (gint index = 0; page != NULL && index < JSTI_PAGE_COUNT; ++index) {
             GtkWidget *row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, index));
-            if (g_strcmp0(page_info[index].name, page) != 0) continue;
+            if (g_strcmp0(page_name(index), page) != 0) continue;
             if (!gtk_widget_is_sensitive(row) || !gtk_widget_get_visible(row)) return FALSE;
             show_page(index);
             return TRUE;
@@ -556,4 +406,49 @@ GtkWidget *build_about(void) {
     gtk_box_append(GTK_BOX(body), permissions);
     gtk_box_append(GTK_BOX(column), card);
     return page;
+}
+
+typedef struct AboutInformation {
+    gchar *details;
+    gchar **titles;
+    gchar **urls;
+} AboutInformation;
+
+static void about_information_free(gpointer pointer) {
+    AboutInformation *information = pointer;
+    g_free(information->details);
+    g_strfreev(information->titles);
+    g_strfreev(information->urls);
+    g_free(information);
+}
+
+static void about_information_apply(gpointer pointer) {
+    AboutInformation *information = pointer;
+    gtk_label_set_text(about_page()->about_details, information->details);
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(about_page()->about_links))) != NULL)
+        gtk_flow_box_remove(about_page()->about_links, child);
+    for (guint i = 0; information->titles[i] != NULL; ++i)
+        gtk_flow_box_insert(about_page()->about_links, link_button(information->titles[i], information->urls[i]), -1);
+}
+
+int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count) {
+    if (details == NULL || links == NULL || count == 0 || count > 8 || strlen(details) > 4096 ||
+        !g_utf8_validate(details, -1, NULL) || details[0] == '\0') return -1;
+    for (size_t i = 0; i < count; ++i) {
+        if (links[i].title == NULL || links[i].url == NULL || strlen(links[i].title) > 128 ||
+            strlen(links[i].url) > 2048 || !g_utf8_validate(links[i].title, -1, NULL) ||
+            !g_utf8_validate(links[i].url, -1, NULL) || links[i].title[0] == '\0' ||
+            strpbrk(links[i].title, "\r\n\t") != NULL || !g_str_has_prefix(links[i].url, "https://") ||
+            strlen(links[i].url) <= 8 || strpbrk(links[i].url, " \r\n\t") != NULL) return -1;
+    }
+    AboutInformation *information = g_new0(AboutInformation, 1);
+    information->details = g_strdup(details);
+    information->titles = g_new0(gchar *, count + 1);
+    information->urls = g_new0(gchar *, count + 1);
+    for (size_t i = 0; i < count; ++i) {
+        information->titles[i] = g_strdup(links[i].title);
+        information->urls[i] = g_strdup(links[i].url);
+    }
+    return post(about_information_apply, information, about_information_free);
 }

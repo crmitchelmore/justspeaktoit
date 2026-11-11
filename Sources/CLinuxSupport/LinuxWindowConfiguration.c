@@ -1,6 +1,10 @@
 /* Dictation preferences: the configuration form, its updates and settings-search reveal. */
-#include "LinuxWindowInternal.h"
-#include "LinuxWindowDashboardPage.h"
+#include "LinuxWindowConfigurationState.h"
+
+static ConfigurationState configuration;
+static Reveal reveal;
+ConfigurationState *configuration_state(void) { return &configuration; }
+Reveal *reveal_state(void) { return &reveal; }
 
 /* Configuration fields the host described, fixed by the first description. */
 static gint configuration_field_count;
@@ -17,7 +21,7 @@ typedef struct ConfigurationUpdate {
 } ConfigurationUpdate;
 
 static void configuration_problem(const char *message) {
-    gtk_label_set_text(dashboard_page()->status, message);
+    gtk_label_set_text(ui.status, message);
 }
 
 static void configuration_submit(gint32 action, const char *const *values, gsize count) {
@@ -413,7 +417,6 @@ int32_t jsti_window_set_configuration_field_enabled(size_t index, int32_t enable
     update->index = index; update->enabled = enabled;
     return post(configuration_availability_apply, update, g_free);
 }
-Reveal reveal;
 
 static void reveal_forget_target(void) {
     if (reveal.target == NULL) return;
@@ -429,6 +432,22 @@ void reveal_cancel(void) {
     reveal.highlight = 0;
     reveal_forget_target();
     reveal.tick = 0;
+}
+
+/* The run is over: drop the host's callback and the form it described. */
+void configuration_close(void) {
+    reveal_cancel();
+    configuration.callback = NULL;
+    configuration.context = NULL;
+    g_clear_pointer(&configuration.revision, g_free);
+    g_clear_pointer(&configuration.rows, g_ptr_array_unref);
+    g_clear_pointer(&configuration.choices, g_ptr_array_unref);
+    g_clear_pointer(&configuration.booleans, g_array_unref);
+    g_clear_pointer(&configuration.overlay_settings, g_array_unref);
+    g_clear_pointer(&configuration.hands_free_settings, g_array_unref);
+    configuration.recovery_group = NULL;
+    configuration.recovery_row = NULL;
+    configuration.recovery_count = 0;
 }
 
 static gboolean reveal_highlight_done(gpointer data) {

@@ -3,6 +3,29 @@
 #include "LinuxWindowDashboardPage.h"
 #include "LinuxWindowHistoryPage.h"
 
+/* The streaming cleanup preview. `lock` guards every field but `visible`. */
+typedef struct CleanupPreview {
+    GMutex lock;
+    guint64 ticket;
+    gboolean active, posted;
+    gchar *text;
+    /* UI-thread only; preview text is never a Copy/export/read-aloud source. */
+    gboolean visible;
+} CleanupPreview;
+
+static CleanupPreview cleanup_preview;
+
+void retire_cleanup_preview(void) {
+    g_mutex_lock(&cleanup_preview.lock);
+    ++cleanup_preview.ticket;
+    cleanup_preview.active = FALSE;
+    g_clear_pointer(&cleanup_preview.text, g_free);
+    g_mutex_unlock(&cleanup_preview.lock);
+}
+
+gboolean cleanup_preview_visible(void) { return cleanup_preview.visible; }
+void cleanup_preview_set_visible(gboolean visible) { cleanup_preview.visible = visible; }
+
 /* The post queue: updates staged before the loop runs wait in `early_posts`;
  * `window_closed` refuses new ones. Guarded by `post_lock`. */
 static gint loop_running;
@@ -52,7 +75,7 @@ static int32_t post_with_recording(apply_fn apply, gpointer data, GDestroyNotify
         pending_free(pending);
         return 0;
     }
-    if (recording >= 0) escape_publish(&escape_policy, recording, -1, FALSE);
+    if (recording >= 0) window_escape_publish(recording, -1, FALSE);
     if (!jsti_window_loop_running()) {
         g_queue_push_tail(&early_posts, pending);
         g_mutex_unlock(&post_lock);
@@ -84,7 +107,7 @@ void open_posts(void) {
 void close_posts(void) {
     g_mutex_lock(&post_lock);
     window_closed = TRUE;
-    escape_publish(&escape_policy, -1, -1, TRUE);
+    window_escape_publish(-1, -1, TRUE);
     g_atomic_int_set(&loop_running, 0);
     Pending *pending;
     while ((pending = g_queue_pop_head(&early_posts)) != NULL) pending_free(pending);
@@ -102,7 +125,7 @@ static void update_free(gpointer pointer) {
 static gboolean announce_state(gpointer unused) {
     (void)unused;
     ui.state_announcement = 0;
-    const char *text = gtk_label_get_text(dashboard_page()->status);
+    const char *text = gtk_label_get_text(ui.status);
     if (jsti_hud_card() == NULL && text != NULL && text[0] != '\0')
         gtk_accessible_announce(GTK_ACCESSIBLE(ui.window), text, GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
     return G_SOURCE_REMOVE;
@@ -112,7 +135,7 @@ void update_apply(gpointer pointer) {
     Update *update = pointer;
     if (update->state >= 0 && update->state != ui.state && ui.state_announcement == 0)
         ui.state_announcement = g_idle_add_full(G_PRIORITY_LOW, announce_state, NULL, NULL);
-    if (update->status != NULL) gtk_label_set_text(dashboard_page()->status, update->status);
+    if (update->status != NULL) gtk_label_set_text(ui.status, update->status);
     if (update->has_transcript) {
         cleanup_preview.visible = FALSE;
         set_transcript(update->transcript);
@@ -132,10 +155,10 @@ void cleanup_preview_apply(gpointer pointer) {
         (ui.page == JSTI_PAGE_DASHBOARD || ui.page == JSTI_PAGE_HISTORY)) {
         set_transcript(cleanup_preview.text);
         cleanup_preview.visible = TRUE;
-        gtk_label_set_text(dashboard_page()->status, "Streaming cleanup preview. The original is saved in History.");
+        gtk_label_set_text(ui.status, "Streaming cleanup preview. The original is saved in History.");
         history_forget_presentation();
-        gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->copy), FALSE);
-        gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), FALSE);
+        history_set_copy_enabled(FALSE);
+        dashboard_set_copy_enabled(FALSE);
     }
     g_clear_pointer(&cleanup_preview.text, g_free);
     g_mutex_unlock(&cleanup_preview.lock);

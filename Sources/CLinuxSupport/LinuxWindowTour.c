@@ -122,7 +122,7 @@ static const char *tour_name(gint32 step) {
     case TOUR_VOICE_USAGE: return "voice-usage";
     case TOUR_DARK_GENERAL: return "general-dark";
     case TOUR_VOICE_DISCOVERY: return "voice-discovery";
-    default: return page_info[step].name;
+    default: return page_name(step);
     }
 }
 
@@ -238,11 +238,7 @@ static void tour_start(gpointer data) {
         gtk_window_close(ui.window);
         return;
     }
-    tour->output = (TextOutput){
-        .method = (gint32)adw_combo_row_get_selected(output_page()->output_row),
-        .restore = adw_switch_row_get_active(output_page()->restore_row),
-        .can_restore = output_page()->can_restore_clipboard
-    };
+    tour->output = output_current();
     tour_show(tour);
 }
 

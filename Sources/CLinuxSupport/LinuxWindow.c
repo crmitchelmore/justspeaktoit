@@ -1,12 +1,13 @@
-/* The GTK window: its shared state, window construction, activation and jsti_window_run. */
+/* The GTK window: the shell and its Escape policy, window construction, activation and jsti_window_run. */
 #include "LinuxWindowInternal.h"
 #include "LinuxWindowDashboardPage.h"
 #include "LinuxWindowHistoryPage.h"
 #include "LinuxWindowModelsPage.h"
-#include "LinuxWindowPolishPage.h"
 #include "LinuxWindowStoragePage.h"
 
-EscapePolicy escape_policy = { .enabled = TRUE };
+UI ui;
+
+static EscapePolicy escape_policy = { .enabled = TRUE };
 
 void escape_publish(EscapePolicy *policy, gint32 recording, gint32 enabled, gboolean close) {
     g_mutex_lock(&policy->mutex);
@@ -25,11 +26,24 @@ guint64 escape_token(EscapePolicy *policy) {
     return token;
 }
 
+void window_escape_publish(gint32 recording, gint32 enabled, gboolean close) {
+    escape_publish(&escape_policy, recording, enabled, close);
+}
+
+guint64 window_escape_token(void) { return escape_token(&escape_policy); }
+
 gboolean escape_enabled(void) {
     g_mutex_lock(&escape_policy.mutex);
     gboolean enabled = escape_policy.enabled;
     g_mutex_unlock(&escape_policy.mutex);
     return enabled;
+}
+
+gboolean escape_recording(void) {
+    g_mutex_lock(&escape_policy.mutex);
+    gboolean recording = escape_policy.recording;
+    g_mutex_unlock(&escape_policy.mutex);
+    return recording;
 }
 
 int32_t jsti_window_set_escape_cancellation(int32_t enabled) {
@@ -41,23 +55,6 @@ int32_t jsti_window_set_escape_cancellation(int32_t enabled) {
 int32_t jsti_window_escape_is_current(uint64_t token) {
     return (token & 1u) && token == escape_token(&escape_policy);
 }
-
-CleanupPreview cleanup_preview;
-
-void retire_cleanup_preview(void) {
-    g_mutex_lock(&cleanup_preview.lock);
-    ++cleanup_preview.ticket;
-    cleanup_preview.active = FALSE;
-    g_clear_pointer(&cleanup_preview.text, g_free);
-    g_mutex_unlock(&cleanup_preview.lock);
-}
-
-UI ui;
-ConfigurationState configuration;
-/* Fields in the first configuration, which builds the rows; any thread. */
-ReadAloud read_aloud;
-
-
 
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
@@ -73,16 +70,13 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     ui.closing = TRUE;
     escape_publish(&escape_policy, -1, -1, TRUE);
     retire_migration_restore();
-    if (storage_page()->backup_chooser != NULL) g_cancellable_cancel(storage_page()->backup_chooser);
-    g_clear_object(&storage_page()->backup_chooser);
-    if (storage_page()->location_chooser != NULL) g_cancellable_cancel(storage_page()->location_chooser);
-    g_clear_object(&storage_page()->location_chooser);
+    storage_page_close();
     g_clear_handle_id(&ui.state_announcement, g_source_remove);
     jsti_hud_destroy();
     jsti_tray_stop();
     emit(JSTI_EVENT_CLOSING, "", 0);
     close_posts();
-    if (models_page()->model_catalog != NULL) { models_free(models_page()->model_catalog); models_page()->model_catalog = NULL; }
+    models_close();
     history_page_close();
     return FALSE;
 }
@@ -160,13 +154,13 @@ static void build_window(void) {
     GtkWidget *statusbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(statusbar, "jsti-statusbar");
     /* The status role lets screen readers and agents find the app's current state. */
-    dashboard_page()->status = GTK_LABEL(g_object_new(GTK_TYPE_LABEL, "label", "Starting…",
+    ui.status = GTK_LABEL(g_object_new(GTK_TYPE_LABEL, "label", "Starting…",
                                        "accessible-role", GTK_ACCESSIBLE_ROLE_STATUS, NULL));
-    gtk_label_set_wrap(dashboard_page()->status, TRUE);
-    gtk_label_set_xalign(dashboard_page()->status, 0);
-    gtk_label_set_selectable(dashboard_page()->status, TRUE);
-    gtk_widget_set_hexpand(GTK_WIDGET(dashboard_page()->status), TRUE);
-    gtk_box_append(GTK_BOX(statusbar), GTK_WIDGET(dashboard_page()->status));
+    gtk_label_set_wrap(ui.status, TRUE);
+    gtk_label_set_xalign(ui.status, 0);
+    gtk_label_set_selectable(ui.status, TRUE);
+    gtk_widget_set_hexpand(GTK_WIDGET(ui.status), TRUE);
+    gtk_box_append(GTK_BOX(statusbar), GTK_WIDGET(ui.status));
     adw_toolbar_view_add_bottom_bar(ADW_TOOLBAR_VIEW(content), statusbar);
 
     ui.split = ADW_NAVIGATION_SPLIT_VIEW(adw_navigation_split_view_new());
@@ -183,16 +177,7 @@ static void build_window(void) {
     g_value_set_boolean(&collapsed, TRUE);
     adw_breakpoint_add_setter(compact, G_OBJECT(ui.split), "collapsed", &collapsed);
     g_value_unset(&collapsed);
-    GValue vertical = G_VALUE_INIT;
-    g_value_init(&vertical, GTK_TYPE_ORIENTATION);
-    g_value_set_enum(&vertical, GTK_ORIENTATION_VERTICAL);
-    adw_breakpoint_add_setter(compact, G_OBJECT(dashboard_page()->columns), "orientation", &vertical);
-    g_value_unset(&vertical);
-    GValue unequal = G_VALUE_INIT;
-    g_value_init(&unequal, G_TYPE_BOOLEAN);
-    g_value_set_boolean(&unequal, FALSE);
-    adw_breakpoint_add_setter(compact, G_OBJECT(dashboard_page()->columns), "homogeneous", &unequal);
-    g_value_unset(&unequal);
+    dashboard_add_compact_setters(compact);
     add_compact_hero_setters(compact, GTK_WIDGET(ui.pages));
     adw_application_window_add_breakpoint(ADW_APPLICATION_WINDOW(window), compact);
     /* The content paints the window background, so snapshots of it are opaque. */
@@ -296,28 +281,9 @@ int32_t jsti_window_run(
     retire_migration_restore();
     close_posts();
     ui.callback = NULL;
-    read_aloud.picker_callback = NULL;
-    read_aloud.picker_context = NULL;
-    g_clear_pointer(&read_aloud.identifiers, g_ptr_array_unref);
-    g_clear_pointer(&read_aloud.favorite_ranks, g_array_unref);
-    g_clear_pointer(&read_aloud.favorite_indices, g_array_unref);
-    g_clear_object(&read_aloud.voices);
-    g_clear_object(&read_aloud.favorite_names);
-    reveal_cancel();
-    configuration.callback = NULL;
-    configuration.context = NULL;
-    g_clear_pointer(&configuration.revision, g_free);
-    g_clear_pointer(&configuration.rows, g_ptr_array_unref);
-    g_clear_pointer(&configuration.choices, g_ptr_array_unref);
-    g_clear_pointer(&configuration.booleans, g_array_unref);
-    g_clear_pointer(&configuration.overlay_settings, g_array_unref);
-    g_clear_pointer(&configuration.hands_free_settings, g_array_unref);
-    configuration.recovery_group = NULL;
-    configuration.recovery_row = NULL;
-    configuration.recovery_count = 0;
-    g_clear_pointer(&polish_page()->polish_catalog, g_ptr_array_unref);
-    g_clear_pointer(&polish_page()->polish_slots, g_array_unref);
-    g_clear_pointer(&polish_page()->polish_local_notice, g_free);
+    read_aloud_close();
+    configuration_close();
+    polish_page_close();
     g_clear_object(&ui.application);
     ui.window = NULL;
     jsti_app_icon_clear();

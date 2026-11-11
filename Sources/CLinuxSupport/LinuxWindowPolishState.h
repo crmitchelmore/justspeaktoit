@@ -1,7 +1,8 @@
-/* The Post-processing page: its state, owned by LinuxWindowPolish.c. GTK main thread only.
- * Only translation units that include this header can reach it. */
-#ifndef JSTI_LINUX_WINDOW_POLISH_PAGE_H
-#define JSTI_LINUX_WINDOW_POLISH_PAGE_H
+/* The Post-processing page's state. Private to LinuxWindowPolish.c, which
+ * builds, applies and submits it; the window self-tests also include it to
+ * inspect it. GTK main thread only. */
+#ifndef JSTI_LINUX_WINDOW_POLISH_STATE_H
+#define JSTI_LINUX_WINDOW_POLISH_STATE_H
 
 #include "LinuxWindowInternal.h"
 

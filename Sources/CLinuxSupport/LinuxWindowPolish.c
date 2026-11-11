@@ -1,6 +1,6 @@
-/* Post-processing page: cleanup location, model and prompt controls. */
-#include "LinuxWindowInternal.h"
-#include "LinuxWindowPolishPage.h"
+/* The Post-processing page: cleanup location, model and prompt controls, and
+ * the host's post-processing setters. Owns PolishPage (LinuxWindowPolishState.h). */
+#include "LinuxWindowPolishState.h"
 
 static PolishPage polish_state = { .polish_remote_count = G_MAXUINT };
 PolishPage *polish_page(void) { return &polish_state; }
@@ -140,4 +140,182 @@ void on_polish_apply(GtkButton *button, gpointer data) {
     g_free(prompt);
     g_free(key);
     gtk_editable_set_text(GTK_EDITABLE(polish_page()->polish_key_row), "");
+}
+
+GtkWidget *build_post_processing(void) {
+    GtkWidget *column, *page = jsti_page_new(&column);
+    ui.configuration_columns[2] = column;
+    gtk_box_append(GTK_BOX(column), settings_hero(
+        "Post-processing", "Clean up transcripts locally or through OpenRouter. The original is always kept."));
+    GtkWidget *polish = group("Clean-up");
+    polish_page()->polish_row = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_row), "Enable post-processing");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_row));
+    polish_page()->polish_location_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_location_row), "Model source");
+    const char *locations[] = {"Local", "Remote", "Choose a source…", NULL};
+    GtkStringList *location_names = gtk_string_list_new(locations);
+    adw_combo_row_set_model(polish_page()->polish_location_row, G_LIST_MODEL(location_names));
+    g_object_unref(location_names);
+    adw_combo_row_set_selected(polish_page()->polish_location_row, 2);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_location_row));
+    AdwActionRow *mode = ADW_ACTION_ROW(adw_action_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(mode), "Finished-transcript cleanup");
+    adw_action_row_set_subtitle(mode,
+        "Remote cleanup can stream previews when enabled in preferences. Local cleanup completes in one step.");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(mode));
+    polish_page()->polish_models = gtk_string_list_new(NULL);
+    polish_page()->polish_slots = g_array_new(FALSE, FALSE, sizeof(gint32));
+    polish_page()->polish_local_index = -1;
+    polish_page()->polish_remote_selected = -1;
+    polish_page()->polish_local_selected = -1;
+    polish_page()->polish_model_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_model_row), "Polishing model");
+    adw_combo_row_set_model(polish_page()->polish_model_row, G_LIST_MODEL(polish_page()->polish_models));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_model_row));
+    polish_page()->polish_directives_row = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_directives_row), "Include personal lexicon directives");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(polish_page()->polish_directives_row),
+        "Use saved spelling and name instructions with downloaded or remote language models.");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_directives_row));
+    polish_page()->polish_tags_row = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_tags_row), "Include lexicon context tags");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(polish_page()->polish_tags_row),
+        "Use saved context tags with downloaded or remote language models.");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_tags_row));
+    GtkWidget *prompt_label = gtk_label_new("Custom system instructions (optional)");
+    gtk_label_set_xalign(GTK_LABEL(prompt_label), 0);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), prompt_label);
+    polish_page()->polish_prompt_row = GTK_TEXT_VIEW(gtk_text_view_new());
+    gtk_text_view_set_wrap_mode(polish_page()->polish_prompt_row, GTK_WRAP_WORD_CHAR);
+    gtk_text_view_set_top_margin(polish_page()->polish_prompt_row, 10);
+    gtk_text_view_set_bottom_margin(polish_page()->polish_prompt_row, 10);
+    gtk_text_view_set_left_margin(polish_page()->polish_prompt_row, 10);
+    gtk_text_view_set_right_margin(polish_page()->polish_prompt_row, 10);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(polish_page()->polish_prompt_row),
+        GTK_ACCESSIBLE_PROPERTY_LABEL, "Custom system instructions", -1);
+    GtkWidget *prompt_scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(prompt_scroll), 140);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(prompt_scroll), GTK_WIDGET(polish_page()->polish_prompt_row));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), prompt_scroll);
+    polish_page()->polish_key_row = ADW_PASSWORD_ENTRY_ROW(adw_password_entry_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_key_row), "New key for the selected model's provider (leave empty to keep)");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_key_row));
+    g_signal_connect(polish_page()->polish_location_row, "notify::selected", G_CALLBACK(on_polish_location), NULL);
+    g_signal_connect(polish_page()->polish_model_row, "notify::selected", G_CALLBACK(on_polish_model), NULL);
+    GtkWidget *polish_apply = gtk_button_new_with_label("Apply");
+    gtk_widget_add_css_class(polish_apply, "suggested-action");
+    gtk_widget_set_halign(polish_apply, GTK_ALIGN_END);
+    gtk_widget_set_margin_top(polish_apply, 8);
+    g_signal_connect(polish_apply, "clicked", G_CALLBACK(on_polish_apply), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), polish_apply);
+    gtk_box_append(GTK_BOX(column), polish);
+    polish_page()->polish_local_group = jsti_local_cleanup_group_new();
+    gtk_widget_set_visible(polish_page()->polish_local_group, FALSE);
+    gtk_box_append(GTK_BOX(column), polish_page()->polish_local_group);
+    return page;
+}
+
+static void polish_free(gpointer pointer) {
+    Polish *polish = pointer;
+    g_ptr_array_unref(polish->models);
+    g_free(polish->prompt);
+    g_free(polish->local_notice);
+    g_free(polish);
+}
+
+void polish_apply(gpointer pointer) {
+    Polish *polish = pointer;
+    gboolean suppressed = ui.suppress;
+    ui.suppress = TRUE;
+    gint32 local_selected = polish_page()->polish_local_selected;
+    gboolean retain_local = local_selected >= polish->local_index && polish_page()->polish_catalog != NULL &&
+        (guint)local_selected < polish_page()->polish_catalog->len && (guint)local_selected < polish->models->len &&
+        g_strcmp0(g_ptr_array_index(polish_page()->polish_catalog, local_selected),
+                  g_ptr_array_index(polish->models, local_selected)) == 0;
+    g_clear_pointer(&polish_page()->polish_catalog, g_ptr_array_unref);
+    polish_page()->polish_catalog = g_ptr_array_ref(polish->models);
+    polish_page()->polish_local_index = polish->local_index;
+    polish_page()->polish_remote_count = (guint)polish->local_index;
+    g_free(polish_page()->polish_local_notice);
+    polish_page()->polish_local_notice = g_strdup(polish->local_notice);
+    polish_page()->polish_remote_selected = polish->selected >= 0 && polish->selected < polish->local_index
+        ? polish->selected : polish->remembered_remote_index;
+    polish_page()->polish_local_selected = polish->selected >= polish->local_index ? polish->selected
+        : retain_local ? local_selected : polish->local_index;
+    adw_combo_row_set_selected(polish_page()->polish_location_row, polish->selected < 0
+        ? 2 : (guint)polish->selected >= polish_remote_boundary() ? 0 : 1);
+    polish_select_location(polish->selected, FALSE);
+    adw_switch_row_set_active(polish_page()->polish_row, polish->enabled);
+    adw_switch_row_set_active(polish_page()->polish_directives_row, polish->include_directives);
+    adw_switch_row_set_active(polish_page()->polish_tags_row, polish->include_tags);
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(polish_page()->polish_prompt_row),
+        polish->prompt != NULL ? polish->prompt : "", -1);
+    ui.suppress = suppressed;
+}
+
+void cleanup_sources_apply(gpointer pointer) {
+    const guint count = GPOINTER_TO_UINT(pointer);
+    if (polish_page()->polish_catalog == NULL || count > polish_page()->polish_catalog->len ||
+        polish_page()->polish_local_index < 0 || count != (guint)polish_page()->polish_local_index) {
+        jsti_window_update("The post-processing source boundary is inconsistent with its model choices.", NULL, -1);
+        return;
+    }
+    gint32 selected = polish_selected_model();
+    polish_page()->polish_remote_count = count;
+    polish_select_location(selected, FALSE);
+}
+
+int32_t jsti_window_set_cleanup_sources(size_t count) {
+    if (count > 10000) return -1;
+    return post(cleanup_sources_apply, GUINT_TO_POINTER((guint)count), NULL);
+}
+
+int32_t jsti_window_set_post_processing(
+    const char *const *models, size_t count, int32_t enabled, int32_t selected,
+    int32_t local_index, int32_t remembered_remote_index, const char *local_notice,
+    int32_t include_directives, int32_t include_tags, const char *prompt) {
+    if (models == NULL || count == 0 || count > 10000 || (enabled != 0 && enabled != 1) ||
+        selected < -1 || (selected >= 0 && (size_t)selected >= count) ||
+        local_index < 0 || (size_t)local_index >= count || local_notice == NULL || *local_notice == '\0' ||
+        remembered_remote_index < -1 || remembered_remote_index >= local_index ||
+        !g_utf8_validate(local_notice, -1, NULL) || prompt == NULL ||
+        !g_utf8_validate(prompt, -1, NULL) || strlen(prompt) > 65535 ||
+        (include_directives != 0 && include_directives != 1) || (include_tags != 0 && include_tags != 1)) return -1;
+    for (size_t index = 0; index < count; index++) {
+        if (models[index] == NULL || !g_utf8_validate(models[index], -1, NULL)) return -1;
+    }
+    Polish *polish = g_new0(Polish, 1);
+    polish->models = g_ptr_array_new_with_free_func(g_free);
+    for (size_t index = 0; index < count; index++) g_ptr_array_add(polish->models, g_strdup(models[index]));
+    polish->enabled = enabled != 0;
+    polish->include_directives = include_directives != 0;
+    polish->include_tags = include_tags != 0;
+    polish->selected = selected;
+    polish->prompt = g_strdup(prompt);
+    polish->local_index = local_index;
+    polish->remembered_remote_index = remembered_remote_index;
+    polish->local_notice = g_strdup(local_notice);
+    return post(polish_apply, polish, polish_free);
+}
+
+void post_processing_enabled_apply(gpointer pointer) {
+    gboolean suppress = ui.suppress;
+    ui.suppress = TRUE;
+    adw_switch_row_set_active(polish_page()->polish_row, *(gint32 *)pointer != 0);
+    ui.suppress = suppress;
+}
+
+int32_t jsti_window_set_post_processing_enabled(int32_t enabled) {
+    if (enabled != 0 && enabled != 1) return -1;
+    gint32 *value = g_new(gint32, 1);
+    *value = enabled;
+    return post(post_processing_enabled_apply, value, g_free);
+}
+
+/* The run is over: the catalogue and choices go with it. */
+void polish_page_close(void) {
+    g_clear_pointer(&polish_page()->polish_catalog, g_ptr_array_unref);
+    g_clear_pointer(&polish_page()->polish_slots, g_array_unref);
+    g_clear_pointer(&polish_page()->polish_local_notice, g_free);
 }

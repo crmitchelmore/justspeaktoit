@@ -36,18 +36,9 @@ typedef struct Slot {
 
 typedef struct Models Models;
 
-/* The streaming cleanup preview. `lock` guards every field but `visible`. */
-typedef struct CleanupPreview {
-    GMutex lock;
-    guint64 ticket;
-    gboolean active, posted;
-    gchar *text;
-    /* UI-thread only; preview text is never a Copy/export/read-aloud source. */
-    gboolean visible;
-} CleanupPreview;
-
 /* The window shell: application, navigation and recording state. Each page's
- * state lives in its own file behind its header (LinuxWindow*Page.h). */
+ * state is private to its own units (LinuxWindow*State.h); other units call
+ * the functions in its LinuxWindow*Page.h. */
 typedef struct UI {
     AdwApplication *application;
     GtkWindow *window;
@@ -70,43 +61,13 @@ typedef struct UI {
     gint32 page;
     /* The header's Record button; the dashboard hero has its own. */
     GtkButton *header_record;
+    /* The status bar: the window's current state for screen readers and agents. */
+    GtkLabel *status;
     GtkWidget *configuration_columns[5];
 } UI;
 GtkWidget *jsti_vocabulary_page_new(int kind);
 GtkWidget *jsti_vocabulary_learning_preferences(void);
 int32_t jsti_vocabulary_self_test(char *error, size_t capacity);
-
-typedef struct ConfigurationState {
-    GPtrArray *rows;
-    GPtrArray *choices;
-    GArray *booleans;
-    GArray *overlay_settings;
-    GArray *hands_free_settings;
-    GArray *enabled_by_fields;
-    GtkWidget *recovery_group;
-    AdwComboRow *recovery_row;
-    guint recovery_count;
-    gchar *revision;
-    JSTIConfigurationCallback callback;
-    void *context;
-} ConfigurationState;
-
-/* Read aloud: its History action and the voice picker in its own group. */
-typedef struct ReadAloud {
-    GtkButton *button;
-    AdwComboRow *voice_row;
-    GtkStringList *voices;
-    AdwComboRow *favorite_row;
-    GtkStringList *favorite_names;
-    GtkButton *favorite_button;
-    GPtrArray *identifiers;
-    GArray *favorite_ranks;
-    GArray *favorite_indices;
-    JSTIVoicePickerCallback picker_callback;
-    void *picker_context;
-    gboolean favorite_pending;
-    gboolean favorite_executable;
-} ReadAloud;
 
 typedef struct BackupChoice {
     GWeakRef parent;
@@ -115,20 +76,6 @@ typedef struct BackupChoice {
     gint32 include_profiles;
     gint action; /* 0 export, 1 inspect, 2 restore */
 } BackupChoice;
-
-/* Sidebar entries in page order, with the Mac sidebar's tints. */
-typedef struct PageInfo {
-    const char *name;
-    const char *title;
-    const char *icon;
-    const char *tint;
-} PageInfo;
-
-typedef struct SidebarShortcuts {
-    gint digits[JSTI_PAGE_COUNT];
-    GtkWidget *hints[JSTI_PAGE_COUNT];
-    gboolean configured;
-} SidebarShortcuts;
 
 typedef struct WindowCommand {
     gint run, slot;
@@ -226,14 +173,6 @@ typedef struct {
 
 typedef struct { size_t index; gboolean enabled; } ConfigurationAvailabilityUpdate;
 
-/* Settings search: the revealed row, its pending scroll and its highlight. */
-typedef struct Reveal {
-    GtkWidget *target;
-    guint tick;
-    guint frames;
-    guint highlight;
-} Reveal;
-
 typedef struct Voices {
     GPtrArray *names;
     gint32 selected;
@@ -249,22 +188,25 @@ int32_t jsti_voice_discovery_save_snapshot(const char *path);
 /* Hidden: shared between these units only, never exported from the binary. */
 #pragma GCC visibility push(hidden)
 
-/* Shared window state, defined once in the translation unit named beside it. */
-extern EscapePolicy escape_policy; /* LinuxWindow.c */
-extern CleanupPreview cleanup_preview; /* LinuxWindow.c */
-extern UI ui; /* LinuxWindow.c */
-extern ConfigurationState configuration; /* LinuxWindow.c */
-extern ReadAloud read_aloud; /* LinuxWindow.c */
-extern const PageInfo page_info[JSTI_PAGE_COUNT]; /* LinuxWindowNavigation.c */
-extern SidebarShortcuts sidebar_shortcuts; /* LinuxWindowNavigation.c */
-extern Reveal reveal; /* LinuxWindowConfiguration.c */
+/* The window shell, defined in LinuxWindow.c. Every page's state is private to
+ * its own units (LinuxWindow*State.h); the rest of the window calls functions. */
+extern UI ui;
 
 /* Defined in the LinuxWindow*.c translation units. */
 void escape_publish(EscapePolicy *policy, gint32 recording, gint32 enabled, gboolean close);
 guint64 escape_token(EscapePolicy *policy);
+/* The window's own Escape policy (LinuxWindow.c); any thread. */
+void window_escape_publish(gint32 recording, gint32 enabled, gboolean close);
+guint64 window_escape_token(void);
 gboolean escape_enabled(void);
+gboolean escape_recording(void);
+/* The page's stack name, e.g. "history" (LinuxWindowNavigation.c). */
+const char *page_name(gint32 page);
 guint model_mode(gboolean local, gboolean live);
+/* The streaming cleanup preview (LinuxWindowPost.c). */
 void retire_cleanup_preview(void);
+gboolean cleanup_preview_visible(void);
+void cleanup_preview_set_visible(gboolean visible);
 void emit(gint32 event, const char *text, gint32 index);
 gint32 selected_model_slot(void);
 const char *selected_microphone(void);
@@ -272,45 +214,35 @@ gchar *displayed_transcript(void);
 void set_transcript(const char *text);
 void refresh_setup(void);
 void refresh_actions(void);
+/* The Voice Output page's actions (LinuxWindowSettingsPages.c). */
+void voice_page_refresh_actions(gboolean idle, gboolean readable, gboolean voices);
 void on_record(GtkButton *button, gpointer data);
 void on_cancel(GtkButton *button, gpointer data);
 void on_copy(GtkButton *button, gpointer data);
-void refresh_azure_row(void);
-void on_model(GObject *object, GParamSpec *spec, gpointer data);
-void on_azure_apply(AdwEntryRow *row, gpointer data);
-void on_microphone(GObject *object, GParamSpec *spec, gpointer data);
-void on_key_apply(AdwEntryRow *row, gpointer data);
-void on_text_output(GObject *object, GParamSpec *spec, gpointer data);
-void apply_appearance(guint appearance);
-void on_appearance(GObject *object, GParamSpec *spec, gpointer data);
-void on_login_item(GObject *object, GParamSpec *spec, gpointer data);
-void on_automation(GObject *object, GParamSpec *spec, gpointer data);
-void on_style(GObject *object, GParamSpec *spec, gpointer data);
 guint polish_remote_boundary(void);
 gint32 polish_selected_model(void);
 gchar *polish_prompt_text(void);
 void polish_select_location(gint32 desired, gboolean choose_first);
+void polish_page_close(void);
 void on_polish_location(GObject *object, GParamSpec *spec, gpointer data);
 void on_polish_model(GObject *object, GParamSpec *spec, gpointer data);
 void on_polish_apply(GtkButton *button, gpointer data);
-void on_refresh(GtkButton *button, gpointer data);
 void on_stop_play(GtkButton *button, gpointer data);
 void on_read_aloud(GtkButton *button, gpointer data);
-void on_voice(GObject *object, GParamSpec *spec, gpointer data);
-void on_favorite_voice(GObject *object, GParamSpec *spec, gpointer data);
-void on_favorite_toggle(GtkButton *button, gpointer data);
-void on_recordings_folder(GtkButton *button, gpointer data);
-void on_recordings_choose(GtkButton *button, gpointer data);
 void on_recordings_default(GtkButton *button, gpointer data);
 void on_audio_cleanup(GtkButton *button, gpointer data);
 gboolean backup_choice_active(const BackupChoice *choice, GObject *parent);
 void backup_emit_path(const BackupChoice *choice, const char *path);
-void on_backup(GtkButton *button, gpointer data);
 void audio_cleanup_response(AdwMessageDialog *dialog, const char *response, gpointer data);
 GtkWidget *audio_cleanup_dialog(const char *token, size_t count);
 void on_import(GtkButton *button, gpointer data);
 GtkWidget *group(const char *title);
+const char *combo_row_text(AdwComboRow *row);
 GtkWidget *read_aloud_group(void);
+/* Read aloud's voice picker (LinuxWindowReadAloud.c). */
+gboolean read_aloud_has_voices(void);
+void read_aloud_refresh_actions(gboolean idle);
+void read_aloud_close(void);
 void show_page(gint32 page);
 gboolean sidebar_navigate(guint keyval, GdkModifierType modifiers, GtkWidget *focused);
 gboolean cancel_key(guint keyval, GdkModifierType modifiers, GtkWidget *focused, gboolean active);
@@ -326,7 +258,6 @@ GtkWidget *settings_hero(const char *title, const char *subtitle);
 void add_page(gint32 page, GtkWidget *widget);
 void add_compact_hero_setters(AdwBreakpoint *breakpoint, GtkWidget *widget);
 GtkWidget *transcript_view(GtkTextBuffer *buffer, int height);
-GtkWidget *build_dashboard(GtkTextBuffer *buffer);
 GtkWidget *build_voice_output(void);
 GtkWidget *build_general(void);
 GtkWidget *build_transcription(void);
@@ -379,6 +310,7 @@ gboolean configuration_choices_valid(const char *choices, const char *value);
 void configuration_title_apply(gpointer data);
 void configuration_availability_apply(gpointer data);
 void reveal_cancel(void);
+void configuration_close(void);
 void configuration_reveal_apply(gpointer data);
 void voices_apply(gpointer pointer);
 int32_t fail(char *error, size_t capacity, const char *message);

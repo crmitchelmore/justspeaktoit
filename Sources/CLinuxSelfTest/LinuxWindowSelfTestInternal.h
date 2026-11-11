@@ -26,6 +26,7 @@ gboolean post_processing_self_test(void); /* LinuxWindowCleanupSelfTest.c */
 int32_t local_cleanup_sources_self_test(char *error, size_t capacity);
 gboolean cleanup_preview_self_test(void);
 gboolean migration_restore_self_test(void);
+gboolean page_functions_self_test(void); /* LinuxWindowPagesSelfTest.c */
 int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capacity); /* LinuxVoiceSourcesSelfTest.c */
 
 #pragma GCC visibility pop

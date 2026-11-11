@@ -2,7 +2,6 @@
  * transcript and buttons, export, delete and the functions the rest of the
  * window uses instead of the page state (LinuxWindowHistoryPage.h). */
 #include "LinuxWindowHistoryState.h"
-#include "LinuxWindowDashboardPage.h"
 
 static void on_search(GtkSearchEntry *entry, gpointer data) {
     (void)data;
@@ -22,6 +21,18 @@ void attach_detail(GtkListBoxRow *row) {
     if (card != NULL && gtk_widget_get_parent(history_page()->detail) == card) return;
     detach_detail();
     if (card != NULL) gtk_box_append(GTK_BOX(card), history_page()->detail);
+}
+
+/* The window's one transcript buffer, shown here and on the dashboard. */
+gchar *displayed_transcript(void) {
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(history_page()->transcript);
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(buffer, &start, &end);
+    return gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+}
+
+void set_transcript(const char *text) {
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(history_page()->transcript), text != NULL ? text : "", -1);
 }
 
 static void on_history_selected(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
@@ -47,7 +58,7 @@ static void on_history_selected(GtkListBox *box, GtkListBoxRow *row, gpointer da
 static void on_version(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
     if (history_page()->selected_id == NULL || g_strcmp0(history_page()->presented_id, history_page()->selected_id) != 0) return;
-    guint selected = gtk_drop_down_get_selected(dashboard_page()->version);
+    guint selected = gtk_drop_down_get_selected(history_page()->version);
     if ((gint32)selected == history_page()->presented_variant) return;
     retire_cleanup_preview();
     history_page()->presented_variant = (gint32)selected;
@@ -223,14 +234,14 @@ GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_widget_add_css_class(label, "jsti-detail-heading");
     gtk_box_append(GTK_BOX(heading), label);
     const char *versions[] = { "Processed", "Original", NULL };
-    dashboard_page()->version = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(versions));
-    gtk_widget_set_tooltip_text(GTK_WIDGET(dashboard_page()->version), "Transcript version");
-    jsti_accessible_set_name(GTK_WIDGET(dashboard_page()->version), "Transcript version");
-    g_signal_connect(dashboard_page()->version, "notify::selected", G_CALLBACK(on_version), NULL);
-    gtk_box_append(GTK_BOX(heading), GTK_WIDGET(dashboard_page()->version));
+    history_page()->version = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(versions));
+    gtk_widget_set_tooltip_text(GTK_WIDGET(history_page()->version), "Transcript version");
+    jsti_accessible_set_name(GTK_WIDGET(history_page()->version), "Transcript version");
+    g_signal_connect(history_page()->version, "notify::selected", G_CALLBACK(on_version), NULL);
+    gtk_box_append(GTK_BOX(heading), GTK_WIDGET(history_page()->version));
     gtk_box_append(GTK_BOX(history_page()->detail), heading);
     GtkWidget *scroller = transcript_view(buffer, 72);
-    dashboard_page()->transcript = GTK_TEXT_VIEW(gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller)));
+    history_page()->transcript = GTK_TEXT_VIEW(gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller)));
     gtk_box_append(GTK_BOX(history_page()->detail), scroller);
 
     GtkWidget *playback = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
@@ -246,16 +257,16 @@ GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_box_append(GTK_BOX(playback), GTK_WIDGET(history_page()->play));
     gtk_box_append(GTK_BOX(playback), GTK_WIDGET(history_page()->stop_play));
     gtk_box_append(GTK_BOX(playback), GTK_WIDGET(history_page()->playback_label));
-    dashboard_page()->copy = GTK_BUTTON(gtk_button_new_with_label("Copy"));
-    gtk_widget_add_css_class(GTK_WIDGET(dashboard_page()->copy), "suggested-action");
-    g_signal_connect(dashboard_page()->copy, "clicked", G_CALLBACK(on_copy), NULL);
-    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(dashboard_page()->copy));
+    history_page()->copy = GTK_BUTTON(gtk_button_new_with_label("Copy"));
+    gtk_widget_add_css_class(GTK_WIDGET(history_page()->copy), "suggested-action");
+    g_signal_connect(history_page()->copy, "clicked", G_CALLBACK(on_copy), NULL);
+    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(history_page()->copy));
     gtk_box_append(GTK_BOX(history_page()->detail), playback);
 
     GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_set_halign(actions, GTK_ALIGN_END);
-    read_aloud.button = GTK_BUTTON(gtk_button_new_with_label("Read aloud"));
-    g_signal_connect(read_aloud.button, "clicked", G_CALLBACK(on_read_aloud), NULL);
+    history_page()->read_aloud = GTK_BUTTON(gtk_button_new_with_label("Read aloud"));
+    g_signal_connect(history_page()->read_aloud, "clicked", G_CALLBACK(on_read_aloud), NULL);
     history_page()->retry = GTK_BUTTON(gtk_button_new_with_label("Retry"));
     history_page()->export_button = GTK_BUTTON(gtk_button_new_with_label("Export…"));
     history_page()->issue_button = GTK_BUTTON(gtk_button_new_with_label("Create Issue with Details…"));
@@ -264,7 +275,7 @@ GtkWidget *build_history(GtkTextBuffer *buffer) {
     g_signal_connect(history_page()->retry, "clicked", G_CALLBACK(on_retry), NULL);
     g_signal_connect(history_page()->export_button, "clicked", G_CALLBACK(on_export), NULL);
     g_signal_connect(history_page()->open_audio, "clicked", G_CALLBACK(on_open_audio), NULL);
-    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(read_aloud.button));
+    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(history_page()->read_aloud));
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(history_page()->retry));
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(history_page()->export_button));
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(history_page()->open_audio));
@@ -323,9 +334,24 @@ void history_show_playback(const char *id, gint32 state, const char *text) {
 }
 const char *history_export_text(void) { return history_page()->export_text; }
 
-void refresh_history_actions(gboolean idle, gboolean has_text) {
+void history_show_variant(gint32 variant) {
+    if (variant >= 0) gtk_drop_down_set_selected(history_page()->version, (guint)variant);
+}
+
+guint history_selected_variant(void) { return gtk_drop_down_get_selected(history_page()->version); }
+
+void history_set_copy_enabled(gboolean enabled) {
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->copy), enabled);
+}
+
+void refresh_history_actions(gboolean idle, gboolean has_text, gboolean copyable, gboolean readable) {
     gboolean has_record = history_page()->selected_id != NULL;
     gboolean presented = history_selection_presented();
+    gboolean switchable = presented && history_page()->presented_switchable;
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->copy), copyable);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->read_aloud), readable);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->version), switchable && idle);
+    gtk_widget_set_visible(GTK_WIDGET(history_page()->version), switchable);
     gtk_widget_set_sensitive(GTK_WIDGET(history_page()->retry), idle && has_record);
     gtk_widget_set_sensitive(GTK_WIDGET(history_page()->correction_results), idle && presented);
     gtk_widget_set_sensitive(GTK_WIDGET(history_page()->export_button), idle && presented && has_text);

@@ -1,66 +1,16 @@
-/* Control handlers: recording, models, microphones, output, appearance and voices. */
+/* Window actions: the event callback, recording, cancel and copy, and the
+ * refresh that asks every page to follow the window state. */
 #include "LinuxWindowInternal.h"
 #include "LinuxWindowDashboardPage.h"
-#include "LinuxWindowGeneralPage.h"
 #include "LinuxWindowHistoryPage.h"
 #include "LinuxWindowModelsPage.h"
-#include "LinuxWindowOutputPage.h"
 #include "LinuxWindowStoragePage.h"
-#include "LinuxWindowVoicePage.h"
 
 void emit(gint32 event, const char *text, gint32 index) {
     if (ui.callback != NULL && !ui.suppress) ui.callback(event, text != NULL ? text : "", index, ui.context);
 }
 
-gint32 selected_model_slot(void) {
-    guint position = adw_combo_row_get_selected(models_page()->model_row);
-    if (models_page()->model_slots == NULL || position == GTK_INVALID_LIST_POSITION || position >= models_page()->model_slots->len) {
-        return -1;
-    }
-    return g_array_index(models_page()->model_slots, Slot, position).global;
-}
-
-const char *selected_microphone(void) {
-    guint position = adw_combo_row_get_selected(models_page()->microphone_row);
-    if (models_page()->microphone_ids == NULL || position == GTK_INVALID_LIST_POSITION || position >= models_page()->microphone_ids->len) {
-        return "";
-    }
-    return g_ptr_array_index(models_page()->microphone_ids, position);
-}
-
-gchar *displayed_transcript(void) {
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(dashboard_page()->transcript);
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(buffer, &start, &end);
-    return gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-}
-
-void set_transcript(const char *text) {
-    gtk_text_buffer_set_text(gtk_text_view_get_buffer(dashboard_page()->transcript), text != NULL ? text : "", -1);
-}
-
-static const char *combo_text(AdwComboRow *row) {
-    GObject *item = adw_combo_row_get_selected_item(row);
-    return item != NULL ? gtk_string_object_get_string(GTK_STRING_OBJECT(item)) : NULL;
-}
-
-/* The dashboard's Setup card and the header subtitle echo the settings. */
-void refresh_setup(void) {
-    const char *microphone = combo_text(models_page()->microphone_row);
-    gtk_label_set_text(dashboard_page()->setup_microphone, microphone != NULL ? microphone : "Default microphone");
-    const char *model = combo_text(models_page()->model_row);
-    gtk_label_set_text(dashboard_page()->setup_model, model != NULL ? model : "No model selected");
-    adw_window_title_set_subtitle(ui.title, model != NULL ? model : "");
-    const char *output = combo_text(output_page()->output_row);
-    gboolean restores = output_page()->can_restore_clipboard && adw_combo_row_get_selected(output_page()->output_row) == 0 &&
-                        adw_switch_row_get_active(output_page()->restore_row);
-    gchar *text = g_strdup_printf("%s%s", output != NULL ? output : "", restores ? " · clipboard restored" : "");
-    gtk_label_set_text(dashboard_page()->setup_output, text);
-    g_free(text);
-    const char *hint = adw_action_row_get_subtitle(output_page()->shortcut_row);
-    gtk_label_set_text(dashboard_page()->setup_shortcut, hint != NULL && hint[0] != '\0' ? hint : "Checking the desktop…");
-}
-
+/* Every page's actions follow the window state; each page refreshes its own. */
 void refresh_actions(void) {
     gboolean idle = ui.state == JSTI_STATE_IDLE;
     jsti_action_shortcut_editor_set_idle(idle);
@@ -68,63 +18,26 @@ void refresh_actions(void) {
     gchar *text = displayed_transcript();
     gboolean has_text = text != NULL && text[0] != '\0';
     g_free(text);
-    gboolean presented = history_selection_presented();
-    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->copy), has_text && !cleanup_preview.visible);
-    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), has_text && !cleanup_preview.visible);
-    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->cancel), ui.state == JSTI_STATE_WORKING);
-    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->cancel), ui.state == JSTI_STATE_WORKING);
+    gboolean copyable = has_text && !cleanup_preview_visible();
     gboolean recording = ui.state == JSTI_STATE_RECORDING;
-    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->record), ui.state != JSTI_STATE_WORKING);
+    dashboard_refresh_actions(ui.state, copyable);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.header_record), ui.state != JSTI_STATE_WORKING);
-    gtk_button_set_label(dashboard_page()->record, recording ? "Stop Recording"
-                                    : ui.state == JSTI_STATE_WORKING ? "Working…" : "Start Recording");
     adw_button_content_set_label(ADW_BUTTON_CONTENT(gtk_button_get_child(ui.header_record)),
                                  recording ? "Stop" : "Record");
     adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(gtk_button_get_child(ui.header_record)),
                                      recording ? "media-playback-stop-symbolic" : "audio-input-microphone-symbolic");
-    if (recording) {
-        gtk_widget_add_css_class(GTK_WIDGET(dashboard_page()->record), "recording");
-        gtk_widget_add_css_class(GTK_WIDGET(ui.header_record), "destructive-action");
-    } else {
-        gtk_widget_remove_css_class(GTK_WIDGET(dashboard_page()->record), "recording");
-        gtk_widget_remove_css_class(GTK_WIDGET(ui.header_record), "destructive-action");
-    }
-    /* While recording, the hero previews the words as they arrive. */
-    gchar *preview = recording ? displayed_transcript() : NULL;
-    gtk_label_set_text(dashboard_page()->live_preview, preview != NULL && preview[0] != '\0' ? preview : "Listening…");
-    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->live_preview), recording);
-    g_free(preview);
-    refresh_history_actions(idle, has_text);
+    if (recording) gtk_widget_add_css_class(GTK_WIDGET(ui.header_record), "destructive-action");
+    else gtk_widget_remove_css_class(GTK_WIDGET(ui.header_record), "destructive-action");
     /* Speaks the presented record's displayed text, so it needs both. */
-    gboolean voices = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)) > 0;
-    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.button), idle && presented && has_text && voices);
-    gtk_widget_set_sensitive(GTK_WIDGET(voice_page()->voice_read), idle && presented && has_text && voices);
-    gtk_widget_set_sensitive(GTK_WIDGET(voice_page()->voice_stop), !ui.closing);
-    gtk_widget_set_sensitive(GTK_WIDGET(voice_page()->voice_sources), idle && voices);
+    gboolean voices = read_aloud_has_voices();
+    gboolean readable = idle && history_selection_presented() && has_text && voices;
+    refresh_history_actions(idle, has_text, copyable, readable);
+    voice_page_refresh_actions(idle, readable, voices);
     jsti_voice_credentials_set_idle(idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.voice_row), idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_row),
-        idle && read_aloud.favorite_indices != NULL && read_aloud.favorite_indices->len > 0);
-    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button),
-        idle && read_aloud.favorite_executable && !read_aloud.favorite_pending);
-    if (storage_page()->recordings_choose != NULL) {
-        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->recordings_choose), idle && storage_page()->location_chooser == NULL);
-        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->recordings_default), idle && storage_page()->location_chooser == NULL);
-    }
-    if (storage_page()->backup_audio != NULL) {
-        gboolean backup_idle = idle && storage_page()->backup_chooser == NULL && storage_page()->restore_dialog == NULL;
-        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_audio), backup_idle);
-        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_profiles), backup_idle);
-        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_export), backup_idle);
-        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_inspect), backup_idle);
-        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_restore), backup_idle);
-    }
+    read_aloud_refresh_actions(idle);
+    storage_refresh_actions(idle);
     refresh_migration_restore();
-    gtk_widget_set_sensitive(GTK_WIDGET(models_page()->model_row), idle);
-    jsti_model_filters_set_idle(idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(models_page()->microphone_row), idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->version), presented && history_presented_switchable() && idle);
-    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->version), presented && history_presented_switchable());
+    models_refresh_actions(idle);
     refresh_setup();
 }
 
@@ -157,151 +70,7 @@ void on_cancel(GtkButton *button, gpointer data) {
 
 void on_copy(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (cleanup_preview.visible) return;
+    if (cleanup_preview_visible()) return;
     emit(JSTI_EVENT_COPY, "", 0);
-}
-
-/* The Azure resource row belongs to Azure models only. */
-void refresh_azure_row(void) {
-    guint position = adw_combo_row_get_selected(models_page()->model_row);
-    gboolean azure = models_page()->model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < models_page()->model_slots->len
-        && g_str_has_prefix(g_array_index(models_page()->model_slots, Slot, position).id, "azure/");
-    gtk_widget_set_visible(GTK_WIDGET(models_page()->azure_row), azure);
-    /* On-device models (canonical "local/" identifiers) need no API key. */
-    gboolean local = models_page()->model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < models_page()->model_slots->len
-        && g_str_has_prefix(g_array_index(models_page()->model_slots, Slot, position).id, "local/");
-    gtk_widget_set_visible(GTK_WIDGET(models_page()->key_row), !local);
-}
-
-void on_model(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object; (void)spec; (void)data;
-    refresh_azure_row();
-    refresh_setup();
-    gint32 slot = selected_model_slot();
-    if (!ui.suppress && slot >= 0) {
-        guint mode = model_mode(jsti_model_filters_local(), jsti_model_filters_live());
-        models_page()->preferred_model_slots[mode] = slot;
-    }
-    if (slot >= 0) emit(JSTI_EVENT_SELECT_MODEL, "", slot);
-}
-
-void on_azure_apply(AdwEntryRow *row, gpointer data) {
-    (void)data;
-    emit(JSTI_EVENT_AZURE_RESOURCE, gtk_editable_get_text(GTK_EDITABLE(row)), 0);
-}
-
-void on_microphone(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object; (void)spec; (void)data;
-    refresh_setup();
-    emit(JSTI_EVENT_SELECT_MICROPHONE, selected_microphone(), 0);
-}
-
-void on_key_apply(AdwEntryRow *row, gpointer data) {
-    (void)data;
-    const char *key = gtk_editable_get_text(GTK_EDITABLE(row));
-    emit(JSTI_EVENT_SAVE_KEY, key, selected_model_slot());
-    gtk_editable_set_text(GTK_EDITABLE(row), "");
-}
-
-void on_text_output(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object; (void)spec; (void)data;
-    guint method = adw_combo_row_get_selected(output_page()->output_row);
-    gboolean restore = adw_switch_row_get_active(output_page()->restore_row);
-    gtk_widget_set_sensitive(GTK_WIDGET(output_page()->restore_row), method == 0 && output_page()->can_restore_clipboard);
-    gtk_widget_set_sensitive(GTK_WIDGET(output_page()->app_switch_row), method == 0 && output_page()->app_switch_configured);
-    refresh_setup();
-    if (output_page()->app_switch_configured) {
-        gchar *payload = g_strdup_printf("%s\t%u", restore ? "restore" : "",
-                                        adw_combo_row_get_selected(output_page()->app_switch_row));
-        emit(JSTI_EVENT_TEXT_OUTPUT, payload, (gint32)method);
-        g_free(payload);
-    } else {
-        emit(JSTI_EVENT_TEXT_OUTPUT, restore ? "restore" : "", (gint32)method);
-    }
-}
-
-void apply_appearance(guint appearance) {
-    static const AdwColorScheme schemes[] = { ADW_COLOR_SCHEME_DEFAULT, ADW_COLOR_SCHEME_FORCE_LIGHT,
-                                              ADW_COLOR_SCHEME_FORCE_DARK };
-    if (appearance < G_N_ELEMENTS(schemes)) {
-        adw_style_manager_set_color_scheme(adw_style_manager_get_default(), schemes[appearance]);
-    }
-}
-
-void on_appearance(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object; (void)spec; (void)data;
-    guint appearance = adw_combo_row_get_selected(general_page()->appearance_row);
-    apply_appearance(appearance);
-    emit(JSTI_EVENT_APPEARANCE, "", (gint32)appearance);
-}
-
-/* Launch at login. The switch waits, insensitive, for the state the desktop
- * reached, which jsti_window_set_login_item reports. */
-void on_login_item(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object; (void)spec; (void)data;
-    if (ui.suppress) return;
-    gtk_widget_set_sensitive(GTK_WIDGET(general_page()->login_row), FALSE);
-    emit(JSTI_EVENT_LOGIN_ITEM, "", adw_switch_row_get_active(general_page()->login_row) ? 1 : 0);
-}
-
-void on_automation(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object; (void)spec; (void)data;
-    if (ui.suppress) return;
-    gtk_widget_set_sensitive(GTK_WIDGET(general_page()->automation_row), FALSE);
-    emit(JSTI_EVENT_AUTOMATION, "", adw_switch_row_get_active(general_page()->automation_row) ? 1 : 0);
-}
-
-void on_style(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object; (void)spec; (void)data;
-    emit(JSTI_EVENT_SHORTCUT_STYLE, "", (gint32)adw_combo_row_get_selected(output_page()->style_row));
-}
-
-void on_refresh(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    emit(JSTI_EVENT_REFRESH_MODELS, "", 0);
-}
-
-void on_voice(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object; (void)spec; (void)data;
-    if (ui.suppress) return;
-    read_aloud.favorite_pending = TRUE;
-    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button), FALSE);
-    if (!ui.suppress) jsti_voice_credentials_selection_pending();
-    guint position = adw_combo_row_get_selected(read_aloud.voice_row);
-    if (read_aloud.picker_callback != NULL) {
-        if (read_aloud.identifiers != NULL && position < read_aloud.identifiers->len) {
-            const char *identifier = g_ptr_array_index(read_aloud.identifiers, position);
-            if (*identifier != '\0') read_aloud.picker_callback(0, identifier,
-                read_aloud.picker_context != NULL ? read_aloud.picker_context : ui.context);
-        }
-        return;
-    }
-    if (position != GTK_INVALID_LIST_POSITION) emit(JSTI_EVENT_VOICE_OUTPUT, "", (gint32)position);
-}
-
-void on_favorite_voice(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object; (void)spec; (void)data;
-    if (ui.suppress || read_aloud.favorite_indices == NULL) return;
-    guint position = adw_combo_row_get_selected(read_aloud.favorite_row);
-    if (position < read_aloud.favorite_indices->len) {
-        guint index = g_array_index(read_aloud.favorite_indices, guint, position);
-        if (adw_combo_row_get_selected(read_aloud.voice_row) != index) {
-            adw_combo_row_set_selected(read_aloud.voice_row, index);
-        }
-    }
-}
-
-void on_favorite_toggle(GtkButton *button, gpointer data) {
-    (void)data;
-    guint position = adw_combo_row_get_selected(read_aloud.voice_row);
-    if (ui.suppress || read_aloud.picker_callback == NULL || read_aloud.identifiers == NULL ||
-        position >= read_aloud.identifiers->len) return;
-    const char *identifier = g_ptr_array_index(read_aloud.identifiers, position);
-    if (*identifier == '\0') return;
-    gint32 rank = g_array_index(read_aloud.favorite_ranks, gint32, position);
-    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
-    read_aloud.favorite_pending = TRUE;
-    read_aloud.picker_callback(rank >= 0 ? 2 : 1, identifier,
-        read_aloud.picker_context != NULL ? read_aloud.picker_context : ui.context);
 }
 

@@ -133,6 +133,10 @@ struct _GtkWidget *jsti_brand_icon_new(int size);
 /* Paints the app icon into a size x size square at the origin. */
 struct _cairo;
 void jsti_brand_icon_paint(struct _cairo *cr, double size);
+/* A 620-pixel-wide window over `owner` that Escape closes, with a header bar;
+ * `*column` receives its margined content column (LinuxToolWindow.c). */
+struct _GtkWindow *jsti_tool_window_new(struct _GtkWindow *owner, const char *title, int height,
+                                        struct _GtkWidget **column);
 /* A scrolling page with centred content; `*content` receives its column. */
 struct _GtkWidget *jsti_page_new(struct _GtkWidget **content);
 /* Sets the AT-SPI name. GtkDropDown and labelled GtkButton point a labelled-by

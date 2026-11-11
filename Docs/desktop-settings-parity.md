@@ -2441,7 +2441,7 @@ The preview lists each applied category's counts (new, updated, removed,
 before and after), conflicts, skipped items and every category that is kept in
 the backup but not applied. It never shows transcript text, profile contents,
 identifiers or credential values. Nothing is written until the user picks an
-action in the native dialog (`WindowsMigrationRestore.cpp`, Linux's `LinuxWindow.c`). Cancel is the
+action in the native dialog (`WindowsMigrationRestore.cpp`, Linux's `LinuxWindowHistory.c`). Cancel is the
 default button. Replace needs a second confirmation that defaults to No. Each
 preview has a single-use token, so a stale or repeated answer is refused.
 Linux reuses the owned ZIP picker and its cancellation/parent-identity fence.

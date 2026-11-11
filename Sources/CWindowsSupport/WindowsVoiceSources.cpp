@@ -5,6 +5,7 @@
 #include <mutex>
 #include <vector>
 #include <algorithm>
+#include <utility>
 
 int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t capacity);
 void jsti_show_voice_controls(HWND owner, JSTIVoiceSourceCallback callback, void *context);
@@ -12,6 +13,8 @@ void jsti_show_voice_usage(HWND owner, const std::string &snapshot, JSTIVoiceSou
 void jsti_show_voice_discovery(HWND owner, JSTIVoiceSourceCallback callback, void *context);
 
 namespace jsti::voiceSources {
+namespace {
+// What the host staged for the open dialog and the next one. Guarded by `mutex`.
 std::mutex mutex;
 Configuration configuration;
 MarkupConfiguration markupConfiguration;
@@ -19,6 +22,36 @@ FormatState formatState;
 GenerationState generationState;
 HWND generationWindow = nullptr;
 ImportResult importResult;
+} // namespace
+
+Configuration hostConfiguration() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return configuration;
+}
+MarkupConfiguration exchangeMarkupConfiguration(MarkupConfiguration next) {
+    std::lock_guard<std::mutex> lock(mutex);
+    return std::exchange(markupConfiguration, std::move(next));
+}
+void setMarkupEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(mutex);
+    markupConfiguration.enabled = enabled;
+}
+FormatState exchangeFormats(FormatState next) {
+    std::lock_guard<std::mutex> lock(mutex);
+    return std::exchange(formatState, std::move(next));
+}
+GenerationState hostGeneration() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return generationState;
+}
+void replaceGeneration(GenerationState next) {
+    std::lock_guard<std::mutex> lock(mutex);
+    generationState = std::move(next);
+}
+void expectImport(HWND window, const std::string &token) {
+    std::lock_guard<std::mutex> lock(mutex);
+    importResult = {window, token, {}, {}, false};
+}
 
 using jsti::chrome::scale;
 std::wstring text(HWND window) {
@@ -281,10 +314,7 @@ static void importFile(HWND window, Dialog &dialog) {
     }
     cancelImport(window, dialog);
     dialog.importToken = jsti::utf8(token);
-    {
-        std::lock_guard<std::mutex> lock(mutex);
-        importResult = {window, dialog.importToken, {}, {}, false};
-    }
+    expectImport(window, dialog.importToken);
     SetDlgItemTextW(window, noticeID, L"Reading UTF-8 text... Stop cancels. Editing or changing source discards the result.");
     refresh(window, dialog);
     const std::string destination = jsti::utf8(path.data());
@@ -690,7 +720,7 @@ int32_t jsti_window_set_voice_audio_formats(const char *rows, const char *select
 
 void jsti_show_voice_sources(HWND owner, const char *record, const char *history) {
     Dialog dialog;
-    { std::lock_guard<std::mutex> lock(mutex); dialog.config = configuration; }
+    dialog.config = hostConfiguration();
     if (!dialog.config.callback) return;
     dialog.record = record ? record : "";
     if (!jsti::wide(history ? history : "", dialog.history)) return;
@@ -710,6 +740,6 @@ void jsti_show_voice_sources(HWND owner, const char *record, const char *history
 
 void jsti_voice_sources_stop() {
     Configuration config;
-    { std::lock_guard<std::mutex> lock(mutex); config = configuration; }
+    config = hostConfiguration();
     if (config.callback) config.callback(112, 0, "", "", "", config.context);
 }

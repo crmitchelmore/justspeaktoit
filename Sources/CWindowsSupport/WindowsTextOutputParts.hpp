@@ -71,16 +71,15 @@ Clipboard *systemClipboard();
 
 // ---- worker accounting -------------------------------------------------------
 
-extern std::mutex workerMutex;
-extern std::condition_variable workerChanged;
-extern size_t liveWorkers;
+// The live-worker count is private to WindowsTextOutput.cpp, which reserves a
+// slot before it creates a worker thread. Releasing it wakes waitForWorkersToExit.
+void releaseWorker();
 
 struct WorkerScope {
     WorkerScope() = default; // Slot was reserved before the thread was created.
-    ~WorkerScope() {
-        { std::lock_guard<std::mutex> lock(workerMutex); --liveWorkers; }
-        workerChanged.notify_all();
-    }
+    ~WorkerScope() { releaseWorker(); }
+    WorkerScope(const WorkerScope &) = delete;
+    WorkerScope &operator=(const WorkerScope &) = delete;
 };
 
 struct ClipboardItem {

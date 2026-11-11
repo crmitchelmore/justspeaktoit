@@ -15,15 +15,8 @@ static bool configurationTitleSelfTest(HWND owner, std::string &error) {
     fixture.group = L"Voice Output";
     HWND window = createDialog(owner, fixture);
     if (!window) { error = "Could not create the Voice language label fixture."; return false; }
-    Configuration previous;
-    HWND previousWindow;
-    {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        previous = configuration;
-        previousWindow = activeConfiguration;
-        configuration = fixture.config;
-        activeConfiguration = window;
-    }
+    Configuration previous = exchangeConfiguration(fixture.config);
+    HWND previousWindow = exchangeActiveEditor(window);
     SetDlgItemTextW(window, fieldBase, L"fr_FR");
     const bool queued = jsti_window_set_configuration_field_title(0, "Gemini voice language") == 0;
     SendMessageW(window, refreshTitleMessage, 0, 0);
@@ -61,11 +54,8 @@ static bool configurationTitleSelfTest(HWND owner, std::string &error) {
     if (revisionRendered) SendMessageW(window, WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
     const bool revisionApplied = !IsWindow(window) && revisionTest.applies == 1;
     if (IsWindow(window)) DestroyWindow(window);
-    {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        configuration = std::move(previous);
-        activeConfiguration = previousWindow;
-    }
+    exchangeConfiguration(std::move(previous));
+    exchangeActiveEditor(previousWindow);
     if (!queued || !preserved || !refused || !availabilityPreserved || !revisionRendered || !revisionApplied) {
         error = "Configuration labels, live snapshot replacement or emitted view revision failed.";
         return false;
@@ -74,11 +64,7 @@ static bool configurationTitleSelfTest(HWND owner, std::string &error) {
 }
 
 static bool configurationAutoCleanSelfTest(HWND owner, std::string &error) {
-    Configuration previous;
-    {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        previous = configuration;
-    }
+    Configuration previous = hostConfiguration();
     struct Applied { int calls = 0; bool correct = false; } applied;
     const auto callback = [](int action, const char *const *values, size_t count, void *context,
                               char *, size_t) -> int {
@@ -104,10 +90,7 @@ static bool configurationAutoCleanSelfTest(HWND owner, std::string &error) {
     const bool registered = jsti_window_set_configuration(
         fields.data(), fields.size(), nullptr, 0, callback, &applied) == 0;
     Dialog fixture;
-    {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        fixture.config = configuration;
-    }
+    fixture.config = hostConfiguration();
     fixture.group = L"Transcription";
     HWND window = registered ? createDialog(owner, fixture) : nullptr;
     bool accepted = false;
@@ -126,10 +109,7 @@ static bool configurationAutoCleanSelfTest(HWND owner, std::string &error) {
     }
     const bool bounded = jsti_window_set_configuration(
         fields.data(), maximumConfigurationFields + 1, nullptr, 0, callback, &applied) < 0;
-    {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        configuration = std::move(previous);
-    }
+    exchangeConfiguration(std::move(previous));
     if (!registered || !accepted || !bounded) {
         error = "Auto-Clean preferences did not register or apply past the former 32-field limit.";
         return false;
@@ -138,8 +118,7 @@ static bool configurationAutoCleanSelfTest(HWND owner, std::string &error) {
 }
 
 static bool configurationEmptyChoiceSelfTest(HWND owner, std::string &error) {
-    Configuration previous;
-    { std::lock_guard<std::mutex> lock(configurationMutex); previous = configuration; }
+    Configuration previous = hostConfiguration();
     struct Applied { int calls = 0; std::string expected; bool correct = false; } applied;
     const auto callback = [](int action, const char *const *values, size_t count, void *context,
                               char *, size_t) -> int {
@@ -158,11 +137,11 @@ static bool configurationEmptyChoiceSelfTest(HWND owner, std::string &error) {
     };
     bool okay = registerFields() == 0;
     const auto retained = [&] {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        return configuration.fields.size() == 2 && configuration.fields[0].choices.size() == 2 &&
-            configuration.fields[0].choices[0] == std::make_pair(std::wstring(), std::wstring(L"Legacy fixture")) &&
-            configuration.fields[0].value.empty() && configuration.fields[1].value == L"preserved" &&
-            configuration.callback == callback && configuration.context == &applied;
+        const Configuration current = hostConfiguration();
+        return current.fields.size() == 2 && current.fields[0].choices.size() == 2 &&
+            current.fields[0].choices[0] == std::make_pair(std::wstring(), std::wstring(L"Legacy fixture")) &&
+            current.fields[0].value.empty() && current.fields[1].value == L"preserved" &&
+            current.callback == callback && current.context == &applied;
     };
     okay = okay && retained();
     const char *invalid[] = {
@@ -195,17 +174,17 @@ static bool configurationEmptyChoiceSelfTest(HWND owner, std::string &error) {
     fields[0].choices = "\tLegacy fixture\n retained \tExplicit fixture";
     okay = registerFields() == 0 && okay;
     {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        okay = configuration.fields.size() == 2 && configuration.fields[0].choices.size() == 2 &&
-            configuration.fields[0].value == L" retained " &&
-            configuration.fields[0].choices[1].first == L" retained " && okay;
+        const Configuration current = hostConfiguration();
+        okay = current.fields.size() == 2 && current.fields[0].choices.size() == 2 &&
+            current.fields[0].value == L" retained " &&
+            current.fields[0].choices[1].first == L" retained " && okay;
     }
     fields[0].value = "";
     fields[0].choices = "\tLegacy fixture\nretained\tExplicit fixture";
     okay = registerFields() == 0 && retained() && okay;
     for (int selection = 0; selection < 2; ++selection) {
         Dialog fixture;
-        { std::lock_guard<std::mutex> lock(configurationMutex); fixture.config = configuration; }
+        fixture.config = hostConfiguration();
         HWND window = okay ? createDialog(owner, fixture) : nullptr;
         if (!window) { okay = false; break; }
         const bool populated = SendDlgItemMessageW(window, fieldBase, CB_GETCOUNT, 0, 0) == 2 &&
@@ -217,7 +196,7 @@ static bool configurationEmptyChoiceSelfTest(HWND owner, std::string &error) {
         okay = populated && !IsWindow(window) && applied.calls == before + 1 && applied.correct && okay;
         if (IsWindow(window)) DestroyWindow(window);
     }
-    { std::lock_guard<std::mutex> lock(configurationMutex); configuration = std::move(previous); }
+    exchangeConfiguration(std::move(previous));
     if (!okay) error = "Optional choice registration lost an empty draft, accepted ambiguous metadata or changed Apply values.";
     return okay;
 }
@@ -295,15 +274,10 @@ static bool configurationRevealSelfTest(HWND owner, std::string &error) {
         !(GetWindowLongW(GetDlgItem(window, fieldBase), GWL_STYLE) & WS_VISIBLE);
     const bool refused = !revealField(window, fixture, 2) && !revealField(window, fixture, 24);
     DestroyWindow(window);
-    Configuration previous;
-    {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        previous = configuration;
-        configuration = Configuration();
-    }
-    const bool unconfigured = !jsti_configuration_field_available(0) &&
+    Configuration previous = exchangeConfiguration(Configuration());
+    const bool unconfigured = hostConfiguration().fields.empty() && !jsti_configuration_field_available(0) &&
         jsti_window_reveal_configuration_field(0) == -1;
-    { std::lock_guard<std::mutex> lock(configurationMutex); configuration = std::move(previous); }
+    exchangeConfiguration(std::move(previous));
     const bool outOfRange = !jsti_configuration_field_available(maximumConfigurationFields) &&
         jsti_window_reveal_configuration_field(maximumConfigurationFields) == -1 &&
         jsti_window_reveal_configuration_field(static_cast<size_t>(-1)) == -1;

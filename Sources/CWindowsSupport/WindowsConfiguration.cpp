@@ -5,12 +5,29 @@
 #include <cstring>
 #include <mutex>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 namespace jsti::configuration {
+namespace {
+// The host's latest description and the open editor, guarded by configurationMutex.
 Configuration configuration;
 std::mutex configurationMutex;
 HWND activeConfiguration = nullptr;
+} // namespace
+
+Configuration hostConfiguration() {
+    std::lock_guard<std::mutex> lock(configurationMutex);
+    return configuration;
+}
+Configuration exchangeConfiguration(Configuration next) {
+    std::lock_guard<std::mutex> lock(configurationMutex);
+    return std::exchange(configuration, std::move(next));
+}
+HWND exchangeActiveEditor(HWND next) {
+    std::lock_guard<std::mutex> lock(configurationMutex);
+    return std::exchange(activeConfiguration, next);
+}
 
 using jsti::chrome::scale;
 

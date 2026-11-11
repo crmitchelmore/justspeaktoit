@@ -51,6 +51,7 @@ let appleCoreSources: [String] = [
     "AppleSpeech/AppleSpeechModelPreparation.swift",
     "AppleSpeech/AppleSpeechPreparationOperations.swift",
     "Audio/AudioTapInstallation.swift",
+    "Audio/ManagedAudioPlayer.swift",
     "Automation/AutomationIntentSupport.swift",
     "Automation/SpeakCLIManifest.swift",
     "Balance/DeepgramBalanceClient.swift",

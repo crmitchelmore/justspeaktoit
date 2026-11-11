@@ -4,7 +4,7 @@ import Foundation
 
 /// Owns transient test content and audio. It does not write history, preferences, or logs.
 @MainActor
-final class OpenRouterAudioPreview: NSObject, ObservableObject, AVAudioPlayerDelegate {
+final class OpenRouterAudioPreview: NSObject, ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var isPlaying = false
     @Published private(set) var transcript = ""
@@ -12,7 +12,10 @@ final class OpenRouterAudioPreview: NSObject, ObservableObject, AVAudioPlayerDel
     private var operation: Task<Void, Never>?
     private var generation = UUID()
     private var audioURL: URL?
-    private var player: AVAudioPlayer?
+    private lazy var playback = ManagedAudioPlayer { [weak self] player, ending in
+        self?.finishPlayback(player: player, message: Self.message(for: ending))
+    }
+    private var player: AVAudioPlayer? { playback.player }
     #if os(iOS)
     private var interruptionObserver: NSObjectProtocol?
     private var audioSessionLease: OpenRouterPreviewAudioSessionLease?
@@ -83,8 +86,7 @@ final class OpenRouterAudioPreview: NSObject, ObservableObject, AVAudioPlayerDel
                 }
                 self.audioURL = result.audioURL
                 let player = try AVAudioPlayer(contentsOf: result.audioURL)
-                player.delegate = self
-                self.player = player
+                self.playback.adopt(player)
                 #if os(iOS)
                 self.audioSessionLease = try OpenRouterPreviewAudioSessionLease.acquire()
                 #endif
@@ -109,22 +111,6 @@ final class OpenRouterAudioPreview: NSObject, ObservableObject, AVAudioPlayerDel
         status = ""
     }
 
-    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        let reference = OpenRouterPreviewPlayerReference(player: player)
-        Task { @MainActor [weak self] in
-            self?.finishPlayback(player: reference.player, message: flag ? nil : "Audio playback failed. Try again.")
-        }
-    }
-
-    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        let reference = OpenRouterPreviewPlayerReference(player: player)
-        Task { @MainActor [weak self] in
-            self?.finishPlayback(
-                player: reference.player, message: "Audio playback failed. Try another model or sample."
-            )
-        }
-    }
-
     private func finishPlayback(player: AVAudioPlayer, message: String?) {
         guard self.player === player else { return }
         releaseAudio()
@@ -141,8 +127,7 @@ final class OpenRouterAudioPreview: NSObject, ObservableObject, AVAudioPlayerDel
     }
 
     private func releaseAudio() {
-        player?.stop()
-        player = nil
+        playback.stop()
         isPlaying = false
         if let audioURL { try? FileManager.default.removeItem(at: audioURL) }
         audioURL = nil
@@ -152,16 +137,17 @@ final class OpenRouterAudioPreview: NSObject, ObservableObject, AVAudioPlayerDel
         #endif
     }
 
+    private static func message(for ending: ManagedAudioPlayer.Ending) -> String? {
+        switch ending {
+        case .finished(successfully: true): return nil
+        case .finished: return "Audio playback failed. Try again."
+        case .decodeFailed: return "Audio playback failed. Try another model or sample."
+        }
+    }
+
     private static func elapsed(since start: Date) -> String {
         String(format: "%.1f", Date().timeIntervalSince(start))
     }
-}
-
-/// Keeps an old player alive until its delegate callback reaches the main actor,
-/// preventing identity reuse. The reference is only dereferenced on MainActor;
-/// AVAudioPlayer is never accessed concurrently through this transfer wrapper.
-private struct OpenRouterPreviewPlayerReference: @unchecked Sendable {
-    let player: AVAudioPlayer
 }
 
 #if os(iOS)

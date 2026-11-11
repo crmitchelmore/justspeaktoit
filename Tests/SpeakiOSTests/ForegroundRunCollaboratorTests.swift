@@ -118,16 +118,20 @@ final class ForegroundRunCollaboratorTests: XCTestCase {
 
     // MARK: Stop settlement
 
-    func testSettle_bestTranscriptWinsWhileTheStopStillOwnsTheSession() async {
-        let session = ForegroundTestSession()
-        session.stopOperation = { ForegroundTestSession.result("short") }
-        let outcome = await ForegroundCaptureFinalisation.settle(
-            session, handsFree: false, stillOwned: { true },
-            shown: { ForegroundTestSession.result("the longer shown words") },
-            onFailure: { _ in XCTFail("The drain succeeded"); return false }
-        )
-        guard case .finished(let result) = outcome else { return XCTFail("Expected a finished stop") }
-        XCTAssertEqual(result.text, "the longer shown words")
+    /// The provider's result wins; the shown interim text is used only when the
+    /// result is blank (a very short recording), as before the split.
+    func testSettle_resultWinsAndShownTextFillsOnlyABlankResult() async {
+        for (drained, expected) in [("final words", "final words"), ("  ", "the shown words")] {
+            let session = ForegroundTestSession()
+            session.stopOperation = { ForegroundTestSession.result(drained) }
+            let outcome = await ForegroundCaptureFinalisation.settle(
+                session, handsFree: false, stillOwned: { true },
+                shown: { ForegroundTestSession.result("the shown words") },
+                onFailure: { _ in XCTFail("The drain succeeded"); return false }
+            )
+            guard case .finished(let result) = outcome else { return XCTFail("Expected a finished stop") }
+            XCTAssertEqual(result.text, expected)
+        }
     }
 
     func testSettle_failedDrainKeepsShownTextOnlyWhenTheOwnerSaysSo() async {

@@ -1,9 +1,11 @@
 package com.justspeaktoit.android.cloud
 
 /**
- * Cloud providers available on Android. Identifiers mirror the Mac app (`Sources/SpeakCore`):
- * credential IDs follow `ProviderCredentialCatalogue.apiKeyIdentifier`, and model IDs come from
- * `ModelCatalog`. `CloudCatalogParityTest` fails if either drifts.
+ * Cloud providers available on Android. Identifiers, credential IDs and models are a typed mirror of
+ * `assets/cloud_catalog.json`, which `CloudCatalogAndroidExport` generates from `Sources/SpeakCore`
+ * (including which models Android offers); `CloudCatalogParityTest` fails on any difference. They
+ * stay compile-time constants so the catalogue costs nothing at startup. Base URLs are Android's
+ * transport detail.
  */
 enum class CloudProvider(val id: String, val displayName: String, val baseUrl: String) {
     OpenAI("openai", "OpenAI", "https://api.openai.com/v1"),

@@ -1,8 +1,5 @@
-import AVFoundation
 import Foundation
 import os.log
-
-// swiftlint:disable file_length
 
 // MARK: - Client
 
@@ -12,14 +9,17 @@ import os.log
 ///
 /// Inline-audio transcription itself is the portable
 /// `OpenRouterInlineAudioTranscriptionClient`; this actor adds the stored-key
-/// lookup, the local fallbacks and the AVFoundation duration reader.
+/// lookup. Key validation, local fallbacks, file transcription and the
+/// streaming request live in `OpenRouterKeyValidation`,
+/// `OpenRouterLocalFallback`, `OpenRouterFileTranscription` and
+/// `OpenRouterStreamingChat`.
 ///
 /// API keys are resolved lazily through `apiKeyProvider` (or the explicit
 /// override) and are only ever placed in the `Authorization` header — they are
 /// never logged. Validation debug snapshots pass through
 /// `APIKeyValidationDebugSnapshot`, which redacts sensitive headers via
 /// `SensitiveHeaderRedactor` before storing them.
-public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:this type_body_length
+public actor OpenRouterAPIClient: StreamingChatLLMClient,
     BatchTranscriptionClient {
     public typealias APIKeyProvider = @Sendable () async -> String?
     /// Resolves a stored key by credential identifier for native text providers.
@@ -33,50 +33,6 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
     private let maximumInlineAudioBytes: Int64
     private let branding: OpenRouterBranding
     private let logger = SpeakLogger.logger(category: "OpenRouter")
-
-    private struct ValidationAttemptResult {
-        let success: Bool
-        let debug: APIKeyValidationDebugSnapshot
-        let message: String
-    }
-
-    private struct ValidationAttemptError: Error {
-        let debug: APIKeyValidationDebugSnapshot
-        let message: String
-    }
-
-    private enum ValidationAttempt {
-        case authEndpoint
-        case modelsEndpoint
-
-        var path: String {
-            switch self {
-            case .authEndpoint: return "auth/validate"
-            case .modelsEndpoint: return "models"
-            }
-        }
-
-        var successMessage: String {
-            switch self {
-            case .authEndpoint: return "OpenRouter API key validated via auth endpoint"
-            case .modelsEndpoint: return "OpenRouter API key validated via models endpoint"
-            }
-        }
-
-        var unauthorizedMessage: String {
-            switch self {
-            case .authEndpoint: return "Unauthorized response from auth endpoint"
-            case .modelsEndpoint: return "Unauthorized response from models endpoint"
-            }
-        }
-
-        var logLabel: String {
-            switch self {
-            case .authEndpoint: return "API key auth validation failed"
-            case .modelsEndpoint: return "API key validation via chat failed"
-            }
-        }
-    }
 
     public init(
         apiKeyProvider: @escaping APIKeyProvider,
@@ -145,6 +101,10 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         )
     }
 
+    public func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
+        await OpenRouterKeyValidation(session: session, branding: branding, baseURL: baseURL).validate(key)
+    }
+
     public func hasStoredAPIKey() async -> Bool {
         await storedAPIKey() != nil
     }
@@ -156,7 +116,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
     }
 
     public func requiresRemoteAccess(for model: String) -> Bool {
-        !allowsLocalFallback(for: model)
+        !OpenRouterLocalFallback.allows(model: model)
     }
 
     // MARK: - Chat
@@ -196,7 +156,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         if let native = NativeTextModels.route(for: model) {
             throw NativeTextModelError.apiKeyMissing(providerName: native.provider.displayName)
         }
-        return performLocalChatFallback(systemPrompt: systemPrompt, messages: messages)
+        return OpenRouterLocalFallback.chatResponse(systemPrompt: systemPrompt, messages: messages)
     }
 
     public nonisolated func sendChatStreaming(
@@ -216,10 +176,10 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
                         return
                     }
 
-                    let request = try await self.streamingChatRequest(
+                    let request = try OpenRouterStreamingChat.request(
                         apiKey: key,
-                        systemPrompt: systemPrompt,
-                        messages: messages,
+                        branding: self.branding,
+                        messages: OpenRouterChatRequest.messages(systemPrompt: systemPrompt, messages: messages),
                         model: model,
                         temperature: temperature
                     )
@@ -240,9 +200,9 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
 
                     for try await line in bytes.lines {
                         if Task.isCancelled { break }
-                        if let content = Self.streamedContent(fromSSELine: line) {
+                        if let content = OpenRouterStreamingChat.content(fromSSELine: line) {
                             continuation.yield(content)
-                        } else if Self.isSSETerminator(line) {
+                        } else if OpenRouterStreamingChat.isTerminator(line) {
                             break
                         }
                     }
@@ -255,27 +215,6 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
                 task.cancel()
             }
         }
-    }
-
-    /// Extracts the delta content from a single OpenRouter SSE line, or nil
-    /// when the line carries no textual delta (comments, empty lines, `[DONE]`).
-    static func streamedContent(fromSSELine line: String) -> String? {
-        guard !line.isEmpty, line.hasPrefix("data: ") else { return nil }
-
-        let jsonString = String(line.dropFirst(6))
-        guard jsonString != "[DONE]", let data = jsonString.data(using: .utf8) else { return nil }
-
-        guard let chunk = try? JSONDecoder().decode(OpenRouterStreamChunk.self, from: data),
-              let delta = chunk.choices?.first?.delta,
-              let content = delta.content, !content.isEmpty else {
-            return nil
-        }
-        return content
-    }
-
-    /// True when the line is the `data: [DONE]` terminator.
-    static func isSSETerminator(_ line: String) -> Bool {
-        line == "data: [DONE]"
     }
 
     // MARK: - Batch transcription
@@ -295,32 +234,9 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
 
     public func transcribeFile(at url: URL, model: String, language: String?) async throws
         -> TranscriptionResult {
-        let cleanedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let key = await storedAPIKey() {
-            if cleanedModel.hasPrefix(OpenRouterTranscriptionSelection.prefix) {
-                guard let rawModel = OpenRouterTranscriptionSelection.modelID(from: cleanedModel) else {
-                    throw OpenRouterAudioError.invalidInput
-                }
-                let audioClient = OpenRouterAudioClient(
-                    apiKeyProvider: { key }, session: session,
-                    maximumInputBytes: Int(clamping: maximumInlineAudioBytes)
-                )
-                return try await audioClient.transcribe(
-                    audioFileURL: url,
-                    model: rawModel,
-                    language: language
-                )
-            }
-            return try await performRemoteTranscription(
-                apiKey: key, url: url, model: cleanedModel, language: language)
-        }
-
-        if allowsLocalFallback(for: cleanedModel) {
-            return await localTranscriptionFallback(url: url, model: cleanedModel)
-        }
-
-        throw OpenRouterClientError.apiKeyMissing
+        try await OpenRouterFileTranscription(
+            session: session, maximumInlineAudioBytes: maximumInlineAudioBytes, branding: branding
+        ).transcribe(at: url, model: model, language: language, apiKey: await storedAPIKey())
     }
 
     // MARK: - API key resolution
@@ -345,342 +261,10 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         return key.flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    // MARK: - Validation
-
-    public func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return .failure(
-                message: "API key is empty",
-                debug: debugSnapshot(url: "", method: "", errorDescription: "API key is empty")
-            )
-        }
-
-        var lastFailure: (message: String, debug: APIKeyValidationDebugSnapshot?) =
-            ("Validation failed", nil)
-
-        for attempt in [ValidationAttempt.authEndpoint, .modelsEndpoint] {
-            do {
-                let result = try await runValidation(attempt, apiKey: trimmed)
-                if result.success {
-                    return .success(message: attempt.successMessage, debug: result.debug)
-                }
-                lastFailure = (result.message, result.debug)
-            } catch let attemptError as ValidationAttemptError {
-                logger.error(
-                    "\(attempt.logLabel, privacy: .public): \(attemptError.message, privacy: .public)"
-                )
-                lastFailure = (attemptError.message, attemptError.debug)
-            } catch {
-                logger.error(
-                    "\(attempt.logLabel, privacy: .public): \(error.localizedDescription, privacy: .public)"
-                )
-                let debug = debugSnapshot(
-                    url: baseURL.appendingPathComponent(attempt.path).absoluteString,
-                    method: "GET",
-                    errorDescription: error.localizedDescription
-                )
-                lastFailure = (error.localizedDescription, debug)
-            }
-        }
-
-        return .failure(message: lastFailure.message, debug: lastFailure.debug)
-    }
-
-    private func runValidation(_ attempt: ValidationAttempt, apiKey: String) async throws
-        -> ValidationAttemptResult {
-        let url = baseURL.appendingPathComponent(attempt.path)
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        applyBrandHeaders(&request)
-
-        let headers = request.allHTTPHeaderFields ?? [:]
-
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                let debug = debugSnapshot(
-                    url: url.absoluteString,
-                    method: request.httpMethod ?? "GET",
-                    requestHeaders: headers,
-                    errorDescription: OpenRouterClientError.invalidResponse.localizedDescription
-                )
-                throw ValidationAttemptError(
-                    debug: debug,
-                    message: OpenRouterClientError.invalidResponse.localizedDescription
-                )
-            }
-            return try evaluateValidationResponse(
-                attempt, url: url, requestHeaders: headers, http: http, data: data
-            )
-        } catch let attemptError as ValidationAttemptError {
-            throw attemptError
-        } catch {
-            let debug = debugSnapshot(
-                url: url.absoluteString,
-                method: request.httpMethod ?? "GET",
-                requestHeaders: headers,
-                errorDescription: error.localizedDescription
-            )
-            throw ValidationAttemptError(debug: debug, message: error.localizedDescription)
-        }
-    }
-
-    private func evaluateValidationResponse(
-        _ attempt: ValidationAttempt,
-        url: URL,
-        requestHeaders: [String: String],
-        http: HTTPURLResponse,
-        data: Data
-    ) throws -> ValidationAttemptResult {
-        let responseBody = string(from: data)
-        let isSuccessStatus: Bool
-        switch attempt {
-        case .authEndpoint: isSuccessStatus = http.statusCode == 200
-        case .modelsEndpoint: isSuccessStatus = (200..<300).contains(http.statusCode)
-        }
-
-        let debug = debugSnapshot(
-            url: url.absoluteString,
-            method: "GET",
-            requestHeaders: requestHeaders,
-            statusCode: http.statusCode,
-            responseHeaders: normalizedHeaders(http.allHeaderFields),
-            responseBody: responseBody,
-            errorDescription: isSuccessStatus ? nil : responseBody
-        )
-
-        if isSuccessStatus {
-            if attempt == .authEndpoint,
-               let payload = try? JSONDecoder().decode(OpenRouterValidationResponse.self, from: data),
-               let valid = payload.valid ?? payload.data?.valid {
-                return ValidationAttemptResult(
-                    success: valid,
-                    debug: debug,
-                    message: valid ? "Validated" : "Auth validation returned invalid"
-                )
-            }
-            return ValidationAttemptResult(success: true, debug: debug, message: "Validated")
-        }
-
-        if http.statusCode == 401 {
-            return ValidationAttemptResult(
-                success: false,
-                debug: debug,
-                message: attempt.unauthorizedMessage
-            )
-        }
-
-        throw ValidationAttemptError(
-            debug: debug,
-            message: "Unexpected status \(http.statusCode)"
-        )
-    }
-
-    private func debugSnapshot(
-        url: String,
-        method: String,
-        requestHeaders: [String: String] = [:],
-        statusCode: Int? = nil,
-        responseHeaders: [String: String] = [:],
-        responseBody: String? = nil,
-        errorDescription: String?
-    ) -> APIKeyValidationDebugSnapshot {
-        APIKeyValidationDebugSnapshot(
-            url: url,
-            method: method,
-            requestHeaders: requestHeaders,
-            requestBody: nil,
-            statusCode: statusCode,
-            responseHeaders: responseHeaders,
-            responseBody: responseBody,
-            errorDescription: errorDescription
-        )
-    }
-
-    // MARK: - Remote requests
-
-    private func streamingChatRequest(
-        apiKey: String,
-        systemPrompt: String?,
-        messages: [ChatMessage],
-        model: String,
-        temperature: Double
-    ) throws -> URLRequest {
-        let target = try ChatCompletionTarget.resolve(model)
-        var request = URLRequest(url: target.url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        if target.isOpenRouter { applyBrandHeaders(&request) }
-
-        let payload = OpenRouterChatRequest(
-            model: model,
-            temperature: temperature,
-            messages: buildMessages(systemPrompt: systemPrompt, messages: messages),
-            stream: true,
-            maxTokens: nil
-        )
-        request.httpBody = try JSONEncoder().encode(payload)
-        return request
-    }
-
-    /// The shared inline-audio contract, enriched with this actor's best-effort
-    /// duration so a transcript is never lost to unreadable container metadata.
-    private func performRemoteTranscription(
-        apiKey: String,
-        url: URL,
-        model: String,
-        language: String?
-    ) async throws -> TranscriptionResult {
-        let client = OpenRouterInlineAudioTranscriptionClient(
-            apiKey: apiKey,
-            session: session,
-            maximumInlineAudioBytes: maximumInlineAudioBytes,
-            branding: branding,
-            durationResolver: { audioURL in await self.bestEffortDuration(of: audioURL) }
-        )
-        return try await client.transcribeFile(at: url, model: model, language: language)
-    }
-
-    // MARK: - Local fallbacks
-
-    private func localTranscriptionFallback(url: URL, model: String) async
-        -> TranscriptionResult {
-        let duration = await bestEffortDuration(of: url)
-        let text = "Transcription placeholder for \(url.lastPathComponent)"
-        let segment = TranscriptionSegment(startTime: 0, endTime: duration, text: text)
-        return TranscriptionResult(
-            text: text,
-            segments: [segment],
-            confidence: nil,
-            duration: duration,
-            modelIdentifier: model,
-            cost: nil,
-            rawPayload: nil,
-            debugInfo: nil
-        )
-    }
-
-    private func performLocalChatFallback(systemPrompt: String?, messages: [ChatMessage])
-        -> ChatResponse {
-        let userText =
-            messages.last(where: { $0.role == .user })?.content
-            ?? messages.last?.content
-            ?? ""
-        let processed = heuristicPostProcess(text: userText)
-
-        var conversation: [ChatMessage] = []
-        if let systemPrompt {
-            conversation.append(ChatMessage(role: .system, content: systemPrompt))
-        }
-        conversation.append(contentsOf: messages)
-        conversation.append(ChatMessage(role: .assistant, content: processed))
-
-        return ChatResponse(
-            messages: conversation, finishReason: "fallback-local", cost: nil, rawPayload: nil)
-    }
-
-    private func heuristicPostProcess(text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return text }
-
-        let collapsed =
-            trimmed
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-
-        guard !collapsed.isEmpty else { return trimmed }
-
-        var result = collapsed
-        if let first = result.first {
-            let uppercaseFirst = String(first).uppercased()
-            result.replaceSubrange(result.startIndex...result.startIndex, with: uppercaseFirst)
-        }
-
-        if let last = result.last, !".!?".contains(last) {
-            result.append(".")
-        }
-
-        return result
-    }
-
     // MARK: - Helpers
-
-    private func buildMessages(systemPrompt: String?, messages: [ChatMessage])
-        -> [OpenRouterChatRequest.Message] {
-        OpenRouterChatRequest.messages(systemPrompt: systemPrompt, messages: messages)
-    }
-
-    private func string(from data: Data?) -> String? {
-        guard let data else { return nil }
-        if let text = String(data: data, encoding: .utf8) {
-            return text
-        }
-        return String(data: data, encoding: .ascii)
-    }
-
-    private func normalizedHeaders(_ headers: [AnyHashable: Any]) -> [String: String] {
-        var normalized: [String: String] = [:]
-        for (key, value) in headers {
-            guard let keyString = key as? String else { continue }
-            if let valueString = value as? String {
-                normalized[keyString] = valueString
-            } else {
-                normalized[keyString] = String(describing: value)
-            }
-        }
-        return normalized
-    }
-
-    /// Reads the recorded length of `audioURL`, and reports `0` when the local
-    /// file gives no usable value.
-    ///
-    /// Duration is enrichment that is added after the provider replies. A
-    /// container that AVFoundation cannot parse, or that holds no duration
-    /// metadata, must not discard a transcript the provider already made — the
-    /// audio is frequently a temporary file that is deleted immediately after,
-    /// so a thrown error loses the speech and the transcript together.
-    ///
-    /// `TranscriptionResult.duration` is a non-optional `TimeInterval`, and all
-    /// consumers already read `0` as "unknown": speech insights skip sessions
-    /// below the minimum length, and the history and recording lists show
-    /// `0:00`. Cost is separate metadata and stays `nil` here. The failure is
-    /// logged so a run with missing durations stays diagnosable.
-    private func bestEffortDuration(of audioURL: URL) async -> TimeInterval {
-        let asset = AVURLAsset(url: audioURL)
-        do {
-            let seconds = try await asset.load(.duration).seconds
-            guard seconds.isFinite, seconds > 0 else {
-                logger.warning(
-                    "Duration metadata for \(audioURL.lastPathComponent, privacy: .public) is not usable; reporting 0"
-                )
-                return 0
-            }
-            return seconds
-        } catch {
-            logger.warning(
-                """
-                Failed to load duration metadata for \
-                \(audioURL.lastPathComponent, privacy: .public): \
-                \(error.localizedDescription, privacy: .public). Keeping the transcript with duration 0
-                """
-            )
-            return 0
-        }
-    }
 
     private nonisolated func applyBrandHeaders(_ request: inout URLRequest) {
         branding.apply(to: &request)
-    }
-
-    private func allowsLocalFallback(for model: String) -> Bool {
-        if model.lowercased().hasPrefix("apple/") { return true }
-        if model.lowercased().hasPrefix("local/") { return true }
-        if model.lowercased() == "on-device" { return true }
-        return false
     }
 
     /// Pre-warms the TCP/TLS connection to OpenRouter by making a lightweight HEAD request.
@@ -711,15 +295,4 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
             )
         }
     }
-}
-
-// MARK: - Wire models
-
-private struct OpenRouterValidationResponse: Decodable {
-    struct ValidationData: Decodable {
-        let valid: Bool?
-    }
-
-    let valid: Bool?
-    let data: ValidationData?
 }

@@ -99,7 +99,9 @@ final class NativeCallbackContextTests: XCTestCase {
             .filter { $0.pathExtension == "swift" }
         return try files.map { file in
             let text = try String(contentsOf: file, encoding: .utf8)
-            return ("\(relativePath)/\(file.lastPathComponent)", text.components(separatedBy: "\n"))
+            // Windows checkouts use CRLF; "\r\n" is one newline Character.
+            let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+            return ("\(relativePath)/\(file.lastPathComponent)", lines)
         }
     }
 

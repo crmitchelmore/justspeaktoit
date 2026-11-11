@@ -23,8 +23,8 @@ def load(name, path):
     return module
 
 
-ICONS = load("desktop_icons", "scripts/generate-desktop-icons.py")
-STAGE = load("stage_linux", "scripts/stage-linux-desktop.py")
+ICONS = load("desktop_icons", "scripts/assets/generate-desktop-icons.py")
+STAGE = load("stage_linux", "scripts/linux/stage-linux-desktop.py")
 
 
 def ico_frames(data):
@@ -143,7 +143,7 @@ class DesktopIconTests(unittest.TestCase):
         self.assertIn("jsti::appIcon::refresh(window, HIWORD(wparam)", window)
         self.assertNotIn("IDI_APPLICATION", window)
         flatpak = (ROOT / f"packaging/linux/{ICONS.APP_ID}.yml").read_text()
-        self.assertIn("python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux", flatpak)
+        self.assertIn("python3 scripts/linux/stage-linux-desktop.py --binary .build/release/SpeakLinux", flatpak)
         self.assertIn("--output .build/linux-desktop-layout --prefix /app", flatpak)
         self.assertIn("cp -r .build/linux-desktop-layout/. /app/", flatpak)
         linux = (ROOT / "Sources/CLinuxSupport/LinuxAppIcon.c").read_text()

@@ -196,15 +196,15 @@ def execute(kind, directory):
 # Tuist (pinned, via scripts/install-tuist.sh) and SwiftPM binary targets
 # (Sentry, Sparkle, NemoTextProcessing) download from GitHub release assets,
 # which return 5xx (runs 41984795106, 42561777264, 42573814973). Generation and
-# package resolution retry with scripts/retry-network.sh backoff, and resolve
+# package resolution retry with scripts/ci/retry-network.sh backoff, and resolve
 # into the build's own DerivedData so the measured build reuses the artefacts.
 # The setup budget covers that worst-case backoff; it is not a test budget.
 def setup_command(directory):
     derived = shlex.quote(str(directory / "DerivedData"))
     return ["bash", "-c", "set -euo pipefail; "
             'PATH="$(scripts/install-tuist.sh):$PATH"; '
-            "scripts/retry-network.sh tuist generate --no-open; "
-            "scripts/retry-network.sh xcodebuild -resolvePackageDependencies "
+            "scripts/ci/retry-network.sh tuist generate --no-open; "
+            "scripts/ci/retry-network.sh xcodebuild -resolvePackageDependencies "
             "-workspace 'Just Speak to It.xcworkspace' -scheme SpeakApp "
             f"-derivedDataPath {derived} -skipPackagePluginValidation"]
 

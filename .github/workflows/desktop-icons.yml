@@ -14,9 +14,9 @@ on:
       - Sources/SpeakLinux/**
       - Package.swift
       - packaging/linux/**
-      - scripts/generate-icon.swift
-      - scripts/generate-desktop-icons.py
-      - scripts/stage-linux-desktop.py
+      - scripts/assets/generate-icon.swift
+      - scripts/assets/generate-desktop-icons.py
+      - scripts/linux/stage-linux-desktop.py
       - scripts/tests/test_desktop_icons.py
       - scripts/windows-package/**
       - scripts/windows-bundle/**
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify exact canonical exports and native resource wiring
         run: |
-          python3 scripts/generate-desktop-icons.py --check
+          python3 scripts/assets/generate-desktop-icons.py --check
           python3 -B -m unittest discover -s scripts/tests -p test_desktop_icons.py -v
       - name: Verify MSIX logos and portable bundle packaging
         run: |

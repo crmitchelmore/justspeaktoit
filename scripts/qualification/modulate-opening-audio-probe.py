@@ -17,7 +17,7 @@ import threading
 import time
 import urllib.parse
 
-_SPEC = importlib.util.spec_from_file_location("websocket_probe", Path(__file__).with_name("websocket-loopback-probe.py"))
+_SPEC = importlib.util.spec_from_file_location("websocket_probe", Path(__file__).resolve().parents[1] / "loopback" / "websocket-loopback-probe.py")
 WS = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(WS)
 FRAME_BYTES = 3200

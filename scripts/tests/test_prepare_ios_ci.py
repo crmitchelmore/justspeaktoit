@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location(
-    "prepare_ios_ci", Path(__file__).resolve().parents[1] / "prepare-ios-ci.py"
+    "prepare_ios_ci", Path(__file__).resolve().parents[1] / "ios/prepare-ios-ci.py"
 )
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)

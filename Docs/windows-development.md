@@ -212,7 +212,7 @@ In PowerShell from the repository root:
 
 ```powershell
 swift --version
-python scripts/verify-portable-core-boundary.py
+python scripts/ci/verify-portable-core-boundary.py
 swift build --configuration release --product SpeakWindows
 swift test --configuration release
 $bin = swift build --configuration release --show-bin-path

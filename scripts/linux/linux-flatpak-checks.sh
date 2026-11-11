@@ -93,7 +93,7 @@ flatpak run --command=sh "$app" -ec '
 # Inspect installed ELF files from the build host, using its existing readelf.
 # Nothing is added to the runtime and the normal sandbox receives no override.
 installed_root=$(flatpak info --user --show-location "$app")
-python3 "$(dirname "$0")/../packaging/linux/verify-flatpak-manifest.py" \
+python3 "$(dirname "$0")/../../packaging/linux/verify-flatpak-manifest.py" \
   --runtime-directory "$installed_root/files/lib/justspeaktoit"
 
 echo '== real on-device transcription, live folding, silence and cancellation'

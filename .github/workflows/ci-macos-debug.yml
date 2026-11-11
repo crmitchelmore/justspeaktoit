@@ -48,7 +48,7 @@ jobs:
         continue-on-error: true
         run: |
           status=0
-          python3 scripts/collect-macos-sample-contract.py || status=$?
+          python3 scripts/ci/collect-macos-sample-contract.py || status=$?
           if [ "$status" -eq 0 ] || [ "$status" -eq 3 ]; then
             echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
           fi
@@ -91,7 +91,7 @@ jobs:
       # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
       # release assets, which intermittently return 5xx; resolve with retries first.
       - name: Resolve Swift packages
-        run: scripts/retry-network.sh swift package resolve --disable-dependency-cache
+        run: scripts/ci/retry-network.sh swift package resolve --disable-dependency-cache
 
       - name: Build
         id: build
@@ -133,7 +133,7 @@ jobs:
         id: debug_crash_boundary
         # Diagnostics must not prevent the original test from running.
         continue-on-error: true
-        run: python3 scripts/collect-macos-xctest-crashes.py boundary
+        run: python3 scripts/ci/collect-macos-xctest-crashes.py boundary
 
       # Pull requests run only the test targets whose sources (or
       # dependencies) changed, minus targets the Linux portable job runs;
@@ -162,7 +162,7 @@ jobs:
           args=()
           if [ -n "$TEST_FILTER" ]; then args+=(--filter "$TEST_FILTER"); fi
           if [ -n "$TEST_SKIP" ]; then args+=(--skip "$TEST_SKIP"); fi
-          python3 scripts/with-test-keychain.py python3 scripts/retry-xctest-crash.py swift test --enable-code-coverage --disable-dependency-cache "${args[@]}"
+          python3 scripts/with-test-keychain.py python3 scripts/ci/retry-xctest-crash.py swift test --enable-code-coverage --disable-dependency-cache "${args[@]}"
 
       # Tooling tests that need Apple tools (Keychain, xcrun, Apple Swift)
       # skip on the Ubuntu Lint job; batches and main run them here.
@@ -177,7 +177,7 @@ jobs:
           JSTI_XCTEST_BOUNDARY_OUTCOME: ${{ steps.debug_crash_boundary.outcome }}
         run: |
           status=0
-          python3 scripts/collect-macos-xctest-crashes.py collect || status=$?
+          python3 scripts/ci/collect-macos-xctest-crashes.py collect || status=$?
           if [ "$status" -eq 0 ] || [ "$status" -eq 3 ]; then
             echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
           fi
@@ -307,11 +307,11 @@ jobs:
       # runtime keeps its original 480s budget, independent of build time.
       - name: Build core journey test products
         timeout-minutes: 17
-        run: scripts/run-core-journey-e2e.sh --phase build
+        run: scripts/core-journey/run-core-journey-e2e.sh --phase build
 
       - name: Run prepared core journey gate
         timeout-minutes: 10
-        run: python3 scripts/with-test-keychain.py bash scripts/run-core-journey-e2e.sh --phase test
+        run: python3 scripts/with-test-keychain.py bash scripts/core-journey/run-core-journey-e2e.sh --phase test
 
       - name: Upload stage diagnostics
         if: always()

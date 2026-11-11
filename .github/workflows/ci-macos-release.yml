@@ -37,7 +37,7 @@ jobs:
       # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
       # release assets, which intermittently return 5xx; resolve with retries first.
       - name: Resolve Swift packages
-        run: scripts/retry-network.sh swift package resolve
+        run: scripts/ci/retry-network.sh swift package resolve
 
       - name: Build (Release)
         run: swift build -c release
@@ -79,7 +79,7 @@ jobs:
       # release assets, which return 5xx (run 42573814973). Resolve with retries
       # first so the diagnosis reuses the shared SwiftPM artefact cache.
       - name: Resolve Swift packages
-        run: scripts/retry-network.sh swift package resolve
+        run: scripts/ci/retry-network.sh swift package resolve
 
       # On a push the squash-merge subjects carry each PR title and its '!'
       # marker; any breaking subject in the batch declares the break.
@@ -94,4 +94,4 @@ jobs:
           if [ "$EVENT_NAME" != "pull_request" ] || [[ "$HEAD_REF" == merge-batch/* ]]; then
             PR_TITLE=$(git log --format=%s "$BASELINE..HEAD" | grep -E '^[a-z]+(\([^)]*\))?!:' | head -n 1 || true)
           fi
-          PR_TITLE="$PR_TITLE" bash scripts/check-api-compatibility.sh "$BASELINE"
+          PR_TITLE="$PR_TITLE" bash scripts/ci/check-api-compatibility.sh "$BASELINE"

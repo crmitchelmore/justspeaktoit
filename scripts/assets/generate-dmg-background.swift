@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
 // Generates DMG installer background with drag-to-Applications visual
-// Run with: swift scripts/generate-dmg-background.swift
+// Run with: swift scripts/assets/generate-dmg-background.swift
 
 import AppKit
 

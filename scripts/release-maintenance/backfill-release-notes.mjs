@@ -8,7 +8,7 @@ import {
     DEFAULT_MODEL,
     DEFAULT_REASONING_EFFORT,
     generateReleaseNotes,
-} from "./release-notes-lib.mjs";
+} from "../release-notes-lib.mjs";
 
 const hasFlag = (flag) => process.argv.includes(flag);
 const valueAfter = (name) => {

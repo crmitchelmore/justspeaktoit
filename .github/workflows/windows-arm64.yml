@@ -12,7 +12,7 @@ on:
       - .gitattributes
       - Package.swift
       - Resources/Desktop/**
-      - scripts/generate-desktop-icons.py
+      - scripts/assets/generate-desktop-icons.py
       - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
@@ -37,8 +37,8 @@ on:
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
-      - scripts/verify-portable-core-boundary.py
-      - scripts/websocket-loopback-probe.py
+      - scripts/ci/verify-portable-core-boundary.py
+      - scripts/loopback/websocket-loopback-probe.py
       - scripts/windows-bundle/**
       - scripts/windows-cross/**
       - scripts/windows-local-runtime/**
@@ -105,7 +105,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify portable source boundary
-        run: python scripts/verify-portable-core-boundary.py
+        run: python scripts/ci/verify-portable-core-boundary.py
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -185,7 +185,7 @@ jobs:
           $probe = $null
           try {
             $server = Start-Process -FilePath (Get-Command python).Source -PassThru -NoNewWindow `
-              -ArgumentList @('-u', 'scripts/websocket-loopback-probe.py', '--ready-file', $readyPath, '--max-seconds', '180') `
+              -ArgumentList @('-u', 'scripts/loopback/websocket-loopback-probe.py', '--ready-file', $readyPath, '--max-seconds', '180') `
               -RedirectStandardOutput windows-arm64-websocket-server.log -RedirectStandardError windows-arm64-websocket-server-errors.log
             $deadline = [DateTime]::UtcNow.AddSeconds(10)
             while (-not (Test-Path $readyPath)) {

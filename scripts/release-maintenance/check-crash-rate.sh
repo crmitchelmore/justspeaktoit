@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Check measured Sentry session health for an exact release identity.
-# Usage: ./scripts/check-crash-rate.sh 'justspeaktoit-mac@<version>+<build>'
+# Usage: ./scripts/release-maintenance/check-crash-rate.sh 'justspeaktoit-mac@<version>+<build>'
 # Exit 0: measured pass; 1: below threshold; 2: unavailable/invalid evidence.
 # This standalone check is not automatically run by the release workflow.
 set -euo pipefail

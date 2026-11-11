@@ -8,7 +8,7 @@ from unittest import mock
 
 
 SPEC = importlib.util.spec_from_file_location(
-    "owned_simulator", Path(__file__).resolve().parents[1] / "owned-ios-ci-simulator.py")
+    "owned_simulator", Path(__file__).resolve().parents[1] / "ios/owned-ios-ci-simulator.py")
 owned = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(owned)
 OLD = "10000000-0000-0000-0000-000000000001"

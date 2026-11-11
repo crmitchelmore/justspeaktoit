@@ -91,9 +91,9 @@ application source alone does not change either distribution channel.
   this tests self-installation, not migration from every previously shipped app.
   GUI relaunch observation remains advisory on headless CI; replacement is a
   required, independently observed condition.
-- The release workflow does not invoke `scripts/check-crash-rate.sh`. Run it
+- The release workflow does not invoke `scripts/release-maintenance/check-crash-rate.sh`. Run it
   separately with the exact Sentry identity, for example
-  `scripts/check-crash-rate.sh 'justspeaktoit-mac@2.30.1+202609051234'`, and the
+  `scripts/release-maintenance/check-crash-rate.sh 'justspeaktoit-mac@2.30.1+202609051234'`, and the
   monitoring token. It queries EU release health for the configured project and
   exits 0 only with measured sessions meeting the threshold (99% by default).
   Exit 1 means a below-threshold measurement; exit 2 means missing or invalid

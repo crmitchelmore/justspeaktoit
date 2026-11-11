@@ -10,7 +10,7 @@ import {
     generateReleaseNotes,
     markdownToHTML,
     releaseTrack,
-} from "./release-notes-lib.mjs";
+} from "../release-notes-lib.mjs";
 
 const valueAfter = (name) => {
     const index = process.argv.indexOf(name);

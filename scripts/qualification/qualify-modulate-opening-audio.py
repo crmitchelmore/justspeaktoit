@@ -26,7 +26,7 @@ REQUIRED_CASES = (
     "testFailedHeldUpgradeReportsTransportFailureAndClearsPendingAudioBeforeRestart",
     "testStopDuringHeldUpgradeSeparatesRestartFromLateOldUpgrade",
 )
-_SPEC = importlib.util.spec_from_file_location("core_journey_gate", Path(__file__).with_name("run-core-journey-e2e.py"))
+_SPEC = importlib.util.spec_from_file_location("core_journey_gate", Path(__file__).resolve().parents[1] / "core-journey" / "run-core-journey-e2e.py")
 COVERAGE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(COVERAGE)
 _SOURCE_SPEC = importlib.util.spec_from_file_location(

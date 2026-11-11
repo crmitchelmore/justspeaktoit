@@ -7,7 +7,7 @@ output shows `exited with unexpected signal code` and no test case reported
 a failure, the command is re-run once and the crashing case is annotated.
 A crash that repeats, or any ordinary test failure, still fails the step.
 
-Usage: scripts/retry-xctest-crash.py <command> [arguments...]
+Usage: scripts/ci/retry-xctest-crash.py <command> [arguments...]
 """
 
 from __future__ import annotations

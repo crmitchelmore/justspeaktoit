@@ -8,7 +8,7 @@ import subprocess
 import struct
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 APP_ID = "com.justspeaktoit.JustSpeakToIt"
 sys.path.insert(0, str(ROOT / "scripts" / "local-llm-runtime"))
 import local_llm_package

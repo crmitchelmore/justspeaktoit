@@ -20,7 +20,7 @@ fi
 scheme="$1"
 destination="$2"
 workspace="Just Speak to It.xcworkspace"
-retry="$(dirname "$0")/../retry-network.sh"
+retry="$(dirname "$0")/retry-network.sh"
 
 if [[ $generate -eq 1 ]]; then
     "$retry" tuist generate --no-open

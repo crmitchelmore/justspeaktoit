@@ -10,7 +10,7 @@ on:
       - .gitattributes
       - Package.swift
       - Resources/Desktop/**
-      - scripts/generate-desktop-icons.py
+      - scripts/assets/generate-desktop-icons.py
       - scripts/tests/test_desktop_icons.py
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**

@@ -9,7 +9,7 @@
 # workflow remains the authority.
 set -euo pipefail
 
-repo="$(cd "$(dirname "$0")/.." && pwd)"
+repo="$(cd "$(dirname "$0")/../.." && pwd)"
 work="${SPEAK_WINDOWS_TYPECHECK_DIR:-${TMPDIR:-/tmp}/speak-windows-typecheck}"
 mkdir -p "$work"
 rm -rf "$work/Sources" "$work/Tests" "$work/Resources" "$work/Package.swift"

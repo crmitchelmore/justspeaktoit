@@ -6,7 +6,7 @@ import pathlib
 import struct
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
     "desktop_icon_images", ROOT / "scripts/windows-package/windows_msix.py")
 IMAGES = importlib.util.module_from_spec(SPEC)
@@ -120,7 +120,7 @@ def main():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
     if stale:
-        print("Stale desktop icons; run scripts/generate-desktop-icons.py:\n" + "\n".join(stale), file=sys.stderr)
+        print("Stale desktop icons; run scripts/assets/generate-desktop-icons.py:\n" + "\n".join(stale), file=sys.stderr)
         return 1
     print("Canonical desktop icon exports " + ("verified." if args.check else "generated."))
     return 0

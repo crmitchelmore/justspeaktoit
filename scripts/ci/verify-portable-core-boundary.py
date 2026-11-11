@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import sys
 
-root = Path(__file__).resolve().parents[1]
+root = Path(__file__).resolve().parents[2]
 manifest = (root / "Package.swift").read_text(encoding="utf-8")
 
 

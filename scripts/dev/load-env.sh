@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Load environment variables from .env file
-# Usage: source scripts/load-env.sh
+# Usage: source scripts/dev/load-env.sh
 
 set -a  # automatically export all variables
 if [ -f .env ]; then

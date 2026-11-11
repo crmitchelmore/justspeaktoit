@@ -3,7 +3,7 @@
 # install) with bounded retries. GitHub release assets used by SwiftPM binary
 # targets and Homebrew casks intermittently return 5xx on hosted runners.
 #
-# Usage: scripts/retry-network.sh <command> [arguments...]
+# Usage: scripts/ci/retry-network.sh <command> [arguments...]
 # RETRY_NETWORK_DELAYS overrides the space-separated backoff (seconds).
 set -uo pipefail
 

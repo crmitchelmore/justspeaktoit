@@ -148,7 +148,7 @@ for (appearance, name) in [(Appearance.standard, "LaunchMark.svg"), (.dark, "Lau
 }
 let desktopIcons = Process()
 desktopIcons.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-desktopIcons.arguments = ["python3", "scripts/generate-desktop-icons.py"]
+desktopIcons.arguments = ["python3", "scripts/assets/generate-desktop-icons.py"]
 try desktopIcons.run()
 desktopIcons.waitUntilExit()
 guard desktopIcons.terminationStatus == 0 else { fatalError("desktop icon export failed") }

@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location(
-    'sample_contract', Path(__file__).resolve().parents[1] / 'collect-macos-sample-contract.py')
+    'sample_contract', Path(__file__).resolve().parents[1] / 'ci/collect-macos-sample-contract.py')
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 

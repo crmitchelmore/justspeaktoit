@@ -40,11 +40,11 @@ jobs:
 
       - name: Prepare Tuist and macOS project
         timeout-minutes: 11
-        run: python3 scripts/run-core-journey-stages.py ui --phase setup
+        run: python3 scripts/core-journey/run-core-journey-stages.py ui --phase setup
 
       - name: Build launched fixture test products
         timeout-minutes: 17
-        run: python3 scripts/run-core-journey-stages.py ui --phase build
+        run: python3 scripts/core-journey/run-core-journey-stages.py ui --phase build
 
       # Iteration 1 is the cold run on this fresh VM; 2-4 reuse the same host.
       # Every iteration runs once under the unchanged 600s budget and is
@@ -61,7 +61,7 @@ jobs:
           failed=0
           for iteration in $(seq 1 "$ITERATIONS"); do
             started=$(date +%s)
-            python3 scripts/run-core-journey-stages.py ui --phase test
+            python3 scripts/core-journey/run-core-journey-stages.py ui --phase test
             code=$?
             seconds=$(( $(date +%s) - started ))
             out="$root/iterations/$iteration"
@@ -121,7 +121,7 @@ jobs:
       - name: Decide qualification
         run: |
           set -o pipefail
-          python3 scripts/summarise-core-journey-qualification.py receipts qualification foundation,p0 \
+          python3 scripts/core-journey/summarise-core-journey-qualification.py receipts qualification foundation,p0 \
             | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload qualification record
         if: always()

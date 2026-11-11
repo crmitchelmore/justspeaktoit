@@ -7,7 +7,7 @@ import SpeakCore
 import SpeakWindowsPlatform
 
 /// Drives the shared Gladia live client end to end against the bounded
-/// loopback peer (`scripts/websocket-loopback-probe.py`): the platform's HTTP
+/// loopback peer (`scripts/loopback/websocket-loopback-probe.py`): the platform's HTTP
 /// session request, then the production WinHTTP socket. No provider account,
 /// credential or external network is involved; the key is a synthetic marker.
 final class GladiaWinHTTPRuntimeTests: XCTestCase {

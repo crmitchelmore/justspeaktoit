@@ -156,7 +156,7 @@ modules:
       # Share the SDK runtime between GUI and CLI instead of statically embedding it twice.
       # The stager copies only DT_NEEDED libraries and sets relative runtime search paths.
       # Flatpak keeps separate debug symbols during its normal cleanup phase.
-      - python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux
+      - python3 scripts/linux/stage-linux-desktop.py --binary .build/release/SpeakLinux
         --output .build/linux-desktop-layout --prefix /app --cli .build/release/speak
         --swift-runtime "$(swift -print-target-info | python3 -c 'import json,sys; print(json.load(sys.stdin)["paths"]["runtimeLibraryPaths"][0])')"
       - cp -r .build/linux-desktop-layout/. /app/

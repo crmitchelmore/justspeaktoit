@@ -10,7 +10,7 @@ import sys
 
 
 WORKFLOW = '.github/workflows/linux-flatpak.yml'
-VERIFY = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'packaging/linux/verify_build_revision.py'))
+VERIFY = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'packaging/linux/verify_build_revision.py'))
 
 
 def source_metadata(run, sha, repo, run_id, harness_sha):

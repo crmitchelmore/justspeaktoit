@@ -7,11 +7,11 @@ on:
       - .gitattributes
       - Package.swift
       - Resources/AppIcon.iconset/**
-      - scripts/generate-desktop-icons.py
-      - scripts/stage-linux-desktop.py
+      - scripts/assets/generate-desktop-icons.py
+      - scripts/linux/stage-linux-desktop.py
       - scripts/tests/test_desktop_icons.py
       - scripts/tests/test_linux_automation_staging.py
-      - scripts/check-linux-accessibility.py
+      - scripts/accessibility/check-linux-accessibility.py
       - scripts/tests/test_linux_accessibility.py
       - Sources/CLinuxAutomation/**
       - Sources/SpeakLinuxAutomation/**
@@ -53,8 +53,8 @@ on:
       - Sources/CWindowsSupport/include/VoiceAudioCodec.h
       - Sources/CWindowsSupport/include/VoiceCredentials.h
       - Sources/CWindowsSupport/include/LocalCleanup.h
-      - scripts/typecheck-windows-swift.sh
-      - scripts/verify-portable-core-boundary.py
+      - scripts/ci/typecheck-windows-swift.sh
+      - scripts/ci/verify-portable-core-boundary.py
       - packaging/linux/**
       - .github/workflows/linux.yml
       - .github/workflows/linux-local-runtime.yml
@@ -120,12 +120,12 @@ jobs:
             fonts-cantarell adwaita-icon-theme
 
       - name: Verify portable source boundary
-        run: python3 scripts/verify-portable-core-boundary.py
+        run: python3 scripts/ci/verify-portable-core-boundary.py
 
       - name: Check GTK accessibility conventions
         run: |
           python3 -B -m unittest discover -s scripts/tests -p test_linux_accessibility.py
-          python3 scripts/check-linux-accessibility.py
+          python3 scripts/accessibility/check-linux-accessibility.py
 
       # The pinned whisper.cpp runtime, its JFK sample and a cached model
       # folder, so the on-device tests run the real runtime instead of skipping.
@@ -192,7 +192,7 @@ jobs:
       - name: Type-check the Windows Swift targets against the shared host
         env:
           SPEAK_LINUX_TARGET: ""
-        run: scripts/typecheck-windows-swift.sh --jobs 4
+        run: scripts/ci/typecheck-windows-swift.sh --jobs 4
 
       - name: Upload window snapshot
         if: always()

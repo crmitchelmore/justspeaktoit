@@ -119,12 +119,6 @@ int jsti_audio_playback_destroy(JSTIAudioPlayback *playback, char *error, size_t
  * reinterpreted as a missing endpoint. */
 int jsti_audio_playback_endpoint_available(char *error, size_t error_capacity);
 
-/* Deterministic native checks: Unicode, 16/24 kHz frame boundaries, silence,
- * fixed queue capacity, writer drain, capture creation and sample-rate
- * validation, invalid insertion targets. Does not use microphone, clipboard or
- * real credentials. */
-int jsti_native_self_test(char *error, size_t error_capacity);
-
 #ifdef __cplusplus
 }
 #endif

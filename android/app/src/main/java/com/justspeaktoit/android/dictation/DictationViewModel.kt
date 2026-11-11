@@ -11,6 +11,7 @@ import com.justspeaktoit.android.cloud.CloudClient
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.RequestReleasedException
 import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
 import com.justspeaktoit.android.cloud.WavRecorder
@@ -272,6 +273,8 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                         cloud.transcribe(model, key, file, language, call, format)
                     },
                 )
+            } catch (e: RequestReleasedException) {
+                DictationEvent.Cancelled
             } catch (e: CloudException) {
                 noteKeyFailure(model.provider, e.failure)
                 DictationEvent.Error(e.failure)
@@ -584,7 +587,8 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     private fun finishCloud() {
         val rec = recorder ?: return
         val file = recording ?: return
-        val model = _state.value.cloudModel
+        // Settings stays open during a session, so use the model the recording started with.
+        val model = sessionModelId?.let(CloudCatalog::transcriptionModel) ?: _state.value.cloudModel
         val language = _state.value.languageTag
         work = viewModelScope.launch {
             val event = try {
@@ -607,6 +611,8 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                         }
                     }
                 }
+            } catch (e: RequestReleasedException) {
+                DictationEvent.Cancelled
             } catch (e: CloudException) {
                 noteKeyFailure(model.provider, e.failure)
                 DictationEvent.Error(e.failure)
@@ -727,6 +733,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                         )
                     }
                 }
+            } catch (e: RequestReleasedException) {
+                // The user stopped it, so the entry stays as it was.
+                entry
             } catch (e: CloudException) {
                 entry.copy(failure = e.failure.name)
             } catch (e: GeneralSecurityException) {
@@ -794,7 +803,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             reason = "Waiting for ${provider.displayName} to answer",
             owner = "DictationViewModel",
             releaseTitle = "Cancel request",
-            release = call::cancel,
+            release = call::release,
         )
         return try {
             bounded(deadlineMs, DictationFailure.NetworkTimeout, abort = call::cancel) { block(call) }
@@ -842,6 +851,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     private fun runCleanup(done: DictationState.Done) {
         _state.update { it.copy(cleanup = CleanupStatus.Running) }
         work = viewModelScope.launch {
+            var released = false
             val cleaned = try {
                 val key = withContext(Dispatchers.IO) { secrets.read(CloudProvider.OpenRouter.credentialId) }
                 key?.let {
@@ -849,6 +859,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                         cloud.cleanup(it, done.transcript, call)
                     }
                 }
+            } catch (e: RequestReleasedException) {
+                released = true
+                null
             } catch (e: CloudException) {
                 null
             } catch (e: GeneralSecurityException) {
@@ -858,7 +871,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             }
             if (_state.value.dictation != done) return@launch
             _state.update {
-                if (cleaned.isNullOrBlank()) {
+                if (released) {
+                    it.copy(cleanup = CleanupStatus.None)
+                } else if (cleaned.isNullOrBlank()) {
                     it.copy(cleanup = CleanupStatus.Failed)
                 } else {
                     it.copy(

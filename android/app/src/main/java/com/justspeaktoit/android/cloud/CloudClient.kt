@@ -21,11 +21,24 @@ class CallHandle {
         if (cancelled) conn.disconnect()
     }
 
+    /** Set when the user let the request go (from Settings), as opposed to a timeout or teardown. */
+    @Volatile var released = false
+        private set
+
     fun cancel() {
         cancelled = true
         connection?.disconnect()
     }
+
+    /** Cancels on the user's behalf; the blocked call then throws [RequestReleasedException]. */
+    fun release() {
+        released = true
+        cancel()
+    }
 }
+
+/** A request the user stopped; callers treat it as a cancel, not a failure. */
+class RequestReleasedException(cause: Throwable? = null) : Exception("Request released", cause)
 
 /**
  * Blocking HTTPS client for OpenAI-compatible APIs; call from a background dispatcher. Keys are
@@ -72,7 +85,7 @@ class CloudClient(
         return CloudWire.cleanupText(body)
     }
 
-    private fun post(
+    internal fun post(
         url: String,
         apiKey: String,
         contentType: String,
@@ -97,6 +110,7 @@ class CloudClient(
             }
             return conn.inputStream.bufferedReader().use { it.readText() }
         } catch (e: IOException) {
+            if (call.released) throw RequestReleasedException(e)
             throw CloudException(CloudWire.failureForIo(e), "Network error", e)
         } finally {
             conn.disconnect()

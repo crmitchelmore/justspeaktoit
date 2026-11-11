@@ -5,26 +5,35 @@ import androidx.core.content.edit
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.history.Retention
 
+/** The non-secret choices the dictation screen reads and writes; [AppPreferences] in production. */
+interface DictationPreferences {
+    var chosenMode: RecognitionMode?
+    var cloudModelId: String?
+    var cleanupEnabled: Boolean
+    var retention: Retention
+    var keepAudioOnCancel: Boolean
+}
+
 /** Non-secret choices. Secrets live in the Keystore-backed `SecretStore`, never here. */
-class AppPreferences(context: Context) {
+class AppPreferences(context: Context) : DictationPreferences {
     private val prefs = context.applicationContext.getSharedPreferences("jsti_prefs", Context.MODE_PRIVATE)
 
-    var chosenMode: RecognitionMode?
+    override var chosenMode: RecognitionMode?
         get() {
             val name = prefs.getString(KEY_MODE, null) ?: return null
             return RecognitionMode.entries.firstOrNull { it.name == name }
         }
         set(value) = prefs.edit { if (value == null) remove(KEY_MODE) else putString(KEY_MODE, value.name) }
 
-    var cloudModelId: String?
+    override var cloudModelId: String?
         get() = prefs.getString(KEY_CLOUD_MODEL, null)
         set(value) = prefs.edit { putString(KEY_CLOUD_MODEL, value) }
 
-    var cleanupEnabled: Boolean
+    override var cleanupEnabled: Boolean
         get() = prefs.getBoolean(KEY_CLEANUP, false)
         set(value) = prefs.edit { putBoolean(KEY_CLEANUP, value) }
 
-    var retention: Retention
+    override var retention: Retention
         get() {
             val name = prefs.getString(KEY_RETENTION, null)
             return Retention.entries.firstOrNull { it.name == name } ?: Retention.Month
@@ -35,7 +44,7 @@ class AppPreferences(context: Context) {
      * Cloud mode only: on-device and speech-service recognition never give the app an audio file,
      * so there is nothing to keep when they are cancelled.
      */
-    var keepAudioOnCancel: Boolean
+    override var keepAudioOnCancel: Boolean
         get() = prefs.getBoolean(KEY_KEEP_AUDIO_ON_CANCEL, DEFAULT_KEEP_AUDIO_ON_CANCEL)
         set(value) = prefs.edit { putBoolean(KEY_KEEP_AUDIO_ON_CANCEL, value) }
 

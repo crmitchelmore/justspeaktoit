@@ -5,8 +5,11 @@ import FoundationNetworking
 
 /// Velma streaming: WAV-prefixed binary PCM, an empty text end frame, then
 /// `done`. Closing without `done` is a failure, even if utterances were received.
+/// Its snapshot carries the speaker-labelled text, timed segments, `done`
+/// duration and raw utterances; each utterance is one announced boundary.
 /// Contract: https://docs.modulate.ai/get-started/stt (2026-10-13).
-public final class ModulateLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+public final class ModulateLiveClient: FinalizingStreamingTranscriptionClient, StreamingTranscriptSnapshotProviding,
+    UtteranceBoundaryStreamingClient, @unchecked Sendable {
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
     public let finishFlushesBufferedAudio = true
     public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
@@ -15,6 +18,7 @@ public final class ModulateLiveClient: FinalizingStreamingTranscriptionClient, @
     private let apiKey: String
     private let options: ModulateLiveOptions
     private let lifecycle: StreamingProviderSession
+    private let transcript: ModulateLiveTranscript
     var preroll: StreamingAudioPreroll { lifecycle.preroll }
 
     public convenience init(apiKey: String, sampleRate: Int = 16_000, session: URLSession = .shared) {
@@ -40,6 +44,8 @@ public final class ModulateLiveClient: FinalizingStreamingTranscriptionClient, @
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.apiKey = key
         self.options = options
+        let transcript = ModulateLiveTranscript(options: options)
+        self.transcript = transcript
         var configuration = StreamingProviderSession.Configuration(
             provider: "Modulate", sampleRate: sampleRate, shape: .standaloneSegments, finishBudget: 5,
             request: {
@@ -57,7 +63,11 @@ public final class ModulateLiveClient: FinalizingStreamingTranscriptionClient, @
                 return .binary(payload)
             },
             end: .text(""),
-            decode: Self.events
+            decode: { text in
+                let events = Self.events(text)
+                transcript.record(text, events: events)
+                return events
+            }
         )
         configuration.cumulativeSegmentUpdates = true
         configuration.unsolicitedCompletionFails = true
@@ -66,8 +76,21 @@ public final class ModulateLiveClient: FinalizingStreamingTranscriptionClient, @
         )
     }
 
+    public var onUtteranceBoundary: ((String) -> Void)? {
+        get { transcript.onBoundary }
+        set { transcript.onBoundary = newValue }
+    }
+
     public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
-        lifecycle.start(onTranscript: onTranscript, onError: onError)
+        transcript.reset()
+        lifecycle.start(onTranscript: { [transcript] text, isFinal in
+            onTranscript(text, isFinal)
+            transcript.announceBoundaries()
+        }, onError: onError)
+    }
+
+    public func transcriptSnapshot(captureDuration: TimeInterval) -> StreamingTranscriptSnapshot {
+        transcript.snapshot(captureDuration: captureDuration)
     }
     public func sendAudio(_ audioData: Data) { lifecycle.sendAudio(audioData) }
     public func stop() { lifecycle.stop() }

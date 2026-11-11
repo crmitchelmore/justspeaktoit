@@ -68,12 +68,13 @@ final class AudioPlaybackController: NSObject, ObservableObject, RepeatingTimerT
       state = .paused
       timer?.invalidate()
     case .paused:
-      player.play()
+      playback.play()
       state = .playing
       startTimer()
     case .idle:
       player.currentTime = 0
-      player.play()
+      // A new play, so its end is reported even when replaying this player.
+      playback.play()
       state = .playing
       startTimer()
     }

@@ -164,7 +164,7 @@ final class TextToSpeechManager: ObservableObject {
       }
       playback.adopt(player)
       player.prepareToPlay()
-      guard player.play() else { throw TTSError.audioPlaybackFailure }
+      guard playback.play() else { throw TTSError.audioPlaybackFailure }
       isPlaying = true
       monitorPlayback(player)
     } catch {
@@ -207,7 +207,7 @@ final class TextToSpeechManager: ObservableObject {
       return
     }
     guard let audioPlayer else { return }
-    isPlaying = audioPlayer.play()
+    isPlaying = playback.play()
     if isPlaying { monitorPlayback(audioPlayer) }
   }
 

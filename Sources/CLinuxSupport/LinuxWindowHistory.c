@@ -1,6 +1,6 @@
 /* History rows, History management, audio cleanup and migration restore confirmations. */
 #include "LinuxWindowInternal.h"
-#include "LinuxWindowHistoryPage.h"
+#include "LinuxWindowHistoryState.h"
 #include "LinuxWindowStoragePage.h"
 
 static HistoryPage history_state;

@@ -6,7 +6,7 @@
 #include "../CLinuxSupport/LinuxWindowAboutPage.h"
 #include "../CLinuxSupport/LinuxWindowDashboardPage.h"
 #include "../CLinuxSupport/LinuxWindowGeneralPage.h"
-#include "../CLinuxSupport/LinuxWindowHistoryPage.h"
+#include "../CLinuxSupport/LinuxWindowHistoryState.h"
 #include "../CLinuxSupport/LinuxWindowModelsPage.h"
 #include "../CLinuxSupport/LinuxWindowOutputPage.h"
 #include "../CLinuxSupport/LinuxWindowPolishPage.h"
@@ -678,6 +678,17 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (history_page()->history_ids->len != 2 || g_strcmp0(history_page()->selected_id, first) != 0) {
         return fail(error, capacity, "History rows or selection were not applied");
     }
+    /* Other units see the selection and presentation only through LinuxWindowHistoryPage.h. */
+    HistoryPage saved = *history_page();
+    gchar *saved_presented = g_strdup(saved.presented_id);
+    history_mark_presented(first, 0, TRUE);
+    gboolean presented = history_is_selected(first) && !history_is_selected(second) &&
+        history_selection_presented() && history_presented_switchable() && history_presented_variant() == 0;
+    history_forget_presentation();
+    presented = presented && !history_selection_presented() && g_strcmp0(history_selected_id(), first) == 0;
+    history_mark_presented(saved_presented, saved.presented_variant, saved.presented_switchable);
+    g_free(saved_presented);
+    if (!presented) return fail(error, capacity, "the History selection functions disagree with the page state");
     gchar *all_ids = g_strdup_printf("%s\n%s", first, second);
     if (jsti_window_set_history_management(NULL) != -1 || jsti_window_set_history_management("\xff") != -1) {
         g_free(all_ids);

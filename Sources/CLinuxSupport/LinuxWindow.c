@@ -83,7 +83,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     emit(JSTI_EVENT_CLOSING, "", 0);
     close_posts();
     if (models_page()->model_catalog != NULL) { models_free(models_page()->model_catalog); models_page()->model_catalog = NULL; }
-    g_clear_pointer(&history_page()->all_history_ids, g_free);
+    history_page_close();
     return FALSE;
 }
 
@@ -142,7 +142,7 @@ static void build_window(void) {
     ui.title = ADW_WINDOW_TITLE(adw_window_title_new("Dashboard", ""));
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), GTK_WIDGET(ui.title));
     GtkButton *import_button = GTK_BUTTON(gtk_button_new_from_icon_name("document-open-symbolic"));
-    history_page()->import_button = import_button;
+    history_set_import_button(import_button);
     gtk_widget_set_tooltip_text(GTK_WIDGET(import_button), "Import audio…");
     gtk_accessible_update_property(GTK_ACCESSIBLE(import_button), GTK_ACCESSIBLE_PROPERTY_LABEL, "Import audio", -1);
     g_signal_connect(import_button, "clicked", G_CALLBACK(on_import), NULL);
@@ -281,7 +281,7 @@ int32_t jsti_window_run(
     ui.callback = callback;
     ui.context = context;
     ui.flags = flags;
-    history_page()->presented_variant = -1;
+    history_page_start();
     initial_models = (RunModels){ .rows = models, .count = model_count, .selected = selected_model };
     GSimpleAction *toggle = g_simple_action_new("toggle-recording", NULL);
     g_signal_connect(toggle, "activate", G_CALLBACK(on_toggle_action), NULL);

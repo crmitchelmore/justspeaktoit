@@ -1,7 +1,6 @@
-/* Page builders: shared page scaffolding, Dashboard and History. */
+/* Page builders: shared page scaffolding and the Dashboard. */
 #include "LinuxWindowInternal.h"
 #include "LinuxWindowDashboardPage.h"
-#include "LinuxWindowHistoryPage.h"
 
 static DashboardPage dashboard_state;
 DashboardPage *dashboard_page(void) { return &dashboard_state; }
@@ -57,7 +56,7 @@ void add_page(gint32 page, GtkWidget *widget) {
     gtk_stack_add_named(ui.pages, widget, page_info[page].name);
 }
 
-static GtkWidget *transcript_view(GtkTextBuffer *buffer, int height) {
+GtkWidget *transcript_view(GtkTextBuffer *buffer, int height) {
     GtkWidget *view = buffer != NULL ? gtk_text_view_new_with_buffer(buffer) : gtk_text_view_new();
     gtk_text_view_set_editable(GTK_TEXT_VIEW(view), FALSE);
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view), GTK_WRAP_WORD_CHAR);
@@ -204,167 +203,5 @@ GtkWidget *build_dashboard(GtkTextBuffer *buffer) {
     gtk_box_append(GTK_BOX(setup_body), setup_tile("input-keyboard-symbolic", "Keyboard shortcut", &dashboard_page()->setup_shortcut));
     gtk_box_append(GTK_BOX(setup_body), setup_tile("edit-paste-symbolic", "Text output", &dashboard_page()->setup_output));
     gtk_box_append(GTK_BOX(column), two_columns(insights, setup));
-    return page;
-}
-
-static void history_delete_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
-    (void)data;
-    const char *identifiers = g_object_get_data(G_OBJECT(dialog), "jsti-history-delete-ids");
-    if (g_strcmp0(response, "keep-audio") == 0 || g_strcmp0(response, "delete-audio") == 0) {
-        emit(JSTI_EVENT_HISTORY_DELETE, identifiers, g_strcmp0(response, "delete-audio") == 0 ? 1 : 0);
-    }
-    gtk_window_destroy(GTK_WINDOW(dialog));
-}
-
-GtkWidget *history_delete_dialog(const char *identifiers, gboolean clear) {
-    guint count = 1;
-    for (const char *cursor = identifiers; *cursor != '\0'; cursor++) if (*cursor == '\n') count++;
-    gchar *body = clear ? g_strdup_printf(
-        "Remove all %u History entries, including hidden and filtered entries? "
-        "You can keep their saved audio or delete owned recording files too. "
-        "This cannot be undone. If History sync is enabled, synced text will also be deleted.", count)
-        : g_strdup("Remove this History entry? Its saved audio will be kept. "
-                   "This cannot be undone. If History sync is enabled, its synced text will also be deleted.");
-    GtkWidget *dialog = adw_message_dialog_new(ui.window, clear ? "Clear History?" : "Delete History entry?", body);
-    g_free(body);
-    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
-    g_object_set_data_full(G_OBJECT(dialog), "jsti-history-delete-ids", g_strdup(identifiers), g_free);
-    adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog),
-        "cancel", "Cancel", "keep-audio", clear ? "Clear History" : "Delete entry", NULL);
-    adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "keep-audio", ADW_RESPONSE_DESTRUCTIVE);
-    if (clear) {
-        adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "delete-audio", "Clear History and recordings");
-        adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "delete-audio", ADW_RESPONSE_DESTRUCTIVE);
-    }
-    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
-    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
-    g_signal_connect(dialog, "response", G_CALLBACK(history_delete_response), NULL);
-    return dialog;
-}
-
-static void on_history_delete(GtkButton *button, gpointer data) {
-    (void)data;
-    gboolean clear = button == history_page()->history_clear;
-    const char *identifiers = clear ? history_page()->all_history_ids : history_page()->selected_id;
-    if (ui.state != 0 || identifiers == NULL || identifiers[0] == '\0') return;
-    gtk_window_present(GTK_WINDOW(history_delete_dialog(identifiers, clear)));
-}
-
-/* Scrolling to the end of History asks the host for its next page of matches. */
-static void on_history_edge(GtkScrolledWindow *scroller, GtkPositionType position, gpointer data) {
-    (void)scroller;
-    (void)data;
-    if (position == GTK_POS_BOTTOM && history_page()->history_ids != NULL && history_page()->history_ids->len > 0) {
-        emit(JSTI_EVENT_HISTORY_LOAD_MORE, "", 0);
-    }
-}
-
-GtkWidget *build_history(GtkTextBuffer *buffer) {
-    GtkWidget *column, *page = jsti_page_new(&column);
-    g_signal_connect(page, "edge-reached", G_CALLBACK(on_history_edge), NULL);
-    GtkWidget *chips, *trailing;
-    GtkWidget *hero = jsti_hero_new(
-        NULL, "Session History", "Search, replay and reuse past recordings and their transcripts.", &chips,
-        &trailing);
-    history_page()->history_import = GTK_BUTTON(gtk_button_new_with_label("Import…"));
-    gtk_widget_add_css_class(GTK_WIDGET(history_page()->history_import), "jsti-hero-button");
-    g_signal_connect(history_page()->history_import, "clicked", G_CALLBACK(on_import), NULL);
-    gtk_box_append(GTK_BOX(trailing), GTK_WIDGET(history_page()->history_import));
-    history_page()->history_clear = GTK_BUTTON(gtk_button_new_with_label("Clear History…"));
-    g_signal_connect(history_page()->history_clear, "clicked", G_CALLBACK(on_history_delete), NULL);
-    gtk_box_prepend(GTK_BOX(trailing), GTK_WIDGET(history_page()->history_clear));
-    history_page()->history_filters = jsti_history_filters_button_new();
-    gtk_box_prepend(GTK_BOX(trailing), history_page()->history_filters);
-    history_page()->search = GTK_SEARCH_ENTRY(gtk_search_entry_new());
-    gtk_search_entry_set_placeholder_text(history_page()->search, "Search transcripts, models and profiles");
-    gtk_accessible_update_property(GTK_ACCESSIBLE(history_page()->search), GTK_ACCESSIBLE_PROPERTY_LABEL, "Search History", -1);
-    g_signal_connect(history_page()->search, "search-changed", G_CALLBACK(on_search), NULL);
-    gtk_box_insert_child_after(GTK_BOX(hero), GTK_WIDGET(history_page()->search), gtk_widget_get_first_child(hero));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Sessions", &history_page()->history_sessions));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Errors", &history_page()->history_errors));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Average Length", &history_page()->history_average));
-    gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Spend", &history_page()->history_spend));
-    gtk_box_append(GTK_BOX(column), hero);
-
-    history_page()->history = GTK_LIST_BOX(gtk_list_box_new());
-    gtk_widget_add_css_class(GTK_WIDGET(history_page()->history), "jsti-history");
-    gtk_list_box_set_selection_mode(history_page()->history, GTK_SELECTION_SINGLE);
-    g_signal_connect(history_page()->history, "row-selected", G_CALLBACK(on_history_selected), NULL);
-    history_page()->history_ids = g_ptr_array_new_with_free_func(g_free);
-    gtk_box_append(GTK_BOX(column), GTK_WIDGET(history_page()->history));
-    history_page()->history_empty = gtk_label_new("No history yet. Press Record to capture your first session.");
-    gtk_widget_add_css_class(history_page()->history_empty, "jsti-empty");
-    gtk_box_append(GTK_BOX(column), history_page()->history_empty);
-
-    /* The detail moved into the selected card. */
-    history_page()->detail = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    g_object_ref_sink(history_page()->detail);
-    gtk_box_append(GTK_BOX(history_page()->detail), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
-    GtkWidget *heading = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget *label = gtk_label_new("Transcript");
-    gtk_label_set_xalign(GTK_LABEL(label), 0);
-    gtk_widget_set_hexpand(label, TRUE);
-    gtk_widget_add_css_class(label, "jsti-detail-heading");
-    gtk_box_append(GTK_BOX(heading), label);
-    const char *versions[] = { "Processed", "Original", NULL };
-    dashboard_page()->version = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(versions));
-    gtk_widget_set_tooltip_text(GTK_WIDGET(dashboard_page()->version), "Transcript version");
-    jsti_accessible_set_name(GTK_WIDGET(dashboard_page()->version), "Transcript version");
-    g_signal_connect(dashboard_page()->version, "notify::selected", G_CALLBACK(on_version), NULL);
-    gtk_box_append(GTK_BOX(heading), GTK_WIDGET(dashboard_page()->version));
-    gtk_box_append(GTK_BOX(history_page()->detail), heading);
-    GtkWidget *scroller = transcript_view(buffer, 72);
-    dashboard_page()->transcript = GTK_TEXT_VIEW(gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scroller)));
-    gtk_box_append(GTK_BOX(history_page()->detail), scroller);
-
-    GtkWidget *playback = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    history_page()->play = GTK_BUTTON(gtk_button_new_with_label("Play"));
-    history_page()->stop_play = GTK_BUTTON(gtk_button_new_with_label("Stop"));
-    g_signal_connect(history_page()->play, "clicked", G_CALLBACK(on_play), NULL);
-    g_signal_connect(history_page()->stop_play, "clicked", G_CALLBACK(on_stop_play), NULL);
-    history_page()->playback_label = GTK_LABEL(gtk_label_new(""));
-    gtk_widget_add_css_class(GTK_WIDGET(history_page()->playback_label), "dim-label");
-    gtk_widget_add_css_class(GTK_WIDGET(history_page()->playback_label), "numeric");
-    gtk_widget_set_hexpand(GTK_WIDGET(history_page()->playback_label), TRUE);
-    gtk_label_set_xalign(history_page()->playback_label, 0);
-    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(history_page()->play));
-    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(history_page()->stop_play));
-    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(history_page()->playback_label));
-    dashboard_page()->copy = GTK_BUTTON(gtk_button_new_with_label("Copy"));
-    gtk_widget_add_css_class(GTK_WIDGET(dashboard_page()->copy), "suggested-action");
-    g_signal_connect(dashboard_page()->copy, "clicked", G_CALLBACK(on_copy), NULL);
-    gtk_box_append(GTK_BOX(playback), GTK_WIDGET(dashboard_page()->copy));
-    gtk_box_append(GTK_BOX(history_page()->detail), playback);
-
-    GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_halign(actions, GTK_ALIGN_END);
-    read_aloud.button = GTK_BUTTON(gtk_button_new_with_label("Read aloud"));
-    g_signal_connect(read_aloud.button, "clicked", G_CALLBACK(on_read_aloud), NULL);
-    history_page()->retry = GTK_BUTTON(gtk_button_new_with_label("Retry"));
-    history_page()->export_button = GTK_BUTTON(gtk_button_new_with_label("Export…"));
-    history_page()->issue_button = GTK_BUTTON(gtk_button_new_with_label("Create Issue with Details…"));
-    g_signal_connect(history_page()->issue_button, "clicked", G_CALLBACK(on_issue_report), NULL);
-    history_page()->open_audio = GTK_BUTTON(gtk_button_new_with_label("Open audio"));
-    g_signal_connect(history_page()->retry, "clicked", G_CALLBACK(on_retry), NULL);
-    g_signal_connect(history_page()->export_button, "clicked", G_CALLBACK(on_export), NULL);
-    g_signal_connect(history_page()->open_audio, "clicked", G_CALLBACK(on_open_audio), NULL);
-    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(read_aloud.button));
-    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(history_page()->retry));
-    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(history_page()->export_button));
-    gtk_box_append(GTK_BOX(actions), GTK_WIDGET(history_page()->open_audio));
-    gtk_box_append(GTK_BOX(history_page()->detail), actions);
-    gtk_widget_set_halign(GTK_WIDGET(history_page()->issue_button), GTK_ALIGN_END);
-    gtk_widget_set_size_request(GTK_WIDGET(history_page()->issue_button), -1, 44);
-    gtk_box_append(GTK_BOX(history_page()->detail), GTK_WIDGET(history_page()->issue_button));
-    GtkWidget *management = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_halign(management, GTK_ALIGN_END);
-    history_page()->correction_results = GTK_BUTTON(gtk_button_new_with_label("Correction results"));
-    g_signal_connect(history_page()->correction_results, "clicked", G_CALLBACK(on_correction_results), NULL);
-    history_page()->history_delete = GTK_BUTTON(gtk_button_new_with_label("Delete…"));
-    g_signal_connect(history_page()->history_delete, "clicked", G_CALLBACK(on_history_delete), NULL);
-    gtk_box_append(GTK_BOX(management), GTK_WIDGET(history_page()->correction_results));
-    gtk_box_append(GTK_BOX(management), GTK_WIDGET(history_page()->history_delete));
-    gtk_box_append(GTK_BOX(history_page()->detail), management);
     return page;
 }

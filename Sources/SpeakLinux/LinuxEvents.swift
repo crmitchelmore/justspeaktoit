@@ -387,6 +387,7 @@ private func linuxHistoryEvent(_ event: Int, value: String, slot: Int, holder: L
         } catch { LinuxHostPlatform.update(error.localizedDescription) }
     case Int(JSTI_EVENT_OPEN_AUDIO): Task { await controller.openHistoryAudio(value) }
     case Int(JSTI_EVENT_SEARCH_HISTORY): holder.search(value)
+    case Int(JSTI_EVENT_HISTORY_LOAD_MORE): Task { await controller.loadMoreHistory() }
     case Int(JSTI_EVENT_TRANSCRIPT_VERSION):
         holder.selectVersion(slot == 1 ? .original : .processed, identifier: value)
     case Int(JSTI_EVENT_PLAYBACK_TOGGLE): holder.submitHistoryPlayback(.playPause(value))

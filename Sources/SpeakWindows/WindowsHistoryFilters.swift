@@ -8,6 +8,7 @@ func windowsHistoryManagementEvent(
 ) -> Bool {
     switch event {
     case 90: holder.submitHistoryPlayback(.filter(value))
+    case 156: Task { await holder.controller.loadMoreHistory() }
     case 91:
         let controller = holder.controller
         holder.enqueueSettings { await controller.beginHistoryDeletion(value, deleteAudio: index == 1) }

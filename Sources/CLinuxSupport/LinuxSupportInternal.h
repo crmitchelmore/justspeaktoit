@@ -132,6 +132,10 @@ struct _cairo;
 void jsti_brand_icon_paint(struct _cairo *cr, double size);
 /* A scrolling page with centred content; `*content` receives its column. */
 struct _GtkWidget *jsti_page_new(struct _GtkWidget **content);
+/* Sets the AT-SPI name. GtkDropDown and labelled GtkButton point a labelled-by
+ * relation at their visible text, which outranks GTK_ACCESSIBLE_PROPERTY_LABEL,
+ * so that relation is cleared too. */
+void jsti_accessible_set_name(struct _GtkWidget *widget, const char *name);
 void jsti_visual_density_apply(struct _GtkWidget *root, const JSTIVisualDensity *density);
 int32_t jsti_visual_density_self_test(struct _GtkWidget *root);
 /* A gradient header. `variant` is NULL (brand), "voice" or "settings".

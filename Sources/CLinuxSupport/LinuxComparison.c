@@ -57,9 +57,6 @@ static void comparison_error(const char *message) {
         gtk_widget_grab_focus(GTK_WIDGET(ui.detail));
     }
 }
-static void named(GtkWidget *widget, const char *name) {
-    gtk_accessible_update_property(GTK_ACCESSIBLE(widget), GTK_ACCESSIBLE_PROPERTY_LABEL, name, -1);
-}
 static void clear_models(void) {
     while (gtk_widget_get_first_child(GTK_WIDGET(ui.models)) != NULL)
         gtk_list_box_remove(ui.models, gtk_widget_get_first_child(GTK_WIDGET(ui.models)));
@@ -102,7 +99,7 @@ static void populate_models(void) {
             gtk_label_set_wrap(GTK_LABEL(label), TRUE);
             gtk_label_set_xalign(GTK_LABEL(label), 0);
             gtk_check_button_set_child(GTK_CHECK_BUTTON(check), label);
-            named(check, fields[1]);
+            jsti_accessible_set_name(check, fields[1]);
             gtk_list_box_append(ui.models, check);
             g_ptr_array_add(ui.model_ids, g_strdup(fields[0]));
             gtk_check_button_set_active(GTK_CHECK_BUTTON(check),
@@ -355,12 +352,13 @@ void jsti_comparison_open(GtkWindow *parent) {
     gtk_label_set_wrap(GTK_LABEL(notice), TRUE); gtk_label_set_xalign(GTK_LABEL(notice), 0);
     gtk_box_append(GTK_BOX(column), notice);
     const char *modes[] = {"File / multi-sample Batch", "Live microphone", NULL};
-    ui.mode = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(modes)); named(GTK_WIDGET(ui.mode), "Comparison input");
+    ui.mode = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(modes));
+    jsti_accessible_set_name(GTK_WIDGET(ui.mode), "Comparison input");
     g_signal_connect(ui.mode, "notify::selected", G_CALLBACK(mode_changed), NULL);
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.mode));
     ui.language = GTK_ENTRY(gtk_entry_new());
     gtk_entry_set_placeholder_text(ui.language, "Language hint (e.g. en_GB); blank is Automatic");
-    named(GTK_WIDGET(ui.language), "Comparison language hint");
+    jsti_accessible_set_name(GTK_WIDGET(ui.language), "Comparison language hint");
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.language));
     heading(GTK_BOX(column), "Models (at least two; Live supports up to eight)");
     GtkWidget *selection = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -384,7 +382,7 @@ void jsti_comparison_open(GtkWindow *parent) {
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(ui.cancel)); gtk_box_append(GTK_BOX(column), actions);
     heading(GTK_BOX(column), "Saved rounds");
     ui.rounds = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(NULL));
-    named(GTK_WIDGET(ui.rounds), "Saved comparison rounds");
+    jsti_accessible_set_name(GTK_WIDGET(ui.rounds), "Saved comparison rounds");
     g_signal_connect(ui.rounds, "notify::selected", G_CALLBACK(round_changed), NULL);
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.rounds));
     GtkWidget *playback = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -395,22 +393,22 @@ void jsti_comparison_open(GtkWindow *parent) {
     gtk_box_append(GTK_BOX(column), playback);
     heading(GTK_BOX(column), "Diff against");
     ui.reference = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(NULL));
-    named(GTK_WIDGET(ui.reference), "Blind word-diff reference");
+    jsti_accessible_set_name(GTK_WIDGET(ui.reference), "Blind word-diff reference");
     g_signal_connect(ui.reference, "notify::selected", G_CALLBACK(reference_changed), NULL);
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.reference));
     ui.detail = GTK_TEXT_VIEW(gtk_text_view_new());
     gtk_text_view_set_editable(ui.detail, FALSE); gtk_text_view_set_wrap_mode(ui.detail, GTK_WRAP_WORD_CHAR);
-    named(GTK_WIDGET(ui.detail), "Blind results and scoreboard");
+    jsti_accessible_set_name(GTK_WIDGET(ui.detail), "Blind results and scoreboard");
     GtkWidget *detail_scroll = gtk_scrolled_window_new();
     gtk_widget_set_size_request(detail_scroll, -1, 240);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(detail_scroll), GTK_WIDGET(ui.detail));
     gtk_box_append(GTK_BOX(column), detail_scroll);
     heading(GTK_BOX(column), "Ranks for A, B, ... (e.g. 2,1,3; rank failures too)");
-    ui.ranks = GTK_ENTRY(gtk_entry_new()); named(GTK_WIDGET(ui.ranks), "Ranks in blind order");
+    ui.ranks = GTK_ENTRY(gtk_entry_new()); jsti_accessible_set_name(GTK_WIDGET(ui.ranks), "Ranks in blind order");
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.ranks));
     ui.judge = GTK_BUTTON(button_new("Save ranking and reveal", G_CALLBACK(action_clicked)));
     ui.next_file = GTK_BUTTON(button_new("Next file", G_CALLBACK(action_clicked)));
-    named(GTK_WIDGET(ui.next_file), "Next file");
+    jsti_accessible_set_name(GTK_WIDGET(ui.next_file), "Next file");
     gtk_widget_set_visible(GTK_WIDGET(ui.next_file), FALSE);
     GtkWidget *judging = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(judging), GTK_WIDGET(ui.judge));
@@ -419,7 +417,7 @@ void jsti_comparison_open(GtkWindow *parent) {
     heading(GTK_BOX(column), "Export transcripts and model identities (no audio)");
     const char *scopes[] = {"All rounds", "Selected round", NULL};
     ui.export_scope = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(scopes));
-    named(GTK_WIDGET(ui.export_scope), "Comparison export scope");
+    jsti_accessible_set_name(GTK_WIDGET(ui.export_scope), "Comparison export scope");
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.export_scope));
     GtkWidget *exports = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     ui.json = GTK_BUTTON(button_new("Save JSON…", G_CALLBACK(export_clicked)));
@@ -439,7 +437,7 @@ void jsti_comparison_open(GtkWindow *parent) {
     GtkWidget *sync_label = gtk_label_new("Sync comparison transcripts and rankings with iCloud");
     gtk_label_set_wrap(GTK_LABEL(sync_label), TRUE); gtk_label_set_xalign(GTK_LABEL(sync_label), 0);
     gtk_check_button_set_child(ui.sync, sync_label);
-    named(GTK_WIDGET(ui.sync), "Sync comparison transcripts and rankings with iCloud");
+    jsti_accessible_set_name(GTK_WIDGET(ui.sync), "Sync comparison transcripts and rankings with iCloud");
     g_signal_connect(ui.sync, "toggled", G_CALLBACK(sync_changed), NULL);
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.sync));
     ui.sync_now = GTK_BUTTON(button_new("Sync now / retry", G_CALLBACK(action_clicked)));
@@ -448,7 +446,8 @@ void jsti_comparison_open(GtkWindow *parent) {
     GtkWidget *history_label = gtk_label_new("Save results to History (one item per model, including failures)");
     gtk_label_set_wrap(GTK_LABEL(history_label), TRUE); gtk_label_set_xalign(GTK_LABEL(history_label), 0);
     gtk_check_button_set_child(ui.save_history, history_label);
-    named(GTK_WIDGET(ui.save_history), "Save results to History, one item per model, including failures");
+    jsti_accessible_set_name(GTK_WIDGET(ui.save_history),
+        "Save results to History, one item per model, including failures");
     g_signal_connect(ui.save_history, "toggled", G_CALLBACK(save_history_changed), NULL);
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.save_history));
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), column);

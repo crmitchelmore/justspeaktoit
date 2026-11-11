@@ -260,6 +260,11 @@ static GtkWidget *label_with(const char *text, const char *css_class) {
     return label;
 }
 
+void jsti_accessible_set_name(GtkWidget *widget, const char *name) {
+    gtk_accessible_reset_relation(GTK_ACCESSIBLE(widget), GTK_ACCESSIBLE_RELATION_LABELLED_BY);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(widget), GTK_ACCESSIBLE_PROPERTY_LABEL, name, -1);
+}
+
 GtkWidget *jsti_page_new(GtkWidget **content) {
     GtkWidget *scroller = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);

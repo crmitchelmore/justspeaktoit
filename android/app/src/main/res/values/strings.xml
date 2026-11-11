@@ -95,7 +95,10 @@
     <string name="settings_cleanup_needs_key">Add a %1$s key to use cleanup.</string>
     <string name="settings_cleanup_model">Cleanup model</string>
     <string name="cleanup_picker_title">Cleanup model</string>
-    <string name="cleanup_picker_openrouter_note">%1$d models from many providers with one OpenRouter key</string>
+    <plurals name="cleanup_picker_openrouter_note">
+        <item quantity="one">%1$d model from many providers with one OpenRouter key</item>
+        <item quantity="other">%1$d models from many providers with one OpenRouter key</item>
+    </plurals>
     <string name="cleanup_picker_openrouter_footer">These models are sent to OpenRouter with your OpenRouter key.</string>
     <string name="cleanup_picker_search">Search OpenRouter models</string>
     <string name="cleanup_picker_no_results">No models match.</string>

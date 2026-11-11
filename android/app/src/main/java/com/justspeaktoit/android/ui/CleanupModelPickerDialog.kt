@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -149,7 +150,7 @@ private fun ModelRow(model: CleanupModel, isSelected: Boolean, hasKey: Boolean, 
 
 @Composable
 private fun OpenRouterRow(count: Int, selected: CleanupModel?, onOpen: () -> Unit) {
-    val detail = selected?.displayName ?: stringResource(R.string.cleanup_picker_openrouter_note, count)
+    val detail = selected?.displayName ?: pluralStringResource(R.plurals.cleanup_picker_openrouter_note, count, count)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier

@@ -19,10 +19,14 @@ owner has configured the release secrets; see the
 ```bash
 cd android
 ./gradlew testDebugUnitTest   # JVM unit tests
-./gradlew lintDebug           # Android lint
+./gradlew lintDebug           # Android lint: zero warnings, no baseline
 ./gradlew assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew installDebug        # install on a connected device
 ```
+
+Android lint treats every warning as an error and the Kotlin compiler fails on any warning
+(`android/app/build.gradle.kts`). Only the checks that report a newer upstream release are
+disabled, because they would fail an unchanged tree; Dependabot owns dependency currency.
 
 CI runs the unit test, lint, debug build and R8 release bundle tasks (not `installDebug`, so
 installation is not checked) in [`.github/workflows/android.yml`](../.github/workflows/android.yml)

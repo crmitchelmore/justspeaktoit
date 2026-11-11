@@ -58,7 +58,10 @@ android {
     }
 
     lint {
-        warningsAsErrors = false
+        warningsAsErrors = true
+        // Zero warnings. These checks only report that something newer was published upstream, so they
+        // would fail an unchanged tree; Dependabot (gradle) and the Play target-SDK policy own currency.
+        disable += setOf("GradleDependency", "AndroidGradlePluginVersion", "NewerVersionAvailable", "OldTargetApi")
         abortOnError = true
         checkDependencies = true
         // Accessibility regressions fail CI (Docs/accessibility.md).
@@ -166,5 +169,12 @@ val generateCloudCatalog = tasks.register<GenerateCloudCatalog>("generateCloudCa
 androidComponents {
     onVariants { variant ->
         variant.sources.java?.addGeneratedSourceDirectory(generateCloudCatalog, GenerateCloudCatalog::outputDir)
+    }
+}
+
+// Zero Kotlin compiler warnings, like every other linter in the repository.
+kotlin {
+    compilerOptions {
+        allWarningsAsErrors.set(true)
     }
 }

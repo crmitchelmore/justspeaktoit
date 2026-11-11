@@ -102,7 +102,21 @@ final class SentryManagerTests: XCTestCase {
 
     // MARK: - Collection contract
 
-    #if canImport(Sentry)
+        /// Mac and iOS share one configuration but report to separate projects
+    /// and release packages, so their crash groups and release health never mix.
+    func testDestinations_separateMacAndIOSProjectsAndReleases() {
+        XCTAssertEqual(SentryManager.destination, SentryManager.macOSDestination)
+        XCTAssertEqual(SentryManager.macOSDestination.releasePackage, "justspeaktoit-mac")
+        XCTAssertEqual(SentryManager.iOSDestination.releasePackage, "justspeaktoit-ios")
+        XCTAssertTrue(SentryManager.macOSDestination.dsn.hasSuffix("/4510790595903568"))
+        XCTAssertTrue(SentryManager.iOSDestination.dsn.hasSuffix("/4510687487197264"))
+        for destination in [SentryManager.macOSDestination, SentryManager.iOSDestination] {
+            XCTAssertTrue(destination.dsn.hasPrefix("https://"))
+            XCTAssertTrue(destination.dsn.contains(".ingest.de.sentry.io/"), "EU region only")
+        }
+    }
+
+#if canImport(Sentry)
     /// The privacy-relevant options are pinned, so an SDK update cannot widen
     /// collection through a changed default. A deliberate change to the contract
     /// must change this test as well as `SentryManager.configure`.

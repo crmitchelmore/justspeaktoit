@@ -353,6 +353,7 @@ var iosAppDependencies: [TargetDependency] = [
     .package(product: "SpeakCore"),
     .package(product: "SpeakiOSLib"),
     .package(product: "SpeakSync"),
+    .package(product: "Sentry"),
     .target(name: "JustSpeakToItWidgetExtension")
 ]
 if isIOSKeyboardEnabled {
@@ -449,7 +450,14 @@ let iosAppTarget: Target = .target(
     bundleId: trainIdentifier("com.justspeaktoit.ios"),
     deploymentTargets: .iOS("17.0"),
     infoPlist: .extendingDefault(with: iosAppInfoPlist),
-    sources: ["SpeakiOSApp/**"],
+    // Crash reporting shares the Mac's collection contract and credential
+    // scrubber by compiling the same two files. Extensions stay without Sentry:
+    // its crash handler and session tracking do not fit their memory limits.
+    sources: [
+        "SpeakiOSApp/**",
+        "Sources/SpeakApp/SentryManager.swift",
+        "Sources/SpeakApp/SentryEventScrubber.swift"
+    ],
     resources: [
         "SpeakiOSApp/Assets.xcassets",
         "SpeakiOSApp/Resources/LaunchScreen.storyboard",

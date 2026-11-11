@@ -56,9 +56,10 @@ struct HardwareTriggerSettingsView: View {
 
             Section("Before You Start") {
                 Text(
-                    "Open JustSpeakToIt before first use and grant the requested permissions, "
-                        + "including microphone access. You may need to unlock your iPhone or open the app "
-                        + "to start recording."
+                    LocalizedStringKey(
+                        "**Open JustSpeakToIt once and allow microphone access** before your first trigger. "
+                            + "You may need to unlock your iPhone or open the app to start recording."
+                    )
                 )
                     .font(.callout)
             }
@@ -67,23 +68,23 @@ struct HardwareTriggerSettingsView: View {
                 nativeControlSetupSection
             }
 
+            whichActionSection
+
             Section("Set Up a Shortcut") {
                 Text(
-                    "Toggle Recording requires iOS 18 or iPadOS 18 or later. Create one shortcut for the "
-                        + "options below or for your existing automations. Back Tap on a supported iPhone and "
-                        + "Apple Pencil Pro squeeze on a compatible iPad do not require an Action Button."
+                    "Use a shortcut for Back Tap, the Shortcuts widget, Apple Pencil Pro squeeze or your own "
+                        + "automations. Needs iOS 18 or iPadOS 18 or later."
                 )
                     .font(.callout)
 
-                StepRow(number: 1, text: "Open the Shortcuts app and tap the + button.")
+                StepRow(number: 1, text: "Open the **Shortcuts** app and tap **+**.")
                 StepRow(
                     number: 2,
-                    text: "Search for JustSpeakToIt and add Toggle Recording as the only action. "
+                    text: "Search for JustSpeakToIt and add **Toggle Recording** as the only action. "
                         + "Do not add a separate Copy to Clipboard action — JustSpeakToIt uses the "
-                        + "destination selected above when you stop. Use Start Recording only if you also "
-                        + "create a separate Stop Recording shortcut."
+                        + "destination selected above when you stop."
                 )
-                StepRow(number: 3, text: "Name the shortcut and tap Done.")
+                StepRow(number: 3, text: "Name the shortcut and tap **Done**.")
 
                 Button {
                     if let url = URL(string: "shortcuts://") {
@@ -112,7 +113,7 @@ struct HardwareTriggerSettingsView: View {
                 BulletRow(
                     icon: "mic.fill",
                     title: "Siri",
-                    detail: "Say \"Toggle Recording with JustSpeakToIt\" or \"Start Recording with JustSpeakToIt\"."
+                    detail: "Say **\"Toggle Recording with JustSpeakToIt\"** to start, and again to stop."
                 )
                 BulletRow(
                     icon: "square.grid.2x2.fill",
@@ -210,16 +211,48 @@ struct HardwareTriggerSettingsView: View {
         }
     }
 
+    /// Which of this app's Shortcuts actions to pick (#1470). The names match
+    /// the App Intent titles, which `AutomationGalleryIntentTests` pins.
+    private var whichActionSection: some View {
+        Section("Which Shortcuts Action?") {
+            ActionChoiceRow(
+                action: "Toggle Recording",
+                use: "**Use this one** for a single button: run once to start, again to stop."
+            )
+            ActionChoiceRow(
+                action: "Start Recording + Stop Recording",
+                use: "Separate start and stop buttons, such as two Back Tap gestures."
+            )
+            ActionChoiceRow(
+                action: "Dictate",
+                use: "Records until you pause and **returns the text** to the next action, such as Create Note."
+            )
+            ActionChoiceRow(
+                action: "Stop Dictation and Get Text",
+                use: "Stops a recording and **returns the text** to the next action."
+            )
+            Text("The text always goes to the destination above too. Transcribe Voice is the Control version of "
+                + "Toggle Recording.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     @available(iOS 18.0, *)
     private var nativeControlSetupSection: some View {
         Section("Set Up Transcribe Voice") {
-            Text("On iOS 18 and later, add JustSpeakToIt’s Transcribe Voice control directly.")
+            Text(
+                LocalizedStringKey(
+                    "**Recommended.** Add the **Transcribe Voice** control: one press starts, the next stops. "
+                        + "No shortcut needed."
+                )
+            )
                 .font(.callout)
             BulletRow(
                 icon: "button.programmable",
                 title: "Action Button",
                 detail: "On an iPhone with an Action Button, open Settings → Action Button → Controls. "
-                    + "Tap the control picker and choose Transcribe Voice. Press and hold the Action Button "
+                    + "Tap the control picker and choose **Transcribe Voice**. Press and hold the Action Button "
                     + "to start or stop dictation."
             )
             BulletRow(
@@ -251,7 +284,7 @@ private struct StepRow: View {
                 .frame(width: badgeSize, height: badgeSize)
                 .background(Color.accentColor.opacity(0.15), in: Circle())
                 .foregroundStyle(Color.accentColor)
-            Text(text)
+            Text(LocalizedStringKey(text))
                 .font(.callout)
         }
         .accessibilityElement(children: .combine)
@@ -267,10 +300,25 @@ private struct BulletRow: View {
         VStack(alignment: .leading, spacing: 4) {
             Label(title, systemImage: icon)
                 .font(.callout.weight(.medium))
-            Text(detail)
+            Text(LocalizedStringKey(detail))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+private struct ActionChoiceRow: View {
+    let action: String
+    let use: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(action)
+                .font(.callout.weight(.semibold))
+            Text(LocalizedStringKey(use))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 #endif

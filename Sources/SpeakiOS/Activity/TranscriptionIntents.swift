@@ -200,7 +200,12 @@ func journalingRefusedStartParameters(
 public struct StartTranscriptionIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundContinuableIntent {
     public static var title: LocalizedStringResource = "Start Recording"
     public static var description = IntentDescription(
-        "Start a fresh transcription. No-op if already recording. Pair with Stop Recording to finish."
+        """
+        Only starts recording, and does nothing if one is already running. Use it with Stop Recording \
+        when you want separate start and stop buttons. For one button that does both, use Toggle Recording.
+        """,
+        categoryName: "Recording",
+        searchKeywords: ["begin", "start", "dictation", "transcription"]
     )
 
     public static var openAppWhenRun: Bool = false
@@ -314,7 +319,12 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
 
     public static var title: LocalizedStringResource = "Toggle Recording"
     public static var description = IntentDescription(
-        "Start or stop voice transcription. Result lands in the destination you chose in Settings."
+        """
+        Starts recording, or stops it if one is running. Recommended for the Action Button, Back Tap, \
+        widgets and Siri. The transcript goes to the destination chosen in Settings.
+        """,
+        categoryName: "Recording",
+        searchKeywords: ["begin", "start", "stop", "transcription", "transcribe", "action button"]
     )
 
     public static var openAppWhenRun: Bool = false
@@ -354,7 +364,7 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
     /// destination applies to whichever half runs, because a toggle that stops
     /// an unparameterised recording still has somewhere to put the text.
     public static var parameterSummary: some ParameterSummary {
-        Summary("Toggle recording") {
+        Summary("Start or stop recording") {
             \.$destination
             \.$language
             \.$model
@@ -432,7 +442,13 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
 public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivityIntent {
     public static var title: LocalizedStringResource = "Stop Recording"
     public static var description = IntentDescription(
-        "Stops the current transcription and routes the result to the destination you chose in Settings."
+        """
+        Stops the current recording and sends the transcript to the destination chosen in Settings. \
+        Works on a locked iPhone but returns no text; to use the text in a later action, \
+        use Stop Dictation and Get Text.
+        """,
+        categoryName: "Recording",
+        searchKeywords: ["end", "finish", "transcription"]
     )
 
     public static var openAppWhenRun: Bool = false
@@ -509,6 +525,10 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
 public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIntent, LiveActivityIntent,
     ForegroundContinuableIntent {
     public static var title: LocalizedStringResource = "Toggle Transcription"
+    /// Backs the Transcribe Voice control only. Shortcuts already offers the
+    /// same start/stop as Toggle Recording, and listing both read as two
+    /// different features (#1470). Hiding it keeps saved shortcuts running.
+    public static var isDiscoverable: Bool { false }
 
     /// Deliberately runs without authentication: Control Center is reachable
     /// from the lock screen and this toggle returns no transcript — results
@@ -602,6 +622,9 @@ public struct CopyLastTranscriptIntent: LiveActivityIntent {
     public static var description = IntentDescription(
         "Copies the transcript shown on the completed recording row to the clipboard."
     )
+    /// The Live Activity row button: it needs that row's completion ID, so it
+    /// cannot be built usefully in Shortcuts (#1470). Saved shortcuts still run.
+    public static var isDiscoverable: Bool { false }
 
     public static var openAppWhenRun: Bool = false
     /// Reads and writes private transcript data, so never run on a locked device.
@@ -652,7 +675,10 @@ public struct CopyLastTranscriptIntent: LiveActivityIntent {
 /// Can be triggered from Live Activity, Shortcuts, or Siri.
 struct CopyLastSentenceIntent: AppIntent {
     static var title: LocalizedStringResource = "Copy Last Sentence"
-    static var description = IntentDescription("Copies the most recent transcribed sentence to the clipboard")
+    static var description = IntentDescription(
+        "Copies the last sentence of the current or most recent recording to the clipboard.",
+        categoryName: "Transcripts"
+    )
 
     // Make this available from Live Activity
     static var openAppWhenRun: Bool = false
@@ -681,7 +707,10 @@ struct CopyLastSentenceIntent: AppIntent {
 /// App Intent to copy the full transcript to clipboard.
 struct CopyFullTranscriptIntent: AppIntent {
     static var title: LocalizedStringResource = "Copy Full Transcript"
-    static var description = IntentDescription("Copies the entire transcription to the clipboard")
+    static var description = IntentDescription(
+        "Copies the full text of the current or most recent recording to the clipboard.",
+        categoryName: "Transcripts"
+    )
 
     static var openAppWhenRun: Bool = false
     /// Returns and copies private transcript data, so never run on a locked device.

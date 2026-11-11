@@ -78,6 +78,21 @@ configured in the app — nothing is duplicated.
 | Get Last Transcription | Yes | Yes | Most recent history entry (polished text preferred) |
 | Polish Text | Yes | Yes | Cleaned-up (or custom-prompt-processed) text |
 
+Which iOS recording action to use (also shown in **Settings → Recording &
+Shortcuts → Action Button & Shortcuts**):
+
+| Action | Use it for |
+| --- | --- |
+| **Toggle Recording** | One button that starts, then stops. Recommended for Back Tap, widgets and Siri. |
+| **Start Recording** + **Stop Recording** | Separate start and stop buttons. Neither returns text. |
+| **Dictate** | Records until you pause and returns the text to the next action. |
+| **Stop Dictation and Get Text** | Stops a recording and returns the text to the next action. |
+
+The **Transcribe Voice** control (Control Center, Lock Screen, Action Button) is
+the Control version of Toggle Recording. Its backing "Toggle Transcription"
+intent and the Live Activity's "Copy Last Transcript" button are hidden from the
+Shortcuts action list; shortcuts saved with them keep working.
+
 Notes:
 
 - **Start / Stop Dictation (macOS)** drive the exact same session pipeline as

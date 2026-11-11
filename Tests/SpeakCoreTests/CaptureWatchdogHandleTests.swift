@@ -2,8 +2,8 @@ import Foundation
 @testable import SpeakCore
 import XCTest
 
-/// The run-owned watchdog handle: arm/retire keyed by run, and no stale tick
-/// acting on a replacement run.
+/// The run-owned watchdog handle: arm/retire keyed by run, no stale tick
+/// acting on a replacement run, and trip actions that run outside the tick.
 @MainActor
 final class CaptureWatchdogHandleTests: XCTestCase {
     private let longAgo = Date(timeIntervalSinceNow: -120)
@@ -48,6 +48,26 @@ final class CaptureWatchdogHandleTests: XCTestCase {
         handle.noteInputObserved(run: first)
         XCTAssertEqual(handle.monitor, CaptureWatchdogMonitor(), "A's late reports must not touch B's bounds")
         handle.retire()
+    }
+
+    func testTripAction_retiringTheHandleDoesNotCancelTheAction() async {
+        let ticks = ManualTicks()
+        let handle = CaptureWatchdogHandle(sleep: ticks.sleep)
+        let acted = expectation(description: "trip acted on")
+        var cancelledAfterRetire: Bool?
+        handle.arm(run: UUID(), startedAt: longAgo, isLive: { true }, onTrip: { trip, _ in
+            XCTAssertEqual(trip, .startStalled(after: nil))
+            // Acting on a terminal trip ends the run, which retires the handle.
+            handle.retire()
+            await Task.yield()
+            cancelledAfterRetire = Task.isCancelled
+            acted.fulfill()
+        })
+        await ticks.waitForSleepers(1)
+        await ticks.releaseAll()
+        await fulfillment(of: [acted], timeout: 2)
+
+        XCTAssertEqual(cancelledAfterRetire, false)
     }
 
     func testOwnerNoLongerLive_isNeverEvaluated() async {

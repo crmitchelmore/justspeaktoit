@@ -40,3 +40,25 @@ Releasing a Cloud request from Settings calls `CallHandle.cancel()`, which disco
   locked during dictation. Only keyboard dictation and History transcription show up in practice.
 - The dictation keyboard has no opaque background, so app text shows through behind the status text
   and buttons (visible in `06`/`09`).
+
+## Re-test after fixes (2026-11-11, PR branch head `f6c56d2d`)
+
+The fixes are pushed to `feat/1473-android-system-resources` as 164dafbb, d3c11528 and f6c56d2d. The APK came from precheck
+run 43024357706 and was tested on the same API 35 emulator. Cloud requests were made to hang with a
+black-hole HTTP proxy; a fake OpenAI key was used.
+
+| # | Check | Result | Evidence |
+|---|-------|--------|----------|
+| R1 | Settings opens while dictating; the main-screen mic hold is listed and released | PASS | `16-settings-open-while-dictating.png` |
+| R2 | A Cloud recording shows as a mic hold; Stop recording ends capture (appops no longer running) | PASS | `17`, `18` |
+| R3 | Main-screen upload: Cancel request in Settings returns to Ready with no failed History entry | PASS | `19`–`22` |
+| R4 | History › Transcribe: Cancel request leaves the entry unchanged ("Cancelled…", Transcribe still offered) | PASS (bug fixed) | `23`, `24` |
+| R5 | Keyboard has an opaque background and sits clear of the navigation bar, in light and dark modes | PASS | `25`, `26` |
+| R6 | No FATAL EXCEPTION or ANR in logcat | PASS | — |
+
+Known side effect: releasing during a main-screen upload deletes the recorded audio even with
+"Keep audio when a recording is cancelled" on, because the existing `finally` block removes it.
+
+The CI change that publishes precheck APKs is in #1491.
+
+**Overall after fixes: PASS.**

@@ -55,7 +55,9 @@ final class SettingsCredentialUITests: XCTestCase {
         try launch(app, region: "ap-southeast-1")
         try openAlibaba(app)
         XCTAssertFalse(app.buttons["Clear Stored Key"].exists, "The deletion must survive startup")
-        XCTAssertTrue(app.staticTexts["Missing"].exists)
+        // The Stored/Missing summary rows moved to their own page in #1479;
+        // the filtered Alibaba section header carries the state here.
+        XCTAssertTrue(app.staticTexts["Unset"].waitForExistence(timeout: 15), "Alibaba must show Unset after removal")
     }
 
     private func launch(_ app: XCUIApplication, region: String) throws {
@@ -70,13 +72,11 @@ final class SettingsCredentialUITests: XCTestCase {
     private func openAlibaba(_ app: XCUIApplication) throws {
         app.buttons["settingsNavLink"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 15))
-        let providers = app.buttons["settingsPage.apiKeys"]
-        try reveal(providers, in: app)
-        providers.tap()
-        let manage = app.buttons["Manage Keys"]
-        try reveal(manage, in: app)
-        manage.tap()
-        XCTAssertTrue(app.navigationBars["API Keys"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tap(
+            app.buttons["settingsPage.apiKeys"],
+            until: app.navigationBars["Providers & API Keys"]
+        ))
+        XCTAssertTrue(app.tap(app.buttons["Manage Keys"], until: app.navigationBars["API Keys"]))
         let search = app.searchFields.firstMatch
         if !search.isHittable { app.swipeDown() }
         XCTAssertTrue(search.waitForExistence(timeout: 15))
@@ -93,10 +93,14 @@ final class SettingsCredentialUITests: XCTestCase {
 
     private func save(_ app: XCUIApplication, value: String, success: Bool) throws {
         let field = app.secureTextFields["API Key"]
-        try reveal(field, in: app)
-        try wait { field.isEnabled && field.isHittable }
-        field.tap()
-        try wait { app.keyboards.firstMatch.exists }
+        try wait { field.exists && field.isEnabled }
+        // The field moves while the search keyboard's dismissal re-lays out the
+        // list; a tap sent then never focused it (run 42863220743). Tap it once
+        // it has settled, and again if no keyboard appears.
+        guard app.tap(field, until: app.keyboards.firstMatch) else {
+            XCTFail("The API Key field did not take keyboard focus")
+            throw SettingsTimeout()
+        }
         field.typeText(value)
         XCTAssertEqual(app.searchFields.firstMatch.value as? String, "Alibaba")
         let save = app.buttons["apiKeysSaveButton"]
@@ -111,26 +115,8 @@ final class SettingsCredentialUITests: XCTestCase {
         if success { XCTAssertTrue(app.buttons["Clear Stored Key"].waitForExistence(timeout: 15)) }
     }
 
-    // `isHittable` only needs the element's centre on screen. A row half under
-    // the home indicator passed it, and its tap never navigated (run
-    // 42283665401), so require the whole control inside the usable band.
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) throws {
-        let window = app.windows.firstMatch.frame
-        let usable = CGRect(x: window.minX, y: window.minY + 120, width: window.width, height: window.height - 200)
-        func revealed() -> Bool { element.exists && element.isHittable && usable.contains(element.frame) }
-        for _ in 0..<8 {
-            if revealed() { return }
-            guard element.exists, !element.frame.isEmpty else { app.swipeUp(); continue }
-            // A full swipe overshoots the band in both directions (run 42302311943
-            // attempt 2), so drag by the measured distance and hold to stop momentum.
-            let delta = max(-(usable.height - 40), min(usable.height - 40, usable.midY - element.frame.midY))
-            let startY = delta > 0 ? usable.minY + 20 : usable.maxY - 20
-            let origin = app.coordinate(withNormalizedOffset: .zero)
-            let start = origin.withOffset(CGVector(dx: window.midX, dy: startY))
-            start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: delta)),
-                        withVelocity: .slow, thenHoldForDuration: 0.3)
-        }
-        guard revealed() else {
+        guard app.reveal(element) else {
             XCTFail("The actual Settings control was not reachable")
             throw SettingsTimeout()
         }

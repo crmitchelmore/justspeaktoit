@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { renderPage } from './chrome.mjs';
 
 const source = fileURLToPath(new URL('.', import.meta.url));
 
@@ -87,7 +88,7 @@ test('HDR wordmarks are narrowly gated and retain readable fallbacks', async () 
 });
 
 test('every clip on the page ships narrated light and dark variants with posters and captions', async () => {
-  const html = await readFile(path.join(source, 'index.html'), 'utf8');
+  const html = await renderPage('index.html');
   const names = [...html.matchAll(/data-clip="([a-z]+)"/g)].map(match => match[1]);
   assert.ok(names.length >= 2, 'The Mac hero and iPhone clips are on the page');
   for (const name of names) {
@@ -104,7 +105,7 @@ test('every clip on the page ships narrated light and dark variants with posters
 });
 
 test('all device downloads live in the single #get download section', async () => {
-  const html = await readFile(path.join(source, 'index.html'), 'utf8');
+  const html = await renderPage('index.html');
   const match = html.match(/<section\b[^>]*\bid="get"[^>]*>([\s\S]*?)<\/section>/);
   assert.ok(match, 'The unified #get download section exists');
   const downloadSection = match[1];

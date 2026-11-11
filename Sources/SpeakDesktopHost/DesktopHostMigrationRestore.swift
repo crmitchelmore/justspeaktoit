@@ -28,7 +28,7 @@ extension DesktopHostController {
     /// cancellable worker, never on the settings queue. Nothing is written.
     package func beginMigrationRestore(_ source: URL, using restorer: DesktopHostMigrationRestorer? = nil) {
         guard !closed else { return }
-        guard canUseHistory, migrationRestoreTask == nil, migrationRestoreConfirmation == nil,
+        guard canUseHistory, migrationWork.restoreTask == nil, migrationWork.restoreConfirmation == nil,
               audioCleanupConfirmation == nil else {
             update("Restore is unavailable while another operation or confirmation is running.")
             return
@@ -45,12 +45,12 @@ extension DesktopHostController {
         let worker = Task.detached {
             await DesktopMigrationRestore.prepare(source, reader: restorer.reader, targets: targets)
         }
-        migrationRestoreWorker = worker
-        migrationRestoreTask = Task {
+        migrationWork.restoreWorker = worker
+        migrationWork.restoreTask = Task {
             let preparation = await worker.value
             defer {
-                migrationRestoreWorker = nil
-                migrationRestoreTask = nil
+                migrationWork.restoreWorker = nil
+                migrationWork.restoreTask = nil
                 busy = false
                 finishOperation()
             }
@@ -73,12 +73,12 @@ extension DesktopHostController {
             return
         }
         let id = UUID()
-        migrationRestoreConfirmation = (id, plan)
+        migrationWork.restoreConfirmation = (id, plan)
         do {
             try restorer.confirm(id.uuidString, preview.text, preview.offersReplace)
             update("Review the restore preview. Nothing has been written yet.", state: 0)
         } catch {
-            migrationRestoreConfirmation = nil
+            migrationWork.restoreConfirmation = nil
             showSelectedHistory(status: "Could not show the restore preview: \(error.localizedDescription)", state: 0)
         }
     }
@@ -89,12 +89,12 @@ extension DesktopHostController {
         _ identifier: String, choice: Int, using restorer: DesktopHostMigrationRestorer? = nil
     ) {
         guard !closed else { return }
-        guard let confirmation = migrationRestoreConfirmation,
+        guard let confirmation = migrationWork.restoreConfirmation,
               UUID(uuidString: identifier) == confirmation.id else {
             update("That restore preview is no longer current. Nothing was changed.")
             return
         }
-        migrationRestoreConfirmation = nil
+        migrationWork.restoreConfirmation = nil
         guard let selected = DesktopMigrationRestore.Choice(rawValue: choice) else {
             update("Restore cancelled. Nothing was changed.")
             return
@@ -103,7 +103,7 @@ extension DesktopHostController {
             update("Restore cancelled because Replace was not offered. Nothing was changed.")
             return
         }
-        guard canUseHistory, migrationRestoreTask == nil,
+        guard canUseHistory, migrationWork.restoreTask == nil,
               let restorer = restorer ?? Platform.migrationRestorer else {
             update("Restore cancelled because another operation started. Nothing was changed.")
             return
@@ -117,12 +117,12 @@ extension DesktopHostController {
         let worker = Task.detached {
             await DesktopMigrationRestore.apply(plan, choice: selected, targets: targets)
         }
-        migrationRestoreApplyWorker = worker
-        migrationRestoreTask = Task {
+        migrationWork.restoreApplyWorker = worker
+        migrationWork.restoreTask = Task {
             let outcome = await worker.value
             defer {
-                migrationRestoreApplyWorker = nil
-                migrationRestoreTask = nil
+                migrationWork.restoreApplyWorker = nil
+                migrationWork.restoreTask = nil
                 busy = false
                 finishOperation()
             }

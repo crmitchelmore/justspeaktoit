@@ -66,7 +66,7 @@ extension DesktopHostController {
         guard outputSlot.task == nil, !closed else { Platform.cancel(job); return .busy }
         let identifier = UUID()
         cancelCorrectionObservation()
-        let learningRevision = correctionLearningRevision
+        let learningRevision = correctionLearning.revision
         outputSlot = DesktopHostOutputState<Platform>(job: job, id: identifier, recordID: recordID)
         activeOperations += 1
         let effects = self.effects

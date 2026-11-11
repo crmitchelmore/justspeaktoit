@@ -111,7 +111,7 @@ final class DesktopHostProfileBackupTests: XCTestCase {
         await fixture.controller.saveProfiles([])
         let file = fixture.controller.directory.appendingPathComponent(DesktopDictationProfileStore.filename)
         XCTAssertEqual(try Data(contentsOf: file), profileData)
-        let task = await fixture.controller.migrationExportTask
+        let task = await fixture.controller.migrationWork.exportTask
         let statuses = FakeLog.shared.allStatuses
         let report = await fixture.controller.close()
         XCTAssertEqual(report.unfinishedOperations, 1)

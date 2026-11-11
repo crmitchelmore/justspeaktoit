@@ -55,10 +55,10 @@ extension DesktopHostController {
 
     package func refreshModels(force: Bool) {
         guard !closed else { return }
-        if !force, modelDiscoveryTask != nil { return }
-        modelDiscoveryTask?.cancel()
+        if !force, modelDiscovery.task != nil { return }
+        modelDiscovery.task?.cancel()
         let catalog = modelCatalog
-        modelDiscoveryTask = Task.detached { [weak self] in
+        modelDiscovery.task = Task.detached { [weak self] in
             let snapshot = await catalog.refresh(force: force) { [weak self] state in
                 await self?.publishModelCatalog(state)
             }
@@ -68,14 +68,14 @@ extension DesktopHostController {
     }
 
     package func publishModelCatalog(_ state: OpenRouterAudioCatalogState) {
-        guard !closed, state.revision >= modelCatalogRevision else { return }
+        guard !closed, state.revision >= modelDiscovery.catalogRevision else { return }
         do {
             try DesktopHostModels.update(
                 discovered: state.models,
                 retaining: [settings.model, settings.batchModel, settings.liveModel].compactMap { $0 }
             )
             try Platform.publishModels(status: modelCatalogStatus(state), refreshing: state.isRefreshing)
-            modelCatalogRevision = state.revision
+            modelDiscovery.catalogRevision = state.revision
         } catch {
             // Catalogue feedback has its own control; recording status and
             // transcript text must remain unchanged while discovery completes.

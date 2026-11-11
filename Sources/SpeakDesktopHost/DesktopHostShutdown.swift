@@ -189,15 +189,15 @@ extension DesktopHostController {
             report.unfinishedOperations += max(0, voiceEdit.workers - alreadyCounted)
         }
         if voiceEdit.workers == 0 { voiceEdit.scratchOwner = nil }
-        if let warm = connectionWarmTask {
+        if let warm = connectionWarm.task {
             let ended = await DesktopHostShutdown.wait(until: deadline) { await warm.task.value }
             if !ended { report.unfinishedOperations += 1 }
         }
         report.unfinishedOperations += comparisonOperations.activeCount
-        if let discovery = modelDiscoveryTask {
+        if let discovery = modelDiscovery.task {
             report.discoveryEnded = await DesktopHostShutdown.wait(until: deadline) { await discovery.value }
         }
-        modelDiscoveryTask = nil
+        modelDiscovery.task = nil
         report.recordingFeedbackClosed = await feedbackClosed
         report.handsFreeClosed = await detectorClosed
         report.localCleanupClosed = await localCleanupClosed
@@ -224,7 +224,7 @@ extension DesktopHostController {
             let captured = DesktopHostComparisonClosingCapture(active)
             await DesktopHostShutdown.wait(until: deadline) { captured.stop() }
         }
-        modelDiscoveryTask?.cancel()
+        modelDiscovery.task?.cancel()
         voiceDiscovery.requestID = nil
         voiceDiscovery.task?.cancel()
         voiceCredentialTask?.cancel()
@@ -247,15 +247,15 @@ extension DesktopHostController {
         folderRevealTask?.cancel()
         recordingLocation.cancel?()
         audioCleanupTask?.cancel()
-        migrationExportWorker?.cancel()
-        migrationExportTask?.cancel()
-        migrationInspectionWorker?.cancel()
-        migrationInspectionTask?.cancel()
+        migrationWork.exportWorker?.cancel()
+        migrationWork.exportTask?.cancel()
+        migrationWork.inspectionWorker?.cancel()
+        migrationWork.inspectionTask?.cancel()
         audioCleanupConfirmation = nil
-        migrationRestoreWorker?.cancel()
-        migrationRestoreApplyWorker?.cancel()
-        migrationRestoreTask?.cancel()
-        migrationRestoreConfirmation = nil
+        migrationWork.restoreWorker?.cancel()
+        migrationWork.restoreApplyWorker?.cancel()
+        migrationWork.restoreTask?.cancel()
+        migrationWork.restoreConfirmation = nil
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()
     }

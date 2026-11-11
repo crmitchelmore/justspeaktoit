@@ -295,7 +295,7 @@ private struct ObservationalState {
 }
 
 private extension DesktopHostController where Platform == FakePlatform {
-    func observationalConsentForTest() -> Bool { observationalCorrectionConsent }
+    func observationalConsentForTest() -> Bool { correctionLearning.observationalConsent }
     func observationalStateForTest() async throws -> ObservationalState {
         let vocabulary = try await vocabularyStore()
         return ObservationalState(
@@ -304,18 +304,18 @@ private extension DesktopHostController where Platform == FakePlatform {
         )
     }
     func observationalOutputAndWait() async {
-        correctionObservationWait = { _ in }
+        correctionLearning.observationWait = { _ in }
         _ = beginOutput("Susie", output: .init(options: FakeTextOutput(), target: "synthetic"), recordID: UUID())
         await outputSlot.task?.value
-        await correctionObservationTask?.value
+        await correctionLearning.observationTask?.value
     }
     func startHeldObservationalOutput(_ entered: XCTestExpectation) async -> Task<Void, Never>? {
-        correctionObservationWait = { _ in
+        correctionLearning.observationWait = { _ in
             entered.fulfill()
             try await Task.sleep(for: .seconds(60))
         }
         _ = beginOutput("Susie", output: .init(options: FakeTextOutput(), target: "synthetic"), recordID: UUID())
         await outputSlot.task?.value
-        return correctionObservationTask
+        return correctionLearning.observationTask
     }
 }

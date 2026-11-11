@@ -5,6 +5,8 @@ import CLinuxSupport
 typealias LinuxVoiceProviderRegistration = NativeCallbackContext<LinuxEventContext>
 
 extension LinuxWindow {
+    // The native setter waits for admitted callbacks before it clears the
+    // handler, so a detached registration is freed at once.
     private static let providerCallbacks = DesktopNativeHandlerSlot<LinuxEventContext>(
         "The account Voice key callback"
     ) { context in

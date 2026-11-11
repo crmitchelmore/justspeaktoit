@@ -98,6 +98,7 @@ private func shutDownWindow(controller: LinuxAppController, holder: LinuxEventCo
         holder.shortcuts.stop()
         holder.historyPaste.stop()
         LinuxSelectedTextTarget.stopSessionAccess()
+        holder.systemResources.stop()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
         await controller.stopProviderCredentialEdits()

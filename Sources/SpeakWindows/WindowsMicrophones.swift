@@ -57,7 +57,7 @@ private func microphonesChanged(
 
 extension WindowsNative {
     static func createCapture(
-        context: WindowsCaptureContext, deviceID: String, sampleRate: Int = 16_000,
+        callbacks: UnsafeMutableRawPointer, deviceID: String, sampleRate: Int = 16_000,
         frameMilliseconds: Int = 100
     ) throws -> OpaquePointer {
         guard sampleRate == 16_000 || sampleRate == 24_000 else {
@@ -70,7 +70,7 @@ extension WindowsNative {
         let native = deviceID.withCString { device in
             jsti_capture_create_with_options(
                 device, UInt32(sampleRate), UInt32(frameMilliseconds), captureAudio, captureError,
-                Unmanaged.passUnretained(context).toOpaque(), &error, error.count
+                callbacks, &error, error.count
             )
         }
         guard let native else { throw WindowsNativeError(message: String(cString: error)) }

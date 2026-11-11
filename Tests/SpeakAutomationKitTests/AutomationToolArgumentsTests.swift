@@ -53,7 +53,9 @@ final class AutomationToolArgumentsTests: XCTestCase {
         ]
         for row in rows {
             let (tool, json, argv) = (row.tool, row.json, row.argv ?? [])
-            let fromMCP = try self.mcpArguments(tool, json)
+            var fromMCP = try self.mcpArguments(tool, json)
+            // Both front ends resolve paths to absolute ones (a drive letter on Windows).
+            fromMCP.path = fromMCP.path.map { CommandLineParser.absolutePath(for: $0) }
             var (command, fromCLI) = try self.cliArguments(argv)
             XCTAssertEqual(command, tool)
             // `say` reads its text after parsing; MCP carries it inline.

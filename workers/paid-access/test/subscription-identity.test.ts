@@ -7,7 +7,7 @@ import { transitionEntitlement } from '../src/routes/billing.js';
 const NOW = 1800000000;
 async function fixture() {
   const repository = new Repository(env.DB);
-  const user = await repository.upsertUserByAppleSub(crypto.randomUUID(), null, NOW);
+  const user = await repository.users.upsertUserByAppleSub(crypto.randomUUID(), null, NOW);
   const context = { repository, correlationId: 'subscription-test', nowSeconds: NOW };
   const update = (source: EntitlementSource, status: EntitlementStatus, event: number,
     end = NOW + 1000) => transitionEntitlement(context, { userId: user.id, source,
@@ -28,7 +28,7 @@ describe('independent subscription entitlement', () => {
         await update(other, 'active', NOW - 100, NOW + 2000);
         const outcome = await update(source, status, NOW + 10, status === 'active' ? NOW + 1500 : NOW - 1);
         expect(grantsAccess(outcome.entitlement, NOW)).toBe(true);
-        expect(grantsAccess(await repository.findEntitlement(userId, NOW), NOW)).toBe(true);
+        expect(grantsAccess(await repository.entitlements.findEntitlement(userId, NOW), NOW)).toBe(true);
         const rows = await env.DB.prepare(`SELECT status FROM subscription_states
           WHERE user_id = ?1 AND source IN ('stripe', 'storekit')`).bind(userId).all();
         expect(rows.results).toHaveLength(2);
@@ -39,8 +39,8 @@ describe('independent subscription entitlement', () => {
     const { repository, userId, update } = await fixture();
     await update('stripe', 'active', NOW, NOW + 10);
     await update('storekit', 'active', NOW - 100, NOW + 100);
-    expect(grantsAccess(await repository.findEntitlement(userId, NOW + 20), NOW + 20)).toBe(true);
-    expect(grantsAccess(await repository.findEntitlement(userId, NOW + 101), NOW + 101)).toBe(false);
+    expect(grantsAccess(await repository.entitlements.findEntitlement(userId, NOW + 20), NOW + 20)).toBe(true);
+    expect(grantsAccess(await repository.entitlements.findEntitlement(userId, NOW + 101), NOW + 101)).toBe(false);
   });
   it('persists concurrent providers independently and ignores stale events only within their purchase', async () => {
     const { update } = await fixture();

@@ -7,7 +7,9 @@ struct SystemResourcesStatusCard: View {
   @ObservedObject var monitor: SystemResourceMonitor
 
   var body: some View {
-    SettingsCard(title: "System resources in use", systemImage: "gauge.with.dots.needle.33percent", tint: Color.orange) {
+    SettingsCard(
+      title: "System resources in use", systemImage: "gauge.with.dots.needle.33percent", tint: Color.orange
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         if self.monitor.microphone.isUnattributed {
           SettingsInlineInfo(

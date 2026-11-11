@@ -170,7 +170,9 @@ final class MicrophoneUseAuditorTests: XCTestCase {
     func testHoldWithClosedMicrophone_isFlaggedAfterGrace() {
         var auditor = MicrophoneUseAuditor(grace: 3)
         let held = hold()
-        XCTAssertEqual(auditor.observe(osReportsInput: false, holds: [held], at: start).attribution, .attributed([held]))
+        XCTAssertEqual(
+            auditor.observe(osReportsInput: false, holds: [held], at: start).attribution, .attributed([held])
+        )
         XCTAssertEqual(
             auditor.observe(osReportsInput: false, holds: [held], at: start + 3).attribution,
             .claimedButClosed([held])

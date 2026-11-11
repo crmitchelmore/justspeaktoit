@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import AVFoundation
 import Foundation
 import SpeakCore
@@ -21,8 +22,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   private var startedAt: Date?
   private var run: SharedClientControllerRun?
   private var boundaryDeliveryOwner: DeliveryOwner?
-  /// Lists the provider socket in Status (issue #1471). It ends with the dictation.
-  private(set) var connectionHold: SystemResourceToken?
+  var connectionHold: SystemResourceToken?
   private var displayedRevision: UInt64 = 0
   private var displayedTranscriptRevision: UInt64 = 0
   var stopCompletionTimeout: TimeInterval {
@@ -91,12 +91,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     displayedTranscriptRevision = 0
     isStopping = false
     self.client = client
-    connectionHold?.end()
-    connectionHold = SystemResourceRegistry.shared.acquire(
-      kind: .providerConnection, title: "\(route.provider.displayName) live connection",
-      reason: "Streams the dictation in progress for live text. Closes when the dictation ends.",
-      owner: "SharedClientLiveController", detail: route.modelID
-    )
+    replaceConnectionHold(for: route)
 
     do {
       // A preferred-input session may have been acquired while cancellation
@@ -305,8 +300,7 @@ private extension SharedClientLiveController {
   }
 
   func releaseRunOwnership() {
-    connectionHold?.end()
-    connectionHold = nil
+    replaceConnectionHold(for: nil)
     client = nil
     run = nil
     boundaryDeliveryOwner = nil

@@ -215,7 +215,7 @@ let portablePackage = Package(
         // surfaces excluded from the portable graph as they were before the move.
         .target(name: "SpeakWatchCore", path: "Sources/SpeakWatchCore", exclude: [
             "WatchCaptureProtocol.swift", "WatchCaptureQueue.swift", "WatchComplicationState.swift",
-            "WatchRecordingLifecycle.swift",
+            "WatchRecordingController.swift", "WatchRecordingLifecycle.swift",
             "WatchRecordingToggleSerialiser.swift", "WatchSharedContainer.swift"
         ]),
         .target(

@@ -30,7 +30,7 @@ import subprocess
 import sys
 
 GLOBAL = [
-    "Package.swift", "Package.resolved", "Makefile", ".github/workflows/ci.yml",
+    "Package.swift", "Package.resolved", "Makefile", ".github/workflows/ci.yml", ".github/workflows/ci-macos-debug.yml",
     "Config/*", "Resources/*", "Tests/SpeakTestSupport/*", "Tests/Fixtures/*",
     "scripts/with-test-keychain.py", "scripts/private-test-keychain.py", "scripts/affected-swift-tests.py",
 ]

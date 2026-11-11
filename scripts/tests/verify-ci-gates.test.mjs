@@ -7,14 +7,24 @@ import { assessCIGates as assessOracle, gateJobs } from '../ci/verify-ci-gates.m
 import { routes } from '../ci/routing.mjs';
 
 const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+// ci.yml calls one reusable workflow per macOS lane; the lane job in ci.yml owns
+// its needs and condition, and the jobs inside run the work.
+const lanes = { 'macos-debug': 'ci-macos-debug.yml', 'macos-release': 'ci-macos-release.yml', ios: 'ci-ios.yml',
+  'journey-ui': 'ci-journey-ui.yml' };
+const laneSources = Object.fromEntries(Object.entries(lanes).map(([id, file]) =>
+  [id, readFileSync(new URL(`../../.github/workflows/${file}`, import.meta.url), 'utf8')]));
+// Every CI file, for checks that apply wherever a CI job lives.
+const ciSources = [workflow, ...Object.values(laneSources)].join('\n');
 const tesslWorkflow = readFileSync(
   new URL('../../.github/workflows/tessl-code-review.yml', import.meta.url),
   'utf8',
 );
 const makefile = readFileSync(new URL('../../Makefile', import.meta.url), 'utf8');
 const aggregate = workflow.slice(workflow.indexOf('\n  gate:'), workflow.indexOf('\n  required-macos:'));
-const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]+:\n|$(?![\s\S]))/gm)]
+const jobsOf = source => Object.fromEntries([...source.split('\njobs:\n')[1].matchAll(/^  ([a-z][a-z0-9-]+):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]+:\n|$(?![\s\S]))/gm)]
   .map(([, id, body]) => [id, body]));
+const laneJobs = Object.fromEntries(Object.entries(laneSources).map(([id, source]) => [id, Object.keys(jobsOf(source))]));
+const jobBodies = Object.assign(jobsOf(workflow), ...Object.values(laneSources).map(jobsOf));
 const nativeEligibleJobs = [
   'build-macos', 'release-validation', 'api-compatibility', 'core-journey-e2e',
   'build-ios-keyboard',
@@ -93,7 +103,10 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   assert.match(journeyStages, /"GITHUB_SHA"/);
   assert.match(journeyStages, /"Apple Swift"/);
   assert.doesNotMatch(journeyStages, /CORE_JOURNEY_BUDGET_SECONDS|--skip-test|--skip-testing/);
-  for (const body of [swift, ui]) assert.match(body, /if: needs\.release-paths\.outputs\.full == 'true'/);
+  // The journey follows Debug inside its lane; the UI lane's job in ci.yml carries the condition.
+  assert.match(swift, /^    if: inputs\.full == 'true'$/m);
+  assert.match(jobBodies['journey-ui'], /^    if: needs\.release-paths\.outputs\.full == 'true'$/m);
+  assert.match(jobBodies['macos-debug'], /^      full: \$\{\{ needs\.release-paths\.outputs\.full \}\}\n      ios: \$\{\{ needs\.release-paths\.outputs\.ios \}\}$/m);
 });
 
 test('Debug dependency resolution bypasses shared repositories in commands and recorded diagnostics', () => {
@@ -163,8 +176,8 @@ test('Apple CI routing keeps every hosted macOS job on ARM', () => {
   for (const id of ['build-ios-test-products']) {
     assert.match(jobBodies[id], /^\s+runs-on: macos-latest$/m, id);
   }
-  assert.doesNotMatch(workflow, /macos-26-(?:large|xlarge)/);
-  assert.doesNotMatch(workflow, /-intel/);
+  assert.doesNotMatch(ciSources, /macos-26-(?:large|xlarge)/);
+  assert.doesNotMatch(ciSources, /-intel/);
   for (const id of nativeEligibleJobs) {
     const hosted = hostedFallback(id);
     assert.ok(jobBodies[id].includes(`|| '["${hosted}"]') }}`), id);
@@ -204,7 +217,7 @@ test('full runs compile Release without repeating the Debug test suite', () => {
   assert.match(body, /run: swift build -c release\n/);
   assert.doesNotMatch(body, /swift test|JSTI_TEST_KEYCHAIN_REDIRECT/,
     'Release tests repeat Debug; release-mac.yml still runs them for published builds');
-  assert.doesNotMatch(workflow, /build-ios-swiftpm|--target SpeakiOSLib/,
+  assert.doesNotMatch(ciSources, /build-ios-swiftpm|--target SpeakiOSLib/,
     'a host-only SpeakiOSLib build compiles almost no iOS code; real iOS compiles cover it');
 });
 
@@ -226,15 +239,15 @@ test('Lint and the portable Swift graph run on hosted Ubuntu, never a macOS slot
   for (const command of ['$(MAKE) lint', 'git diff --exit-code Tooling/Package.resolved', '$(MAKE) test-tooling']) {
     assert.ok(ciLint.includes(`\t${command}\n`), `make ci-lint must run ${command}`);
   }
-  assert.match(jobBodies['build-macos'], /name: Test macOS-only tooling\n\s+if: needs\.release-paths\.outputs\.full == 'true'\n\s+run: make test-tooling/);
+  assert.match(jobBodies['build-macos'], /name: Test macOS-only tooling\n\s+if: inputs\.full == 'true'\n\s+run: make test-tooling/);
 });
 
 test('the macOS pull-request job tests only affected targets, minus those Linux proves', () => {
   const body = jobBodies['build-macos'];
-  assert.match(body, /name: Compile iOS library for the simulator\n\s+if: needs\.release-paths\.outputs\.full != 'true' && needs\.release-paths\.outputs\.ios == 'true'/);
+  assert.match(body, /name: Compile iOS library for the simulator\n\s+if: inputs\.full != 'true' && inputs\.ios == 'true'/);
   assert.match(body, /xcodebuild build -scheme SpeakiOSLib -destination 'generic\/platform=iOS Simulator'/);
   assert.doesNotMatch(body.split('Compile iOS library for the simulator')[1].split('- name:')[0], /\btest\b/);
-  assert.match(body, /name: Select affected unit tests\n\s+id: affected\n\s+if: needs\.release-paths\.outputs\.full != 'true'/);
+  assert.match(body, /name: Select affected unit tests\n\s+id: affected\n\s+if: inputs\.full != 'true'/);
   assert.match(body, /affected-swift-tests\.py "\$BASE"[\s\\]+--skip-target SpeakDesktopTests --skip-target SpeakAutomationKitTests/);
   assert.match(body, /if: steps\.affected\.outputs\.mode != 'none'/);
   assert.match(body, /BASE: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
@@ -249,8 +262,8 @@ test('Tessl is on demand and preserves trusted-author secret restrictions', () =
   assert.doesNotMatch(tesslWorkflow, /pull_request_target/);
 });
 
-test('every remote action in ci.yml is pinned to a full commit SHA with a version comment', () => {
-  const uses = [...workflow.matchAll(/^\s+(?:- )?uses: ([^\s]+)(.*)$/gm)].filter(([, ref]) => !ref.startsWith('./'));
+test('every remote action in ci.yml and its lanes is pinned to a full commit SHA with a version comment', () => {
+  const uses = [...ciSources.matchAll(/^\s+(?:- )?uses: ([^\s]+)(.*)$/gm)].filter(([, ref]) => !ref.startsWith('./'));
   assert.ok(uses.length > 0);
   for (const [line, ref, rest] of uses) {
     assert.match(ref, /^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/, line.trim());
@@ -259,7 +272,7 @@ test('every remote action in ci.yml is pinned to a full commit SHA with a versio
 });
 
 test('every Apple build cache isolates architecture, host and workspace, including restore prefixes', () => {
-  const cacheLines = workflow.match(/^\s+(?:key:|restore-keys:).*(?:\n\s+\$\{\{[^\n]+)?/gm);
+  const cacheLines = ciSources.match(/^\s+(?:key:|restore-keys:).*(?:\n\s+\$\{\{[^\n]+)?/gm);
   const lintKey = cacheLines.find(line => line.includes('-tooling-'));
   assert.ok(lintKey);
   assert.equal(cacheLines.length, 8,
@@ -307,7 +320,7 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.doesNotMatch(iosPreparation, /"tuist"/);
   assert.match(iosPreparation, /boot.wait\(timeout=600\)/);
   assert.match(body, /xcodebuild test-without-building/);
-  assert.match(body, /needs: \[release-paths, build-ios-test-products\]/);
+  assert.match(body, /^    needs: build-ios-test-products$/m);
   assert.match(body, /artifact-ids: \$\{\{ needs.build-ios-test-products.outputs.artifact-id \}\}/);
   assert.match(body, /scripts\/ios-test-products.py unpack/);
   assert.match(body, /-testProductsPath "\$RUNNER_TEMP\/ios-test-products\/SpeakiOS.xctestproducts"/);
@@ -323,8 +336,9 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(products, /ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO/);
   assert.match(products, /scripts\/ios-test-products.py pack/);
   assert.doesNotMatch(products, /simctl|bravo-mini-local|jsti-macos-build/);
-  assert.match(aggregate, /^\s+- build-ios-test-products$/m);
-  assert.match(aggregate, /needs\.build-ios-test-products\.result != 'success'/);
+  assert.deepEqual(laneJobs.ios, ['build-ios-test-products', 'build-ios', 'build-ios-keyboard']);
+  assert.match(aggregate, /^\s+- ios$/m);
+  assert.match(aggregate, /needs\.ios\.result != 'success'/);
   assert.match(body, /-only-testing:SpeakiOSTests/);
   assert.match(body, /-only-testing:SpeakiOSUITests/);
   assert.match(body, /verify-ios-test-evidence\.py/);
@@ -542,8 +556,8 @@ test('an untrusted Swift pull request needs Lint, the Linux graph and one macOS 
   const needs = pullRequest();
   assert.deepEqual(assessCIGates(needs, 'pull_request'), []);
   const macos = Object.entries(gateFlags).filter(([id, flag]) => !['full', 'workers'].includes(flag) && !['lint', 'portable-linux'].includes(id));
-  assert.deepEqual(macos.map(([id]) => id), ['build-macos']);
-  for (const id of ['lint', 'build-macos', 'portable-linux']) {
+  assert.deepEqual(macos.map(([id]) => id), ['macos-debug']);
+  for (const id of ['lint', 'macos-debug', 'portable-linux']) {
     const failed = pullRequest();
     failed[id].result = 'skipped';
     assert.ok(assessCIGates(failed, 'pull_request').length > 0, `${id} cannot skip on a Swift PR`);
@@ -578,8 +592,8 @@ test('merge batches and main may never skip a gate or report full=false', () => 
   assert.ok(assessCIGates(needs, 'push').length > 0);
 });
 
-// Full runs chain macOS jobs into lanes; a chained job still runs after its
-// predecessor fails, so it is gated on !cancelled() plus its own output.
+// Full runs chain macOS jobs into lanes, one reusable workflow each; a chained
+// job still runs after its predecessor fails, so it is gated on !cancelled().
 const macLanes = {
   'core-journey-e2e': 'build-macos', 'api-compatibility': 'release-validation',
   'build-ios': 'build-ios-test-products',
@@ -588,19 +602,25 @@ const macLanes = {
 
 test('every gate job honours exactly its path-detection output', () => {
   for (const [id, flag] of Object.entries(gateFlags)) {
-    const chained = id in macLanes && !['build-ios', 'core-journey-e2e'].includes(id);
-    const pattern = chained
-      ? `^    if: \\$\\{\\{ !cancelled\\(\\) && needs\\.${macLanes[id]}\\.result != 'skipped' && needs\\.release-paths\\.outputs\\.${flag} == 'true' \\}\\}$`
-      : `^    if: needs\\.release-paths\\.outputs\\.${flag} == 'true'$`;
-    assert.match(jobBodies[id], new RegExp(pattern, 'm'), id);
+    assert.match(jobBodies[id], new RegExp(`^    if: needs\\.release-paths\\.outputs\\.${flag} == 'true'$`, 'm'), id);
   }
+  // Inside a lane only the Debug journey reads a path output: it runs on full runs only.
+  assert.match(jobBodies['core-journey-e2e'], /^    if: inputs\.full == 'true'$/m);
+  assert.doesNotMatch(jobBodies['build-ios'], /^    if:/m);
+  for (const id of ['api-compatibility', 'build-ios-keyboard']) {
+    assert.match(jobBodies[id], new RegExp(`^    if: \\$\\{\\{ !cancelled\\(\\) && needs\\.${macLanes[id]}\\.result != 'skipped' \\}\\}$`, 'm'), id);
+  }
+  for (const id of Object.values(laneJobs).flat()) assert.doesNotMatch(jobBodies[id], /release-paths/, id);
   assert.match(jobBodies['paid-access-worker'], /^    needs: release-paths$/m);
 });
 
 test('full runs ask for at most four hosted macOS slots at once', () => {
   for (const [id, after] of Object.entries(macLanes)) {
-    assert.match(jobBodies[id], new RegExp(`^    needs: \\[release-paths, ${after}\\]$`, 'm'), id);
+    assert.match(jobBodies[id], new RegExp(`^    needs: ${after}$`, 'm'), id);
   }
+  // Each lane starts with its head: the one job inside that needs nothing.
+  assert.deepEqual(Object.values(laneJobs).map(jobs => jobs.filter(id => !(id in macLanes))),
+    [['build-macos'], ['release-validation'], ['build-ios-test-products'], ['core-journey-fixture-ui']]);
   const macJobs = Object.entries(jobBodies)
     .filter(([, body]) => /^    runs-on: (?:macos-latest|\$\{\{ fromJSON\(.*'\["macos-latest"\]'\) \}\})$/m.test(body))
     .map(([id]) => id);
@@ -611,7 +631,10 @@ test('full runs ask for at most four hosted macOS slots at once', () => {
 });
 
 test('macOS lanes start only after the cheap Ubuntu gates pass', () => {
-  for (const id of ['build-macos', 'core-journey-fixture-ui', 'release-validation', 'build-ios-test-products']) {
+  for (const [id, file] of Object.entries(lanes)) {
+    assert.ok(jobBodies[id].includes(`    uses: ./.github/workflows/${file}\n`), `${id} calls its lane`);
+    assert.match(laneSources[id], /^on:\n  workflow_call:\n/m, `${file} runs only when ci.yml calls it`);
+    assert.doesNotMatch(laneSources[id], /^  (?:push|pull_request|workflow_dispatch):/m, file);
     assert.match(jobBodies[id], /^    needs: \[release-paths, lint, portable-linux, pre-pr-evidence\]$/m, id);
     assert.doesNotMatch(jobBodies[id], /^    if: .*(?:always|cancelled)\(\)/m, `${id}: a failed cheap gate must skip it`);
   }

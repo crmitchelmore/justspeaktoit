@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ci.yml's isolated History fixture diagnostic, run after a failed macOS test job.
+"""ci-macos-debug.yml's isolated History fixture diagnostic, run after a failed macOS test job.
 
     capture <dir>                                   copy stdin to <dir>/output.log, keeping the first MiB
     summarise <dir> <command-exit> <capture-exit>   write <dir>/result.json; exit 0 only on an exact pass

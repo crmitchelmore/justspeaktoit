@@ -1,0 +1,97 @@
+name: CI macOS Release lane
+
+# Called by ci.yml (job macos-release) on full runs only: the Release
+# compile, then the public API compatibility check. ci.yml owns the
+# conditions, the needs and CI Gate.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  release-validation:
+    name: Build (Release)
+    # Release-configuration compile only. Its tests were the same 6,055 cases
+    # build-macos runs in Debug, so they are not repeated here; release-mac.yml
+    # still runs the Release tests for every published build.
+    # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Saved once per main commit (see build-macos); a key fixed to the
+      # Package.resolved hash never refreshes, so builds grew colder over time.
+      - name: Cache Swift packages (release)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-release-${{ hashFiles('Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-release-${{ hashFiles('Package.resolved') }}-
+            ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-release-
+
+      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
+      # release assets, which intermittently return 5xx; resolve with retries first.
+      - name: Resolve Swift packages
+        run: scripts/retry-network.sh swift package resolve
+
+      - name: Build (Release)
+        run: swift build -c release
+
+      - name: Build SpeakCore (App Store flavour)
+        # SpeakCore has no package dependencies, so this cheaply compiles the
+        # `#if APP_STORE` branches that only the Mac App Store build exercises.
+        # A separate scratch path keeps the flag out of the cached .build.
+        run: >-
+          swift build --scratch-path "$RUNNER_TEMP/app-store-flavour"
+          -Xswiftc -DAPP_STORE --target SpeakCore
+
+  api-compatibility:
+    name: Public API compatibility
+    # Route only the explicitly reviewed revision to the native pool.
+    # Every selected native runner must also admit this revision locally.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    timeout-minutes: 30
+    needs: release-validation
+    # Merge batches (baseline: origin/main) and main (baseline: the previous
+    # main commit) only.
+    # Follows Release in the same macOS lane.
+    # Runs after its predecessor fails, but not when fail-fast skipped it.
+    if: ${{ !cancelled() && needs.release-validation.result != 'skipped' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The baseline treeish must be resolvable locally.
+          fetch-depth: 0
+
+      # Exported library products must not lose or incompatibly change
+      # public symbols without a declared migration (issue #680). A PR title
+      # carrying the conventional '!' marker permits the reported break;
+      # Stable version selection and publication remain explicit decisions.
+      - name: Test public API compatibility fixtures
+        run: python3 -B -m unittest discover -s scripts/tests -p test_api_compatibility.py -v
+
+      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
+      # release assets, which return 5xx (run 42573814973). Resolve with retries
+      # first so the diagnosis reuses the shared SwiftPM artefact cache.
+      - name: Resolve Swift packages
+        run: scripts/retry-network.sh swift package resolve
+
+      # On a push the squash-merge subjects carry each PR title and its '!'
+      # marker; any breaking subject in the batch declares the break.
+      - name: Diagnose breaking public API changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASELINE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.ref == 'refs/heads/main' && (github.event.before || 'HEAD~1') || 'origin/main') }}
+        run: |
+          # A batch PR's title is generic; any breaking member subject declares the break.
+          if [ "$EVENT_NAME" != "pull_request" ] || [[ "$HEAD_REF" == merge-batch/* ]]; then
+            PR_TITLE=$(git log --format=%s "$BASELINE..HEAD" | grep -E '^[a-z]+(\([^)]*\))?!:' | head -n 1 || true)
+          fi
+          PR_TITLE="$PR_TITLE" bash scripts/check-api-compatibility.sh "$BASELINE"

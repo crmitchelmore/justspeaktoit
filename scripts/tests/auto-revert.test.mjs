@@ -23,6 +23,10 @@ test('test and journey failures are re-run once; lint, build and API failures ar
     assert.equal(classifyFailure([job('Build & Test (macOS Debug)', [{ name: 'Test (Debug)', conclusion: 'failure' }])]).deterministic, false);
     assert.deepEqual(classifyFailure([gate, { name: 'Build & Test (macOS)', conclusion: 'failure' }]).failed, [],
         'aggregates name no cause');
+    // ci.yml's lanes are reusable workflows, so their jobs carry the lane's name first.
+    assert.equal(classifyFailure([job('macOS Release / Public API compatibility')]).deterministic, true);
+    assert.deepEqual(classifyFailure([job('iOS / Build iOS Library', [{ name: 'Test iOS App', conclusion: 'failure' }])]),
+        { failed: ['iOS / Build iOS Library'], deterministic: false });
 });
 
 const apple = file => routeMatches('apple', file);

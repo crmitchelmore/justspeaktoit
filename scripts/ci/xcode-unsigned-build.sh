@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ci.yml's unsigned device builds (the Build iOS Keyboard job): generate the
+# CI's unsigned device builds (ci-ios.yml's Build iOS Keyboard job): generate the
 # Tuist workspace, resolve its packages, both with network retries, then build
 # one scheme unsigned and keep the last 30 lines of xcodebuild's output. Tuist
 # reads its TUIST_* feature flags from the environment.

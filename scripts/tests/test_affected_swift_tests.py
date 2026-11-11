@@ -46,7 +46,7 @@ class SelectionTests(unittest.TestCase):
 
     def test_manifest_support_and_unmapped_sources_select_everything(self):
         for path in ("Package.swift", "Tests/SpeakTestSupport/Fake.swift", "Sources/Unknown/File.swift",
-                     ".github/workflows/ci.yml"):
+                     ".github/workflows/ci.yml", ".github/workflows/ci-macos-debug.yml"):
             mode, selected = affected.select([path], PACKAGE, {"SpeakDesktopTests"})
             self.assertEqual(mode, "all", path)
             self.assertNotIn("SpeakDesktopTests", selected)

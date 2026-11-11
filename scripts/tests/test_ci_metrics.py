@@ -94,6 +94,14 @@ class CriticalPathTests(unittest.TestCase):
         self.assertAlmostEqual(table['Build iOS Library']['queue_p50'], 30.0)
         self.assertAlmostEqual(table['Build iOS Library']['finish_p50'], 50.0)
 
+    def test_lane_jobs_are_reported_under_their_own_name(self):
+        # ci.yml's reusable lanes report "<lane> / <job>"; history before the lanes has the bare name.
+        before = [job('Build iOS Library', '2026-11-01T10:30:00Z', '2026-11-01T10:50:00Z')]
+        after = [job('iOS / Build iOS Library', '2026-11-02T10:30:00Z', '2026-11-02T10:40:00Z')]
+        table = {row['job']: row for row in ci_metrics.critical_path([(run(1), before), (run(2), after)])}
+        self.assertEqual(list(table), ['Build iOS Library'])
+        self.assertEqual(table['Build iOS Library']['n'], 2)
+
 
 class EscapeTests(unittest.TestCase):
     def marker(self, head, result='pass', tree=None):

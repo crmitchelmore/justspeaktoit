@@ -1,4 +1,4 @@
-"""Tests for scripts/ci/isolated-history-diagnostic.py, ci.yml's History fixture diagnostic."""
+"""Tests for scripts/ci/isolated-history-diagnostic.py, ci-macos-debug.yml's History fixture diagnostic."""
 import importlib.util
 import io
 import json

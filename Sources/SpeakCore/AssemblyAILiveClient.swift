@@ -34,8 +34,7 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     let stopGracePeriod: TimeInterval
     let makeConnection: ConnectionFactory
     let schedule: Scheduler
-    private let queue = DispatchQueue(label: "AssemblyAILiveClient.state")
-    private let queueKey = DispatchSpecificKey<Bool>()
+    let stateQueue = LiveClientStateQueue(label: "AssemblyAILiveClient.state")
     var run: AssemblyAILiveRun
     private var boundaryCallback: ((String) -> Void)?
 
@@ -98,7 +97,6 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
         self.makeConnection = makeConnection
         self.schedule = schedule
         self.run = AssemblyAILiveRun(sampleRate: sampleRate)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     /// Test seam: real-time scheduling with short, explicit stop options.
@@ -167,28 +165,13 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     public func cancel() { synchronized { close(run) } }
 
     public func finishAndWait() async -> String? {
-        let active = synchronized { run }
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                synchronized {
-                    guard isCurrent(active), active.attempt != nil else {
-                        if active === run { close(active) }
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    if Task.isCancelled {
-                        close(active)
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    active.waiters.append(continuation)
-                    beginFinish(active)
-                }
+        await awaitFinish(
+            canFinish: { $0.attempt != nil }, transcript: \.transcript,
+            register: { active, continuation in
+                active.waiters.append(continuation)
+                beginFinish(active)
             }
-        } onCancel: { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { self.close(active) } }
-        }
+        )
     }
 
     /// The current session, or the last one until the next `start()`.
@@ -250,21 +233,10 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
         active.onError = nil
     }
 
-    func isCurrent(_ active: AssemblyAILiveRun, _ attempt: AssemblyAILiveRun.Attempt? = nil) -> Bool {
+    func isCurrent(_ active: AssemblyAILiveRun) -> Bool { isCurrent(active, nil) }
+
+    func isCurrent(_ active: AssemblyAILiveRun, _ attempt: AssemblyAILiveRun.Attempt?) -> Bool {
         active === run && active.phase != .closed && (attempt == nil || active.attempt === attempt)
-    }
-
-    func after(_ seconds: TimeInterval, _ active: AssemblyAILiveRun,
-               action: @escaping @Sendable (AssemblyAILiveClient, AssemblyAILiveRun) -> Void) {
-        schedule(seconds) { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { action(self, active) } }
-        }
-    }
-
-    func synchronized<Value>(_ action: () -> Value) -> Value {
-        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
-        return queue.sync(execute: action)
     }
 
     /// The handshake request for `endpoint`, carrying the session's keyterms.
@@ -297,3 +269,5 @@ extension AssemblyAILiveClient: StreamingAudioReadyProviding {
         synchronized { run.phase == .active && run.attempt?.didBegin == true }
     }
 }
+
+extension AssemblyAILiveClient: QueueConfinedLiveClient {}

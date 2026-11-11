@@ -214,7 +214,7 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient,
                     }
                     guard isCurrent(active), active.stage != .idle else {
                         let transcript = active.transcript
-                        effects.append { continuation.resume(returning: transcript) }
+                        effects.add { continuation.resume(returning: transcript) }
                         return
                     }
                     active.waiters.append(continuation)
@@ -248,11 +248,8 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient,
     /// Applies a state change under the lock, then performs the effects it
     /// decided on after releasing it.
     @discardableResult
-    func perform<Value>(_ change: (inout GladiaLiveEffects) -> Value) -> Value {
-        var effects = GladiaLiveEffects()
-        let value = lock.withLock { change(&effects) }
-        effects.run()
-        return value
+    func perform<Value>(_ change: (inout LiveDeferredEffects) -> Value) -> Value {
+        LiveDeferredEffects.applying(under: lock, change)
     }
 }
 
@@ -269,7 +266,7 @@ extension GladiaLiveClient {
     /// ones that join after it closed. The report itself waits for transcript
     /// callbacks already in flight; the caller that failed the run, perhaps on
     /// the capture path, never waits for either.
-    func fail(_ error: Error, _ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    func fail(_ error: Error, _ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard isCurrent(active) else { return }
         let callback = active.onError
         active.reportingFailure = true
@@ -280,7 +277,7 @@ extension GladiaLiveClient {
             reportDelivered(active)
         }
         if active.transcriptCallbacksInFlight == 0 {
-            effects.append(report)
+            effects.add(report)
         } else {
             active.deferredReport = report
         }
@@ -293,7 +290,7 @@ extension GladiaLiveClient {
             let waiters = active.waiters
             active.waiters.removeAll()
             let transcript = active.transcript
-            effects.append { waiters.forEach { $0.resume(returning: transcript) } }
+            effects.add { waiters.forEach { $0.resume(returning: transcript) } }
         }
     }
 
@@ -304,14 +301,14 @@ extension GladiaLiveClient {
             active.transcriptCallbacksInFlight -= 1
             guard active.transcriptCallbacksInFlight == 0, let report = active.deferredReport else { return }
             active.deferredReport = nil
-            effects.append(report)
+            effects.add(report)
         }
     }
 
     /// Ends the run: abandons its request and socket, invalidates every
     /// pending send, receive and deadline, and resumes its waiters unless a
     /// failure's report still has to reach the host first.
-    func close(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    func close(_ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard active.stage != .closed else { return }
         active.stage = .closed
         let request = active.sessionRequest
@@ -337,7 +334,7 @@ extension GladiaLiveClient {
         let transcript = active.transcript
         active.onTranscript = nil
         active.onError = nil
-        effects.append {
+        effects.add {
             request?.cancel()
             connection?.cancel()
             waiters.forEach { $0.resume(returning: transcript) }
@@ -347,9 +344,9 @@ extension GladiaLiveClient {
     /// Schedules `action` for the run. A deadline that fires after the run
     /// closed or was replaced does nothing.
     func arm(
-        _ seconds: TimeInterval, _ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects,
+        _ seconds: TimeInterval, _ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects,
         ownsPhase: (@Sendable (GladiaLiveRun) -> Bool)? = nil,
-        action: @escaping @Sendable (GladiaLiveClient, GladiaLiveRun, inout GladiaLiveEffects) -> Void
+        action: @escaping @Sendable (GladiaLiveClient, GladiaLiveRun, inout LiveDeferredEffects) -> Void
     ) {
         let deadline: @Sendable () -> Void = { [weak self, weak active] in
             guard let self, let active else { return }
@@ -361,7 +358,7 @@ extension GladiaLiveClient {
             armChecked(seconds, active, effects: &effects, ownsPhase: ownsPhase, action: deadline)
         } else {
             let schedule = schedule
-            effects.append { schedule(seconds, deadline) }
+            effects.add { schedule(seconds, deadline) }
         }
     }
 

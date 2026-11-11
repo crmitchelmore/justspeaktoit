@@ -242,18 +242,13 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
 
 // MARK: - Run lifecycle
 
-/// Every function taking `inout MistralVoxtralLiveEffects` runs with `lock`
+/// Every function taking `inout LiveDeferredEffects` runs with `lock`
 /// held and defers anything that could re-enter the client.
 extension MistralVoxtralLiveClient {
     /// Runs `body` under the state lock, then performs the effects it queued.
     @discardableResult
-    func withState<Value>(_ body: (inout MistralVoxtralLiveEffects) -> Value) -> Value {
-        var effects = MistralVoxtralLiveEffects()
-        lock.lock()
-        let value = body(&effects)
-        lock.unlock()
-        effects.perform()
-        return value
+    func withState<Value>(_ body: (inout LiveDeferredEffects) -> Value) -> Value {
+        LiveDeferredEffects.applying(under: lock, body)
     }
 
     /// Retires the current run and installs a fresh one with its callbacks.
@@ -262,7 +257,7 @@ extension MistralVoxtralLiveClient {
     /// through its `onError`, because there was no callback to report it to.
     func arm(
         onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void,
-        usesTransport: Bool, _ effects: inout MistralVoxtralLiveEffects
+        usesTransport: Bool, _ effects: inout LiveDeferredEffects
     ) -> MistralVoxtralLiveRun {
         let previous = run
         let active = MistralVoxtralLiveRun()
@@ -299,7 +294,7 @@ extension MistralVoxtralLiveClient {
         log("Audio offered before start was refused")
     }
 
-    func admit(_ pcm: Data, into active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
+    func admit(_ pcm: Data, into active: MistralVoxtralLiveRun, _ effects: inout LiveDeferredEffects) {
         guard pcm.count.isMultiple(of: 2) else {
             fail(MistralRealtimeStreamingError.invalidPCM, active, &effects)
             return
@@ -316,7 +311,7 @@ extension MistralVoxtralLiveClient {
     /// connecting, including one whose transport factory has not returned yet,
     /// keeps its capture and sends it once configured. One deadline bounds the
     /// whole finish; which step it catches decides the error.
-    func beginFinish(_ active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
+    func beginFinish(_ active: MistralVoxtralLiveRun, _ effects: inout LiveDeferredEffects) {
         guard active.phase != .finishing else { return }
         // The socket-free seam, or a session that captured no audio: there is
         // nothing to flush, so the finish is the text heard so far.
@@ -329,7 +324,7 @@ extension MistralVoxtralLiveClient {
         active.outgoing.append(.end)
         log("Finishing")
         requestPump(active, &effects)
-        effects.append { [weak self] in
+        effects.add { [weak self] in
             self?.after(MistralVoxtralRealtime.finishBudget, active) { client, active, effects in
                 guard active.phase == .finishing else { return }
                 client.fail(client.finishDeadlineError(active), active, &effects)
@@ -350,14 +345,14 @@ extension MistralVoxtralLiveClient {
     /// replacement. Its waiters, and any finish that joins while the callback
     /// runs, stay on the failed run and resume with its text only once the
     /// callback has returned; nothing is held under the lock meanwhile.
-    func fail(_ error: Error, _ active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
+    func fail(_ error: Error, _ active: MistralVoxtralLiveRun, _ effects: inout LiveDeferredEffects) {
         guard isCurrent(active) else { return }
         let callback = active.onError
         active.retire(&effects)
         active.deliveringFailure = true
         log("Session failed")
-        effects.append { callback?(error) }
-        effects.append { self.completeFailureDelivery(active) }
+        effects.add { callback?(error) }
+        effects.add { self.completeFailureDelivery(active) }
     }
 
     /// Ends a failed run's delivery and resumes every finish that waited on it.
@@ -368,14 +363,14 @@ extension MistralVoxtralLiveClient {
         }
     }
 
-    func close(_ active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
+    func close(_ active: MistralVoxtralLiveRun, _ effects: inout LiveDeferredEffects) {
         guard active.retire(&effects) else { return }
         active.releaseWaiters(&effects)
     }
 
     func isCurrent(_ active: MistralVoxtralLiveRun) -> Bool { active === run && active.phase != .closed }
 
-    typealias RunAction = @Sendable (MistralVoxtralLiveClient, MistralVoxtralLiveRun, inout MistralVoxtralLiveEffects)
+    typealias RunAction = @Sendable (MistralVoxtralLiveClient, MistralVoxtralLiveRun, inout LiveDeferredEffects)
         -> Void
 
     /// Schedules `action` for `active`, which runs under the lock only if that

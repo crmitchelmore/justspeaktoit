@@ -63,8 +63,7 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
     let preroll: StreamingAudioPreroll
     /// Mirrors whether the current session's configuration was acknowledged.
     let readiness = StreamingSessionReadiness()
-    private let queue = DispatchQueue(label: "AzureVoiceLiveClient.state")
-    private let queueKey = DispatchSpecificKey<Bool>()
+    let stateQueue = LiveClientStateQueue(label: "AzureVoiceLiveClient.state")
     var run: AzureVoiceLiveRun
 
     public convenience init(
@@ -103,7 +102,6 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
         self.schedule = schedule
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
         self.run = AzureVoiceLiveRun(phase: .idle)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     deinit { run.connection?.cancel() }
@@ -315,20 +313,6 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
 
     /// Schedules `action` for this run. It runs on the state queue, and only
     /// while the run is still current.
-    func after(
-        _ seconds: TimeInterval, _ active: AzureVoiceLiveRun,
-        action: @escaping @Sendable (AzureVoiceLiveClient, AzureVoiceLiveRun) -> Void
-    ) {
-        schedule(seconds) { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { action(self, active) } }
-        }
-    }
-
-    func synchronized<Value>(_ action: () -> Value) -> Value {
-        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
-        return queue.sync(execute: action)
-    }
 
     /// Lifecycle events only: never a key, a frame or transcript text.
     func log(_ event: String) {
@@ -341,3 +325,5 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
 extension AzureVoiceLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { isSessionReady }
 }
+
+extension AzureVoiceLiveClient: QueueConfinedLiveClient {}

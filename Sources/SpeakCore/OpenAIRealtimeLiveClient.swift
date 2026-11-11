@@ -50,8 +50,7 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
     let finalizeBudget: TimeInterval
     let makeConnection: ConnectionFactory
     let schedule: Scheduler
-    private let queue = DispatchQueue(label: "OpenAIRealtimeLiveClient.state")
-    private let queueKey = DispatchSpecificKey<Bool>()
+    let stateQueue = LiveClientStateQueue(label: "OpenAIRealtimeLiveClient.state")
     private let ownedSession: URLSession?
     var run: OpenAIRealtimeLiveRun
 
@@ -95,7 +94,6 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
         self.schedule = schedule
         self.ownedSession = ownedSession
         self.run = OpenAIRealtimeLiveRun()
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     deinit {
@@ -135,28 +133,13 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
     public func cancel() { synchronized { close(run) } }
 
     public func finishAndWait() async -> String? {
-        let active = synchronized { run }
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                synchronized {
-                    guard isCurrent(active), active.connection != nil else {
-                        if active === run { close(active) }
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    if Task.isCancelled {
-                        close(active)
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    active.finishWaiters.append(continuation)
-                    beginFinish(active, deliverCallbacks: false)
-                }
+        await awaitFinish(
+            canFinish: { $0.connection != nil }, transcript: \.transcript,
+            register: { active, continuation in
+                active.finishWaiters.append(continuation)
+                beginFinish(active, deliverCallbacks: false)
             }
-        } onCancel: { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { self.close(active) } }
-        }
+        )
     }
 
     // MARK: - Canonical readiness and commit surface
@@ -277,19 +260,6 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
 
     func isCurrent(_ active: OpenAIRealtimeLiveRun) -> Bool { active === run && active.phase != .closed }
 
-    func after(_ seconds: TimeInterval, _ active: OpenAIRealtimeLiveRun,
-               action: @escaping @Sendable (OpenAIRealtimeLiveClient, OpenAIRealtimeLiveRun) -> Void) {
-        schedule(seconds) { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { action(self, active) } }
-        }
-    }
-
-    func synchronized<Value>(_ action: () -> Value) -> Value {
-        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
-        return queue.sync(execute: action)
-    }
-
     func log(_ event: String) {
         #if canImport(os) && !SPEAK_PORTABLE_CORE
         SpeakLogger.logger(category: "OpenAIRealtimeLiveClient").info("\(event, privacy: .public)")
@@ -300,3 +270,5 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
 extension OpenAIRealtimeLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { isReady }
 }
+
+extension OpenAIRealtimeLiveClient: QueueConfinedLiveClient {}

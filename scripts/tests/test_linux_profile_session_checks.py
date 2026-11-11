@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 
-SCRIPTS = Path(__file__).resolve().parents[1]
+SCRIPTS = Path(__file__).resolve().parents[1] / 'linux'
 
 
 def load(name):

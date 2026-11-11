@@ -59,8 +59,8 @@ export SPEAK_LINUX_TARGET=1
 swift build --product SpeakLinux
 swift test                                  # portable, host and Linux tests
 .build/debug/SpeakLinux --self-test
-scripts/linux-desktop-checks.sh             # self-test + Xvfb window smoke test
-scripts/linux-integration-checks.sh         # keyring, PipeWire, portals, X11 paste
+scripts/linux/linux-desktop-checks.sh             # self-test + Xvfb window smoke test
+scripts/linux/linux-integration-checks.sh         # keyring, PipeWire, portals, X11 paste
 .build/debug/SpeakLinux                     # the app
 ```
 
@@ -78,7 +78,7 @@ sample History (`DesktopHostSampleHistory`, the transcripts the Mac's website
 screenshots use), visits every page and saves each one twice, as the visible
 window and as the whole scrolled page (`NN-name.png`, `NN-name-full.png`),
 then the dashboard and History in dark mode and the dashboard while recording.
-`scripts/linux-desktop-checks.sh` runs it when `JSTI_UI_SCREENSHOT_DIR` is set,
+`scripts/linux/linux-desktop-checks.sh` runs it when `JSTI_UI_SCREENSHOT_DIR` is set,
 and CI uploads the pictures as `linux-ui-screenshots`.
 
 Recording feedback uses a dedicated, warmed libpulse channel and the bundled
@@ -525,7 +525,7 @@ the condition is met. The expiry case intentionally measures the real 2.5-second
 lease. This authored fixture is NOT_RUN locally. It cannot qualify real
 compositor/AT-SPI app behavior, consent UI, provider requests or audible output.
 
-`scripts/linux-desktop-checks.sh` also opts into a cross-process fixture only
+`scripts/linux/linux-desktop-checks.sh` also opts into a cross-process fixture only
 inside its private session bus. It launches 39 real command-client processes
 against the production native command handler with a synthetic event callback:
 valid and repeated commands, `--background`, mixed action flags, unsupported
@@ -758,7 +758,7 @@ proven on a physical desktop.
 |---|---|---|
 | Shared host controller (record, stop, transcribe, cancel, close, output slot, History) | Verified | `SpeakDesktopHostTests` with a fake platform; Windows Swift type-checks against it (`scripts/typecheck-windows-swift.sh`) |
 | All 31 batch models, OpenRouter discovery, post-processing | Shared code, verified by the portable tests | `swift test` (portable suite) |
-| GTK window, events, record-bound History presentation | Verified headless on X11 and Wayland | `--ui-smoke-test` under Xvfb and headless Weston (`scripts/linux-wayland-smoke.sh`), window self-test, snapshot |
+| GTK window, events, record-bound History presentation | Verified headless on X11 and Wayland | `--ui-smoke-test` under Xvfb and headless Weston (`scripts/linux/linux-wayland-smoke.sh`), window self-test, snapshot |
 | Mac layout: sidebar pages, dashboard, History cards, totals, appearance | Verified headless on X11 | Window self-test (every page shown from the sidebar, the selected card holds its transcript, totals shown); `DesktopHistoryPresentationTests`; `--ui-screenshots` pictures of every page in light, dark and recording states (CI artifact). Real desktops and HiDPI **unverified** |
 | Recording HUD | X11: verified headless (window type, no input focus, bottom-centre placement) and under Xvfb + Openbox, where a Zenity field kept focus while it showed; Wayland: result notifications only | Window self-test and screenshot tour; real GNOME/KDE X11 sessions, multiple monitors, fractional scaling and Wayland notifications **unverified** |
 | Microphone capture (libpulse via PipeWire) | Verified with a virtual source | integration check: exact 100 ms frames, non-silent test tone; physical USB/Bluetooth microphones **unverified** |
@@ -992,8 +992,8 @@ require separate qualification and activation.
 `.github/workflows/linux.yml` (ubuntu-24.04, `swift:6.2.3-noble`, pinned by
 digest) installs the packages above, then runs the boundary check, the
 release build, `swift test` with `SPEAK_LINUX_TARGET=1`,
-`scripts/linux-desktop-checks.sh` (uploading the window snapshot),
-`scripts/linux-integration-checks.sh`, `--local-transcription-self-test` on
+`scripts/linux/linux-desktop-checks.sh` (uploading the window snapshot),
+`scripts/linux/linux-integration-checks.sh`, `--local-transcription-self-test` on
 the JFK sample, and the Windows Swift type-check. The reusable
 `linux-local-runtime.yml` first builds the pinned whisper.cpp runtime in the
 same image (cached by its pins); the desktop job downloads it and a cached

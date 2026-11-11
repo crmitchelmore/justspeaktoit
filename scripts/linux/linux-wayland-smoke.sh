@@ -2,10 +2,10 @@
 # Runs the GTK window smoke test on Wayland under a headless Weston, so the
 # window, its thread-safe updates and shutdown are checked without X11.
 #
-#   scripts/linux-wayland-smoke.sh [path/to/SpeakLinux]
+#   scripts/linux/linux-wayland-smoke.sh [path/to/SpeakLinux]
 set -euo pipefail
 
-repo="$(cd "$(dirname "$0")/.." && pwd)"
+repo="$(cd "$(dirname "$0")/../.." && pwd)"
 binary="${1:-$(SPEAK_LINUX_TARGET=1 swift build --package-path "$repo" --show-bin-path)/SpeakLinux}"
 runtime="$(mktemp -d)"
 chmod 700 "$runtime"

@@ -220,6 +220,7 @@ public enum LiveTranscriptionRouting {
             // The catalogue exposes `elevenlabs/scribe-v2-streaming`, but the
             // ElevenLabs realtime API model id is `scribe_v2_realtime`.
             if name == "scribe-v2" { return "scribe_v2_realtime" }
+            if name == "scribe-v3-live" { return ElevenLabsLiveProtocol.scribeV3LiveModelID }
             return name
         case .apple:
             // Apple ids are used as-is by the on-device transcriber.

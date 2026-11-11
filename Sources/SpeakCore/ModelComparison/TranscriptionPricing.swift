@@ -11,7 +11,7 @@ import Foundation
 /// UI shows no cost rather than a guess. On-device models cost nothing.
 public enum TranscriptionPricing {
     /// When the table below was last checked against provider pricing pages.
-    public static let lastReviewed = "2026-10"
+    public static let lastReviewed = "2026-11"
 
     /// Estimated US-dollar cost of transcribing `durationSeconds` of audio
     /// with `modelID`, or `nil` when no rate is known.
@@ -71,20 +71,24 @@ public enum TranscriptionPricing {
         // https://developers.openai.com/api/docs/models/gpt-live-transcribe (checked 2026-11-02).
         OpenAITranscriptionModels.gptTranscribeCatalogID: rate("0.0045"),
         OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID: rate("0.017"),
-        // Mode-specific PAYG rates, including current streaming promotions:
-        // https://deepgram.com/pricing (checked 2026-09-12).
+        // Mode-specific pay-as-you-go rates: https://deepgram.com/pricing
+        // (checked 2026-11-11). The streaming promotions have ended; Nova-3 is
+        // the monolingual rate. Nova, Enhanced and Base are no longer listed,
+        // so their last published rates are kept.
         "deepgram/nova-3": rate("0.0043"),
-        "deepgram/nova-3-streaming": rate("0.0048"),
-        "deepgram/flux-general-en-streaming": rate("0.0065"),
+        "deepgram/nova-3-streaming": rate("0.0077"),
+        "deepgram/flux-general-en-streaming": rate("0.0077"),
         "deepgram/flux-general-multi-streaming": rate("0.0078"),
         "deepgram/nova": rate("0.0058"),
         "deepgram/enhanced": rate("0.0165"),
         "deepgram/base": rate("0.0145"),
-        // https://elevenlabs.io/pricing/api (checked 2026-09-12).
-        "elevenlabs/scribe_v2": perHour("0.22"),
-        // Scribe v2 Medical is billed at the Scribe v2 rate.
-        ModelCatalog.elevenLabsScribeV2MedicalBatchID: perHour("0.22"),
-        "elevenlabs/scribe-v2-streaming": perHour("0.39"),
+        // https://elevenlabs.io/pricing/api (checked 2026-11-11): Scribe v3, v2
+        // and v2 Medical share one batch rate; v3 Live and v2 Realtime share one.
+        ModelCatalog.elevenLabsScribeV3BatchID: perHour("0.20"),
+        "elevenlabs/scribe_v2": perHour("0.20"),
+        ModelCatalog.elevenLabsScribeV2MedicalBatchID: perHour("0.20"),
+        ModelCatalog.elevenLabsScribeV3LiveID: perHour("0.22"),
+        "elevenlabs/scribe-v2-streaming": perHour("0.22"),
         // Modulate Velma: $0.03/hr batch, $0.025/hr English very-fast,
         // $0.06/hr streaming (matches ModulateTranscriptionProvider).
         "modulate/velma-2-stt-batch": perHour("0.03"),

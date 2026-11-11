@@ -3,8 +3,8 @@ import Foundation
 /// Catalogue and upstream identifiers for Google's Gemini 3.5 Transcribe
 /// models (issue #816).
 ///
-/// Both models are in **public preview**. The catalogue has no availability
-/// field, so preview status is carried in the display name and description and
+/// Both models left public preview: Google's deprecations page lists them as
+/// stable with no shutdown date (checked 2026-11-11). They stay opt-in and
 /// neither model is ever a default or an automatic fallback.
 ///
 /// The `google/` catalogue prefix is shared with the OpenRouter-routed

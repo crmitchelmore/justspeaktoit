@@ -97,8 +97,9 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       }
       targetFormat = outputFormat
 
-      // ElevenLabs realtime API requires the `_realtime` suffixed model ID.
-      let modelID = "scribe_v2_realtime"
+      // The catalogue ID maps to the realtime API name, e.g. `scribe_v2_realtime`.
+      let modelID = LiveTranscriptionRouting.route(
+        for: currentModel ?? "elevenlabs/scribe-v2-streaming")?.apiModelName ?? "scribe_v2_realtime"
 
       let newTranscriber = ElevenLabsLiveTranscriber(
         apiKey: apiKey,

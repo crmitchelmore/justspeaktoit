@@ -117,9 +117,28 @@ final class DesktopHostCapturePreparationTests: XCTestCase {
         await controller.reconcileCapturePreparation()
         XCTAssertTrue(effects.preparations.isEmpty)
     }
+
+    func testNativeLifetimeEnd_EndsHoldWithoutAnIdleTransition() async throws {
+        let registry = SystemResourceRegistry()
+        await controller.useSystemResourceRegistry(registry)
+        await controller.setCapturePreparationPollIntervalForTest(.milliseconds(5))
+        await controller.warmOperationCycleForTest()
+        let first = try XCTUnwrap(effects.preparations.first)
+        XCTAssertEqual(registry.holds.map(\.title), ["Microphone preparation"])
+
+        first.expire()
+        await settle { registry.holds.isEmpty && first.released == 1 }
+        XCTAssertTrue(registry.holds.isEmpty, "The hold ends with the native worker")
+        XCTAssertEqual(first.released, 1, "The ended worker is joined")
+        XCTAssertEqual(effects.preparations.count, 1, "An ended lifetime is not renewed by the watch")
+    }
 }
 
 extension DesktopHostController where Platform == FakePlatform {
+    func setCapturePreparationPollIntervalForTest(_ interval: Duration) {
+        capturePreparationPollInterval = interval
+    }
+
     func applyCapturePreparationForTest(enabled: Bool) throws {
         var changed = settings
         changed.configuration = try DesktopConfiguration(values: [

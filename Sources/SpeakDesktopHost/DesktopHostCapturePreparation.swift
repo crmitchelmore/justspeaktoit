@@ -40,6 +40,30 @@ extension DesktopHostController {
             deviceID: deviceID, lifetimeMilliseconds: Self.capturePreparationLifetimeMilliseconds
         ) else { return }
         capturePreparation = (deviceID, prepared)
+        watchCapturePreparation(prepared)
+    }
+
+    /// Ends the "Microphone preparation" hold (issue #1473) once the native
+    /// worker reports its lifetime ended or the endpoint was unavailable,
+    /// rather than at the next idle transition. Never prepares again.
+    private func watchCapturePreparation(_ prepared: any DesktopCapturePreparation) {
+        capturePreparationWatch?.cancel()
+        let interval = capturePreparationPollInterval
+        capturePreparationWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self else { return }
+                if await self.endCapturePreparationIfInactive(prepared) { return }
+            }
+        }
+    }
+
+    /// Returns true once `prepared` is no longer the controller's preparation.
+    private func endCapturePreparationIfInactive(_ prepared: any DesktopCapturePreparation) -> Bool {
+        guard let current = capturePreparation?.value, current === prepared else { return true }
+        guard !prepared.isActive else { return false }
+        releaseCapturePreparation()
+        return true
     }
 
     /// Device, settings, credential or shutdown changes discard the prepared route.
@@ -49,6 +73,8 @@ extension DesktopHostController {
     }
 
     func releaseCapturePreparation() {
+        capturePreparationWatch?.cancel()
+        capturePreparationWatch = nil
         guard let prepared = capturePreparation?.value else { return }
         capturePreparation = nil
         Task.detached(priority: .utility) { prepared.release() }

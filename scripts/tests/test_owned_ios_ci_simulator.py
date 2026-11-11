@@ -220,6 +220,12 @@ class OwnedSimulatorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             owned.selected_configuration({})
 
+    def test_explicit_device_name_matches_exactly_including_ipad_without_fallback(self):
+        ipad = inventory(name="iPad Pro 13-inch (M5)")
+        self.assertEqual(owned.selected_configuration(ipad, "iPad Pro 13-inch (M5)"), (RUNTIME, TYPE))
+        with self.assertRaises(ValueError):
+            owned.selected_configuration(inventory(name="iPhone 17 Pro"), "iPhone 17 Pro Max")
+
 
 
 class InventoryRetryTests(unittest.TestCase):

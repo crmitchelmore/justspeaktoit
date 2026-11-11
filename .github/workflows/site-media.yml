@@ -12,6 +12,12 @@ on:
         description: Re-render from this earlier run's Mac and iPhone captures instead of capturing again
         required: false
         default: ""
+      ios_device:
+        description: >-
+          App Store screenshots only: exact Simulator name, e.g. "iPhone 17 Pro Max" (6.9-inch) or
+          "iPad Pro 13-inch (M5)". Skips the Mac capture and clip rendering.
+        required: false
+        default: ""
   pull_request:
     paths:
       - .github/workflows/site-media.yml
@@ -32,7 +38,7 @@ concurrency:
 jobs:
   capture:
     name: Capture Mac app (${{ matrix.appearance }})
-    if: ${{ !inputs.captures_run && !startsWith(github.head_ref, 'merge-batch/') }}
+    if: ${{ !inputs.captures_run && !inputs.ios_device && !startsWith(github.head_ref, 'merge-batch/') }}
     strategy:
       fail-fast: false
       matrix:
@@ -173,10 +179,12 @@ jobs:
 
       - name: Create an owned Simulator
         timeout-minutes: 3
+        env:
+          IOS_DEVICE: ${{ inputs.ios_device }}
         run: |
           python3 scripts/owned-ios-ci-simulator.py create \
             --receipt "$RUNNER_TEMP/owned-ios-simulator.json" --github-env "$GITHUB_ENV" \
-            --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
+            --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB" --device "$IOS_DEVICE"
 
       - name: Prepare the Simulator
         timeout-minutes: 12
@@ -228,7 +236,7 @@ jobs:
   render:
     name: Render marketing clips
     needs: [capture, capture-ios]
-    if: ${{ !cancelled() && (inputs.captures_run || (needs.capture.result == 'success' && needs.capture-ios.result == 'success')) }}
+    if: ${{ !cancelled() && !inputs.ios_device && (inputs.captures_run || (needs.capture.result == 'success' && needs.capture-ios.result == 'success')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:

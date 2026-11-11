@@ -37,12 +37,14 @@ def devices(available=True):
     return json.loads(output)["devices"]
 
 
-def selected_configuration(inventory):
+def selected_configuration(inventory, device_name=None):
+    # An explicit name (App Store screenshot sizes) must match exactly, iPad included; no fallback.
     candidates = [(runtime, device) for runtime, values in inventory.items() for device in values
-                  if device.get("isAvailable") and device.get("name", "").startswith("iPhone")]
+                  if device.get("isAvailable") and (device.get("name") == device_name if device_name
+                                                    else device.get("name", "").startswith("iPhone"))]
     preferred = [item for item in candidates if item[1]["name"] == "iPhone 17 Pro"]
     if not candidates:
-        raise ValueError("No available iPhone simulator configuration")
+        raise ValueError(f"No available {device_name or 'iPhone'} simulator configuration")
     runtime, device = (preferred or candidates)[0]
     device_type = device.get("deviceTypeIdentifier")
     if not runtime or not device_type:
@@ -73,7 +75,7 @@ def remove_owned(identifier):
             "shutdownWarning": shutdown_failure}
 
 
-def create(receipt, environment, owner):
+def create(receipt, environment, owner, device_name=None):
     try:
         receipt.lstat()
     except FileNotFoundError:
@@ -83,7 +85,7 @@ def create(receipt, environment, owner):
     # Ownership admission includes unavailable pre-existing UUIDs; the
     # configuration selector still considers only available iPhones.
     inventory = devices(available=False)
-    runtime, device_type = selected_configuration(inventory)
+    runtime, device_type = selected_configuration(inventory, device_name)
     previous = {device["udid"] for values in inventory.values() for device in values}
     identifier = run("create", f"JSTI owned CI {uuid.uuid4()}", device_type, runtime)
     uuid.UUID(identifier)
@@ -137,11 +139,12 @@ def main():
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--github-env", type=Path)
     parser.add_argument("--owner", required=True)
+    parser.add_argument("--device", help="exact simulator name, for example 'iPhone 17 Pro Max'")
     arguments = parser.parse_args()
     if arguments.operation == "create":
         if arguments.github_env is None:
             parser.error("create requires --github-env")
-        create(arguments.receipt, arguments.github_env, arguments.owner)
+        create(arguments.receipt, arguments.github_env, arguments.owner, arguments.device or None)
     else:
         cleanup(arguments.receipt, arguments.owner)
 

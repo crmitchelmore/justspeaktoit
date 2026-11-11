@@ -3,7 +3,9 @@
 Native Android app (Kotlin, Jetpack Compose). Scope, supported devices and the feature
 comparison with the Mac app are in the [Android parity matrix](../Docs/android-parity-matrix.md).
 
-This is a developer build: it is not published to Google Play.
+Green `main` builds are signed and published to Google Play's internal testing track once the
+owner has configured the release secrets; see the
+[Play submission guide](../Docs/android-play-store-submission.md).
 
 ## Requirements
 
@@ -22,9 +24,11 @@ cd android
 ./gradlew installDebug        # install on a connected device
 ```
 
-CI runs the unit test, lint and debug build tasks (not `installDebug`, so installation is not
-checked) in [`.github/workflows/android.yml`](../.github/workflows/android.yml)
-and uploads the debug APK as the `justspeaktoit-android-debug` artefact.
+CI runs the unit test, lint, debug build and R8 release bundle tasks (not `installDebug`, so
+installation is not checked) in [`.github/workflows/android.yml`](../.github/workflows/android.yml)
+and uploads the debug APK as the `justspeaktoit-android-debug` artefact. On `main` its `release`
+job then builds the upload-signed AAB (`justspeaktoit-android-release`) and, when configured,
+publishes it to the internal testing track.
 
 Pull requests that change only `android/**`, `.github/workflows/android.yml` or
 `Docs/android-*.md` skip the macOS and iOS jobs in `ci.yml`. The required checks still

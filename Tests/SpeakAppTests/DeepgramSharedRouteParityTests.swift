@@ -81,10 +81,12 @@ final class DeepgramSharedRouteParityTests: XCTestCase {
     }
 
     private func makeFixture(model: String, grace: TimeInterval = 0) throws -> SharedClientParityFixture {
-        try SharedClientParityFixture(model: model, stopGrace: grace) { route, _, socket, clock in
+        try SharedClientParityFixture(model: model, stopGrace: grace) { context in
             DeepgramLiveClient(
-                apiKey: "synthetic", model: route.apiModelName, sampleRate: route.sampleRate,
-                makeConnection: { _ in socket }, schedule: { clock.schedule($0, action: $1) }
+                apiKey: "synthetic", model: context.route.apiModelName, language: context.language,
+                sampleRate: context.route.sampleRate,
+                makeConnection: { [socket = context.socket] _ in socket },
+                schedule: { [clock = context.clock] in clock.schedule($0, action: $1) }
             )
         }
     }

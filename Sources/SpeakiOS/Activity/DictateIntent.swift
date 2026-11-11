@@ -29,7 +29,12 @@ import SpeakCore
 struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
     static var title: LocalizedStringResource = "Dictate"
     static var description = IntentDescription(
-        "Records, finishes on its own once you stop speaking, and returns the transcript."
+        """
+        Records until you stop speaking, then returns the transcript to the next action. \
+        Use it inside a shortcut that needs the words, such as one that creates a note.
+        """,
+        categoryName: "Recording",
+        searchKeywords: ["transcribe", "transcription", "speech to text", "get text"]
     )
 
     static var openAppWhenRun: Bool = false

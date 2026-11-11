@@ -3,9 +3,8 @@ import SpeakCore
 import SpeakSync
 import SwiftUI
 
-// swiftlint:disable file_length
-
-// swiftlint:disable:next type_body_length
+/// The Settings root: a short recommended setup, then one row per sub-page,
+/// grouped the way iOS Settings is (#1470). Search spans every page.
 public struct SettingsView: View {
     /// Names the provider whose key the selected batch model needs, read from
     /// the same canonical resolver `batchAPIKey(for:)` uses. Deriving it means
@@ -19,22 +18,17 @@ public struct SettingsView: View {
         case .notRequired:
             return "This model runs on device and needs no API key."
         case .apiKey(_, let providerName):
-            return "Add your \(providerName) API key below to use this model."
+            return "Add your \(providerName) API key in Providers & API Keys to use this model."
         }
     }
 
-    @StateObject private var settings = AppSettings.shared
-    /// Observed so the Sync section's status rows follow the iCloud History switch.
+    @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var historySync = HistorySyncEngine.shared
-    @Environment(\.openURL) private var openURL
     @Environment(\.iOSKeyboardEnabled) private var iOSKeyboardEnabled
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showingAPIKeys = false
-    @State private var changingTranscriptReadyNotifications = false
-    @State private var transcriptReadyPermissionDenied = false
-    @State private var missingTranscriptionAPIKeyAlert: IOSMissingTranscriptionAPIKeyAlert?
+    @State private var revealTarget: IOSSettingsRevealTarget?
     @State private var searchQuery = ""
-    @State private var searchHighlightID: String?
     @State private var searchIndex = SettingsSearchIndex(
         entries: IOSSettingsSearch.catalogEntries(keyboardEnabled: false)
     )
@@ -42,37 +36,81 @@ public struct SettingsView: View {
 
     public init() {}
 
-    /// Whether the model pickers should be hidden because Simple model choices
-    /// is on and paid routing is actually available.
-    private var hidesModelSelection: Bool {
-        PaidAccessStore.shared.simpleModelChoicesPolicy.hidesModelSelection
-    }
-
     public var body: some View {
-        ScrollViewReader { proxy in
-            settingsForm
-                .environment(\.settingsSearchHighlightID, searchHighlightID)
-                .overlay {
-                    if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                        IOSSettingsSearchResults(query: searchQuery, index: searchIndex) { entry in
-                            reveal(entry, using: proxy)
-                        }
+        settingsList
+            .overlay {
+                if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                    IOSSettingsSearchResults(query: searchQuery, index: searchIndex) { entry in
+                        reveal(entry)
                     }
                 }
+            }
+            .searchable(text: $searchQuery, prompt: "Search settings")
+            .searchSuggestions { searchSuggestions }
+            .onAppear {
+                searchIndex = SettingsSearchIndex(
+                    entries: IOSSettingsSearch.catalogEntries(keyboardEnabled: iOSKeyboardEnabled)
+                        + IOSSettingsSearch.apiKeyEntries(APIKeysView.entries(for: settings))
+                )
+            }
+    }
+
+    private var settingsList: some View {
+        List {
+            if !settings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize) {
+                Section {
+                    RecommendedSetupCard()
+                }
+            }
+
+            ForEach(Array(IOSSettingsPage.groups.enumerated()), id: \.offset) { _, pages in
+                Section {
+                    ForEach(pages) { page in
+                        NavigationLink {
+                            IOSSettingsPageView(page: page)
+                        } label: {
+                            IOSSettingsPageRow(page: page, value: status(for: page))
+                        }
+                        .accessibilityIdentifier("settingsPage.\(page.rawValue)")
+                    }
+                }
+            }
         }
-        .searchable(text: $searchQuery, prompt: "Search settings")
-        .searchSuggestions { searchSuggestions }
-        .onAppear {
-            searchIndex = SettingsSearchIndex(
-                entries: IOSSettingsSearch.catalogEntries(keyboardEnabled: iOSKeyboardEnabled)
-                    + IOSSettingsSearch.apiKeyEntries(managedAPIKeyEntries)
-            )
+        .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)
+        .listSectionSpacing(settings.visualDensity.listSectionSpacing)
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(
+            settings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize) ? .inline : .automatic
+        )
+        .navigationDestination(item: $revealTarget) { target in
+            IOSSettingsPageView(page: target.page, revealEntryID: target.entryID)
         }
-        .task(id: searchHighlightID) {
-            guard searchHighlightID != nil else { return }
-            try? await Task.sleep(for: .seconds(2.5))
-            guard !Task.isCancelled else { return }
-            searchHighlightID = nil
+        .navigationDestination(isPresented: $showingAPIKeys) {
+            APIKeysView(settings: settings)
+        }
+    }
+
+    /// The current choice a page holds, shown on its row like iOS Settings does.
+    private func status(for page: IOSSettingsPage) -> String? {
+        switch page {
+        case .transcription:
+            let location = settings.transcriptionLocation
+            return location == .remote
+                ? "\(location.displayName) · \(settings.remoteTranscriptionMode.displayName)"
+                : location.displayName
+        case .postProcessing:
+            return settings.autoPostProcess ? "Auto" : nil
+        case .apiKeys:
+            let entries = APIKeysView.entries(for: settings)
+            return "\(entries.filter(\.isStored).count) of \(entries.count)"
+        case .recording:
+            return settings.hardwareTriggerDestination.displayName
+        case .sync:
+            return historySync.isSyncEnabled ? "iCloud" : "Off"
+        case .about:
+            return AboutSettingsPage.appVersion
+        case .general, .results, .privacy:
+            return nil
         }
     }
 
@@ -97,7 +135,7 @@ public struct SettingsView: View {
         }
     }
 
-    private func reveal(_ entry: SettingsSearchEntry, using proxy: ScrollViewProxy) {
+    private func reveal(_ entry: SettingsSearchEntry) {
         storedSearchRecents = SettingsSearchRecents.encode(
             SettingsSearchRecents.recording(entry.id, in: SettingsSearchRecents.decode(storedSearchRecents))
         )
@@ -106,775 +144,41 @@ public struct SettingsView: View {
             showingAPIKeys = true
             return
         }
+        guard let page = IOSSettingsPage.page(for: entry) else { return }
         Task { @MainActor in
-            // Let the search overlay dismiss before scrolling the list beneath it.
+            // Let the search overlay dismiss before pushing the page beneath it.
             try? await Task.sleep(for: .milliseconds(250))
-            withAnimation { proxy.scrollTo(entry.id, anchor: .top) }
-            searchHighlightID = entry.id
+            revealTarget = IOSSettingsRevealTarget(page: page, entryID: entry.id)
         }
     }
+}
 
-    private var settingsForm: some View {
-        Form {
-            SearchableSettingsSection("Appearance") {
-                Picker("Layout Density", selection: $settings.visualDensity) {
-                    ForEach(AppVisualDensity.allCases) { density in
-                        Text(density.displayName).tag(density)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                if !usesInlineDensityLayout {
-                    Text(
-                        "Compact restructures screens around inline controls, shorter cards, "
-                            + "and grouped status rows while keeping controls easy to tap."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-
-            SearchableSettingsSection("Language") {
-                Picker("Spoken Language", selection: $settings.preferredLocaleIdentifier) {
-                    ForEach(TranscriptionLanguageCatalog.options) { option in
-                        Text(option.displayName).tag(option.id)
-                    }
-                }
-                .pickerStyle(.navigationLink)
-                .accessibilityIdentifier("spokenLanguagePicker")
-
-                if !usesInlineDensityLayout {
-                    Text(
-                        "Automatic lets remote providers detect the language. "
-                            + "Apple on-device transcription uses your current system locale."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-
-            SearchableSettingsSection("Transcription") {
-                Picker("Where transcription runs", selection: transcriptionLocationBinding) {
-                    ForEach(IOSTranscriptionLocation.allCases) { location in
-                        Text(location.displayName).tag(location)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("transcriptionLocationPicker")
-
-                if hidesModelSelection {
-                    Text(PaidAccessStore.shared.simpleModelChoicesPolicy.explanation)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if transcriptionLocationBinding.wrappedValue == .local {
-                    // Never hidden: on-device transcription bypasses paid routing
-                    // entirely, so hiding this picker would leave no way to choose
-                    // the engine that is actually doing the work.
-                    Picker("Apple Speech Model", selection: selectedModelBinding) {
-                        ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
-                            HStack {
-                                Text(option.displayName)
-                                Spacer()
-                                IOSModelCredentialStatusView(
-                                    availability: ModelCredentialResolver.availability(
-                                        for: option.id,
-                                        purpose: .liveTranscription,
-                                        storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
-                                    )
-                                )
-                            }
-                            .accessibilityElement(children: .combine)
-                            .tag(option.id)
-                        }
-                    }
-                    .pickerStyle(.navigationLink)
-                    .accessibilityIdentifier("appleOnDeviceModelPicker")
-
-                    if #available(iOS 26.0, *), AppleLocalModels.isSpeechAnalyzerModel(settings.selectedModel) {
-                        AppleSpeechPreparationView(
-                            modelID: settings.selectedModel,
-                            localeIdentifier: settings.preferredModelLanguage ?? Locale.current.identifier
-                        )
-                    }
-
-                    if !usesInlineDensityLayout {
-                        Text(
-                            "Transcribes on this device without uploading audio. "
-                                + "If on-device recognition is unavailable or fails, transcription stops."
-                        )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Picker("Remote Mode", selection: remoteTranscriptionModeBinding) {
-                        ForEach(IOSTranscriptionMode.allCases) { mode in
-                            Text(mode.displayName).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("remoteTranscriptionModePicker")
-
-                    // Never hidden either: streaming dictation does not go through
-                    // the paid service, so this picker chooses the model that runs.
-                    if settings.transcriptionMode == .streaming {
-                        Picker("Remote Streaming Model", selection: selectedModelBinding) {
-                            ForEach(LiveModelGroup.grouped(AppSettings.supportedLiveModels)) { group in
-                                Section(group.title) {
-                                    ForEach(group.options) { option in
-                                        HStack {
-                                            Text(option.displayName)
-                                            Spacer()
-                                            IOSModelCredentialStatusView(
-                                                availability: ModelCredentialResolver.availability(
-                                                    for: option.id,
-                                                    purpose: .liveTranscription,
-                                                    storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
-                                                )
-                                            )
-                                        }
-                                        .accessibilityElement(children: .combine)
-                                        .tag(option.id)
-                                    }
-                                }
-                            }
-                        }
-                        .pickerStyle(.navigationLink)
-                        .accessibilityIdentifier("remoteStreamingModelPicker")
-                    } else if !hidesModelSelection {
-                        Picker("Remote Batch Model", selection: $settings.batchTranscriptionModel) {
-                            if let modelID = OpenRouterTranscriptionSelection.modelID(
-                                from: settings.batchTranscriptionModel
-                            ) {
-                                Text("OpenRouter · \(modelID)")
-                                    .tag(settings.batchTranscriptionModel)
-                            }
-                            ForEach(BatchModelGroup.grouped(AppSettings.supportedBatchModels)) { group in
-                                Section(group.title) {
-                                    ForEach(group.options) { option in
-                                        HStack {
-                                            Text(ModelCatalog.friendlyName(for: option.id))
-                                            Spacer()
-                                            IOSModelCredentialStatusView(
-                                                availability: ModelCredentialResolver.availability(
-                                                    for: option.id,
-                                                    purpose: .batchTranscription,
-                                                    storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
-                                                )
-                                            )
-                                        }
-                                        .accessibilityElement(children: .combine)
-                                        .tag(option.id)
-                                    }
-                                }
-                            }
-                        }
-                        .pickerStyle(.navigationLink)
-                        .accessibilityIdentifier("remoteBatchModelPicker")
-                        IOSOpenRouterAudioSettingsLink()
-                    }
-
-                    if !usesInlineDensityLayout {
-                        Text(settings.transcriptionMode == .streaming
-                            ? "Text appears while audio is streamed to the selected provider."
-                            : "Audio is uploaded after recording for a more complete transcript.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if transcriptionLocationBinding.wrappedValue == .remote,
-                   settings.transcriptionMode == .streaming,
-                   let route = LiveTranscriptionRouting.route(for: settings.selectedModel),
-                   route.isSupportedOnIOS,
-                   route.apiKeyIdentifier != nil,
-                   settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Label(
-                        "Add this provider's API key below to use this model.",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .foregroundStyle(.orange)
-                    .font(.caption)
-                }
-
-                if transcriptionLocationBinding.wrappedValue == .remote,
-                   settings.transcriptionMode == .batch,
-                   !AppleLocalModels.isSpeechAnalyzerModel(settings.batchTranscriptionModel),
-                   settings.batchAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Label(
-                        Self.batchAPIKeyPrompt(for: settings.batchTranscriptionModel),
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .foregroundStyle(.orange)
-                    .font(.caption)
-                }
-
-                let activeRemoteModel = settings.transcriptionMode == .batch
-                    ? settings.batchTranscriptionModel
-                    : settings.selectedModel
-                if activeRemoteModel.hasPrefix("meta/") {
-                    TextField(
-                        "Recognition keywords (comma-separated)",
-                        text: $settings.transcriptionKeywords,
-                        axis: .vertical
-                    )
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    Text(
-                        "Meta uses these names, acronyms, and domain terms as vocabulary hints. "
-                            + "The Spoken Language setting above supplies its language bias."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-            }
-
-            SearchableSettingsSection("Behavior") {
-                Toggle(isOn: $settings.autoStartRecording) {
-                    Label("Auto-Start Recording", systemImage: "mic.badge.plus")
-                }
-
-                if settings.autoStartRecording && !usesInlineDensityLayout {
-                    Text("Recording starts automatically when you open the app.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Toggle(isOn: $settings.handsFreeDictationEnabled) {
-                    Label("Hands-Free Dictation", systemImage: "waveform.badge.mic")
-                }
-                .disabled(!settings.handsFreeDictationSupported)
-                .accessibilityIdentifier("handsFreeDictationToggle")
-
-                if !usesInlineDensityLayout {
-                    Text(handsFreeDictationCaption)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Toggle(isOn: $settings.liveActivitiesEnabled) {
-                    Label("Live Activities", systemImage: "platter.filled.bottom.iphone")
-                }
-
-                if settings.liveActivitiesEnabled && !usesInlineDensityLayout {
-                    Text("Shows transcription progress on Lock Screen and Dynamic Island.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if iOSKeyboardEnabled {
-                SearchableSettingsSection("Just Speak Keyboard") {
-                    NavigationLink {
-                        KeyboardSetupView()
-                    } label: {
-                        HStack {
-                            Label("Set Up Keyboard", systemImage: "keyboard")
-                            Spacer()
-                            Text(keyboardStatusLabel)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .accessibilityIdentifier("keyboardSetupLink")
-
-                    if !usesInlineDensityLayout {
-                        Text("Transcribe into other apps through a private handoff to Just Speak.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            SearchableSettingsSection("Saved Results") {
-                Toggle(isOn: Binding(
-                    get: { self.settings.transcriptReadyNotificationsEnabled },
-                    set: { enabled in
-                        self.changingTranscriptReadyNotifications = true
-                        Task { @MainActor in
-                            let allowed = await TranscriptReadyNotificationCoordinator.shared
-                                .setEnabledFromUser(enabled)
-                            self.transcriptReadyPermissionDenied = enabled && !allowed
-                            self.changingTranscriptReadyNotifications = false
-                        }
-                    }
-                )) {
-                    Label("Transcript Ready Alerts", systemImage: "bell")
-                }
-                .disabled(self.changingTranscriptReadyNotifications)
-                .accessibilityIdentifier("transcriptReadyNotificationsToggle")
-                Text(
-                    "Private alerts contain no transcript. They appear for saved background results "
-                        + "without another active result surface."
-                )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if self.transcriptReadyPermissionDenied {
-                    Text("Alerts are off. Allow notifications for Just Speak in iOS Settings, then enable this option.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Toggle(isOn: $settings.upgradeOfflineTranscriptsWhenOnline) {
-                    Label("Upgrade offline transcripts when back online", systemImage: "arrow.triangle.2.circlepath")
-                }
-                .accessibilityIdentifier("upgradeOfflineTranscriptsToggle")
-                Text(
-                    "Recordings made on-device without a connection are re-transcribed with your cloud model "
-                        + "once you are back online. Uses provider credit. Edited transcripts are never replaced."
-                )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            FocusCaptureSettingsSection()
-
-            SearchableSettingsSection("Hardware Trigger") {
-                NavigationLink {
-                    HardwareTriggerSettingsView(settings: settings)
-                } label: {
-                    HStack {
-                        Label("Action Button & Shortcuts", systemImage: "button.programmable")
-                            .layoutPriority(1)
-                        Spacer()
-                        Text(settings.hardwareTriggerDestination.displayName)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                .accessibilityIdentifier("hardwareTriggerSettingsLink")
-
-                NavigationLink {
-                    AutomationGalleryView()
-                } label: {
-                    Label("Shortcuts Gallery", systemImage: "square.stack.3d.up")
-                }
-                .accessibilityIdentifier("automationGalleryLink")
-
-                if !usesInlineDensityLayout {
-                    Text(
-                        "Trigger transcription from the Action Button, Siri, Lock Screen, "
-                            + "Control Center, or Back Tap."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-
-            SearchableSettingsSection("Post-Processing") {
-                Toggle(isOn: $settings.autoPostProcess) {
-                    Label("Auto-Polish After Recording", systemImage: "wand.and.stars")
-                }
-
-                if settings.autoPostProcess && !usesInlineDensityLayout {
-                    Text("Automatically opens polish view after each recording.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                NavigationLink {
-                    PostProcessingSettingsView(settings: settings)
-                } label: {
-                    HStack {
-                        Label("Model & Prompt", systemImage: "slider.horizontal.3")
-                            .layoutPriority(1)
-                        Spacer()
-                        Text(postProcessingModelName)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                if !settings.hasOpenRouterKey {
-                    Label("OpenRouter API key required", systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
-
-            // Hidden while iOS paid routing is unwired — see `PaidAccessFeature`.
-            // The screen stays compiled so re-enabling is one constant.
-            if PaidAccessFeature.isAvailableOnIOS {
-                SearchableSettingsSection("Subscription") {
-                    NavigationLink {
-                        PaidAccessSettingsView()
-                    } label: {
-                        HStack {
-                            Label("Paid Access", systemImage: "creditcard")
-                                .layoutPriority(1)
-                            Spacer()
-                            Text(PaidAccessStore.shared.entitlement.status.displayName)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-            }
-
-            SearchableSettingsSection("API Keys") {
-                if usesInlineDensityLayout {
-                    NavigationLink {
-                        APIKeysView(settings: settings)
-                    } label: {
-                        compactAPIKeySummary
-                    }
-                } else {
-                    apiKeyStatusRow(
-                        name: "Deepgram",
-                        systemImage: "waveform",
-                        isStored: settings.hasDeepgramKey
-                    )
-                    apiKeyStatusRow(
-                        name: "ElevenLabs",
-                        systemImage: "mic.and.signal.meter",
-                        isStored: settings.hasElevenLabsKey
-                    )
-                    apiKeyStatusRow(
-                        name: "OpenRouter",
-                        systemImage: "network",
-                        isStored: settings.hasOpenRouterKey
-                    )
-                    apiKeyStatusRow(
-                        name: "OpenAI",
-                        systemImage: "brain.head.profile",
-                        isStored: settings.hasOpenAIKey
-                    )
-
-                    NavigationLink {
-                        APIKeysView(settings: settings)
-                    } label: {
-                        Label("Manage Keys", systemImage: "key.viewfinder")
-                    }
-                }
-            }
-
-            SearchableSettingsSection("Sync") {
-                // CloudKit History Sync
-                CloudKitSyncSettingsSection()
-
-                CloudKitKeySyncSettingsSection()
-
-                // History remains local when its CloudKit lane is off/unavailable.
-                // Protocol support below does not imply a shipping iPhone sender.
-                let syncStatus = historySync.isSyncEnabled
-                    ? SyncStatus.current(iCloudCloudKitAvailable: historySync.state.isCloudAvailable)
-                    : SyncStatus()
-
-                if usesInlineDensityLayout {
-                    compactSyncStatus(syncStatus)
-                } else {
-                    syncStatusRows(syncStatus)
-                }
-
-                if let lastSync = syncStatus.lastSyncDate {
-                    LabeledContent("Last Sync") {
-                        Text(lastSync, style: .relative)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                // QR Transfer options
-                NavigationLink {
-                    QRCodeGeneratorView()
-                } label: {
-                    Label("Share to Another Device", systemImage: "qrcode")
-                }
-
-                NavigationLink {
-                    QRCodeScannerView()
-                } label: {
-                    Label("Import from QR Code", systemImage: "qrcode.viewfinder")
-                }
-
-                if !usesInlineDensityLayout {
-                    Text("Just Speak to It syncs History through iCloud when enabled and available. Settings are not "
-                        + "synced; use QR transfer to copy them to another device. Without iCloud History Sync, "
-                        + "History stays on this iPhone. The iPhone app has no Bonjour transcript sender.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            SearchableSettingsSection("Capture Health") {
-                NavigationLink {
-                    CaptureHealthView()
-                } label: {
-                    Label("Check capture is working", systemImage: "stethoscope")
-                }
-                .accessibilityIdentifier("captureHealthNavLink")
-
-                if !usesInlineDensityLayout {
-                    Text(
-                        "Checks the things a capture needs, runs a microphone self-test, and offers back "
-                            + "any recording that was interrupted before its transcript was saved. "
-                            + "Nothing on that screen leaves this device."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-
-            SearchableSettingsSection("Recordings") {
-                NavigationLink {
-                    RecordingsView()
-                } label: {
-                    Label("Saved Recordings", systemImage: "waveform.circle")
-                }
-
-                Toggle(isOn: $settings.keepAudioOnCancel) {
-                    Label("Keep Audio When Cancelled", systemImage: "xmark.bin")
-                }
-                .accessibilityIdentifier("keepAudioOnCancelToggle")
-
-                if !usesInlineDensityLayout {
-                    Text(
-                        settings.keepAudioOnCancel
-                            ? "Cancelled recordings stay in Saved Recordings so you can transcribe them later."
-                            : "Cancelling a recording deletes its audio."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-                if !usesInlineDensityLayout {
-                    Text(
-                        "Audio is saved locally during transcription so you can replay it, "
-                            + "or transcribe it again if connectivity was lost."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-
-            SearchableSettingsSection("Privacy & Debugging") {
-                NavigationLink {
-                    PrivacyView()
-                } label: {
-                    Label("Privacy Information", systemImage: "hand.raised")
-                }
-
-                Toggle(isOn: Binding(
-                    get: { SpeakLogger.isDebugMode },
-                    set: { SpeakLogger.isDebugMode = $0 }
-                )) {
-                    Label("Debug Logging", systemImage: "ant")
-                }
-
-                if SpeakLogger.isDebugMode && !usesInlineDensityLayout {
-                    Text("Debug mode logs additional details for troubleshooting.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            SearchableSettingsSection("About") {
-                if usesInlineDensityLayout {
-                    compactBuildSummary
-                } else {
-                    LabeledContent("Version") {
-                        Text("\(appVersion) (\(appBuild))")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    LabeledContent("Commit") {
-                        Text(BuildInfo.gitCommitShort)
-                            .foregroundStyle(.secondary)
-                            .font(.system(.body, design: .monospaced))
-                    }
-
-                    LabeledContent("SpeakCore") {
-                        Text(SpeakCore.version)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                NavigationLink {
-                    ReleaseNotesView()
-                } label: {
-                    Label("Release Notes", systemImage: "sparkles")
-                }
-                .accessibilityHint("Shows what changed in this version and earlier versions")
-
-                Link(destination: PrivacyPolicy.url) {
-                    Label("Privacy Policy", systemImage: "hand.raised.square")
-                }
-                .accessibilityIdentifier("privacyPolicyLink")
-                .accessibilityHint("Opens the published privacy policy in your browser")
-            }
+/// The three steps most people need, with the recommended choice in bold.
+private struct RecommendedSetupCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Recommended setup", systemImage: "star.fill")
+                .font(.headline)
+                .foregroundStyle(Color.accentColor)
+            step(1, "In **Transcription**, choose **Remote → Streaming** for live text, "
+                + "or **Local** to keep audio on this iPhone.")
+            step(2, "For Remote, **add the provider's key** in **Providers & API Keys**.")
+            step(3, "In **Recording & Shortcuts**, set the **Action Button** to **Transcribe Voice**.")
         }
-        .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)
-        .listSectionSpacing(settings.visualDensity.listSectionSpacing)
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(usesInlineDensityLayout ? .inline : .automatic)
-        .controlSize(settings.visualDensity.isCompact ? .small : .regular)
-        .navigationDestination(isPresented: $showingAPIKeys) {
-            APIKeysView(settings: settings)
-        }
-        .iosMissingTranscriptionAPIKeyAlert(
-            alert: $missingTranscriptionAPIKeyAlert,
-            showingAPIKeys: $showingAPIKeys,
-            openURL: openURL
-        )
-    }
-
-    private var batchModeDescription: String {
-        if AppleLocalModels.isSpeechAnalyzerModel(settings.batchTranscriptionModel) {
-            return "Audio is recorded first, then transcribed privately on this device when you stop."
-        }
-        return "Audio is recorded first, then uploaded when you stop for a more complete transcript."
-    }
-
-    private var postProcessingModelName: String {
-        ModelCatalog.friendlyName(for: settings.postProcessingModel)
-    }
-
-    private var usesInlineDensityLayout: Bool {
-        settings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
-    }
-
-    /// Silence budget is read from the shared policy so the copy cannot drift
-    /// from the behaviour, and matches the macOS wording.
-    private var handsFreeDictationCaption: String {
-        guard settings.handsFreeDictationSupported else {
-            return "Requires iOS 26 or later — Apple's on-device speech detector isn't available here."
-        }
-        return "Arm from the microphone button. The microphone remains active while armed; "
-            + "silent audio stays in memory only and is never stored or sent off-device."
-    }
-
-    private var keyboardStatusLabel: String {
-        guard let observation = KeyboardHandoffStore.shared.extensionObservation() else {
-            return "Not observed"
-        }
-        return observation.hadFullAccess ? "Full Access on" : "Full Access off"
-    }
-
-    private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-    }
-
-    private var appBuild: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-    }
-
-    private var compactBuildSummary: some View {
-        HStack(spacing: settings.visualDensity.inlineSpacing) {
-            Label("\(appVersion) (\(appBuild))", systemImage: "app.badge")
-            Spacer()
-            Text(BuildInfo.gitCommitShort)
-                .font(.caption.monospaced())
-            Text("Core \(SpeakCore.version)")
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("settingsRecommendedSetup")
     }
 
-    private var compactAPIKeySummary: some View {
-        HStack(spacing: settings.visualDensity.inlineSpacing) {
-            Label("Manage Keys", systemImage: "key.viewfinder")
-            Spacer()
-            Text("\(storedAPIKeyCount)/\(managedAPIKeyCount)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(storedAPIKeyCount == managedAPIKeyCount ? .green : .secondary)
+    private func step(_ number: Int, _ markdown: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(number).")
+                .font(.callout.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(LocalizedStringKey(markdown))
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .accessibilityLabel(
-            "\(storedAPIKeyCount) of \(managedAPIKeyCount) API keys stored. Manage keys."
-        )
-    }
-
-    private var storedAPIKeyCount: Int {
-        managedAPIKeyEntries.filter(\.isStored).count
-    }
-
-    private var managedAPIKeyCount: Int {
-        managedAPIKeyEntries.count
-    }
-
-    private var managedAPIKeyEntries: [APIKeyListEntry] {
-        APIKeysView.entries(for: settings)
-    }
-
-    private func apiKeyStatusRow(name: String, systemImage: String, isStored: Bool) -> some View {
-        HStack {
-            Label(name, systemImage: systemImage)
-                .accessibilityLabel("\(name) API Key")
-            Spacer()
-            Text(isStored ? "Stored" : "Missing")
-                .foregroundStyle(isStored ? .green : .secondary)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    /// Display only: protocol support is not an iPhone History delivery lane.
-    private func historySyncBackend(_ status: SyncStatus) -> SyncBackend {
-        historySync.isSyncEnabled && status.iCloudCloudKitAvailable ? .iCloud : .localOnly
-    }
-
-    private func compactSyncStatus(_ status: SyncStatus) -> some View {
-        HStack(spacing: settings.visualDensity.inlineSpacing) {
-            Label(
-                historySyncBackend(status).displayName,
-                systemImage: "arrow.triangle.branch"
-            )
-                .lineLimit(1)
-            Spacer()
-            // No iCloud Keychain or iCloud Settings icons: API keys never use
-            // iCloud Keychain and no settings sync through iCloud. History and
-            // encrypted key sync report their own status above.
-            syncAvailabilityIcon(
-                "network",
-                available: status.transportAvailable,
-                label: "Bonjour protocol support"
-            )
-        }
-        .font(.caption)
-    }
-
-    private func syncAvailabilityIcon(
-        _ systemImage: String,
-        available: Bool,
-        label: String
-    ) -> some View {
-        Image(systemName: available ? systemImage : "xmark.circle")
-            .foregroundStyle(available ? .green : .secondary)
-            .accessibilityLabel("\(label): \(available ? "included" : "not included")")
-    }
-
-    private func syncStatusRows(_ status: SyncStatus) -> some View {
-        Group {
-            HStack {
-                Label("History Sync", systemImage: "arrow.triangle.branch")
-                Spacer()
-                Text(historySyncBackend(status).displayName)
-                    .foregroundStyle(historySyncBackend(status) != .localOnly ? .green : .secondary)
-            }
-            .accessibilityElement(children: .combine)
-
-            // iCloud History and Encrypted API-Key Sync rows sit above; there is
-            // no iCloud Keychain or iCloud Settings path to report.
-            syncStatusRow(
-                name: "Bonjour Protocol",
-                systemImage: "network",
-                value: status.transportAvailable ? "Included" : "Not included",
-                isAvailable: status.transportAvailable
-            )
-        }
-    }
-
-    private func syncStatusRow(
-        name: String,
-        systemImage: String,
-        value: String,
-        isAvailable: Bool
-    ) -> some View {
-        HStack {
-            Label(name, systemImage: systemImage)
-            Spacer()
-            Text(value)
-                .foregroundStyle(isAvailable ? .green : .secondary)
-        }
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -883,42 +187,4 @@ public struct SettingsView: View {
         SettingsView()
     }
 }
-
-private extension SettingsView {
-    @MainActor
-    private var transcriptionLocationBinding: Binding<IOSTranscriptionLocation> {
-        Binding(
-            get: { settings.transcriptionLocation },
-            set: { settings.selectTranscriptionLocation($0) }
-        )
-    }
-
-    @MainActor
-    private var remoteTranscriptionModeBinding: Binding<IOSTranscriptionMode> {
-        Binding(
-            get: { settings.remoteTranscriptionMode },
-            set: { settings.selectRemoteTranscriptionMode($0) }
-        )
-    }
-
-    @MainActor
-    private var selectedModelBinding: Binding<String> {
-        Binding(
-            get: { settings.selectedModel },
-            set: { newValue in
-                settings.selectedModel = newValue
-                presentMissingTranscriptionAPIKeyAlertIfNeeded(for: newValue)
-            }
-        )
-    }
-
-    @MainActor
-    private func presentMissingTranscriptionAPIKeyAlertIfNeeded(for model: String) {
-        guard let alert = IOSMissingTranscriptionAPIKeyAlert(modelID: model, settings: settings) else {
-            return
-        }
-        missingTranscriptionAPIKeyAlert = alert
-    }
-}
-
 #endif

@@ -85,7 +85,7 @@ let appleCoreSources: [String] = [
     "Keyboard/KeyboardDictationProfile.swift",
     "Keyboard/KeyboardHandoff.swift",
     "Keyboard/KeyboardHandoffModels.swift",
-    "KeyboardHandoffStartDiagnosis.swift",
+    "Keyboard/KeyboardHandoffStartDiagnosis.swift",
     "Keyboard/KeyboardHandoffStorage.swift",
     "Keyboard/KeyboardHandoffTransitions.swift",
     "Keyboard/KeyboardInstantDictation.swift",

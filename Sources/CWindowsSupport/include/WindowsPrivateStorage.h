@@ -163,9 +163,6 @@ int jsti_recording_registry_destroy_v2(JSTIRecordingRegistryV2 **registry, JSTIR
 int jsti_private_file_publish(const char *source, const char *destination,
                               jsti_file_publication_cancelled_fn cancelled, void *context,
                               char *error, size_t error_capacity);
-/* Uses a unique temporary directory and synthetic bytes only; verifies ACLs,
- * directory repair, existing-file preservation and junction refusal. */
-int jsti_private_storage_self_test(char *error, size_t error_capacity);
 
 #ifdef __cplusplus
 }

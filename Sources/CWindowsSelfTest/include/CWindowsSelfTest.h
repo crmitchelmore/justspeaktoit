@@ -38,6 +38,10 @@ int jsti_text_output_self_test(char *error, size_t error_capacity);
  * Needs Media Foundation. Never uses recordings, credentials or a speaker. */
 int jsti_audio_playback_self_test(char *error, size_t error_capacity);
 
+/* Uses a unique temporary directory and synthetic bytes only; verifies ACLs,
+ * directory repair, existing-file preservation and junction refusal. */
+int jsti_private_storage_self_test(char *error, size_t error_capacity);
+
 #ifdef __cplusplus
 }
 #endif

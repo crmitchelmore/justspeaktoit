@@ -4,6 +4,7 @@ import SpeakDesktop
 import SpeakDesktopHost
 import SpeakLinuxPlatform
 import CLinuxSupport
+import CLinuxSelfTest
 
 /// The window's event numbers, decoded once: events shared with Windows,
 /// Linux-only events, comparison window events and unknown numbers.

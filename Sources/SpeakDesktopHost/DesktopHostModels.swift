@@ -51,6 +51,18 @@ package enum DesktopHostModels {
         return state.visibleIndices.map { state.entries[$0].option }
     }
     package static var snapshot: DesktopModelSlots { storage.lock.withLock { storage.slots } }
+    /// The global slots of the saved Local batch and live choices, or -1 when
+    /// a choice is not a Local slot of that kind.
+    package static func localPreferenceSlots(batch: String?, live: String?) -> (batch: Int32, live: Int32) {
+        let entries = snapshot.entries
+        func index(_ identifier: String?, live: Bool) -> Int32 {
+            guard let identifier, let index = entries.firstIndex(where: {
+                $0.option.id == identifier && $0.isLocal && $0.isLive == live
+            }) else { return -1 }
+            return Int32(index)
+        }
+        return (index(batch, live: false), index(live, live: true))
+    }
     /// The slots and the local install labels, read together.
     package static var labelledSnapshot: (DesktopModelSlots, [String: String]) {
         storage.lock.withLock { (storage.slots, storage.localLabels) }

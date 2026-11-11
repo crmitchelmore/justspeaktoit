@@ -119,7 +119,7 @@ extension DesktopHostController {
         automationTranscriptions.values.forEach { $0.cancel() }
         recording?.live?.livePolish?.cancel()
         liveFinalisation?.livePolish?.cancel()
-        Platform.cancelLocalModels(controller: self)
+        Platform.cancelLocalModels(localModels)
         let ownedAdmission = ownedDictationAdmission
         let ownedDictationID = ownedDictation?.id
         if let ownedDictationID {
@@ -227,15 +227,15 @@ extension DesktopHostController {
         modelDiscovery.task?.cancel()
         voiceDiscovery.requestID = nil
         voiceDiscovery.task?.cancel()
-        voiceCredentialTask?.cancel()
+        voiceCredentials.write?.task.cancel()
         stopProviderCredentialEdits()
-        voiceCredentialReadTask?.cancel()
+        voiceCredentials.readWorker?.task.cancel()
         voiceDiscovery.inventories = [:]
         voiceDiscovery.context = nil
         voiceDiscovery.listing = nil
         voiceDiscovery.listingContext = nil
-        voiceProviderIssuedSlot = nil
-        voiceCredentialReadDestination = nil
+        voiceCredentials.issuedProviderSlot = nil
+        voiceCredentials.readRequest = nil
         cancelOutput()
         // Completed audio belongs to the controller lifetime, not the cancelled operation.
         // Closed entrypoints still refuse replay/export, and late work cannot replace it.

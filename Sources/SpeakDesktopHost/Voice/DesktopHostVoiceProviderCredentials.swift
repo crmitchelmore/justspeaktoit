@@ -12,9 +12,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func voiceCredentialDestinationIsCurrent(_ destination: VoiceOutputCredentialDestination) -> Bool {
         guard !closed else { return false }
         switch destination {
-        case .selectedVoice(let epoch): return epoch == voiceCredentialEpoch
+        case .selectedVoice(let epoch): return epoch == voiceCredentials.selectionEpoch
         case .explicitProvider(let context):
-            return voiceAccountContextIsCurrent(context) && voiceProviderIssuedSlot != nil
+            return voiceAccountContextIsCurrent(context) && voiceCredentials.issuedProviderSlot != nil
         }
     }
 
@@ -23,16 +23,14 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         switch message {
         case .open(let context, let id):
             guard voiceAccountContextIsCurrent(context) else { return }
-            voiceProviderIssuedSlot = nil
+            voiceCredentials.issuedProviderSlot = nil
             beginVoiceCredentialRead(id, destination: .explicitProvider(context))
         case .cancel(let context, let id):
             guard voiceAccountContextIsCurrent(context) else { return }
-            if voiceCredentialReadID == id, voiceCredentialReadDestination == .explicitProvider(context) {
-                voiceCredentialReadTask?.cancel()
-                voiceCredentialReadID = nil
-                voiceCredentialReadDestination = nil
-                voiceProviderIssuedSlot = nil
-            } else if voiceCredentialWriteDestination != .explicitProvider(context)
+            if voiceCredentials.readRequest == .init(id: id, destination: .explicitProvider(context)) {
+                voiceCredentials.cancelRead()
+                voiceCredentials.issuedProviderSlot = nil
+            } else if voiceCredentials.write?.destination != .explicitProvider(context)
                         || !cancelVoiceCredentialSave(id) {
                 update("That account Voice key operation is no longer pending.")
             }
@@ -61,7 +59,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         guard voiceAccountContextIsCurrent(context) else { return .failure(.destinationChanged) }
         switch result {
         case .success(let hasKey):
-            voiceProviderIssuedSlot = slot
+            voiceCredentials.issuedProviderSlot = slot
             return .success(.init(slot: slot, selectionEpoch: context.epoch, hasSavedKey: hasKey,
                 canSave: canSaveVoiceCredential))
         case .failure(let error): return .failure(error)
@@ -74,10 +72,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     ) {
         guard !closed else { completion(voiceCredentialFailure(.closed)); return }
         guard !Task.isCancelled else { completion(voiceCredentialFailure(.cancelled)); return }
-        guard voiceAccountContextIsCurrent(request.context), let issued = voiceProviderIssuedSlot else {
+        guard voiceAccountContextIsCurrent(request.context), let issued = voiceCredentials.issuedProviderSlot else {
             completion(voiceCredentialFailure(.destinationChanged)); return
         }
-        guard canSaveVoiceCredential, voiceCredentialReadTask == nil else {
+        guard canSaveVoiceCredential, voiceCredentials.readWorker == nil else {
             completion(voiceCredentialFailure(.busy)); return
         }
         do {

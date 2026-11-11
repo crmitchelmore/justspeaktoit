@@ -117,7 +117,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         cancelVoiceProviderCredentialWork(voiceDiscovery.context)
         cancelAccountVoiceWork()
         voiceDiscovery.task?.cancel()
-        voiceProviderIssuedSlot = nil
+        voiceCredentials.issuedProviderSlot = nil
         voiceDiscovery.requestID = requestID
         voiceDiscovery.modern = modern
         voiceDiscovery.retiredEpochs = []
@@ -135,7 +135,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceDiscovery.context = nil
         voiceDiscovery.listing = nil
         voiceDiscovery.listingContext = nil
-        voiceProviderIssuedSlot = nil
+        voiceCredentials.issuedProviderSlot = nil
         voiceDiscovery.offeredIDs = []
         voiceDiscovery.task?.cancel()
     }

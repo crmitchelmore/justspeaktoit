@@ -29,9 +29,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         case .open(let id):
             beginVoiceCredentialRead(id)
         case .cancel(let id):
-            if voiceCredentialReadID == id {
-                voiceCredentialReadTask?.cancel()
-                voiceCredentialReadID = nil
+            if voiceCredentials.readRequest?.id == id {
+                voiceCredentials.cancelRead()
             } else if !cancelVoiceCredentialSave(id) {
                 update("That Voice key operation is no longer pending.")
             }
@@ -43,27 +42,25 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     package func beginVoiceCredentialRead(_ id: UUID, destination: VoiceOutputCredentialDestination? = nil) {
-        let destination = destination ?? .selectedVoice(selectionEpoch: voiceCredentialEpoch)
-        voiceCredentialReadID = id
-        voiceCredentialReadDestination = destination
-        if let pending = voiceCredentialReadTask { pending.cancel(); return }
+        let destination = destination ?? .selectedVoice(selectionEpoch: voiceCredentials.selectionEpoch)
+        let request = DesktopHostVoiceCredentialState.ReadRequest(id: id, destination: destination)
+        voiceCredentials.readRequest = request
+        // The read in flight hands over to this request when it settles.
+        if let pending = voiceCredentials.readWorker { pending.task.cancel(); return }
         activeOperations += 1
-        voiceCredentialReadWorkerDestination = destination
-        voiceCredentialReadTask = Task {
+        voiceCredentials.readWorker = .init(destination: destination, task: Task {
             let result = await self.readVoiceCredentialPresentation(destination)
-            self.voiceCredentialReadTask = nil
-            self.voiceCredentialReadWorkerDestination = nil
+            self.voiceCredentials.readWorker = nil
             self.finishOperation()
             self.settleVoiceAccountPresentation()
-            guard !self.closed else { self.voiceCredentialReadID = nil; return }
-            guard self.voiceCredentialReadID == id, self.voiceCredentialReadDestination == destination else {
-                if let next = self.voiceCredentialReadID {
-                    self.beginVoiceCredentialRead(next, destination: self.voiceCredentialReadDestination)
+            guard !self.closed else { self.voiceCredentials.readRequest = nil; return }
+            guard self.voiceCredentials.readRequest == request else {
+                if let next = self.voiceCredentials.readRequest {
+                    self.beginVoiceCredentialRead(next.id, destination: next.destination)
                 }
                 return
             }
-            self.voiceCredentialReadID = nil
-            self.voiceCredentialReadDestination = nil
+            self.voiceCredentials.readRequest = nil
             guard !Task.isCancelled else { return }
             switch destination {
             case .selectedVoice: Platform.voiceCredential(result, requestID: id)
@@ -71,14 +68,14 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 guard self.voiceAccountContextIsCurrent(context) else { return }
                 Platform.voiceProviderCredential(result, requestID: id, context: context)
             }
-        }
+        })
     }
 
     private func readVoiceCredentialPresentation(_ destination: VoiceOutputCredentialDestination) async
         -> Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError> {
         switch destination {
         case .selectedVoice(let epoch):
-            guard epoch == voiceCredentialEpoch else { return .failure(.destinationChanged) }
+            guard epoch == voiceCredentials.selectionEpoch else { return .failure(.destinationChanged) }
             return await voiceCredentialPresentation()
         case .explicitProvider(let context): return await voiceProviderCredentialPresentation(context)
         }
@@ -87,7 +84,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func voiceCredentialPresentation() async
         -> Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError> {
         guard !closed else { return .failure(.closed) }
-        let epoch = voiceCredentialEpoch, settings = voiceOutputSettings()
+        let epoch = voiceCredentials.selectionEpoch, settings = voiceOutputSettings()
         let effects = effects, cached = selectedVoiceAccountInventory
         let lookup = Task.detached {
             Self.lookupVoiceCredential(settings: settings, effects: effects, cached: cached)
@@ -95,11 +92,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let result = await withTaskCancellationHandler { await lookup.value } onCancel: { lookup.cancel() }
         guard !closed else { return .failure(.closed) }
         guard !Task.isCancelled else { return .failure(.cancelled) }
-        guard epoch == voiceCredentialEpoch else { return .failure(.destinationChanged) }
+        guard epoch == voiceCredentials.selectionEpoch else { return .failure(.destinationChanged) }
         switch result {
         case .success(let (slot, hasSavedKey)):
             return .success(.init(
-                slot: slot, selectionEpoch: voiceCredentialEpoch, hasSavedKey: hasSavedKey,
+                slot: slot, selectionEpoch: voiceCredentials.selectionEpoch, hasSavedKey: hasSavedKey,
                 canSave: canSaveVoiceCredential))
         case .failure(let error): return .failure(error)
         }
@@ -111,10 +108,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     ) {
         guard !closed else { completion(voiceCredentialFailure(.closed)); return }
         guard !Task.isCancelled else { completion(voiceCredentialFailure(.cancelled)); return }
-        guard request.selectionEpoch == voiceCredentialEpoch else {
+        guard request.selectionEpoch == voiceCredentials.selectionEpoch else {
             completion(voiceCredentialFailure(.destinationChanged)); return
         }
-        guard canSaveVoiceCredential, voiceCredentialReadTask == nil else {
+        guard canSaveVoiceCredential, voiceCredentials.readWorker == nil else {
             completion(voiceCredentialFailure(.busy)); return
         }
         let slot: VoiceOutputCredentialSlot
@@ -136,13 +133,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         completion: @escaping @Sendable (Result<Void, VoiceOutputCredentialError>) -> Void
     ) {
         activeOperations += 1
-        voiceCredentialRequestID = request.id
-        voiceCredentialWriteDestination = request.destination
-        voiceCredentialTask = Task {
+        voiceCredentials.write = .init(id: request.id, destination: request.destination, task: Task {
             defer {
-                self.voiceCredentialTask = nil
-                self.voiceCredentialRequestID = nil
-                self.voiceCredentialWriteDestination = nil
+                self.voiceCredentials.write = nil
                 self.finishOperation()
                 self.settleVoiceAccountPresentation()
             }
@@ -162,7 +155,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                     completion(.failure(.completedWhileClosing)); return
                 }
                 guard self.voiceCredentialDestinationIsCurrent(request.destination),
-                      self.voiceCredentialRequestID == request.id else {
+                      self.voiceCredentials.write?.id == request.id else {
                     completion(.failure(.completedForPreviousSelection)); return
                 }
                 self.update(request.operation == .remove ? "\(slot.providerName) Voice Output key removed."
@@ -172,17 +165,13 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 completion(self.voiceCredentialFailure(
                     Task.isCancelled || error is CancellationError ? .cancelled : .saveFailed))
             }
-        }
+        })
     }
 
-    package func cancelVoiceCredentialSave(_ requestID: UUID) -> Bool {
-        guard voiceCredentialRequestID == requestID else { return false }
-        voiceCredentialTask?.cancel()
-        return true
-    }
+    package func cancelVoiceCredentialSave(_ requestID: UUID) -> Bool { voiceCredentials.cancelWrite(requestID) }
 
     package var canSaveVoiceCredential: Bool {
-        !closed && !busy && recording == nil && voiceCredentialTask == nil && providerCredentialWriteTask == nil
+        !closed && !busy && recording == nil && !voiceCredentials.isWriting
             && voiceTextImportTask == nil && voiceDiscovery.task == nil && voiceGenerationTask == nil
             && readAloudState.task == nil && readAloudState.exportTask == nil
             && voiceSynthesisWorkers == 0

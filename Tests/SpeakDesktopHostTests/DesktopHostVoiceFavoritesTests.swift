@@ -31,12 +31,12 @@ final class DesktopHostVoiceFavoritesTests: XCTestCase {
     func testNativeActions_EditWithoutSelectingAndChooseExactFavorite() async throws {
         let voices = Array(DesktopSpeechVoice.voices.prefix(3))
         await controller.selectVoiceOutput(voices[0])
-        let epoch = await controller.voiceCredentialEpoch
+        let epoch = await controller.voiceCredentials.selectionEpoch
         await controller.handleVoicePicker(voiceID: voices[2].favoriteIdentifier, action: 1)
         var saved = await controller.voiceOutputSettings()
         XCTAssertEqual(saved.voiceID, voices[0].id)
         XCTAssertEqual(saved.favoriteVoices, [voices[2].favoriteIdentifier])
-        let unchangedEpoch = await controller.voiceCredentialEpoch
+        let unchangedEpoch = await controller.voiceCredentials.selectionEpoch
         XCTAssertEqual(epoch, unchangedEpoch)
         let picker = saved.favoritePicker(accountInventory: nil)
         let favorite = try XCTUnwrap(picker.favoriteRanks.firstIndex(of: 0))

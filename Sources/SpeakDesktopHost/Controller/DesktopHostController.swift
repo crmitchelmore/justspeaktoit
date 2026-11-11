@@ -4,7 +4,10 @@ import SpeakDesktop
 
 // The host actor's stored state. Its value types live beside it
 // (DesktopHostControllerSettings, DesktopHostRecordingValues), and related
-// fields are grouped into domain state (DesktopHostControllerState).
+// fields are grouped into domain state (DesktopHostControllerState): model
+// discovery, correction learning, connection warming, migration work and
+// credential work (`voiceCredentials`). Every value is read and written only
+// on this actor.
 package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package nonisolated let directory: URL
     package let effects: any DesktopHostEffects<Platform>
@@ -83,20 +86,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var voiceTextImportRequestID: String?
     package var voiceGenerationTask: Task<Void, Never>?
     package var voiceSettingsRevision: UInt64 = 0
-    package var voiceCredentialEpoch = UUID()
-    package var voiceCredentialTask: Task<Void, Never>?
-    package var providerCredentialWriteTask: Task<Void, Error>?
-    package var providerCredentialEditTask: Task<Void, Never>?
-    var providerCredentialEditorsStopped = false
-    var pendingProviderCredentialEdits: [DesktopHostCredentialEdit] = []
-    var providerCredentialEditorStatus = ""
-    package var voiceCredentialRequestID: UUID?
-    package var voiceCredentialWriteDestination: VoiceOutputCredentialDestination?
-    package var voiceCredentialReadTask: Task<Void, Never>?
-    package var voiceCredentialReadID: UUID?
-    package var voiceCredentialReadDestination: VoiceOutputCredentialDestination?
-    package var voiceCredentialReadWorkerDestination: VoiceOutputCredentialDestination?
-    package var voiceProviderIssuedSlot: VoiceOutputCredentialSlot?
+    /// Voice key reads and writes, provider key writes and the provider key edit queue.
+    package var voiceCredentials = DesktopHostVoiceCredentialState()
     package var voiceAccountWorkers = 0
     package var voiceSynthesisWorkers = 0
     package var voiceAccountOutputTicket: DesktopPlaybackRequests.Ticket?

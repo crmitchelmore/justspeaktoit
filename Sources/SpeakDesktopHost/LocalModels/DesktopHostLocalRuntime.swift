@@ -41,6 +41,19 @@ package struct DesktopHostLocalModelsState<Runtime: DesktopHostLocalRuntime> {
     package var presenter: UnsafeMutableRawPointer?
 
     package init() {}
+
+    /// The on-device models `host` offers, in catalogue order, then the
+    /// imported models it can run.
+    package func specs(host: LocalModelHostSupport) -> [WhisperCppModel] {
+        DesktopLocalTranscription.models(host: host) + imported.filter { host.canExecute(model: $0) }.map(\.model)
+    }
+
+    /// The model behind a batch identifier or, for live use, the batch model
+    /// a `local/streaming/whisperkit/...` identifier streams with.
+    package func spec(for identifier: String, host: LocalModelHostSupport) -> WhisperCppModel? {
+        let batch = DesktopLocalStreaming.batchModelID(forLiveModelID: identifier) ?? identifier
+        return specs(host: host).first { $0.catalogueID == batch }
+    }
 }
 
 /// One model's row in Local models.
@@ -124,9 +137,9 @@ package extension DesktopHostLocalModelPlatform {
         return state
     }
 
-    static func cancelLocalModels(controller: isolated DesktopHostController<Self>) {
-        controller.localModels.importTask?.cancel()
-        for task in controller.localModels.downloads.values { task.cancel() }
+    static func cancelLocalModels(_ state: LocalModelsState) {
+        state.importTask?.cancel()
+        for task in state.downloads.values { task.cancel() }
     }
 
     static func makeLocalModelsState() -> LocalModelsState { DesktopHostLocalModelsState() }
@@ -141,14 +154,14 @@ package extension DesktopHostLocalModelPlatform {
         try await controller.transcribeLocally(audio, model: model, language: language)
     }
 
-    static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String? {
-        guard let spec = controller.localModelSpec(for: model) else { return nil }
-        controller.localModels.ownership.beginUse(spec.catalogueID)
+    static func beginLocalUse(_ model: String, in state: inout LocalModelsState) -> String? {
+        guard let spec = state.spec(for: model, host: localModelHost) else { return nil }
+        state.ownership.beginUse(spec.catalogueID)
         return spec.catalogueID
     }
 
-    static func endLocalUse(_ held: String, controller: isolated DesktopHostController<Self>) {
-        controller.localModels.ownership.endUse(held)
+    static func endLocalUse(_ held: String, in state: inout LocalModelsState) {
+        state.ownership.endUse(held)
     }
 
     static func makeLocalLiveClient(

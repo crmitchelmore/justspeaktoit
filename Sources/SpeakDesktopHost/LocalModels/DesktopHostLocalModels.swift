@@ -47,7 +47,7 @@ package extension DesktopHostPlatform where ReadAloudState == Void {
 package extension DesktopHostPlatform {
     static func loadLocalModels(directory: URL) throws -> LocalModelsState { makeLocalModelsState() }
 
-    static func cancelLocalModels(controller: isolated DesktopHostController<Self>) {}
+    static func cancelLocalModels(_ state: LocalModelsState) {}
 
     static var localDeviceName: String { "this computer" }
 
@@ -61,9 +61,9 @@ package extension DesktopHostPlatform {
         throw DesktopTranscriptionError.unsupportedModel
     }
 
-    static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String? { nil }
+    static func beginLocalUse(_ model: String, in state: inout LocalModelsState) -> String? { nil }
 
-    static func endLocalUse(_ held: String, controller: isolated DesktopHostController<Self>) {}
+    static func endLocalUse(_ held: String, in state: inout LocalModelsState) {}
 
     static func makeLocalLiveClient(
         _ model: String, language: String?, controller: isolated DesktopHostController<Self>
@@ -73,10 +73,10 @@ package extension DesktopHostPlatform {
 extension DesktopHostController {
     /// Holds `model` while a recording, import or transcription uses it, when
     /// it is an on-device model; pass the result to `endLocalUse`.
-    package func beginLocalUse(_ model: String) -> String? { Platform.beginLocalUse(model, controller: self) }
+    package func beginLocalUse(_ model: String) -> String? { Platform.beginLocalUse(model, in: &localModels) }
 
     package func endLocalUse(_ held: String?) {
-        if let held { Platform.endLocalUse(held, controller: self) }
+        if let held { Platform.endLocalUse(held, in: &localModels) }
     }
 
     /// The key a remote model needs, or an empty key after checking that an

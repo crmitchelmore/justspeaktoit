@@ -33,7 +33,7 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
 
     func testSelectedRead_ProviderBrowseCloseReopenPreservesWorkerDestinationAndCallback() async throws {
         let context = await open()
-        let epoch = await controller.voiceCredentialEpoch
+        let epoch = await controller.voiceCredentials.selectionEpoch
         let before = await controller.voiceOutputSettings()
         let gate = CredentialOwnerGate()
         let entered = expectation(description: "selected-voice read owns blocked I/O")
@@ -43,13 +43,13 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
         let id = UUID()
         await controller.handleVoiceCredential(.open(id))
         await fulfillment(of: [entered], timeout: 3)
-        let pending = await controller.voiceCredentialReadTask
+        let pending = await controller.voiceCredentials.readWorker?.task
         let task = try XCTUnwrap(pending)
         await browseCloseReopen(context)
         XCTAssertFalse(task.isCancelled)
-        let owned = await controller.voiceCredentialReadWorkerDestination
-        let desired = await controller.voiceCredentialReadDestination
-        let pendingID = await controller.voiceCredentialReadID
+        let owned = await controller.voiceCredentials.readWorker?.destination
+        let desired = await controller.voiceCredentials.readRequest?.destination
+        let pendingID = await controller.voiceCredentials.readRequest?.id
         let operations = await controller.activeOperations
         XCTAssertEqual(owned, .selectedVoice(selectionEpoch: epoch))
         XCTAssertEqual(desired, owned)
@@ -62,7 +62,7 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
         XCTAssertEqual(reply.selectionEpoch, epoch)
         XCTAssertTrue(reply.hasSavedKey)
         let after = await controller.voiceOutputSettings()
-        let currentEpoch = await controller.voiceCredentialEpoch
+        let currentEpoch = await controller.voiceCredentials.selectionEpoch
         XCTAssertEqual(after, before)
         XCTAssertEqual(currentEpoch, epoch)
         await assertSettled()
@@ -70,7 +70,7 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
 
     func testSelectedWrite_ProviderBrowseCloseReopenPreservesUncooperativeWriteAndSuccess() async throws {
         let context = await open()
-        let epoch = await controller.voiceCredentialEpoch
+        let epoch = await controller.voiceCredentials.selectionEpoch
         let before = await controller.voiceOutputSettings()
         let gate = CredentialOwnerGate()
         let entered = expectation(description: "selected-voice write owns blocked I/O")
@@ -83,11 +83,11 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
                 "synthetic-confirmed", purpose: "voice-output", identifier: "cartesia.apiKey")
         }
         await fulfillment(of: [entered], timeout: 3)
-        let pending = await controller.voiceCredentialTask
+        let pending = await controller.voiceCredentials.write?.task
         let task = try XCTUnwrap(pending)
         await browseCloseReopen(context)
         XCTAssertFalse(task.isCancelled)
-        let owned = await controller.voiceCredentialWriteDestination
+        let owned = await controller.voiceCredentials.write?.destination
         let operations = await controller.activeOperations
         XCTAssertEqual(owned, .selectedVoice(selectionEpoch: epoch))
         XCTAssertEqual(operations, 1)
@@ -96,7 +96,7 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
         try await write.value.get()
         XCTAssertEqual(FakeLog.shared.key("cartesia.apiKey"), "synthetic-confirmed")
         let after = await controller.voiceOutputSettings()
-        let currentEpoch = await controller.voiceCredentialEpoch
+        let currentEpoch = await controller.voiceCredentials.selectionEpoch
         XCTAssertEqual(after, before)
         XCTAssertEqual(currentEpoch, epoch)
         await assertSettled()
@@ -119,14 +119,14 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
         FakeLog.shared.installKeyReadHook { _ in gate.wait { entered.fulfill() } }
         await controller.handleVoiceProviderCredential(.open(context, requestID: UUID()))
         await fulfillment(of: [entered], timeout: 3)
-        let pending = await controller.voiceCredentialReadTask
+        let pending = await controller.voiceCredentials.readWorker?.task
         let task = try XCTUnwrap(pending)
         await controller.closeVoiceDiscovery(context.sessionID.uuidString)
         _ = await open()
         XCTAssertTrue(task.isCancelled)
-        let desired = await controller.voiceCredentialReadDestination
-        let pendingID = await controller.voiceCredentialReadID
-        let owned = await controller.voiceCredentialReadWorkerDestination
+        let desired = await controller.voiceCredentials.readRequest?.destination
+        let pendingID = await controller.voiceCredentials.readRequest?.id
+        let owned = await controller.voiceCredentials.readWorker?.destination
         let operations = await controller.activeOperations
         XCTAssertNil(desired)
         XCTAssertNil(pendingID)
@@ -135,14 +135,14 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
         gate.release()
         await task.value
         XCTAssertEqual(gate.calls, 1)
-        let slot = await controller.voiceProviderIssuedSlot
+        let slot = await controller.voiceCredentials.issuedProviderSlot
         XCTAssertNil(slot)
         await assertSettled()
     }
 
     func testProviderRead_ClosePreservesCoalescedSelectedRequestWithoutRetaggingOldWorker() async throws {
         let context = await open()
-        let epoch = await controller.voiceCredentialEpoch
+        let epoch = await controller.voiceCredentials.selectionEpoch
         let gate = CredentialOwnerGate()
         let entered = expectation(description: "provider read owns blocked I/O")
         let watchdog = gate.watchdog()
@@ -150,25 +150,25 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
         FakeLog.shared.installKeyReadHook { _ in gate.wait { entered.fulfill() } }
         await controller.handleVoiceProviderCredential(.open(context, requestID: UUID()))
         await fulfillment(of: [entered], timeout: 3)
-        let pending = await controller.voiceCredentialReadTask
+        let pending = await controller.voiceCredentials.readWorker?.task
         let old = try XCTUnwrap(pending)
         let selectedID = UUID()
         await controller.handleVoiceCredential(.open(selectedID))
         await controller.closeVoiceDiscovery(context.sessionID.uuidString)
         _ = await open()
-        let desired = await controller.voiceCredentialReadDestination
-        let owned = await controller.voiceCredentialReadWorkerDestination
+        let desired = await controller.voiceCredentials.readRequest?.destination
+        let owned = await controller.voiceCredentials.readWorker?.destination
         XCTAssertEqual(desired, .selectedVoice(selectionEpoch: epoch))
         XCTAssertEqual(owned, .explicitProvider(context))
         gate.release()
         await old.value
-        let replacement = await controller.voiceCredentialReadTask
+        let replacement = await controller.voiceCredentials.readWorker?.task
         await replacement?.value
         let reply = try XCTUnwrap(CredentialOwnerReplies.shared.result(selectedID)).get()
         XCTAssertEqual(reply.slot.identifier, "cartesia.apiKey")
         XCTAssertEqual(reply.selectionEpoch, epoch)
         XCTAssertEqual(gate.calls, 2)
-        let slot = await controller.voiceProviderIssuedSlot
+        let slot = await controller.voiceCredentials.issuedProviderSlot
         XCTAssertNil(slot)
         await assertSettled()
     }
@@ -190,14 +190,14 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
         let controller = try XCTUnwrap(controller)
         let save = Task { await controller.submitOwnerKey("synthetic-late-key", request: request) }
         await fulfillment(of: [entered], timeout: 3)
-        let pending = await controller.voiceCredentialTask
+        let pending = await controller.voiceCredentials.write?.task
         let task = try XCTUnwrap(pending)
         XCTAssertEqual(FakeLog.shared.key(MistralTTSCatalog.credentialIdentifier),
             committedBeforeClose ? "synthetic-late-key" : "synthetic-mistral-key")
         await controller.closeVoiceDiscovery(context.sessionID.uuidString)
         let next = await open()
         XCTAssertTrue(task.isCancelled)
-        let owned = await controller.voiceCredentialWriteDestination
+        let owned = await controller.voiceCredentials.write?.destination
         let operations = await controller.activeOperations
         XCTAssertEqual(owned, .explicitProvider(context))
         XCTAssertEqual(operations, 1)
@@ -252,10 +252,10 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
 
     private func assertSettled() async {
         let operations = await controller.activeOperations
-        let read = await controller.voiceCredentialReadTask
-        let write = await controller.voiceCredentialTask
-        let readOwner = await controller.voiceCredentialReadWorkerDestination
-        let writeOwner = await controller.voiceCredentialWriteDestination
+        let read = await controller.voiceCredentials.readWorker?.task
+        let write = await controller.voiceCredentials.write?.task
+        let readOwner = await controller.voiceCredentials.readWorker?.destination
+        let writeOwner = await controller.voiceCredentials.write?.destination
         XCTAssertEqual(operations, 0)
         XCTAssertNil(read)
         XCTAssertNil(write)

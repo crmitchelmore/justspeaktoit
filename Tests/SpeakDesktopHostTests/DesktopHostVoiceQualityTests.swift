@@ -52,11 +52,11 @@ final class DesktopHostVoiceQualityTests: XCTestCase {
         XCTAssertEqual(try after.synthesisSelection().voice, original)
         let packet = try JSONDecoder().decode(VoiceSynthesisOptions.self,
             from: Data(#"{"speed":0.25,"pitch":0,"useSSML":false}"#.utf8))
-        let epoch = await controller.voiceCredentialEpoch
+        let epoch = await controller.voiceCredentials.selectionEpoch
         let accepted = await controller.saveVoiceSynthesisOptions(packet)
         XCTAssertTrue(accepted)
         let retained = await controller.voiceOutputSettings()
-        let retainedEpoch = await controller.voiceCredentialEpoch
+        let retainedEpoch = await controller.voiceCredentials.selectionEpoch
         XCTAssertEqual(retained.quality, "standard")
         XCTAssertEqual(retained.speed, 0.25)
         XCTAssertEqual(retainedEpoch, epoch)
@@ -72,12 +72,12 @@ final class DesktopHostVoiceQualityTests: XCTestCase {
         saved.sonioxRegion = "future-region"
         await controller.saveVoiceOutput(saved)
         FakeLog.shared.installKeyReadHook { _ in XCTFail("Quality editing read a credential") }
-        let epoch = await controller.voiceCredentialEpoch
+        let epoch = await controller.voiceCredentials.selectionEpoch
         var entries = try await controller.voiceConfigurationEditorSnapshot().preferences.entries
         entries[try qualityIndex()] = "highest"
         try await controller.saveConfiguration(entries)
         let changed = await controller.voiceOutputSettings()
-        let changedEpoch = await controller.voiceCredentialEpoch
+        let changedEpoch = await controller.voiceCredentials.selectionEpoch
         let effective = DesktopSpeechVoice.openai(.highDefinition, preset)
         XCTAssertNotEqual(changedEpoch, epoch)
         XCTAssertEqual(try VoiceOutputCredentialSlot(voice: effective), try VoiceOutputCredentialSlot(voice: original))

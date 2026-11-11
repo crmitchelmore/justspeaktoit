@@ -7,120 +7,6 @@ import os.log
 
 private let logger = SpeakLogger.logger(category: "TranscriptionManager")
 
-// swiftlint:disable file_length
-
-/// Applies the user-configured extra stop-grace period uniformly across all
-/// live transcription providers. This sits on top of each provider's
-/// hard-coded `LiveModelCapabilities.postStopFinalizeBudget` and lets the
-/// user buy themselves a bit of extra trailing-audio finalisation time
-/// (originally a Deepgram-only knob, now generalised).
-func applyLiveStopGrace(_ period: TimeInterval) async {
-  let grace = max(period, 0)
-  guard grace > 0 else { return }
-  try? await Task.sleep(for: .seconds(grace))
-}
-
-enum TranscriptionManagerError: LocalizedError, Equatable {
-  case liveSessionAlreadyRunning
-  case liveSessionAlreadyStopping
-  case liveSessionNotRunning
-  case recognizerUnavailable
-  case permissionsMissing
-  case microphonePermissionMissing
-  case localLiveStreamingUnsupported
-  case localLiveStreamingStartupTimedOut
-  case invalidLocalStreamingSource(String)
-  case noUsableAudioInput
-
-  var errorDescription: String? {
-    switch self {
-    case .liveSessionAlreadyRunning:
-      return "A live transcription session is already running."
-    case .liveSessionAlreadyStopping:
-      return "A live transcription session is already stopping."
-    case .liveSessionNotRunning:
-      return "No live transcription session is currently running."
-    case .recognizerUnavailable:
-      return "The speech recogniser could not be configured for the selected locale."
-    case .permissionsMissing:
-      return "Required microphone or speech recognition permissions are missing."
-    case .microphonePermissionMissing:
-      return "Microphone permission is missing. Grant microphone access in System Settings and try again."
-    case .localLiveStreamingUnsupported:
-      return "The selected downloaded model does not support Local Streaming. Choose another model or use Local Batch."
-    case .localLiveStreamingStartupTimedOut:
-      return "The local streaming model did not start receiving microphone audio in time. " +
-        "Try reconnecting the input device."
-    case .invalidLocalStreamingSource(let sourceID):
-      return "Local streaming source is not available: \(sourceID). " +
-        "Choose or download a local streaming model in Settings."
-    case .noUsableAudioInput:
-      return "The selected microphone is unavailable. Pick a different input device in Settings and try again."
-    }
-  }
-}
-
-/// Returns `true` when an `AVAudioEngine` input format describes a usable capture
-/// device. A stale or disconnected input device reports zero channels or a zero
-/// sample rate, which would otherwise surface as `kAudioHardwareBadDeviceError`
-/// (`com.apple.coreaudio.avfaudio error 560227702`) when starting the engine.
-func audioInputFormatIsUsable(_ format: AVAudioFormat) -> Bool {
-  format.channelCount > 0 && format.sampleRate > 0
-}
-
-/// Returns `true` when a tap in `tapFormat` can be installed on an input node
-/// whose hardware currently delivers `hardwareFormat`. AVFAudio raises an
-/// Objective-C exception, which Swift cannot catch, when the tap's sample rate
-/// differs from the hardware's.
-func audioInputTapFormatMatchesHardware(_ tapFormat: AVAudioFormat, hardwareFormat: AVAudioFormat) -> Bool {
-  audioInputFormatIsUsable(hardwareFormat)
-    && tapFormat.sampleRate == hardwareFormat.sampleRate
-    && tapFormat.channelCount == hardwareFormat.channelCount
-}
-
-private let coreAudioBadDeviceErrorCode = 560_227_702
-private let avfaudioErrorDomain = "com.apple.coreaudio.avfaudio"
-private let staleInputDeviceRetryDelay: Duration = .milliseconds(200)
-
-func startAudioEngineAfterInputDeviceSettles(_ audioEngine: AVAudioEngine) async throws {
-  do {
-    audioEngine.prepare()
-    try audioEngine.start()
-  } catch {
-    guard audioInputStartErrorIsBadDevice(error) else {
-      throw error
-    }
-
-    audioEngine.stop()
-    try await Task.sleep(for: staleInputDeviceRetryDelay)
-
-    do {
-      audioEngine.prepare()
-      try audioEngine.start()
-    } catch {
-      throw normalisedAudioInputStartError(error)
-    }
-  }
-}
-
-func normalisedAudioInputStartError(_ error: Error) -> Error {
-  audioInputStartErrorIsBadDevice(error)
-    ? TranscriptionManagerError.noUsableAudioInput
-    : error
-}
-
-func audioInputStartErrorIsBadDevice(_ error: Error) -> Bool {
-  let nsError = error as NSError
-  if nsError.code == coreAudioBadDeviceErrorCode,
-    nsError.domain == avfaudioErrorDomain || nsError.domain == NSOSStatusErrorDomain {
-    return true
-  }
-  if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
-    return audioInputStartErrorIsBadDevice(underlying)
-  }
-  return false
-}
-
 @MainActor
 final class TranscriptionManager: ObservableObject {
   /// Live transcript display state for the current recording. Published as one
@@ -139,22 +25,14 @@ final class TranscriptionManager: ObservableObject {
   let liveController: SwitchingLiveTranscriber
 
   private let appSettings: AppSettings
-  private let batchClient: BatchTranscriptionClient
-  private let openRouter: OpenRouterAPIClient
-  private let secureStorage: SecureAppStorage
-  private let stopTimeoutSleep: @MainActor (TimeInterval) async throws -> Void
+  private let batchRouter: BatchTranscriptionRouter
+  private let liveRouter: LiveTranscriptionRouter
+  private let stopWait: LiveStopWait
 
-  private var continuation: CheckedContinuation<TranscriptionResult, Error>?
   private var pendingError: Error?
   private var startupGeneration: UUID?
   private var startupTask: Task<Void, Error>?
   private var cancelledStartupGeneration: UUID?
-  /// Monotonic token identifying the current stop request. The safety timeout
-  /// captures the value at spawn time and only fires if it still matches, so a
-  /// stale timeout from an earlier session can never resume a later session's
-  /// continuation.
-  private var stopGeneration = 0
-  private var stopTimeoutTask: Task<Void, Never>?
 
   init(
     appSettings: AppSettings,
@@ -169,17 +47,22 @@ final class TranscriptionManager: ObservableObject {
     }
   ) {
     self.appSettings = appSettings
-    self.stopTimeoutSleep = stopTimeoutSleep
-    self.liveController = SwitchingLiveTranscriber(
+    self.stopWait = LiveStopWait(sleep: stopTimeoutSleep)
+    let liveController = SwitchingLiveTranscriber(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
       secureStorage: secureStorage,
       controllerOverride: controllerOverride
     )
-    self.batchClient = batchClient
-    self.openRouter = openRouter
-    self.secureStorage = secureStorage
+    self.liveController = liveController
+    let credentials = TranscriptionProviderCredentials(secureStorage: secureStorage)
+    self.batchRouter = BatchTranscriptionRouter(
+      settings: appSettings, batchClient: batchClient, openRouter: openRouter, credentials: credentials
+    )
+    self.liveRouter = LiveTranscriptionRouter(
+      settings: appSettings, liveController: liveController, credentials: credentials
+    )
     self.liveController.delegate = self
     // Scope the on-screen transcript to whichever controller owns the current
     // live session, so a reused controller's late callbacks can be told apart
@@ -213,12 +96,12 @@ final class TranscriptionManager: ObservableObject {
     preRollBuffers: [AVAudioPCMBuffer],
     analyzerFallbackAllowed: Bool = true,
     primedInput: PrimedLiveInput? = nil,
-    onDiagnostic: ((LiveDiagnosticReceipt) -> Void)?
+    onDiagnostic: ((TranscriptionDiagnosticReceipt) -> Void)?
   ) async throws {
         guard !isLiveTranscribing, startupGeneration == nil else {
             throw TranscriptionManagerError.liveSessionAlreadyRunning
         }
-    let model = try liveTranscriptionModelForCurrentMode()
+    let model = try liveRouter.modelForCurrentMode()
     let language = appSettings.preferredModelLanguage
     let generation = UUID()
     startupGeneration = generation
@@ -268,10 +151,8 @@ final class TranscriptionManager: ObservableObject {
 
   // This receipt observes the configured Switching controller call only. Its
   // internal provider/backend/fallback is opaque, including injected controllers.
-  typealias LiveDiagnosticReceipt = BatchDiagnosticReceipt
-
   static func performLiveInvocation(
-    model: String, language: String?, onDiagnostic: ((LiveDiagnosticReceipt) -> Void)?,
+    model: String, language: String?, onDiagnostic: ((TranscriptionDiagnosticReceipt) -> Void)?,
     start: () async throws -> Void
   ) async throws {
     try Task.checkCancellation()
@@ -281,7 +162,7 @@ final class TranscriptionManager: ObservableObject {
     do {
       try await start()
     } catch {
-      onDiagnostic?(.failure(Self.batchFailure(error, stage: .request)))
+      onDiagnostic?(.failure(TranscriptionDiagnostics.failure(error, stage: .request)))
       throw error
     }
   }
@@ -289,7 +170,7 @@ final class TranscriptionManager: ObservableObject {
   func stopLiveTranscription() async throws -> TranscriptionResult {
     // Never replace an outstanding checked continuation: its caller would be
     // suspended forever, even after the replacement stop times out.
-    guard continuation == nil else { throw TranscriptionManagerError.liveSessionAlreadyStopping }
+    guard !stopWait.isPending else { throw TranscriptionManagerError.liveSessionAlreadyStopping }
     // If there was a mid-session error, still stop the controller so audio resources
     // and preferred input-device sessions are released before surfacing the failure.
     if let error = pendingError {
@@ -300,49 +181,22 @@ final class TranscriptionManager: ObservableObject {
       throw error
     }
     guard isLiveTranscribing else { throw TranscriptionManagerError.liveSessionNotRunning }
-    stopGeneration += 1
-    let generation = stopGeneration
     let requestedTimeout = liveController.stopCompletionTimeout
     let timeout = requestedTimeout.isFinite && requestedTimeout > 0 ? requestedTimeout : 10
-    let sleep = stopTimeoutSleep
-    return try await withCheckedThrowingContinuation { continuation in
-      self.continuation = continuation
+    return try await stopWait.wait(timeout: timeout) {
       // Capture the run now; a delayed stop must never resolve its target
       // after cancellation has allowed a replacement recording to start.
       self.liveController.scheduleStop()
-      // Safety timeout: if the delegate never calls back, resume with an error
-      // rather than hanging forever. Guarded by the generation token so a stale
-      // timeout from a previous session can't resume a later session's continuation.
-      stopTimeoutTask?.cancel()
-      stopTimeoutTask = Task { @MainActor [weak self] in
-        try? await sleep(timeout)
-        guard let self, !Task.isCancelled,
-          self.stopGeneration == generation,
-          let cont = self.continuation
-        else { return }
-        logger.error("Safety timeout: continuation not resumed after \(timeout)s, forcing error")
-        self.continuation = nil
-        self.stopTimeoutTask = nil
-        self.isLiveTranscribing = false
-        self.endLiveTranscriptDisplaySession()
-        cont.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
-      }
+    } onTimeout: { [weak self] in
+      self?.isLiveTranscribing = false
+      self?.endLiveTranscriptDisplaySession()
     }
-  }
-
-  /// Cancels the pending stop safety timeout once the continuation has been
-  /// resumed through a normal path (delegate callback or explicit cancel).
-  private func cancelStopTimeout() {
-    stopTimeoutTask?.cancel()
-    stopTimeoutTask = nil
   }
 
   func cancelLiveTranscription() {
     cancelledStartupGeneration = startupGeneration
     startupTask?.cancel()
-    cancelStopTimeout()
-    continuation?.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
-    continuation = nil
+    stopWait.cancel(throwing: TranscriptionManagerError.liveSessionNotRunning)
     liveController.scheduleStop()
     isLiveTranscribing = false
     pendingError = nil
@@ -355,285 +209,44 @@ final class TranscriptionManager: ObservableObject {
   func invalidateLiveControllerCache() {
     liveController.markControllersStale()
   }
-
 }
 
-/// Batch routing and model/credential selection are separate from live session ownership.
+/// Batch routing and live-route lookups are owned by `BatchTranscriptionRouter`
+/// and `LiveTranscriptionRouter`; these are the entry points the session uses.
 extension TranscriptionManager {
-  enum BatchDiagnosticReceipt {
-    case handoff(RequestDiagnosticContext)
-    case failure(RequestDiagnosticContext.Failure)
-  }
-
   func transcribeFile(at url: URL) async throws -> TranscriptionResult {
     try await transcribeFile(at: url, onDiagnostic: nil)
   }
 
   func transcribeFile(
-    at url: URL, onDiagnostic: ((BatchDiagnosticReceipt) -> Void)?
+    at url: URL, onDiagnostic: ((TranscriptionDiagnosticReceipt) -> Void)?
   ) async throws -> TranscriptionResult {
-    try await Self.performBatchTranscription(
-      at: url, model: { self.offlineTranscriptionModel }, settings: appSettings, batchClient: batchClient,
-      apiKey: { try await self.getAPIKey(for: $0) }, onDiagnostic: onDiagnostic
-    )
-  }
-
-  // Keep the existing routing algorithm together; dependencies preserve its actor/evaluation order.
-  // swiftlint:disable:next function_body_length function_parameter_count
-  static func performBatchTranscription(
-    at url: URL, model modelProvider: () -> String, settings: AppSettings,
-    batchClient: any BatchTranscriptionClient,
-    providerForModel: (String) async -> (any TranscriptionProvider)? = {
-      await TranscriptionProviderRegistry.shared.provider(forModel: $0)
-    },
-    apiKey: (TranscriptionProviderMetadata) async throws -> String,
-    onDiagnostic: ((BatchDiagnosticReceipt) -> Void)?
-  ) async throws -> TranscriptionResult {
-    var stage: RequestDiagnosticContext.Stage = .admission
-    do {
-      let model = modelProvider()
-      if AppleLocalModels.isSpeechAnalyzerModel(model) {
-        if #available(macOS 26.0, *) {
-          let locale = settings.resolvedPreferredLocaleIdentifier
-          let engine = AppleSpeechAnalyzerEngine(modelID: model)
-          stage = .request
-          onDiagnostic?(.handoff(Self.batchHandoff(model: model, language: locale, mode: .local)))
-          return try await AppleSpeechAnalyzerTranscriber.transcribeFile(
-            at: url,
-            localeIdentifier: locale,
-            engine: engine
-          )
-        }
-        throw AppleLocalModelError.speechTranscriberUnavailable
-      }
-      if ModelRouting.family(for: model).isDownloadedLocal {
-        let manager = LocalModelManager.shared
-        let language = settings.preferredModelLanguage
-        stage = .request
-        onDiagnostic?(.handoff(Self.batchHandoff(model: model, language: language, mode: .local)))
-        return try await manager.transcribeFile(
-          at: url,
-          modelID: model,
-          language: language
-        )
-      }
-
-      // Check if this model uses a dedicated transcription provider
-      if let provider = await providerForModel(model) {
-        let metadata = provider.metadata
-        let apiKey = try await apiKey(metadata)
-        let language = settings.preferredModelLanguage
-        stage = .request
-        onDiagnostic?(.handoff(Self.batchHandoff(
-          model: model, language: language, mode: .batch, providerID: metadata.id
-        )))
-        return try await provider.transcribeFile(
-          at: url,
-          apiKey: apiKey,
-          model: model,
-          language: language
-        )
-      }
-
-      // Fallback to OpenRouter for legacy models
-      let language = settings.preferredModelLanguage
-      stage = .request
-      // The injected client may route internally. Never infer its provider from this model.
-      onDiagnostic?(.handoff(Self.batchHandoff(model: model, language: language, mode: .batch)))
-      return try await batchClient.transcribeFile(
-        at: url,
-        model: model,
-        language: language
-      )
-    } catch {
-      onDiagnostic?(.failure(Self.batchFailure(error, stage: stage)))
-      throw error
-    }
-  }
-
-  private static func batchHandoff(
-    model: String, language: String?, mode: RequestDiagnosticContext.Mode, providerID: String? = nil
-  ) -> RequestDiagnosticContext {
-    RequestDiagnosticContext(
-      provenance: .observedHandoff, model: .project(model), observedProvider: providerID.map { .project($0) },
-      mode: mode, language: .project(language), options: .init(streamingEnabled: false)
-    )
-  }
-
-  static func batchFailure(_ error: Error, stage: RequestDiagnosticContext.Stage) -> RequestDiagnosticContext.Failure {
-    if error is CancellationError { return .init(stage: stage, code: .cancelled, domain: .application) }
-    if let transport = error as? URLError {
-      let codes: [URLError.Code: RequestDiagnosticContext.FailureCode] = [.timedOut: .timeout, .cancelled: .cancelled]
-      return .init(stage: stage, code: codes[transport.code] ?? .transport, domain: .transport)
-    }
-    if let provider = error as? TranscriptionProviderError {
-      return Self.batchProviderFailure(provider, stage: stage)
-    }
-    if let client = error as? OpenRouterClientError {
-      switch client {
-      case .apiKeyMissing: return .init(stage: stage, code: .authentication, domain: .application)
-      case .invalidResponse: return .init(stage: stage, code: .unknown, domain: .provider)
-      case .httpStatus(let status, _): return Self.batchHTTPFailure(status, stage: stage)
-      case .audioFileTooLarge: return .init(stage: stage, code: .invalidInput, domain: .application)
-      }
-    }
-    return .init(stage: stage, code: .unknown, domain: .unknown)
-  }
-
-  private static func batchProviderFailure(
-    _ error: TranscriptionProviderError, stage: RequestDiagnosticContext.Stage
-  ) -> RequestDiagnosticContext.Failure {
-    switch error {
-    case .apiKeyMissing: return .init(stage: stage, code: .authentication, domain: .application)
-    case .invalidResponse: return .init(stage: stage, code: .unknown, domain: .provider)
-    case .httpError(let status, _): return Self.batchHTTPFailure(status, stage: stage)
-    }
-  }
-
-  private static func batchHTTPFailure(_ status: Int, stage: RequestDiagnosticContext.Stage)
-    -> RequestDiagnosticContext.Failure {
-    .init(stage: stage, code: status == 401 || status == 403 ? .authentication : .unknown,
-          domain: .provider, httpStatus: status)
+    try await batchRouter.transcribeFile(at: url, onDiagnostic: onDiagnostic)
   }
 
   func batchTranscriptionUsesRemoteService() async -> Bool {
-    let model = offlineTranscriptionModel
-    if ModelRouting.family(for: model) == .appleSpeech {
-      return false
-    }
-    if ModelRouting.family(for: model).isDownloadedLocal {
-      return false
-    }
-    let registry = TranscriptionProviderRegistry.shared
-
-    // Check if provider requires API key
-    if await registry.requiresAPIKey(for: model) {
-      return true
-    }
-
-    // Fallback to OpenRouter check
-    return await openRouter.requiresRemoteAccess(for: model)
+    await batchRouter.batchTranscriptionUsesRemoteService()
   }
 
   func hasValidBatchAPIKey() async -> Bool {
-    guard await batchTranscriptionUsesRemoteService() else { return true }
-
-    let model = offlineTranscriptionModel
-    let registry = TranscriptionProviderRegistry.shared
-
-    // Check if provider has API key
-    if let provider = await registry.provider(forModel: model) {
-      return await hasAPIKey(for: provider.metadata)
-    }
-
-    // Fallback to OpenRouter
-    return await openRouter.hasStoredAPIKey()
-  }
-
-  private var offlineTranscriptionModel: String {
-    if appSettings.transcriptionMode == .localModel {
-      return appSettings.localTranscriptionModel
-    }
-    let saved = appSettings.batchTranscriptionModel
-    return ModelRetirements.successor(for: saved, mode: .batch) ?? saved
+    await batchRouter.hasValidBatchAPIKey()
   }
 
   /// Whether the live route for the current mode captures through
   /// `LiveInputEngines.shared`; record-start prepares an engine only then.
-  var liveRouteUsesLiveInputEngine: Bool {
-    guard appSettings.transcriptionMode == .liveNative
-      || (appSettings.transcriptionMode == .localModel && appSettings.localTranscriptionMode == .streaming)
-    else { return false }
-    guard let model = try? liveTranscriptionModelForCurrentMode() else { return false }
-    return liveController.usesLiveInputEngine(for: model)
-  }
+  var liveRouteUsesLiveInputEngine: Bool { liveRouter.usesLiveInputEngine }
 
   /// Read-only projection of the same per-app override applied at session start.
   func liveRouteUsesLiveInputEngine(profiles: [DictationProfile], frontmostBundleID: String?) -> Bool {
-    let profile = ProfileResolver(profiles: profiles).profile(forBundleID: frontmostBundleID)
-    guard let override = profile?.resolvedTranscriptionOverride else { return liveRouteUsesLiveInputEngine }
-    guard override.routing == .remoteStreaming else { return false }
-    return liveController.usesLiveInputEngine(for: override.modelID)
+    liveRouter.usesLiveInputEngine(profiles: profiles, frontmostBundleID: frontmostBundleID)
   }
 
-  private func liveTranscriptionModelForCurrentMode() throws -> String {
-    try Self.resolvedLiveTranscriptionModel(
-      transcriptionMode: appSettings.transcriptionMode,
-      localTranscriptionMode: appSettings.localTranscriptionMode,
-      localStreamingModelSource: appSettings.localStreamingModelSource,
-      liveTranscriptionModel: appSettings.liveTranscriptionModel,
-      availableStreamingSourceIDs: availableLocalStreamingSourceIDs()
-    )
-  }
-
-  private func availableLocalStreamingSourceIDs() -> Set<String> {
-    var availableStreamingSourceIDs = Set(
-      LocalModelManager.shared.availableModels
-        .filter(\.supportsLiveStreaming)
-        .filter { LocalModelManager.shared.isInstalled($0.id) }
-        .map(WhisperKitStreamingModel.id(for:))
-    )
-    if FluidAudioModelManager.supportsCurrentHardware {
-      availableStreamingSourceIDs.insert(FluidAudioParakeetModel.id)
-    }
-    #if !APP_STORE
-    availableStreamingSourceIDs.formUnion(LocalModelManager.recommendedStreamingModelSources.map(\.id))
-    availableStreamingSourceIDs.formUnion(LocalModelManager.shared.streamingModelSources.map(\.id))
-    #endif
-    return availableStreamingSourceIDs
-  }
-
-  nonisolated static func resolvedLiveTranscriptionModel(
-    transcriptionMode: AppSettings.TranscriptionMode,
-    localTranscriptionMode: AppSettings.LocalTranscriptionMode,
-    localStreamingModelSource: String,
-    liveTranscriptionModel: String,
-    availableStreamingSourceIDs: @autoclosure () -> Set<String>
-  ) throws -> String {
-    guard transcriptionMode == .localModel, localTranscriptionMode == .streaming else {
-      // A running app crossing a shutdown day follows the automatic successor.
-      return ModelRetirements.successor(for: liveTranscriptionModel, mode: .live) ?? liveTranscriptionModel
-    }
-
-    guard localStreamingModelSource.hasPrefix("local/streaming/"),
-      availableStreamingSourceIDs().contains(localStreamingModelSource)
-    else {
-      throw TranscriptionManagerError.invalidLocalStreamingSource(localStreamingModelSource)
-    }
-
-    return localStreamingModelSource
-  }
-
-  /// Returns the metadata for the live-transcription provider whose API key is
-  /// missing — `nil` if the current live model needs no key, or its key is set.
-  /// Used for the "API key required" pre-flight alert before a live recording.
+  /// The live provider whose API key is missing, for the pre-flight alert.
   func missingLiveAPIKeyProvider() async -> TranscriptionProviderMetadata? {
-    let model = appSettings.liveTranscriptionModel
-    let registry = TranscriptionProviderRegistry.shared
-    guard await registry.requiresAPIKey(for: model) else { return nil }
-    guard let provider = await registry.provider(forModel: model) else { return nil }
-    if await hasAPIKey(for: provider.metadata) { return nil }
-    return provider.metadata
-  }
-
-  /// Reads the provider API key, mapping only a genuine "not found" to
-  /// `apiKeyMissing`. Other keychain failures (locked keychain, denied access,
-  /// unexpected status) are rethrown as-is so users aren't told to re-enter a
-  /// key that exists.
-  private func getAPIKey(for metadata: TranscriptionProviderMetadata) async throws -> String {
-    do {
-      return try await secureStorage.secret(identifier: metadata.apiKeyIdentifier)
-    } catch SecureAppStorageError.valueNotFound {
-      throw TranscriptionProviderError.apiKeyMissing
-    }
-  }
-
-  private func hasAPIKey(for metadata: TranscriptionProviderMetadata) async -> Bool {
-    await secureStorage.hasSecret(identifier: metadata.apiKeyIdentifier)
+    await liveRouter.missingAPIKeyProvider()
   }
 }
 
-/// Live-transcript display state, scoped to the recording that owns it.
 ///
 /// Kept out of the main class body so the gate and its accessors read as one
 /// unit (issue #643).
@@ -732,13 +345,11 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
     guard displayScope.accepts(session) else { return }
     // Guard against double-resume of continuation - the controllers have their own
     // guards but this is belt-and-suspenders safety
-    guard let cont = continuation else {
+    guard let cont = stopWait.take() else {
       // Already finished or no continuation - log but don't crash
       logger.warning("didFinishWith called but no continuation (already finished?)")
       return
     }
-    cancelStopTimeout()
-    continuation = nil
     isLiveTranscribing = false
     // Only the controller that owns the on-screen session may publish its
     // final text or close the session; a late finish from a superseded
@@ -758,10 +369,8 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
   func liveTranscriber(_ session: any LiveTranscriptionController, didFail error: Error) {
     // Late failures must neither consume a new stop nor poison its next stop.
     guard displayScope.accepts(session) else { return }
-    if let cont = continuation {
+    if let cont = stopWait.take() {
       // We're in the middle of stopping - resume with the error
-      cancelStopTimeout()
-      continuation = nil
       isLiveTranscribing = false
       if displayScope.accepts(session) {
         endLiveTranscriptDisplaySession()
@@ -780,15 +389,5 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
   ) {
     guard displayScope.accepts(session) else { return }
     utteranceBoundaryText = utterance
-  }
-}
-
-struct RemoteAudioTranscriber: BatchTranscriptionClient {
-  /// Held as the protocol so paid access can wrap the OpenRouter client
-  /// without this type knowing which one it has.
-  let client: any BatchTranscriptionClient
-
-  func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
-    try await client.transcribeFile(at: url, model: model, language: language)
   }
 }

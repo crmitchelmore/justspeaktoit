@@ -6,7 +6,7 @@ import Foundation
 /// The diagnostic context a session keeps for its History entry and issue report.
 extension MainManager {
   static func retainBatchDiagnostic(
-    _ receipt: TranscriptionManager.BatchDiagnosticReceipt, for session: ActiveSession, activeSession: ActiveSession?
+    _ receipt: TranscriptionDiagnosticReceipt, for session: ActiveSession, activeSession: ActiveSession?
   ) {
     guard activeSession === session, !Task.isCancelled, let context = session.diagnosticContext else { return }
     var handoff = context.observedHandoff

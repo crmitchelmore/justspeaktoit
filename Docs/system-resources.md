@@ -58,7 +58,11 @@ add a small adapter to the platform monitor instead
   stops resolving when the window closes. WASAPI supplies the OS view: an
   active `IAudioSessionManager2` session owned by this process on any active
   capture endpoint (`jsti_audio_process_capturing`). The same monitor polls it
-  every 2 seconds.
+  every 2 seconds. The *Microphone preparation* row is the
+  `WindowsCapturePrewarm` worker: the shared host polls its state every second
+  and ends the hold (and joins the worker) as soon as its ten-minute lifetime
+  ends or the endpoint proves unavailable, without waiting for the next idle
+  transition.
 - **Android**: Settings › *System resources in use* (issue #1473). Kotlin
   can't read the Swift model, so `resources/SystemResources.kt` mirrors the
   kinds, the release semantics and the summary wording, and

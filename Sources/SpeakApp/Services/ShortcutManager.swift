@@ -319,7 +319,9 @@ final class ShortcutManager: ObservableObject {
 
     private var carbonHotKeys: [UInt32: EventHotKeyRef] = [:]
     private var carbonHotKeyActions: [UInt32: ShortcutAction] = [:]
-    private var carbonEventHandler: EventHandlerRef?
+    /// Carbon's view of this manager. Retiring it (or this manager) closes
+    /// delivery before the Carbon handler is removed.
+    private var carbonEventHandler: CarbonHotKeyHandler?
     private var localMonitor: Any?
     private var recordingMonitor: Any?
     private var handlers: [ShortcutAction: () -> Void] = [:]
@@ -536,7 +538,7 @@ final class ShortcutManager: ObservableObject {
             let carbonModifiers = carbonModifierFlags(from: binding.modifiers)
             let carbonID = Self.carbonHotKeyID(for: action)
             let hotKeyID = EventHotKeyID(
-                signature: 0x5350_4B00,
+                signature: CarbonHotKeyHandler.signature,
                 id: carbonID
             )
 
@@ -568,64 +570,28 @@ final class ShortcutManager: ObservableObject {
         }
         carbonHotKeys.removeAll()
         carbonHotKeyActions.removeAll()
-        if let handler = carbonEventHandler {
-            RemoveEventHandler(handler)
-            carbonEventHandler = nil
-        }
+        carbonEventHandler?.remove()
+        carbonEventHandler = nil
     }
 
     private func installCarbonEventHandler() {
         guard carbonEventHandler == nil else { return }
-
-        var eventType = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
-        let selfPtr = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
-        let status = InstallEventHandler(
-            GetApplicationEventTarget(),
-            { _, event, userData -> OSStatus in
-                guard let userData, let event else { return OSStatus(eventNotHandledErr) }
-                let manager = Unmanaged<ShortcutManager>.fromOpaque(userData).takeUnretainedValue()
-                return manager.handleCarbonHotKeyEvent(event)
-            },
-            1,
-            &eventType,
-            selfPtr,
-            &carbonEventHandler
-        )
-
-        if status != noErr {
-            carbonEventHandler = nil
+        let handler = CarbonHotKeyHandler { [weak self] hotKeyID in
+            DispatchQueue.main.async { [weak self] in
+                self?.handleCarbonHotKey(hotKeyID)
+            }
         }
+        guard handler.install() == noErr else { return }
+        carbonEventHandler = handler
     }
 
-    private nonisolated func handleCarbonHotKeyEvent(_ event: EventRef) -> OSStatus {
-        var hotKeyID = EventHotKeyID()
-        let status = GetEventParameter(
-            event,
-            UInt32(kEventParamDirectObject),
-            UInt32(typeEventHotKeyID),
-            nil,
-            MemoryLayout<EventHotKeyID>.size,
-            nil,
-            &hotKeyID
-        )
-
-        guard status == noErr else { return OSStatus(eventNotHandledErr) }
-        guard hotKeyID.signature == 0x5350_4B00 else { return OSStatus(eventNotHandledErr) }
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            guard !self.isRecordingShortcut else { return }
-            guard let action = self.carbonHotKeyActions[hotKeyID.id], action.isAvailable(in: .current) else {
-                return
-            }
-            guard let binding = self.bindings[action], binding.isEnabled && binding.isGlobal else { return }
-            self.handlers[action]?()
+    private func handleCarbonHotKey(_ hotKeyID: UInt32) {
+        guard !isRecordingShortcut else { return }
+        guard let action = carbonHotKeyActions[hotKeyID], action.isAvailable(in: .current) else {
+            return
         }
-
-        return noErr
+        guard let binding = bindings[action], binding.isEnabled && binding.isGlobal else { return }
+        handlers[action]?()
     }
 
     private static func carbonHotKeyID(for action: ShortcutAction) -> UInt32 {

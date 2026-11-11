@@ -1,6 +1,7 @@
 import Foundation
 import CLinuxSupport
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 import SpeakLinuxPlatform
 
@@ -145,7 +146,7 @@ enum LinuxOnboarding {
     ) async {
         let message = await status(step, holder: holder)
         guard jsti_setup_revision() == revision else { return }
-        let strings = LinuxWindow.Strings()
+        let strings = DesktopNativeStrings()
         let content = LinuxOnboardingPage(step)
         let actions = content.actions.map {
             JSTILinuxSetupAction(title: strings.add(content.title(for: $0)), action: strings.add($0.rawValue))

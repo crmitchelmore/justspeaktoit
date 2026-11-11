@@ -39,3 +39,20 @@ package struct DesktopVoiceCredentialView: Sendable {
         }
     }
 }
+
+/// The native editor's finished line after a provider key save or removal.
+package struct DesktopVoiceCredentialOutcome: Sendable {
+    package let success: Int32
+    package let message: String
+
+    package init(_ result: Result<Void, VoiceOutputCredentialError>, removing: Bool) {
+        switch result {
+        case .success:
+            success = 1
+            message = removing ? "The saved provider key was removed." : "The provider key was saved."
+        case .failure(let error):
+            success = 0
+            message = error.localizedDescription
+        }
+    }
+}

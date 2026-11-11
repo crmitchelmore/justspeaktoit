@@ -119,7 +119,7 @@ private func shutDownWindow(controller: LinuxAppController, holder: LinuxEventCo
 /// raised while marshalling arguments or running `jsti_window_run` instead
 /// of throwing, so the caller can still perform its own cleanup first.
 private func runGTKEventLoop(selected: Int, context: UnsafeMutableRawPointer, holder: LinuxEventContext) -> Error? {
-    let strings = LinuxWindow.Strings()
+    let strings = DesktopNativeStrings()
     let rows = LinuxWindow.modelRows(strings)
     var arguments = CommandLine.arguments.map { strdup($0) }
     defer { arguments.forEach { free($0) } }

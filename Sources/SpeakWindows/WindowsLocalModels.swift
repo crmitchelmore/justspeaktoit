@@ -15,10 +15,6 @@ typealias WindowsLocalModelsState = DesktopHostLocalModelsState<WindowsWhisperRu
 
 typealias WindowsModelSpec = WhisperCppModel
 
-extension WindowsWhisperRuntime: DesktopHostLocalRuntime {
-    package var recognizer: any DesktopLocalRecognizer { WindowsWhisperRecognizer(runtime: self) }
-}
-
 // CNG, the bundled whisper.dll and the native Local models dialog.
 extension WindowsHostPlatform {
     package static var localModelHost: LocalModelHostSupport { .windows }

@@ -21,7 +21,7 @@ extension LinuxHostPlatform {
         _ rows: [DesktopLocalLLMStore.Row], status: String, presenter: UnsafeMutableRawPointer?
     ) {
         guard let presenter else { return }
-        let strings = LinuxWindow.Strings()
+        let strings = DesktopNativeStrings()
         let native = rows.map {
             JSTILocalCleanupRow(
                 identifier: strings.add($0.model.id), name: strings.add($0.model.displayName),

@@ -1,6 +1,7 @@
 import Foundation
 import SpeakCore
 import CLinuxSupport
+import SpeakDesktop
 
 /// Sidebar settings search, on the GTK main thread. Ranking is in memory and
 /// synchronous, so it never joins the settings queue that shutdown drains.
@@ -21,7 +22,7 @@ enum LinuxSettingsSearch {
     static let maximumResults = 50
 
     static func show(_ rows: [DesktopSettingsSearchSession.Row]) {
-        let strings = LinuxWindow.Strings()
+        let strings = DesktopNativeStrings()
         let results = rows.prefix(maximumResults).map { row in
             JSTISettingsSearchResult(
                 title: strings.add(row.title), detail: strings.add(row.detail), identifier: strings.add(row.identifier)

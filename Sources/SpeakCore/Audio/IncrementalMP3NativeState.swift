@@ -3,6 +3,10 @@ import AudioToolbox
 import Foundation
 
 /// Confined to IncrementalMP3Decoder. No native callback schedules asynchronous work.
+///
+/// Native code is handed a retained ``MP3CallbackContext``, never this object;
+/// the context is released once the stream is closed, and resolves `nil` if a
+/// callback ever outlived the state.
 final class IncrementalMP3NativeState {
     private struct Packet {
         let bytes: Data
@@ -22,11 +26,14 @@ final class IncrementalMP3NativeState {
     private var mayDrain = false
     private var inputStorage: NSData?
     private let inputDescription = MP3PacketDescriptionStorage()
+    private var callbackContext: Unmanaged<MP3CallbackContext>?
 
     init() throws {
+        let context = Unmanaged.passRetained(MP3CallbackContext())
+        callbackContext = context
+        context.takeUnretainedValue().state = self
         let status = AudioFileStreamOpen(
-            Unmanaged.passUnretained(self).toOpaque(), mp3PropertyListener, mp3PacketsListener,
-            kAudioFileMP3Type, &stream
+            context.toOpaque(), mp3PropertyListener, mp3PacketsListener, kAudioFileMP3Type, &stream
         )
         guard status == noErr, stream != nil else {
             close()
@@ -38,11 +45,17 @@ final class IncrementalMP3NativeState {
         close()
     }
 
+    /// Whether native code still holds this state's callback context.
+    var isCallbackContextRetained: Bool { callbackContext != nil }
+
     func close() {
         if let stream { AudioFileStreamClose(stream) }
         if let converter { AudioConverterDispose(converter) }
         stream = nil
         converter = nil
+        // Native code can no longer call back once the stream and converter are gone.
+        callbackContext?.release()
+        callbackContext = nil
         packets.removeAll()
         queuedBytes = 0
         inputStorage = nil
@@ -90,7 +103,7 @@ final class IncrementalMP3NativeState {
 
     func nextPCM() throws -> Data? {
         if let callbackFailure { throw callbackFailure }
-        guard let converter, mayDrain else { return nil }
+        guard let converter, let callbackContext, mayDrain else { return nil }
         let capacity = IncrementalMP3Decoder.maximumPCMFrames * Int(channels) * 2
         var output = Data(count: capacity)
         var frames = UInt32(IncrementalMP3Decoder.maximumPCMFrames)
@@ -102,7 +115,7 @@ final class IncrementalMP3NativeState {
                 )
             )
             return AudioConverterFillComplexBuffer(
-                converter, mp3ConverterInput, Unmanaged.passUnretained(self).toOpaque(), &frames, &buffers, nil
+                converter, mp3ConverterInput, callbackContext.toOpaque(), &frames, &buffers, nil
             )
         }
         guard status == noErr || status == Self.needsMoreInput,
@@ -269,19 +282,28 @@ private final class MP3PacketDescriptionStorage {
     }
 }
 
+/// The context native code holds: retained for the stream's life, pointing
+/// weakly at the state so it can never keep it alive or reach it once freed.
+final class MP3CallbackContext {
+    weak var state: IncrementalMP3NativeState?
+
+    static func state(_ context: UnsafeMutableRawPointer?) -> IncrementalMP3NativeState? {
+        guard let context else { return nil }
+        return Unmanaged<MP3CallbackContext>.fromOpaque(context).takeUnretainedValue().state
+    }
+}
+
 private let mp3PropertyListener: AudioFileStream_PropertyListenerProc = { context, stream, property, _ in
-    Unmanaged<IncrementalMP3NativeState>.fromOpaque(context).takeUnretainedValue()
-        .propertyChanged(stream, property: property)
+    MP3CallbackContext.state(context)?.propertyChanged(stream, property: property)
 }
 
 private let mp3PacketsListener: AudioFileStream_PacketsProc = { context, bytes, count, data, descriptions in
-    Unmanaged<IncrementalMP3NativeState>.fromOpaque(context).takeUnretainedValue()
+    MP3CallbackContext.state(context)?
         .receivePackets(bytes: bytes, count: count, data: data, descriptions: descriptions)
 }
 
 private let mp3ConverterInput: AudioConverterComplexInputDataProc = { _, count, buffers, descriptions, context in
-    guard let context else { count.pointee = 0; return kAudio_ParamError }
-    return Unmanaged<IncrementalMP3NativeState>.fromOpaque(context).takeUnretainedValue()
-        .supplyInput(count: count, buffers: buffers, descriptions: descriptions)
+    guard let state = MP3CallbackContext.state(context) else { count.pointee = 0; return kAudio_ParamError }
+    return state.supplyInput(count: count, buffers: buffers, descriptions: descriptions)
 }
 #endif

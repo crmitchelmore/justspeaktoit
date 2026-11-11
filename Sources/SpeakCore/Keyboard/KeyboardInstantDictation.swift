@@ -298,80 +298,102 @@ public enum KeyboardHandoffSignal {
 /// wake-up already sitting on the main queue would still run its handler after
 /// a keyboard has been dismissed, and that handler can re-advertise a target
 /// or act on a document the extension no longer owns.
+///
+/// The notification centre holds a retained ``Delivery`` context, never this
+/// object: a callback racing teardown resolves a live context that has already
+/// been invalidated, instead of a freed observation. The context's
+/// registration reference is released once the observer is removed.
 public final class KeyboardHandoffSignalObservation: @unchecked Sendable {
-    private let name: CFString
-    private let handler: @Sendable () -> Void
-    private let lock = NSLock()
-    private var isDeliveryPending = false
-    private var isInvalidated = false
-    private var isObserving = false
+    private let delivery: Delivery
 
     fileprivate init(name: CFString, handler: @escaping @Sendable () -> Void) {
-        self.name = name
-        self.handler = handler
-        let pointer = Unmanaged.passUnretained(self).toOpaque()
-        isObserving = true
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            pointer,
-            { _, observer, _, _, _ in
-                guard let observer else { return }
-                let observation = Unmanaged<KeyboardHandoffSignalObservation>
-                    .fromOpaque(observer)
-                    .takeUnretainedValue()
-                guard observation.beginDeliveryIfIdle() else { return }
-                DispatchQueue.main.async {
-                    // Cleared before the handler runs, so a notification posted
-                    // *while* it runs still schedules a fresh delivery and no
-                    // change is missed.
-                    guard observation.endDeliveryAndShouldRun() else { return }
-                    observation.handler()
-                }
-            },
-            name,
-            nil,
-            .deliverImmediately
-        )
+        delivery = Delivery(name: name, handler: handler)
+        delivery.register()
     }
 
     /// Stops delivering, including any wake-up already queued. Idempotent, and
     /// safe to call from any thread.
     public func invalidate() {
-        lock.withLock { isInvalidated = true }
-        removeObserver()
+        delivery.unregister()
     }
 
-    private func beginDeliveryIfIdle() -> Bool {
-        lock.withLock {
-            guard !isInvalidated, !isDeliveryPending else { return false }
-            isDeliveryPending = true
-            return true
-        }
-    }
-
-    private func endDeliveryAndShouldRun() -> Bool {
-        lock.withLock {
-            isDeliveryPending = false
-            return !isInvalidated
-        }
-    }
-
-    private func removeObserver() {
-        let shouldRemove = lock.withLock {
-            guard isObserving else { return false }
-            isObserving = false
-            return true
-        }
-        guard shouldRemove else { return }
-        CFNotificationCenterRemoveObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            Unmanaged.passUnretained(self).toOpaque(),
-            CFNotificationName(name),
-            nil
-        )
-    }
+    var isRegisteredForTesting: Bool { delivery.isRegistered }
 
     deinit {
-        removeObserver()
+        delivery.unregister()
+    }
+
+    /// The notification centre's context: the coalescing state and handler.
+    private final class Delivery: @unchecked Sendable {
+        private let name: CFString
+        private let handler: @Sendable () -> Void
+        private let lock = NSLock()
+        private var isDeliveryPending = false
+        private var isInvalidated = false
+        private var registration: Unmanaged<Delivery>?
+
+        init(name: CFString, handler: @escaping @Sendable () -> Void) {
+            self.name = name
+            self.handler = handler
+        }
+
+        var isRegistered: Bool { lock.withLock { registration != nil } }
+
+        func register() {
+            let retained = Unmanaged.passRetained(self)
+            lock.withLock { registration = retained }
+            CFNotificationCenterAddObserver(
+                CFNotificationCenterGetDarwinNotifyCenter(),
+                retained.toOpaque(),
+                { _, observer, _, _, _ in
+                    guard let observer else { return }
+                    let delivery = Unmanaged<Delivery>.fromOpaque(observer).takeUnretainedValue()
+                    guard delivery.beginDeliveryIfIdle() else { return }
+                    DispatchQueue.main.async {
+                        // Cleared before the handler runs, so a notification posted
+                        // *while* it runs still schedules a fresh delivery and no
+                        // change is missed.
+                        guard delivery.endDeliveryAndShouldRun() else { return }
+                        delivery.handler()
+                    }
+                },
+                name,
+                nil,
+                .deliverImmediately
+            )
+        }
+
+        /// Invalidates, removes the observer and then releases the centre's
+        /// reference. Darwin notifications are delivered through the main
+        /// thread's run loop, so the release waits for the main queue: a
+        /// callback already running finishes on a live, invalidated context.
+        func unregister() {
+            let retained = lock.withLock { () -> Unmanaged<Delivery>? in
+                isInvalidated = true
+                defer { registration = nil }
+                return registration
+            }
+            guard let retained else { return }
+            CFNotificationCenterRemoveObserver(
+                CFNotificationCenterGetDarwinNotifyCenter(), retained.toOpaque(), CFNotificationName(name), nil
+            )
+            guard !Thread.isMainThread else { return retained.release() }
+            DispatchQueue.main.async { retained.release() }
+        }
+
+        private func beginDeliveryIfIdle() -> Bool {
+            lock.withLock {
+                guard !isInvalidated, !isDeliveryPending else { return false }
+                isDeliveryPending = true
+                return true
+            }
+        }
+
+        private func endDeliveryAndShouldRun() -> Bool {
+            lock.withLock {
+                isDeliveryPending = false
+                return !isInvalidated
+            }
+        }
     }
 }

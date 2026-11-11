@@ -4,6 +4,7 @@ import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
 import SpeakLinuxPlatform
+import CLinuxSelfTest
 import CLinuxSupport
 
 /// Routes GTK events (on the GTK thread) and shortcut presses (on the X11 or

@@ -1,6 +1,7 @@
-#include "include/CWindowsSupport.h"
-#include "WindowsSupportInternal.hpp"
-#include "WindowsTextOutputInternal.hpp"
+#include "CWindowsSelfTest.h"
+#include "CWindowsSupport.h"
+#include "../CWindowsSupport/WindowsSupportInternal.hpp"
+#include "../CWindowsSupport/WindowsTextOutputInternal.hpp"
 #include <richedit.h>
 #include <atomic>
 #include <condition_variable>

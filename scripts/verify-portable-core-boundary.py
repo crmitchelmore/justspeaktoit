@@ -65,8 +65,8 @@ if missing := sync_required - (sync_sources - set(sync_excluded)):
 
 # The shared desktop layers stay free of any one host's native modules, so the
 # Windows and Linux hosts compile the same orchestration.
-native_modules = {"CWindowsSupport", "SpeakWindowsPlatform", "CLinuxSupport", "SpeakLinuxPlatform",
-                  "AppKit", "UIKit", "WinSDK"}
+native_modules = {"CWindowsSupport", "CWindowsSelfTest", "SpeakWindowsPlatform", "CLinuxSupport", "CLinuxSelfTest",
+                  "SpeakLinuxPlatform", "AppKit", "UIKit", "WinSDK"}
 for shared in ("SpeakDesktop", "SpeakDesktopHost"):
     for path in sorted((root / "Sources" / shared).rglob("*.swift")):
         imports = set(re.findall(r"^\s*import\s+(\w+)", path.read_text(encoding="utf-8"), re.M))

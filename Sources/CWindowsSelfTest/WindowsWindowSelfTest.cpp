@@ -1,7 +1,8 @@
-// The main window's --self-test / --ui-smoke-test checks. They run inside the shipped
-// SpeakWindows.exe (CI and the bundle verifier invoke it), so they are kept apart from
-// the product code here rather than in a separate target.
-#include "WindowsWindowInternal.hpp"
+// The main window's --ui-smoke-test checks. SpeakWindows.exe links this target so CI
+// and the bundle verifier still qualify the shipped binary; CWindowsSupport keeps
+// product code only.
+#include "CWindowsSelfTest.h"
+#include "../CWindowsSupport/WindowsWindowInternal.hpp"
 
 namespace jsti_window {
 

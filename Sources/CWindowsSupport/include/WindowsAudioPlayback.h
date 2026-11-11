@@ -118,16 +118,6 @@ int jsti_audio_playback_destroy(JSTIAudioPlayback *playback, char *error, size_t
  * promise that a later playback succeeds, and playback failures must never be
  * reinterpreted as a missing endpoint. */
 int jsti_audio_playback_endpoint_available(char *error, size_t error_capacity);
-/* Deterministic checks on short low-amplitude synthetic WAV files in a unique
- * temporary directory, without any endpoint: fixed queue, input pinning and
- * limits, Media Foundation exact/converted decode, decoded-sample bound,
- * duration, cancellation of a stalled read, and the production render loop
- * driven by a synthetic engine: exact output bytes with no trailing silence,
- * source-position accounting through pause/resume/cancel/drain, pause before
- * start, event timeout, start failure, immediate completion, refused second
- * start, callback self-destroy refusal, and release of the pinned source.
- * Needs Media Foundation. Never uses recordings, credentials or a speaker. */
-int jsti_audio_playback_self_test(char *error, size_t error_capacity);
 
 /* Deterministic native checks: Unicode, 16/24 kHz frame boundaries, silence,
  * fixed queue capacity, writer drain, capture creation and sample-rate

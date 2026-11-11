@@ -1,5 +1,6 @@
 // swiftlint:disable file_length
 import Foundation
+import CWindowsSelfTest
 import CWindowsSupport
 import SpeakDesktop
 import SpeakDesktopHost

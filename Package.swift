@@ -326,6 +326,15 @@ if windowsTargetBuild {
                     .appendingPathComponent("Resources/Desktop/AppIcon.res").path])
             ]
         ),
+        // Native --self-test / --ui-smoke-test checks, kept out of the product
+        // library. SpeakWindows links them so the shipped binary is what CI and
+        // the bundle verifier qualify.
+        .target(
+            name: "CWindowsSelfTest",
+            dependencies: ["CWindowsSupport"],
+            publicHeadersPath: "include",
+            cxxSettings: windowsCxxSettings
+        ),
         // Same-user named pipes for `speak` and the app; kept apart so the CLI
         // links only kernel32 and advapi32.
         .target(
@@ -355,7 +364,7 @@ if windowsTargetBuild {
         .executableTarget(
             name: "SpeakWindows", dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakDesktopSync", "SpeakSync",
-                "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsAutomation"
+                "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsSelfTest", "CWindowsAutomation"
             ],
             // A windowed app: Start menu and startup launches open no console.
             // Swift emits `main`, so the CRT entry is mainCRTStartup, not WinMain.
@@ -372,8 +381,8 @@ if windowsTargetBuild {
         .testTarget(
             name: "SpeakWindowsPlatformTests",
             dependencies: [
-                "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport",
-                "SpeakAutomationKit"
+                "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsSelfTest",
+                "SpeakTestSupport", "SpeakAutomationKit"
             ],
             resources: [.copy("Fixtures")]
         )
@@ -438,6 +447,14 @@ if linuxTargetBuild {
             // libdl opens the whisper.cpp runtime (part of libc since glibc 2.34).
             linkerSettings: [.linkedLibrary("X11"), .linkedLibrary("dl"), .linkedLibrary("m")]
         ),
+        // The window --ui-smoke-test checks, kept out of the product library.
+        // SpeakLinux links them so the shipped binary is what CI qualifies.
+        .target(
+            name: "CLinuxSelfTest",
+            dependencies: ["CLinuxSupport", "CLinuxAdwaita", "CLinuxGio"],
+            publicHeadersPath: "include",
+            cSettings: [.define("_GNU_SOURCE")]
+        ),
         .target(
             name: "SpeakLinuxPlatform",
             dependencies: [
@@ -459,7 +476,7 @@ if linuxTargetBuild {
             name: "SpeakLinux",
             dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
-                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync", "SpeakLinuxAutomation"
+                "CLinuxSupport", "CLinuxSelfTest", "SpeakDesktopSync", "SpeakSync", "SpeakLinuxAutomation"
             ],
             resources: [.copy("Resources/hicolor")]
         ),

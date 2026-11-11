@@ -2,10 +2,10 @@
 import AVFoundation
 import Foundation
 
-/// Shared only by the OpenRouter file and progressive playback adapters.
+/// The iOS voice-output audio-session lease, shared by every playback adapter.
 /// Prior activation is unknown: neither a borrower nor this lease deactivates it.
 @MainActor
-struct OpenRouterIOSAudioSessionLease {
+struct VoiceOutputAudioSessionLease {
     struct Configuration: Equatable {
         let category: AVAudioSession.Category
         let mode: AVAudioSession.Mode

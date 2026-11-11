@@ -15,19 +15,12 @@ final class WatchCaptureStore: NSObject, ObservableObject {
 
     @Published private(set) var captures: [WatchCapture] = []
     @Published private(set) var isReachable = false
+    /// Why the queue is not being saved normally, shown until it resolves.
+    @Published private(set) var storageIssue: WatchCaptureQueueIssue?
 
-    private let fileURL: URL
+    private let file: WatchCaptureQueueFile
     private var activated = false
-    private lazy var queue: WatchCaptureQueue = {
-        let queue = WatchCaptureQueue(
-            captures: Self.load(from: self.fileURL),
-            transport: WatchConnectivityCaptureTransport(),
-            audioURL: WatchAudioRecorder.fileURL(for:),
-            persist: { [unowned self] captures in self.save(captures) }
-        )
-        queue.onChange = { [unowned self] captures in self.captures = captures }
-        return queue
-    }()
+    private lazy var queue: WatchCaptureQueue = self.makeQueue()
 
     /// Name of the persisted queue inside the shared container.
     private static let queueFileName = "captures.json"
@@ -38,10 +31,38 @@ final class WatchCaptureStore: NSObject, ObservableObject {
         // predate the App Group keep their queue via the one-off migration.
         let container = WatchSharedContainer.shared
         container.migrateLegacyFile(named: Self.queueFileName)
-        self.fileURL = container.url(named: Self.queueFileName)
+        self.file = WatchCaptureQueueFile(fileURL: container.url(named: Self.queueFileName))
         super.init()
         captures = queue.captures
         WatchComplicationPublisher.shared.update(captures: captures)
+    }
+
+    private func makeQueue() -> WatchCaptureQueue {
+        let queue = WatchCaptureQueue(
+            captures: file.open(),
+            transport: WatchConnectivityCaptureTransport(),
+            audioURL: WatchAudioRecorder.fileURL(for:),
+            persist: { [unowned self] captures in self.save(captures) }
+        )
+        storageIssue = file.issue
+        queue.onChange = { [unowned self] captures in self.captures = captures }
+        return queue
+    }
+
+    /// Reads the saved queue again after it could not be read. While it stays
+    /// unreadable nothing is saved over it; new recordings keep their
+    /// recovery marker and audio until it can be.
+    func reloadQueue() {
+        guard storageIssue?.blocksSaving == true else { return }
+        queue = makeQueue()
+        captures = queue.captures
+        WatchComplicationPublisher.shared.update(captures: captures)
+        queue.retryPending()
+    }
+
+    func dismissStorageNotice() {
+        file.dismissNotice()
+        storageIssue = file.issue
     }
 
     // MARK: - Session lifecycle
@@ -75,30 +96,19 @@ final class WatchCaptureStore: NSObject, ObservableObject {
 
     // MARK: - Persistence
 
-    private static func load(from fileURL: URL) -> [WatchCapture] {
-        guard let data = try? Data(contentsOf: fileURL) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([WatchCapture].self, from: data)) ?? []
-    }
-
+    /// Every queue mutation funnels through here. A failed or refused write
+    /// is reported through `storageIssue`; the queue then keeps its previous
+    /// state, and a recording keeps its recovery marker and audio.
     private func save(_ captures: [WatchCapture]) -> Bool {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(captures) else { return false }
-        try? FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        defer { storageIssue = file.issue }
         do {
-            try data.write(to: fileURL, options: .atomic)
-            // Every mutation funnels through save(), so publish only the
-            // queue state that has reached durable storage.
-            WatchComplicationPublisher.shared.update(captures: captures)
-            return true
+            try file.save(captures)
         } catch {
             return false
         }
+        // Publish only the queue state that has reached durable storage.
+        WatchComplicationPublisher.shared.update(captures: captures)
+        return true
     }
 }
 

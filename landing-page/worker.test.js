@@ -259,3 +259,97 @@ test('pointer schemas are checked separately for the Alpha and installer pointer
     assert.deepEqual(status, {available: false, channel: 'beta'});
   }
 });
+
+// An upstream body served in chunks on demand, recording how much was read and
+// whether the reader cancelled it. `endless` keeps producing chunks forever.
+const streamedBody = ({chunks, endless = false}) => {
+  const state = {pulledBytes: 0, cancelled: false};
+  let index = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      const chunk = endless ? new Uint8Array(1024).fill(0x20) : chunks[index++];
+      if (chunk === undefined) return controller.close();
+      state.pulledBytes += chunk.byteLength;
+      controller.enqueue(chunk);
+    },
+    cancel() { state.cancelled = true; },
+  }, {highWaterMark: 0});
+  return {stream, state};
+};
+
+test('oversized upstream bodies are cancelled at their byte cap instead of buffered', async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  const respond = () => {
+    const body = streamedBody({endless: true});
+    bodies.push(body.state);
+    return new Response(body.stream);
+  };
+  try {
+    globalThis.fetch = async () => respond();
+    const pointer = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {});
+    assert.equal(pointer.status, 503);
+    assert.equal(await pointer.text(), 'Invalid Alpha pointer');
+
+    const flatpak = await worker.fetch(new Request('https://justspeaktoit.com/linux/flatpak'), {});
+    assert.equal(flatpak.headers.get('Location'), '/alpha/download/linux-x86_64');
+
+    globalThis.fetch = async url => url.endsWith('/windows-installer-pointer.json')
+      ? Response.json(installerPointer) : respond();
+    const installer = await worker.fetch(
+      new Request('https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller'), {});
+    assert.equal(installer.status, 503);
+    assert.equal(await installer.text(), 'Invalid Windows installer');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const caps = [4096, 16384, 65536];
+  assert.equal(bodies.length, caps.length);
+  bodies.forEach((body, index) => {
+    assert.ok(body.cancelled, `body ${index} was not cancelled`);
+    assert.ok(body.pulledBytes <= caps[index] + 1024, `body ${index} read ${body.pulledBytes} bytes`);
+  });
+});
+
+test('a declared oversized length is refused before the body is read', async () => {
+  const originalFetch = globalThis.fetch;
+  const body = streamedBody({endless: true});
+  try {
+    globalThis.fetch = async () => new Response(body.stream, {headers: {'Content-Length': '5000'}});
+    const response = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {});
+    assert.equal(await response.text(), 'Invalid Alpha pointer');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.ok(body.state.cancelled);
+  assert.equal(body.state.pulledBytes, 0);
+});
+
+test('a body at its cap is accepted and multibyte text split across chunks survives', async () => {
+  const encoded = new TextEncoder().encode(appInstaller.replace('<AppInstaller', '<!-- café --><AppInstaller'));
+  const split = encoded.indexOf(0xc3) + 1;
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async url => url.endsWith('/windows-installer-pointer.json')
+      ? Response.json(installerPointer)
+      : new Response(streamedBody({chunks: [encoded.slice(0, split), encoded.slice(split)]}).stream);
+    const response = await worker.fetch(
+      new Request('https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller'), {});
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), new TextDecoder().decode(encoded));
+
+    const pointer = new TextEncoder().encode(JSON.stringify({tag: 'alpha-build-7'}).padEnd(4096, ' '));
+    globalThis.fetch = async () => new Response(streamedBody({chunks: [pointer]}).stream);
+    const download = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {});
+    assert.equal(download.status, 302);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a body that stalls after its headers ends at the deadline as unavailable', async () => {
+  const response = await serveStalled('/alpha/download/arm64', async () =>
+    new Response(new ReadableStream({pull() { return new Promise(() => {}); }})));
+  assert.equal(response.status, 503);
+  assert.equal(await response.text(), 'Alpha build not yet available');
+});

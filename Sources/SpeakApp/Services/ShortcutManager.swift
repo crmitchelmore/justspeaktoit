@@ -1,327 +1,23 @@
 import AppKit
-import Carbon
 import Foundation
 import SpeakCore
 import SpeakHotKeys
 
-// swiftlint:disable file_length
-/// Represents a keyboard shortcut action that can be triggered globally or locally.
-enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
-    case openDashboard
-    case startStopRecording
-    case speakSelectedText
-    case speakClipboard
-    case pauseResumeTTS
-    case stopTTS
-    case openSettings
-    case showHistory
-    case openVoiceOutput
-    case openCorrections
-    case openTroubleshooting
-    case openTranscriptionSettings
-    case openPostProcessingSettings
-    case openDataMigrationSettings
-    case openProfilesSettings
-    case openVoiceOutputSettings
-    case openPronunciationSettings
-    case openAPIKeysSettings
-    case openKeyboardSettings
-    case openPermissionsSettings
-    case openCompareModelsSettings
-    case openAboutSettings
-    case quickVoice1
-    case quickVoice2
-    case quickVoice3
-    case pasteLastHistoryItem
-    case editSelectionByVoice
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .openDashboard: return "Open Dashboard"
-        case .startStopRecording: return "Start/Stop Recording"
-        case .speakSelectedText: return "Speak Selected Text"
-        case .speakClipboard: return "Speak Clipboard Content"
-        case .pauseResumeTTS: return "Pause/Resume TTS"
-        case .stopTTS: return "Stop TTS"
-        case .openSettings: return "Open General Settings"
-        case .showHistory: return "Show History"
-        case .openVoiceOutput: return "Open Voice Output"
-        case .openCorrections: return "Open Corrections"
-        case .openTroubleshooting: return "Open Troubleshooting"
-        case .openTranscriptionSettings: return "Open Transcription Settings"
-        case .openPostProcessingSettings: return "Open Post-processing Settings"
-        case .openDataMigrationSettings: return "Open Data & Migration"
-        case .openProfilesSettings: return "Open Profiles Settings"
-        case .openVoiceOutputSettings: return "Open Voice Output Settings"
-        case .openPronunciationSettings: return "Open Pronunciation Settings"
-        case .openAPIKeysSettings: return "Open API Keys Settings"
-        case .openKeyboardSettings: return "Open Keyboard Settings"
-        case .openPermissionsSettings: return "Open Permissions Settings"
-        case .openCompareModelsSettings: return "Open Compare Models"
-        case .openAboutSettings: return "Open About Settings"
-        case .quickVoice1: return "Quick Switch Voice 1"
-        case .quickVoice2: return "Quick Switch Voice 2"
-        case .quickVoice3: return "Quick Switch Voice 3"
-        case .pasteLastHistoryItem: return "Paste Last History Item"
-        case .editSelectionByVoice: return "Edit Selection by Voice"
-        }
-    }
-
-    var defaultKeyBinding: KeyBinding {
-        switch self {
-        case .openDashboard:
-            return KeyBinding(keyCode: 2, modifiers: [.command], isGlobal: false)  // ⌘D
-        case .startStopRecording:
-            return KeyBinding(
-                keyCode: 1, modifiers: [.command, .shift], isGlobal: isGlobalByDefault
-            )  // ⌘+Shift+S
-        case .speakSelectedText:
-            return KeyBinding(keyCode: 17, modifiers: [.command, .shift])  // ⌘+Shift+T
-        case .speakClipboard:
-            return KeyBinding(keyCode: 9, modifiers: [.command, .shift])  // ⌘+Shift+V
-        case .pauseResumeTTS:
-            return KeyBinding(keyCode: 49, modifiers: [], isGlobal: false)  // Space
-        case .stopTTS:
-            return KeyBinding(keyCode: 53, modifiers: [], isGlobal: false)  // Escape
-        case .openSettings:
-            return KeyBinding(keyCode: 18, modifiers: [.command], isGlobal: false)  // ⌘1
-        case .showHistory:
-            return KeyBinding(keyCode: 16, modifiers: [.command], isGlobal: false)  // ⌘Y
-        case .openVoiceOutput:
-            return KeyBinding(keyCode: 32, modifiers: [.command], isGlobal: false)  // ⌘U
-        case .openCorrections:
-            return KeyBinding(keyCode: 40, modifiers: [.command], isGlobal: false)  // ⌘K
-        case .openTroubleshooting:
-            return KeyBinding(keyCode: 17, modifiers: [.command], isGlobal: false)  // ⌘T
-        case .openTranscriptionSettings:
-            return KeyBinding(keyCode: 19, modifiers: [.command], isGlobal: false)  // ⌘2
-        case .openPostProcessingSettings:
-            return KeyBinding(keyCode: 20, modifiers: [.command], isGlobal: false)  // ⌘3
-        case .openDataMigrationSettings:
-            return KeyBinding(keyCode: 29, modifiers: [.command], isGlobal: false)  // ⌘0
-        case .openProfilesSettings:
-            return KeyBinding(keyCode: 24, modifiers: [.command, .shift], isGlobal: false)  // ⌘+
-        case .openVoiceOutputSettings:
-            return KeyBinding(keyCode: 21, modifiers: [.command], isGlobal: false)  // ⌘4
-        case .openPronunciationSettings:
-            return KeyBinding(keyCode: 23, modifiers: [.command], isGlobal: false)  // ⌘5
-        case .openAPIKeysSettings:
-            return KeyBinding(keyCode: 22, modifiers: [.command], isGlobal: false)  // ⌘6
-        case .openKeyboardSettings:
-            return KeyBinding(keyCode: 26, modifiers: [.command], isGlobal: false)  // ⌘7
-        case .openPermissionsSettings:
-            return KeyBinding(keyCode: 28, modifiers: [.command], isGlobal: false)  // ⌘8
-        case .openCompareModelsSettings:
-            return KeyBinding(keyCode: 25, modifiers: [.command], isGlobal: false)  // ⌘9
-        case .openAboutSettings:
-            return KeyBinding(keyCode: 27, modifiers: [.command], isGlobal: false)  // ⌘-
-        case .quickVoice1:
-            return KeyBinding(keyCode: 18, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥1
-        case .quickVoice2:
-            return KeyBinding(keyCode: 19, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥2
-        case .quickVoice3:
-            return KeyBinding(keyCode: 20, modifiers: [.command, .option], isGlobal: false)  // ⌘⌥3
-        case .pasteLastHistoryItem:
-            return KeyBinding(keyCode: 9, modifiers: [.command, .option])  // ⌥⌘V
-        case .editSelectionByVoice:
-            return KeyBinding(keyCode: 14, modifiers: [.command, .option])  // ⌥⌘E
-        }
-    }
-
-    var legacyDefaultKeyBindings: [KeyBinding] {
-        switch self {
-        case .startStopRecording:
-            // Migrates users who still hold the shipped global ⇧⌘S they never chose.
-            // `loadBindings` only rewrites a binding that still matches a shipped default,
-            // so anyone who re-bound or already toggled Global keeps their own setting.
-            return [KeyBinding(keyCode: 1, modifiers: [.command, .shift], isGlobal: true)]
-        case .openDashboard:
-            return [KeyBinding(keyCode: 18, modifiers: [.command, .option], isGlobal: false)]
-        case .showHistory:
-            return [KeyBinding(keyCode: 19, modifiers: [.command, .option], isGlobal: false)]
-        case .openVoiceOutput:
-            return [KeyBinding(keyCode: 20, modifiers: [.command, .option], isGlobal: false)]
-        case .openCorrections:
-            return [KeyBinding(keyCode: 21, modifiers: [.command, .option], isGlobal: false)]
-        case .openTroubleshooting:
-            return [KeyBinding(keyCode: 23, modifiers: [.command, .option], isGlobal: false)]
-        case .openSettings:
-            return [KeyBinding(keyCode: 43, modifiers: [.command], isGlobal: false)]
-        case .openTranscriptionSettings:
-            return [KeyBinding(keyCode: 18, modifiers: [.command, .option, .shift], isGlobal: false)]
-        case .openPostProcessingSettings:
-            return [KeyBinding(keyCode: 19, modifiers: [.command, .option, .shift], isGlobal: false)]
-        case .openProfilesSettings:
-            return [KeyBinding(keyCode: 29, modifiers: [.command], isGlobal: false)]
-        case .openDataMigrationSettings, .openCompareModelsSettings:
-            return [KeyBinding(keyCode: 0, modifiers: [], isGlobal: false, isEnabled: false)]
-        case .openVoiceOutputSettings:
-            return [KeyBinding(keyCode: 20, modifiers: [.command, .option, .shift], isGlobal: false)]
-        case .openPronunciationSettings:
-            return [KeyBinding(keyCode: 21, modifiers: [.command, .option, .shift], isGlobal: false)]
-        case .openAPIKeysSettings:
-            return [KeyBinding(keyCode: 23, modifiers: [.command, .option, .shift], isGlobal: false)]
-        case .openKeyboardSettings:
-            return [KeyBinding(keyCode: 22, modifiers: [.command, .option, .shift], isGlobal: false)]
-        case .openPermissionsSettings:
-            return [KeyBinding(keyCode: 26, modifiers: [.command, .option, .shift], isGlobal: false)]
-        case .openAboutSettings:
-            return [
-                KeyBinding(keyCode: 25, modifiers: [.command], isGlobal: false),
-                KeyBinding(keyCode: 28, modifiers: [.command, .option, .shift], isGlobal: false)
-            ]
-        case .quickVoice1:
-            return [KeyBinding(keyCode: 18, modifiers: [.command], isGlobal: false)]
-        case .quickVoice2:
-            return [KeyBinding(keyCode: 19, modifiers: [.command], isGlobal: false)]
-        case .quickVoice3:
-            return [KeyBinding(keyCode: 20, modifiers: [.command], isGlobal: false)]
-        default:
-            return []
-        }
-    }
-
-    /// Whether the action can be registered system-wide at all.
-    ///
-    /// Drives which settings card the action appears under and whether it offers a Global
-    /// toggle, so an action must stay here even when it ships non-global — otherwise the
-    /// user loses the only control that can turn it back on.
-    var supportsGlobalShortcut: Bool {
-        switch self {
-        case .startStopRecording, .speakSelectedText, .speakClipboard, .pasteLastHistoryItem,
-             .editSelectionByVoice:
-            return true
-        default:
-            return false
-        }
-    }
-
-    /// Whether a fresh install registers it system-wide.
-    ///
-    /// `startStopRecording` is deliberately absent. The configured hotkey is already a
-    /// system-wide way to record; shipping ⇧⌘S as a second global trigger gave users a
-    /// recording shortcut they never asked for, on a chord many apps use for Save As. It
-    /// stays bound, still works while the app is focused, and the Global toggle is still
-    /// there for anyone who wants it back.
-    var isGlobalByDefault: Bool {
-        switch self {
-        case .speakSelectedText, .speakClipboard, .pasteLastHistoryItem,
-             .editSelectionByVoice:
-            return true
-        default:
-            return false
-        }
-    }
-
-    /// The build capability this action needs, or nil when every channel has it.
-    var requiredChannelFeature: ChannelFeature? {
-        switch self {
-        case .editSelectionByVoice:
-            return .voiceEdit
-        default:
-            return nil
-        }
-    }
-
-    /// Whether this action can work in `channel`. Unavailable actions are never
-    /// registered, dispatched or listed, so a build does not offer a flow that
-    /// can only end in "Nothing to edit" (issue #673).
-    func isAvailable(in channel: DistributionChannel) -> Bool {
-        guard let feature = requiredChannelFeature else { return true }
-        return channel.supports(feature)
-    }
-
-    static func availableCases(in channel: DistributionChannel = .current) -> [ShortcutAction] {
-        allCases.filter { $0.isAvailable(in: channel) }
-    }
-}
-
-/// Represents a keyboard shortcut binding.
-struct KeyBinding: Codable, Equatable {
-    var keyCode: UInt16
-    var modifiers: NSEvent.ModifierFlags
-    var isGlobal: Bool
-    var isEnabled: Bool
-
-    init(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isGlobal: Bool = true, isEnabled: Bool = true) {
-        self.keyCode = keyCode
-        self.modifiers = modifiers
-        self.isGlobal = isGlobal
-        self.isEnabled = isEnabled
-    }
-
-    // Custom Codable to handle NSEvent.ModifierFlags
-    enum CodingKeys: String, CodingKey {
-        case keyCode, modifiersRaw, isGlobal, isEnabled
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        keyCode = try container.decode(UInt16.self, forKey: .keyCode)
-        let rawModifiers = try container.decode(UInt.self, forKey: .modifiersRaw)
-        modifiers = NSEvent.ModifierFlags(rawValue: rawModifiers)
-        isGlobal = try container.decode(Bool.self, forKey: .isGlobal)
-        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(keyCode, forKey: .keyCode)
-        try container.encode(modifiers.rawValue, forKey: .modifiersRaw)
-        try container.encode(isGlobal, forKey: .isGlobal)
-        try container.encode(isEnabled, forKey: .isEnabled)
-    }
-
-    var displayString: String {
-        var parts: [String] = []
-        if modifiers.contains(.control) { parts.append("⌃") }
-        if modifiers.contains(.option) { parts.append("⌥") }
-        let isPlus = keyCode == 24 && modifiers.contains(.shift)
-        if modifiers.contains(.shift), !isPlus { parts.append("⇧") }
-        if modifiers.contains(.command) { parts.append("⌘") }
-        parts.append(isPlus ? "+" : keyCodeToString(keyCode))
-        return parts.joined()
-    }
-
-    private func keyCodeToString(_ code: UInt16) -> String {
-        KeyCodeMapping.string(for: code)
-    }
-}
-
-/// Detected conflict with system or other app shortcuts.
-struct ShortcutConflict {
-    let action: ShortcutAction
-    let conflictSource: String
-    let description: String
-}
-
-private struct SystemShortcut {
-    let keyCode: UInt16
-    let modifiers: NSEvent.ModifierFlags
-    let description: String
-}
-
 /// Manages global and local keyboard shortcuts for the application.
 @MainActor
-// swiftlint:disable:next type_body_length
 final class ShortcutManager: ObservableObject {
     @Published private(set) var bindings: [ShortcutAction: KeyBinding] = [:]
     @Published private(set) var conflicts: [ShortcutConflict] = []
-    private var carbonRegistrationConflicts: [ShortcutConflict] = []
     var migrationWarnings: [String] {
-        carbonRegistrationConflicts.map { "\($0.action.displayName): \($0.description)" }
+        carbonHotKeys.registrationConflicts.map { "\($0.action.displayName): \($0.description)" }
     }
     @Published private(set) var isRecordingShortcut: Bool = false
     @Published private(set) var recordingAction: ShortcutAction?
     @Published private(set) var recordingError: String?
 
-    private var carbonHotKeys: [UInt32: EventHotKeyRef] = [:]
-    private var carbonHotKeyActions: [UInt32: ShortcutAction] = [:]
-    /// Carbon's view of this manager. Retiring it (or this manager) closes
-    /// delivery before the Carbon handler is removed.
-    private var carbonEventHandler: CarbonHotKeyHandler?
+    private lazy var carbonHotKeys = CarbonHotKeyRegistry { [weak self] action in
+        self?.handleGlobalHotKey(action)
+    }
     private var localMonitor: Any?
     private var recordingMonitor: Any?
     private var handlers: [ShortcutAction: () -> Void] = [:]
@@ -494,7 +190,7 @@ final class ShortcutManager: ObservableObject {
     // MARK: - Private Methods
 
     private var isMonitoring: Bool {
-        localMonitor != nil || carbonEventHandler != nil
+        localMonitor != nil || carbonHotKeys.isInstalled
     }
 
     private func handleKeyEvent(_ event: NSEvent, isGlobal: Bool) -> Bool {
@@ -529,82 +225,18 @@ final class ShortcutManager: ObservableObject {
     }
 
     private func registerCarbonHotkeys() {
-        carbonRegistrationConflicts.removeAll()
-        installCarbonEventHandler()
-        for (action, binding) in bindings {
-            guard binding.isEnabled && binding.isGlobal, action.isAvailable(in: .current) else { continue }
-
-            var hotKeyRef: EventHotKeyRef?
-            let carbonModifiers = carbonModifierFlags(from: binding.modifiers)
-            let carbonID = Self.carbonHotKeyID(for: action)
-            let hotKeyID = EventHotKeyID(
-                signature: CarbonHotKeyHandler.signature,
-                id: carbonID
-            )
-
-            let status = RegisterEventHotKey(
-                UInt32(binding.keyCode),
-                carbonModifiers,
-                hotKeyID,
-                GetApplicationEventTarget(),
-                0,
-                &hotKeyRef
-            )
-
-            if status == noErr, let ref = hotKeyRef {
-                carbonHotKeys[carbonID] = ref
-                carbonHotKeyActions[carbonID] = action
-            } else {
-                carbonRegistrationConflicts.append(ShortcutConflict(
-                    action: action, conflictSource: "macOS registration",
-                    description: "Shortcut unavailable (\(status)). Choose another binding in Keyboard settings."
-                ))
-            }
-        }
+        carbonHotKeys.register(bindings)
         detectConflicts()
     }
 
     private func unregisterCarbonHotkeys() {
-        for (_, hotKeyRef) in carbonHotKeys {
-            UnregisterEventHotKey(hotKeyRef)
-        }
-        carbonHotKeys.removeAll()
-        carbonHotKeyActions.removeAll()
-        carbonEventHandler?.remove()
-        carbonEventHandler = nil
+        carbonHotKeys.unregister()
     }
 
-    private func installCarbonEventHandler() {
-        guard carbonEventHandler == nil else { return }
-        let handler = CarbonHotKeyHandler { [weak self] hotKeyID in
-            DispatchQueue.main.async { [weak self] in
-                self?.handleCarbonHotKey(hotKeyID)
-            }
-        }
-        guard handler.install() == noErr else { return }
-        carbonEventHandler = handler
-    }
-
-    private func handleCarbonHotKey(_ hotKeyID: UInt32) {
-        guard !isRecordingShortcut else { return }
-        guard let action = carbonHotKeyActions[hotKeyID], action.isAvailable(in: .current) else {
-            return
-        }
+    private func handleGlobalHotKey(_ action: ShortcutAction) {
+        guard !isRecordingShortcut, action.isAvailable(in: .current) else { return }
         guard let binding = bindings[action], binding.isEnabled && binding.isGlobal else { return }
         handlers[action]?()
-    }
-
-    private static func carbonHotKeyID(for action: ShortcutAction) -> UInt32 {
-        UInt32(ShortcutAction.allCases.firstIndex(of: action) ?? 0) + 1
-    }
-
-    private func carbonModifierFlags(from modifiers: NSEvent.ModifierFlags) -> UInt32 {
-        var carbonModifiers: UInt32 = 0
-        if modifiers.contains(.command) { carbonModifiers |= UInt32(cmdKey) }
-        if modifiers.contains(.shift) { carbonModifiers |= UInt32(shiftKey) }
-        if modifiers.contains(.option) { carbonModifiers |= UInt32(optionKey) }
-        if modifiers.contains(.control) { carbonModifiers |= UInt32(controlKey) }
-        return carbonModifiers
     }
 
     private func loadBindings() {
@@ -639,39 +271,7 @@ final class ShortcutManager: ObservableObject {
     }
 
     private func detectConflicts() {
-        var newConflicts: [ShortcutConflict] = []
-
-        // Check for common system shortcut conflicts
-        let systemShortcuts: [SystemShortcut] = [
-            SystemShortcut(keyCode: 1, modifiers: [.command], description: "Save (System)"),
-            SystemShortcut(
-                keyCode: 1, modifiers: [.command, .shift], description: "Save As (System)"
-            ),
-            SystemShortcut(keyCode: 9, modifiers: [.command], description: "Paste (System)"),
-            SystemShortcut(keyCode: 8, modifiers: [.command], description: "Copy (System)"),
-            SystemShortcut(keyCode: 0, modifiers: [.command], description: "Select All (System)"),
-            SystemShortcut(keyCode: 6, modifiers: [.command], description: "Undo (System)"),
-            SystemShortcut(keyCode: 4, modifiers: [.command], description: "Hide App (System)"),
-            SystemShortcut(keyCode: 12, modifiers: [.command], description: "Quit (System)"),
-            SystemShortcut(keyCode: 13, modifiers: [.command], description: "Close Window (System)"),
-            SystemShortcut(keyCode: 45, modifiers: [.command], description: "Minimize (System)")
-        ]
-
-        for (action, binding) in bindings where binding.isEnabled {
-            for system in systemShortcuts {
-                if binding.keyCode == system.keyCode && binding.modifiers == system.modifiers {
-                    newConflicts.append(
-                        ShortcutConflict(
-                            action: action,
-                            conflictSource: "System",
-                            description: "Conflicts with \(system.description)"
-                        )
-                    )
-                }
-            }
-        }
-
-        conflicts = newConflicts + carbonRegistrationConflicts
+        conflicts = ShortcutConflict.systemConflicts(in: bindings) + carbonHotKeys.registrationConflicts
     }
 }
 

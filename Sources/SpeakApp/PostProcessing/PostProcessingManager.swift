@@ -184,7 +184,7 @@ final class PostProcessingManager: ObservableObject {
       log.error("Post-processing failed: \(error.localizedDescription, privacy: .public)")
       onDiagnostic?(Self.observation(
         model: model, streaming: false, fallbackObserved: fallbackObserved,
-        failure: TranscriptionManager.batchFailure(error, stage: .postProcessing)
+        failure: TranscriptionDiagnostics.failure(error, stage: .postProcessing)
       ))
       return .failure(error)
     }

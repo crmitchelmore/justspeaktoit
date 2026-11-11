@@ -36,6 +36,16 @@ typedef struct Slot {
 
 typedef struct Models Models;
 
+/* The streaming cleanup preview. `lock` guards every field but `visible`. */
+typedef struct CleanupPreview {
+    GMutex lock;
+    guint64 ticket;
+    gboolean active, posted;
+    gchar *text;
+    /* UI-thread only; preview text is never a Copy/export/read-aloud source. */
+    gboolean visible;
+} CleanupPreview;
+
 typedef struct UI {
     AdwApplication *application;
     GtkWindow *window;
@@ -352,11 +362,7 @@ int32_t jsti_voice_discovery_save_snapshot(const char *path);
 
 /* Shared window state, defined once in the translation unit named beside it. */
 extern EscapePolicy escape_policy; /* LinuxWindow.c */
-extern GMutex cleanup_lock; /* LinuxWindow.c */
-extern guint64 cleanup_ticket; /* LinuxWindow.c */
-extern gboolean cleanup_active, cleanup_posted; /* LinuxWindow.c */
-extern gchar *cleanup_text; /* LinuxWindow.c */
-extern gboolean cleanup_visible; /* LinuxWindow.c */
+extern CleanupPreview cleanup_preview; /* LinuxWindow.c */
 extern UI ui; /* LinuxWindow.c */
 extern guint polish_remote_count; /* LinuxWindow.c */
 extern GtkWidget *polish_local_group; /* LinuxWindow.c */

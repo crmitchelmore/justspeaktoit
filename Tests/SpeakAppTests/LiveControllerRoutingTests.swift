@@ -28,7 +28,6 @@ final class LiveControllerRoutingTests: XCTestCase {
             let controller = switcher.controller(for: route.modelID)
             switch route.provider {
             case .openai: XCTAssertTrue(controller is OpenAIRealtimeLiveController, route.modelID)
-            case .modulate: XCTAssertTrue(controller is ModulateLiveController, route.modelID)
             default: XCTAssertTrue(controller is SharedClientLiveController, route.modelID)
             }
         }

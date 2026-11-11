@@ -64,25 +64,7 @@ public struct CLIPlan: Equatable {
     /// Builds the wire request. The id is injected so a retry can reuse one and
     /// tests can assert on a fixed value.
     public func request(id: String = UUID().uuidString) -> AutomationRequest {
-        var request = AutomationRequest(
-            id: id,
-            command: self.command,
-            path: self.path,
-            limit: self.limit,
-            timeout: self.timeout,
-            captureID: self.captureID,
-            sinceID: self.sinceID
-        )
-        request.text = self.text
-        request.voice = self.voice
-        request.play = self.play
-        request.provider = self.provider
-        request.model = self.model
-        request.speed = self.speed
-        request.pitch = self.pitch
-        request.quality = self.quality
-        request.language = self.language
-        return request
+        self.arguments.request(id: id, command: self.command)
     }
 }
 
@@ -153,15 +135,15 @@ public enum CommandLineParser {
         #endif
     }
 
-    /// Verbs that map straight onto a command plus the options they accept.
-    /// Table-driven so adding a verb is data, not another branch.
-    private static let verbs: [String: (command: AutomationCommand, options: Set<Option>)] = [
-        "await": (.awaitTranscript, [.json, .timeout, .captureID, .sinceID]),
-        "listen": (.startDictation, [.json]),
-        "stop": (.stopDictation, [.json]),
-        "history": (.history, [.json, .last]),
-        "status": (.status, [.json]),
-        "voices": (.listVoices, [.json, .provider])
+    /// Verbs that map straight onto a command. Table-driven so adding a verb
+    /// is data, not another branch.
+    private static let verbs: [String: AutomationCommand] = [
+        "await": .awaitTranscript,
+        "listen": .startDictation,
+        "stop": .stopDictation,
+        "history": .history,
+        "status": .status,
+        "voices": .listVoices
     ]
 
     /// Verbs with their own argument grammar.
@@ -189,11 +171,11 @@ public enum CommandLineParser {
             return .mcpServer
         default:
             if let custom = self.customVerbs[verb] { return .run(try custom(remaining)) }
-            guard let entry = self.verbs[verb] else {
+            guard let command = self.verbs[verb] else {
                 throw CLIUsageError(message: "Unknown command \"\(verb)\". Run `speak --help`.")
             }
-            var plan = CLIPlan(command: entry.command)
-            try self.rejectPositional(&plan, arguments: remaining, allowed: entry.options, verb: verb)
+            var plan = CLIPlan(command: command)
+            try self.rejectPositional(&plan, arguments: remaining, allowed: self.options[command] ?? [], verb: verb)
             if plan.command == .awaitTranscript {
                 do { _ = try plan.request().validated() } catch {
                     throw CLIUsageError(
@@ -209,7 +191,7 @@ public enum CommandLineParser {
         let positional = try self.applyOptions(
             &plan,
             arguments: arguments,
-            allowed: [.json, .timeout]
+            allowed: self.options[.transcribeFile] ?? []
         )
         guard let file = positional.first else {
             throw CLIUsageError(message: "`speak transcribe` requires an audio file path.")

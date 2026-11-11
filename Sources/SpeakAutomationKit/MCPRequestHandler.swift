@@ -82,7 +82,9 @@ public struct MCPRequestHandler {
             return Self.encode(Self.errorResponse(
                 id: nil, code: -32600, message: "Await requires a string or 64-bit integer JSON-RPC ID."))
         }
-        return Self.encode(self.callTool(id: id, params: params, cancellation: cancellation, awaitIdentity: identity))
+        return Self.encode(self.callTool(
+            id: id, params: params, message: rawData, cancellation: cancellation, awaitIdentity: identity
+        ))
     }
 
     // MARK: - Handlers
@@ -98,7 +100,8 @@ public struct MCPRequestHandler {
     }
 
     private func callTool(
-        id: Any?, params: [String: Any], cancellation: AutomationRequestCancellation?, awaitIdentity: String?
+        id: Any?, params: [String: Any], message: Data, cancellation: AutomationRequestCancellation?,
+        awaitIdentity: String?
     ) -> [String: Any] {
         guard let name = params["name"] as? String else {
             return Self.errorResponse(id: id, code: -32602, message: "tools/call requires a \"name\".")
@@ -107,9 +110,8 @@ public struct MCPRequestHandler {
         guard let command = AutomationCommand(rawValue: name), Self.advertisedToolNames.contains(name) else {
             return Self.errorResponse(id: id, code: -32602, message: "Unknown tool: \(name).")
         }
-        let arguments = params["arguments"] as? [String: Any] ?? [:]
-
         do {
+            let arguments = try AutomationToolArguments.decode(toolCall: message)
             let request = try self.request(for: command, arguments: arguments, callID: id, awaitIdentity: awaitIdentity)
             let response: AutomationResponse
             if command == .awaitTranscript {
@@ -139,67 +141,13 @@ public struct MCPRequestHandler {
     }
 
     private func request(
-        for command: AutomationCommand, arguments: [String: Any], callID: Any?, awaitIdentity: String?
+        for command: AutomationCommand, arguments: AutomationToolArguments, callID: Any?, awaitIdentity: String?
     ) throws -> AutomationRequest {
         let identifier = try Self.socketRequestID(command: command, callID: callID, awaitIdentity: awaitIdentity)
-        var request = AutomationRequest(id: identifier, command: command)
-        for (key, value) in [("capture_id", arguments["capture_id"]), ("since_id", arguments["since_id"])] {
-            guard let value else { continue }
-            guard let identifier = value as? String else {
-                throw AutomationError(code: .invalidArgument, message: "Capture and cursor must be UUID strings.")
-            }
-            if key == "capture_id" { request.captureID = identifier } else { request.sinceID = identifier }
-        }
-        if let path = arguments["path"] {
-            guard let path = path as? String else {
-                throw AutomationError(code: .invalidArgument, message: "\"path\" must be a string.")
-            }
-            request.path = CommandLineParser.absolutePath(for: path)
-        }
-        try Self.applySpeechArguments(arguments, to: &request)
-        if let limit = arguments["limit"] {
-            guard let limit = limit as? Int else {
-                throw AutomationError(code: .invalidArgument, message: "\"limit\" must be an integer.")
-            }
-            request.limit = limit
-        }
-        if let timeout = arguments["timeout_seconds"] {
-            guard let timeout = timeout as? Double, timeout > 0 else {
-                throw AutomationError(
-                    code: .invalidArgument,
-                    message: "\"timeout_seconds\" must be a positive number."
-                )
-            }
-            request.timeout = timeout
-        }
-        return try request.validated()
-    }
-
-    private static func applySpeechArguments(_ arguments: [String: Any], to request: inout AutomationRequest) throws {
-        let fields: [(String, WritableKeyPath<AutomationRequest, String?>)] = [
-            ("text", \.text), ("voice", \.voice), ("provider", \.provider), ("model", \.model),
-            ("quality", \.quality), ("language", \.language)
-        ]
-        for (key, field) in fields {
-            guard let value = arguments[key] else { continue }
-            guard let string = value as? String else {
-                throw AutomationError(code: .invalidArgument, message: "\"\(key)\" must be a string.")
-            }
-            request[keyPath: field] = string
-        }
-        for (key, field) in [("speed", \AutomationRequest.speed), ("pitch", \AutomationRequest.pitch)] {
-            guard let value = arguments[key] else { continue }
-            guard let number = value as? Double ?? (value as? Int).map(Double.init) else {
-                throw AutomationError(code: .invalidArgument, message: "\"\(key)\" must be a number.")
-            }
-            request[keyPath: field] = number
-        }
-        if let play = arguments["play"] {
-            guard let play = play as? Bool else {
-                throw AutomationError(code: .invalidArgument, message: "\"play\" must be a boolean.")
-            }
-            request.play = play
-        }
+        var arguments = arguments
+        // The app resolves paths in its own working directory.
+        arguments.path = arguments.path.map { CommandLineParser.absolutePath(for: $0) }
+        return try arguments.request(id: identifier, command: command).validated()
     }
 
     private static func socketRequestID(

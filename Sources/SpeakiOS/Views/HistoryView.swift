@@ -234,7 +234,10 @@ public struct HistoryView: View {
                     }
                 }
                 if pageWindow.hasMore(total: filteredItems.count) {
-                    loadMoreFooter
+                    HistoryLoadMoreFooter(shown: displayedItems.count, total: filteredItems.count) {
+                        pageWindow.loadMore(total: filteredItems.count)
+                    }
+                    .id("history-load-more-\(pageWindow.limit)")
                 }
             }
         }
@@ -243,22 +246,6 @@ public struct HistoryView: View {
 
     private var displayedItems: ArraySlice<iOSHistoryItem> {
         filteredItems.prefix(pageWindow.visibleCount(of: filteredItems.count))
-    }
-
-    /// Loads the next page when scrolled into view. Its identity follows the
-    /// window, so it fires again if it is still on screen after a page loads.
-    private var loadMoreFooter: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-            Text("Showing \(displayedItems.count) of \(filteredItems.count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("historyLoadMoreFooter")
-        .id("history-load-more-\(pageWindow.limit)")
-        .onAppear { pageWindow.loadMore(total: filteredItems.count) }
     }
 
     private var statsHeader: some View {

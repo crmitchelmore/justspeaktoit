@@ -226,6 +226,8 @@ internal class ViewModelHarness(root: File) {
     val cacheDir = File(root, "cache").apply { mkdirs() }
     val recordingsDir = File(root, "recordings")
     var timings = DictationTimings()
+    /** Each harness gets its own lane, so a stalled stop in one test never refuses another's recording. */
+    val retirement = RecorderRetirement(Dispatchers.IO)
 
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "test-main") }
     private val main = executor.asCoroutineDispatcher()
@@ -247,6 +249,7 @@ internal class ViewModelHarness(root: File) {
                     scope = CoroutineScope(SupervisorJob() + main),
                     io = Dispatchers.IO,
                     timings = timings,
+                    retirement = retirement,
                 )
             }
         }

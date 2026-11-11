@@ -16,14 +16,8 @@ on:
   # Pull requests benchmark only benchmark changes; SpeakCore and package
   # changes are benchmarked on every push to main, keeping this macOS job out
   # of the shared hosted macOS queue for ordinary product pull requests.
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/local-transcription-benchmark.yml"
-      - "Benchmarks/LocalTranscription/**"
-      - "Docs/TRANSCRIBE_CPP_ASSESSMENT.md"
-      - "scripts/verify-checksums.sh"
-
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
 permissions:
   contents: read
 

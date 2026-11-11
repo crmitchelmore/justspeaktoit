@@ -51,47 +51,8 @@ on:
       - packaging/linux/**
       - .github/workflows/linux.yml
       - .github/workflows/linux-local-runtime.yml
-  pull_request:
-    # Pull requests build this platform only when its own sources, native
-    # dependencies, packaging or workflow change. Shared Swift is proven on
-    # pull requests by ci.yml's required Portable Swift (Linux) gate; the full
-    # path set below runs on merge-batch heads and main.
-    paths:
-      - .gitattributes
-      - Package.swift
-      - Resources/AppIcon.iconset/**
-      - scripts/generate-desktop-icons.py
-      - scripts/stage-linux-desktop.py
-      - scripts/tests/test_desktop_icons.py
-      - scripts/tests/test_linux_automation_staging.py
-      - scripts/check-linux-accessibility.py
-      - scripts/tests/test_linux_accessibility.py
-      - Sources/CLinuxAutomation/**
-      - Sources/SpeakLinuxAutomation/**
-      - Tests/SpeakLinuxAutomationTests/**
-      # The Linux app stages the automation kit and CLI.
-      - Sources/SpeakAutomationKit/**
-      - Sources/SpeakCLI/**
-      - Tests/SpeakAutomationKitTests/**
-      - Sources/CLlamaCpp/**
-      - Sources/CMigrationArchive/**
-      - Sources/CRecordingFileSupport/**
-      - Sources/SpeakLinux/**
-      - Sources/SpeakLinuxPlatform/**
-      - Sources/SpeakLinuxWebSocket/**
-      - Sources/CLinuxSupport/**
-      - Sources/CLinuxSystem/**
-      - Tests/SpeakLinuxPlatformTests/**
-      - Tests/SpeakLinuxWebSocketTests/**
-      - scripts/linux-*
-      - scripts/linux-local-runtime/**
-      - scripts/windows-local-runtime/**
-      - Sources/CWindowsSupport/whisper-cpp/**
-      - scripts/typecheck-windows-swift.sh
-      - scripts/verify-portable-core-boundary.py
-      - packaging/linux/**
-      - .github/workflows/linux.yml
-      - .github/workflows/linux-local-runtime.yml
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
   workflow_dispatch:
 
 permissions:

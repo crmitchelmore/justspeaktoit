@@ -395,6 +395,10 @@ jobs:
   #          opens an issue (report-ci-failure), and for a `ci:full` label.
   release-paths:
     name: Detect Release-Relevant Changes
+    # Skipped for a trusted pull request (see the gate): every job that needs
+    # it is then skipped at once, so CI Gate starts without queueing behind
+    # other jobs on the shared hosted runner limit.
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.event.pull_request.user.login, 'dependabot') && !contains(github.event.pull_request.labels.*.name, 'ci:full') && !startsWith(github.head_ref, 'merge-batch/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -478,9 +482,6 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') || startsWith(github.head_ref, 'merge-batch/') }}
-          # A record pasted by a fork or a bot is not trusted to stand in for
-          # CI; only Dependabot is exempt from the record altogether.
-          PRE_PR_TRUSTED: ${{ github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.event.pull_request.user.login, 'dependabot') }}
           APPLE: ${{ steps.apple.outputs.apple }}
           SWIFT: ${{ steps.filter.outputs.swift }}
           IOS: ${{ steps.filter.outputs.ios }}
@@ -489,12 +490,9 @@ jobs:
           if [ "$EVENT_NAME" = "pull_request" ] && [ "$FULL" != "true" ]; then
             if [ "$API" = "true" ]; then SWIFT=true; fi
             if [ "$SWIFT" = "true" ]; then APPLE=true; fi
+            # Only untrusted pull requests (Dependabot, forks) get here: a
+            # trusted one skips this job and merges on its pre-pr record.
             WORKERS=true
-            # The pre-pr record (checked by pre-pr-evidence, which the gate
-            # requires) proves pre-pr's checks, the API check included, passed
-            # on this exact tree; CI does not repeat any of them before the
-            # merge. Main runs them all.
-            if [ "$PRE_PR_TRUSTED" = "true" ]; then APPLE=false; SWIFT=false; IOS=false; API=false; WORKERS=false; fi
             { echo "apple=$APPLE"; echo "swift=$SWIFT"; echo "ios=$IOS"; echo "api=$API"; echo "full=false"; echo "workers=$WORKERS"; } >> "$GITHUB_OUTPUT"
           else
             # main push, merge-batch/* or ci:full pull request: no
@@ -980,6 +978,8 @@ jobs:
   # just after the push that started this run.
   pre-pr-evidence:
     name: Pre-PR evidence (blocking)
+    # A trusted pull request's record is checked inside CI Gate instead.
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.event.pull_request.user.login, 'dependabot') && !contains(github.event.pull_request.labels.*.name, 'ci:full') && !startsWith(github.head_ref, 'merge-batch/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -1187,6 +1187,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
+    # A trusted pull request (same repository, not Dependabot, no ci:full,
+    # not a merge batch) merges on its passing scripts/pre-pr record alone,
+    # and every build and test runs on main after the merge. Its other jobs
+    # are all skipped, so this job is created as soon as the run starts and
+    # checks the record itself: one queue wait instead of three.
+    env:
+      TRUSTED_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.event.pull_request.user.login, 'dependabot') && !contains(github.event.pull_request.labels.*.name, 'ci:full') && !startsWith(github.head_ref, 'merge-batch/') }}
     needs:
       - release-paths
       - build-macos
@@ -1202,11 +1209,38 @@ jobs:
       - core-journey-fixture-ui
       - api-compatibility
     # Evaluate GitHub's job results directly. This aggregate never checks out
-    # or executes a PR-controlled helper; workflow edits still require review.
-    # actions: write only lets it cancel its own run (below).
+    # or executes a PR-controlled helper: the record checker is read from the
+    # base commit. actions: write only lets it cancel its own run (below).
     permissions:
       actions: write
+      contents: read
+      pull-requests: read
     steps:
+      - name: Require a passing scripts/pre-pr record for this head (trusted pull request)
+        if: env.TRUSTED_PR == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          JSTI_PRE_PR_STRICT: "true"
+        run: |
+          checker="$RUNNER_TEMP/check-pre-pr-evidence.py"
+          gh api -H 'Accept: application/vnd.github.raw' \
+            "repos/$REPO/contents/scripts/check-pre-pr-evidence.py?ref=$BASE_SHA" > "$checker"
+          PR_HEAD_TREE="$(gh api "repos/$REPO/git/commits/$PR_HEAD_SHA" --jq .tree.sha)"
+          export PR_HEAD_TREE
+          # The body is usually updated just after the push that started this run.
+          for attempt in 1 2 3 4 5 6 7; do
+            PR_BODY="$(gh api "$PR_URL" --jq '.body // ""')" || PR_BODY=''
+            export PR_BODY
+            if python3 "$checker"; then exit 0; fi
+            [ "$attempt" -lt 7 ] && sleep 30
+          done
+          echo "::error::Run scripts/pre-pr on this commit (or its exact tree) and paste its --markdown output into the PR body."
+          exit 1
       # A cancelled run is not a failed one: end this check as cancelled so
       # it neither reads as a red main nor counts as passing. If the cancel
       # call fails, the gate still fails closed.
@@ -1223,7 +1257,7 @@ jobs:
           exit 1
       - name: Reject unsuccessful CI gates
         if: >-
-          always() && (
+          always() && env.TRUSTED_PR != 'true' && (
             needs.release-paths.result != 'success' ||
             needs.pre-pr-evidence.result != 'success' ||
             (needs.release-paths.outputs.apple != 'true' && needs.release-paths.outputs.apple != 'false') ||

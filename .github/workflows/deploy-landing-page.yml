@@ -9,12 +9,8 @@ on:
       - 'Docs/manual-checks.yml'
       - '.github/workflows/deploy-landing-page.yml'
   # Pull requests only test and build; publication stays on main.
-  pull_request:
-    paths:
-      - 'landing-page/**'
-      - 'Docs/manual-checks.yml'
-      - '.github/scripts/manual-qa-results.mjs'
-      - '.github/workflows/deploy-landing-page.yml'
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
   workflow_dispatch:
 
 # Serialize production publication; keep the current deployment and only the

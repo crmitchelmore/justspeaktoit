@@ -23,18 +23,15 @@ test('every page renders without leftover markers and keeps its chrome in chrome
 });
 
 test('privacy and support share one document chrome', () => {
-  const chrome = html => [between(html, '<style>', '</style>'), between(html, '<nav', '</nav>'),
-    between(html, '<footer', '</footer>')];
+  const chrome = html => [between(html, '<style>', '</style>'), between(html, '<nav', '</nav>')];
   assert.deepEqual(chrome(rendered['privacy.html']), chrome(rendered['support.html']));
 });
 
-test('every footer links the legal pages and states the same licence', () => {
-  const footers = pages.map(page => between(rendered[page], '<footer', '</footer>'));
-  for (const footer of footers) {
-    assert.match(footer, /href="\/privacy"/);
-    assert.match(footer, /href="\/support"/);
-    assert.match(footer, /© 2026 Chris Mitchelmore · MIT licensed/);
-  }
+test('each page keeps its own footer wording', () => {
+  assert.match(between(rendered['index.html'], '<footer', '</footer>'), /© 2026 Chris Mitchelmore · MIT licensed/);
+  assert.match(between(rendered['privacy.html'], '<footer', '</footer>'), /© 2026 JustSpeakToIt\. All rights reserved\./);
+  assert.match(between(rendered['support.html'], '<footer', '</footer>'),
+    /Just Speak to It · <a href="\/">Home<\/a> · <a href="\/privacy">Privacy policy<\/a>/);
 });
 
 test('clip markup is generated for every listed clip in light/dark WebM and MP4 order', () => {
@@ -70,5 +67,6 @@ test('the Stable display version names the GitHub Latest release the Mac downloa
 test('an unknown marker fails the build instead of shipping', async () => {
   await assert.rejects(renderMarkup('<!-- partial:nope -->'), /Unknown partial: nope/);
   await assert.rejects(renderMarkup('  <!-- clip:nope -->'), /Unknown clip: nope/);
+  await assert.rejects(renderMarkup('<!-- partial:document-footer:nope -->'), /Unknown document footer: nope/);
   await assert.rejects(renderMarkup('<p><!-- partial:site-header --></p>'), /Unrendered marker/);
 });

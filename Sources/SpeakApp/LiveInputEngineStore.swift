@@ -306,7 +306,6 @@ protocol LiveInputEngineConsumer: AnyObject {}
 
 extension NativeOSXLiveTranscriber: LiveInputEngineConsumer {}
 extension AppleSpeechAnalyzerLiveController: LiveInputEngineConsumer {}
-extension DeepgramLiveController: LiveInputEngineConsumer {}
 extension ModulateLiveController: LiveInputEngineConsumer {}
 extension ElevenLabsLiveController: LiveInputEngineConsumer {}
 extension SonioxLiveController: LiveInputEngineConsumer {}

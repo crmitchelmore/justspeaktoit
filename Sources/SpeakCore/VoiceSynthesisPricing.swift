@@ -60,7 +60,9 @@ public enum VoiceSynthesisPricing {
         case .openaiRealtime: return nil
         case .elevenlabs: return ElevenLabsTTSAPI.estimatedCostPerThousandCharacters
         case .deepgram(let voice):
-            return voice.model == DeepgramSpeechCatalog.flux ? nil : DeepgramTTSAPI.costPerThousandCharacters
+            if voice.model == DeepgramSpeechCatalog.flux { return nil }
+            return voice.model.id == DeepgramTTSModel.aura1.rawValue
+                ? DeepgramTTSAPI.aura1CostPerThousandCharacters : DeepgramTTSAPI.costPerThousandCharacters
         }
     }
 

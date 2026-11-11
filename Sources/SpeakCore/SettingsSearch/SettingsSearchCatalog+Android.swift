@@ -34,6 +34,13 @@ extension SettingsSearchCatalog {
             summary: "Add or remove provider keys, encrypted with the Android Keystore.",
             keywords: ["credentials", "token", "keystore", "openrouter key", "openai key", "deepgram key"],
             platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.privacyPolicy", title: "Privacy policy", section: .about,
+            systemImage: "hand.raised",
+            summary: "Open the Just Speak to It privacy policy on the website.",
+            keywords: ["privacy", "data", "policy", "data safety", "what is collected"],
+            platforms: .android
         )
     ]
 }

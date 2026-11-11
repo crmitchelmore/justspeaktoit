@@ -29,8 +29,19 @@ public struct DeepgramTTSAPI: Sendable {
     static let fluxSpeakEndpoint = URL(string: "https://api.deepgram.com/v2/speak")!
     /// Cheap authenticated endpoint used to validate API keys.
     public static let projectsEndpoint = URL(string: "https://api.deepgram.com/v1/projects")!
-    /// Deepgram Aura pricing: $0.0135 per 1000 characters.
-    public static let costPerThousandCharacters = Decimal(string: "0.0135")!
+    /// Deepgram Aura-2 pay-as-you-go: $0.030 per 1,000 characters
+    /// (https://deepgram.com/pricing, checked 2026-11-11).
+    public static let costPerThousandCharacters = Decimal(string: "0.030")!
+    /// Aura-1 pay-as-you-go: $0.015 per 1,000 characters.
+    public static let aura1CostPerThousandCharacters = Decimal(string: "0.015")!
+
+    /// The Aura rate for a catalogue or provider voice ID; nil for Flux voices.
+    public static func costPerThousandCharacters(forVoiceID voiceID: String) -> Decimal? {
+        let bare = voiceID.hasPrefix("deepgram/") ? String(voiceID.dropFirst("deepgram/".count)) : voiceID
+        if bare.hasPrefix("flux-") { return nil }
+        return DeepgramTTSCatalog.voice(forID: bare)?.model == .aura1
+            ? aura1CostPerThousandCharacters : costPerThousandCharacters
+    }
 
     private let session: URLSession
 

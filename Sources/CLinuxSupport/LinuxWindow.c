@@ -1537,6 +1537,7 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_box_prepend(GTK_BOX(trailing), ui.history_filters);
     ui.search = GTK_SEARCH_ENTRY(gtk_search_entry_new());
     gtk_search_entry_set_placeholder_text(ui.search, "Search transcripts, models and profiles");
+    gtk_accessible_update_property(GTK_ACCESSIBLE(ui.search), GTK_ACCESSIBLE_PROPERTY_LABEL, "Search History", -1);
     g_signal_connect(ui.search, "search-changed", G_CALLBACK(on_search), NULL);
     gtk_box_insert_child_after(GTK_BOX(hero), GTK_WIDGET(ui.search), gtk_widget_get_first_child(hero));
     gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Sessions", &ui.history_sessions));
@@ -1568,6 +1569,7 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     const char *versions[] = { "Processed", "Original", NULL };
     ui.version = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(versions));
     gtk_widget_set_tooltip_text(GTK_WIDGET(ui.version), "Transcript version");
+    jsti_accessible_set_name(GTK_WIDGET(ui.version), "Transcript version");
     g_signal_connect(ui.version, "notify::selected", G_CALLBACK(on_version), NULL);
     gtk_box_append(GTK_BOX(heading), GTK_WIDGET(ui.version));
     gtk_box_append(GTK_BOX(ui.detail), heading);
@@ -1741,6 +1743,7 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.automation_row, "notify::active", G_CALLBACK(on_automation), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(automation), GTK_WIDGET(ui.automation_row));
     gtk_box_append(GTK_BOX(column), automation);
+    gtk_box_append(GTK_BOX(column), jsti_system_resources_group_new());
 
     GtkWidget *appearance = group("Appearance");
     const char *schemes[] = { "Follow the system", "Light", "Dark", NULL };
@@ -6385,6 +6388,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (!model_modes_self_test())
         return fail(error, capacity, "Model picker did not isolate and restore all four Source/Mode choices");
     if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
+    if (jsti_system_resources_self_test(error, capacity) != 0) return -1;
     if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
     if (jsti_vocabulary_self_test(error, capacity) != 0) return -1;
     if (jsti_profiles_self_test(error, capacity) != 0) return -1;

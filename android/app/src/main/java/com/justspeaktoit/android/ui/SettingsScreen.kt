@@ -49,6 +49,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -87,6 +88,8 @@ class SettingsActions(
     val onKeepAudioOnCancelChanged: (Boolean) -> Unit,
     val onChooseCleanupModel: (CleanupModel) -> Unit,
 )
+
+const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
 
 /** Where a search result scrolls to on this screen. */
 private fun anchorFor(entry: SettingsSearchEntry): String = when {
@@ -263,6 +266,16 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
                     actions,
                     anchor("${SettingsSearchIndex.KEY_PREFIX}${provider.id}"),
                 )
+            }
+
+            HorizontalDivider()
+            val uriHandler = LocalUriHandler.current
+            // Google Play's User Data policy requires the privacy policy inside the app as well as on the listing.
+            TextButton(
+                onClick = { uriHandler.openUri(PRIVACY_POLICY_URL) },
+                modifier = anchor("android.privacyPolicy").testTag(AutomationIds.SETTINGS_PRIVACY_POLICY),
+            ) {
+                Text(stringResource(R.string.privacy_policy_link))
             }
         }
     }

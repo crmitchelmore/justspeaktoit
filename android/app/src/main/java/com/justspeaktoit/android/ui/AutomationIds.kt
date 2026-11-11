@@ -22,6 +22,7 @@ object AutomationIds {
     const val SETTINGS_SEARCH = "settingsSearchField"
     const val SETTINGS_SEARCH_CLEAR = "settingsSearchClear"
     const val API_KEYS_FILTER = "settings.apiKeysFilter"
+    const val SETTINGS_PRIVACY_POLICY = "settings.privacyPolicy"
     const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
     const val CLEANUP_PICKER_BACK = "cleanupPicker.back"
     const val CLEANUP_PICKER_SEARCH = "cleanupPicker.search"

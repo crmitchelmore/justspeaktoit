@@ -148,7 +148,7 @@ static GtkWidget *field(Profiles *e, guint index, const char *title) {
         gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(widget), GTK_WRAP_WORD_CHAR);
         gtk_widget_set_size_request(widget, -1, 88);
     } else widget = gtk_entry_new();
-    gtk_accessible_update_property(GTK_ACCESSIBLE(widget), GTK_ACCESSIBLE_PROPERTY_LABEL, title, -1);
+    jsti_accessible_set_name(widget, title);
     e->fields[index] = widget;
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_box_append(GTK_BOX(box), label(title));
@@ -181,8 +181,7 @@ GtkWidget *jsti_profiles_page_new(void) {
     gtk_box_append(GTK_BOX(column), e->controls);
     gtk_box_append(GTK_BOX(e->controls), label("Next recording: manual selection or automatic / app settings"));
     e->active = GTK_DROP_DOWN(gtk_drop_down_new(NULL, NULL));
-    gtk_accessible_update_property(GTK_ACCESSIBLE(e->active),
-        GTK_ACCESSIBLE_PROPERTY_LABEL, "Profile for next recording", -1);
+    jsti_accessible_set_name(GTK_WIDGET(e->active), "Profile for next recording");
     gtk_box_append(GTK_BOX(e->controls), GTK_WIDGET(e->active));
     e->list = GTK_LIST_BOX(gtk_list_box_new());
     gtk_widget_add_css_class(GTK_WIDGET(e->list), "boxed-list");

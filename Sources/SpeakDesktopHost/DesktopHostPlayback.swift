@@ -15,6 +15,7 @@ extension DesktopHostController {
     /// Terminal playback outcomes share the status line, but never while a
     /// recording or transcription owns it.
     func playbackStatus(revision: UInt64, message: String) {
+        endSavedAudioPlaybackIfStopped()
         guard !closed, !busy, recording == nil, playback.isCurrent(revision: revision) else { return }
         update(message)
     }
@@ -40,6 +41,7 @@ extension DesktopHostController {
             // shutdown may have changed while the store resolved the file.
             guard playbackRequests.isCurrent(ticket), !closed, canUseHistory, selectedHistoryID == id else { return }
             try playback.play(recordID: id, path: audio.path, knownDuration: record.recordingDuration)
+            trackSavedAudioPlayback(recordID: id)
         } catch {
             guard playbackRequests.isCurrent(ticket), !busy, recording == nil else { return }
             update("Could not play recording: \(error.localizedDescription)")
@@ -56,6 +58,7 @@ extension DesktopHostController {
         let generating = voiceGenerationTask != nil
         stopReadAloud()
         playback.stop(announcing: true)
+        endSavedAudioPlaybackIfStopped()
         guard reading || generating, !busy, recording == nil else { return }
         update(generating ? "Generated voice audio stopped. Completed audio remains available." :
             "Reading aloud stopped.")

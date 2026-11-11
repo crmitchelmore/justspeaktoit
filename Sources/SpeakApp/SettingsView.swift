@@ -695,7 +695,7 @@ struct SettingsView: View {
       settings.postProcessingModel = localPostProcessingOptions.first?.id ?? "local/post-processing/rules"
     case .remote:
       settings.postProcessingModel = cloudPostProcessingOptions.first {
-        $0.id == "openai/gpt-5-mini"
+        $0.id == ModelCatalog.defaultPostProcessingModel
       }?.id ?? cloudPostProcessingOptions.first?.id ?? settings.postProcessingModel
     }
   }

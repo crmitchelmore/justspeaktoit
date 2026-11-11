@@ -96,6 +96,8 @@ void jsti_show_vocabulary_result(HWND owner, const char *record, void (*emit)(in
 bool jsti_vocabulary_self_test(HWND owner, std::string &error);
 void jsti_show_automation_settings(HWND owner, bool (*enabled)(), void (*toggle)(HWND owner));
 bool jsti_automation_settings_self_test(HWND owner, std::string &error);
+void jsti_show_system_resources(HWND owner, void (*emit)(HWND owner, int event, const char *text));
+bool jsti_system_resources_self_test(HWND owner, std::string &error);
 
 int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity);
 
@@ -204,6 +206,9 @@ constexpr int backupInspectID = 468;
 constexpr int backupRestoreID = 476;
 constexpr int backupProfilesID = 469;
 constexpr int automationSettingsID = 489;
+// Opens System resources in use. It stays enabled while recording: releasing
+// the microphone mid-recording is what it is for.
+constexpr int systemResourcesID = 498;
 constexpr int sourceID = 175;
 constexpr int comparisonID = 183;
 // Model modes: bit 0 is live, bit 1 is local (on-device).
@@ -952,7 +957,7 @@ unsigned pagesOf(int identifier) {
     case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
     case backupAudioID: case backupProfilesID: case backupExportID: case backupInspectID:
     case backupRestoreID:
-    case automationSettingsID:
+    case automationSettingsID: case systemResourcesID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
@@ -1351,6 +1356,7 @@ void layoutSettings(HWND window, const RECT &content) {
         top = y + 2 * row + scale(window, 12) + densitySpace(window, 20, visualDensity.card_padding) + gap;
         // The Mac's App Behaviour card. The note appears only when the system
         // decides Launch at login, so the page still fits the minimum height.
+        const int appBehaviourTop = top;
         y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.loginItemNote,
                                3 * row + scale(window, 24));
         label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
@@ -1359,6 +1365,8 @@ void layoutSettings(HWND window, const RECT &content) {
                                          y + 2 * row + scale(window, 12)});
         place(window, automationSettingsID, box(right - scale(window, 220), y + row + scale(window, 12),
                                                 scale(window, 220), row));
+        place(window, systemResourcesID, box(right - scale(window, 220),
+            appBehaviourTop + densitySpace(window, 16, visualDensity.card_padding), scale(window, 220), row));
         label(recordingsFolderLabelID, y + 2 * row + scale(window, 24));
         control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 110));
         place(window, audioCleanupID, RECT{
@@ -2443,6 +2451,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Launch at &login", BS_PUSHBUTTON | WS_TABSTOP, loginItemID) &&
         add(L"BUTTON", L"Allow &automation (speak command and MCP)", BS_PUSHBUTTON | WS_TABSTOP, automationID) &&
         add(L"BUTTON", L"CLI and MCP s&etup…", BS_PUSHBUTTON | WS_TABSTOP, automationSettingsID) &&
+        add(L"BUTTON", L"System resources in &use…", BS_PUSHBUTTON | WS_TABSTOP, systemResourcesID) &&
         add(L"STATIC", L"Recording storage", 0, recordingsFolderLabelID) &&
         add(L"BUTTON", L"Open &folder", BS_PUSHBUTTON | WS_TABSTOP, recordingsFolderID) &&
         add(L"BUTTON", L"Delete all a&udio...", BS_PUSHBUTTON | WS_TABSTOP, audioCleanupID) &&
@@ -3343,6 +3352,13 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case automationSettingsID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, automationSettingsID) && IsWindowEnabled(window)) {
                 jsti_show_automation_settings(window, automationShownEnabled, requestAutomationToggle);
+            }
+            return 0;
+        case systemResourcesID:
+            if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(window)) {
+                jsti_show_system_resources(window, [](HWND owner, int event, const char *text) {
+                    emit(owner, event, text ? text : "");
+                });
             }
             return 0;
         case automationID: {
@@ -6101,7 +6117,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_local_models_self_test(window, failure) && jsti_api_keys_self_test(window, failure) &&
             jsti_cloud_sync_settings_self_test(window, failure) &&
             jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)
-            && jsti_comparison_self_test(window, failure) && jsti_automation_settings_self_test(window, failure);
+            && jsti_comparison_self_test(window, failure) && jsti_automation_settings_self_test(window, failure) &&
+            jsti_system_resources_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }

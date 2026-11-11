@@ -28,10 +28,10 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
 
     // MARK: - Supported Models
 
-    func testSupportedModels_returnsScribeV2AndMedical() {
+    func testSupportedModels_returnsScribeV3V2AndMedical() {
         let provider = ElevenLabsTranscriptionProvider()
         let ids = provider.supportedModels().map(\.id)
-        XCTAssertEqual(ids, ["elevenlabs/scribe_v2", "elevenlabs/scribe_v2_medical"])
+        XCTAssertEqual(ids, ["elevenlabs/scribe_v3", "elevenlabs/scribe_v2", "elevenlabs/scribe_v2_medical"])
     }
 
     func testSupportedModels_haveNonEmptyDisplayNames() {

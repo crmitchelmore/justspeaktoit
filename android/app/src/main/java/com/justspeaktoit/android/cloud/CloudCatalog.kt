@@ -61,7 +61,7 @@ object CloudCatalog {
     val defaultTranscriptionModel: CloudModel = transcriptionModels.first()
 
     /** Matches `ModelCatalog.defaultPostProcessingModel` on the Mac (an OpenRouter route). */
-    const val CLEANUP_MODEL = "openai/gpt-5-mini"
+    const val CLEANUP_MODEL = "openai/gpt-5.6-luna"
 
     // Declared before cleanupModels: object properties initialise in order.
     /** Matches `ModelPickerGrouping.vendorNames` on the Mac. */
@@ -85,6 +85,7 @@ object CloudCatalog {
         native(CloudProvider.Google, "gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite"),
         native(CloudProvider.Google, "gemini-2.5-flash", "Gemini 2.5 Flash"),
         native(CloudProvider.Groq, "openai/gpt-oss-120b", "GPT-OSS 120B"),
+        native(CloudProvider.Groq, "openai/gpt-oss-20b", "GPT-OSS 20B"),
         native(CloudProvider.Groq, "llama-3.1-8b-instant", "Llama 3.1 8B Instant"),
         native(CloudProvider.Mistral, "mistral-small-latest", "Mistral Small"),
         openRouter("openai/gpt-6-luna", "GPT-6 Luna"),
@@ -98,6 +99,8 @@ object CloudCatalog {
         openRouter("google/gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"),
         openRouter("qwen/qwen3.6-35b-a3b", "Qwen3.6 35B A3B"),
         openRouter("meta-llama/llama-4-scout", "Llama 4 Scout"),
+        openRouter("anthropic/claude-haiku-5.5", "Claude Haiku 5.5"),
+        openRouter("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5"),
         openRouter("anthropic/claude-haiku-4.5", "Claude Haiku 4.5"),
         openRouter("openai/gpt-5.6-luna", "GPT-5.6 Luna"),
         openRouter("openai/gpt-5.4-mini", "GPT-5.4 Mini"),

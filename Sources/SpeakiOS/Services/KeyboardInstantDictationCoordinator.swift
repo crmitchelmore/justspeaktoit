@@ -242,6 +242,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             _ = try? handoffStore.cancel(requestID: activeRequestID)
         }
         activeRequestID = nil
+        AudioSessionManager.activeSessionHold = nil
         activeProfile = nil
         heartbeatTask?.cancel()
         heartbeatTask = nil
@@ -443,6 +444,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             recordingService.cancelRecording()
             failStart(requestID: requestID, stage: .recording, error: error)
             activeRequestID = nil
+            AudioSessionManager.activeSessionHold = nil
             activeProfile = nil
             await resumeReadinessAfterRequest()
         }
@@ -577,6 +579,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
     private func releaseRecording(for requestID: UUID) async {
         guard activeRequestID == requestID else { return }
         activeRequestID = nil
+        AudioSessionManager.activeSessionHold = nil
         activeProfile = nil
         await finalisation.resumeReadiness()
     }
@@ -588,6 +591,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             finalisation.cancel()
         }
         activeRequestID = nil
+        AudioSessionManager.activeSessionHold = nil
         activeProfile = nil
         Task {
             await finalisation.resumeReadiness()

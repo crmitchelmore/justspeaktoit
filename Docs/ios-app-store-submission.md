@@ -187,6 +187,70 @@ steps; never commit those credentials.
 The listing must point at `https://justspeaktoit.com/privacy`, the same document
 the new in-app link opens from Settings.
 
+## Listing metadata
+
+Not in the repo's upload path: the release worker only writes What's New. Enter
+or update these in App Store Connect › App Store › the version's English (U.K.)
+localisation and App Information.
+
+| Field | Value |
+| --- | --- |
+| Name (30) | Just Speak to It |
+| Subtitle (30) | Private dictation, your keys |
+| Category | Productivity (secondary: Utilities) |
+| Keywords (100) | `dictation,speech to text,transcribe,voice typing,whisper,keyboard,notes,on-device,openai,deepgram` |
+| Support URL | `https://justspeaktoit.com/support` (the July rejection cited the GitHub issues URL) |
+| Marketing URL | `https://justspeaktoit.com` |
+| Privacy Policy URL | `https://justspeaktoit.com/privacy` |
+| Copyright | `2026` followed by the owner's legal name as on the developer account |
+
+**Promotional text** (170):
+
+> Speak and it is typed. Apple's on-device speech by default, or any cloud
+> provider you hold the key to. No account, no subscription, no server in the middle.
+
+**Description**:
+
+> Just Speak to It turns your voice into text without an account and without a
+> server in the middle.
+>
+> Tap the microphone and talk. Apple's on-device speech recognition is the
+> default, so dictation works with no setup and no key. When you want a specific
+> model, add your own key for a cloud provider in Settings and audio goes
+> straight to that provider. Optional clean-up tidies the transcript with a
+> language model you choose.
+>
+> Dictate anywhere:
+> • Just Speak Keyboard hands dictation to the app and types the result into any text field
+> • Start, stop and toggle recording from Shortcuts and the Action Button
+> • A Live Activity shows recording progress on the Lock Screen and Dynamic Island
+> • Recording continues when the screen locks
+>
+> History keeps every transcript on your device and syncs it through your own
+> private iCloud, unless you turn that off. Already use the Mac app? Scan its QR code to
+> copy your settings and keys across.
+>
+> No ads, no tracking, no analytics. Open source under the MIT licence.
+
+## Screenshots
+
+The iOS target ships on iPhone and iPad, so App Store Connect needs a 6.9-inch
+iPhone set (1320 × 2868; 6.5-inch is the fallback) and a 13-inch iPad set
+(2064 × 2752). Capture them from the real app with fictional History through the
+Site Media workflow on a hosted runner:
+
+```bash
+gh workflow run site-media.yml --ref main -f ios_device="iPhone 17 Pro Max"
+gh workflow run site-media.yml --ref main -f ios_device="iPad Pro 13-inch (M5)"
+```
+
+With `ios_device` set it captures only the iPhone/iPad app (light and dark) and
+skips the Mac capture and clip rendering; download the `site-media-ios-*`
+artefacts. The simulator name must match exactly; the job fails rather than
+falling back to another size. The capture suite was written for iPhone, so
+review the iPad frames before uploading. Never use screenshots that show real
+History, keys or provider accounts.
+
 ## Historical App Store Connect observations
 
 A prior audit observed App Store version **2.23.5**, created 30 January 2026,

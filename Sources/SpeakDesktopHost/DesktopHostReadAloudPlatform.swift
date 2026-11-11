@@ -86,4 +86,11 @@ package extension DesktopHostReadAloudPlatform {
     }
 
     static func isReadingAloud(_ state: ReadAloudState) -> Bool { state.task != nil || state.exportTask != nil }
+
+    /// Automation speech that plays sets `speech`, so it reports speaking even
+    /// though it is owned by `exportTask`.
+    static func readAloudActivity(_ state: ReadAloudState) -> DesktopHostReadAloudActivity {
+        if state.task != nil || state.speech != nil { return .speaking }
+        return state.exportTask == nil ? .idle : .exporting
+    }
 }

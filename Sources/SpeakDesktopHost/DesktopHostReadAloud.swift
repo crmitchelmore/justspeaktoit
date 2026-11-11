@@ -190,6 +190,15 @@ package protocol DesktopHostVoiceOutput: Sendable {
     ) async throws -> DeepgramVoiceOutput.Outcome
 }
 
+/// What Read aloud is doing, as "System resources in use" describes it.
+package enum DesktopHostReadAloudActivity: Equatable, Sendable {
+    case idle
+    /// Speech is audible, or a segment is being synthesized to be spoken.
+    case speaking
+    /// Synthesizing or writing an exported file; nothing is audible.
+    case exporting
+}
+
 /// The controller's Read aloud state. The engine and its private folder are
 /// created on first use, never at launch. Which Read aloud may still report
 /// is decided by the controller's shared `playbackRequests`.

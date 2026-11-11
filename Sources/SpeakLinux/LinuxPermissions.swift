@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 import SpeakLinuxPlatform
 import CLinuxSupport
@@ -21,7 +22,7 @@ extension LinuxWindow {
     }
 
     fileprivate static func showPermissions(_ items: [DesktopPermissionItem], revision: UInt64, hint: String) {
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let rows = items.map {
             JSTILinuxPermissionRow(
                 title: strings.add($0.kind.title), status: strings.add($0.status.label),

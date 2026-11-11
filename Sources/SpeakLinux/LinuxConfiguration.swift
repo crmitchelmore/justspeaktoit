@@ -43,7 +43,7 @@ extension LinuxWindow {
         holder.gestures.configureTiming(
             hold: preferences.number("holdThreshold"), doubleTap: preferences.number("doubleTapWindow")
         )
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let rows = zip(DesktopConfiguration.fields, snapshot.entries).map { field, value in
             JSTIConfigurationField(
                 title: strings.add(field.key == VoiceOutputLanguagePreference.key ? snapshot.languageTitle
@@ -81,7 +81,9 @@ extension LinuxWindow {
         try await configureActionShortcuts(holder)
     }
 
-    private static func configureConfigurationLayout(_ preferences: DesktopConfiguration, strings: Strings) throws {
+    private static func configureConfigurationLayout(
+        _ preferences: DesktopConfiguration, strings: DesktopNativeStrings
+    ) throws {
         let density = preferences.visualDensity
         let layout = JSTIVisualDensity(
             compact: density.isCompact ? 1 : 0,
@@ -111,23 +113,7 @@ extension LinuxWindow {
     static func performConfigurationAction(
         _ action: Int32, values: [String], holder: LinuxEventContext, editorID: String? = nil
     ) async throws {
-        switch action {
-        case 0: try await holder.controller.saveConfiguration(values, intent: .apply, editorID: editorID)
-        case 1: try await holder.controller.importConfiguration(path: values[0])
-        case 2: try await holder.controller.exportConfiguration(path: values[0])
-        case 3:
-            guard let selected = values.last else {
-                throw DesktopConfigurationError.invalidField("Recovered keyword selection")
-            }
-            try await holder.controller.recoverConfigurationKeywords(
-                Array(values.dropLast()), selected: selected, editorID: editorID
-            )
-        case 4, 5:
-            try await holder.controller.previewRecordingFeedback(
-                action == 4 ? .start : .stop, configurationEntries: values, editorID: editorID
-            )
-        default: throw DesktopConfigurationError.invalidField("Configuration action")
-        }
+        try await holder.controller.performConfigurationEditorAction(action, values: values, editorID: editorID)
         try await configureConfiguration(holder)
         voiceOutput(await holder.controller.voiceOutputSettings(),
             accountInventory: await holder.controller.selectedVoiceAccountInventory)
@@ -168,10 +154,7 @@ func linuxConfigurationEvent(
         }
         return 0
     } catch {
-        if let buffer = errorBuffer, capacity > 0 {
-            let bytes = Array(error.localizedDescription.utf8CString.prefix(capacity - 1)) + [0]
-            bytes.withUnsafeBufferPointer { buffer.update(from: $0.baseAddress!, count: $0.count) }
-        }
+        DesktopNativeStrings.copy(error.localizedDescription, into: errorBuffer, capacity: capacity)
         return -1
     }
 }

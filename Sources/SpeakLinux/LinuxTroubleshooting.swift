@@ -114,7 +114,7 @@ private enum LinuxTroubleshooting {
     }
 
     static func show(_ snapshot: LinuxTroubleshootingSnapshot, summary: String) {
-        let strings = LinuxWindow.Strings()
+        let strings = DesktopNativeStrings()
         let rows = snapshot.findings.map { finding in
             let (title, page) = navigation(finding.destination)
             return JSTILinuxTroubleshootingRow(

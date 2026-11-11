@@ -97,7 +97,7 @@ extension LinuxWindow {
     }
 
     static func voiceSources(context: UnsafeMutableRawPointer) {
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let sources = VoiceOutputSource.allCases.filter { $0 != .externalSelection }
         let names: [UnsafePointer<CChar>?] = sources.map { strings.add($0.displayName) }
         let result = withExtendedLifetime(strings) {
@@ -118,7 +118,7 @@ extension LinuxWindow {
 
     static func voiceOutput(_ settings: LinuxVoiceOutputSettings, accountInventory: VoiceAccountInventory?) {
         let presentation = settings.favoritePicker(accountInventory: accountInventory)
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let names: [UnsafePointer<CChar>?] = presentation.labels.map { strings.add($0) }
         let identifiers: [UnsafePointer<CChar>?] = presentation.identifiers.map { strings.add($0) }
         let selected = presentation.selected
@@ -166,7 +166,7 @@ extension LinuxWindow {
             }
         }
         if result != 0 { LinuxHostPlatform.update("The saved Voice synthesis controls could not be shown.") }
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let examples = VoiceSynthesisMarkup.examples.map {
             JSTIVoiceMarkupExample(text: strings.add($0.text), description: strings.add($0.description))
         }

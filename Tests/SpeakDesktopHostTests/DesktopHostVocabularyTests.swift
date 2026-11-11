@@ -109,4 +109,48 @@ final class DesktopHostVocabularyTests: XCTestCase {
         XCTAssertEqual(corrected.lexiconSummary?.applied.count, 0)
         await controller.close()
     }
+
+    func testNativeVocabularyEventPresentsAppliedSnapshotsAndRejectedHistory() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        FakeLog.shared.reset()
+        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let presented = NativeVocabularyPresentations()
+        await controller.nativeVocabularyEvent(
+            71, payload: "", kind: 0, targetAvailability: { "Targets: test" }, present: presented.append
+        )
+        await controller.nativeVocabularyEvent(72, payload: UUID().uuidString, kind: 2, present: presented.append)
+        let calls = presented.calls
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertEqual(calls.first?.kind, 0)
+        XCTAssertEqual(calls.first?.applied, true)
+        XCTAssertTrue(calls.first?.text.contains("Targets: test") == true)
+        XCTAssertEqual(calls.last?.kind, 2)
+        XCTAssertEqual(calls.last?.applied, false)
+        XCTAssertTrue(calls.last?.text.contains("Select a visible saved recording") == true)
+        XCTAssertTrue(FakeLog.shared.allStatuses.isEmpty)
+
+        await controller.nativeVocabularyEvent(71, payload: "", kind: 1) { _, _, _ in false }
+        XCTAssertEqual(
+            FakeLog.shared.allStatuses.last, "Vocabulary response could not be displayed. Reopen the editor."
+        )
+        await controller.close()
+    }
+}
+
+private final class NativeVocabularyPresentations: @unchecked Sendable {
+    private let lock = NSLock()
+    struct Call {
+        let kind: Int32
+        let text: String
+        let applied: Bool
+    }
+
+    private var recorded: [Call] = []
+    var calls: [Call] { lock.withLock { recorded } }
+
+    @Sendable func append(_ kind: Int32, _ text: String, _ applied: Bool) -> Bool {
+        lock.withLock { recorded.append(Call(kind: kind, text: text, applied: applied)) }
+        return true
+    }
 }

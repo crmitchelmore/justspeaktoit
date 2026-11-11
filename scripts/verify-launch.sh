@@ -24,6 +24,8 @@ else
 fi
 
 TIMEOUT_SECONDS="${VERIFY_LAUNCH_TIMEOUT:-8}"
+# A candidate that dies within this window "exited during launch"; one alive at its end goes on to monitoring.
+STARTUP_SECONDS="${VERIFY_LAUNCH_STARTUP:-2}"
 PROCESS_NAME="JustSpeakToIt"
 
 # --- Determine app path ---
@@ -152,7 +154,11 @@ LAUNCH_START_NS=$(_now_ns)
 echo "  Launching candidate executable..."
 "$APP_EXECUTABLE" > "$OUTPUT_FIFO" 2>&1 &
 APP_PID=$!
-sleep 2
+# Poll rather than sleep: an early death is reported at once, and the window stays STARTUP_SECONDS.
+STARTUP_DEADLINE_NS=$((LAUNCH_START_NS + STARTUP_SECONDS * 1000000000))
+while kill -0 "$APP_PID" 2>/dev/null && [ "$(_now_ns)" -lt "$STARTUP_DEADLINE_NS" ]; do
+    sleep 0.1
+done
 
 if ! kill -0 "$APP_PID" 2>/dev/null; then
     echo "❌ Candidate process exited during launch"

@@ -224,8 +224,11 @@ class OwnedRunnerTests(unittest.TestCase):
                         "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
                         f"print({result_text!r}, flush=True); " + ending)
                 result = subprocess.run([sys.executable, "-B", str(runner), "--output-dir", str(output),
-                                         "--test-timeout", "1", "--", sys.executable, "-B", "-c", code, str(pid_file)],
-                                        capture_output=True, text=True, timeout=15)
+                                         # Only the timeout scenario relies on the deadline; a loaded
+                                         # interpreter can take over 1 s to start the others.
+                                         "--test-timeout", "1" if scenario == "timeout" else "10",
+                                         "--", sys.executable, "-B", "-c", code, str(pid_file)],
+                                        capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 receipt = json.loads((output / "qualification.json").read_text())
                 self.assertEqual(receipt["qualificationExitCode"], expected)

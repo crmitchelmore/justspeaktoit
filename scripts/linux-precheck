@@ -37,7 +37,7 @@ IMAGE = os.environ.get('JSTI_SWIFT_IMAGE',
                        'swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6')
 WORKFLOW = 'precheck.yml'
 OVERLAY = ('.github/workflows/precheck.yml', 'scripts/ci-portable-linux.sh', 'scripts/ci-android.sh')
-JOBS = ('portable', 'android')
+JOBS = ('portable', 'android', 'lint')
 TIMEOUT_MINUTES = float(os.environ.get('JSTI_PRECHECK_TIMEOUT_MINUTES', '45'))
 
 
@@ -151,10 +151,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--base', default='origin/main',
                         help="test the change merged into this ref, as CI does ('' tests the branch alone)")
     parser.add_argument('--job', choices=JOBS, default='portable',
-                        help='the CI job to run: portable (Portable Swift (Linux)) or android (always remote)')
+                        help='the CI job to run: portable (Portable Swift (Linux)), android or lint (always remote)')
     args = parser.parse_args(argv)
     tree = Path(git(args.tree, 'rev-parse', '--show-toplevel'))
-    runtime = None if args.remote or args.job == 'android' else container_runtime()
+    # Only the portable job has a container form; Android and Lint need GitHub's Ubuntu image.
+    runtime = None if args.remote or args.job != 'portable' else container_runtime()
     if args.container and not runtime:
         print('linux-precheck: no running docker or podman', file=sys.stderr)
         return 1

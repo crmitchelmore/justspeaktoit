@@ -33,6 +33,8 @@ class PlanTests(unittest.TestCase):
 
     def test_tooling_change_runs_the_ci_lint_job(self):
         selected, _, checks = ids(['scripts/release-train.mjs'])
+        selected = [c for c in selected if c != 'ci-lint-linux']
+        checks = [c for c in checks if c.id == 'ci-lint']
         self.assertEqual(selected, ['ci-lint'])
         self.assertEqual(checks[0].command, ['make', 'ci-lint'])
         self.assertEqual(checks[0].forbid_drift, ('Tooling/Package.resolved',))
@@ -94,6 +96,17 @@ class PlanTests(unittest.TestCase):
         if pre_pr.IS_MAC:
             self.assertIn('apple-build', selected)
             self.assertEqual({c.id: c for c in checks}['apple-build'].forbid_drift, ('Package.resolved',))
+
+    def test_lint_also_runs_on_ubuntu_like_ci(self):
+        with mock.patch.object(pre_pr.sys, 'platform', 'darwin'):
+            checks = {c.id: c for c in pre_pr.plan(['scripts/release-train.mjs'], False)[0]}
+            self.assertEqual(checks['ci-lint-linux'].command[2:4], ['--job', 'lint'])
+            self.assertTrue(checks['ci-lint-linux'].background)
+            skipped = {c.id: c for c in pre_pr.plan(['scripts/release-train.mjs'], False, linux='skip')[0]}
+            self.assertTrue(skipped['ci-lint-linux'].incomplete)
+        with mock.patch.object(pre_pr.sys, 'platform', 'linux'):
+            ids_ = [c.id for c in pre_pr.plan(['scripts/release-train.mjs'], False)[0]]
+        self.assertNotIn('ci-lint-linux', ids_)
 
     def test_linux_modes(self):
         for mode, flag in (('remote', '--remote'), ('container', '--container')):

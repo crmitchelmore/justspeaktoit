@@ -3,8 +3,8 @@ import XCTest
 @testable import SpeakCore
 
 final class XAILiveClientTests: XCTestCase {
-    func testWebSocketURL_pinsThinkFast2Model() throws {
-        let url = try XCTUnwrap(XAILiveClient.webSocketURL(model: XAIVoiceModels.thinkFast2APIName))
+    func testWebSocketURL_pinsGrokVoice3Model() throws {
+        let url = try XCTUnwrap(XAILiveClient.webSocketURL(model: XAIVoiceModels.voice3APIName))
         let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
 
         XCTAssertEqual(components.scheme, "wss")
@@ -12,7 +12,7 @@ final class XAILiveClientTests: XCTestCase {
         XCTAssertEqual(components.path, "/v1/realtime")
         let modelItem = try XCTUnwrap(components.queryItems?.first { $0.name == "model" })
         XCTAssertEqual(modelItem.name, "model")
-        XCTAssertEqual(modelItem.value, XAIVoiceModels.thinkFast2APIName)
+        XCTAssertEqual(modelItem.value, XAIVoiceModels.voice3APIName)
     }
 
     func testSessionUpdate_usesManualTranscriptionOnlyMode() throws {
@@ -57,12 +57,12 @@ final class XAILiveClientTests: XCTestCase {
 
     func testCatalogueAndRoute_exposeXAIOnBothPlatforms() throws {
         let option = try XCTUnwrap(ModelCatalog.liveTranscription.first {
-            $0.id == XAIVoiceModels.thinkFast2CatalogID
+            $0.id == XAIVoiceModels.voice3CatalogID
         })
         let route = try XCTUnwrap(LiveTranscriptionRouting.route(for: option.id))
 
         XCTAssertEqual(route.provider, .xai)
-        XCTAssertEqual(route.apiModelName, XAIVoiceModels.thinkFast2APIName)
+        XCTAssertEqual(route.apiModelName, XAIVoiceModels.voice3APIName)
         XCTAssertEqual(route.sampleRate, 24_000)
         XCTAssertEqual(route.apiKeyIdentifier, "xai.apiKey")
         XCTAssertTrue(route.isSupportedOnIOS)
@@ -74,7 +74,7 @@ final class XAILiveClientTests: XCTestCase {
     }
 
     func testCapabilities_supportLivePolishAndFinalizationBudget() {
-        let capabilities = ModelCatalog.liveCapabilities(for: XAIVoiceModels.thinkFast2CatalogID)
+        let capabilities = ModelCatalog.liveCapabilities(for: XAIVoiceModels.voice3CatalogID)
 
         XCTAssertTrue(capabilities.supportedSpeedModes.contains(.livePolish))
         XCTAssertEqual(capabilities.postStopFinalizeBudget, 3.0)

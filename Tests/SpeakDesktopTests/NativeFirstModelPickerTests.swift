@@ -105,10 +105,11 @@ final class NativeFirstModelPickerTests: XCTestCase {
             XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(saved), saved)
             XCTAssertTrue(ModelPickerGrouping.isOpenRouter(saved, purpose: .postProcessing), saved)
         }
-        for native in NativeTextModels.postProcessing.map(\.id) {
+        // Shut-down native models move to their successor (ModelRetirementTests).
+        for native in ModelRetirements.current(NativeTextModels.postProcessing).map(\.id) {
             XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(native), native)
         }
-        XCTAssertEqual(ModelCatalog.defaultPostProcessingModel, "openai/gpt-5-mini")
+        XCTAssertEqual(ModelCatalog.defaultPostProcessingModel, "openai/gpt-5.6-luna")
     }
 
     // MARK: - Grouping and ordering
@@ -123,7 +124,7 @@ final class NativeFirstModelPickerTests: XCTestCase {
         })
         XCTAssertEqual(
             Set(groups.direct.filter { NativeTextModels.isNative($0.id) }.map(\.id)),
-            Set(NativeTextModels.postProcessing.map(\.id))
+            Set(ModelRetirements.current(NativeTextModels.postProcessing).map(\.id))
         )
         // A model available both ways is never a top-level OpenRouter entry.
         XCTAssertTrue(groups.direct.contains { $0.id == "native/openai/gpt-6-luna" })

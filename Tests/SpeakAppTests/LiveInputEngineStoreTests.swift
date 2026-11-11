@@ -296,7 +296,7 @@ final class LiveInputEngineSourceGuardTests: XCTestCase {
 
     func testRecordStart_PreparesTheLiveInputBeforeCapture() throws {
         // Act
-        let text = try source("Session/MainManager.swift")
+        let text = try source("Session/MainManager+SessionStart.swift")
 
         // Assert
         XCTAssertTrue(text.contains("prepareStream: prepareStream"))

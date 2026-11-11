@@ -4,6 +4,7 @@
 // page's header, footer, clip markup and Stable display version come from here.
 //
 //   <!-- partial:NAME -->   a block from `partials`, at the marker's indentation
+//   <!-- partial:NAME:ARG -->  the same, passing ARG (e.g. which page's legal line)
 //   <!-- clip:NAME -->      the <video> for one entry in `clips`
 //   <!-- stable:mac-version -->  the Stable Mac version shown beside its download
 import { readFile } from 'node:fs/promises';
@@ -34,6 +35,15 @@ const webm = 'video/webm; codecs=&quot;av01.0.05M.08, opus&quot;';
 const dark = ' media="(prefers-color-scheme: dark)"';
 const icon = '/favicon.svg?v=20260909';
 const copyright = '© 2026 Chris Mitchelmore · MIT licensed';
+
+/**
+ * Each document page's own footer line. These are legal statements, so they
+ * are kept word for word per page rather than unified.
+ */
+export const documentFooters = {
+  privacy: '<footer>\n  © 2026 JustSpeakToIt. All rights reserved.\n</footer>',
+  support: '<footer><p>Just Speak to It · <a href="/">Home</a> · <a href="/privacy">Privacy policy</a></p></footer>',
+};
 
 function brand(href, { label, size = 34 } = {}) {
   const name = label === undefined ? '' : ` aria-label="${label}"`;
@@ -106,8 +116,10 @@ export const partials = {
     '  </div>',
     '</nav>',
   ].join('\n'),
-  'document-footer': () =>
-    `<footer><p>${copyright} · <a href="/">Home</a> · <a href="/privacy">Privacy policy</a> · <a href="/support">Support</a></p></footer>`,
+  'document-footer': page => {
+    if (!Object.hasOwn(documentFooters, page)) throw new Error(`Unknown document footer: ${page}`);
+    return documentFooters[page];
+  },
 };
 
 function indent(block, prefix) {
@@ -117,13 +129,14 @@ function indent(block, prefix) {
 /** Replaces every marker in `html`. Unknown markers throw rather than ship. */
 export async function renderMarkup(html) {
   let output = html;
-  for (const [line, prefix, kind, name] of html.matchAll(/^([ \t]*)<!-- (partial|clip):([a-z-]+) -->$/gm)) {
+  for (const [line, prefix, kind, name, argument] of
+    html.matchAll(/^([ \t]*)<!-- (partial|clip):([a-z-]+)(?::([a-z-]+))? -->$/gm)) {
     let block;
     if (kind === 'clip') {
       block = clipVideo(name);
     } else {
       if (!Object.hasOwn(partials, name)) throw new Error(`Unknown partial: ${name}`);
-      block = await partials[name]();
+      block = await partials[name](argument);
     }
     output = output.replace(line, () => indent(block.replace(/\n$/, ''), prefix));
   }

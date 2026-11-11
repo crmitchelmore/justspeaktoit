@@ -195,7 +195,11 @@ extension ModelCatalog {
             supportedSpeedModes: [.instant, .livePolish],
             supportsLanguageHint: true
         ),
-        XAIVoiceModels.thinkFast2CatalogID: LiveModelCapabilities(
+        ModelCatalog.elevenLabsScribeV3LiveID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            supportsLanguageHint: true
+        ),
+        XAIVoiceModels.voice3CatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 3.0
         ),

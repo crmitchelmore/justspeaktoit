@@ -32,7 +32,7 @@ final class ModelCatalogRefreshTests: XCTestCase {
     }
 
     func testPostProcessingRefresh_preservesExistingSelectionsAndDefault() {
-        XCTAssertEqual(ModelCatalog.defaultPostProcessingModel, "openai/gpt-5-mini")
+        XCTAssertEqual(ModelCatalog.defaultPostProcessingModel, "openai/gpt-5.6-luna")
         for option in ModelCatalog.postProcessing {
             XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(option.id), option.id)
         }

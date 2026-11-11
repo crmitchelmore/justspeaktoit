@@ -193,7 +193,9 @@ struct OpenRouterChatRequest: Encodable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(CleanupModelSelection.requestModel(model), forKey: .model)
+        // A process left running across a cleanup model's shutdown sends its successor.
+        let current = ModelRetirements.successor(for: model, mode: .postProcessing) ?? model
+        try container.encode(CleanupModelSelection.requestModel(current), forKey: .model)
         try container.encode(temperature, forKey: .temperature)
         try container.encode(messages, forKey: .messages)
         try container.encodeIfPresent(stream, forKey: .stream)

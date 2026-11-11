@@ -16,6 +16,7 @@ public struct ModelRetirement: Sendable, Equatable {
         case batch
         case live
         case speech
+        case postProcessing
     }
 
     public let id: String
@@ -122,7 +123,7 @@ public enum ModelRetirements {
             recommendedID: gptTranscribe,
             migrationNote: "OpenRouter does not offer its successor. Choose GPT Transcribe or another "
                 + "model; this selection is not moved automatically.")
-    ] + OpenAITTSModel.allCases.map {
+    ] + postProcessing + OpenAITTSModel.allCases.map {
         // OpenAI's named successor, gpt-realtime-2.1-mini, is a Realtime
         // conversational model that `/v1/audio/speech` does not accept.
         ModelRetirement(
@@ -131,6 +132,23 @@ public enum ModelRetirements {
             migrationNote: "choose OpenAI Realtime 2.1 mini or another voice provider; "
                 + "this selection is not moved automatically.")
     }
+
+    /// Cleanup chat models take the same OpenRouter request whatever the model,
+    /// so each moves automatically. GPT-5 Mini's named replacement, GPT-5.6
+    /// Terra, costs about eight times as much; GPT-5.6 Luna is the closest
+    /// price. Source: https://developers.openai.com/api/docs/deprecations
+    /// (checked 2026-11-11).
+    static let postProcessing: [ModelRetirement] = [
+        ModelRetirement(
+            id: "openai/gpt-5-mini", mode: .postProcessing, shutdownDay: "2026-12-11",
+            successorID: "openai/gpt-5.6-luna",
+            migrationNote: "moves to GPT-5.6 Luna ($0.20/$1.20 per million tokens, down from $0.25/$2). "
+                + "OpenAI names GPT-5.6 Terra ($2/$12) as the replacement; choose it for higher quality."),
+        ModelRetirement(
+            id: "openai/gpt-5.4-nano", mode: .postProcessing, shutdownDay: "2027-04-01",
+            successorID: "openai/gpt-6-luna",
+            migrationNote: "moves to GPT-6 Luna ($0.10/$0.50 per million tokens, down from $0.20/$1.25).")
+    ]
 
     public static func retirement(for id: String) -> ModelRetirement? {
         all.first { $0.id == id }

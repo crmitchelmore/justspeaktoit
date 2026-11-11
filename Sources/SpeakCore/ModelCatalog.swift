@@ -46,9 +46,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
             id: GeminiTranscribeModels.liveCatalogID,
-            displayName: "Gemini 3.5 Transcribe Live (Preview)",
+            displayName: "Gemini 3.5 Transcribe Live",
             description: "Google's real-time Gemini Live API transcription across 85+ languages with "
-                + "automatic language detection. Public preview — opt-in, never a default or fallback.",
+                + "automatic language detection. Opt-in; never a default or fallback.",
             estimatedLatencyMs: 200, latencyTier: .fast),
         Option(
             id: "modulate/velma-2-stt-streaming", displayName: "Modulate Velma-2 (Streaming)",
@@ -79,14 +79,20 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Speechmatics realtime WebSocket transcription with partial and final results.",
             estimatedLatencyMs: 220, latencyTier: .fast),
         Option(
+            id: elevenLabsScribeV3LiveID,
+            displayName: "ElevenLabs Scribe v3 Live (Streaming)",
+            description: "ElevenLabs' most accurate real-time Scribe model, on the same WebSocket as "
+                + "Scribe v2. Reuses your ElevenLabs API key with speech-to-text (Scribe) access.",
+            estimatedLatencyMs: 200, latencyTier: .fast),
+        Option(
             id: "elevenlabs/scribe-v2-streaming",
             displayName: "ElevenLabs Scribe v2 (Streaming)",
             description: "ElevenLabs Scribe v2 real-time WebSocket transcription. Reuses your "
                 + "ElevenLabs API key — the key must have speech-to-text (Scribe) access.",
             estimatedLatencyMs: 200, latencyTier: .fast),
         Option(
-            id: XAIVoiceModels.thinkFast2CatalogID,
-            displayName: "Grok Voice Think Fast 2.0 (Streaming)",
+            id: XAIVoiceModels.voice3CatalogID,
+            displayName: "Grok Voice 3.0 (Streaming)",
             description: "xAI's flagship realtime voice model, used in transcription-only mode "
                 + "with cumulative live captions and no assistant response.",
             estimatedLatencyMs: 200,
@@ -231,9 +237,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 1200, latencyTier: .medium),
         Option(
             id: GeminiTranscribeModels.batchCatalogID,
-            displayName: "Gemini 3.5 Transcribe (Google, Preview)",
+            displayName: "Gemini 3.5 Transcribe (Google)",
             description: "Google's Gemini Interactions API for recorded audio, with word-level "
-                + "timestamps and speaker attribution. Public preview — opt-in, never a default.",
+                + "timestamps and speaker attribution. Opt-in; never a default.",
             estimatedLatencyMs: 900, latencyTier: .fast),
         Option(
             id: XAISpeechToText.batchCatalogID,
@@ -333,6 +339,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Fast and reliable batch transcription from AssemblyAI.",
             estimatedLatencyMs: 1200, latencyTier: .medium),
         Option(
+            id: elevenLabsScribeV3BatchID, displayName: "ElevenLabs Scribe v3",
+            description: "ElevenLabs' most accurate Scribe model for recorded audio, across 90+ languages "
+                + "with word-level timestamps. Same API and price as Scribe v2.",
+            estimatedLatencyMs: 800, latencyTier: .fast),
+        Option(
             id: elevenLabsScribeV2BatchID, displayName: "ElevenLabs Scribe v2",
             description: "ElevenLabs Scribe v2: high-accuracy speech-to-text across 90+ languages "
                 + "with word-level timestamps.",
@@ -343,6 +354,14 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "with the same languages, pricing and word-level timestamps as Scribe v2.",
             estimatedLatencyMs: 800, latencyTier: .fast)
     ] + AzureTranscriptionModels.batchOptions + FileSpeechProvider.batchOptions
+
+    /// ElevenLabs' successor to Scribe v2 (models page, checked 2026-11-11):
+    /// same `POST /v1/speech-to-text` request with `model_id=scribe_v3`.
+    /// Scribe v2 remains available, so saved v2 selections are not moved.
+    public static let elevenLabsScribeV3BatchID = "elevenlabs/scribe_v3"
+
+    /// Scribe v3 Live: the realtime WebSocket with `model_id=scribe_v3_live`.
+    public static let elevenLabsScribeV3LiveID = "elevenlabs/scribe-v3-live-streaming"
 
     /// Current ElevenLabs batch speech-to-text model. ElevenLabs removed
     /// `scribe_v1` (and its experimental variant) on 2026-07-09.
@@ -383,7 +402,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             + [("deepgram/nova-2-streaming", "deepgram/nova-3-streaming"),
                ("soniox/stt-rt-v3-streaming", "soniox/stt-rt-v6-streaming"),
                ("soniox/stt-rt-v4-streaming", "soniox/stt-rt-v6-streaming"),
-               ("soniox/stt-rt-v5-streaming", "soniox/stt-rt-v6-streaming")],
+               ("soniox/stt-rt-v5-streaming", "soniox/stt-rt-v6-streaming"),
+               (XAIVoiceModels.thinkFast2CatalogID, XAIVoiceModels.voice3CatalogID)],
         uniquingKeysWith: { first, _ in first }
     )
 
@@ -507,7 +527,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     // Curated, static set for transcript cleanup (OpenRouter) with pricing + tags.
     // Pricing is based on OpenRouter's /api/v1/models at time of writing.
-    public static let postProcessing: [Option] = applePostProcessingOptions + [
+    // Announced shutdowns are labelled and shut-down entries hidden on each read.
+    public static var postProcessing: [Option] { ModelRetirements.current(scheduledPostProcessing) }
+
+    private static let scheduledPostProcessing: [Option] = applePostProcessingOptions + [
         Option(
             id: "local/post-processing/rules",
             displayName: "Local Cleanup (Offline)",
@@ -564,7 +587,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Fast and cheap OpenAI reasoning model for reliable transcript cleanup.",
             estimatedLatencyMs: 500,
             latencyTier: .fast,
-            tags: [.fast, .cheap, .leading],
+            tags: [.fast, .cheap],
             pricing: Pricing(promptPerMTokens: 0.25, completionPerMTokens: 2.0),
             contextLength: 400_000
         ),
@@ -629,6 +652,25 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             contextLength: 327_680
         ),
 
+        // Claude 5.5 IDs/rates from OpenRouter's models API and Anthropic's models
+        // overview (2026-11-11). No measured cleanup latency; Option's default tier applies.
+        Option(
+            id: "anthropic/claude-haiku-5.5",
+            displayName: "Claude Haiku 5.5",
+            description: "Anthropic's newest Haiku via OpenRouter, priced well below Haiku 4.5.",
+            tags: [.cheap],
+            pricing: Pricing(promptPerMTokens: 0.10, completionPerMTokens: 0.50),
+            contextLength: 1_000_000
+        ),
+        Option(
+            id: "anthropic/claude-sonnet-5.5",
+            displayName: "Claude Sonnet 5.5",
+            description: "Anthropic's newest Sonnet via OpenRouter, for structure- and tone-preserving cleanup.",
+            tags: [.quality],
+            pricing: Pricing(promptPerMTokens: 2.0, completionPerMTokens: 10.0),
+            contextLength: 1_000_000
+        ),
+
         // Fast / quality cleanup
         Option(
             id: "anthropic/claude-haiku-4.5",
@@ -646,8 +688,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Fastest GPT-5.6 model for efficient, high-volume transcript cleanup.",
             estimatedLatencyMs: 450,
             latencyTier: .fast,
-            tags: [.fast, .quality],
-            pricing: Pricing(promptPerMTokens: 1.0, completionPerMTokens: 6.0),
+            tags: [.fast, .cheap, .quality],
+            pricing: Pricing(promptPerMTokens: 0.20, completionPerMTokens: 1.2),
             contextLength: 1_050_000
         ),
         Option(
@@ -689,7 +731,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 750,
             latencyTier: .medium,
             tags: [.quality, .leading],
-            pricing: Pricing(promptPerMTokens: 2.5, completionPerMTokens: 15.0),
+            pricing: Pricing(promptPerMTokens: 2.0, completionPerMTokens: 12.0),
             contextLength: 1_050_000
         ),
         Option(
@@ -699,7 +741,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 1_200,
             latencyTier: .slow,
             tags: [.quality, .leading],
-            pricing: Pricing(promptPerMTokens: 5.0, completionPerMTokens: 30.0),
+            pricing: Pricing(promptPerMTokens: 4.0, completionPerMTokens: 20.0),
             contextLength: 1_050_000
         ),
         Option(
@@ -826,7 +868,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             ?? trimmed
     }
 
-    public static let defaultPostProcessingModel = "openai/gpt-5-mini"
+    /// GPT-5 Mini, the previous default, shuts down on 2026-12-11. GPT-5.6 Luna
+    /// is the closest-priced current OpenAI model; see `ModelRetirements`.
+    public static let defaultPostProcessingModel = "openai/gpt-5.6-luna"
 
     /// Low-latency cloud text model for latency-sensitive rewrites (live polish,
     /// spoken-response summaries) when the user has not chosen one.
@@ -842,11 +886,18 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// Migrates retired selections while preserving valid catalogue entries
     /// and custom local cleanup models installed by the user.
     public static func normalizedPostProcessingModel(_ identifier: String?) -> String {
+        normalizedPostProcessingModel(identifier, at: Date())
+    }
+
+    public static func normalizedPostProcessingModel(_ identifier: String?, at date: Date) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmed.hasPrefix("local/post-processing/") || CleanupModelSelection.modelID(from: trimmed) != nil {
             return trimmed
         }
-        if postProcessing.contains(where: { $0.id == trimmed }) { return trimmed }
+        if let successor = ModelRetirements.successor(for: trimmed, mode: .postProcessing, at: date) {
+            return successor
+        }
+        if scheduledPostProcessing.contains(where: { $0.id == trimmed }) { return trimmed }
         return defaultPostProcessingModel
     }
 

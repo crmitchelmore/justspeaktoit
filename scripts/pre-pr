@@ -33,6 +33,7 @@ import argparse
 import contextlib
 import datetime as dt
 import fnmatch
+import functools
 import importlib.util
 import json
 import os
@@ -142,41 +143,31 @@ NOT_CODE = re.compile(r'^\s*(?:@testable\s+)?import\s+.*$|//.*$', re.M)
 
 @dataclass
 class Graph:
-    """SwiftPM targets of one package graph, from `swift package dump-package`."""
-    targets: dict[str, dict]  # name -> {'type', 'path', 'deps'}
+    """SwiftPM targets of one package graph, from `swift package dump-package`.
+
+    Ownership and dependency walks come from affected-swift-tests.py's TargetGraph, the graph CI's
+    macOS job selects with, so pre-pr's finer selection starts from the same targets.
+    """
+    targets: dict[str, dict]  # name -> {'type', 'path'}
     dump: dict = field(default_factory=dict)
+    shared: object = None
 
     @classmethod
     def from_dump(cls, dump: dict) -> 'Graph':
-        targets = {}
-        for target in dump['targets']:
-            deps = [next(iter(dep.values()))[0] for dep in target.get('dependencies', [])
-                    if 'byName' in dep or 'target' in dep]
-            default = 'Tests' if target['type'] == 'test' else 'Sources'
-            targets[target['name']] = {'type': target['type'], 'deps': deps,
-                                       'path': target.get('path') or f'{default}/{target["name"]}'}
-        return cls(targets, dump)
+        shared = affected_selector().TargetGraph(dump)
+        targets = {name: {'type': shared.types[name], 'path': shared.paths[name].rstrip('/')}
+                   for name in shared.paths}
+        return cls(targets, dump, shared)
 
     def module_for(self, path: str) -> str | None:
-        best = None
-        for name, target in self.targets.items():
-            prefix = target['path'].rstrip('/') + '/'
-            if path.startswith(prefix) and (best is None or len(prefix) > len(self.targets[best]['path']) + 1):
-                best = name
-        return best
+        return self.shared.owner(path)
 
     def test_targets(self) -> list[str]:
-        return sorted(n for n, t in self.targets.items() if t['type'] == 'test' and n not in UI_TEST_TARGETS)
+        return [name for name in self.shared.tests if name not in UI_TEST_TARGETS]
 
     def covering(self, module: str) -> set[str]:
         """Test targets that are, or transitively depend on, module."""
-        def reaches(name: str, seen: set[str]) -> bool:
-            if name == module:
-                return True
-            seen.add(name)
-            return any(dep not in seen and dep in self.targets and reaches(dep, seen)
-                       for dep in self.targets[name]['deps'])
-        return {test for test in self.test_targets() if reaches(test, set())}
+        return self.shared.dependants({module}) & set(self.test_targets())
 
 
 _GRAPHS: dict[bool, Graph | None] = {}
@@ -337,6 +328,7 @@ def ci_selects_apple(files: list[str]) -> bool:
     return any(not matches(f, CI_NOT_APPLE) for f in files)
 
 
+@functools.cache
 def affected_selector():
     spec = importlib.util.spec_from_file_location('affected_swift_tests',
                                                   Path(__file__).resolve().parent / 'affected-swift-tests.py')

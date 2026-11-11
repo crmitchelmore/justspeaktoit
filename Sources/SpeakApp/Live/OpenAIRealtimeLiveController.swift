@@ -384,8 +384,6 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
 /// pattern as `SharedClientAudioProcessor`; OpenAI's 24 kHz framing stays here.
 private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
   private let queue = DispatchQueue(label: "com.speak.app.openairealtime.audioProcessing")
-  private let minimumChunkBytes: Int
-  private let preferredChunkBytes: Int
   private let copyBufferPool = LivePCMBufferPool(
     maximumBuffers: 4,
     tapBufferSize: 1024,
@@ -395,12 +393,10 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
   private var isRunning: Bool = false
   private let conversion = LivePCM16Conversion()
   private var conversionFailure: LivePCMConversionFailureReport?
-  private var pendingPCMData = Data()
+  private var framer: LivePCMChunkFramer
 
   init(targetSampleRate: Int) {
-    // 50 ms safety lower bound, 100 ms preferred upload chunk size.
-    self.minimumChunkBytes = (targetSampleRate / 1000) * 50 * 2
-    self.preferredChunkBytes = (targetSampleRate / 1000) * 100 * 2
+    framer = LivePCMChunkFramer(sampleRate: targetSampleRate)
   }
 
   /// Starting arms `onConversionFailure` for the run's first conversion failure.
@@ -411,42 +407,26 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
       if !running {
         conversion.reset()
         copyBufferPool.removeAll()
-        pendingPCMData.removeAll(keepingCapacity: false)
+        framer.reset()
       }
     }
   }
 
-  /// Flushes the retained resampler's trailing frames into `pendingPCMData` so
+  /// Flushes the retained resampler's trailing frames into the framer so
   /// the final flush sends them (issue #849). The converter is finished once
   /// drained, so the cache releases it rather than reusing it.
   func drainConverterTail() {
     queue.sync {
       guard let tail = conversion.drainPCM16() else { return }
-      pendingPCMData.append(tail)
+      framer.append(tail)
     }
   }
 
   func flushPendingAudio(to transcriber: OpenAIRealtimeLiveTranscriber) {
     queue.sync {
-      guard !pendingPCMData.isEmpty else { return }
-
-      var offset = 0
-      while pendingPCMData.count - offset >= preferredChunkBytes {
-        let chunk = pendingPCMData.subdata(in: offset..<(offset + preferredChunkBytes))
+      for chunk in framer.takeAll() {
         transcriber.sendAudio(chunk)
-        offset += preferredChunkBytes
       }
-      if offset > 0 {
-        pendingPCMData = Data(pendingPCMData.dropFirst(offset))
-      }
-
-      guard !pendingPCMData.isEmpty else { return }
-      if pendingPCMData.count < minimumChunkBytes {
-        pendingPCMData.append(
-          contentsOf: repeatElement(0, count: minimumChunkBytes - pendingPCMData.count))
-      }
-      transcriber.sendAudio(pendingPCMData)
-      pendingPCMData.removeAll(keepingCapacity: false)
     }
   }
 
@@ -477,7 +457,7 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
     logger: Logger
   ) {
     do {
-      pendingPCMData.append(try conversion.pcm16(from: buffer, to: outputFormat))
+      framer.append(try conversion.pcm16(from: buffer, to: outputFormat))
     } catch {
       guard let report = conversionFailure else { return }
       conversionFailure = nil
@@ -486,14 +466,8 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
       return
     }
 
-    var offset = 0
-    while pendingPCMData.count - offset >= preferredChunkBytes {
-      let chunk = pendingPCMData.subdata(in: offset..<(offset + preferredChunkBytes))
+    for chunk in framer.takeFullChunks() {
       transcriber.sendAudio(chunk)
-      offset += preferredChunkBytes
-    }
-    if offset > 0 {
-      pendingPCMData = Data(pendingPCMData.dropFirst(offset))
     }
   }
 }

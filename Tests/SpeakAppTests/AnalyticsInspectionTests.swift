@@ -89,11 +89,8 @@ final class AnalyticsInspectionTests: XCTestCase {
             try await fixture.sink.reopen()
             XCTFail("The first restored delivery must encounter the transient failure")
         } catch {}
-        await fulfillment(of: [delivered], timeout: 2)
-        for _ in 0..<1_000 {
-            if await fixture.sink.inspectionSnapshot().queueDepth == 0 { break }
-            await Task.yield()
-        }
+        await fulfillment(of: [delivered], timeout: 10)
+        await eventually { await fixture.sink.inspectionSnapshot().queueDepth == 0 }
         let completed = await fixture.sink.inspectionSnapshot()
         XCTAssertEqual(completed.queueDepth, 0)
         XCTAssertEqual(completed.records.map(\.id), seeded.records.map(\.id))
@@ -114,11 +111,8 @@ final class AnalyticsInspectionTests: XCTestCase {
         try? await fixture.sink.capture(fixture.payload())
         let pending = await fixture.sink.inspectionSnapshot()
         let identifier = try XCTUnwrap(pending.records.first?.id)
-        await fulfillment(of: [delivered], timeout: 2)
-        for _ in 0..<1_000 {
-            if await fixture.sink.inspectionSnapshot().records.first?.status == .httpAcknowledged { break }
-            await Task.yield()
-        }
+        await fulfillment(of: [delivered], timeout: 10)
+        await eventually { await fixture.sink.inspectionSnapshot().records.first?.status == .httpAcknowledged }
         let completed = await fixture.sink.inspectionSnapshot()
         XCTAssertEqual(completed.records.map(\.id), [identifier])
         XCTAssertEqual(completed.records.first?.status, .httpAcknowledged)
@@ -217,6 +211,16 @@ final class AnalyticsInspectionTests: XCTestCase {
             fixture.recorder.requests.first?.url?.path, url.path, "Transport retains its configured proxy path"
         )
         await fixture.sink.close()
+    }
+
+    /// Waits for the sink actor to settle after the stubbed response. A fixed number of
+    /// `Task.yield()` calls finished too early when the whole suite ran under load.
+    private func eventually(timeout: Duration = .seconds(10), _ condition: () async -> Bool) async {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if await condition() { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     private func makeFixture(

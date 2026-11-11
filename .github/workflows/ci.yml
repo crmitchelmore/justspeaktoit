@@ -329,6 +329,9 @@ jobs:
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
+          # These lists are the swift, api and ios routes in
+          # scripts/ci/routing.json; edit them there and run
+          # `python3 scripts/ci/routing.py --write`.
           filters: |
             # CI-only edits do not select the macOS job; add `ci:full` to
             # exercise a workflow change on its pull request.
@@ -371,7 +374,7 @@ jobs:
       # True when any changed file lies outside docs, the website, the native
       # Android app (android.yml) and the Workers package (paid-access-worker
       # below). A file matches only if it matches every pattern, hence the
-      # separate step.
+      # separate step. The list is the apple route in scripts/ci/routing.json.
       - name: Filter Apple-relevant paths
         if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3

@@ -13,8 +13,8 @@ Regenerate the table only for an intended routing change, and review the diff:
 import importlib.machinery
 import importlib.util
 import json
-import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -26,6 +26,7 @@ _spec = importlib.util.spec_from_loader('pre_pr', _loader)
 pre_pr = importlib.util.module_from_spec(_spec)
 sys.modules['pre_pr'] = pre_pr
 _loader.exec_module(pre_pr)
+routing = pre_pr.routing()
 
 PATHS = [
     # Docs, website, Android and Workers: no Apple lint.
@@ -63,39 +64,13 @@ PATHS = [
 ]
 
 
-def glob_regex(pattern: str) -> re.Pattern:
-    """GitHub's path-filter glob (as dorny/paths-filter and `on.<event>.paths` match it): `**` spans
-    directories, `*` and `?` stay inside one, and dot files match."""
-    out, i = '', 0
-    while i < len(pattern):
-        if pattern.startswith('**/', i):
-            out, i = out + '(?:.*/)?', i + 3
-        elif pattern.startswith('**', i):
-            out, i = out + '.*', i + 2
-        elif pattern[i] == '*':
-            out, i = out + '[^/]*', i + 1
-        elif pattern[i] == '?':
-            out, i = out + '[^/]', i + 1
-        else:
-            out, i = out + re.escape(pattern[i]), i + 1
-    return re.compile(out + r'\Z')
-
-
 def glob_any(path: str, patterns: list[str]) -> bool:
-    """`on.<event>.paths` and the default some-pattern quantifier: a later `!pattern` excludes."""
-    selected = False
-    for pattern in patterns:
-        if pattern.startswith('!'):
-            selected = selected and not glob_regex(pattern[1:]).match(path)
-        elif glob_regex(pattern).match(path):
-            selected = True
-    return selected
+    return any(routing.glob(path, p) for p in patterns)
 
 
 def glob_every(path: str, patterns: list[str]) -> bool:
     """dorny/paths-filter's `predicate-quantifier: every`."""
-    return all(not glob_regex(p[1:]).match(path) if p.startswith('!') else bool(glob_regex(p).match(path))
-               for p in patterns)
+    return all(not routing.glob(path, p[1:]) if p.startswith('!') else routing.glob(path, p) for p in patterns)
 
 
 def yaml_list(text: str, header: str) -> list[str]:
@@ -167,6 +142,43 @@ class RoutingTruthTableTests(unittest.TestCase):
         self.assertTrue(glob_any('README.md', ['**/*.md']))
         self.assertTrue(glob_any('.github/x', ['**']))
         self.assertFalse(glob_every('Docs/a.txt', ['**', '!Docs/**']))
+
+
+class WorkflowCopyTests(unittest.TestCase):
+    """Workflow `paths:` lists cannot read routing.json, so they hold generated copies of it."""
+
+    def test_workflow_lists_equal_routing_json(self):
+        self.assertEqual(routing.drift(), [])
+        self.assertEqual({(t['file'], t['list'].strip()) for _, t, _ in routing.workflow_lists()}, {
+            ('.github/workflows/ci.yml', f'{name}:') for name in ('apple', 'swift', 'api', 'ios')} | {
+            ('.github/workflows/android.yml', 'paths:')})
+
+    def test_drift_names_the_route_and_write_repairs_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / 'w.yml'
+            workflow.write_text("on:\n  push:\n    paths:\n      - a/**\n      # note\n      - b\n"
+                                "  pull_request:\n    paths:\n      - 'x'\njobs: {}\n", encoding='utf-8')
+            data = {'r': {'paths': ['a/**', 'c'], 'workflows': [
+                {'file': 'w.yml', 'after': '  push:', 'list': '    paths:'},
+                {'file': 'w.yml', 'after': '  pull_request:', 'list': '    paths:'}]}}
+            with mock.patch.object(routing, 'ROOT', root), mock.patch.object(routing, 'routes', lambda: data):
+                self.assertEqual(len(routing.drift()), 2)
+                routing.write()
+                self.assertEqual(routing.drift(), [])
+            self.assertEqual(workflow.read_text(encoding='utf-8'),
+                             "on:\n  push:\n    paths:\n      - a/**\n      - c\n"
+                             "  pull_request:\n    paths:\n      - 'a/**'\n      - 'c'\njobs: {}\n")
+
+    def test_negations_need_the_every_quantifier(self):
+        bad = json.dumps({'routes': {'r': {'paths': ['**', '!x/**']}}})
+        with mock.patch.object(routing.Path, 'read_text', lambda self, encoding=None: bad):
+            routing.routes.cache_clear()
+            try:
+                with self.assertRaises(ValueError):
+                    routing.routes()
+            finally:
+                routing.routes.cache_clear()
 
 
 if __name__ == '__main__':

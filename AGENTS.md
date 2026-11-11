@@ -248,8 +248,10 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
   or `=0` forces the choice.
 - It fails closed. A required check whose tool is missing fails, and so does a
   Swift change that runs no unit tests or a changed module that no test
-  target covers. `test_pre_pr` checks the routing against ci.yml's path
-  filters, so the two can't drift apart.
+  target covers. Path routing lives once in `scripts/ci/routing.json`:
+  pre-pr reads it, and ci.yml's and android.yml's path filters are generated
+  from it (`python3 scripts/ci/routing.py --write`); the tooling tests fail
+  when they drift.
 - It never runs UI tests, xcodebuild, the core-journey harness or app launches,
   and Swift tests use a private file Keychain in `.build/pre-pr/`, so it is safe
   on the owner's Mac. CI still runs UI and release gates.

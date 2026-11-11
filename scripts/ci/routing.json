@@ -1,0 +1,108 @@
+{
+  "$comment": "The one definition of which changed paths start which checks. scripts/pre-pr reads it directly. Workflow `paths:` filters cannot read a file, so each route lists the YAML lists it is copied into; `python3 scripts/ci/routing.py --write` rewrites them and `python3 scripts/ci/routing.py` (run by make test-tooling) fails when they drift. Patterns use GitHub's path-filter globs: `**` spans directories, `*` stays inside one.",
+  "routes": {
+    "apple": {
+      "description": "CI Lint and the tooling tests: every path outside docs, the website, the native Android app and the Workers package.",
+      "quantifier": "every",
+      "paths": [
+        "**",
+        "!android/**",
+        "!.github/workflows/android.yml",
+        "!Docs/**",
+        "!**/*.md",
+        "!landing-page/**",
+        "!.github/workflows/deploy-landing-page.yml",
+        "!workers/**"
+      ],
+      "workflows": [{"file": ".github/workflows/ci.yml", "list": "            apple:"}]
+    },
+    "swift": {
+      "description": "The macOS job and Portable Swift (Linux): Swift package inputs and the scripts those jobs run. CI-only edits do not select them; add `ci:full` to exercise a workflow change.",
+      "paths": [
+        "Package.swift",
+        "Package.resolved",
+        "Makefile",
+        "Sources/**",
+        "Tests/**",
+        "Config/**",
+        "Resources/**",
+        "scripts/affected-swift-tests.py",
+        "scripts/retry-network.sh",
+        "scripts/retry-xctest-crash.py",
+        "scripts/with-test-keychain.py",
+        "scripts/private-test-keychain.py",
+        "scripts/verify-portable-core-boundary.py",
+        "scripts/collect-macos-*.py",
+        "scripts/prepare-mac-cli-symbols.sh",
+        "scripts/tests/brand-assets.test.mjs"
+      ],
+      "workflows": [{"file": ".github/workflows/ci.yml", "list": "            swift:"}]
+    },
+    "api": {
+      "description": "Public API compatibility: the exported library products' sources, the manifest and the gate. pre-pr also runs the check when the CI job's own script changes.",
+      "paths": [
+        "Package.swift",
+        "Package.resolved",
+        "Sources/SpeakCore/**",
+        "Sources/SpeakSync/**",
+        "Sources/SpeakiOS/**",
+        "Sources/SpeakHotKeys/**",
+        "Sources/SpeakAutomationKit/**",
+        "Sources/SpeakWatchCore/**",
+        "scripts/check-api-compatibility.sh",
+        "scripts/api-breakage-allowlist.txt"
+      ],
+      "prePrAlso": ["scripts/ci-api-compatibility.sh"],
+      "workflows": [{"file": ".github/workflows/ci.yml", "list": "            api:"}]
+    },
+    "ios": {
+      "description": "The pull-request iOS simulator compile: shared and iOS library sources.",
+      "paths": [
+        "Package.swift",
+        "Package.resolved",
+        "Sources/SpeakCore/**",
+        "Sources/SpeakSync/**",
+        "Sources/SpeakiOS/**"
+      ],
+      "workflows": [{"file": ".github/workflows/ci.yml", "list": "            ios:"}]
+    },
+    "android": {
+      "description": "The Android workflow on main (pre-pr runs it before the merge): the app, its workflow and the shared Swift definitions its parity tests read.",
+      "paths": [
+        "android/**",
+        ".github/workflows/android.yml",
+        "Sources/SpeakCore/TranscriptCleanupPolicy.swift",
+        "Sources/SpeakCore/ModelCatalog.swift",
+        "Sources/SpeakCore/ModelRetirements.swift",
+        "Sources/SpeakCore/ProviderCredentialCatalogue.swift",
+        "Sources/SpeakCore/OpenAITranscriptionModels.swift"
+      ],
+      "workflows": [{"file": ".github/workflows/android.yml", "after": "  push:", "list": "    paths:"}]
+    },
+    "windows": {
+      "description": "pre-pr only: the Windows Swift type check (linux.yml runs it in CI).",
+      "paths": [
+        "Sources/SpeakWindows*/**",
+        "Sources/CWindows*/**",
+        "Tests/SpeakWindows*/**",
+        "scripts/typecheck-windows-swift.sh"
+      ]
+    },
+    "workflows": {
+      "description": "pre-pr only: actionlint over changed workflows (advisory).",
+      "paths": [".github/workflows/**", ".github/actions/**", ".github/actionlint.yaml"]
+    },
+    "shell": {
+      "description": "pre-pr only: ShellCheck over changed shell scripts (advisory).",
+      "paths": ["scripts/**/*.sh", ".githooks/**", "scripts/install-pre-pr-hook"]
+    },
+    "paid-access-worker": {
+      "description": "pre-pr only: the Workers package's npm checks (ci.yml's paid-access-worker job runs on every untrusted pull request).",
+      "paths": ["workers/paid-access/**"]
+    },
+    "landing-page": {
+      "description": "pre-pr only: the landing page tests.",
+      "paths": ["landing-page/**"]
+    }
+  }
+}

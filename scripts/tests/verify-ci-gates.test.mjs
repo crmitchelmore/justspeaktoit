@@ -103,8 +103,14 @@ test('Debug dependency resolution bypasses shared repositories in commands and r
   for (const command of commands) {
     assert.ok(command.includes('--disable-dependency-cache'), command);
   }
-  assert.equal((body.match(/"--disable-dependency-cache"/g) ?? []).length, 2,
-    'both recorded History argv values must describe the actual diagnostic');
+  // The placeholder result lives in the workflow and the final one in the
+  // diagnostic script; both recorded History argv values must match the run.
+  const diagnostic = readFileSync(new URL('../ci/isolated-history-diagnostic.py', import.meta.url), 'utf8');
+  assert.equal((body.match(/"--disable-dependency-cache"/g) ?? []).length, 1,
+    'the placeholder History argv must describe the actual diagnostic');
+  assert.equal((diagnostic.match(/"--disable-dependency-cache"/g) ?? []).length, 1,
+    'the summarised History argv must describe the actual diagnostic');
+  assert.match(body, /python3 scripts\/ci\/isolated-history-diagnostic\.py summarise /);
   assert.match(body, /^    timeout-minutes: 45$/m);
   assert.doesNotMatch(body, /swift package (?:reset|clean)|rm -rf.*\.build/);
 });

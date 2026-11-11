@@ -10,6 +10,9 @@ manifest, shared test support, CI wiring or any file that cannot be mapped
 select every test target. --skip-target removes targets proven elsewhere
 (the Linux portable job) from the selection.
 
+`TargetGraph` is the one reading of the SwiftPM graph: scripts/pre-pr loads
+this file and builds its finer type-level selection on the same graph.
+
 Prints GitHub output lines:
   mode=all|filtered|none
   filter=<swift test --filter regex>   (mode=filtered)
@@ -53,30 +56,49 @@ def dependencies(target: dict) -> set[str]:
     return names
 
 
+class TargetGraph:
+    """Target ownership and reverse dependencies of one `dump-package` graph."""
+
+    def __init__(self, package: dict):
+        self.types = {target["name"]: target["type"] for target in package["targets"]}
+        self.paths = target_paths(package)
+        self.dependencies = {target["name"]: dependencies(target) for target in package["targets"]}
+        self.tests = sorted(name for name, kind in self.types.items() if kind == "test")
+        self._dependants: dict[str, set[str]] = {}
+        for name, names in self.dependencies.items():
+            for dependency in names:
+                self._dependants.setdefault(dependency, set()).add(name)
+
+    def owner(self, path: str) -> str | None:
+        """The target whose directory most specifically contains path."""
+        owners = [name for name, prefix in self.paths.items() if path.startswith(prefix)]
+        return max(owners, key=lambda name: len(self.paths[name])) if owners else None
+
+    def dependants(self, names: set[str]) -> set[str]:
+        """names plus every target that depends on one of them, transitively."""
+        found, queue = set(names), list(names)
+        while queue:
+            for dependent in self._dependants.get(queue.pop(), ()):
+                if dependent not in found:
+                    found.add(dependent)
+                    queue.append(dependent)
+        return found
+
+
 def select(changed: list[str], package: dict, skip: set[str]) -> tuple[str, list[str]]:
-    tests = sorted(t["name"] for t in package["targets"] if t["type"] == "test")
-    paths = target_paths(package)
+    graph = TargetGraph(package)
     touched: set[str] = set()
     for path in changed:
         if any(fnmatch.fnmatchcase(path, pattern) for pattern in GLOBAL):
-            return "all", [t for t in tests if t not in skip]
+            return "all", [t for t in graph.tests if t not in skip]
         if not path.startswith(("Sources/", "Tests/")):
             continue
-        owners = [name for name, prefix in paths.items() if path.startswith(prefix)]
-        if not owners:
-            return "all", [t for t in tests if t not in skip]
-        touched.add(max(owners, key=lambda name: len(paths[name])))
-    reverse: dict[str, set[str]] = {}
-    for target in package["targets"]:
-        for dependency in dependencies(target):
-            reverse.setdefault(dependency, set()).add(target["name"])
-    affected, queue = set(touched), list(touched)
-    while queue:
-        for dependent in reverse.get(queue.pop(), ()):
-            if dependent not in affected:
-                affected.add(dependent)
-                queue.append(dependent)
-    selected = [t for t in tests if t in affected and t not in skip]
+        owner = graph.owner(path)
+        if owner is None:
+            return "all", [t for t in graph.tests if t not in skip]
+        touched.add(owner)
+    affected = graph.dependants(touched)
+    selected = [t for t in graph.tests if t in affected and t not in skip]
     return ("filtered" if selected else "none"), selected
 
 

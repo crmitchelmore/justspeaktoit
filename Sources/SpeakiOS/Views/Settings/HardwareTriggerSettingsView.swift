@@ -231,8 +231,8 @@ struct HardwareTriggerSettingsView: View {
                 action: "Stop Dictation and Get Text",
                 use: "Stops a recording and **returns the text** to the next action."
             )
-            Text("The text always goes to the destination above too. Transcribe Voice is the Control version of "
-                + "Toggle Recording.")
+            Text("The text also goes to the destination above unless the shortcut sets its own. "
+                + "Transcribe Voice is the Control version of Toggle Recording.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

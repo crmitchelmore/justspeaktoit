@@ -1,5 +1,7 @@
 package com.justspeaktoit.android.ui
 
+import com.justspeaktoit.android.resources.SystemResourceKind
+
 /**
  * Stable test tags for controls that screen readers and automation agents drive.
  * MainActivity exposes them as resource IDs, so UiAutomator and accessibility
@@ -23,6 +25,16 @@ object AutomationIds {
     const val SETTINGS_SEARCH_CLEAR = "settingsSearchClear"
     const val API_KEYS_FILTER = "settings.apiKeysFilter"
     const val SETTINGS_PRIVACY_POLICY = "settings.privacyPolicy"
+    const val RESOURCES_HEADLINE = "settings.resources.headline"
+    const val RESOURCES_RELEASE_EVERYTHING = "settings.resources.releaseEverything"
+
+    /**
+     * One per hold row, keyed by the shared kind and the owner, so the app's recording and the keyboard's
+     * each get their own, e.g. `settings.resources.release.microphone.DictationViewModel`.
+     */
+    fun resourceRelease(kind: SystemResourceKind, owner: String): String =
+        "settings.resources.release.${kind.rawValue}.$owner"
+
     const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
     const val CLEANUP_PICKER_BACK = "cleanupPicker.back"
     const val CLEANUP_PICKER_SEARCH = "cleanupPicker.search"

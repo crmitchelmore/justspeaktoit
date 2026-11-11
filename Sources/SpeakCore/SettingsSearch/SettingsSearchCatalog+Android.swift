@@ -30,6 +30,16 @@ extension SettingsSearchCatalog {
             settingKeys: ["keepAudioOnCancel"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.resourcesInUse", title: "System resources in use", section: .general,
+            systemImage: "gauge.with.dots.needle.33percent",
+            summary: "See what the app holds now, such as the microphone or a cloud request, and release it.",
+            keywords: [
+                "status", "resources", "microphone in use", "mic stuck", "release", "release everything",
+                "stop recording", "orange dot", "privacy indicator"
+            ],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.apiKeys", title: "API keys", section: .apiKeys, systemImage: "key.fill",
             summary: "Add or remove provider keys, encrypted with the Android Keystore.",
             keywords: ["credentials", "token", "keystore", "openrouter key", "openai key", "deepgram key"],

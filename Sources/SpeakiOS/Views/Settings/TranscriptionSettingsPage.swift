@@ -29,8 +29,8 @@ struct GeneralSettingsPage: View {
             .accessibilityIdentifier("spokenLanguagePicker")
 
             SettingsFootnote(
-                "**Automatic** lets remote providers detect the language. "
-                    + "Apple on-device transcription uses your iPhone's language."
+                "**Automatic** lets remote providers detect the language; "
+                    + "Apple on-device transcription then uses your iPhone's language."
             )
         }
     }

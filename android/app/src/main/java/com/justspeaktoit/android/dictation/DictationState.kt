@@ -56,6 +56,14 @@ sealed interface DictationState {
 
     val isActive: Boolean
         get() = this is Starting || this is Listening || this is Finishing
+
+    /**
+     * Whether the session still has the microphone open. A speech recogniser keeps listening while it
+     * finishes, until its final result or cancellation; a Cloud session's recorder is tracked separately,
+     * and its Finishing is only the upload.
+     */
+    val holdsMicrophone: Boolean
+        get() = this is Starting || this is Listening || (this is Finishing && mode != RecognitionMode.Cloud)
 }
 
 sealed interface DictationEvent {

@@ -26,6 +26,16 @@ final class IOSSettingsPageTests: XCTestCase {
         }
     }
 
+    func testEveryPageNameIsSearchable() {
+        let index = SettingsSearchIndex(
+            entries: IOSSettingsSearch.catalogEntries(keyboardEnabled: true) + IOSSettingsSearch.pageEntries()
+        )
+        for page in IOSSettingsPage.allCases {
+            let top = index.search(page.title, limit: 1).first?.entry
+            XCTAssertEqual(top.flatMap(IOSSettingsPage.page(for:)), page, page.title)
+        }
+    }
+
     func testRootGroupsListEveryPageOnce() {
         let grouped = IOSSettingsPage.groups.flatMap { $0 }
         XCTAssertEqual(grouped.count, Set(grouped).count)

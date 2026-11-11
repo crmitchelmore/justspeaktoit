@@ -99,7 +99,9 @@ final class SiteMediaCaptureUITests: XCTestCase {
 
     private func openSettingsPage(_ page: String) {
         let link = app.buttons["settingsPage.\(page)"]
-        if scrollUpUntilExists(link) { link.tap() }
+        XCTAssertTrue(scrollUpUntilExists(link), "settingsPage.\(page) not found in Settings")
+        link.tap()
+        XCTAssertTrue(link.waitForNonExistence(timeout: Self.elementTimeout), "settingsPage.\(page) did not open")
     }
 
     private func scrollUpUntilExists(_ element: XCUIElement, maxSwipes: Int = 6) -> Bool {

@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-09"
+updated: "2026-11-11"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -480,6 +480,21 @@ sessions:
           - "Start once more and tap Cancel."
         expected: "Each dictation inserts exactly once with a leading space where needed; Cancel inserts nothing; no microphone prompt appears inside the keyboard. Still needs an iOS 17 iPhone and iPad to close #661."
         final_gate: false
+      - id: "iphone-keyboard-other-apps"
+        issues:
+          - 1469
+        title: "Keyboard: dictation starts in Notes, Messages and Safari, not just in the app"
+        minutes: 5
+        core: true
+        build: "TestFlight Just Speak to It Alpha that includes the #1469 fix"
+        steps:
+          - "Keyboard enabled with Allow Full Access on. Open Just Speak once so Instant Dictation is ready, then swipe home."
+          - "In Notes switch to the Just Speak keyboard, tap the mic, say \"keyboard in notes\" and stop."
+          - "Repeat in a Messages chat with \"keyboard in messages\" and in Safari's address bar with \"keyboard in safari\"."
+          - "Play music in another app and repeat once in Notes."
+          - "If any attempt shows a message, note its exact wording."
+        expected: "Each dictation inserts exactly once and music keeps playing. No attempt says to check the microphone permission. If iOS ever refuses, the keyboard says \"iOS paused Just Speak's microphone. Open Just Speak, then return here and tap the mic.\", and doing that makes the next attempt work."
+        final_gate: true
       - id: "iphone-hands-free"
         issues:
           - 614

@@ -54,7 +54,7 @@ extension RevAILiveClient {
         }
     }
 
-    private func apply(_ event: RevAIStreamingEvent, _ active: RevAILiveRun, _ effects: inout RevAILiveEffects) {
+    private func apply(_ event: RevAIStreamingEvent, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
         switch event {
         case .connected:
             guard !active.ready else { return }
@@ -74,7 +74,7 @@ extension RevAILiveClient {
     /// A partial restates the open segment's words and replaces the previous
     /// one. While a finish runs it is held back, to be released only if the
     /// finish fails; an empty one withdraws the words without a delivery.
-    private func showPartial(_ text: String, _ active: RevAILiveRun, _ effects: inout RevAILiveEffects) {
+    private func showPartial(_ text: String, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
         guard !text.isEmpty else {
             active.openPartial = nil
             active.withheldPartial = nil
@@ -92,7 +92,7 @@ extension RevAILiveClient {
     /// by order: each covers a new window of audio, so identical text in two
     /// finals is two utterances (issue #700). A finish folds finals that arrive
     /// during it into its return instead of delivering them.
-    private func confirm(_ text: String, _ active: RevAILiveRun, _ effects: inout RevAILiveEffects) {
+    private func confirm(_ text: String, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
         active.openPartial = nil
         active.withheldPartial = nil
         guard !text.isEmpty else { return }
@@ -107,7 +107,7 @@ extension RevAILiveClient {
     /// Hands a transcript to the host outside the lock and counts it until the
     /// callback returns, so a failure decided meanwhile is reported after it.
     private func deliver(
-        _ text: String, isFinal: Bool, _ active: RevAILiveRun, _ effects: inout RevAILiveEffects
+        _ text: String, isFinal: Bool, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects
     ) {
         guard let callback = active.onTranscript else { return }
         active.transcriptsInFlight += 1
@@ -122,7 +122,7 @@ extension RevAILiveClient {
     /// the stream; one while it is merely claimed, or after a send failed, did
     /// not answer it. If `EOS`'s send has not completed yet, its completion
     /// settles the closure.
-    private func closed(by error: Error, _ active: RevAILiveRun, _ effects: inout RevAILiveEffects) {
+    private func closed(by error: Error, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
         guard active.endOfStreamSent, active.sendFailure == nil else {
             fail(active, interruption(by: error), &effects)
             return
@@ -140,7 +140,7 @@ extension RevAILiveClient {
     /// partial has had its final. Any other status, or a transport failure
     /// without a close frame, fails it: the words it flushed are still released
     /// to the host and the confirmed text returned.
-    func settle(closure error: Error, _ active: RevAILiveRun, _ effects: inout RevAILiveEffects) {
+    func settle(closure error: Error, _ active: RevAILiveRun, _ effects: inout LiveDeferredEffects) {
         let closeCode = (error as? StreamingWebSocketCloseReporting)?.webSocketCloseCode
         guard closeCode == RevAIStreaming.normalClosureCode else {
             fail(active, interruption(by: error), &effects)

@@ -28,7 +28,6 @@ import os.log
 /// `.cumulativeTranscript`: every `onTranscript` delivery restates the whole
 /// transcript so far, so finals replace rather than append.
 public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
-    // swiftlint:disable:previous type_body_length
     // existing owned WebSocket lifecycle/state surface; no behavior change.
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
     public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
@@ -50,15 +49,14 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     private let keywords: [String]
     private let sampleRate: Int
     let makeConnection: ConnectionFactory
-    private let schedule: Scheduler
+    let schedule: Scheduler
     private var finishTimeout: TimeInterval = SonioxLiveClient.finishDeadline
     /// Per-send and handshake bounds; the documented statics in production.
     var sendTimeout: TimeInterval = SonioxLiveClient.sendDeadline
     var readyTimeout: TimeInterval = SonioxLiveClient.readyDeadline
-    private let queue = DispatchQueue(label: "SonioxLiveClient.state")
-    private let queueKey = DispatchSpecificKey<Bool>()
+    let stateQueue = LiveClientStateQueue(label: "SonioxLiveClient.state")
     private let ownedSession: URLSession?
-    private var run: SonioxLiveRun
+    private(set) var run: SonioxLiveRun
 
     /// Holds audio captured before `start()` opens a run, then replays it, in
     /// capture order, ahead of the live frames once a run exists (issue #641).
@@ -100,7 +98,6 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         self.ownedSession = ownedSession
         self.run = SonioxLiveRun(sampleRate: sampleRate)
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     /// Source-compatible overload preserved for callers predating keyword hints.
@@ -125,7 +122,6 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         self.ownedSession = ownedSession
         self.run = SonioxLiveRun(sampleRate: sampleRate)
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     /// An explicit caller budget for drain plus provider completion. The
@@ -221,28 +217,13 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     public func cancel() { synchronized { close(run) } }
 
     public func finishAndWait() async -> String? {
-        let active = synchronized { run }
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                synchronized {
-                    guard isCurrent(active), active.connection != nil else {
-                        if active === run { close(active) }
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    if Task.isCancelled {
-                        close(active)
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    active.waiters.append(continuation)
-                    beginFinish(active, deliverCallbacks: false)
-                }
+        await awaitFinish(
+            canFinish: { $0.connection != nil }, transcript: \.transcript,
+            register: { active, continuation in
+                active.waiters.append(continuation)
+                beginFinish(active, deliverCallbacks: false)
             }
-        } onCancel: { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { self.close(active) } }
-        }
+        )
     }
 
     public var isConnected: Bool { synchronized { isCurrent(run) && run.didOpen && run.configSent } }
@@ -337,21 +318,6 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
 
     func isCurrent(_ active: SonioxLiveRun) -> Bool { active === run && active.phase != .closed }
 
-    func after(
-        _ seconds: TimeInterval, _ active: SonioxLiveRun,
-        action: @escaping @Sendable (SonioxLiveClient, SonioxLiveRun) -> Void
-    ) {
-        schedule(seconds) { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { action(self, active) } }
-        }
-    }
-
-    func synchronized<Value>(_ action: () -> Value) -> Value {
-        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
-        return queue.sync(execute: action)
-    }
-
     /// 401/403 error frames are an invalid key; everything else is a typed
     /// server error. Nothing here logs the key, transcript or audio.
     func mapServerError(_ error: (code: Int, message: String)) -> Error {
@@ -387,3 +353,5 @@ extension SonioxLiveClient {
 extension SonioxLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { isConnected }
 }
+
+extension SonioxLiveClient: QueueConfinedLiveClient {}

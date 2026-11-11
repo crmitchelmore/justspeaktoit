@@ -48,8 +48,7 @@ final class StreamingProviderSession: @unchecked Sendable {
     private let configuration: Configuration
     private let makeConnection: ConnectionFactory
     private let schedule: Scheduler
-    private let queue = DispatchQueue(label: "StreamingProviderSession.state")
-    private let queueKey = DispatchSpecificKey<Bool>()
+    private let stateQueue = LiveClientStateQueue(label: "StreamingProviderSession.state")
     private var run: Run
     let preroll: StreamingAudioPreroll
 
@@ -63,7 +62,6 @@ final class StreamingProviderSession: @unchecked Sendable {
         self.schedule = schedule
         run = Run(configuration)
         preroll = StreamingAudioPreroll(sampleRate: configuration.sampleRate)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     deinit { run.connection?.cancel() }
@@ -381,10 +379,7 @@ extension StreamingProviderSession {
         }
     }
 
-    private func synchronized<Value>(_ action: () -> Value) -> Value {
-        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
-        return queue.sync(execute: action)
-    }
+    private func synchronized<Value>(_ action: () -> Value) -> Value { stateQueue.sync(action) }
 }
 
 public enum ProviderStreamingError: LocalizedError, Equatable {

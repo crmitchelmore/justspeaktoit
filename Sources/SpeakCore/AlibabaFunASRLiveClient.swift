@@ -15,10 +15,9 @@ public final class AlibabaFunASRLiveClient: FinalizingStreamingTranscriptionClie
 
     private let credentials: String
     private let makeConnection: ConnectionFactory
-    private let schedule: Scheduler
-    private let queue = DispatchQueue(label: "AlibabaFunASRLiveClient.state")
-    private let queueKey = DispatchSpecificKey<Bool>()
-    private var run = AlibabaFunASRLiveRun()
+    let schedule: Scheduler
+    let stateQueue = LiveClientStateQueue(label: "AlibabaFunASRLiveClient.state")
+    private(set) var run = AlibabaFunASRLiveRun()
     private static let maximumBytes = 16_000 * 2 * 5
     private static let maximumFrames = 256
     static let maximumResponseBytes = 1_024 * 1_024
@@ -38,7 +37,6 @@ public final class AlibabaFunASRLiveClient: FinalizingStreamingTranscriptionClie
         self.credentials = credentials
         self.makeConnection = makeConnection
         self.schedule = schedule
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     deinit { run.connection?.cancel() }
@@ -273,7 +271,7 @@ extension AlibabaFunASRLiveClient {
     }
 
     private var stalledError: Error { StreamingClientError.transportStalled(provider: "Alibaba") }
-    private func isCurrent(_ active: AlibabaFunASRLiveRun) -> Bool { active === run && active.phase != .closed }
+    func isCurrent(_ active: AlibabaFunASRLiveRun) -> Bool { active === run && active.phase != .closed }
 
     private func fail(_ error: Error, _ active: AlibabaFunASRLiveRun) {
         guard isCurrent(active) else { return }
@@ -286,7 +284,7 @@ extension AlibabaFunASRLiveClient {
         waiters.forEach { $0.resume(returning: active.transcript) }
     }
 
-    private func close(_ active: AlibabaFunASRLiveRun) {
+    func close(_ active: AlibabaFunASRLiveRun) {
         guard active.phase != .closed else { return }
         active.phase = .closed
         let connection = active.connection
@@ -302,18 +300,6 @@ extension AlibabaFunASRLiveClient {
         waiters.forEach { $0.resume(returning: active.transcript) }
     }
 
-    private func after(
-        _ seconds: TimeInterval, _ active: AlibabaFunASRLiveRun,
-        action: @escaping @Sendable (AlibabaFunASRLiveClient, AlibabaFunASRLiveRun) -> Void
-    ) {
-        schedule(seconds) { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { action(self, active) } }
-        }
-    }
-
-    private func synchronized<Value>(_ action: () -> Value) -> Value {
-        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
-        return queue.sync(execute: action)
-    }
 }
+
+extension AlibabaFunASRLiveClient: QueueConfinedLiveClient {}

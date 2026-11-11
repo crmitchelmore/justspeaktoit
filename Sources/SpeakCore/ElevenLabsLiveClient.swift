@@ -52,12 +52,11 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     /// to size the send budget and pre-roll.
     let sampleRate: Int
     private let makeConnection: ConnectionFactory
-    private let schedule: Scheduler
+    let schedule: Scheduler
     /// Readiness, commit and finish bounds; the documented statics in production.
     let timing: Timing
-    private let queue = DispatchQueue(label: "ElevenLabsLiveClient.state")
-    private let queueKey = DispatchSpecificKey<Bool>()
-    private var run: ElevenLabsLiveRun
+    let stateQueue = LiveClientStateQueue(label: "ElevenLabsLiveClient.state")
+    private(set) var run: ElevenLabsLiveRun
     /// Holds audio captured before `start()` opens a run (issue #641) and, as
     /// the established Mac transcriber did, the newest five seconds captured
     /// before `session_started`; both are replayed in capture order once the
@@ -133,7 +132,6 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         let budgetRate = ElevenLabsLiveProtocol.supportedSampleRates.contains(sampleRate)
             ? sampleRate : LiveTranscriptionProviderID.elevenlabs.expectedSampleRate
         self.preroll = StreamingAudioPreroll(sampleRate: budgetRate)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     deinit { run.connection?.cancel() }
@@ -220,28 +218,13 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     /// transcribed; finals consumed here are not also delivered through
     /// `onTranscript`. A finish that reaches a bound returns what it has.
     public func finishAndWait() async -> String? {
-        let active = synchronized { run }
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                synchronized {
-                    guard isCurrent(active), active.connection != nil else {
-                        if active === run { close(active) }
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    if Task.isCancelled {
-                        close(active)
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    active.waiters.append(continuation)
-                    beginFinish(active)
-                }
+        await awaitFinish(
+            canFinish: { $0.connection != nil }, transcript: \.transcript,
+            register: { active, continuation in
+                active.waiters.append(continuation)
+                beginFinish(active)
             }
-        } onCancel: { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { self.close(active) } }
-        }
+        )
     }
 
     /// Immediate abort; text received so far stays available to `finishAndWait`.
@@ -380,21 +363,6 @@ extension ElevenLabsLiveClient {
 
     func isCurrent(_ active: ElevenLabsLiveRun) -> Bool { active === run && active.phase != .closed }
 
-    func after(
-        _ seconds: TimeInterval, _ active: ElevenLabsLiveRun,
-        action: @escaping @Sendable (ElevenLabsLiveClient, ElevenLabsLiveRun) -> Void
-    ) {
-        schedule(seconds) { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { action(self, active) } }
-        }
-    }
-
-    func synchronized<Value>(_ action: () -> Value) -> Value {
-        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
-        return queue.sync(execute: action)
-    }
-
     private func log(_ event: String) {
         #if canImport(os) && !SPEAK_PORTABLE_CORE
         SpeakLogger.logger(category: "ElevenLabsLiveClient").info("\(event, privacy: .public)")
@@ -404,5 +372,6 @@ extension ElevenLabsLiveClient {
 
 extension ElevenLabsLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { isConnected }
-// existing owned WebSocket lifecycle/state surface; no behavior change.
-} // swiftlint:disable:this file_length
+}
+
+extension ElevenLabsLiveClient: QueueConfinedLiveClient {}

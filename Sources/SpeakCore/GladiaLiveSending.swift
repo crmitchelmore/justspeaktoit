@@ -37,9 +37,9 @@ extension GladiaLiveClient {
 
     /// Caller holds the lock. Hands the next outbound message to a send loop
     /// performed after the lock is released.
-    func startNextSend(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    func startNextSend(_ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard let send = nextSend(active) else { return }
-        effects.append { [self] in sendLoop(active, send) }
+        effects.add { [self] in sendLoop(active, send) }
     }
 
     /// Caller holds the lock. Exactly one send is in flight, and only once the
@@ -121,7 +121,7 @@ extension GladiaLiveClient {
     /// Caller holds the lock. A rejected send is a failed session, never a
     /// frame to skip: nothing after it could still be a complete transcript.
     private func completeSend(
-        _ outcome: Result<Void, Error>, _ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects
+        _ outcome: Result<Void, Error>, _ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects
     ) -> GladiaLiveRun.PendingSend? {
         active.sending = false
         if active.inFlightAudioBytes > 0 {
@@ -148,7 +148,7 @@ extension GladiaLiveClient {
     /// Caller holds the lock. Queues `stop_recording` behind every admitted
     /// chunk and arms the one whole deadline. A run that never admitted audio
     /// has nothing to finalise and closes at once, empty.
-    func beginFinish(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+    func beginFinish(_ active: GladiaLiveRun, _ effects: inout LiveDeferredEffects) {
         guard !active.finishing else { return }
         active.finishing = true
         guard active.admittedAnyAudio else {

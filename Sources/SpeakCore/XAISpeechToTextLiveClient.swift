@@ -57,8 +57,7 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
     public let sampleRate: Int
     let makeConnection: ConnectionFactory
     let schedule: Scheduler
-    private let queue = DispatchQueue(label: "XAISpeechToTextLiveClient.state")
-    private let queueKey = DispatchSpecificKey<Bool>()
+    let stateQueue = LiveClientStateQueue(label: "XAISpeechToTextLiveClient.state")
     private(set) var run: XAISpeechToTextLiveRun
     /// The pre-start priming contract shared with the other clients: audio
     /// offered before `start()` is held here. Once a session starts, its
@@ -96,7 +95,6 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
         self.schedule = schedule
         self.run = XAISpeechToTextLiveRun(sampleRate: sampleRate)
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     deinit { run.connection?.cancel() }
@@ -161,28 +159,13 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
     /// the socket closes early or the budget elapses, publishes its error
     /// before returning the spans received so far.
     public func finishAndWait() async -> String? {
-        let active = synchronized { run }
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                synchronized {
-                    guard isCurrent(active), active.connection != nil else {
-                        if active === run { close(active) }
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    if Task.isCancelled {
-                        close(active)
-                        continuation.resume(returning: active.transcript)
-                        return
-                    }
-                    active.waiters.append(continuation)
-                    beginFinish(active)
-                }
+        await awaitFinish(
+            canFinish: { $0.connection != nil }, transcript: \.transcript,
+            register: { active, continuation in
+                active.waiters.append(continuation)
+                beginFinish(active)
             }
-        } onCancel: { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { self.close(active) } }
-        }
+        )
     }
 
     // MARK: - Session seams
@@ -278,19 +261,6 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
 
     func isCurrent(_ active: XAISpeechToTextLiveRun) -> Bool { active === run && active.phase != .closed }
 
-    func after(_ seconds: TimeInterval, _ active: XAISpeechToTextLiveRun,
-               action: @escaping @Sendable (XAISpeechToTextLiveClient, XAISpeechToTextLiveRun) -> Void) {
-        schedule(seconds) { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { action(self, active) } }
-        }
-    }
-
-    func synchronized<Value>(_ action: () -> Value) -> Value {
-        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
-        return queue.sync(execute: action)
-    }
-
     /// Lifecycle events only: never a key, a frame or transcript text.
     func log(_ event: String) {
         #if canImport(os) && !SPEAK_PORTABLE_CORE
@@ -302,3 +272,5 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
 extension XAISpeechToTextLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { isSessionReady }
 }
+
+extension XAISpeechToTextLiveClient: QueueConfinedLiveClient {}

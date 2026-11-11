@@ -22,10 +22,9 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     private let keywords: [String]
     private let sampleRate: Int
     private let makeConnection: ConnectionFactory
-    private let schedule: Scheduler
-    private let queue = DispatchQueue(label: "DeepgramLiveClient.state")
-    private let queueKey = DispatchSpecificKey<Bool>()
-    private var run: DeepgramLiveRun
+    let schedule: Scheduler
+    let stateQueue = LiveClientStateQueue(label: "DeepgramLiveClient.state")
+    private(set) var run: DeepgramLiveRun
     /// Retains the existing pre-start priming contract. Once a session starts,
     /// its bounded send queue holds connecting audio without silently evicting it.
     let preroll: StreamingAudioPreroll
@@ -60,7 +59,6 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         self.schedule = schedule
         self.run = DeepgramLiveRun(sampleRate: sampleRate)
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     /// Source-compatible overload preserved for callers predating keyword hints.
@@ -80,7 +78,6 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         self.schedule = schedule
         self.run = DeepgramLiveRun(sampleRate: sampleRate)
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
-        queue.setSpecific(key: queueKey, value: true)
     }
 
     deinit { run.connection?.cancel() }
@@ -273,7 +270,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         waiters.forEach { $0.resume(returning: transcript) }
     }
 
-    private func close(_ active: DeepgramLiveRun) {
+    func close(_ active: DeepgramLiveRun) {
         guard active.phase != .closed else { return }
         active.phase = .closed
         let connection = active.connection
@@ -300,20 +297,7 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
         return active.accumulated.transcriptOrNil
     }
 
-    private func isCurrent(_ active: DeepgramLiveRun) -> Bool { active === run && active.phase != .closed }
-
-    private func after(_ seconds: TimeInterval, _ active: DeepgramLiveRun,
-                       action: @escaping @Sendable (DeepgramLiveClient, DeepgramLiveRun) -> Void) {
-        schedule(seconds) { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized { if self.isCurrent(active) { action(self, active) } }
-        }
-    }
-
-    private func synchronized<Value>(_ action: () -> Value) -> Value {
-        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
-        return queue.sync(execute: action)
-    }
+    func isCurrent(_ active: DeepgramLiveRun) -> Bool { active === run && active.phase != .closed }
 
     private func log(_ event: String) {
         #if canImport(os) && !SPEAK_PORTABLE_CORE
@@ -346,3 +330,5 @@ public enum DeepgramLiveError: LocalizedError {
 extension DeepgramLiveClient: StreamingAudioReadyProviding {
     public var isReadyForAudio: Bool { isConnected }
 }
+
+extension DeepgramLiveClient: QueueConfinedLiveClient {}

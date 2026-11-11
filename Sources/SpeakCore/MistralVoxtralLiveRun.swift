@@ -171,7 +171,7 @@ final class MistralVoxtralLiveRun: @unchecked Sendable {
     /// Detaches the run: nothing more is sent, received or delivered for it,
     /// and its deadlines become inert. Answers `false` if it already was.
     @discardableResult
-    func retire(_ effects: inout MistralVoxtralLiveEffects) -> Bool {
+    func retire(_ effects: inout LiveDeferredEffects) -> Bool {
         guard phase != .closed else { return false }
         phase = .closed
         let detached = connection
@@ -179,41 +179,29 @@ final class MistralVoxtralLiveRun: @unchecked Sendable {
         discardOutbound()
         onTranscript = nil
         onError = nil
-        if let detached { effects.append { detached.cancel() } }
+        if let detached { effects.add { detached.cancel() } }
         return true
     }
 
     /// Resumes every waiting finish with the run's text.
-    func releaseWaiters(_ effects: inout MistralVoxtralLiveEffects) {
+    func releaseWaiters(_ effects: inout LiveDeferredEffects) {
         let resumed = waiters
         waiters.removeAll()
         let text = transcript
-        if !resumed.isEmpty { effects.append { resumed.forEach { $0.resume(returning: text) } } }
+        if !resumed.isEmpty { effects.add { resumed.forEach { $0.resume(returning: text) } } }
     }
 
     /// Answers a finish of this run once it is no longer current: with its
     /// text at once, or, while its failure is still being delivered, only
     /// after that delivery, so a late finish cannot return before the error.
     func answerRetired(
-        _ continuation: CheckedContinuation<String?, Never>, _ effects: inout MistralVoxtralLiveEffects
+        _ continuation: CheckedContinuation<String?, Never>, _ effects: inout LiveDeferredEffects
     ) {
         guard !deliveringFailure else {
             waiters.append(continuation)
             return
         }
         let text = transcript
-        effects.append { continuation.resume(returning: text) }
+        effects.add { continuation.resume(returning: text) }
     }
-}
-
-/// Work collected while the client's state lock is held and performed, in
-/// order, once it is released. Transport calls, scheduling, callbacks and
-/// waiter resumptions never run under the lock, so each may re-enter the
-/// client, including by starting a replacement session.
-struct MistralVoxtralLiveEffects {
-    private var actions: [() -> Void] = []
-
-    mutating func append(_ action: @escaping () -> Void) { actions.append(action) }
-
-    func perform() { actions.forEach { $0() } }
 }

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -96,6 +97,21 @@ class SnapshotTests(unittest.TestCase):
             precheck.merged_with(self.repo, precheck.snapshot(self.repo), main)
         self.assertIn('does not merge cleanly', str(raised.exception))
 
+
+
+class PushRetryTests(unittest.TestCase):
+    def test_rejected_push_is_retried_then_succeeds(self):
+        outcomes = [SystemExit('rejected'), '']
+        with mock.patch.object(precheck, 'git', side_effect=outcomes) as git, \
+                mock.patch.object(precheck.time, 'sleep'):
+            precheck.push(Path('.'), 'a' * 40, 'precheck/x', attempts=3)
+        self.assertEqual(git.call_count, 2)
+
+    def test_persistent_rejection_still_fails(self):
+        with mock.patch.object(precheck, 'git', side_effect=SystemExit('rejected')) as git, \
+                mock.patch.object(precheck.time, 'sleep'), self.assertRaises(SystemExit):
+            precheck.push(Path('.'), 'a' * 40, 'precheck/x', attempts=3)
+        self.assertEqual(git.call_count, 3)
 
 if __name__ == '__main__':
     unittest.main()

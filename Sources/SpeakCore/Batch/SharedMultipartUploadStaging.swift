@@ -28,19 +28,45 @@ public final class SharedMultipartUploadStaging: @unchecked Sendable {
   private let ownerID = UUID()
   private let securityPolicy: SecurityPolicy
   private let report: @Sendable (Event) -> Void
+  private let reportInspectionFailure: @Sendable (InspectionFailure) -> Void
+  private let modificationDate: @Sendable (URL) throws -> Date?
 
-  public init(
+  public convenience init(
     directory: URL,
     securityPolicy: SecurityPolicy,
     stalenessThreshold: TimeInterval = SharedMultipartUploadStaging.defaultStalenessThreshold,
     fileManager: FileManager = .default,
     report: @escaping @Sendable (Event) -> Void = { _ in }
   ) {
+    self.init(
+      directory: directory,
+      securityPolicy: securityPolicy,
+      stalenessThreshold: stalenessThreshold,
+      fileManager: fileManager,
+      report: report,
+      reportInspectionFailure: { _ in },
+    )
+  }
+
+  /// `modificationDate` reads a body's age; tests inject failures through it.
+  init(
+    directory: URL,
+    securityPolicy: SecurityPolicy,
+    stalenessThreshold: TimeInterval,
+    fileManager: FileManager,
+    report: @escaping @Sendable (Event) -> Void,
+    reportInspectionFailure: @escaping @Sendable (InspectionFailure) -> Void,
+    modificationDate: @escaping @Sendable (URL) throws -> Date? = {
+      try $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+  ) {
     self.directory = directory
     self.securityPolicy = securityPolicy
     self.stalenessThreshold = stalenessThreshold
     self.fileManager = fileManager
     self.report = report
+    self.reportInspectionFailure = reportInspectionFailure
+    self.modificationDate = modificationDate
   }
 
   /// Creates an empty upload body file and claims it for the current upload so a
@@ -94,17 +120,38 @@ public final class SharedMultipartUploadStaging: @unchecked Sendable {
     }
   }
 
+  /// A body whose age cannot be read is kept: cleanup never deletes what it
+  /// cannot inspect, and a later pass retries it.
   private func purgeSecuredDirectory(now: Date) {
-    guard let candidates = try? self.fileManager.contentsOfDirectory(
-      at: self.directory,
-      includingPropertiesForKeys: [.contentModificationDateKey],
-      options: [.skipsHiddenFiles]
-    ) else { return }
+    let candidates: [URL]
+    do {
+      candidates = try self.fileManager.contentsOfDirectory(
+        at: self.directory,
+        includingPropertiesForKeys: [.contentModificationDateKey],
+        options: [.skipsHiddenFiles]
+      )
+    } catch {
+      self.reportInspectionFailure(.directoryEnumerationFailed(message: error.localizedDescription))
+      return
+    }
 
     let claimed = self.currentClaims()
     for url in candidates where Self.isUploadBody(url) && !claimed.contains(Self.claimKey(for: url)) {
-      let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-        .contentModificationDate ?? .distantPast
+      let modified: Date
+      do {
+        guard let date = try self.modificationDate(url) else {
+          self.reportInspectionFailure(.modificationDateUnavailable(
+            filename: url.lastPathComponent, message: "No modification date"
+          ))
+          continue
+        }
+        modified = date
+      } catch {
+        self.reportInspectionFailure(.modificationDateUnavailable(
+          filename: url.lastPathComponent, message: error.localizedDescription
+        ))
+        continue
+      }
       guard now.timeIntervalSince(modified) >= self.stalenessThreshold else { continue }
       do {
         try self.fileManager.removeItem(at: url)

@@ -38,4 +38,11 @@ extension SharedMultipartUploadStaging {
         case removalFailed(filename: String, message: String)
         case directoryPreparationFailed(message: String)
     }
+
+    /// Cleanup that could not inspect the directory or a body. Kept off the
+    /// public `Event` so adding it does not break exhaustive client switches.
+    enum InspectionFailure: Sendable, Equatable {
+        case directoryEnumerationFailed(message: String)
+        case modificationDateUnavailable(filename: String, message: String)
+    }
 }

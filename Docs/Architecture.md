@@ -175,11 +175,15 @@ platform capabilities.
 
 [SpeakApp.swift](../Sources/SpeakApp/SpeakApp.swift) is the executable entry point. [WireUp.swift](../Sources/SpeakApp/WireUp.swift)
 constructs the long-lived `AppEnvironment`, injects services, installs optional analytics and sync adapters, and makes
-the environment available to SwiftUI and App Intents. `AppSettings`, `PermissionsManager`, audio devices and capture,
+the environment available to SwiftUI and App Intents. Feature assembly sits beside it in `WireUp+<Feature>.swift`
+(paid access, analytics, TTS, Send to Mac, credential sync, transcription defaults); `AppChrome` owns the status bar,
+menus, Services and Touch Bar. `AppSettings`, `PermissionsManager`, audio devices and capture,
 transcription, post-processing, TTS, history, HUD, hot keys, output delivery and local transports live for the process.
 
 `MainManager` owns the dictation session lifecycle and coordinates recording, transcription, optional polishing,
-delivery, HUD transitions and history finalisation. `SmartTextOutput` chooses accessibility insertion or paste/clipboard
+delivery, HUD transitions and history finalisation. The stages after a stop live in `MainManager+SessionPipeline`;
+`SessionGestureRouter` turns hotkey gestures into starts and stops, and `SilenceAutoStop`, `HUDOcclusionObserver`,
+`PostProcessingRetryStore` and `SessionNetworkExchanges` own their own state and tests. `SmartTextOutput` chooses accessibility insertion or paste/clipboard
 fallback. Cancellation is scoped to the active session/run, and live-controller teardown waits for provider startup
 where necessary so a late start cannot capture for a replacement run.
 

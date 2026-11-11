@@ -35,18 +35,10 @@ enum WindowsSystemResources {
     static func log(_ line: String) { DesktopNativeSystemResources.log(line) }
 
     static func show(_ presentation: DesktopSystemResources.Presentation) {
-        DesktopNativeSystemResources.withNative(presentation, row: {
-            JSTISystemResourceRow(
-                id: $0.id, title: $0.title, reason: $0.reason, caption: $0.caption,
-                release_title: $0.releaseTitle, releasing: $0.releasing
-            )
-        }, present: { view, rows in
-            var native = JSTISystemResourcesView(
-                headline: view.headline, warning: view.warning, empty: view.empty, microphone: view.microphone,
-                rows: rows.baseAddress, row_count: Int32(rows.count), can_release_everything: view.canReleaseEverything
-            )
-            _ = jsti_window_set_system_resources(&native)
-        })
+        DesktopNativeSystemResources.show(
+            presentation, row: JSTISystemResourceRow.init, view: JSTISystemResourcesView.init,
+            set: jsti_window_set_system_resources
+        )
     }
 }
 

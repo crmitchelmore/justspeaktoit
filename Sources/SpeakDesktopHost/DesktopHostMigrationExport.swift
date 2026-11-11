@@ -28,7 +28,7 @@ extension DesktopHostController {
         using adapter: DesktopMigrationBackup.Adapter? = nil
     ) {
         guard !closed else { return }
-        guard canUseHistory, migrationExportTask == nil, audioCleanupConfirmation == nil else {
+        guard canUseHistory, migrationWork.exportTask == nil, audioCleanupConfirmation == nil else {
             let state: Int32
             if busy { state = 2 } else if recording != nil { state = 1 } else { state = 0 }
             update("History backup is unavailable while another operation or confirmation is running.", state: state)
@@ -54,12 +54,12 @@ extension DesktopHostController {
                 profiles: profiles, adapter: adapter
             )
         }
-        migrationExportWorker = worker
-        migrationExportTask = Task {
+        migrationWork.exportWorker = worker
+        migrationWork.exportTask = Task {
             let outcome = await worker.value
             defer {
-                migrationExportWorker = nil
-                migrationExportTask = nil
+                migrationWork.exportWorker = nil
+                migrationWork.exportTask = nil
                 busy = false
                 finishOperation()
             }

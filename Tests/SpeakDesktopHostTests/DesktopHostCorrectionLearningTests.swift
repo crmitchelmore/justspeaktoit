@@ -238,7 +238,7 @@ private struct LearningState: Sendable {
 
 private extension DesktopHostController where Platform == FakePlatform {
     func learningHistoryPasteAndWait() async {
-        correctionObservationWait = { _ in }
+        correctionLearning.observationWait = { _ in }
         var record = DesktopRecordingStore.Record(
             id: UUID(), audioFilename: "synthetic.wav", modelIdentifier: "synthetic"
         )
@@ -246,48 +246,48 @@ private extension DesktopHostController where Platform == FakePlatform {
         indexHistory(record)
         pasteLastHistoryItem(target: "synthetic")
         await outputSlot.task?.value
-        await correctionObservationTask?.value
+        await correctionLearning.observationTask?.value
     }
 
     func learningStartWaiting(_ entered: XCTestExpectation) async -> Task<Void, Never>? {
-        correctionObservationWait = { _ in
+        correctionLearning.observationWait = { _ in
             entered.fulfill()
             try await Task.sleep(for: .seconds(60))
         }
         _ = beginOutput("Susie", output: .init(options: FakeTextOutput(), target: "synthetic"), recordID: UUID())
         await outputSlot.task?.value
-        return correctionObservationTask
+        return correctionLearning.observationTask
     }
 
     func learningOutputAndWait() async {
-        correctionObservationWait = { _ in }
+        correctionLearning.observationWait = { _ in }
         _ = beginOutput("Susie", output: .init(options: FakeTextOutput(), target: "synthetic"), recordID: UUID())
         await outputSlot.task?.value
-        await correctionObservationTask?.value
+        await correctionLearning.observationTask?.value
     }
 
     func learningAdmission(disposition: DesktopTextOutputResult.Disposition, clipboard: Bool) async {
-        correctionObservationWait = { _ in }
+        correctionLearning.observationWait = { _ in }
         cancelCorrectionObservation()
         beginCorrectionObservation(
             job: FakeJob(label: "Synthetic", target: clipboard ? nil : "synthetic"),
-            text: "Susie", recordID: UUID(), revision: correctionLearningRevision,
+            text: "Susie", recordID: UUID(), revision: correctionLearning.revision,
             completion: .init(disposition, status: "Synthetic output")
         )
-        await correctionObservationTask?.value
+        await correctionLearning.observationTask?.value
     }
 
     func learningReplacementAndWait() async {
-        correctionObservationWait = { _ in }
+        correctionLearning.observationWait = { _ in }
         _ = beginOutput("Susy", output: .init(options: FakeTextOutput(), target: "replacement"), recordID: UUID())
         await outputSlot.task?.value
-        await correctionObservationTask?.value
+        await correctionLearning.observationTask?.value
     }
 
     func learningState() async throws -> LearningState {
         let vocabulary = try await vocabularyStore()
         return LearningState(
-            approved: correctionLearningApproved, status: correctionLearningStatus(),
+            approved: correctionLearning.approved, status: correctionLearningStatus(),
             candidates: await vocabulary.candidates.candidates, rules: await vocabulary.lexicon.rules.count
         )
     }

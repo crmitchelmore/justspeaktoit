@@ -25,7 +25,7 @@ extension DesktopHostController {
     /// Admission only; the reader and staging cleanup never occupy the settings queue.
     package func beginMigrationInspection(_ source: URL, using inspector: DesktopHostMigrationInspector? = nil) {
         guard !closed else { return }
-        guard canUseHistory, migrationInspectionTask == nil, audioCleanupConfirmation == nil else {
+        guard canUseHistory, migrationWork.inspectionTask == nil, audioCleanupConfirmation == nil else {
             let state: Int32
             if busy { state = 2 } else if recording != nil { state = 1 } else { state = 0 }
             update("Backup inspection is unavailable while another operation or confirmation is running.", state: state)
@@ -48,12 +48,12 @@ extension DesktopHostController {
         let worker = Task.detached {
             await DesktopMigrationInspection.inspect(source, reader: inspector.reader, comparison: comparison)
         }
-        migrationInspectionWorker = worker
-        migrationInspectionTask = Task {
+        migrationWork.inspectionWorker = worker
+        migrationWork.inspectionTask = Task {
             let outcome = await worker.value
             defer {
-                migrationInspectionWorker = nil
-                migrationInspectionTask = nil
+                migrationWork.inspectionWorker = nil
+                migrationWork.inspectionTask = nil
                 busy = false
                 finishOperation()
             }

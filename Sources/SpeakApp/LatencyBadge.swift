@@ -15,31 +15,9 @@ struct LatencyBadge: View {
     self.estimatedMs = option.estimatedLatencyMs
   }
 
-  private var badgeColor: Color {
-    switch tier {
-    case .instant: return .green
-    case .fast: return .brandLagoon
-    case .medium: return .yellow
-    case .slow: return .orange
-    }
-  }
-
-  private var iconName: String {
-    switch tier {
-    case .instant: return "bolt.fill"
-    case .fast: return "hare.fill"
-    case .medium: return "gauge.with.dots.needle.50percent"
-    case .slow: return "tortoise.fill"
-    }
-  }
-
-  private var tooltipText: String {
-    var text = tier.displayName
-    if let ms = estimatedMs {
-      text += " (~\(ms)ms)"
-    }
-    return text
-  }
+  private var badgeColor: Color { tier.badgeColor }
+  private var iconName: String { tier.badgeIconName }
+  private var tooltipText: String { tier.badgeTooltip(estimatedMs: estimatedMs) }
 
   var body: some View {
     HStack(spacing: 4) {
@@ -78,31 +56,9 @@ struct LatencyBadgeCompact: View {
     self.emphasized = emphasized
   }
 
-  private var badgeColor: Color {
-    switch tier {
-    case .instant: return .green
-    case .fast: return .brandLagoon
-    case .medium: return .yellow
-    case .slow: return .orange
-    }
-  }
-
-  private var iconName: String {
-    switch tier {
-    case .instant: return "bolt.fill"
-    case .fast: return "hare.fill"
-    case .medium: return "gauge.with.dots.needle.50percent"
-    case .slow: return "tortoise.fill"
-    }
-  }
-
-  private var tooltipText: String {
-    var text = tier.displayName
-    if let ms = estimatedMs {
-      text += " (~\(ms)ms)"
-    }
-    return text
-  }
+  private var badgeColor: Color { tier.badgeColor }
+  private var iconName: String { tier.badgeIconName }
+  private var tooltipText: String { tier.badgeTooltip(estimatedMs: estimatedMs) }
 
   var body: some View {
     if emphasized {
@@ -124,6 +80,32 @@ struct LatencyBadgeCompact: View {
     Image(systemName: iconName)
       .font(.system(size: 10, weight: .semibold))
       .foregroundStyle(badgeColor)
+  }
+}
+
+/// Presentation shared by the full and compact latency badges.
+extension LatencyTier {
+  fileprivate var badgeColor: Color {
+    switch self {
+    case .instant: return .green
+    case .fast: return .brandLagoon
+    case .medium: return .yellow
+    case .slow: return .orange
+    }
+  }
+
+  fileprivate var badgeIconName: String {
+    switch self {
+    case .instant: return "bolt.fill"
+    case .fast: return "hare.fill"
+    case .medium: return "gauge.with.dots.needle.50percent"
+    case .slow: return "tortoise.fill"
+    }
+  }
+
+  fileprivate func badgeTooltip(estimatedMs: Int?) -> String {
+    guard let estimatedMs else { return displayName }
+    return "\(displayName) (~\(estimatedMs)ms)"
   }
 }
 

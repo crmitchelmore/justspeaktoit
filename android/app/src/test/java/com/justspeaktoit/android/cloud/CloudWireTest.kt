@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.net.SocketTimeoutException
 
@@ -109,5 +110,30 @@ class CloudWireTest {
     fun testCatalogue_fallsBackToDefaultForUnknownModel() {
         assertEquals(CloudCatalog.defaultTranscriptionModel, CloudCatalog.transcriptionModel("retired/model"))
         assertTrue(CloudCatalog.transcriptionModels.all { it.provider != CloudProvider.OpenRouter })
+    }
+
+    @Test
+    fun testReadBody_readsUtf8UpToTheLimit() {
+        val body = "{\"text\":\"héllo\"}"
+        assertEquals(body, CloudWire.readBody(ByteArrayInputStream(body.toByteArray())))
+        val exact = ByteArray(1024) { 'a'.code.toByte() }
+        assertEquals(1024, CloudWire.readBody(ByteArrayInputStream(exact), limit = 1024).length)
+    }
+
+    @Test
+    fun testReadBody_rejectsAnOversizedResponseWithoutReadingItAll() {
+        // An endless body: only the cap ends the read.
+        val stream = object : java.io.InputStream() {
+            var served = 0L
+
+            override fun read(): Int {
+                served++
+                return 'a'.code
+            }
+        }
+        val error = assertThrows(CloudException::class.java) { CloudWire.readBody(stream) }
+        assertEquals(DictationFailure.Server, error.failure)
+        assertTrue(error.message.orEmpty().contains("larger than ${CloudWire.MAX_RESPONSE_BYTES} bytes"))
+        assertTrue(stream.served <= CloudWire.MAX_RESPONSE_BYTES + 8L * 1024)
     }
 }

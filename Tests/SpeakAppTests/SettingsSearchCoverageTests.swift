@@ -80,7 +80,9 @@ final class SettingsSearchCoverageTests: XCTestCase {
     }
 
     func testEveryPersistedIOSSettingIsIndexed() throws {
-        let published = publishedProperties(in: try read("Sources/SpeakiOS/Settings/AppSettings.swift"))
+        let sources = try swiftFiles(under: "Sources/SpeakiOS/Settings")
+            .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
+        let published = sources.flatMap { publishedProperties(in: $0.1) }
             .filter { !$0.hasSuffix("APIKey") }  // Each key is indexed at runtime from the API Keys list.
         assertIndexed(published, platform: .iOS, exemptions: Self.unindexedIOSSettings)
     }

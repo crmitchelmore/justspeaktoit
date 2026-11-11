@@ -81,6 +81,7 @@ package enum DesktopNativeLinuxEvent: Int32, CaseIterable, Sendable {
     case appearance = 45          // index: 0 system, 1 light, 2 dark
     case loginItem = 46           // index: 1 on
     case automation = 47          // index: 1 allows automation
+    case recordingsLocation = 48  // text: chosen folder, or "" for the History default
     case localModelDownload = 50
     case localModelCancel = 51
     case localModelRemove = 52
@@ -91,10 +92,6 @@ package enum DesktopNativeLinuxEvent: Int32, CaseIterable, Sendable {
     case cloudSyncSignIn = 61
     case cloudSyncSignOut = 62
     case cloudSyncNow = 63
-    /// Shares 98 with `DesktopNativeWindowEvent.migrationRestore`, which
-    /// decodes first, so the window's New recordings folder choice cannot
-    /// reach the host until the native constant is renumbered.
-    case recordingsLocation = 98
     case actionShortcutEdit = 115
     case apiKeys = 117
     case permissions = 118

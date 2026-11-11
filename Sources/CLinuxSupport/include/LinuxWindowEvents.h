@@ -68,7 +68,8 @@ enum {
     JSTI_EVENT_PROFILES = 140
 };
 
-/* Read aloud, Appearance and Launch at login. Linux-only numbers 40-46. */
+/* Read aloud, Appearance, Launch at login, automation and the recordings
+ * location. Linux-only numbers 40-48. */
 enum {
     /* text: the selected record id; the displayed transcript is captured
      * with jsti_window_transcript_snapshot while this event runs. */
@@ -81,8 +82,9 @@ enum {
     JSTI_EVENT_LOGIN_ITEM = 46,
     JSTI_EVENT_AUTOMATION = 47,
     /* Housekeeping › New recordings folder. text: chosen absolute local folder,
-     * or "" to save new recordings in History again. Nothing is moved. */
-    JSTI_EVENT_RECORDINGS_LOCATION = 98,
+     * or "" to save new recordings in History again. Nothing is moved.
+     * Must stay distinct from every shared event (98 is Migration restore). */
+    JSTI_EVENT_RECORDINGS_LOCATION = 48,
     JSTI_EVENT_USER_ABSENT = 131, /* Outside comparison events 100-109 and 120-129. */
     /* Settings search in the sidebar. text: the query as typed, reported as it
      * changes (debounced by GtkSearchEntry) and as "" when the empty entry is

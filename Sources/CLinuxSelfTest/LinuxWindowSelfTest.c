@@ -536,6 +536,10 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     backup_emit_path(&choice, "synthetic-restore.zip");
     backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_RESTORE && observed.index == 0 &&
         g_strcmp0(observed.text, "synthetic-restore.zip") == 0;
+    observed.event = 0;
+    on_recordings_default(NULL, NULL);
+    backup_ok = backup_ok && observed.event == JSTI_EVENT_RECORDINGS_LOCATION &&
+        observed.event != JSTI_EVENT_MIGRATION_RESTORE && g_strcmp0(observed.text, "") == 0;
     ui.callback = backup_callback;
     g_clear_pointer(&observed.text, g_free);
     ui.closing = TRUE;
@@ -548,7 +552,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     g_weak_ref_clear(&choice.parent);
     g_object_unref(choice.cancelled);
     refresh_actions();
-    if (!backup_ok) return fail(error, capacity, "History backup chooser cancellation or late-close fence failed");
+    if (!backup_ok) return fail(error, capacity, "History backup events, recordings location or chooser fences failed");
     gchar report_text[] = "Synthetic read-only report.";
     GtkWidget *report_dialog = migration_report_dialog(report_text);
     g_object_ref_sink(report_dialog);

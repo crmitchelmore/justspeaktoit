@@ -47,7 +47,7 @@ struct Dialog {
     int shown = -1;
 };
 
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 
 std::wstring wideText(const std::string &text) {
     std::wstring result;
@@ -229,11 +229,7 @@ void command(HWND window, Dialog &dialog, int id) {
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     LRESULT themed = 0;
     if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
@@ -245,23 +241,15 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case WM_TIMER:
         if (wparam == refreshTimer) refresh(window, *dialog);
         return 0;
-    case WM_GETMINMAXINFO: {
-        RECT frame{0, 0, scale(window, minimumClientWidth), scale(window, minimumClientHeight)};
-        AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {frame.right - frame.left, frame.bottom - frame.top};
+    case WM_GETMINMAXINFO:
+        jsti::chrome::minimumTrackSize(window, lparam, minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle);
         return 0;
-    }
     case WM_SIZE: layout(window); return 0;
     case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        jsti::chrome::applySuggestedBounds(window, lparam);
         refreshFont(window, *dialog); layout(window); return 0;
     }
-    case WM_ACTIVATE:
-        if (LOWORD(wparam) == WA_INACTIVE) { dialog->focus = GetFocus(); return 0; }
-        SetFocus(dialog->focus && IsChild(window, dialog->focus) ? dialog->focus : GetDlgItem(window, toggleID));
-        return 0;
+    case WM_ACTIVATE: jsti::chrome::rememberFocus(window, wparam, dialog->focus, toggleID); return 0;
     case DM_GETDEFID: return MAKELRESULT(IDCANCEL, DC_HASDEFID);
     case WM_COMMAND:
         if (HIWORD(wparam) == BN_CLICKED) command(window, *dialog, LOWORD(wparam));

@@ -82,7 +82,7 @@ void emit(Dialog &dialog, const char *path, const std::string &text = "", bool s
     const auto &identity = dialog.modern && !session ? dialog.epoch : dialog.token;
     dialog.callback(118, -1, text.c_str(), identity.c_str(), path, dialog.context);
 }
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 bool rows(const char *text, std::vector<std::string> &result) {
     if (!text || strlen(text) > 262144) return false;
     if (!text[0]) return true;
@@ -165,11 +165,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             if (!eligible) { pending = {}; pendingProviders.clear(); return 0; }
         }
     }
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     LRESULT themed = 0;
     if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;

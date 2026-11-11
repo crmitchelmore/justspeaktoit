@@ -61,7 +61,7 @@ HWND activeProviderForm = nullptr;
 std::vector<Delivery> deliveries;
 constexpr UINT providerDeliveryMessage = WM_APP + 28;
 enum { labelID = 1030, privacyID, keyID, statusID, saveID, removeID, recheckID, closeID };
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 bool uuid(const char *value) {
     if (!value || strlen(value) != 36) return false;
     for (size_t index = 0; index < 36; ++index) {

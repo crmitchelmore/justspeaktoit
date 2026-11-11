@@ -72,7 +72,7 @@ final class SettingsSearchCoverageTests: XCTestCase {
     }
 
     func testEveryPersistedMacSettingIsIndexed() throws {
-        let published = publishedProperties(in: try read("Sources/SpeakApp/AppSettings.swift"))
+        let published = publishedProperties(in: try read("Sources/SpeakApp/Settings/AppSettings.swift"))
         assertIndexed(published, platform: .macOS, exemptions: Self.unindexedMacSettings)
     }
 

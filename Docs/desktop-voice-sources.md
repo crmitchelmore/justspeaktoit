@@ -1002,7 +1002,7 @@ call or native/audio activation is part of this source-only delivery.
 
 ## Actual macOS features and remaining gaps
 
-`Sources/SpeakApp/VoiceOutputView.swift` currently offers manual text, clipboard,
+`Sources/SpeakApp/TextToSpeech/VoiceOutputView.swift` currently offers manual text, clipboard,
 History and text-file import; it copies `TextToSpeechManager.lastResult.audioURL`
 through `NSSavePanel` for export. It does not offer an external-selection source
 in that workspace. Windows/Linux now implement all four text sources and

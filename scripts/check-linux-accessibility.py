@@ -20,8 +20,10 @@ ICON_ONLY = re.compile(
     r"(?:gtk_button_new_from_icon_name|gtk_toggle_button_new_from_icon_name)\s*\("
 )
 SET_ICON = re.compile(r"(?:gtk_button_set_icon_name|gtk_menu_button_set_icon_name)\s*\(\s*(?:GTK_\w+\()?\s*(?P<target>[\w.\->\[\]]+)")
-DROP_DOWN = re.compile(r"\bgtk_drop_down_new(?:_from_strings)?\s*\(")
-DROP_DOWN_NAMED = re.compile(r"\b(?:jsti_accessible_set_name|gtk_label_set_mnemonic_widget)\s*\(")
+DROP_DOWN = re.compile(
+    r"(?:(?P<target>[\w.\->\[\]]+)\s*=\s*(?:GTK_\w+\()?\s*)?\bgtk_drop_down_new(?:_from_strings)?\s*\("
+)
+DROP_DOWN_NAMED = re.compile(r"\b(?:jsti_accessible_set_name|gtk_label_set_mnemonic_widget)\s*\((?P<arguments>[^;]*)\)\s*;")
 # Lines after a drop-down's construction that may hold its naming call.
 DROP_DOWN_WINDOW = 10
 
@@ -32,6 +34,21 @@ def labelled(source: str, target: str) -> bool:
         rf"gtk_accessible_update_property\(\s*GTK_ACCESSIBLE\(\s*{escaped}\s*\)\s*,\s*GTK_ACCESSIBLE_PROPERTY_LABEL",
         source,
     ) is not None
+
+
+def references(arguments: str, names: set[str]) -> bool:
+    return any(re.search(rf"(?<![\w.>]){re.escape(name)}(?![\w\[])", arguments) for name in names)
+
+
+def drop_down_named(target: str | None, window: str) -> bool:
+    """True when a naming call in the window refers to this drop-down (or a plain alias of it)."""
+    if target is None:
+        return False
+    names = {target}
+    for alias in re.finditer(r"(?P<alias>[\w.\->\[\]]+)\s*=\s*(?P<source>[\w.\->\[\]]+)\s*;", window):
+        if alias.group("source") in names:
+            names.add(alias.group("alias"))
+    return any(references(call.group("arguments"), names) for call in DROP_DOWN_NAMED.finditer(window))
 
 
 def violations(path: Path) -> list[str]:
@@ -47,7 +64,7 @@ def violations(path: Path) -> list[str]:
     for match in DROP_DOWN.finditer(source):
         line = source.count("\n", 0, match.start())
         window = "\n".join(lines[line:line + DROP_DOWN_WINDOW])
-        if DROP_DOWN_NAMED.search(window) is None:
+        if not drop_down_named(match.group("target"), window):
             found.append(f"{path}:{line + 1}: drop-down needs jsti_accessible_set_name or a mnemonic label")
     return found
 

@@ -218,11 +218,10 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     // OpenAI's only live transcription transport is the Realtime WebSocket
     // API, so any openai/* live model is handled by the realtime controller.
     case .openai: return controllers.openAIRealtime
-    case .deepgram: return controllers.deepgram
     case .modulate: return controllers.modulate
     case .elevenlabs: return controllers.elevenlabs
     case .soniox: return controllers.soniox
-    case .assemblyai, .cartesia, .gladia, .google, .xai, .azure, .alibaba, .meta, .speechmatics, .revai,
+    case .assemblyai, .cartesia, .deepgram, .gladia, .google, .xai, .azure, .alibaba, .meta, .speechmatics, .revai,
          .mistral, .reson8:
       return controllers.sharedClient
     }
@@ -394,7 +393,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private struct ControllerSet {
     let native: NativeOSXLiveTranscriber
     let speechAnalyzer: AppleSpeechAnalyzerLiveController
-    let deepgram: DeepgramLiveController
     let modulate: ModulateLiveController
     let elevenlabs: ElevenLabsLiveController
     let soniox: SonioxLiveController
@@ -423,12 +421,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         permissionsManager: permissionsManager,
         appSettings: appSettings,
         audioDeviceManager: audioDeviceManager
-      )
-      deepgram = DeepgramLiveController(
-        appSettings: appSettings,
-        permissionsManager: permissionsManager,
-        audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
       )
       modulate = ModulateLiveController(
         appSettings: appSettings,
@@ -486,7 +478,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       var controllers: [any LiveTranscriptionController] = [
         native,
         speechAnalyzer,
-        deepgram,
         modulate,
         elevenlabs,
         soniox,

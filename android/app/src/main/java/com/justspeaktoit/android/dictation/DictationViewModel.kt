@@ -135,8 +135,10 @@ class DictationViewModel internal constructor(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val timings: DictationTimings = DictationTimings(),
+    // Process-wide, so a recreated ViewModel shares the lane that releases its predecessor's microphone.
+    retirement: RecorderRetirement = RecorderRetirement.shared,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
-    private val capture = CloudCapture(recorders, cacheDir, io)
+    private val capture = CloudCapture(recorders, cacheDir, io, retirement)
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
     private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs)
 

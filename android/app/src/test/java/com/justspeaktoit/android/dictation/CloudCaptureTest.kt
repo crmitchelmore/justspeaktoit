@@ -2,10 +2,8 @@ package com.justspeaktoit.android.dictation
 
 import com.justspeaktoit.android.cloud.CallHandle
 import com.justspeaktoit.android.cloud.CloudException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -25,7 +23,11 @@ class CloudCaptureTest {
     @get:Rule val folder = TemporaryFolder()
 
     private val recorders = FakeRecorders()
-    private val capture by lazy { CloudCapture(recorders, folder.root, Dispatchers.IO) }
+    private val retirement = RecorderRetirement(Dispatchers.IO)
+    private val capture by lazy { owner() }
+
+    /** A new owner, as a recreated ViewModel builds, sharing this test's retirement lane. */
+    private fun owner() = CloudCapture(recorders, folder.root, Dispatchers.IO, retirement)
 
     private fun start(): CloudCapture.Recording {
         assertTrue(capture.start(onLevel = {}, onLimitReached = {}, onCaptureFailed = {}))
@@ -108,18 +110,60 @@ class CloudCaptureTest {
     }
 
     @Test
-    fun testClose_runsOnTheInjectedTeardownScope() = runBlocking {
+    fun testRecreatedOwners_shareOneLane_andRefuseNewRecordingsWhileOrphansAreStalled() = runBlocking {
         val gate = CountDownLatch(1)
         recorders.stopGate = gate
-        val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val owned = CloudCapture(recorders, folder.root, Dispatchers.IO, teardownScope)
-        assertTrue(owned.start(onLevel = {}, onLimitReached = {}, onCaptureFailed = {}))
-        val recording = checkNotNull(owned.current)
+        val owners = List(3) { owner() }
+        val orphans = owners.take(2).map { owner ->
+            assertTrue(owner.start(onLevel = {}, onLimitReached = {}, onCaptureFailed = {}))
+            val recording = checkNotNull(owner.current)
+            recording to checkNotNull(owner.close())
+        }
 
-        val teardown = checkNotNull(owned.close())
-        assertTrue(teardown in checkNotNull(teardownScope.coroutineContext[Job]).children.toList())
+        ViewModelHarness.await(recorders.created[0].stopEntered)
+        Thread.sleep(50)
+        assertEquals("one stalled stop holds the only lane thread", 0, recorders.created[1].stops)
+        assertEquals(2, retirement.pendingOrphans)
+        assertFalse("no microphone opens while two orphans wait", owners[2].start({}, {}, {}))
+        assertEquals(2, recorders.created.size)
+        assertNull(owners[2].current)
+
         gate.countDown()
-        withTimeout(ViewModelHarness.TIMEOUT_MS) { teardown.join() }
+        orphans.forEach { (recording, teardown) ->
+            withTimeout(ViewModelHarness.TIMEOUT_MS) { teardown.join() }
+            assertFalse("stopped, then deleted", recording.file.exists())
+        }
+        assertEquals(listOf(1, 1), recorders.created.map { it.stops })
+        assertEquals(0, retirement.pendingOrphans)
+        assertTrue("admission reopens once the orphans are released", owners[2].start({}, {}, {}))
+    }
+
+    @Test
+    fun testClose_duringAnOwnersStop_joinsItWithoutASecondStopOrDelete() = runBlocking {
+        val gate = CountDownLatch(1)
+        recorders.stopGate = gate
+        val recording = start()
+        val stopping = async(Dispatchers.Default) { capture.stop(recording) }
+        ViewModelHarness.await(recorders.last.stopEntered)
+
+        val teardown = checkNotNull(capture.close())
+        assertSame("close joins the stop under way", recording.stopped, teardown)
+        assertEquals(0, retirement.pendingOrphans)
+
+        gate.countDown()
+        assertEquals(recorders.bytes, withTimeout(ViewModelHarness.TIMEOUT_MS) { stopping.await() })
+        teardown.join()
+        assertEquals(1, recorders.last.stops)
+        assertTrue("the stopping path still owns the file", recording.file.exists())
+    }
+
+    @Test
+    fun testStop_afterCloseClaimedTheRecording_waitsForTheOrphanStop() = runBlocking {
+        val recording = start()
+        val teardown = checkNotNull(capture.close())
+
+        assertEquals(recorders.bytes, withTimeout(ViewModelHarness.TIMEOUT_MS) { capture.stop(recording) })
+        teardown.join()
         assertEquals(1, recorders.last.stops)
         assertFalse(recording.file.exists())
     }

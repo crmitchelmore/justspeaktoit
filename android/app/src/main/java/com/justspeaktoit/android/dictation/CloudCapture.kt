@@ -4,13 +4,10 @@ import com.justspeaktoit.android.cloud.AudioRecorder
 import com.justspeaktoit.android.cloud.CallHandle
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.RecorderFactory
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineName
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
@@ -19,6 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns the Cloud recording and the session's blocking IO. Call from the main thread.
@@ -27,19 +25,42 @@ import java.io.File
  * microphone, and callbacks from a recording that is no longer owned are ignored by the caller via
  * [owns]. Blocking IO runs under an overall deadline, and cancelling it aborts the blocked call.
  *
- * [teardown] runs the release of a recording still owned at [close]. It outlives the owner's scope on
- * purpose (the microphone must be released after the screen is gone) and runs one stop at a time, so
- * a stalled recorder holds at most one IO thread.
+ * Each recorder is stopped exactly once, by whichever path claims it first: [stop], [discard] or
+ * [close]. A recording still owned at [close] is handed to [retirement], which outlives the owner on
+ * purpose (the microphone must be released after the screen is gone) and is shared by every owner
+ * in the process, so recreated owners cannot multiply stalled stops.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 internal class CloudCapture(
     private val recorders: RecorderFactory,
     private val cacheDir: File,
     private val io: CoroutineDispatcher,
-    private val teardown: CoroutineScope =
-        CoroutineScope(SupervisorJob() + io.limitedParallelism(1) + CoroutineName("jsti-recorder-teardown")),
+    private val retirement: RecorderRetirement = RecorderRetirement.shared,
 ) {
-    class Recording(val recorder: AudioRecorder, val file: File)
+    class Recording(val recorder: AudioRecorder, val file: File) {
+        private val claimed = AtomicBoolean(false)
+        private val result = CompletableDeferred<Long>()
+
+        /** Completes once the recorder has stopped. */
+        val stopped: Job get() = result
+
+        /** True for the one caller that must then stop the recorder; later callers wait for it. */
+        internal fun claimStop(): Boolean = claimed.compareAndSet(false, true)
+
+        /** Blocking. Stops the recorder for the caller that claimed it. */
+        internal fun stopClaimed(): Long {
+            val bytes = try {
+                recorder.stop()
+            } catch (e: Throwable) {
+                result.completeExceptionally(e)
+                throw e
+            }
+            result.complete(bytes)
+            return bytes
+        }
+
+        /** Stops the recorder if nobody has yet, otherwise waits for the stop under way. */
+        internal suspend fun stopOnce(): Long = if (claimStop()) stopClaimed() else result.await()
+    }
 
     /** The recording that has not yet been stopped, if any. */
     var current: Recording? = null
@@ -56,6 +77,8 @@ internal class CloudCapture(
         onLimitReached: (Recording) -> Unit,
         onCaptureFailed: (Recording) -> Unit,
     ): Boolean {
+        // Orphans are still holding microphones that have not been released.
+        if (!retirement.admitsNewRecording()) return false
         val file = File(cacheDir, "dictation-${System.nanoTime()}.wav")
         lateinit var recording: Recording
         val recorder = recorders.create(
@@ -75,7 +98,7 @@ internal class CloudCapture(
 
     /** Stops capture and returns the audio bytes, or -1 on a capture failure. The file is kept. */
     suspend fun stop(recording: Recording): Long {
-        val bytes = withContext(NonCancellable + io) { recording.recorder.stop() }
+        val bytes = withContext(NonCancellable + io) { recording.stopOnce() }
         release(recording)
         return bytes
     }
@@ -83,7 +106,7 @@ internal class CloudCapture(
     /** Stops capture without a result and deletes its file. */
     suspend fun discard(recording: Recording) {
         withContext(NonCancellable + io) {
-            recording.recorder.stop()
+            recording.stopOnce()
             recording.file.delete()
         }
         release(recording)
@@ -104,11 +127,11 @@ internal class CloudCapture(
     fun close(): Job? {
         val recording = current ?: return null
         current = null
-        // Stop before delete, off the main thread: joining the capture thread here could cause an ANR.
-        return teardown.launch {
-            recording.recorder.stop()
-            recording.file.delete()
-        }
+        // A stop already under way owns the recording and decides what happens to its file; a second
+        // stop or a delete here could race it. Otherwise retire it off the main thread: joining the
+        // capture thread here could cause an ANR.
+        if (!recording.claimStop()) return recording.stopped
+        return retirement.retire(recording)
     }
 
     /**

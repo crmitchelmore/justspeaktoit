@@ -797,14 +797,25 @@ final class MainManager: ObservableObject {
       // otherwise claims the app only listens while it in fact records.
       // Showing that the microphone captures is a privacy duty, not a taste.
       let showsHUD = appSettings.showHUDDuringSessions || trigger == .handsFree
-      if showsHUD {
-        // Up straight away as "Getting ready"; its clock starts only when the
-        // microphone delivers real audio, never while words can't be heard.
-        // Uses the cached microphone status: each TCC query costs 13-35 ms
-        // before capture (#611), and `startRecording` makes the authoritative
-        // check moments later; the HUD health is refreshed once capture is live.
-        hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
-        hudManager.beginRecording(profileName: profileApplier.activeProfileName, awaitingAudio: true)
+      // Up as "Getting ready"; its clock starts only when the microphone
+      // delivers real audio, never while words can't be heard. Uses the cached
+      // microphone status: each TCC query costs 13-35 ms before capture (#611),
+      // and the capture start makes the authoritative check; the HUD health is
+      // refreshed once capture is live.
+      let presentStartingHUD = { [weak self] in
+        guard let self else { return }
+        self.hudManager.updateCaptureHealth(self.buildCaptureHealthSnapshot())
+        self.hudManager.beginRecording(profileName: self.profileApplier.activeProfileName, awaitingAudio: true)
+      }
+      // The panel renders on the main run loop, which the capture start used to
+      // wait behind (#611). Show it up front only when a slow input-node build
+      // needs covering; otherwise it renders while the recorder opens.
+      let showsHUDBeforeInputBuild = showsHUD
+        && StartingHUDTiming.presentsBeforeInputBuild(
+          buildsInputNode: prepareStream != nil, hasPrimedInput: primedInput != nil
+        )
+      if showsHUDBeforeInputBuild {
+        presentStartingHUD()
       }
       let sequencer = RecordingStartSequencer(
         isSessionCurrent: { [weak self] in self?.activeSession === session },
@@ -812,10 +823,19 @@ final class MainManager: ObservableObject {
         discardPreparedStream: { await liveInputPreparation.finish(startFailed: true) },
         startCapture: { [weak self] in
           guard let self else { return }
-          let recording = try await self.audioFileManager.startRecording(
+          let audioFileManager = self.audioFileManager
+          // Main-actor reads happen here, before the hop, so the recorder's
+          // actor never waits for the main thread on its way to `record()`.
+          let preflight = await audioFileManager.makeStartPreflight()
+          async let startedRecording = audioFileManager.startRecording(
             warmContext: warmContext,
-            owner: .dictation
+            owner: .dictation,
+            preflight: preflight
           )
+          if showsHUD, !showsHUDBeforeInputBuild {
+            presentStartingHUD()
+          }
+          let recording = try await startedRecording
           // The stop could have landed while `startRecording()` was suspended.
           // Publish nothing for a session that is already over — throw away the
           // capture that just came up instead.
@@ -823,7 +843,7 @@ final class MainManager: ObservableObject {
             await self.discardStartedCapture()
             throw RecordingStartAbort.sessionEnded
           }
-          self.recordCaptureStart(for: session, wasWarm: recording.usedWarmRecorder)
+          self.recordCaptureStart(for: session, recording: recording)
           self.state = .recording
           session.events.append(
             HistoryEvent(
@@ -889,11 +909,14 @@ final class MainManager: ObservableObject {
   ///
   /// Called from the start sequencer's capture step, so the checkpoint is taken
   /// the moment capture is *proven* live rather than when it was requested.
-  private func recordCaptureStart(for session: ActiveSession, wasWarm: Bool) {
-    session.captureStarted = Date()
-    session.captureStartedUptime = ProcessInfo.processInfo.systemUptime
+  private func recordCaptureStart(for session: ActiveSession, recording: RecordingStart) {
+    let nowUptime = ProcessInfo.processInfo.systemUptime
+    let liveUptime = min(recording.liveUptime ?? nowUptime, nowUptime)
+    session.captureStarted = Date().addingTimeInterval(liveUptime - nowUptime)
+    session.captureStartedUptime = liveUptime
+    session.recorderOpenMilliseconds = recording.recorderOpenMilliseconds
     if let coldStartMs = session.captureStartMilliseconds {
-      let path = wasWarm ? "pre-warmed" : "cold"
+      let path = recording.usedWarmRecorder ? "pre-warmed" : "cold"
       self.logger.info("Latency: capture started \(coldStartMs)ms after trigger (\(path, privacy: .public))")
     }
     if let keyDownMs = session.keyDownToCaptureMilliseconds {
@@ -914,8 +937,11 @@ final class MainManager: ObservableObject {
   /// so a clipped-start report can be diagnosed from the session alone
   /// (issue #641).
   private func recordStartTimeline(for session: ActiveSession, timeline: RecordingStartTimeline) {
-    let summary = timeline.diagnosticSummary
+    var summary = timeline.diagnosticSummary
     guard !summary.isEmpty else { return }
+    if let recorderOpenMs = session.recorderOpenMilliseconds {
+      summary += ", recorder open \(SessionLatencyMetrics.formattedMilliseconds(recorderOpenMs))"
+    }
     self.logger.info("Recording start timeline: \(summary, privacy: .public)")
     session.events.append(
       HistoryEvent(

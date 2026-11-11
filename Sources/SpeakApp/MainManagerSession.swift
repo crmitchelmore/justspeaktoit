@@ -31,6 +31,17 @@ enum SessionTriggerSource: Equatable {
   }
 }
 
+/// When the "Getting ready" HUD is presented relative to the capture start
+/// (#611). The panel renders on the main run loop, and the recorder start used
+/// to queue behind that render. It is shown up front only when the start has
+/// a slow live-input build (100-300 ms) to cover; otherwise it is presented
+/// once the recorder start is in flight, so the two overlap.
+enum StartingHUDTiming {
+  static func presentsBeforeInputBuild(buildsInputNode: Bool, hasPrimedInput: Bool) -> Bool {
+    buildsInputNode && !hasPrimedInput
+  }
+}
+
 /// Wall-clock identity plus an optional monotonic hotkey checkpoint. UI and
 /// programmatic starts deliberately omit the monotonic value so they never
 /// enter the hotkey-to-capture percentile cohort.
@@ -120,6 +131,8 @@ final class ActiveSession {
   /// reached the target app, and when the user requested stop.
   var captureStarted: Date?
   var captureStartedUptime: TimeInterval?
+  /// How long the recorder's `record()` took to prove capture (#611).
+  var recorderOpenMilliseconds: Int?
   var firstPartialReceived: Date?
   var firstInsertion: Date?
   var stopRequested: Date?

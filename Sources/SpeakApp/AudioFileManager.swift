@@ -30,6 +30,23 @@ enum AudioRecordingLifecycleEvent: Sendable {
 struct RecordingStart: Sendable {
   let url: URL
   let usedWarmRecorder: Bool
+  /// `systemUptime` at the moment the recorder proved it was capturing, taken
+  /// on the recorder's actor so a busy main thread cannot inflate it (#611).
+  var liveUptime: TimeInterval?
+  /// How long `record()` took to prove capture.
+  var recorderOpenMilliseconds: Int?
+}
+
+/// Main-actor state a capture start needs, read before the recorder's actor
+/// takes over (#611). The HUD panel is presented on the main run loop as a
+/// session starts, so each main-actor hop inside `startRecording` used to wait
+/// for that render before the microphone could open.
+struct CaptureStartPreflight: Sendable {
+  let microphoneGranted: Bool
+  let recordingsDirectory: URL
+  /// The preferred-input session, begun only when the microphone is granted.
+  /// `startRecording(preflight:)` owns it from then on and ends it on failure.
+  let inputSession: AudioInputDeviceManager.SessionContext?
 }
 
 enum AudioFileManagerError: LocalizedError {
@@ -385,31 +402,61 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
 
   // MARK: - Recording
 
+  /// Reads the main-actor state a capture start needs, synchronously on the
+  /// main actor, so `startRecording(preflight:)` can open the microphone
+  /// without waiting for the main thread. Begins the preferred-input session
+  /// only when the microphone is already granted; otherwise the start falls
+  /// back to the authoritative request path.
+  @MainActor
+  func makeStartPreflight() async -> CaptureStartPreflight {
+    permissionsManager.refresh(.microphone, ifOlderThan: Self.microphoneStatusMaxAge)
+    let granted = permissionsManager.status(for: .microphone).isGranted
+    let inputSession = granted ? await audioDeviceManager.beginUsingPreferredInput() : nil
+    return CaptureStartPreflight(
+      microphoneGranted: granted,
+      recordingsDirectory: appSettings.recordingsDirectory,
+      inputSession: inputSession
+    )
+  }
+
   /// Starts capture, claiming the staged recorder when `warmContext` matches
   /// the one it was prepared for. On the warm path the only work left on the
   /// hotkey→capture path is the input-device session and `record()` itself.
-  func startRecording( // swiftlint:disable:this function_body_length
+  ///
+  /// - Parameter preflight: main-actor state read by `makeStartPreflight()`.
+  ///   With a granted preflight nothing here waits for the main actor before
+  ///   `record()`. This call owns its input session, including when it throws.
+  func startRecording( // swiftlint:disable:this function_body_length cyclomatic_complexity
     warmContext: CaptureWarmContext? = nil,
-    owner: AudioRecordingOwner = .auxiliary
+    owner: AudioRecordingOwner = .auxiliary,
+    preflight: CaptureStartPreflight? = nil
   ) async throws -> RecordingStart {
     guard self.recorder == nil, self.currentRecordingURL == nil,
           !self.isStartingRecording, sourceTeardownCount == 0 else {
+      await self.endPreflightInput(preflight)
       throw AudioFileManagerError.alreadyRecording
     }
     self.isStartingRecording = true
     defer { self.isStartingRecording = false }
 
     if let captureSource {
+      await self.endPreflightInput(preflight)
       return try await startCaptureSource(captureSource, owner: owner)
     }
 
-    let permissionStatus = await MainActor.run {
-      // Reuses the authoritative query made at hotkey key-down when it is
-      // fresh, keeping 15-35 ms of TCC off the trigger-to-capture path (#611).
-      permissionsManager.refresh(.microphone, ifOlderThan: Self.microphoneStatusMaxAge)
-      return permissionsManager.status(for: .microphone)
+    let permissionGranted: Bool
+    if let preflight {
+      permissionGranted = preflight.microphoneGranted
+    } else {
+      permissionGranted = await MainActor.run {
+        // Reuses the authoritative query made at hotkey key-down when it is
+        // fresh, keeping 15-35 ms of TCC off the trigger-to-capture path (#611).
+        permissionsManager.refresh(.microphone, ifOlderThan: Self.microphoneStatusMaxAge)
+        return permissionsManager.status(for: .microphone).isGranted
+      }
     }
-    if !permissionStatus.isGranted {
+    if !permissionGranted {
+      await self.endPreflightInput(preflight)
       self.invalidateWarmRecorder()
       let requested = await permissionsManager.request(.microphone)
       guard requested.isGranted else {
@@ -424,7 +471,12 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
       self.applyWarmAction(self.warmMachine.recordingBeganWithoutClaim())
     }
 
-    let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
+    let sessionContext: AudioInputDeviceManager.SessionContext
+    if permissionGranted, let preflightSession = preflight?.inputSession {
+      sessionContext = preflightSession
+    } else {
+      sessionContext = await audioDeviceManager.beginUsingPreferredInput()
+    }
 
     do {
       let captureRequestedAt = Date()
@@ -439,11 +491,17 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
           isWarm: true
         )
       } else {
-        directory = await MainActor.run { appSettings.recordingsDirectory }
+        if let preflightDirectory = preflight?.recordingsDirectory {
+          directory = preflightDirectory
+        } else {
+          directory = await MainActor.run { appSettings.recordingsDirectory }
+        }
         prepared = try self.makeRecorder(in: directory)
       }
 
+      let recordRequestedUptime = ProcessInfo.processInfo.systemUptime
       let started = try self.startCapture(with: prepared, in: directory)
+      let liveUptime = ProcessInfo.processInfo.systemUptime
       let startDate = Date()
       let readyDelay = startDate.timeIntervalSince(captureRequestedAt)
       logger.info("Audio capture confirmed live \(Int(readyDelay * 1000))ms after start request")
@@ -462,7 +520,12 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
       if owner != .dictation {
         self.lifecycleHandler?(.auxiliaryStarted)
       }
-      return RecordingStart(url: started.url, usedWarmRecorder: started.isWarm)
+      return RecordingStart(
+        url: started.url,
+        usedWarmRecorder: started.isWarm,
+        liveUptime: liveUptime,
+        recorderOpenMilliseconds: Int(((liveUptime - recordRequestedUptime) * 1000).rounded())
+      )
     } catch let error as AudioFileManagerError {
       // Capture that never started (or a recorder we could not build) must
       // surface as itself: the start sequencer distinguishes them, and only a
@@ -473,6 +536,12 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw AudioFileManagerError.failedToCreateRecorder
     }
+  }
+
+  /// Ends the input session a preflight began for a start that will not use it.
+  private func endPreflightInput(_ preflight: CaptureStartPreflight?) async {
+    guard let session = preflight?.inputSession else { return }
+    await audioDeviceManager.endUsingPreferredInput(session: session)
   }
 
   /// Reserve ownership before either await: cancellation can arrive while the

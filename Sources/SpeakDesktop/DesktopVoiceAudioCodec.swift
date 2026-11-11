@@ -59,21 +59,20 @@ public struct DesktopVoiceAudioCodec: @unchecked Sendable {
         return try await VoiceAudioCodecWorker.run { cancellation in
             let capture = VoiceAudioCodecCapture(cancellation: cancellation)
             var error = [CChar](repeating: 0, count: 1_024)
-            let status = withExtendedLifetime(capture) {
+            let status = NativeCallbackContext.withScoped(capture) { context in
                 audio.wav.dropFirst(44).withUnsafeBytes { pcm in
                     format.rawValue.withCString { identifier in
                         codec.encodeRequest(Request(
                             format: identifier, sampleRate: UInt32(audio.sampleRate),
                             pcm: pcm.bindMemory(to: UInt8.self).baseAddress, pcmBytes: pcm.count,
                             output: { kind, bytes, count, context in
-                                guard let context else { return -1 }
-                                return Unmanaged<VoiceAudioCodecCapture>.fromOpaque(context)
-                                    .takeUnretainedValue().append(kind: kind, bytes: bytes, count: count)
+                                NativeCallbackContext<VoiceAudioCodecCapture>.resolve(context)?
+                                    .append(kind: kind, bytes: bytes, count: count) ?? -1
                             }, cancelled: { context in
-                                guard let context else { return 1 }
-                                return Unmanaged<VoiceAudioCodecCapture>.fromOpaque(context)
-                                    .takeUnretainedValue().cancellation.isCancelled ? 1 : 0
-                            }, context: Unmanaged.passUnretained(capture).toOpaque()
+                                guard let capture = NativeCallbackContext<VoiceAudioCodecCapture>.resolve(context)
+                                else { return 1 }
+                                return capture.cancellation.isCancelled ? 1 : 0
+                            }, context: context
                         ), &error, error.count)
                     }
                 }

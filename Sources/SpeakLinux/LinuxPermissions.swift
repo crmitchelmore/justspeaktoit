@@ -17,7 +17,7 @@ extension LinuxAppController {
 extension LinuxWindow {
     static func configurePermissions(_ holder: LinuxEventContext) throws {
         guard jsti_permissions_configure(
-            linuxPermissionsEvent, Unmanaged.passUnretained(holder).toOpaque()
+            linuxPermissionsEvent, holder.callbackContext
         ) == 0 else { throw DesktopHostError(message: "Permissions could not be configured.") }
     }
 
@@ -43,8 +43,7 @@ extension LinuxWindow {
 }
 
 private func linuxPermissionsEvent(_ revision: UInt64, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     holder.enqueueSettings {
         guard jsti_permissions_revision() == revision else { return }
         let items = await holder.controller.permissionItems()

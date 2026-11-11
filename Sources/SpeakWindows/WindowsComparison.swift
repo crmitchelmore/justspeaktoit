@@ -29,7 +29,7 @@ func comparisonWindowEvent(
         windowEvent(event, text, index, context)
         return
     }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     let controller = holder.controller
     let value = text.map(String.init(cString:)) ?? ""
     holder.enqueueSettings { await controller.enqueueComparisonEvent(event, text: value, index: index) }

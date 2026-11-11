@@ -93,12 +93,12 @@ enum LinuxIntegrationChecks {
             var count = 0
         }
         let changes = Changes()
-        try withExtendedLifetime(changes) {
+        try NativeCallbackContext.withScoped(changes) { context in
             try LinuxNative.call {
                 jsti_audio_device_monitor_start({ context in
-                    let changes = Unmanaged<Changes>.fromOpaque(context!).takeUnretainedValue()
+                    guard let changes = NativeCallbackContext<Changes>.resolve(context) else { return }
                     changes.lock.withLock { changes.count += 1 }
-                }, Unmanaged.passUnretained(changes).toOpaque(), $0, $1)
+                }, context, $0, $1)
             }
             let pactl = Process()
             pactl.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -202,13 +202,13 @@ enum LinuxIntegrationChecks {
         }
         let presses = Presses()
         var trigger = [CChar](repeating: 0, count: 128)
-        try withExtendedLifetime(presses) {
+        try NativeCallbackContext.withScoped(presses) { context in
             try LinuxNative.call {
                 jsti_shortcuts_start(
                     LinuxShortcuts.portalShortcutID, "Start or stop dictation", "CTRL+ALT+space", { pressed, context in
-                        let presses = Unmanaged<Presses>.fromOpaque(context!).takeUnretainedValue()
+                        guard let presses = NativeCallbackContext<Presses>.resolve(context) else { return }
                         presses.lock.withLock { presses.events.append(pressed) }
-                    }, Unmanaged.passUnretained(presses).toOpaque(), &trigger, trigger.count, $0, $1
+                    }, context, &trigger, trigger.count, $0, $1
                 )
             }
             let bound = String(cString: trigger)
@@ -273,13 +273,13 @@ extension LinuxIntegrationChecks {
             var events: [Int32] = []
         }
         let presses = Presses()
-        try withExtendedLifetime(presses) {
+        try NativeCallbackContext.withScoped(presses) { context in
             try LinuxNative.call {
                 jsti_x11_hotkey_start(
                     LinuxShortcuts.x11Keysym, LinuxShortcuts.x11Modifiers, { pressed, context in
-                        let presses = Unmanaged<Presses>.fromOpaque(context!).takeUnretainedValue()
+                        guard let presses = NativeCallbackContext<Presses>.resolve(context) else { return }
                         presses.lock.withLock { presses.events.append(pressed) }
-                    }, Unmanaged.passUnretained(presses).toOpaque(), $0, $1
+                    }, context, $0, $1
                 )
             }
             defer { jsti_x11_hotkey_stop() }

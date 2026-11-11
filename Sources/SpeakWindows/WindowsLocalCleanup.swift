@@ -48,8 +48,7 @@ func windowsLocalCleanupEvent(
     _ action: Int32, _ identifier: UnsafePointer<CChar>?, _ repository: UnsafePointer<CChar>?,
     _ filename: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     let id = identifier.map(String.init(cString:)) ?? ""
     let repo = repository.map(String.init(cString:)) ?? ""
     let file = filename.map(String.init(cString:)) ?? ""

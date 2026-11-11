@@ -87,33 +87,49 @@ final class LinuxShortcuts: @unchecked Sendable {
     }
 
     private static func registerX11(_ callback: LinuxShortcutCallback) throws -> Registration {
-        let context = Unmanaged.passUnretained(callback).toOpaque()
-        try LinuxNative.call {
-            jsti_x11_hotkey_start(x11Keysym, x11Modifiers, linuxShortcutPressed, context, $0, $1)
+        let callbacks = NativeCallbackContext(callback)
+        do {
+            try LinuxNative.call {
+                jsti_x11_hotkey_start(x11Keysym, x11Modifiers, linuxShortcutPressed, callbacks.pointer, $0, $1)
+            }
+        } catch {
+            callbacks.release()
+            throw error
         }
         return Registration(
             name: "Ctrl+Alt+Space",
             hint: "Ctrl+Alt+Space starts or stops dictation in any app. "
                 + "You can also bind `\(toggleCommand) --toggle` in your keyboard settings.",
-            cleanup: { withExtendedLifetime(callback) { jsti_x11_hotkey_stop() } }
+            cleanup: {
+                jsti_x11_hotkey_stop()
+                callbacks.unregister()
+            }
         )
     }
 
     private static func registerPortal(_ callback: LinuxShortcutCallback) throws -> Registration {
-        let context = Unmanaged.passUnretained(callback).toOpaque()
+        let callbacks = NativeCallbackContext(callback)
         var trigger = [CChar](repeating: 0, count: 256)
-        try LinuxNative.call {
-            jsti_shortcuts_start(
-                portalShortcutID, "Start or stop dictation", "CTRL+ALT+space", linuxShortcutPressed,
-                context, &trigger, trigger.count, $0, $1
-            )
+        do {
+            try LinuxNative.call {
+                jsti_shortcuts_start(
+                    portalShortcutID, "Start or stop dictation", "CTRL+ALT+space", linuxShortcutPressed,
+                    callbacks.pointer, &trigger, trigger.count, $0, $1
+                )
+            }
+        } catch {
+            callbacks.release()
+            throw error
         }
         let bound = String(cString: trigger)
         return Registration(
             name: bound.isEmpty ? "the dictation shortcut" : bound,
             hint: (bound.isEmpty ? "Your desktop's dictation shortcut" : bound)
                 + " starts or stops dictation. Change it in your desktop's keyboard settings.",
-            cleanup: { withExtendedLifetime(callback) { jsti_shortcuts_stop() } }
+            cleanup: {
+                jsti_shortcuts_stop()
+                callbacks.unregister()
+            }
         )
     }
 }
@@ -137,6 +153,5 @@ private final class LinuxShortcutCallback: @unchecked Sendable {
 
 /// X11 listener or portal thread: presses and releases feed the gestures.
 private func linuxShortcutPressed(_ pressed: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    Unmanaged<LinuxShortcutCallback>.fromOpaque(context).takeUnretainedValue().receive(pressed == 1)
+    NativeCallbackContext<LinuxShortcutCallback>.resolve(context)?.receive(pressed == 1)
 }

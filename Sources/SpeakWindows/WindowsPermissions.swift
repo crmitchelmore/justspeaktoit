@@ -199,7 +199,7 @@ enum WindowsPermissions {
 /// Opened, Check again, or back from a Windows Settings page: on the UI thread.
 func permissionsEvent(_ command: Int32, _ context: UnsafeMutableRawPointer?) {
     guard let context, command == Int32(JSTI_PERMISSIONS_COMMAND_CHECK.rawValue) else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     holder.enqueueSettings {
         let rows = await WindowsPermissions.check(holder)
         let items = rows.map(\.item)
@@ -212,6 +212,6 @@ func permissionsEvent(_ command: Int32, _ context: UnsafeMutableRawPointer?) {
 
 extension WindowsEventContext {
     func configurePermissions() {
-        _ = jsti_permissions_configure(permissionsEvent, Unmanaged.passUnretained(self).toOpaque())
+        _ = jsti_permissions_configure(permissionsEvent, callbackContext)
     }
 }

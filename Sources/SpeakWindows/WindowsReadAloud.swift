@@ -191,8 +191,7 @@ func windowsVoiceSourceEvent(
     _ action: Int32, _ source: Int32, _ text: UnsafePointer<CChar>?,
     _ record: UnsafePointer<CChar>?, _ path: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     do {
         let message = try DesktopVoiceSourceMessage(
             action: action, source: source, text: text.map(String.init(cString:)) ?? "",
@@ -258,11 +257,11 @@ func windowsVoicePickerEvent(
 ) {
     guard let identifier, let context else { return }
     let voiceID = String(cString: identifier)
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     holder.enqueueSettings {
         await holder.controller.handleVoicePicker(voiceID: voiceID, action: action)
         if !WindowsNative.configureVoiceOutput(await holder.controller.voiceOutputSettings(),
-            context: Unmanaged.passUnretained(holder).toOpaque(),
+            context: holder.callbackContext,
             accountInventory: await holder.controller.selectedVoiceAccountInventory) {
             WindowsNative.update("The saved favorite voices could not be shown. Reopen Voice and try again.")
         }
@@ -271,14 +270,13 @@ func windowsVoicePickerEvent(
 
 /// Apply from the native Voice output dialog, on the UI thread.
 func voiceOutputEvent(_ index: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     let voices = DesktopSpeechVoice.voices
     guard voices.indices.contains(Int(index)) else { return }
     holder.enqueueSettings {
         await holder.controller.selectVoiceOutput(voices[Int(index)])
         let saved = await holder.controller.voiceOutputSettings()
-        if !WindowsNative.configureVoiceOutput(saved, context: Unmanaged.passUnretained(holder).toOpaque()) {
+        if !WindowsNative.configureVoiceOutput(saved, context: holder.callbackContext) {
             WindowsNative.update("The saved voice could not be shown. Reopen Voice and try again.")
         }
     }

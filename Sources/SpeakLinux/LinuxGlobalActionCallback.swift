@@ -56,6 +56,5 @@ final class LinuxGlobalActionCallback: @unchecked Sendable {
 }
 
 func linuxGlobalActionPressed(_ identifier: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    Unmanaged<LinuxGlobalActionCallback>.fromOpaque(context).takeUnretainedValue().receive(identifier)
+    NativeCallbackContext<LinuxGlobalActionCallback>.resolve(context)?.receive(identifier)
 }

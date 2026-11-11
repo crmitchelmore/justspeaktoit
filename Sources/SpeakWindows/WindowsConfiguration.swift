@@ -59,7 +59,7 @@ extension WindowsNative {
                     snapshot.id.withCString {
                         jsti_window_set_configuration_revision(
                             fields.baseAddress, fields.count, recovery.baseAddress, recovery.count,
-                            windowsConfigurationEvent, Unmanaged.passUnretained(holder).toOpaque(), $0
+                            windowsConfigurationEvent, holder.callbackContext, $0
                         )
                     }
                 }
@@ -109,13 +109,13 @@ extension WindowsNative {
         try await holder.controller.performConfigurationEditorAction(action, values: values, editorID: editorID)
         try await configureConfiguration(holder)
         guard configureVoiceOutput(await holder.controller.voiceOutputSettings(),
-            context: Unmanaged.passUnretained(holder).toOpaque(),
+            context: holder.callbackContext,
             accountInventory: await holder.controller.selectedVoiceAccountInventory) else {
             throw WindowsNativeError(message: "Could not display the saved Voice quality and model.")
         }
         if action == 1 {
             try configurePostProcessing(
-                await holder.controller.postProcessingOptions(), context: Unmanaged.passUnretained(holder).toOpaque()
+                await holder.controller.postProcessingOptions(), context: holder.callbackContext
             )
         }
     }
@@ -128,7 +128,7 @@ func windowsConfigurationEvent(
     _ context: UnsafeMutableRawPointer?, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ capacity: Int
 ) -> Int32 {
     guard let context, let entries else { return -1 }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return -1 }
     let received = UnsafeBufferPointer(start: entries, count: count).map { $0.map(String.init(cString:)) ?? "" }
     do {
         switch try DesktopHostConfigurationEditorEvent(action: action, values: received) {

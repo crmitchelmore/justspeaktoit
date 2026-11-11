@@ -120,21 +120,40 @@ public enum BatchTranscriptionJob {
         header.appendString(
             "Content-Disposition: form-data; name=\"\(part.field)\"; filename=\"\(part.filename)\"\r\n")
         header.appendString("Content-Type: \(part.mimeType)\r\n\r\n")
+        return try writeMultipartSnapshot(header: header, source: part.source, boundary: boundary)
+    }
 
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    /// The bytes a multipart snapshot copies the recording with.
+    static let multipartCopyChunkBytes = 65_536
+
+    /// Writes `header` (every part up to and including the file part's blank
+    /// line), the recording's bytes and the closing boundary to
+    /// `upload.multipart` in a new owner-only (0700) temporary directory. The
+    /// recording is copied in `multipartCopyChunkBytes` chunks, checking for
+    /// cancellation before each write. Any failure removes the directory and
+    /// rethrows; the recording itself is only ever read. `temporaryRoot` and
+    /// `writeChunk` are test seams for observing cleanup and injecting failures.
+    static func writeMultipartSnapshot(
+        header: Data,
+        source: URL,
+        boundary: String,
+        temporaryRoot: URL = FileManager.default.temporaryDirectory,
+        writeChunk: (FileHandle, Data) throws -> Void = { try $0.write(contentsOf: $1) }
+    ) throws -> URL {
+        let directory = temporaryRoot.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         let file = directory.appendingPathComponent("upload.multipart")
         do {
             try header.write(to: file)
-            let input = try FileHandle(forReadingFrom: part.source)
+            let input = try FileHandle(forReadingFrom: source)
             defer { try? input.close() }
             let output = try FileHandle(forWritingTo: file)
             defer { try? output.close() }
             try output.seekToEnd()
-            while let chunk = try input.read(upToCount: 65_536), !chunk.isEmpty {
+            while let chunk = try input.read(upToCount: multipartCopyChunkBytes), !chunk.isEmpty {
                 try Task.checkCancellation()
-                try output.write(contentsOf: chunk)
+                try writeChunk(output, chunk)
             }
             try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
             return file

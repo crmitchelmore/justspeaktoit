@@ -49,6 +49,27 @@ extension SharedMultipartUploadStaging {
         }
     }
 
+    /// The file part's content type for a provider that accepts these
+    /// containers; anything else is sent as `application/octet-stream`.
+    static func audioContentType(for url: URL) -> String {
+        audioContentTypes[url.pathExtension.lowercased()] ?? "application/octet-stream"
+    }
+
+    private static let audioContentTypes = [
+        "aac": "audio/aac",
+        "aiff": "audio/aiff",
+        "aif": "audio/aiff",
+        "flac": "audio/flac",
+        "mov": "video/quicktime",
+        "mp3": "audio/mpeg",
+        "mp4": "audio/mp4",
+        "m4a": "audio/mp4",
+        "ogg": "audio/ogg",
+        "opus": "audio/opus",
+        "wav": "audio/wav",
+        "webm": "audio/webm"
+    ]
+
     private static func write(
         fields: [(name: String, value: String)], boundary: String, to output: FileHandle
     ) throws {

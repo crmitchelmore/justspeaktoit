@@ -1,16 +1,30 @@
 // The main window: its shared state, the hands-free session guard and jsti_window_run.
 #include "WindowsWindowInternal.hpp"
+#include "WindowsWindowDashboardPage.hpp"
+#include "WindowsWindowHistoryPage.hpp"
+#include "WindowsWindowModelsPage.hpp"
 
 static_assert(!(JSTI_EVENT_USER_ABSENT >= 100 && JSTI_EVENT_USER_ABSENT <= 109) &&
     !(JSTI_EVENT_USER_ABSENT >= 120 && JSTI_EVENT_USER_ABSENT <= 129),
     "Session absence must not be routed as a comparison action.");
 namespace jsti_window {
+namespace {
 HMODULE handsFreeWts = nullptr;
 using HandsFreeRegister = BOOL (WINAPI *)(HWND, DWORD);
 using HandsFreeUnregister = BOOL (WINAPI *)(HWND);
 HandsFreeUnregister handsFreeUnregister = nullptr;
 std::atomic<bool> handsFreeGuardRegistered{false};
 std::atomic<unsigned> handsFreeAbsence{0};
+} // namespace
+
+void setHandsFreeAbsent(unsigned reason, bool absent) {
+    if (absent) handsFreeAbsence.fetch_or(reason);
+    else handsFreeAbsence.fetch_and(~reason);
+}
+
+unsigned handsFreeAbsenceBits() { return handsFreeAbsence; }
+
+unsigned exchangeHandsFreeAbsence(unsigned bits) { return handsFreeAbsence.exchange(bits); }
 
 void startHandsFreeGuard(HWND window) {
     handsFreeAbsence = 0;
@@ -59,8 +73,6 @@ void stopHandsFreeGuard(HWND window) {
     if (handsFreeWts) { FreeLibrary(handsFreeWts); handsFreeWts = nullptr; }
 }
 WindowState state;
-CleanupPreview cleanupPreview;
-SettingsSearch settingsSearch;
 } // namespace jsti_window
 
 int jsti_window_hands_free_guard_ready(void) {
@@ -120,77 +132,61 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         if (state.running) return jsti::fail("The desktop window is already running.", error, capacity);
-        if (!state.models.configuredModelModes.empty() && state.models.configuredModelModes.size() != count) {
+        if (!modelsState().configuredModelModes.empty() && modelsState().configuredModelModes.size() != count) {
             return jsti::fail("The model mode catalogue does not match the supplied model labels.", error, capacity);
         }
-        state.models.modelNames = std::move(names);
-        state.models.modelModes = state.models.configuredModelModes.empty() ? std::vector<int>(count, 0) : state.models.configuredModelModes;
-        state.models.modelOrder.resize(count);
-        for (size_t index = 0; index < count; ++index) state.models.modelOrder[index] = static_cast<int>(index);
-        if (!state.models.pendingModels.empty()) {
-            if (state.models.pendingModels.size() != count) return jsti::fail("The discovered model catalogue has the wrong slot count.", error, capacity);
+        modelsState().modelNames = std::move(names);
+        modelsState().modelModes = modelsState().configuredModelModes.empty() ? std::vector<int>(count, 0) : modelsState().configuredModelModes;
+        modelsState().modelOrder.resize(count);
+        for (size_t index = 0; index < count; ++index) modelsState().modelOrder[index] = static_cast<int>(index);
+        if (!modelsState().pendingModels.empty()) {
+            if (modelsState().pendingModels.size() != count) return jsti::fail("The discovered model catalogue has the wrong slot count.", error, capacity);
             for (size_t index = 0; index < count; ++index) {
-                const auto &row = state.models.pendingModels[index];
-                if (row.mode != state.models.modelModes[index]) return jsti::fail("The discovered model catalogue has inconsistent modes.", error, capacity);
-                state.models.modelNames[index] = row.name;
-                state.models.modelOrder[index] = row.order;
+                const auto &row = modelsState().pendingModels[index];
+                if (row.mode != modelsState().modelModes[index]) return jsti::fail("The discovered model catalogue has inconsistent modes.", error, capacity);
+                modelsState().modelNames[index] = row.name;
+                modelsState().modelOrder[index] = row.order;
             }
         }
-        state.models.pendingModels.clear(); state.models.modelsChanged = false;
-        state.models.localModelPreferencesChanged = false;
-        std::fill(std::begin(state.models.pendingLocalModelPreferences), std::end(state.models.pendingLocalModelPreferences), -1);
+        modelsState().pendingModels.clear(); modelsState().modelsChanged = false;
+        modelsState().localModelPreferencesChanged = false;
+        std::fill(std::begin(modelsState().pendingLocalModelPreferences), std::end(modelsState().pendingLocalModelPreferences), -1);
         for (int mode = 0; mode < modeCount; ++mode) {
-            const auto first = std::find(state.models.modelModes.begin(), state.models.modelModes.end(), mode);
-            state.models.preferredModels[mode] = first == state.models.modelModes.end() ? -1 : static_cast<int>(first - state.models.modelModes.begin());
+            const auto first = std::find(modelsState().modelModes.begin(), modelsState().modelModes.end(), mode);
+            modelsState().preferredModels[mode] = first == modelsState().modelModes.end() ? -1 : static_cast<int>(first - modelsState().modelModes.begin());
         }
         // Configured batch and live preferences belong to whichever source holds them.
-        for (const int preferred : state.models.configuredPreferredModels) {
-            if (preferred >= 0) state.models.preferredModels[state.models.modelModes[preferred]] = preferred;
+        for (const int preferred : modelsState().configuredPreferredModels) {
+            if (preferred >= 0) modelsState().preferredModels[modelsState().modelModes[preferred]] = preferred;
         }
         if (selected < 0 || static_cast<size_t>(selected) >= count) {
-            selected = state.models.configuredPreferredModels[0] >= 0 ? state.models.configuredPreferredModels[0] : -1;
-            for (int mode = 0; selected < 0 && mode < modeCount; ++mode) selected = state.models.preferredModels[mode];
+            selected = modelsState().configuredPreferredModels[0] >= 0 ? modelsState().configuredPreferredModels[0] : -1;
+            for (int mode = 0; selected < 0 && mode < modeCount; ++mode) selected = modelsState().preferredModels[mode];
         }
-        state.models.activeMode = state.models.modelModes[selected];
-        state.models.preferredModels[state.models.activeMode] = selected;
-        state.models.filteredModels.clear();
-        if (state.models.microphones.empty()) state.models.microphones.push_back({"", L"Default communications microphone"});
+        modelsState().activeMode = modelsState().modelModes[selected];
+        modelsState().preferredModels[modelsState().activeMode] = selected;
+        modelsState().filteredModels.clear();
+        if (modelsState().microphones.empty()) modelsState().microphones.push_back({"", L"Default communications microphone"});
         state.running = true;
         state.recording = 0;
         jsti::globalEscape::publish(0);
         state.cancelKeyHeld = false;
-        state.models.microphonesChanged = false;
-        state.models.pendingMicrophones.clear(); state.models.microphoneError.clear();
+        modelsState().microphonesChanged = false;
+        modelsState().pendingMicrophones.clear(); modelsState().microphoneError.clear();
         state.posted = false;
-        state.dashboard.statusChanged = false;
-        state.dashboard.transcriptChanged = false;
-        state.history.historyChanged = false;
-        state.history.historySelectionProvided = false;
-        state.history.historyInteractionRevision = 0;
-        state.history.pendingHistoryRevision = 0;
-        state.history.variantChanged = false;
-        state.history.presentationChanged = false;
-        state.history.pendingPresentation = {};
-        state.history.pendingVariantRecord.clear();
-        state.history.pendingVariant = -1;
-        state.history.pendingVariantSwitchable = false;
-        state.history.playbackChanged = false;
-        state.history.pendingPlaybackRecord.clear();
-        state.history.pendingPlaybackState = playbackIdle;
-        state.history.pendingPlaybackText.clear();
-        state.history.pendingHistory.clear(); state.history.pendingHistorySelection.clear(); state.history.selectedHistoryID.clear();
-        state.history.allHistoryIDs.clear();
-        state.dashboard.status.clear(); state.dashboard.transcript.clear();
+        resetDashboard();
+        resetHistoryPending();
     }
     state.callback = callback; state.context = context;
     state.controls.clear();
-    state.history.displayedHistory.clear();
-    state.history.displayedVariant = -1;
-    state.history.variantSwitchable = false;
-    state.history.historyPresentationReady = false;
-    state.history.requestedVariant = -1;
-    state.history.displayedPlayback = playbackIdle;
-    state.history.suppressSearchEvents = false;
+    HistoryView &history = historyView();
+    history.displayedHistory.clear();
+    history.displayedVariant = -1;
+    history.variantSwitchable = false;
+    history.historyPresentationReady = false;
+    history.requestedVariant = -1;
+    history.displayedPlayback = playbackIdle;
+    history.suppressSearchEvents = false;
     // The process may already have a manifest-defined awareness context.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const ULONG_PTR visualStyles = activateVisualStyles();
@@ -230,9 +226,9 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         jsti_issue_report_attach(window, callback, context);
         if (initialSidebar) state.sidebar = std::move(*initialSidebar);
         initialSidebar.reset();
-        if (initialDensity) { visualDensity = *initialDensity; layout(window); }
+        if (initialDensity) applyVisualDensity(window, *initialDensity);
         initialDensity.reset();
-        shell = initialShell ? *initialShell : ShellPresentation{};
+        setShellPresentation(initialShell ? *initialShell : ShellPresentation{});
         initialShell.reset();
         applySidebarBindings(window);
         // Optional: without a notification area the app keeps its taskbar button.
@@ -240,7 +236,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         const bool login = jsti::login::launchedAtLogin();
         // A login launch leaves the focus where it is: minimised, or only in
         // the notification area when the app has no taskbar button.
-        if (!(login && trayResident)) {
+        if (!(login && isTrayResident())) {
             ShowWindow(window, login ? SW_SHOWMINNOACTIVE : SW_SHOWDEFAULT);
             UpdateWindow(window);
         }
@@ -282,7 +278,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     state.controls.clear(); state.callback = nullptr; state.context = nullptr;
     jsti::appIcon::destroy();
     if (visualStyles) DeactivateActCtx(0, visualStyles);
-    state.history.displayedHistory.clear();
+    historyView().displayedHistory.clear();
     if (registered) UnregisterClassW(type.lpszClassName, instance);
     {
         std::lock_guard<std::mutex> lock(state.mutex);

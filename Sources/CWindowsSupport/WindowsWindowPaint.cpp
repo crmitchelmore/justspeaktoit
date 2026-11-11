@@ -1,5 +1,6 @@
 // Painting: the backdrop, owner-drawn controls, theme and font.
 #include "WindowsWindowInternal.hpp"
+#include "WindowsWindowHistoryPage.hpp"
 
 namespace jsti_window {
 
@@ -7,6 +8,8 @@ namespace jsti_window {
 
 void paintFrame(HWND window, HDC dc) {
     namespace chrome = jsti::chrome;
+    const Frame &frame = layoutFrame();
+    const JSTIVisualDensity visualDensity = currentVisualDensity();
     const auto &palette = chrome::palette();
     const UINT dpi = GetDpiForWindow(window);
     auto s = [&](int value) { return scale(window, value); };
@@ -100,7 +103,25 @@ void paintFrame(HWND window, HDC dc) {
     }
     if (frame.icon.right > frame.icon.left) chrome::brandIcon(dc, frame.icon);
 }
+namespace {
+// The painted window, rendered once per change and copied from: WM_PAINT,
+// WM_PRINTCLIENT and every owner-drawn control's background come from it, so
+// GDI+ only ever draws on a memory DC with no viewport offset.
+struct Backdrop {
+    HDC dc = nullptr;
+    HBITMAP bitmap = nullptr;
+    HGDIOBJ previous = nullptr;
+    int width = 0, height = 0;
+    bool dirty = true;
+    void release() {
+        if (dc && previous) SelectObject(dc, previous);
+        if (bitmap) DeleteObject(bitmap);
+        if (dc) DeleteDC(dc);
+        *this = Backdrop{};
+    }
+};
 Backdrop backdrop;
+} // namespace
 
 // Controls draw their own backgrounds from the backdrop, so a new backdrop
 // repaints them too.
@@ -132,8 +153,21 @@ HDC backdropDC(HWND window) {
     return backdrop.dc;
 }
 
+// The client belongs at the DC's device origin. A WM_PRINT caller may have
+// moved the viewport so child windows land at their window-relative offsets
+// (the snapshot does), and Windows passes that DC on unchanged.
+void printBackdrop(HWND window, HDC target) {
+    HDC source = backdropDC(window);
+    POINT origin{};
+    GetViewportOrgEx(target, &origin);
+    if (source) BitBlt(target, -origin.x, -origin.y, backdrop.width, backdrop.height, source, 0, 0, SRCCOPY);
+}
+
+void releaseBackdrop() { backdrop.release(); }
+
 // Copies what lies behind `control` to (0, 0) of `target`.
 void copyBackdrop(HWND window, HDC target, HWND control, int width, int height) {
+    const auto &placed = placedControls();
     const auto found = placed.find(GetDlgCtrlID(control));
     RECT rect{};
     if (found != placed.end()) rect = found->second;
@@ -326,16 +360,16 @@ void drawHistoryItem(HWND window, const DRAWITEMSTRUCT &item) {
     HBRUSH background = CreateSolidBrush(palette.window);
     FillRect(dc, &area, background);
     DeleteObject(background);
-    if (item.itemID == static_cast<UINT>(-1) || item.itemID >= state.history.displayedHistory.size()) return;
+    if (item.itemID == static_cast<UINT>(-1) || item.itemID >= historyView().displayedHistory.size()) return;
     // Drawing the last row of a scrolled list means it scrolled into view: ask
     // the host for the next page of matches once per list. The host ignores it
     // when none remain; a list that fits without scrolling was never cut short.
-    if (item.itemID + 1 == state.history.displayedHistory.size() && !state.history.historyMoreRequested &&
+    if (item.itemID + 1 == historyView().displayedHistory.size() && !historyView().historyMoreRequested &&
         SendMessageW(item.hwndItem, LB_GETTOPINDEX, 0, 0) > 0) {
-        state.history.historyMoreRequested = true;
+        historyView().historyMoreRequested = true;
         emit(window, JSTI_EVENT_HISTORY_LOAD_MORE);
     }
-    const HistoryRow &row = state.history.displayedHistory[item.itemID];
+    const HistoryRow &row = historyView().displayedHistory[item.itemID];
     RECT card{area.left + s(2), area.top + s(5), area.right - s(4), area.bottom - s(5)};
     const bool selected = (item.itemState & ODS_SELECTED) != 0;
     chrome::fillRound(dc, card, s(20), palette.card);
@@ -400,8 +434,9 @@ void drawSettingsResult(HWND window, const DRAWITEMSTRUCT &item) {
                                                   : palette.sidebar);
     FillRect(dc, &area, background);
     DeleteObject(background);
-    if (item.itemID == static_cast<UINT>(-1) || item.itemID >= settingsSearch.shown.size()) return;
-    const SettingsSearchRow &row = settingsSearch.shown[item.itemID];
+    const SettingsSearchRow *shown = item.itemID == static_cast<UINT>(-1) ? nullptr : settingsSearchRow(item.itemID);
+    if (!shown) return;
+    const SettingsSearchRow &row = *shown;
     if (selected && !contrast)
         chrome::fillRound(dc, RECT{area.left, area.top + s(2), area.right, area.bottom - s(2)}, s(10), chrome::accent,
                           chrome::dark() ? 58 : 40);

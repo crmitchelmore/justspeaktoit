@@ -1,5 +1,10 @@
 /* jsti_window_* setters for History presentation, text output, playback, post-processing and Azure. */
 #include "LinuxWindowInternal.h"
+#include "LinuxWindowDashboardPage.h"
+#include "LinuxWindowHistoryPage.h"
+#include "LinuxWindowModelsPage.h"
+#include "LinuxWindowOutputPage.h"
+#include "LinuxWindowPolishPage.h"
 
 static void presentation_free(gpointer pointer) {
     Presentation *presentation = pointer;
@@ -12,18 +17,18 @@ static void presentation_free(gpointer pointer) {
 void presentation_apply(gpointer pointer) {
     Presentation *presentation = pointer;
     /* Only the selected record's content may be shown under its actions. */
-    if (g_strcmp0(presentation->id, ui.history_page.selected_id) != 0) return;
+    if (g_strcmp0(presentation->id, history_page()->selected_id) != 0) return;
     ui.suppress = TRUE;
     if (presentation->has_text) {
         set_transcript(presentation->text);
-        if (presentation->status != NULL) gtk_label_set_text(ui.dashboard.status, presentation->status);
+        if (presentation->status != NULL) gtk_label_set_text(dashboard_page()->status, presentation->status);
     }
-    g_free(ui.history_page.presented_id);
-    ui.history_page.presented_id = g_strdup(presentation->id);
+    g_free(history_page()->presented_id);
+    history_page()->presented_id = g_strdup(presentation->id);
     cleanup_preview.visible = FALSE;
-    ui.history_page.presented_variant = presentation->variant;
-    ui.history_page.presented_switchable = presentation->switchable;
-    if (presentation->variant >= 0) gtk_drop_down_set_selected(ui.dashboard.version, (guint)presentation->variant);
+    history_page()->presented_variant = presentation->variant;
+    history_page()->presented_switchable = presentation->switchable;
+    if (presentation->variant >= 0) gtk_drop_down_set_selected(dashboard_page()->version, (guint)presentation->variant);
     ui.suppress = FALSE;
     refresh_actions();
 }
@@ -64,25 +69,25 @@ static void text_output_free(gpointer pointer) {
 void text_output_apply(gpointer pointer) {
     TextOutput *output = pointer;
     ui.suppress = TRUE;
-    ui.output.can_restore_clipboard = output->can_restore;
+    output_page()->can_restore_clipboard = output->can_restore;
     if (output->policy_labels != NULL) {
         gchar **labels = g_strsplit(output->policy_labels, "\n", -1);
         GtkStringList *model = gtk_string_list_new((const char *const *)labels);
-        adw_combo_row_set_model(ui.output.app_switch_row, G_LIST_MODEL(model));
+        adw_combo_row_set_model(output_page()->app_switch_row, G_LIST_MODEL(model));
         g_object_unref(model);
         g_strfreev(labels);
-        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.output.app_switch_row), output->policy_title);
-        gtk_label_set_text(ui.output.app_switch_help, output->policy_help);
-        adw_combo_row_set_selected(ui.output.app_switch_row, output->policy_selection);
-        ui.output.app_switch_configured = TRUE;
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(output_page()->app_switch_row), output->policy_title);
+        gtk_label_set_text(output_page()->app_switch_help, output->policy_help);
+        adw_combo_row_set_selected(output_page()->app_switch_row, output->policy_selection);
+        output_page()->app_switch_configured = TRUE;
     }
-    adw_combo_row_set_selected(ui.output.output_row, output->method == 1 ? 1 : 0);
-    adw_switch_row_set_active(ui.output.restore_row, output->restore);
-    gtk_widget_set_visible(GTK_WIDGET(ui.output.restore_row), output->can_restore);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.output.restore_row), output->method != 1 && output->can_restore);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.output.app_switch_row), output->method != 1 && ui.output.app_switch_configured);
-    gboolean explicit_policy = ui.output.app_switch_configured && adw_combo_row_get_selected(ui.output.app_switch_row) != 0;
-    adw_preferences_group_set_description(ui.output.output_group, explicit_policy ?
+    adw_combo_row_set_selected(output_page()->output_row, output->method == 1 ? 1 : 0);
+    adw_switch_row_set_active(output_page()->restore_row, output->restore);
+    gtk_widget_set_visible(GTK_WIDGET(output_page()->restore_row), output->can_restore);
+    gtk_widget_set_sensitive(GTK_WIDGET(output_page()->restore_row), output->method != 1 && output->can_restore);
+    gtk_widget_set_sensitive(GTK_WIDGET(output_page()->app_switch_row), output->method != 1 && output_page()->app_switch_configured);
+    gboolean explicit_policy = output_page()->app_switch_configured && adw_combo_row_get_selected(output_page()->app_switch_row) != 0;
+    adw_preferences_group_set_description(output_page()->output_group, explicit_policy ?
         "The saved app-switch policy is enforced. Unsupported or uncertain destinations copy only; "
         "the delivery support explanation below describes this desktop's limits." : output->can_restore ?
         "Finished text goes to the app you were in when dictation started. Recording in this window offers "
@@ -90,7 +95,7 @@ void text_output_apply(gpointer pointer) {
         "Wayland pastes into the app focused at delivery and cannot confirm when it consumes the paste, "
         "so the transcript stays on the clipboard. Your X11 restoration preference is retained. "
         "Recording in this window offers Copy instead.");
-    if (output->hint != NULL) adw_action_row_set_subtitle(ui.output.shortcut_row, output->hint);
+    if (output->hint != NULL) adw_action_row_set_subtitle(output_page()->shortcut_row, output->hint);
     ui.suppress = FALSE;
     refresh_setup();
 }
@@ -130,7 +135,7 @@ int32_t jsti_window_set_text_output_policy(
 }
 
 int32_t jsti_window_transcript_snapshot(char *buffer, size_t capacity, size_t *required) {
-    gchar *text = ui.history_page.export_text != NULL ? g_strdup(ui.history_page.export_text) : displayed_transcript();
+    gchar *text = history_page()->export_text != NULL ? g_strdup(history_page()->export_text) : displayed_transcript();
     size_t length = strlen(text) + 1;
     if (required != NULL) *required = length;
     if (buffer == NULL || capacity < length) {
@@ -143,9 +148,9 @@ int32_t jsti_window_transcript_snapshot(char *buffer, size_t capacity, size_t *r
 }
 
 int32_t jsti_window_transcript_variant(void) {
-    if (ui.history_page.selected_id == NULL || g_strcmp0(ui.history_page.presented_id, ui.history_page.selected_id) != 0) return -1;
-    if (!ui.history_page.presented_switchable) return ui.history_page.presented_variant < 0 ? -1 : 1;
-    return (int32_t)gtk_drop_down_get_selected(ui.dashboard.version);
+    if (history_page()->selected_id == NULL || g_strcmp0(history_page()->presented_id, history_page()->selected_id) != 0) return -1;
+    if (!history_page()->presented_switchable) return history_page()->presented_variant < 0 ? -1 : 1;
+    return (int32_t)gtk_drop_down_get_selected(dashboard_page()->version);
 }
 
 typedef struct Playback {
@@ -163,9 +168,9 @@ static void playback_free(gpointer pointer) {
 
 static void playback_apply(gpointer pointer) {
     Playback *playback = pointer;
-    if (g_strcmp0(playback->id, ui.history_page.selected_id) != 0) return;
-    ui.history_page.playback_state = playback->state;
-    gtk_label_set_text(ui.history_page.playback_label, playback->text != NULL ? playback->text : "");
+    if (g_strcmp0(playback->id, history_page()->selected_id) != 0) return;
+    history_page()->playback_state = playback->state;
+    gtk_label_set_text(history_page()->playback_label, playback->text != NULL ? playback->text : "");
     refresh_actions();
 }
 
@@ -189,41 +194,41 @@ void polish_apply(gpointer pointer) {
     Polish *polish = pointer;
     gboolean suppressed = ui.suppress;
     ui.suppress = TRUE;
-    gint32 local_selected = ui.polish.polish_local_selected;
-    gboolean retain_local = local_selected >= polish->local_index && ui.polish.polish_catalog != NULL &&
-        (guint)local_selected < ui.polish.polish_catalog->len && (guint)local_selected < polish->models->len &&
-        g_strcmp0(g_ptr_array_index(ui.polish.polish_catalog, local_selected),
+    gint32 local_selected = polish_page()->polish_local_selected;
+    gboolean retain_local = local_selected >= polish->local_index && polish_page()->polish_catalog != NULL &&
+        (guint)local_selected < polish_page()->polish_catalog->len && (guint)local_selected < polish->models->len &&
+        g_strcmp0(g_ptr_array_index(polish_page()->polish_catalog, local_selected),
                   g_ptr_array_index(polish->models, local_selected)) == 0;
-    g_clear_pointer(&ui.polish.polish_catalog, g_ptr_array_unref);
-    ui.polish.polish_catalog = g_ptr_array_ref(polish->models);
-    ui.polish.polish_local_index = polish->local_index;
-    polish_remote_count = (guint)polish->local_index;
-    g_free(ui.polish.polish_local_notice);
-    ui.polish.polish_local_notice = g_strdup(polish->local_notice);
-    ui.polish.polish_remote_selected = polish->selected >= 0 && polish->selected < polish->local_index
+    g_clear_pointer(&polish_page()->polish_catalog, g_ptr_array_unref);
+    polish_page()->polish_catalog = g_ptr_array_ref(polish->models);
+    polish_page()->polish_local_index = polish->local_index;
+    polish_page()->polish_remote_count = (guint)polish->local_index;
+    g_free(polish_page()->polish_local_notice);
+    polish_page()->polish_local_notice = g_strdup(polish->local_notice);
+    polish_page()->polish_remote_selected = polish->selected >= 0 && polish->selected < polish->local_index
         ? polish->selected : polish->remembered_remote_index;
-    ui.polish.polish_local_selected = polish->selected >= polish->local_index ? polish->selected
+    polish_page()->polish_local_selected = polish->selected >= polish->local_index ? polish->selected
         : retain_local ? local_selected : polish->local_index;
-    adw_combo_row_set_selected(ui.polish.polish_location_row, polish->selected < 0
+    adw_combo_row_set_selected(polish_page()->polish_location_row, polish->selected < 0
         ? 2 : (guint)polish->selected >= polish_remote_boundary() ? 0 : 1);
     polish_select_location(polish->selected, FALSE);
-    adw_switch_row_set_active(ui.polish.polish_row, polish->enabled);
-    adw_switch_row_set_active(ui.polish.polish_directives_row, polish->include_directives);
-    adw_switch_row_set_active(ui.polish.polish_tags_row, polish->include_tags);
-    gtk_text_buffer_set_text(gtk_text_view_get_buffer(ui.polish.polish_prompt_row),
+    adw_switch_row_set_active(polish_page()->polish_row, polish->enabled);
+    adw_switch_row_set_active(polish_page()->polish_directives_row, polish->include_directives);
+    adw_switch_row_set_active(polish_page()->polish_tags_row, polish->include_tags);
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(polish_page()->polish_prompt_row),
         polish->prompt != NULL ? polish->prompt : "", -1);
     ui.suppress = suppressed;
 }
 
 void cleanup_sources_apply(gpointer pointer) {
     const guint count = GPOINTER_TO_UINT(pointer);
-    if (ui.polish.polish_catalog == NULL || count > ui.polish.polish_catalog->len ||
-        ui.polish.polish_local_index < 0 || count != (guint)ui.polish.polish_local_index) {
+    if (polish_page()->polish_catalog == NULL || count > polish_page()->polish_catalog->len ||
+        polish_page()->polish_local_index < 0 || count != (guint)polish_page()->polish_local_index) {
         jsti_window_update("The post-processing source boundary is inconsistent with its model choices.", NULL, -1);
         return;
     }
     gint32 selected = polish_selected_model();
-    polish_remote_count = count;
+    polish_page()->polish_remote_count = count;
     polish_select_location(selected, FALSE);
 }
 
@@ -262,7 +267,7 @@ int32_t jsti_window_set_post_processing(
 
 static void azure_apply(gpointer data) {
     ui.suppress = TRUE;
-    gtk_editable_set_text(GTK_EDITABLE(ui.models.azure_row), data != NULL ? data : "");
+    gtk_editable_set_text(GTK_EDITABLE(models_page()->azure_row), data != NULL ? data : "");
     ui.suppress = FALSE;
 }
 

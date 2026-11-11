@@ -1,5 +1,10 @@
 /* General > Recordings and backup: folder choice, migration backup, audio cleanup, export and import. */
 #include "LinuxWindowInternal.h"
+#include "LinuxWindowHistoryPage.h"
+#include "LinuxWindowStoragePage.h"
+
+static StoragePage storage_state;
+StoragePage *storage_page(void) { return &storage_state; }
 
 _Static_assert(JSTI_EVENT_RECORDINGS_LOCATION != JSTI_EVENT_MIGRATION_RESTORE,
                "the recordings location choice must not decode as Migration restore");
@@ -20,8 +25,8 @@ static void recordings_location_chosen(GObject *source, GAsyncResult *result, gp
     GFile *file = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source), result, &error);
     GObject *parent = g_weak_ref_get(&choice->parent);
     gboolean active = parent != NULL && parent == G_OBJECT(ui.window) && !ui.closing &&
-        ui.storage.location_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
-    if (ui.storage.location_chooser == choice->cancelled) g_clear_object(&ui.storage.location_chooser);
+        storage_page()->location_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
+    if (storage_page()->location_chooser == choice->cancelled) g_clear_object(&storage_page()->location_chooser);
     if (active) {
         if (file != NULL) {
             gchar *path = g_file_get_path(file);
@@ -47,11 +52,11 @@ static void recordings_location_chosen(GObject *source, GAsyncResult *result, gp
 
 void on_recordings_choose(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.closing || ui.state != 0 || ui.storage.location_chooser != NULL) return;
+    if (ui.closing || ui.state != 0 || storage_page()->location_chooser != NULL) return;
     LocationChoice *choice = g_new0(LocationChoice, 1);
     g_weak_ref_init(&choice->parent, G_OBJECT(ui.window));
     choice->cancelled = g_cancellable_new();
-    ui.storage.location_chooser = g_object_ref(choice->cancelled);
+    storage_page()->location_chooser = g_object_ref(choice->cancelled);
     refresh_actions();
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, "Choose where new recordings are saved (existing audio is not moved)");
@@ -61,7 +66,7 @@ void on_recordings_choose(GtkButton *button, gpointer data) {
 
 void on_recordings_default(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.closing || ui.state != 0 || ui.storage.location_chooser != NULL) return;
+    if (ui.closing || ui.state != 0 || storage_page()->location_chooser != NULL) return;
     emit(JSTI_EVENT_RECORDINGS_LOCATION, "", 0);
 }
 
@@ -72,7 +77,7 @@ void on_audio_cleanup(GtkButton *button, gpointer data) {
 
 gboolean backup_choice_active(const BackupChoice *choice, GObject *parent) {
     return parent != NULL && parent == G_OBJECT(ui.window) && !ui.closing &&
-        ui.storage.backup_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
+        storage_page()->backup_chooser == choice->cancelled && !g_cancellable_is_cancelled(choice->cancelled);
 }
 
 void backup_emit_path(const BackupChoice *choice, const char *path) {
@@ -91,7 +96,7 @@ static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) 
                                 : gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
     GObject *parent = g_weak_ref_get(&choice->parent);
     gboolean active = backup_choice_active(choice, parent);
-    if (ui.storage.backup_chooser == choice->cancelled) g_clear_object(&ui.storage.backup_chooser);
+    if (storage_page()->backup_chooser == choice->cancelled) g_clear_object(&storage_page()->backup_chooser);
     if (active) {
         if (file != NULL) {
             gchar *path = g_file_get_path(file);
@@ -120,14 +125,14 @@ static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) 
 
 void on_backup(GtkButton *button, gpointer data) {
     (void)button;
-    if (ui.closing || ui.state != 0 || ui.storage.backup_chooser != NULL || ui.storage.restore_dialog != NULL) return;
+    if (ui.closing || ui.state != 0 || storage_page()->backup_chooser != NULL || storage_page()->restore_dialog != NULL) return;
     BackupChoice *choice = g_new0(BackupChoice, 1);
     g_weak_ref_init(&choice->parent, G_OBJECT(ui.window));
     choice->cancelled = g_cancellable_new();
-    choice->include_audio = adw_switch_row_get_active(ui.storage.backup_audio) ? 1 : 0;
-    choice->include_profiles = adw_switch_row_get_active(ui.storage.backup_profiles) ? 2 : 0;
+    choice->include_audio = adw_switch_row_get_active(storage_page()->backup_audio) ? 1 : 0;
+    choice->include_profiles = adw_switch_row_get_active(storage_page()->backup_profiles) ? 2 : 0;
     choice->action = GPOINTER_TO_INT(data);
-    ui.storage.backup_chooser = g_object_ref(choice->cancelled);
+    storage_page()->backup_chooser = g_object_ref(choice->cancelled);
     refresh_actions();
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, choice->action == 2 ? "Restore backup (preview before changes)"
@@ -182,28 +187,28 @@ static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) 
         g_free(path);
         g_object_unref(file);
     }
-    g_clear_pointer(&ui.history_page.export_text, g_free);
+    g_clear_pointer(&history_page()->export_text, g_free);
 }
 
 void on_issue_report(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.state == JSTI_STATE_IDLE && ui.history_page.selected_id != NULL &&
-        g_strcmp0(ui.history_page.presented_id, ui.history_page.selected_id) == 0)
-        emit(JSTI_EVENT_HISTORY_ISSUE_REPORT, ui.history_page.selected_id, 0);
+    if (ui.state == JSTI_STATE_IDLE && history_page()->selected_id != NULL &&
+        g_strcmp0(history_page()->presented_id, history_page()->selected_id) == 0)
+        emit(JSTI_EVENT_HISTORY_ISSUE_REPORT, history_page()->selected_id, 0);
 }
 
 void on_export(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.history_page.selected_id == NULL || ui.history_page.export_text != NULL) return;
+    if (history_page()->selected_id == NULL || history_page()->export_text != NULL) return;
     /* Capture the displayed text and version at the click, before the dialog. */
-    ui.history_page.export_text = displayed_transcript();
+    history_page()->export_text = displayed_transcript();
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, "Export transcript");
-    gchar *name = g_strdup_printf("Transcript-%s.txt", ui.history_page.selected_id);
+    gchar *name = g_strdup_printf("Transcript-%s.txt", history_page()->selected_id);
     gtk_file_dialog_set_initial_name(dialog, name);
     g_free(name);
     gtk_file_dialog_save(dialog, ui.window, NULL, export_chosen,
-                         GINT_TO_POINTER(ui.history_page.presented_switchable ? ui.history_page.presented_variant : 1));
+                         GINT_TO_POINTER(history_page()->presented_switchable ? history_page()->presented_variant : 1));
     g_object_unref(dialog);
 }
 

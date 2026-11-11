@@ -293,105 +293,10 @@ struct HistoryPresentation {
 };
 struct MicrophoneRow { std::string id; std::wstring name; };
 struct ModelRow { std::string id; std::wstring name; int mode = 0; int order = -1; };
-struct AboutLink { std::wstring title, url; };
-// About page: build details and links, delivered under WindowState::mutex.
-struct AboutPageState {
-    std::wstring aboutDetails = L"Build metadata has not been supplied by this host.";
-    std::vector<AboutLink> aboutLinks;
-};
 
-// General page: automation and Launch at login.
-struct GeneralPageState {
-    bool automationEnabled = false, automationChanged = false;
-    // Launch at login: the shared DesktopLoginItemState, -1 until the host
-    // reports it; a click waits for the state reached.
-    int loginItem = -1;
-    bool loginItemPending = false;
-    std::wstring loginItemDetail;
-    // UI thread only: the note under App behaviour, shown when the system
-    // decides the switch.
-    std::wstring loginItemNote;
-};
-
-// Dashboard: status, the latest transcript and the insights totals.
-struct DashboardPageState {
-    bool statusChanged = false;
-    bool transcriptChanged = false;
-    std::wstring status;
-    std::wstring transcript;
-    // Totals: [all, visible][sessions, errors, recording time, average, spend].
-    std::wstring insights[2][5];
-    bool insightsChanged = false;
-};
-
-// History page: pending snapshots (under WindowState::mutex) and the UI-thread presentation.
-struct HistoryPageState {
-    bool historyChanged = false;
-    bool historySelectionProvided = false;
-    uint64_t historyInteractionRevision = 0;
-    uint64_t pendingHistoryRevision = 0;
-    bool variantChanged = false;
-    bool presentationChanged = false;
-    HistoryPresentation pendingPresentation;
-    std::string pendingVariantRecord;
-    int pendingVariant = -1;
-    bool pendingVariantSwitchable = false;
-    bool playbackChanged = false;
-    std::string pendingPlaybackRecord;
-    int pendingPlaybackState = playbackIdle;
-    std::wstring pendingPlaybackText;
-    std::vector<HistoryRow> pendingHistory;
-    std::string pendingHistorySelection;
-    std::string selectedHistoryID;
-    std::string allHistoryIDs;
-    std::string audioCleanupToken;
-    std::wstring migrationReport;
-    size_t audioCleanupCount = 0;
-    // Only accessed by the UI thread. Pending snapshots above use mutex.
-    std::vector<HistoryRow> displayedHistory;
-    // UI thread only: the last row was drawn and the next page was asked for.
-    bool historyMoreRequested = false;
-    int displayedVariant = -1;
-    bool variantSwitchable = false;
-    bool historyPresentationReady = false;
-    int requestedVariant = -1;
-    int displayedPlayback = playbackIdle;
-    bool suppressSearchEvents = false;
-};
-
-// Models page: microphones and transcription model choices.
-struct ModelsPageState {
-    bool microphonesChanged = false;
-    std::vector<MicrophoneRow> pendingMicrophones;
-    std::wstring microphoneError;
-    bool modelsChanged = false;
-    bool localModelPreferencesChanged = false;
-    int pendingLocalModelPreferences[2] = {-1, -1};
-    bool modelsRefreshing = false;
-    std::wstring modelStatus;
-    std::vector<ModelRow> pendingModels;
-    std::vector<std::pair<std::string, int>> knownModelIdentities;
-    std::vector<MicrophoneRow> microphones;
-    std::string microphoneSelection;
-    std::vector<int> configuredModelModes;
-    int configuredPreferredModels[4] = {-1, -1, -1, -1}; // Global remote batch, remote live, local batch and local live rows.
-    std::vector<std::wstring> modelNames;
-    std::vector<int> modelModes;
-    std::vector<int> modelOrder;
-    std::vector<int> filteredModels;
-    int preferredModels[modeCount] = {-1, -1, -1, -1};
-    int activeMode = 0;
-    std::wstring remoteModelStatus;
-};
-
-// The screenshot tour (UI thread).
-struct TourState {
-    std::wstring tourDirectory;
-    int tourStep = -1;
-};
-
-// The window shell. It owns one state per page; each page file reads and
-// writes its own, and cross-thread fields stay under `mutex`.
+// The window shell: lifetime, recording state, the event callback and
+// navigation. Page state lives in each page's own file behind its header
+// (WindowsWindow*Page.hpp); cross-thread fields stay under `mutex`.
 struct WindowState {
     std::mutex mutex;
     HWND window = nullptr;
@@ -414,37 +319,17 @@ struct WindowState {
     std::wstring headerSubtitle;
     int displayedRecording = 0;
     std::wstring traySummary;
-    AboutPageState about;
-    GeneralPageState general;
-    DashboardPageState dashboard;
-    HistoryPageState history;
-    ModelsPageState models;
-    TourState tour;
 };
 
-struct CleanupPreview {
-    std::mutex mutex;
-    uint64_t ticket = 0;
-    bool active = false, changed = false;
-    std::wstring text;
-};
-
-// The sidebar's settings search. Rows are delivered under `mutex`; the rest is
-// UI-thread only. `shown` matches the results list row for row.
+// One settings search result, as the sidebar's results list shows it.
 struct SettingsSearchRow { std::wstring title, detail; std::string identifier; };
-struct SettingsSearch {
-    std::mutex mutex;
-    std::vector<SettingsSearchRow> pending;
-    bool changed = false, posted = false;
-    std::vector<SettingsSearchRow> shown;
-    // The box or list has focus and wants results; `suppress` silences
-    // programmatic edits; `focusPage` moves focus to the page a choice opens.
-    bool active = false, suppress = false, focusPage = false;
-};
 
 void setShown(HWND window, int identifier, bool shown);
 void layout(HWND window);
 void invalidateBackdrop(HWND window);
+// The painted backdrop (WindowsWindowPaint.cpp): WM_PRINTCLIENT's copy and its release.
+void printBackdrop(HWND window, HDC target);
+void releaseBackdrop();
 
 void updateModelLayout(HWND window);
 
@@ -468,38 +353,26 @@ struct Frame {
     std::vector<Paragraph> paragraphs;
 };
 
-// The painted window, rendered once per change and copied from: WM_PAINT,
-// WM_PRINTCLIENT and every owner-drawn control's background come from it, so
-// GDI+ only ever draws on a memory DC with no viewport offset.
-struct Backdrop {
-    HDC dc = nullptr;
-    HBITMAP bitmap = nullptr;
-    HGDIOBJ previous = nullptr;
-    int width = 0, height = 0;
-    bool dirty = true;
-    void release() {
-        if (dc && previous) SelectObject(dc, previous);
-        if (bitmap) DeleteObject(bitmap);
-        if (dc) DeleteDC(dc);
-        *this = Backdrop{};
-    }
-};
+// The last layout (WindowsWindowLayout.cpp), UI thread only: what WM_PAINT
+// draws, every placed control's rectangle and the applied density.
+const Frame &layoutFrame();
+const std::unordered_map<int, RECT> &placedControls();
+JSTIVisualDensity currentVisualDensity();
+// Applies a density from the host and lays the window out again.
+void applyVisualDensity(HWND window, const JSTIVisualDensity &density);
 
-// Shared window state, defined once in the translation unit named beside it.
-extern std::atomic<unsigned> handsFreeAbsence; // WindowsWindow.cpp
-extern WindowState state; // WindowsWindow.cpp
-extern CleanupPreview cleanupPreview; // WindowsWindow.cpp
-extern SettingsSearch settingsSearch; // WindowsWindow.cpp
-extern ShellPresentation shell; // WindowsWindowShell.cpp
-extern bool trayResident; // WindowsWindowShell.cpp
-extern Frame frame; // WindowsWindowLayout.cpp
-extern JSTIVisualDensity visualDensity; // WindowsWindowLayout.cpp
-extern std::unordered_map<int, RECT> placed; // WindowsWindowLayout.cpp
-extern Backdrop backdrop; // WindowsWindowPaint.cpp
+// The window shell, defined in WindowsWindow.cpp. Every other piece of window
+// state is private to the file that owns it and reached through the functions below.
+extern WindowState state;
 
 // Defined in the WindowsWindow*.cpp translation units.
 void startHandsFreeGuard(HWND window);
 void stopHandsFreeGuard(HWND window);
+// Why hands-free is suspended, as bits: 1 locked, 2 suspended, 4 disconnected (WindowsWindow.cpp).
+void setHandsFreeAbsent(unsigned reason, bool absent);
+unsigned handsFreeAbsenceBits();
+// Replaces the bits and returns the previous ones; the self-test restores them with it.
+unsigned exchangeHandsFreeAbsence(unsigned bits);
 int configureShell(ShellDelivery &delivery, HWND window, int visibility, int compact);
 int configureVisualDensity(DensityDelivery &delivery, HWND window, JSTIVisualDensity density);
 int configureSidebarShortcuts(SidebarDelivery &delivery, HWND window,
@@ -521,6 +394,10 @@ bool automationShownEnabled();
 void requestAutomationToggle(HWND window);
 std::string selectedMicrophone(HWND window);
 void emitRecording(HWND window);
+// General > App visibility as applied (WindowsWindowShell.cpp), UI thread only.
+void setShellPresentation(const ShellPresentation &presentation);
+// The window lives in the notification area with no taskbar button.
+bool isTrayResident();
 void applyShell(HWND window);
 void releaseShell();
 void trayCommand(HWND window, UINT command);
@@ -546,7 +423,16 @@ int widthOf(const RECT &rect);
 int heightOf(const RECT &rect);
 std::wstring heroTitle(int page);
 RECT cardBody(HWND window, const RECT &card);
+// The sidebar's settings search (WindowsWindowNavigation.cpp), UI thread only.
 bool settingsSearchOpen(HWND window);
+// The row the results list shows at `index`, or null.
+const SettingsSearchRow *settingsSearchRow(size_t index);
+// Whether a chosen result asked for focus on its page; clears the request.
+bool takeSettingsSearchFocusPage();
+// Programmatic edits of the search box report no search.
+bool settingsSearchSuppressed();
+// The window closed: drop pending and shown results.
+void retireSettingsSearch();
 int settingsResultHeight(HWND window);
 HDC backdropDC(HWND window);
 std::wstring controlText(HWND control);
@@ -582,6 +468,8 @@ int migrationBackupOptions(HWND window);
 void emitMigrationBackup(HWND window, const std::string &path, int options);
 void exportMigrationBackup(HWND window);
 void tourShow(HWND window, int step);
+// Starts the screenshot tour unless one is already running (WindowsWindowTour.cpp).
+bool tourBegin(HWND window, const std::wstring &directory);
 void tourStep(HWND window);
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
 } // namespace jsti_window

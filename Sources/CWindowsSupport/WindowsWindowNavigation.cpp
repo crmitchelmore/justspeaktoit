@@ -2,6 +2,47 @@
 #include "WindowsWindowInternal.hpp"
 
 namespace jsti_window {
+namespace {
+// Rows are delivered under `mutex`; the rest is UI-thread only. `shown`
+// matches the results list row for row.
+struct SettingsSearch {
+    std::mutex mutex;
+    std::vector<SettingsSearchRow> pending;
+    bool changed = false, posted = false;
+    std::vector<SettingsSearchRow> shown;
+    // The box or list has focus and wants results; `suppress` silences
+    // programmatic edits; `focusPage` moves focus to the page a choice opens.
+    bool active = false, suppress = false, focusPage = false;
+};
+SettingsSearch settingsSearch;
+} // namespace
+
+bool settingsSearchOpen(HWND window) {
+    return settingsSearch.active &&
+        (!settingsSearch.shown.empty() || GetWindowTextLengthW(GetDlgItem(window, settingsSearchID)) > 0);
+}
+
+const SettingsSearchRow *settingsSearchRow(size_t index) {
+    return index < settingsSearch.shown.size() ? &settingsSearch.shown[index] : nullptr;
+}
+
+bool takeSettingsSearchFocusPage() {
+    const bool requested = settingsSearch.focusPage;
+    settingsSearch.focusPage = false;
+    return requested;
+}
+
+bool settingsSearchSuppressed() { return settingsSearch.suppress; }
+
+void retireSettingsSearch() {
+    {
+        std::lock_guard<std::mutex> lock(settingsSearch.mutex);
+        settingsSearch.pending.clear();
+        settingsSearch.changed = settingsSearch.posted = false;
+    }
+    settingsSearch.shown.clear();
+    settingsSearch.active = settingsSearch.focusPage = false;
+}
 
 void showPage(HWND window, int page) {
     if (page < 0 || page >= pageCount) return;

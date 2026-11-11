@@ -3,6 +3,11 @@
 // product code only.
 #include "CWindowsSelfTest.h"
 #include "../CWindowsSupport/WindowsWindowInternal.hpp"
+#include "../CWindowsSupport/WindowsWindowAboutPage.hpp"
+#include "../CWindowsSupport/WindowsWindowBackup.hpp"
+#include "../CWindowsSupport/WindowsWindowGeneralPage.hpp"
+#include "../CWindowsSupport/WindowsWindowHistoryPage.hpp"
+#include "../CWindowsSupport/WindowsWindowModelsPage.hpp"
 
 namespace jsti_window {
 
@@ -138,7 +143,7 @@ static bool shellSelfTest(std::string &failure) {
 
 static bool cleanupPreviewSelfTest(HWND window) {
     const int page = state.page;
-    const bool ready = state.history.historyPresentationReady;
+    const bool ready = historyView().historyPresentationReady;
     std::wstring originalText(static_cast<size_t>(GetWindowTextLengthW(GetDlgItem(window, transcriptID))) + 1, 0);
     std::wstring originalStatus(static_cast<size_t>(GetWindowTextLengthW(GetDlgItem(window, statusID))) + 1, 0);
     GetDlgItemTextW(window, transcriptID, &originalText[0], static_cast<int>(originalText.size()));
@@ -174,7 +179,7 @@ static bool cleanupPreviewSelfTest(HWND window) {
         jsti_window_cleanup_preview("\xff", second) == -1;
     jsti_window_update(nullptr, nullptr, recording);
     applyUpdate(window);
-    state.history.historyPresentationReady = ready;
+    historyView().historyPresentationReady = ready;
     showPage(window, page);
     SetDlgItemTextW(window, transcriptID, originalText.c_str());
     SetDlgItemTextW(window, statusID, originalStatus.c_str());
@@ -233,7 +238,7 @@ static bool settingsSearchSelfTest(HWND window) {
     okay = okay && settingsSearchKeyMessage(window, enter) && observed.event == JSTI_EVENT_SETTINGS_SEARCH_OPEN &&
         observed.row == 1 && observed.text == "settingsSearchResult.desktop.model" &&
         GetWindowTextLengthW(edit) == 0 && !visible(settingsResultsID) && visible(navBaseID);
-    settingsSearch.focusPage = false;
+    takeSettingsSearchFocusPage();
     SetWindowTextW(edit, L"zzzz");
     okay = jsti_window_set_settings_search_results(nullptr, 0) == 0 && okay;
     SendMessageW(window, settingsSearchMessage, 0, 0);
@@ -272,14 +277,14 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     const JSTIAboutLink lateAboutLink{"Late", "https://example.com/"};
     if (!onPage(configurationID, correctionsPage) || onPage(configurationID, pronunciationPage))
         return jsti::fail("Correction learning preferences lost their page scope.", error, errorCapacity);
-    if (state.about.aboutLinks.size() != 6 || controlText(GetDlgItem(window, aboutDetailsID)) != state.about.aboutDetails ||
-        state.about.aboutDetails.find(L"Version:") == std::wstring::npos ||
+    if (aboutState().aboutLinks.size() != 6 || controlText(GetDlgItem(window, aboutDetailsID)) != aboutState().aboutDetails ||
+        aboutState().aboutDetails.find(L"Version:") == std::wstring::npos ||
         jsti_window_configure_about("late", &lateAboutLink, 1) != -1 ||
         jsti_window_configure_about("late", nullptr, 0) != -1)
         return jsti::fail("About metadata, canonical links or invalid input refusal failed.", error, errorCapacity);
-    for (size_t i = 0; i < state.about.aboutLinks.size(); ++i) {
+    for (size_t i = 0; i < aboutState().aboutLinks.size(); ++i) {
         HWND button = GetDlgItem(window, aboutLinkBaseID + static_cast<int>(i));
-        if (!button || controlText(button) != state.about.aboutLinks[i].title ||
+        if (!button || controlText(button) != aboutState().aboutLinks[i].title ||
             onPage(aboutLinkBaseID + static_cast<int>(i), dashboardPage) ||
             !onPage(aboutLinkBaseID + static_cast<int>(i), aboutPage))
             return jsti::fail("About link labels or page scope failed.", error, errorCapacity);
@@ -305,7 +310,9 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     if (jsti_window_set_sidebar_shortcuts(unknownSidebar, 1, 1) != -1)
         return jsti::fail("An unrecognized sidebar destination was accepted.", error, errorCapacity);
     {
-        const JSTIVisualDensity saved = visualDensity;
+        const JSTIVisualDensity saved = currentVisualDensity();
+        const Frame &frame = layoutFrame();
+        const auto &placed = placedControls();
         JSTIVisualDensity normal = saved;
         normal.compact = 0;
         const JSTIVisualDensity compact{1, 8, 6, 8, 6, 6, 8, 30};
@@ -422,30 +429,26 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         jsti_shell_open_directory(nullptr, folderError, sizeof(folderError)) == 0) {
         return jsti::fail("Recording folder control or invalid-path refusal failed.", error, errorCapacity);
     }
-    const std::vector<MicrophoneRow> originalMicrophones = state.models.microphones;
-    const std::string originalMicrophoneID = state.models.microphoneSelection;
-    const std::vector<HistoryRow> originalHistory = state.history.displayedHistory;
+    const std::vector<MicrophoneRow> originalMicrophones = modelsState().microphones;
+    const std::string originalMicrophoneID = modelsState().microphoneSelection;
+    const std::vector<HistoryRow> originalHistory = historyView().displayedHistory;
     const std::string originalSelection = selectedHistory(window);
-    const std::vector<std::wstring> originalModelNames = state.models.modelNames;
-    const std::vector<int> originalModelModes = state.models.modelModes;
-    const std::vector<int> originalModelOrder = state.models.modelOrder;
+    const std::vector<std::wstring> originalModelNames = modelsState().modelNames;
+    const std::vector<int> originalModelModes = modelsState().modelModes;
+    const std::vector<int> originalModelOrder = modelsState().modelOrder;
     std::vector<std::pair<std::string, int>> originalModelIdentities;
     std::wstring originalModelStatus;
     bool originalRefreshing;
     {
         std::lock_guard<std::mutex> lock(state.mutex);
-        originalModelIdentities = state.models.knownModelIdentities;
-        originalModelStatus = state.models.modelStatus;
-        originalRefreshing = state.models.modelsRefreshing;
+        originalModelIdentities = modelsState().knownModelIdentities;
+        originalModelStatus = modelsState().modelStatus;
+        originalRefreshing = modelsState().modelsRefreshing;
     }
     int originalPreferredModels[modeCount];
-    std::copy(std::begin(state.models.preferredModels), std::end(state.models.preferredModels), originalPreferredModels);
-    const int originalMode = state.models.activeMode;
-    std::pair<int, std::wstring> originalLogin;
-    {
-        std::lock_guard<std::mutex> lock(state.mutex);
-        originalLogin = {state.general.loginItem, state.general.loginItemDetail};
-    }
+    std::copy(std::begin(modelsState().preferredModels), std::end(modelsState().preferredModels), originalPreferredModels);
+    const int originalMode = modelsState().activeMode;
+    const GeneralSettings originalLogin = generalSettings();
     const auto originalCallback = state.callback;
     void *const originalContext = state.context;
     RECT originalBounds{};
@@ -459,16 +462,16 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         observed.event = event; observed.id = id ? id : ""; observed.model = model; ++observed.calls;
     };
     state.context = &observed;
-    const unsigned originalAbsence = handsFreeAbsence.exchange(0);
+    const unsigned originalAbsence = exchangeHandsFreeAbsence(0);
     SendMessageW(window, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK, 0);
     const bool lockEvent = observed.calls == 1 && observed.event == JSTI_EVENT_USER_ABSENT && !observed.id.empty();
     SendMessageW(window, WM_POWERBROADCAST, PBT_APMSUSPEND, 0);
     const bool suspendEvent = observed.calls == 2 && observed.event == JSTI_EVENT_USER_ABSENT && !observed.id.empty();
     SendMessageW(window, WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK, 0);
-    const bool stayedSuspended = handsFreeAbsence == 2u && !jsti_window_hands_free_guard_ready();
+    const bool stayedSuspended = handsFreeAbsenceBits() == 2u && !jsti_window_hands_free_guard_ready();
     SendMessageW(window, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC, 0);
-    const bool guardCleared = handsFreeAbsence == 0;
-    handsFreeAbsence = originalAbsence;
+    const bool guardCleared = handsFreeAbsenceBits() == 0;
+    exchangeHandsFreeAbsence(originalAbsence);
     const bool absenceEvents = lockEvent && suspendEvent && observed.calls == 2;
     observed = {};
     if (!absenceEvents || !stayedSuspended || !guardCleared) {
@@ -545,24 +548,24 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         bool reportOwned;
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            reportOwned = state.history.migrationReport == L"Synthetic read-only report.";
-            state.history.migrationReport.clear(); // Do not open a modal report in the automated fixture.
+            // Taking the report also keeps the automated fixture from opening a modal report.
+            reportOwned = takeMigrationReport() == L"Synthetic read-only report.";
         }
         if (!reportOwned) { failure = "Backup inspection report did not own its posted text."; return false; }
         observed = {};
         // Deliberately interleaved global rows prove callbacks do not leak the
         // filtered combo index. These are never sent to the real Swift host.
-        state.models.modelNames = {L"Batch Alpha", L"Live One", L"Batch Beta", L"Live Two"};
-        state.models.modelModes = {0, 1, 0, 1};
-        state.models.modelOrder = {0, 1, 2, 3};
+        modelsState().modelNames = {L"Batch Alpha", L"Live One", L"Batch Beta", L"Live Two"};
+        modelsState().modelModes = {0, 1, 0, 1};
+        modelsState().modelOrder = {0, 1, 2, 3};
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            state.models.knownModelIdentities = {{"batch-a", 0}, {"live-a", 1}, {"batch-b", 0}, {"live-b", 1}};
+            modelsState().knownModelIdentities = {{"batch-a", 0}, {"live-a", 1}, {"batch-b", 0}, {"live-b", 1}};
         }
-        state.models.preferredModels[0] = 2;
-        state.models.preferredModels[1] = 3;
-        state.models.preferredModels[2] = state.models.preferredModels[3] = -1; // No local rows in this fixture.
-        state.models.activeMode = 0;
+        modelsState().preferredModels[0] = 2;
+        modelsState().preferredModels[1] = 3;
+        modelsState().preferredModels[2] = modelsState().preferredModels[3] = -1; // No local rows in this fixture.
+        modelsState().activeMode = 0;
         if (!populateModels(window) || !checkBounds() || selection(window) != 2 ||
             SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) != 2) {
             if (failure.empty()) failure = "Batch models did not retain their global identity.";
@@ -680,23 +683,23 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         }
         // Restore the fixture directly; the public API deliberately forbids
         // shrinking identities even after a model has disappeared from discovery.
-        state.models.modelNames = {L"Batch Alpha", L"Live One", L"Batch Beta", L"Live Two"};
-        state.models.modelModes = {0, 1, 0, 1};
-        state.models.modelOrder = {0, 1, 2, 3};
-        state.models.preferredModels[0] = 0;
+        modelsState().modelNames = {L"Batch Alpha", L"Live One", L"Batch Beta", L"Live Two"};
+        modelsState().modelModes = {0, 1, 0, 1};
+        modelsState().modelOrder = {0, 1, 2, 3};
+        modelsState().preferredModels[0] = 0;
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            state.models.knownModelIdentities = {{"batch-a", 0}, {"live-a", 1}, {"batch-b", 0}, {"live-b", 1}};
+            modelsState().knownModelIdentities = {{"batch-a", 0}, {"live-a", 1}, {"batch-b", 0}, {"live-b", 1}};
         }
         if (!populateModels(window)) { failure = "Model fixture restoration failed."; return false; }
         const LRESULT originalMicrophone = SendDlgItemMessageW(window, microphoneID, CB_GETCURSEL, 0, 0);
-        if (state.models.microphones.size() < 2) { failure = "Smoke test requires two synthetic microphone choices."; return false; }
+        if (modelsState().microphones.size() < 2) { failure = "Smoke test requires two synthetic microphone choices."; return false; }
         SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, 1, 0);
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(microphoneID, CBN_SELCHANGE), 0);
-        const bool microphoneChanged = observed.event == JSTI_EVENT_MICROPHONE_CHANGED && observed.id == state.models.microphones[1].id;
+        const bool microphoneChanged = observed.event == JSTI_EVENT_MICROPHONE_CHANGED && observed.id == modelsState().microphones[1].id;
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
         const bool recordingSnapshot = observed.event == JSTI_EVENT_TOGGLE_RECORDING &&
-            observed.id == state.models.microphones[1].id && observed.model == 1;
+            observed.id == modelsState().microphones[1].id && observed.model == 1;
         SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, static_cast<WPARAM>(originalMicrophone), 0);
         if (!microphoneChanged || !recordingSnapshot) {
             failure = "Microphone selection and recording did not retain the exact selected device."; return false;
@@ -713,7 +716,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             failure = "A refreshed microphone did not keep its opaque ID."; return false;
         }
         observed.event = -500;
-        const size_t beforeRecordingMicrophoneCount = state.models.microphones.size();
+        const size_t beforeRecordingMicrophoneCount = modelsState().microphones.size();
         jsti_window_update("Microphone refresh status sentinel", "Microphone transcript sentinel", 1);
         applyUpdate(window);
         const JSTIAudioDevice removed[] = {{"usb-b", "USB Beta", 1}};
@@ -721,7 +724,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             failure = "A microphone removal during capture was rejected."; return false;
         }
         applyUpdate(window);
-        if (selectedMicrophone(window) != "usb-a" || state.models.microphones.size() != beforeRecordingMicrophoneCount ||
+        if (selectedMicrophone(window) != "usb-a" || modelsState().microphones.size() != beforeRecordingMicrophoneCount ||
             IsWindowEnabled(GetDlgItem(window, microphoneID)) || observed.event != -500) {
             failure = "Hot-plug replaced the active capture selection or unlocked controls."; return false;
         }
@@ -732,16 +735,16 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         }
         jsti_window_update(nullptr, nullptr, 0);
         applyUpdate(window);
-        if (selectedMicrophone(window) != "usb-a" || state.models.microphones.size() != 3 ||
-            state.models.microphones.back().name.find(L"unavailable") == std::wstring::npos ||
-            state.models.microphones.front().name.find(L"USB Beta") == std::wstring::npos || observed.event != -500) {
+        if (selectedMicrophone(window) != "usb-a" || modelsState().microphones.size() != 3 ||
+            modelsState().microphones.back().name.find(L"unavailable") == std::wstring::npos ||
+            modelsState().microphones.front().name.find(L"USB Beta") == std::wstring::npos || observed.event != -500) {
             failure = "An unplugged selection silently changed or lost its unavailable/default label."; return false;
         }
         const JSTIAudioDevice restored[] = {{"usb-b", "USB Beta", 1}, {"usb-a", "USB Alpha renamed", 0}};
         jsti_window_refresh_microphones(restored, 2, nullptr);
         applyUpdate(window);
-        if (selectedMicrophone(window) != "usb-a" || state.models.microphones.size() != 3 ||
-            state.models.microphones.back().name != L"USB Alpha renamed" || observed.event != -500) {
+        if (selectedMicrophone(window) != "usb-a" || modelsState().microphones.size() != 3 ||
+            modelsState().microphones.back().name != L"USB Alpha renamed" || observed.event != -500) {
             failure = "A restored microphone lost the selected ID or kept an unavailable label."; return false;
         }
         wchar_t microphoneStatus[128]{}, microphoneTranscript[128]{};
@@ -763,20 +766,20 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         jsti_window_refresh_microphones(removed, 1, nullptr);
         jsti_window_refresh_microphones(connected, 1, nullptr);
         applyUpdate(window);
-        if (!selectedMicrophone(window).empty() || state.models.microphones.size() != 2 ||
-            state.models.microphones.front().name.find(L"USB Alpha") == std::wstring::npos || observed.event != -500) {
+        if (!selectedMicrophone(window).empty() || modelsState().microphones.size() != 2 ||
+            modelsState().microphones.front().name.find(L"USB Alpha") == std::wstring::npos || observed.event != -500) {
             failure = "Microphone snapshots did not coalesce or the dynamic default changed ID."; return false;
         }
         jsti_window_refresh_microphones(removed, 1, nullptr);
         jsti_window_refresh_microphones(nullptr, 0, "Synthetic enumeration error");
         applyUpdate(window);
-        if (state.models.microphones.size() != 2 || !selectedMicrophone(window).empty() ||
-            state.models.microphones.front().name.find(L"USB Beta") == std::wstring::npos) {
+        if (modelsState().microphones.size() != 2 || !selectedMicrophone(window).empty() ||
+            modelsState().microphones.front().name.find(L"USB Beta") == std::wstring::npos) {
             failure = "An enumeration failure discarded the last complete microphone snapshot."; return false;
         }
         jsti_window_refresh_microphones(nullptr, 0, nullptr);
         applyUpdate(window);
-        if (state.models.microphones.size() != 1 || !selectedMicrophone(window).empty() || observed.event != -500) {
+        if (modelsState().microphones.size() != 1 || !selectedMicrophone(window).empty() || observed.event != -500) {
             failure = "No active microphones did not retain the dynamic default without emitting a user change."; return false;
         }
         const JSTIHistoryRow first[] = {{"one", "First recording", "Completed"}, {"two", "Second recording", "Failed"}};
@@ -854,7 +857,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             failure = "Playback report validation failed."; return false;
         }
         applyUpdate(window);
-        if (state.history.displayedPlayback != playbackIdle || playbackLabel() != L"Play" ||
+        if (historyView().displayedPlayback != playbackIdle || playbackLabel() != L"Play" ||
             IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) || playbackTime() != playbackIdleText) {
             failure = "A playback report for another record changed the selected row's controls."; return false;
         }
@@ -863,7 +866,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             failure = "Playback reports for the selected record were rejected."; return false;
         }
         applyUpdate(window);
-        if (state.history.displayedPlayback != playbackPlaying || playbackLabel() != L"Pause" ||
+        if (historyView().displayedPlayback != playbackPlaying || playbackLabel() != L"Pause" ||
             !IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) || !IsWindowEnabled(GetDlgItem(window, playPauseID)) ||
             playbackTime() != L"00:00.10 / 00:01.90") {
             failure = "A playing report did not show Pause, Stop and the latest time."; return false;
@@ -880,7 +883,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             IsWindowEnabled(GetDlgItem(window, stopPlaybackID));
         jsti_window_set_playback("one", playbackPaused, "00:00.50 / 00:01.50");
         applyUpdate(window);
-        const bool pausedWhileRecording = state.history.displayedPlayback == playbackPaused && playbackLabel() == L"Play" &&
+        const bool pausedWhileRecording = historyView().displayedPlayback == playbackPaused && playbackLabel() == L"Play" &&
             IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) && playbackTime() == L"00:00.50 / 00:01.50";
         jsti_window_set_playback("one", playbackIdle, "00:00.00 / 00:02.00");
         applyUpdate(window);
@@ -905,7 +908,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             failure = "Explicit same-record history update failed."; return false;
         }
         applyUpdate(window);
-        if (selectedHistory(window) != "one" || state.history.displayedPlayback != playbackPaused || playbackLabel() != L"Play" ||
+        if (selectedHistory(window) != "one" || historyView().displayedPlayback != playbackPaused || playbackLabel() != L"Play" ||
             !IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) || playbackTime() != L"00:00.50 / 00:01.50") {
             failure = "Explicitly re-selecting a record discarded its active playback state."; return false;
         }
@@ -917,20 +920,20 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         applyUpdate(window);
         SendDlgItemMessageW(window, historyID, LB_SETCURSEL, 0, 0);
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(historyID, LBN_SELCHANGE), 0);
-        if (observed.event != JSTI_EVENT_HISTORY_SELECTED || observed.id != "two" || state.history.displayedPlayback != playbackIdle ||
+        if (observed.event != JSTI_EVENT_HISTORY_SELECTED || observed.id != "two" || historyView().displayedPlayback != playbackIdle ||
             playbackLabel() != L"Play" || IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) || playbackTime() != playbackIdleText) {
             failure = "Selecting another record did not reset the playback display."; return false;
         }
         jsti_window_set_playback("one", playbackPlaying, "00:01.10 / 00:00.90");
         applyUpdate(window);
-        if (state.history.displayedPlayback != playbackIdle || IsWindowEnabled(GetDlgItem(window, stopPlaybackID))) {
+        if (historyView().displayedPlayback != playbackIdle || IsWindowEnabled(GetDlgItem(window, stopPlaybackID))) {
             failure = "A stale playback report was applied to a different record."; return false;
         }
         jsti_window_set_playback("two", playbackPlaying, "00:00.20 / 00:00.80");
         applyUpdate(window);
         jsti_window_set_playback("", playbackPlaying, nullptr);
         applyUpdate(window);
-        if (state.history.displayedPlayback != playbackIdle || IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) ||
+        if (historyView().displayedPlayback != playbackIdle || IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) ||
             playbackTime() != playbackIdleText || !checkBounds()) {
             if (failure.empty()) failure = "An empty playback report did not reset the controls.";
             return false;
@@ -1219,10 +1222,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             okay = jsti_window_set_escape_cancellation(savedPolicy ? 1 : 0) == 0 && okay;
             if (!okay) { failure = "Escape cancellation lost ownership, idle or repeat guards."; return false; }
         }
-        state.models.modelModes.assign(state.models.modelNames.size(), 0);
-        state.models.preferredModels[0] = 2;
-        state.models.preferredModels[1] = -1;
-        state.models.activeMode = 0;
+        modelsState().modelModes.assign(modelsState().modelNames.size(), 0);
+        modelsState().preferredModels[0] = 2;
+        modelsState().preferredModels[1] = -1;
+        modelsState().activeMode = 0;
         if (!populateModels(window) || !checkBounds() || IsWindowVisible(GetDlgItem(window, modeID)) ||
             IsWindowEnabled(GetDlgItem(window, modeID)) || !IsWindowEnabled(GetDlgItem(window, importID)) ||
             selection(window) != 2 || SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) != 4) {
@@ -1238,7 +1241,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_window_set_login_item(jsti::login::offBySystem, "Turned off in Settings.");
             applyUpdate(window);
             const bool decided = !IsWindowEnabled(toggle) && shows(false) &&
-                                 state.general.loginItemNote == L"Turned off in Settings." && checkBounds();
+                                 loginItemNote() == L"Turned off in Settings." && checkBounds();
             jsti_window_set_login_item(jsti::login::off, "Start minimised.");
             applyUpdate(window);
             observed.event = 0;
@@ -1249,7 +1252,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             const bool once = observed.event == 0;
             jsti_window_set_login_item(jsti::login::on, "Start minimised.");
             applyUpdate(window);
-            const bool settled = IsWindowEnabled(toggle) && shows(true) && state.general.loginItemNote.empty();
+            const bool settled = IsWindowEnabled(toggle) && shows(true) && loginItemNote().empty();
             showPage(window, transcriptionPage);
             if (!decided || !reported || !once || !settled) {
                 if (failure.empty()) failure = "Launch at login did not follow the state the host reported.";
@@ -1272,7 +1275,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         // without restarting or changing the current batch preference.
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            state.models.knownModelIdentities = {{"batch-a", 0}, {"batch-b", 0}, {"batch-c", 0}, {"batch-d", 0}};
+            modelsState().knownModelIdentities = {{"batch-a", 0}, {"batch-b", 0}, {"batch-c", 0}, {"batch-d", 0}};
         }
         const JSTIModelRow firstLive[] = {
             {"batch-a", "Batch Alpha", 0, 0, 0}, {"batch-b", "Batch Beta", 0, 1, 0},
@@ -1296,18 +1299,18 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         }
         // Source picker: Remote and Local each keep their own preference, the
         // Local source has no Live mode here, and callbacks keep global indices.
-        state.models.modelNames = {L"Remote Batch", L"Remote Live", L"Local Batch"};
-        state.models.modelModes = {0, 1, 2};
-        state.models.modelOrder = {0, 1, 2};
+        modelsState().modelNames = {L"Remote Batch", L"Remote Live", L"Local Batch"};
+        modelsState().modelModes = {0, 1, 2};
+        modelsState().modelOrder = {0, 1, 2};
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            state.models.knownModelIdentities = {{"remote-batch", 0}, {"remote-live", 1}, {"local-batch", 2}};
+            modelsState().knownModelIdentities = {{"remote-batch", 0}, {"remote-live", 1}, {"local-batch", 2}};
         }
-        state.models.preferredModels[0] = 0;
-        state.models.preferredModels[1] = 1;
-        state.models.preferredModels[2] = 2;
-        state.models.preferredModels[3] = -1;
-        state.models.activeMode = 0;
+        modelsState().preferredModels[0] = 0;
+        modelsState().preferredModels[1] = 1;
+        modelsState().preferredModels[2] = 2;
+        modelsState().preferredModels[3] = -1;
+        modelsState().activeMode = 0;
         auto changeSource = [&](int source, int expected) {
             SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, source, 0);
             SendMessageW(window, WM_COMMAND, MAKEWPARAM(sourceID, CBN_SELCHANGE), 0);
@@ -1332,16 +1335,16 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             !changeSource(1, 2) || !changeSource(0, 0)) {
             failure = "The Source picker lost a source preference, its controls or the global model identity."; return false;
         }
-        state.models.modelNames = {L"Remote Batch", L"Remote Live", L"Local Batch", L"Local Live",
+        modelsState().modelNames = {L"Remote Batch", L"Remote Live", L"Local Batch", L"Local Live",
                             L"Imported Local Batch", L"Imported Local Live"};
-        state.models.modelModes = {0, 1, 2, 3, 2, 3};
-        state.models.modelOrder = {0, 1, 2, 3, 4, 5};
+        modelsState().modelModes = {0, 1, 2, 3, 2, 3};
+        modelsState().modelOrder = {0, 1, 2, 3, 4, 5};
         {
             std::lock_guard<std::mutex> lock(state.mutex);
-            state.models.knownModelIdentities = {{"remote-batch", 0}, {"remote-live", 1}, {"local-batch", 2},
+            modelsState().knownModelIdentities = {{"remote-batch", 0}, {"remote-live", 1}, {"local-batch", 2},
                                          {"local-live", 3}, {"other-batch", 2}, {"other-live", 3}};
         }
-        state.models.preferredModels[3] = 3;
+        modelsState().preferredModels[3] = 3;
         if (!populateModels(window)) { failure = "Local transfer fixture could not display models."; return false; }
         const int beforeImport = observed.event = -500;
         if (jsti_window_set_local_model_preferences(4, -1) != 0 ||
@@ -1349,15 +1352,15 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             failure = "Inactive Local choices could not be published."; return false;
         }
         applyUpdate(window);
-        if (selection(window) != 0 || observed.event != beforeImport || state.models.preferredModels[0] != 0 ||
-            state.models.preferredModels[1] != 1 || state.models.preferredModels[2] != 4 || state.models.preferredModels[3] != 5 ||
+        if (selection(window) != 0 || observed.event != beforeImport || modelsState().preferredModels[0] != 0 ||
+            modelsState().preferredModels[1] != 1 || modelsState().preferredModels[2] != 4 || modelsState().preferredModels[3] != 5 ||
             !changeSource(1, 4) || !changeMode(1, 5) || jsti_window_set_local_model_preferences(2, 3) != 0) {
             failure = "Local transfer activated a model or lost an inactive preference."; return false;
         }
         observed.event = -500;
         applyUpdate(window);
-        if (selection(window) != 5 || observed.event != -500 || state.models.preferredModels[3] != 5 ||
-            state.models.preferredModels[2] != 2 ||
+        if (selection(window) != 5 || observed.event != -500 || modelsState().preferredModels[3] != 5 ||
+            modelsState().preferredModels[2] != 2 ||
             jsti_window_set_local_model_preferences(-2, -1) != -1 ||
             jsti_window_set_local_model_preferences(1, 2) != -1 || !changeSource(0, 1)) {
             failure = "Local transfer replaced the active model or accepted a wrong-mode index."; return false;
@@ -1391,50 +1394,41 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     try { passed = check(); }
     catch (const std::exception &) { failure = "Window smoke test could not allocate its temporary state."; }
     jsti_smoke_stage("window.later-check.returned");
-    state.models.microphones = originalMicrophones;
-    state.models.microphoneSelection = originalMicrophoneID;
+    modelsState().microphones = originalMicrophones;
+    modelsState().microphoneSelection = originalMicrophoneID;
     populateMicrophones(window);
     SetDlgItemTextW(window, 94, L"&Microphone");
     {
         std::lock_guard<std::mutex> lock(state.mutex);
-        state.models.microphonesChanged = false;
-        state.models.pendingMicrophones.clear(); state.models.microphoneError.clear();
+        modelsState().microphonesChanged = false;
+        modelsState().pendingMicrophones.clear(); modelsState().microphoneError.clear();
     }
-    state.models.modelNames = originalModelNames;
-    state.models.modelModes = originalModelModes;
-    state.models.modelOrder = originalModelOrder;
+    modelsState().modelNames = originalModelNames;
+    modelsState().modelModes = originalModelModes;
+    modelsState().modelOrder = originalModelOrder;
     {
         std::lock_guard<std::mutex> lock(state.mutex);
-        state.models.knownModelIdentities = std::move(originalModelIdentities);
-        state.models.modelStatus = std::move(originalModelStatus);
-        state.models.modelsRefreshing = originalRefreshing;
-        state.models.modelsChanged = true;
-        state.models.pendingModels.clear();
+        modelsState().knownModelIdentities = std::move(originalModelIdentities);
+        modelsState().modelStatus = std::move(originalModelStatus);
+        modelsState().modelsRefreshing = originalRefreshing;
+        modelsState().modelsChanged = true;
+        modelsState().pendingModels.clear();
     }
-    std::copy(std::begin(originalPreferredModels), std::end(originalPreferredModels), state.models.preferredModels);
-    state.models.activeMode = originalMode;
+    std::copy(std::begin(originalPreferredModels), std::end(originalPreferredModels), modelsState().preferredModels);
+    modelsState().activeMode = originalMode;
     if (!populateModels(window)) { passed = false; failure = "The model catalogue could not be restored after its smoke test."; }
-    state.history.suppressSearchEvents = true;
+    historyView().suppressSearchEvents = true;
     SetDlgItemTextW(window, searchID, L"");
-    state.history.suppressSearchEvents = false;
+    historyView().suppressSearchEvents = false;
     applyVariant(window, -1, false, 0);
     applyPlayback(window, playbackIdle, L"", false, 0);
     state.callback = originalCallback;
     state.context = originalContext;
     {
         std::lock_guard<std::mutex> lock(state.mutex);
-        state.general.loginItem = originalLogin.first;
-        state.general.loginItemDetail = originalLogin.second;
-        state.general.loginItemPending = false;
-        state.history.pendingHistory = originalHistory;
-        state.history.pendingHistorySelection = originalSelection;
-        state.history.historySelectionProvided = true;
-        state.history.pendingHistoryRevision = state.history.historyInteractionRevision;
-        state.history.historyChanged = true;
-        state.history.playbackChanged = false;
-        state.history.pendingPlaybackRecord.clear();
-        state.history.pendingPlaybackState = playbackIdle;
-        state.history.pendingPlaybackText.clear();
+        restoreLoginItem(originalLogin.loginItem, originalLogin.loginItemDetail);
+        stageHistoryRows(originalHistory, &originalSelection);
+        clearHistoryPlayback();
     }
     applyUpdate(window);
     SetWindowPos(window, nullptr, originalBounds.left, originalBounds.top,

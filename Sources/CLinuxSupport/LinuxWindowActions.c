@@ -1,35 +1,42 @@
 /* Control handlers: recording, models, microphones, output, appearance and History actions. */
 #include "LinuxWindowInternal.h"
+#include "LinuxWindowDashboardPage.h"
+#include "LinuxWindowGeneralPage.h"
+#include "LinuxWindowHistoryPage.h"
+#include "LinuxWindowModelsPage.h"
+#include "LinuxWindowOutputPage.h"
+#include "LinuxWindowStoragePage.h"
+#include "LinuxWindowVoicePage.h"
 
 void emit(gint32 event, const char *text, gint32 index) {
     if (ui.callback != NULL && !ui.suppress) ui.callback(event, text != NULL ? text : "", index, ui.context);
 }
 
 gint32 selected_model_slot(void) {
-    guint position = adw_combo_row_get_selected(ui.models.model_row);
-    if (ui.models.model_slots == NULL || position == GTK_INVALID_LIST_POSITION || position >= ui.models.model_slots->len) {
+    guint position = adw_combo_row_get_selected(models_page()->model_row);
+    if (models_page()->model_slots == NULL || position == GTK_INVALID_LIST_POSITION || position >= models_page()->model_slots->len) {
         return -1;
     }
-    return g_array_index(ui.models.model_slots, Slot, position).global;
+    return g_array_index(models_page()->model_slots, Slot, position).global;
 }
 
 const char *selected_microphone(void) {
-    guint position = adw_combo_row_get_selected(ui.models.microphone_row);
-    if (ui.models.microphone_ids == NULL || position == GTK_INVALID_LIST_POSITION || position >= ui.models.microphone_ids->len) {
+    guint position = adw_combo_row_get_selected(models_page()->microphone_row);
+    if (models_page()->microphone_ids == NULL || position == GTK_INVALID_LIST_POSITION || position >= models_page()->microphone_ids->len) {
         return "";
     }
-    return g_ptr_array_index(ui.models.microphone_ids, position);
+    return g_ptr_array_index(models_page()->microphone_ids, position);
 }
 
 gchar *displayed_transcript(void) {
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(ui.dashboard.transcript);
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(dashboard_page()->transcript);
     GtkTextIter start, end;
     gtk_text_buffer_get_bounds(buffer, &start, &end);
     return gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
 }
 
 void set_transcript(const char *text) {
-    gtk_text_buffer_set_text(gtk_text_view_get_buffer(ui.dashboard.transcript), text != NULL ? text : "", -1);
+    gtk_text_buffer_set_text(gtk_text_view_get_buffer(dashboard_page()->transcript), text != NULL ? text : "", -1);
 }
 
 static const char *combo_text(AdwComboRow *row) {
@@ -39,19 +46,19 @@ static const char *combo_text(AdwComboRow *row) {
 
 /* The dashboard's Setup card and the header subtitle echo the settings. */
 void refresh_setup(void) {
-    const char *microphone = combo_text(ui.models.microphone_row);
-    gtk_label_set_text(ui.dashboard.setup_microphone, microphone != NULL ? microphone : "Default microphone");
-    const char *model = combo_text(ui.models.model_row);
-    gtk_label_set_text(ui.dashboard.setup_model, model != NULL ? model : "No model selected");
+    const char *microphone = combo_text(models_page()->microphone_row);
+    gtk_label_set_text(dashboard_page()->setup_microphone, microphone != NULL ? microphone : "Default microphone");
+    const char *model = combo_text(models_page()->model_row);
+    gtk_label_set_text(dashboard_page()->setup_model, model != NULL ? model : "No model selected");
     adw_window_title_set_subtitle(ui.title, model != NULL ? model : "");
-    const char *output = combo_text(ui.output.output_row);
-    gboolean restores = ui.output.can_restore_clipboard && adw_combo_row_get_selected(ui.output.output_row) == 0 &&
-                        adw_switch_row_get_active(ui.output.restore_row);
+    const char *output = combo_text(output_page()->output_row);
+    gboolean restores = output_page()->can_restore_clipboard && adw_combo_row_get_selected(output_page()->output_row) == 0 &&
+                        adw_switch_row_get_active(output_page()->restore_row);
     gchar *text = g_strdup_printf("%s%s", output != NULL ? output : "", restores ? " · clipboard restored" : "");
-    gtk_label_set_text(ui.dashboard.setup_output, text);
+    gtk_label_set_text(dashboard_page()->setup_output, text);
     g_free(text);
-    const char *hint = adw_action_row_get_subtitle(ui.output.shortcut_row);
-    gtk_label_set_text(ui.dashboard.setup_shortcut, hint != NULL && hint[0] != '\0' ? hint : "Checking the desktop…");
+    const char *hint = adw_action_row_get_subtitle(output_page()->shortcut_row);
+    gtk_label_set_text(dashboard_page()->setup_shortcut, hint != NULL && hint[0] != '\0' ? hint : "Checking the desktop…");
 }
 
 void refresh_actions(void) {
@@ -61,78 +68,78 @@ void refresh_actions(void) {
     gchar *text = displayed_transcript();
     gboolean has_text = text != NULL && text[0] != '\0';
     g_free(text);
-    gboolean has_record = ui.history_page.selected_id != NULL;
-    gboolean presented = has_record && g_strcmp0(ui.history_page.presented_id, ui.history_page.selected_id) == 0;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard.copy), has_text && !cleanup_preview.visible);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard.dashboard_copy), has_text && !cleanup_preview.visible);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard.cancel), ui.state == JSTI_STATE_WORKING);
-    gtk_widget_set_visible(GTK_WIDGET(ui.dashboard.cancel), ui.state == JSTI_STATE_WORKING);
+    gboolean has_record = history_page()->selected_id != NULL;
+    gboolean presented = has_record && g_strcmp0(history_page()->presented_id, history_page()->selected_id) == 0;
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->copy), has_text && !cleanup_preview.visible);
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), has_text && !cleanup_preview.visible);
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->cancel), ui.state == JSTI_STATE_WORKING);
+    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->cancel), ui.state == JSTI_STATE_WORKING);
     gboolean recording = ui.state == JSTI_STATE_RECORDING;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard.record), ui.state != JSTI_STATE_WORKING);
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->record), ui.state != JSTI_STATE_WORKING);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.header_record), ui.state != JSTI_STATE_WORKING);
-    gtk_button_set_label(ui.dashboard.record, recording ? "Stop Recording"
+    gtk_button_set_label(dashboard_page()->record, recording ? "Stop Recording"
                                     : ui.state == JSTI_STATE_WORKING ? "Working…" : "Start Recording");
     adw_button_content_set_label(ADW_BUTTON_CONTENT(gtk_button_get_child(ui.header_record)),
                                  recording ? "Stop" : "Record");
     adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(gtk_button_get_child(ui.header_record)),
                                      recording ? "media-playback-stop-symbolic" : "audio-input-microphone-symbolic");
     if (recording) {
-        gtk_widget_add_css_class(GTK_WIDGET(ui.dashboard.record), "recording");
+        gtk_widget_add_css_class(GTK_WIDGET(dashboard_page()->record), "recording");
         gtk_widget_add_css_class(GTK_WIDGET(ui.header_record), "destructive-action");
     } else {
-        gtk_widget_remove_css_class(GTK_WIDGET(ui.dashboard.record), "recording");
+        gtk_widget_remove_css_class(GTK_WIDGET(dashboard_page()->record), "recording");
         gtk_widget_remove_css_class(GTK_WIDGET(ui.header_record), "destructive-action");
     }
     /* While recording, the hero previews the words as they arrive. */
     gchar *preview = recording ? displayed_transcript() : NULL;
-    gtk_label_set_text(ui.dashboard.live_preview, preview != NULL && preview[0] != '\0' ? preview : "Listening…");
-    gtk_widget_set_visible(GTK_WIDGET(ui.dashboard.live_preview), recording);
+    gtk_label_set_text(dashboard_page()->live_preview, preview != NULL && preview[0] != '\0' ? preview : "Listening…");
+    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->live_preview), recording);
     g_free(preview);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.retry), idle && has_record);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.correction_results), idle && presented);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.export_button), idle && presented && has_text);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.issue_button), idle && presented);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.open_audio), has_record);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.play), has_record && (idle || ui.history_page.playback_state != 0));
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.stop_play), has_record && ui.history_page.playback_state != 0);
-    gtk_button_set_label(ui.history_page.play, ui.history_page.playback_state == 1 ? "Pause" : "Play");
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->retry), idle && has_record);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->correction_results), idle && presented);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->export_button), idle && presented && has_text);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->issue_button), idle && presented);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->open_audio), has_record);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->play), has_record && (idle || history_page()->playback_state != 0));
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->stop_play), has_record && history_page()->playback_state != 0);
+    gtk_button_set_label(history_page()->play, history_page()->playback_state == 1 ? "Pause" : "Play");
     /* Speaks the presented record's displayed text, so it needs both. */
     gboolean voices = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)) > 0;
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.button), idle && presented && has_text && voices);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice.voice_read), idle && presented && has_text && voices);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice.voice_stop), !ui.closing);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.voice.voice_sources), idle && voices);
+    gtk_widget_set_sensitive(GTK_WIDGET(voice_page()->voice_read), idle && presented && has_text && voices);
+    gtk_widget_set_sensitive(GTK_WIDGET(voice_page()->voice_stop), !ui.closing);
+    gtk_widget_set_sensitive(GTK_WIDGET(voice_page()->voice_sources), idle && voices);
     jsti_voice_credentials_set_idle(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.voice_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_row),
         idle && read_aloud.favorite_indices != NULL && read_aloud.favorite_indices->len > 0);
     gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.favorite_button),
         idle && read_aloud.favorite_executable && !read_aloud.favorite_pending);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.import_button), idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.history_import), idle);
-    gtk_widget_set_sensitive(ui.history_page.history_filters, idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.history_delete), idle && has_record);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.history_clear),
-        idle && ui.history_page.all_history_ids != NULL && ui.history_page.all_history_ids[0] != '\0');
-    if (ui.history_page.audio_cleanup != NULL) gtk_widget_set_sensitive(GTK_WIDGET(ui.history_page.audio_cleanup), idle);
-    if (ui.storage.recordings_choose != NULL) {
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.storage.recordings_choose), idle && ui.storage.location_chooser == NULL);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.storage.recordings_default), idle && ui.storage.location_chooser == NULL);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->import_button), idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->history_import), idle);
+    gtk_widget_set_sensitive(history_page()->history_filters, idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->history_delete), idle && has_record);
+    gtk_widget_set_sensitive(GTK_WIDGET(history_page()->history_clear),
+        idle && history_page()->all_history_ids != NULL && history_page()->all_history_ids[0] != '\0');
+    if (history_page()->audio_cleanup != NULL) gtk_widget_set_sensitive(GTK_WIDGET(history_page()->audio_cleanup), idle);
+    if (storage_page()->recordings_choose != NULL) {
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->recordings_choose), idle && storage_page()->location_chooser == NULL);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->recordings_default), idle && storage_page()->location_chooser == NULL);
     }
-    if (ui.storage.backup_audio != NULL) {
-        gboolean backup_idle = idle && ui.storage.backup_chooser == NULL && ui.storage.restore_dialog == NULL;
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.storage.backup_audio), backup_idle);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.storage.backup_profiles), backup_idle);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.storage.backup_export), backup_idle);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.storage.backup_inspect), backup_idle);
-        gtk_widget_set_sensitive(GTK_WIDGET(ui.storage.backup_restore), backup_idle);
+    if (storage_page()->backup_audio != NULL) {
+        gboolean backup_idle = idle && storage_page()->backup_chooser == NULL && storage_page()->restore_dialog == NULL;
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_audio), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_profiles), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_export), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_inspect), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_restore), backup_idle);
     }
     refresh_migration_restore();
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.models.model_row), idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(models_page()->model_row), idle);
     jsti_model_filters_set_idle(idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.models.microphone_row), idle);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard.version), presented && ui.history_page.presented_switchable && idle);
-    gtk_widget_set_visible(GTK_WIDGET(ui.dashboard.version), presented && ui.history_page.presented_switchable);
+    gtk_widget_set_sensitive(GTK_WIDGET(models_page()->microphone_row), idle);
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->version), presented && history_page()->presented_switchable && idle);
+    gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->version), presented && history_page()->presented_switchable);
     refresh_setup();
 }
 
@@ -171,14 +178,14 @@ void on_copy(GtkButton *button, gpointer data) {
 
 /* The Azure resource row belongs to Azure models only. */
 void refresh_azure_row(void) {
-    guint position = adw_combo_row_get_selected(ui.models.model_row);
-    gboolean azure = ui.models.model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < ui.models.model_slots->len
-        && g_str_has_prefix(g_array_index(ui.models.model_slots, Slot, position).id, "azure/");
-    gtk_widget_set_visible(GTK_WIDGET(ui.models.azure_row), azure);
+    guint position = adw_combo_row_get_selected(models_page()->model_row);
+    gboolean azure = models_page()->model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < models_page()->model_slots->len
+        && g_str_has_prefix(g_array_index(models_page()->model_slots, Slot, position).id, "azure/");
+    gtk_widget_set_visible(GTK_WIDGET(models_page()->azure_row), azure);
     /* On-device models (canonical "local/" identifiers) need no API key. */
-    gboolean local = ui.models.model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < ui.models.model_slots->len
-        && g_str_has_prefix(g_array_index(ui.models.model_slots, Slot, position).id, "local/");
-    gtk_widget_set_visible(GTK_WIDGET(ui.models.key_row), !local);
+    gboolean local = models_page()->model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < models_page()->model_slots->len
+        && g_str_has_prefix(g_array_index(models_page()->model_slots, Slot, position).id, "local/");
+    gtk_widget_set_visible(GTK_WIDGET(models_page()->key_row), !local);
 }
 
 void on_model(GObject *object, GParamSpec *spec, gpointer data) {
@@ -188,7 +195,7 @@ void on_model(GObject *object, GParamSpec *spec, gpointer data) {
     gint32 slot = selected_model_slot();
     if (!ui.suppress && slot >= 0) {
         guint mode = model_mode(jsti_model_filters_local(), jsti_model_filters_live());
-        ui.models.preferred_model_slots[mode] = slot;
+        models_page()->preferred_model_slots[mode] = slot;
     }
     if (slot >= 0) emit(JSTI_EVENT_SELECT_MODEL, "", slot);
 }
@@ -213,14 +220,14 @@ void on_key_apply(AdwEntryRow *row, gpointer data) {
 
 void on_text_output(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
-    guint method = adw_combo_row_get_selected(ui.output.output_row);
-    gboolean restore = adw_switch_row_get_active(ui.output.restore_row);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.output.restore_row), method == 0 && ui.output.can_restore_clipboard);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.output.app_switch_row), method == 0 && ui.output.app_switch_configured);
+    guint method = adw_combo_row_get_selected(output_page()->output_row);
+    gboolean restore = adw_switch_row_get_active(output_page()->restore_row);
+    gtk_widget_set_sensitive(GTK_WIDGET(output_page()->restore_row), method == 0 && output_page()->can_restore_clipboard);
+    gtk_widget_set_sensitive(GTK_WIDGET(output_page()->app_switch_row), method == 0 && output_page()->app_switch_configured);
     refresh_setup();
-    if (ui.output.app_switch_configured) {
+    if (output_page()->app_switch_configured) {
         gchar *payload = g_strdup_printf("%s\t%u", restore ? "restore" : "",
-                                        adw_combo_row_get_selected(ui.output.app_switch_row));
+                                        adw_combo_row_get_selected(output_page()->app_switch_row));
         emit(JSTI_EVENT_TEXT_OUTPUT, payload, (gint32)method);
         g_free(payload);
     } else {
@@ -238,7 +245,7 @@ void apply_appearance(guint appearance) {
 
 void on_appearance(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
-    guint appearance = adw_combo_row_get_selected(ui.general.appearance_row);
+    guint appearance = adw_combo_row_get_selected(general_page()->appearance_row);
     apply_appearance(appearance);
     emit(JSTI_EVENT_APPEARANCE, "", (gint32)appearance);
 }
@@ -248,20 +255,20 @@ void on_appearance(GObject *object, GParamSpec *spec, gpointer data) {
 void on_login_item(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
     if (ui.suppress) return;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.general.login_row), FALSE);
-    emit(JSTI_EVENT_LOGIN_ITEM, "", adw_switch_row_get_active(ui.general.login_row) ? 1 : 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(general_page()->login_row), FALSE);
+    emit(JSTI_EVENT_LOGIN_ITEM, "", adw_switch_row_get_active(general_page()->login_row) ? 1 : 0);
 }
 
 void on_automation(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
     if (ui.suppress) return;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.general.automation_row), FALSE);
-    emit(JSTI_EVENT_AUTOMATION, "", adw_switch_row_get_active(ui.general.automation_row) ? 1 : 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(general_page()->automation_row), FALSE);
+    emit(JSTI_EVENT_AUTOMATION, "", adw_switch_row_get_active(general_page()->automation_row) ? 1 : 0);
 }
 
 void on_style(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
-    emit(JSTI_EVENT_SHORTCUT_STYLE, "", (gint32)adw_combo_row_get_selected(ui.output.style_row));
+    emit(JSTI_EVENT_SHORTCUT_STYLE, "", (gint32)adw_combo_row_get_selected(output_page()->style_row));
 }
 
 void on_refresh(GtkButton *button, gpointer data) {
@@ -278,15 +285,15 @@ void on_search(GtkSearchEntry *entry, gpointer data) {
  * expands its selected row. The window holds its own reference, so moving
  * the detail between cards or rebuilding the list never destroys it. */
 void detach_detail(void) {
-    GtkWidget *parent = gtk_widget_get_parent(ui.history_page.detail);
-    if (parent != NULL) gtk_box_remove(GTK_BOX(parent), ui.history_page.detail);
+    GtkWidget *parent = gtk_widget_get_parent(history_page()->detail);
+    if (parent != NULL) gtk_box_remove(GTK_BOX(parent), history_page()->detail);
 }
 
 void attach_detail(GtkListBoxRow *row) {
     GtkWidget *card = row != NULL ? gtk_list_box_row_get_child(row) : NULL;
-    if (card != NULL && gtk_widget_get_parent(ui.history_page.detail) == card) return;
+    if (card != NULL && gtk_widget_get_parent(history_page()->detail) == card) return;
     detach_detail();
-    if (card != NULL) gtk_box_append(GTK_BOX(card), ui.history_page.detail);
+    if (card != NULL) gtk_box_append(GTK_BOX(card), history_page()->detail);
 }
 
 void on_history_selected(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
@@ -294,58 +301,58 @@ void on_history_selected(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
     attach_detail(row);
     if (row == NULL) return;
     gint index = gtk_list_box_row_get_index(row);
-    if (index < 0 || (guint)index >= ui.history_page.history_ids->len) return;
-    const char *id = g_ptr_array_index(ui.history_page.history_ids, index);
-    if (g_strcmp0(id, ui.history_page.selected_id) == 0) return;
+    if (index < 0 || (guint)index >= history_page()->history_ids->len) return;
+    const char *id = g_ptr_array_index(history_page()->history_ids, index);
+    if (g_strcmp0(id, history_page()->selected_id) == 0) return;
     retire_cleanup_preview();
-    g_free(ui.history_page.selected_id);
-    ui.history_page.selected_id = g_strdup(id);
+    g_free(history_page()->selected_id);
+    history_page()->selected_id = g_strdup(id);
     /* Stale text never stays under another record's actions. */
-    g_clear_pointer(&ui.history_page.presented_id, g_free);
+    g_clear_pointer(&history_page()->presented_id, g_free);
     set_transcript("");
-    ui.history_page.playback_state = 0;
-    gtk_label_set_text(ui.history_page.playback_label, "");
+    history_page()->playback_state = 0;
+    gtk_label_set_text(history_page()->playback_label, "");
     refresh_actions();
     emit(JSTI_EVENT_SELECT_HISTORY, id, 0);
 }
 
 void on_version(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
-    if (ui.history_page.selected_id == NULL || g_strcmp0(ui.history_page.presented_id, ui.history_page.selected_id) != 0) return;
-    guint selected = gtk_drop_down_get_selected(ui.dashboard.version);
-    if ((gint32)selected == ui.history_page.presented_variant) return;
+    if (history_page()->selected_id == NULL || g_strcmp0(history_page()->presented_id, history_page()->selected_id) != 0) return;
+    guint selected = gtk_drop_down_get_selected(dashboard_page()->version);
+    if ((gint32)selected == history_page()->presented_variant) return;
     retire_cleanup_preview();
-    ui.history_page.presented_variant = (gint32)selected;
-    emit(JSTI_EVENT_TRANSCRIPT_VERSION, ui.history_page.selected_id, (gint32)selected);
+    history_page()->presented_variant = (gint32)selected;
+    emit(JSTI_EVENT_TRANSCRIPT_VERSION, history_page()->selected_id, (gint32)selected);
 }
 
 void on_retry(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.history_page.selected_id != NULL) emit(JSTI_EVENT_RETRY_HISTORY, ui.history_page.selected_id, 0);
+    if (history_page()->selected_id != NULL) emit(JSTI_EVENT_RETRY_HISTORY, history_page()->selected_id, 0);
 }
 
 void on_correction_results(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.history_page.selected_id != NULL && g_strcmp0(ui.history_page.presented_id, ui.history_page.selected_id) == 0)
-        emit(72, ui.history_page.selected_id, 2);
+    if (history_page()->selected_id != NULL && g_strcmp0(history_page()->presented_id, history_page()->selected_id) == 0)
+        emit(72, history_page()->selected_id, 2);
 }
 
 void on_play(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.history_page.selected_id != NULL) emit(JSTI_EVENT_PLAYBACK_TOGGLE, ui.history_page.selected_id, 0);
+    if (history_page()->selected_id != NULL) emit(JSTI_EVENT_PLAYBACK_TOGGLE, history_page()->selected_id, 0);
 }
 
 void on_stop_play(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    emit(JSTI_EVENT_PLAYBACK_STOP, ui.history_page.selected_id, 0);
+    emit(JSTI_EVENT_PLAYBACK_STOP, history_page()->selected_id, 0);
 }
 
 /* The host captures the displayed text with jsti_window_transcript_snapshot
  * while this event runs, so it is the text shown under this record. */
 void on_read_aloud(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.history_page.selected_id == NULL || g_strcmp0(ui.history_page.presented_id, ui.history_page.selected_id) != 0) return;
-    emit(JSTI_EVENT_READ_ALOUD, ui.history_page.selected_id, 0);
+    if (history_page()->selected_id == NULL || g_strcmp0(history_page()->presented_id, history_page()->selected_id) != 0) return;
+    emit(JSTI_EVENT_READ_ALOUD, history_page()->selected_id, 0);
 }
 
 void on_voice(GObject *object, GParamSpec *spec, gpointer data) {
@@ -394,5 +401,5 @@ void on_favorite_toggle(GtkButton *button, gpointer data) {
 
 void on_open_audio(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (ui.history_page.selected_id != NULL) emit(JSTI_EVENT_OPEN_AUDIO, ui.history_page.selected_id, 0);
+    if (history_page()->selected_id != NULL) emit(JSTI_EVENT_OPEN_AUDIO, history_page()->selected_id, 0);
 }

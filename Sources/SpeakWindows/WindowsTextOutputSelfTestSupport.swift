@@ -134,8 +134,11 @@ final class SyntheticCapture: WindowsRecordingCapture {
     init(context: WindowsCaptureContext) { self.context = context }
 
     func start() throws {
-        SyntheticEffects.samples.withUnsafeBufferPointer {
-            captureAudio($0.baseAddress, $0.count, Unmanaged.passUnretained(context).toOpaque())
+        // The callback resolves a NativeCallbackContext, as WASAPI's does.
+        NativeCallbackContext.withScoped(context) { callbacks in
+            SyntheticEffects.samples.withUnsafeBufferPointer {
+                captureAudio($0.baseAddress, $0.count, callbacks)
+            }
         }
     }
 

@@ -2,18 +2,21 @@
 import SpeakCore
 
 extension AppSettings.DefaultsKey {
-    /// Share names with macOS's existing catalogue, not defaults or model support.
-    /// Each value keeps its existing type and platform-owned validation/effects.
-    /// This projection does not add keys to transfer or automatic sync policies.
+    /// Names shared with macOS come from `SharedApplicationPreferences`, not a
+    /// second list. Each value keeps its existing type and platform-owned
+    /// validation/effects. This projection does not add keys to transfer or
+    /// automatic sync policies.
     var storageKey: String {
         switch self {
-        case .batchTranscriptionModel: ApplicationPreferenceKey.batchTranscriptionModel.rawValue
-        case .postProcessingModel: ApplicationPreferenceKey.postProcessingModel.rawValue
-        case .transcriptionKeywords: ApplicationPreferenceKey.transcriptionKeywords.rawValue
-        case .preferredLocale: ApplicationPreferenceKey.preferredLocale.rawValue
-        case .postProcessingEnabled: ApplicationPreferenceKey.postProcessingEnabled.rawValue
-        case .handsFreeDictationEnabled: ApplicationPreferenceKey.handsFreeDictationEnabled.rawValue
-        case .keepAudioOnCancel: ApplicationPreferenceKey.keepAudioOnCancel.rawValue
+        case .selectedModel: AppSettings.Shared.liveTranscriptionModel.iOS.key
+        case .batchTranscriptionModel: AppSettings.Shared.batchTranscriptionModel.iOS.key
+        case .postProcessingModel: AppSettings.Shared.postProcessingModel.iOS.key
+        case .transcriptionKeywords: AppSettings.Shared.transcriptionKeywords.iOS.key
+        case .preferredLocale: AppSettings.Shared.preferredLocale.iOS.key
+        case .visualDensity: AppSettings.Shared.visualDensity.iOS.key
+        case .postProcessingEnabled: AppSettings.Shared.postProcessingEnabled.iOS.key
+        case .handsFreeDictationEnabled: AppSettings.Shared.handsFreeDictationEnabled.iOS.key
+        case .keepAudioOnCancel: AppSettings.Shared.keepAudioOnCancel.iOS.key
         default: self.rawValue
         }
     }

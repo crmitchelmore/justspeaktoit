@@ -144,7 +144,9 @@ struct ConfigTransferView: View {
             let manager = ConfigTransferManager.shared
             let secrets = try await manager.gatherSecrets(storage: secureStorage.coreStorage())
             try Task.checkCancellation()
-            let settings = manager.gatherSettings(liveModelDefaultsKey: "liveTranscriptionModel")
+            let settings = manager.gatherSettings(
+                liveModelDefaultsKey: SharedApplicationPreferences.liveTranscriptionModel.macOS.key
+            )
 
             secretCount = secrets.count
             settingCount = settings.count

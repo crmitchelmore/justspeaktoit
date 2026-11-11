@@ -115,10 +115,12 @@ public final class AppSettings: ObservableObject {
     }
 
     public static let shared = AppSettings()
+    /// Keys, defaults and value domains shared with the macOS store.
+    typealias Shared = SharedApplicationPreferences
 
     @Published public var selectedModel: String {
         didSet {
-            defaults.set(selectedModel, forKey: DefaultsKey.selectedModel.rawValue)
+            defaults.set(selectedModel, forKey: DefaultsKey.selectedModel.storageKey)
             liveTranscriptionSelection.remember(selectedModel)
             liveTranscriptionSelection.persist(to: defaults)
             publishKeyboardProfileSelection()
@@ -420,8 +422,7 @@ public final class AppSettings: ObservableObject {
 
     /// Read where no settings object is in reach, such as the recorder's cancel path.
     nonisolated public static func storedKeepAudioOnCancel(in defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: ApplicationPreferenceKey.keepAudioOnCancel.rawValue) as? Bool
-            ?? SpeechDefaults.keepAudioOnCancel
+        Shared.keepAudioOnCancel.iOS.value(in: defaults)
     }
 
     @Published public var liveActivitiesEnabled: Bool {
@@ -476,7 +477,7 @@ public final class AppSettings: ObservableObject {
     }
 
     @Published public var visualDensity: AppVisualDensity {
-        didSet { defaults.set(visualDensity.rawValue, forKey: DefaultsKey.visualDensity.rawValue) }
+        didSet { defaults.set(visualDensity.rawValue, forKey: DefaultsKey.visualDensity.storageKey) }
     }
 
     @Published public var autoStartRecording: Bool {
@@ -561,7 +562,7 @@ public final class AppSettings: ObservableObject {
 
     /// Device-local metadata discovery; intentionally outside automatic settings transfer.
     @Published public var cleanupModelDiscoveryEnabled: Bool {
-        didSet { defaults.set(cleanupModelDiscoveryEnabled, forKey: CleanupModelSelection.preferenceKey) }
+        didSet { defaults.set(cleanupModelDiscoveryEnabled, forKey: Shared.cleanupModelDiscoveryEnabled.iOS.key) }
     }
 
     @Published public var postProcessingModel: String {
@@ -599,9 +600,7 @@ public final class AppSettings: ObservableObject {
         self.defaults = defaults
         self.credentials = credentialStorage ?? Self.credentialStorage
         self.migratesLegacyCredentials = credentialStorage == nil
-        let storedSelectedRaw = defaults.string(forKey: DefaultsKey.selectedModel.rawValue)
-            ?? AppleLocalModels.preferredSpeechModelID
-        let selectedRaw = ModelCatalog.normalizedLiveTranscriptionModel(storedSelectedRaw)
+        let selectedRaw = Shared.liveTranscriptionModel.iOS.value(in: defaults)
         // Normalise to canonical catalogue ids. Keep only models that this iOS
         // target can actually run; a previously stored macOS-only model falls
         // back to Apple Speech instead of leaking into the iPhone picker.
@@ -645,14 +644,10 @@ public final class AppSettings: ObservableObject {
         } else {
             clipboardNoticeVersion = 0
         }
-        let density = AppVisualDensity(
-            rawValue: defaults.string(forKey: DefaultsKey.visualDensity.rawValue) ?? ""
-        ) ?? .normal
+        let density = Shared.visualDensity.iOS.value(in: defaults)
         let autoStart = defaults.bool(forKey: DefaultsKey.autoStartRecording.rawValue)
-        let handsFree = defaults.bool(forKey: DefaultsKey.handsFreeDictationEnabled.storageKey)
-        let preferredLocale = TranscriptionLanguageCatalog.normalizedIdentifier(
-            defaults.string(forKey: DefaultsKey.preferredLocale.storageKey)
-        )
+        let handsFree = Shared.handsFreeDictationEnabled.iOS.value(in: defaults)
+        let preferredLocale = Shared.preferredLocale.iOS.value(in: defaults)
 
         // Hardware trigger destination (Action Button, Siri, Shortcuts).
         // `.auto` is the default only for users who never made a choice: an
@@ -675,17 +670,14 @@ public final class AppSettings: ObservableObject {
         }
 
         // Post-processing settings
-        let postEnabled = defaults.bool(forKey: DefaultsKey.postProcessingEnabled.storageKey)
-        let storedPostModel = defaults.string(forKey: DefaultsKey.postProcessingModel.storageKey)
-        let normalizedPostModel = ModelCatalog.normalizedPostProcessingModel(storedPostModel)
+        let postEnabled = Shared.postProcessingEnabled.iOS.value(in: defaults)
+        let normalizedPostModel = Shared.postProcessingModel.iOS.value(in: defaults)
         let postModel = (Self.postProcessingModels.contains { $0.id == normalizedPostModel }
             || CleanupModelSelection.modelID(from: normalizedPostModel) != nil)
             ? normalizedPostModel
             : ModelCatalog.defaultPostProcessingModel
         let autoPost = defaults.bool(forKey: DefaultsKey.autoPostProcess.rawValue)
-        let batchModel = ModelCatalog.normalizedBatchTranscriptionModel(
-            defaults.string(forKey: DefaultsKey.batchTranscriptionModel.storageKey)
-        )
+        let batchModel = Shared.batchTranscriptionModel.iOS.value(in: defaults)
         let mode = IOSTranscriptionMode(
             rawValue: defaults.string(forKey: DefaultsKey.transcriptionMode.rawValue) ?? ""
         ) ?? .streaming
@@ -721,7 +713,7 @@ public final class AppSettings: ObservableObject {
         self.speechmaticsAPIKey = ""
         self.revAIAPIKey = ""
         self.mistralAPIKey = ""
-        self.transcriptionKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.storageKey) ?? ""
+        self.transcriptionKeywords = Shared.transcriptionKeywords.iOS.value(in: defaults)
         self.transcriptReadyNotificationsEnabled = defaults.bool(
             forKey: DefaultsKey.transcriptReadyNotificationsEnabled.storageKey
         )
@@ -748,7 +740,7 @@ public final class AppSettings: ObservableObject {
                 ?? CaptureEndPointingPolicy.defaultSilenceWindowSeconds
         )
         self.postProcessingEnabled = postEnabled
-        self.cleanupModelDiscoveryEnabled = defaults.bool(forKey: CleanupModelSelection.preferenceKey)
+        self.cleanupModelDiscoveryEnabled = Shared.cleanupModelDiscoveryEnabled.iOS.value(in: defaults)
         self.postProcessingModel = postModel
         self.autoPostProcess = autoPost
 

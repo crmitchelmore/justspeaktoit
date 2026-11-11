@@ -72,7 +72,7 @@ public final class ConfigTransferManager: Sendable {
     ]
 
     /// Shared UserDefaults key for the user's transcription keywords.
-    public static let transcriptionKeywordsKey = "transcriptionKeywords"
+    public static let transcriptionKeywordsKey = SharedApplicationPreferences.transcriptionKeywords.macOS.key
 
     /// Collects the transferable secrets currently stored in `storage`,
     /// skipping identifiers that are missing or empty.
@@ -102,7 +102,7 @@ public final class ConfigTransferManager: Sendable {
     /// transcription model under.
     public func gatherSettings(
         defaults: UserDefaults = .standard,
-        liveModelDefaultsKey: String = "selectedModel"
+        liveModelDefaultsKey: String = SharedApplicationPreferences.liveTranscriptionModel.iOS.key
     ) -> [String: String] {
         var settings: [String: String] = [:]
         if let model = defaults.string(forKey: liveModelDefaultsKey) {

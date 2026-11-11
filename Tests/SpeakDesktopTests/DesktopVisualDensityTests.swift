@@ -173,4 +173,41 @@ final class DesktopVisualDensityTests: XCTestCase {
             to: entries, searchText: "", status: .stored, sortOrder: .category
         ).map(\.id), ["a"])
     }
+
+    func testAPIKeyStatusFilter_ShowsOnlyMatchingKeys() {
+        let entries = [
+            APIKeyListEntry(id: "unset", title: "Alpha", category: "Speech", isStored: false),
+            APIKeyListEntry(id: "set", title: "Bravo", category: "Speech", isStored: true),
+            APIKeyListEntry(id: "broken", title: "Charlie", category: "Voice", isStored: true, hasError: true),
+            APIKeyListEntry(id: "unreadable", title: "Delta", category: "Voice", isStored: false, hasError: true)
+        ]
+        func ids(_ status: APIKeyStatusFilter, _ search: String = "") -> [String] {
+            APIKeyListQuery.apply(to: entries, searchText: search, status: status, sortOrder: .name).map(\.id)
+        }
+        XCTAssertEqual(APIKeyStatusFilter.allCases.map(\.displayName), ["All", "Errors", "Set", "Unset"])
+        XCTAssertEqual(ids(.all), ["unset", "set", "broken", "unreadable"])
+        XCTAssertEqual(ids(.errors), ["broken", "unreadable"])
+        XCTAssertEqual(ids(.stored), ["set", "broken"])
+        XCTAssertEqual(ids(.missing), ["unset", "unreadable"])
+        XCTAssertEqual(ids(.errors, "voice"), ["broken", "unreadable"])
+        XCTAssertEqual(ids(.stored, "voice"), ["broken"])
+        XCTAssertEqual(
+            APIKeyListQuery.apply(to: entries, searchText: "", status: .all, sortOrder: .status).map(\.id),
+            ["broken", "unreadable", "set", "unset"]
+        )
+    }
+
+    func testAPIKeyStatusFilter_MatchMaskFollowsCaseOrder() {
+        let broken = APIKeyListEntry(id: "x", title: "X", category: "Y", isStored: true, hasError: true)
+        let unset = APIKeyListEntry(id: "z", title: "Z", category: "Y", isStored: false)
+        XCTAssertEqual(APIKeyStatusFilter.matchMask(for: broken), 0b0111)
+        XCTAssertEqual(APIKeyStatusFilter.matchMask(for: unset), 0b1001)
+    }
+
+    func testAPIKeyListEmptyState_DescribesEachFilter() {
+        let titles = APIKeyStatusFilter.allCases.map { APIKeyListQuery.emptyState(status: $0, searchText: "").title }
+        XCTAssertEqual(titles, ["No API Keys", "No Key Errors", "No Keys Set", "No Unset Keys"])
+        XCTAssertTrue(APIKeyListQuery.emptyState(status: .errors, searchText: "x").message.hasSuffix("search."))
+        XCTAssertFalse(APIKeyListQuery.emptyState(status: .errors, searchText: " ").message.contains("search"))
+    }
 }

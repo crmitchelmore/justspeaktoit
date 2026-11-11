@@ -1,6 +1,5 @@
 package com.justspeaktoit.android.settings
 
-import com.justspeaktoit.android.cloud.RepoSources
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -24,7 +23,7 @@ class ApiKeyStatusFilterTest {
 
     @Test
     fun testFilters_matchSharedSwiftCasesAndLabels() {
-        val swift = RepoSources.speakCore("APIKeyListQuery.swift")
+        val swift = SettingsSearchAsset.locate("Sources/SpeakCore/Credentials/APIKeyListQuery.swift").readText()
         val cases = Regex("""^\s+case (\w+)$""", RegexOption.MULTILINE)
             .findAll(swift.substringAfter("enum APIKeyStatusFilter").substringBefore("public var id"))
             .map { it.groupValues[1] }.toList()

@@ -60,6 +60,7 @@ public struct SettingsView: View {
             .onAppear {
                 searchIndex = SettingsSearchIndex(
                     entries: IOSSettingsSearch.catalogEntries(keyboardEnabled: iOSKeyboardEnabled)
+                        + IOSSettingsSearch.pageEntries()
                         + IOSSettingsSearch.apiKeyEntries(APIKeysView.entries(for: settings))
                 )
             }
@@ -122,7 +123,8 @@ public struct SettingsView: View {
         case .recording:
             return settings.hardwareTriggerDestination.displayName
         case .sync:
-            return historySync.isSyncEnabled ? "iCloud" : "Off"
+            guard historySync.isSyncEnabled else { return "Off" }
+            return historySync.state.isCloudAvailable ? "iCloud" : "Unavailable"
         case .about:
             return AboutSettingsPage.appVersion
         case .general, .results, .privacy:

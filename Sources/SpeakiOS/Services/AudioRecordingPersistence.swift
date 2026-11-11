@@ -23,8 +23,8 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// fails a write, so the owning session can surface the problem while the
     /// recording is still running rather than discovering it at stop.
     nonisolated public var onPersistenceIssue: (@Sendable (RecordingPersistenceDiagnostics) -> Void)? {
-        get { issueLock.withLock { storedIssueHandler } }
-        set { issueLock.withLock { storedIssueHandler = newValue } }
+        get { issueLatch.withLock { $0.handler } }
+        set { issueLatch.withLock { $0.handler = newValue } }
     }
 
     /// The metered microphone level. Everything about it —  the type, the
@@ -38,9 +38,11 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// main-actor teardown while `AVAudioFile.write` is in flight.
     let ioQueue = DispatchQueue(label: "com.justspeaktoit.ios.audioPersistence.io")
     /// Only touched on `ioQueue` after `startRecording` hands the file over.
+    /// nonisolated(unsafe): confined to the serial `ioQueue`, which is its only synchronisation.
     nonisolated(unsafe) var ioFile: AVAudioFile?
     /// Fast-path flag read by `writeBuffer` before copying; guarded by `stateLock`.
     let stateLock = NSLock()
+    /// nonisolated(unsafe): guarded by `stateLock`, held across the ioQueue submit and probed with try().
     nonisolated(unsafe) var isWriterOpen = false
     /// Pool for buffer copies handed to `ioQueue` so writes never touch the
     /// caller's (reused) buffer.
@@ -49,6 +51,7 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// fallback allocations up to a duration budget sized from the sample
     /// format; sustained overflow drops frames and records the gap instead of
     /// silently presenting a complete recording. Replaced per session.
+    /// nonisolated(unsafe): guarded by `stateLock` together with `isWriterOpen`.
     nonisolated(unsafe) private var admission = RecordingPersistenceAdmissionController()
     /// Leaf lock for the once-per-session issue latch and its handler. The
     /// latch is tested from `writeBuffer` (which holds `stateLock`) and from
@@ -56,13 +59,7 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// lock: a check-then-set on a bare flag would let both paths fire the
     /// callback, and `stateLock` cannot be taken on `ioQueue` without
     /// inverting the order against `closeWriter`'s barrier.
-    let issueLock = NSLock()
-    /// Guarded by `issueLock`.
-    nonisolated(unsafe) var storedIssueHandler: (@Sendable (RecordingPersistenceDiagnostics) -> Void)?
-    /// Set once per session after the first drop/write failure so the
-    /// owning-session callback fires exactly once, off the audio thread.
-    /// Guarded by `issueLock`.
-    nonisolated(unsafe) var didReportIssue = false
+    let issueLatch = OSAllocatedUnfairLock(initialState: PersistenceIssueLatch())
     private var startTime: Date?
 
     /// The claim record for the file currently being written, if any
@@ -113,6 +110,7 @@ public final class AudioRecordingPersistence: ObservableObject {
     // deterministically. Set them before recording starts and leave them nil in
     // every non-test build.
 
+    // nonisolated(unsafe): DEBUG test seams below are set before recording starts and only read after.
     nonisolated(unsafe) var beforeFileWrite: (@Sendable () throws -> Void)?
 
     /// Called from `writeBuffer` once admission has been granted and the buffer
@@ -175,7 +173,7 @@ public final class AudioRecordingPersistence: ObservableObject {
         ioQueue.async { [weak self] in self?.ioFile = file }
         isWriterOpen = true
         admission = RecordingPersistenceAdmissionController()
-        issueLock.withLock { didReportIssue = false }
+        issueLatch.withLock { $0.didReport = false }
         stateLock.unlock()
 
         let startedAt = Date()

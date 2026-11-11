@@ -20,7 +20,9 @@ extension DesktopTranscription {
             case "deepgram", "assemblyai", "speechmatics", "soniox", "xai", "meta", "azure":
                 return nil
             case "elevenlabs":
-                if model == ModelCatalog.elevenLabsScribeV2BatchID { return nil }
+                if [ModelCatalog.elevenLabsScribeV2BatchID, ModelCatalog.elevenLabsScribeV3BatchID].contains(model) {
+                    return nil
+                }
             case "mistral":
                 if MistralBatchClient.supportsKeywords(model: model) { return nil }
             case "google":

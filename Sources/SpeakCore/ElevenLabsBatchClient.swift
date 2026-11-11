@@ -63,7 +63,7 @@ public struct ElevenLabsBatchClient: TranscriptionProvider {
             .init(name: "timestamps_granularity", value: "word")
         ]
         if let language { fields.append(.init(name: "language_code", value: language.localeLanguageCode)) }
-        if extractModelID(from: model) == "scribe_v2" {
+        if ["scribe_v2", "scribe_v3"].contains(extractModelID(from: model)) {
             fields += ElevenLabsLiveProtocol.boundedKeyterms(keywords)
                 .map { .init(name: "keyterms", value: $0) }
         }

@@ -30,7 +30,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         XCTAssertTrue(visibleIDs.contains(SpeechmaticsRealtime.liveCatalogID))
         XCTAssertEqual(visibleIDs, Set(ModelCatalog.remoteLiveTranscription.map(\.id)))
         XCTAssertTrue(visibleIDs.contains(OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID))
-        XCTAssertTrue(visibleIDs.contains(XAIVoiceModels.thinkFast2CatalogID))
+        XCTAssertTrue(visibleIDs.contains(XAIVoiceModels.voice3CatalogID))
         XCTAssertTrue(visibleIDs.contains(XAISpeechToText.liveCatalogID))
     }
 

@@ -23,14 +23,15 @@ final class TranscriptionPricingTests: XCTestCase {
     }
 
     func testStreamingAndFileRatesRemainDistinct() {
+        // November 2026 rates: Deepgram's streaming promotion ended; Scribe repriced.
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "deepgram/nova-3-streaming"),
-                       Decimal(string: "0.0048"))
+                       Decimal(string: "0.0077"))
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe_v2"),
-                       Decimal(string: "0.22")! / 60)
+                       Decimal(string: "0.20")! / 60)
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe-v2-streaming"),
-                       Decimal(string: "0.39")! / 60)
-        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe_v2_medical"),
                        Decimal(string: "0.22")! / 60)
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe_v2_medical"),
+                       Decimal(string: "0.20")! / 60)
     }
 
     func testExactIdsWinOverProviderPrefixes() {

@@ -78,6 +78,21 @@ def merged_with(tree: Path, snapshot_sha: str, base: str, job: str = 'portable')
                '-m', f'pre-pr precheck: snapshot merged into {base} [precheck:{job}]')
 
 
+def push(tree: Path, sha: str, branch: str, attempts: int = 4, pause: float = 10.0) -> None:
+    # pre-pr starts the Lint and Android prechecks together, and GitHub intermittently answers
+    # simultaneous pushes with "[remote rejected] ... (failed)". A forced push of a fixed sha is idempotent.
+    for attempt in range(1, attempts + 1):
+        try:
+            git(tree, 'push', '--quiet', '--force', REMOTE, f'{sha}:refs/heads/{branch}')
+            return
+        except SystemExit as error:
+            # An integer code is the SIGTERM handler's exit (pre-pr cancelling us), not a push failure.
+            if isinstance(error.code, int) or attempt == attempts:
+                raise
+            print(f'linux-precheck: push to {branch} failed (attempt {attempt}); retrying', flush=True)
+            time.sleep(pause * attempt)
+
+
 def gh_json(*args: str):
     result = subprocess.run(['gh', *args], text=True, capture_output=True)
     if result.returncode != 0:
@@ -99,13 +114,21 @@ def remote(tree: Path, base: str | None = None, poll: float = 20.0, job: str = '
         sha = merged_with(tree, sha, git(tree, 'rev-parse', base), job)
     user = os.environ.get('USER', 'dev').lower().replace(' ', '-')
     branch = f'precheck/{user}-{job}-{sha[:12]}'
-    git(tree, 'push', '--quiet', '--force', REMOTE, f'{sha}:refs/heads/{branch}')
+    push(tree, sha, branch)
     print(f'linux-precheck: pushed {sha[:12]} to {branch}; waiting for {WORKFLOW}', flush=True)
     try:
         deadline = time.monotonic() + TIMEOUT_MINUTES * 60
         run, last = None, None
         while time.monotonic() < deadline:
-            run = find_run(sha)
+            try:
+                run = find_run(sha)
+            except SystemExit as error:
+                # A dropped connection while polling must not fail a run that is still going.
+                if isinstance(error.code, int):
+                    raise
+                print(f'{error}; polling again', file=sys.stderr, flush=True)
+                time.sleep(poll)
+                continue
             if run and run['status'] == 'completed':
                 break
             state = run['status'] if run else 'not registered'

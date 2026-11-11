@@ -5,4 +5,5 @@
 # (android/settings.gradle.kts); scripts/pre-pr otherwise runs it remotely.
 set -euo pipefail
 cd "$(dirname "$0")/../android"
-./gradlew --stacktrace testDebugUnitTest lintDebug assembleDebug
+# bundleRelease runs R8 and resource shrinking, as android-release.yml does for Play.
+./gradlew --stacktrace testDebugUnitTest lintDebug assembleDebug bundleRelease

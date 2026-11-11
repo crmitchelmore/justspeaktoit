@@ -42,7 +42,7 @@ import com.justspeaktoit.android.ui.theme.JustSpeakTheme
 private enum class Screen { Dictation, Settings, History }
 
 class MainActivity : ComponentActivity() {
-    private val viewModel: DictationViewModel by viewModels()
+    private val viewModel: DictationViewModel by viewModels { DictationViewModel.Factory }
     private val permission = mutableStateOf(MicPermission.NotRequested)
     private val screenState = mutableStateOf(Screen.Dictation)
 

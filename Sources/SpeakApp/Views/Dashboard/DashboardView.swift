@@ -2,14 +2,10 @@ import Combine
 import SpeakCore
 import SwiftUI
 
-// swiftlint:disable file_length
-// swiftlint:disable:next type_body_length
 struct DashboardView: View {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject private var history: HistoryManager
-  @EnvironmentObject private var recording: RecordingControlModel
   @Environment(\.appVisualDensity) private var density
-  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @StateObject private var speechInsights = SpeechInsightsModel()
 
   /// Chart inputs derived from the *whole* history. Cached in state and
@@ -27,7 +23,7 @@ struct DashboardView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: density.sectionSpacing) {
-        heroHeader
+        DashboardHeroHeader()
         dashboardSections
       }
       .padding(density.pagePadding)
@@ -41,175 +37,6 @@ struct DashboardView: View {
       )
       .ignoresSafeArea()
     )
-  }
-
-  @ViewBuilder
-  private var heroHeader: some View {
-    if density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize) {
-      compactHeroHeader
-    } else {
-      normalHeroHeader
-    }
-  }
-
-  private var compactHeroHeader: some View {
-    let stats = history.statistics
-    return VStack(alignment: .leading, spacing: 4) {
-      HStack(spacing: density.inlineSpacing) {
-        Label("Dashboard", systemImage: "sparkles.rectangle.stack")
-          .font(.subheadline.bold())
-          .lineLimit(1)
-
-        Spacer(minLength: 4)
-
-        CompactHeroMetric(
-          title: "Sessions",
-          value: "\(stats.totalSessions)",
-          systemImage: "record.circle"
-        )
-        CompactHeroMetric(
-          title: "Recording time",
-          value: formattedDuration(stats.cumulativeRecordingDuration),
-          systemImage: "timer"
-        )
-        CompactHeroMetric(
-          title: "Spend",
-          value: formattedCurrency(stats.totalSpend),
-          systemImage: "creditcard"
-        )
-
-        Button(action: recording.toggle) {
-          compactRecordButtonLabel
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-        .tint(recording.isRecording ? .red : .accentColor)
-        .disabled(isBusy)
-        .keyboardShortcut(.space, modifiers: [.command])
-        .accessibilityLabel(recordButtonAccessibility.label)
-        .accessibilityValue(recordButtonAccessibility.value)
-        .accessibilityHint(recordButtonAccessibility.hint)
-        .accessibilityAddTraits(recordButtonAccessibility.traits)
-      }
-
-      if let preview = livePreviewText, !preview.isEmpty {
-        Label(preview, systemImage: "waveform")
-          .font(.caption.monospaced())
-          .lineLimit(1)
-          .foregroundStyle(.secondary)
-      }
-    }
-    .padding(density.cardPadding)
-    .foregroundStyle(.white)
-    .background(
-      LinearGradient(
-        colors: [Color.brandAccentDeep, Color.brandAccentWarm.opacity(0.9)],
-        startPoint: .leading,
-        endPoint: .trailing
-      ),
-      in: RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
-    )
-  }
-
-  private var normalHeroHeader: some View {
-    let stats = history.statistics
-    return VStack(alignment: .leading, spacing: 18) {
-      HStack(alignment: .top, spacing: 20) {
-        VStack(alignment: .leading, spacing: 8) {
-          Text("Speak Dashboard")
-            .font(.largeTitle.bold())
-            .foregroundStyle(.white)
-          Text(
-            "Ready to capture ideas instantly. Check permissions, monitor usage, and dive into your latest sessions."
-          )
-          .font(.headline)
-          .foregroundStyle(.white.opacity(0.85))
-        }
-        Spacer()
-        Button(action: recording.toggle) {
-          recordButtonLabel
-            .padding(.horizontal, 32)
-            .padding(.vertical, 18)
-            .background(
-              Capsule()
-                .fill(recordButtonBackground)
-            )
-            .overlay(
-              Capsule()
-                .stroke(Color.white.opacity(0.2), lineWidth: 1)
-            )
-            .foregroundStyle(Color.white)
-        }
-        .buttonStyle(.plain)
-        .contentShape(Capsule())
-        .keyboardShortcut(.space, modifiers: [.command])
-        .disabled(isBusy)
-        .speakTooltip("Start a new recording instantly or stop the current one—Speak keeps you informed every step of the way.")
-        .accessibilityLabel(recordButtonAccessibility.label)
-        .accessibilityValue(recordButtonAccessibility.value)
-        .accessibilityHint(recordButtonAccessibility.hint)
-        .accessibilityAddTraits(recordButtonAccessibility.traits)
-        .shadow(color: Color.black.opacity(0.25), radius: 18, x: 0, y: 12)
-        .animation(.easeInOut(duration: 0.2), value: recording.state)
-      }
-
-      if let preview = livePreviewText, !preview.isEmpty {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Live preview")
-            .font(.caption.bold())
-            .foregroundStyle(.white.opacity(0.7))
-          Text(preview)
-            .font(.body.monospaced())
-            .foregroundStyle(.white)
-            .lineLimit(3)
-            .multilineTextAlignment(.leading)
-        }
-        .padding(16)
-        .background(
-          RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(Color.white.opacity(0.12))
-        )
-      }
-
-      HStack(spacing: 16) {
-        HeroStatChip(title: "Sessions", value: "\(stats.totalSessions)", systemImage: "record.circle")
-        HeroStatChip(
-          title: "Recording Time",
-          value: formattedDuration(stats.cumulativeRecordingDuration),
-          systemImage: "timer"
-        )
-        HeroStatChip(
-          title: "Spend",
-          value: formattedCurrency(stats.totalSpend),
-          systemImage: "creditcard"
-        )
-      }
-    }
-    .padding(24)
-    .background(
-      LinearGradient(
-        colors: [Color.brandAccentDeep, Color.brandAccentWarm.opacity(0.9)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-      .cornerRadius(32)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 32, style: .continuous)
-        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-    )
-    .shadow(color: Color.brandAccent.opacity(0.35), radius: 24, x: 0, y: 16)
-  }
-
-  @ViewBuilder
-  private var compactRecordButtonLabel: some View {
-    switch recording.state {
-    case .processing, .delivering:
-      ProgressView()
-        .controlSize(.mini)
-    default:
-      Image(systemName: buttonIcon)
-    }
   }
 
   private var dashboardSections: some View {
@@ -244,8 +71,8 @@ struct DashboardView: View {
         columns: [GridItem(.adaptive(minimum: density.gridMinimumWidth), spacing: density.sectionSpacing)],
         spacing: density.sectionSpacing
       ) {
-        ttsUsageChartSection
-        ttsProviderChartSection
+        DashboardVoiceOutputUsageCard()
+        DashboardTTSProvidersCard()
       }
     }
     // One pass over history per content revision *and* per day feeds all five
@@ -275,95 +102,6 @@ struct DashboardView: View {
     DashboardAggregatesKey(revision: history.contentRevision, startOfDay: aggregatesDay)
   }
 
-  private var livePreviewText: String? {
-    guard recording.isRecording else { return nil }
-    return environment.main.livePreview
-  }
-
-  private var buttonTitle: String {
-    switch recording.state {
-    case .idle, .completed(_), .failed(_):
-      return "Start Recording"
-    case .recording:
-      return "Recording…"
-    case .processing:
-      return "Transcribing…"
-    case .delivering:
-      return "Delivering…"
-    }
-  }
-
-  private var buttonIcon: String {
-    switch recording.state {
-    case .idle, .completed(_), .failed(_):
-      return "mic.fill"
-    case .recording:
-      return "record.circle.fill"
-    case .processing:
-      return "hourglass"
-    case .delivering:
-      return "arrowshape.turn.up.right"
-    }
-  }
-
-  private var recordButtonAccessibility: RecordingControlAccessibility {
-    recording.accessibility
-  }
-
-  @ViewBuilder
-  private var recordButtonLabel: some View {
-    switch recording.state {
-    case .processing, .delivering:
-      HStack(spacing: 12) {
-        ProgressView()
-          .controlSize(.small)
-        Text(buttonTitle)
-          .font(.headline)
-      }
-    case .recording:
-      HStack(spacing: 12) {
-        Image(systemName: buttonIcon)
-          .font(.headline)
-        Text(buttonTitle)
-          .font(.headline)
-      }
-    default:
-      HStack(spacing: 12) {
-        Image(systemName: buttonIcon)
-          .font(.headline)
-        Text(buttonTitle)
-          .font(.headline)
-      }
-    }
-  }
-
-  private var recordButtonBackground: LinearGradient {
-    switch recording.state {
-    case .recording:
-      return LinearGradient(
-        colors: [.red, Color.red.opacity(0.75)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-    case .processing, .delivering:
-      return LinearGradient(
-        colors: [Color.gray.opacity(0.8), Color.gray.opacity(0.6)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-    default:
-      return LinearGradient(
-        colors: [Color.accentColor, Color.accentColor.opacity(0.85)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-    }
-  }
-
-  private var isBusy: Bool {
-    recording.isBusy
-  }
-
   private var permissionsSection: some View {
     DashboardPermissionsSection(permissions: environment.permissions)
   }
@@ -383,10 +121,10 @@ struct DashboardView: View {
         statCard(title: "Sessions", value: "\(stats.totalSessions)")
         statCard(
           title: "Recording Time",
-          value: formattedDuration(stats.cumulativeRecordingDuration)
+          value: DashboardFormat.duration(stats.cumulativeRecordingDuration)
         )
-        statCard(title: "Average Length", value: formattedDuration(stats.averageSessionLength))
-        statCard(title: "Spend", value: formattedCurrency(stats.totalSpend))
+        statCard(title: "Average Length", value: DashboardFormat.duration(stats.averageSessionLength))
+        statCard(title: "Spend", value: DashboardFormat.currency(stats.totalSpend))
       }
     }
     .speakTooltip("Keep tabs on how often you record, how long sessions run, and what they cost over time.")
@@ -410,21 +148,6 @@ struct DashboardView: View {
     )
   }
 
-  private func formattedDuration(_ duration: TimeInterval) -> String {
-    guard duration > 0 else { return "—" }
-    let minutes = Int(duration) / 60
-    let seconds = Int(duration) % 60
-    return String(format: "%02dm %02ds", minutes, seconds)
-  }
-
-  private func formattedCurrency(_ value: Decimal) -> String {
-    guard value > 0 else { return "—" }
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .currency
-    formatter.currencyCode = "USD"
-    return formatter.string(from: value as NSDecimalNumber) ?? "$0.00"
-  }
-
   private var recentSection: some View {
     DashboardCard(title: "Recent Session", systemImage: "clock.arrow.circlepath", tint: Color.brandLagoon) {
       if let item = history.items.first {
@@ -445,7 +168,7 @@ struct DashboardView: View {
         Text(item.createdAt, style: .time)
           .foregroundStyle(.secondary)
         Spacer()
-        Text(formattedDuration(item.recordingDuration))
+        Text(DashboardFormat.duration(item.recordingDuration))
       }
       .font(density.isCompact ? .caption.weight(.semibold) : .headline)
 
@@ -456,10 +179,10 @@ struct DashboardView: View {
       }
 
       HStack {
-        Label("Models: \(formattedModels(item.modelsUsed))", systemImage: "macpro.gen1")
+        Label("Models: \(DashboardFormat.models(item.modelsUsed))", systemImage: "macpro.gen1")
         Spacer()
         if let cost = item.cost {
-          Text(formattedCurrency(cost.total))
+          Text(DashboardFormat.currency(cost.total))
             .font(.subheadline)
         }
       }
@@ -522,162 +245,6 @@ struct DashboardView: View {
       )
     }
     .speakTooltip("Understand which refinement models polish your transcripts after the first pass.")
-  }
-
-  private var ttsUsageChartSection: some View {
-    DashboardCard(title: "Voice Output Usage", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
-      VStack(alignment: .leading, spacing: density.inlineSpacing) {
-        let totalCharacters = environment.tts.totalCharactersThisMonth()
-        let totalCost = environment.tts.totalCostThisMonth()
-
-        HStack {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Characters This Month")
-              .font(density.isCompact ? .caption2 : .caption)
-              .foregroundStyle(.secondary)
-            Text("\(totalCharacters)")
-              .font(density.isCompact ? .caption.bold() : .title2.bold())
-              .foregroundStyle(Color.brandLagoonDeep)
-          }
-          Spacer()
-          VStack(alignment: .trailing, spacing: 4) {
-            Text("Total Cost")
-              .font(density.isCompact ? .caption2 : .caption)
-              .foregroundStyle(.secondary)
-            Text("$\(totalCost, format: .number.precision(.fractionLength(2)))")
-              .font(density.isCompact ? .caption.bold() : .title2.bold())
-              .foregroundStyle(Color.brandLagoonDeep)
-          }
-        }
-
-        if totalCharacters > 0, !density.isCompact {
-          Text(
-            "\(totalCharacters) characters synthesized this month"
-          )
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        } else if !density.isCompact {
-          Text("No voice output generated yet this month")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-      }
-    }
-    .speakTooltip("Track your text-to-speech usage and costs this month.")
-  }
-
-  private var ttsProviderChartSection: some View {
-    DashboardCard(title: "TTS Providers", systemImage: "waveform.circle", tint: Color.brandAccent) {
-      let now = Date()
-      let monthAgo = Calendar.current.date(byAdding: .month, value: -1, to: now)!
-      let usage = environment.tts.usageByProvider(since: monthAgo)
-
-      if usage.isEmpty {
-        VStack(spacing: density.inlineSpacing) {
-          Image(systemName: "speaker.wave.2.circle")
-            .font(density.isCompact ? .title3 : .largeTitle)
-            .foregroundStyle(.secondary)
-          Text("No TTS usage yet")
-            .font(density.isCompact ? .caption : .subheadline)
-            .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: density.isCompact ? 44 : 120)
-      } else {
-        VStack(alignment: .leading, spacing: density.inlineSpacing) {
-          ForEach(usage.sorted(by: { $0.value > $1.value }), id: \.key) { provider, count in
-            HStack {
-              Circle()
-                .fill(providerColor(provider))
-                .frame(width: density.isCompact ? 7 : 12, height: density.isCompact ? 7 : 12)
-              Text(provider.displayName)
-                .font(density.isCompact ? .caption : .subheadline)
-              Spacer()
-              Text("\(count) chars")
-                .font(density.isCompact ? .caption2.monospacedDigit() : .subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
-            }
-          }
-        }
-      }
-    }
-    .speakTooltip("See which TTS providers you use most frequently.")
-  }
-
-  // One branch per provider; the switch is the whole body.
-  // swiftlint:disable:next cyclomatic_complexity
-  private func providerColor(_ provider: TTSProvider) -> Color {
-    switch provider {
-    case .elevenlabs: return .brandAccent
-    case .openai: return .green
-    case .openrouter: return .indigo
-    case .azure: return .brandLagoonDeep
-    case .deepgram: return .brandAccentWarm
-    case .soniox: return .brandLagoon
-    case .cartesia: return .purple
-    case .groq: return .orange
-    case .gemini: return .blue
-    case .mistral: return .indigo
-    case .speechmatics: return .cyan
-    case .xai: return .primary
-    case .system: return .gray
-    }
-  }
-}
-
-/// The five full-history aggregations the dashboard charts render, computed
-/// together in one pass so the view body reads plain stored values.
-///
-/// Building it for an empty history is the same work the charts did on a cold
-/// dashboard before, so the initial value is identical to what the first
-/// refresh produces when there is nothing recorded yet.
-struct DashboardAggregates {
-  let dailyUsage: [DailyUsageData]
-  let latencyProviders: [ProviderLatencyInsight]
-  let latencyOverview: LatencyOverview
-  let transcriptionModels: [ModelUsageData]
-  let postProcessingModels: [ModelUsageData]
-
-  init(items: [HistoryItem], referenceDate: Date = .now) {
-    dailyUsage = items.dailyUsageForLastMonth(referenceDate: referenceDate)
-    latencyProviders = items.latencyInsightsByProvider()
-    latencyOverview = items.latencyOverview()
-    transcriptionModels = items.modelUsage(for: .transcription)
-    postProcessingModels = items.modelUsage(for: .postProcessing)
-  }
-}
-
-/// What `DashboardAggregates` actually depends on: the history content *and*
-/// the day the rolling 30-day usage window ends on. Keying the dashboard's
-/// `.task` on both is what makes the charts survive a midnight rollover with
-/// the window left open.
-struct DashboardAggregatesKey: Equatable {
-  let revision: UInt64
-  let startOfDay: Date
-}
-
-private func formattedModels(_ identifiers: [String]) -> String {
-  identifiers
-    .map { ModelCatalog.friendlyName(for: $0) }
-    .joined(separator: ", ")
-}
-
-struct DashboardCard<Content: View>: View {
-  let title: String
-  let systemImage: String
-  let tint: Color
-  @ViewBuilder let content: Content
-
-  init(title: String, systemImage: String, tint: Color, @ViewBuilder content: () -> Content) {
-    self.title = title
-    self.systemImage = systemImage
-    self.tint = tint
-    self.content = content()
-  }
-
-  var body: some View {
-    SpeakDensityCard(title: title, systemImage: systemImage, tint: tint) {
-      content
-    }
   }
 }
 

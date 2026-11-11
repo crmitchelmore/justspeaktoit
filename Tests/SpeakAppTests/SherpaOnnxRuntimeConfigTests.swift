@@ -18,7 +18,7 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
             archiveURL: ParakeetLocalModels.tdtV3Int8ArchiveURL
         )
 
-        let spec = try SherpaOnnxRuntimeManager.specification(for: source)
+        let spec = try SherpaOnnxModelSpecification.resolve(for: source)
         let root = ParakeetLocalModels.tdtV3Int8ModelName
 
         XCTAssertEqual(spec.modelType, "nemo_transducer")
@@ -37,7 +37,7 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
             modelName: ParakeetLocalModels.tdtV3Int8ModelName
         )
 
-        let spec = try SherpaOnnxRuntimeManager.specification(for: source)
+        let spec = try SherpaOnnxModelSpecification.resolve(for: source)
 
         XCTAssertEqual(spec.archiveURL, ParakeetLocalModels.tdtV3Int8ArchiveURL)
         XCTAssertEqual(spec.archiveSHA256, ParakeetLocalModels.tdtV3Int8ArchiveSHA256)
@@ -49,7 +49,7 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
             modelName: "streaming-zipformer-en-kroko-2025-08-06"
         )
 
-        let spec = try SherpaOnnxRuntimeManager.specification(for: source)
+        let spec = try SherpaOnnxModelSpecification.resolve(for: source)
 
         XCTAssertEqual(spec.modelType, "transducer")
         XCTAssertEqual(spec.featureDim, 80)
@@ -62,7 +62,7 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
             modelName: "sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25"
         )
 
-        let spec = try SherpaOnnxRuntimeManager.specification(for: source)
+        let spec = try SherpaOnnxModelSpecification.resolve(for: source)
 
         XCTAssertEqual(spec.modelType, "transducer")
         XCTAssertEqual(spec.featureDim, 128)
@@ -73,7 +73,7 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
             let source = try XCTUnwrap(
                 ModelCatalog.localStreamingSources.first { $0.modelName == variant.modelName }
             )
-            let spec = try SherpaOnnxRuntimeManager.specification(for: source)
+            let spec = try SherpaOnnxModelSpecification.resolve(for: source)
 
             XCTAssertEqual(spec.modelType, "transducer")
             XCTAssertEqual(spec.featureDim, 128)
@@ -92,7 +92,7 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
             modelName: "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25"
         )
 
-        let spec = try SherpaOnnxRuntimeManager.specification(for: source)
+        let spec = try SherpaOnnxModelSpecification.resolve(for: source)
 
         XCTAssertNil(spec.minimumRuntimeVersion)
         XCTAssertFalse(spec.supportsLanguageHint)
@@ -129,7 +129,7 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
     }
 
     func testSidecarScript_setsLanguageOptionOnlyWhenProvided() {
-        let script = SherpaOnnxRuntimeManager.sidecarScript
+        let script = SherpaOnnxSidecarScript.source
 
         XCTAssertTrue(script.contains("parser.add_argument(\"--language\", default=None)"))
         XCTAssertTrue(script.contains("if args.language:\n        # Language-ID"))
@@ -137,7 +137,7 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
     }
 
     func testSidecarScript_routesModelTypesToMatchingRecognizers() {
-        let script = SherpaOnnxRuntimeManager.sidecarScript
+        let script = SherpaOnnxSidecarScript.source
 
         XCTAssertTrue(script.contains("--model-type"))
         XCTAssertTrue(script.contains("OnlineRecognizer.from_transducer"))
@@ -149,7 +149,7 @@ final class SherpaOnnxRuntimeConfigTests: XCTestCase {
     // MARK: - Bounded offline decode contract (issue #679)
 
     func testSidecarScript_decouplesIngestionFromOfflineDecode() {
-        let script = SherpaOnnxRuntimeManager.sidecarScript
+        let script = SherpaOnnxSidecarScript.source
 
         // A dedicated reader thread must always drain stdin so the pipe can
         // never fill and block the app's real-time audio queue behind

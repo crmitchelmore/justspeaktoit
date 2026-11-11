@@ -13,7 +13,8 @@ It compares HEAD plus uncommitted and untracked files with the merge base of
 --base, selects the lint, build and unit-test checks for each affected area,
 and writes a machine-readable summary to .build/pre-pr/summary.json (and a
 Markdown copy for the PR body). The exit status is 0 only when every selected
-check passed. Advisory checks report "warn" and never fail the run.
+check passed. Advisory checks report "warn" and never fail the run. The
+pass/fail/warn/skip/incomplete rules live in one place, scripts/ci/pre_pr_outcome.py.
 
 It fails closed: a required check whose tool is missing fails, and so does a
 Swift change that runs no unit tests (no covering test target, an empty filter
@@ -305,6 +306,21 @@ def routing():
 
 
 @functools.cache
+def outcomes():
+    """scripts/ci/pre_pr_outcome.py: the one classifier of check and run outcomes."""
+    spec = importlib.util.spec_from_file_location('pre_pr_outcome',
+                                                  Path(__file__).resolve().parent / 'ci' / 'pre_pr_outcome.py')
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses resolve their module's annotations through sys.modules
+    spec.loader.exec_module(module)
+    return module
+
+
+def settle(check: Check, outcome) -> None:
+    check.status, check.note = outcome.status, outcome.note
+
+
+@functools.cache
 def affected_selector():
     spec = importlib.util.spec_from_file_location('affected_swift_tests',
                                                   Path(__file__).resolve().parent / 'ci' / 'affected-swift-tests.py')
@@ -490,16 +506,11 @@ def tests_executed(log: str) -> int:
 
 def launch(check: Check) -> subprocess.Popen | None:
     """Start a check with its output going to its log, or settle it at once (skip, planning failure, no tool)."""
-    if check.skip_reason:
-        check.status, check.note = 'skip', check.skip_reason
-        return None
-    if check.failure:
-        check.status, check.note = 'fail', check.failure
-        return None
-    if check.requires and not shutil.which(check.requires):
-        # Fail closed: a required check that cannot run is not a pass.
-        check.status = 'warn' if check.advisory else 'fail'
-        check.note = f'{check.requires} not installed'
+    missing = check.requires if check.requires and not shutil.which(check.requires) else None
+    settled = outcomes().before_launch(skip_reason=check.skip_reason, failure=check.failure,
+                                       missing_tool=missing, advisory=check.advisory)
+    if settled is not None:
+        settle(check, settled)
         return None
     check.log.parent.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', **check.env}
@@ -513,7 +524,7 @@ def launch(check: Check) -> subprocess.Popen | None:
                                 text=True, stdin=subprocess.DEVNULL)
     except OSError as error:
         log.write(f'{error}\n')
-        check.status, check.note = ('warn' if check.advisory else 'fail'), f'cannot start: {error.strerror}'
+        settle(check, outcomes().cannot_start(advisory=check.advisory, reason=error.strerror))
         return None
     finally:
         log.close()
@@ -528,22 +539,11 @@ def finish(check: Check, process: subprocess.Popen | None, verbose: bool) -> Non
     if verbose:
         sys.stdout.write(''.join(f'    {line}\n' for line in text.splitlines()))
     executed = tests_executed(text) if check.counts_tests else None
-    if code != 0:
-        check.status = 'warn' if check.advisory else 'fail'
-        check.note = f'exit {code}; log {display(check.log)}'
-    elif executed == 0:
-        check.status, check.note = 'fail', f'no tests matched the filter; log {display(check.log)}'
-    else:
-        check.status = 'pass'
-        if executed:
-            check.note = f'{executed} tests'
-    if check.background:
-        return
-    drifted = sorted(set(check.forbid_drift) & (dirty_tracked() - check.dirty_before))
-    if drifted and check.status == 'pass':
-        check.status = 'fail'
-        check.note = f'modified {", ".join(drifted)} (CI fails on this drift); commit the regenerated file'
-    restore_side_effects(check, check.dirty_before)
+    drifted = () if check.background else set(check.forbid_drift) & (dirty_tracked() - check.dirty_before)
+    settle(check, outcomes().after_exit(advisory=check.advisory, exit_code=code, tests_executed=executed,
+                                        drifted=drifted, log=display(check.log)))
+    if not check.background:
+        restore_side_effects(check, check.dirty_before)
 
 
 def run(check: Check, verbose: bool) -> None:
@@ -562,7 +562,7 @@ def worktree_tree() -> str:
 
 
 def markdown(summary: dict) -> str:
-    icon = {'pass': '✅', 'fail': '❌', 'warn': '⚠️', 'skip': '⏭️', 'pending': '…'}
+    icon = outcomes().ICONS
     lines = [f'### Pre-PR checks: {summary["result"].upper()}',
              f'`scripts/pre-pr` at `{summary["head"][:12]}`{" (dirty tree)" if summary["dirty"] else ""} '
              f'against `{summary["base_ref"]}` ({summary["merge_base"][:12]}), '
@@ -668,7 +668,7 @@ def execute(args, checks, areas, files, merge_base, head, tree, dirty) -> int:
 
     def report(check: Check) -> None:
         nonlocal failed
-        mark = {'pass': '✅', 'fail': '❌', 'warn': '⚠️', 'skip': '⏭️', 'pending': '…'}[check.status]
+        mark = outcomes().ICONS[check.status]
         print(f'  {mark} [{check.area}] {check.title}: {check.status} in {check.duration:.0f}s'
               f'{" — " + check.note if check.note else ""}', flush=True)
         if check.status == 'fail':
@@ -686,7 +686,7 @@ def execute(args, checks, areas, files, merge_base, head, tree, dirty) -> int:
         if check.background:
             continue
         if failed and not args.keep_going and not check.advisory:
-            check.status, check.note = 'skip', 'earlier failure'
+            settle(check, outcomes().not_run('earlier failure'))
             print(f'⏭️  [{check.area}] {check.title} — skipped after an earlier failure')
             continue
         print(f'▶ [{check.area}] {check.title}', flush=True)
@@ -696,13 +696,13 @@ def execute(args, checks, areas, files, merge_base, head, tree, dirty) -> int:
         if process is not None and failed and not args.keep_going:
             process.terminate()  # linux-precheck deletes its branch on SIGTERM
             process.wait()
-            check.status, check.note = 'skip', 'stopped after an earlier failure'
+            settle(check, outcomes().not_run('stopped after an earlier failure'))
         else:
             if process is not None:
                 print(f'… waiting for [{check.area}] {check.title}', flush=True)
             finish(check, process, args.verbose)
         report(check)
-    incomplete = any(c.incomplete for c in checks)
+    result = outcomes().run_result((c.status for c in checks), any(c.incomplete for c in checks))
 
     summary = {
         'schema': SCHEMA_VERSION,
@@ -710,7 +710,7 @@ def execute(args, checks, areas, files, merge_base, head, tree, dirty) -> int:
         'generated_at': dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'),
         'head': head, 'tree': tree, 'dirty': dirty, 'base_ref': args.base, 'merge_base': merge_base,
         'full': args.full, 'changed_file_count': len(files), 'areas': sorted(areas),
-        'result': 'fail' if failed else 'incomplete' if incomplete else 'pass',
+        'result': result,
         'duration_seconds': round(time.monotonic() - started, 1),
         'checks': [{'id': c.id, 'area': c.area, 'title': c.title, 'status': c.status,
                     'advisory': c.advisory, 'duration_seconds': round(c.duration, 1), 'note': c.note,
@@ -723,7 +723,7 @@ def execute(args, checks, areas, files, merge_base, head, tree, dirty) -> int:
           f'summary in {display(OUT / "summary.json")} and summary.md')
     if args.markdown:
         print(markdown(summary))
-    return 1 if failed or incomplete else 0
+    return outcomes().exit_status(result)
 
 
 if __name__ == '__main__':

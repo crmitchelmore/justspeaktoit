@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Regenerates the Android app's assets that are projections of SpeakCore: the settings search
+# catalogue and the cloud catalogue. Each export test rewrites its asset, then checks it.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+UPDATE_SETTINGS_SEARCH_ANDROID=1 UPDATE_CLOUD_CATALOG_ANDROID=1 \
+    swift test --filter 'SettingsSearchAndroidExportTests|CloudCatalogAndroidExportTests'

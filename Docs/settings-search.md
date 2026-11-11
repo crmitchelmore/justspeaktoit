@@ -95,6 +95,9 @@ it, run:
 UPDATE_SETTINGS_SEARCH_ANDROID=1 swift test --filter SettingsSearchAndroidExportTests
 ```
 
+`scripts/update-android-assets` regenerates this asset and the cloud catalogue
+(`cloud_catalog.json`) together.
+
 `SettingsSearchIndex.kt` mirrors the Swift ranking rules and adds one entry per
 `CloudCatalog` model and provider key. Settings has a search field with
 completions, results, recents and scroll-to-highlight. Result rows use the test

@@ -85,8 +85,13 @@ app/src/main/java/com/justspeaktoit/android/
 Policy lives in plain Kotlin so it is unit-tested on the JVM; Android classes stay in the
 adapters and UI. The ViewModel takes its engine, recorder factory, cloud client, history,
 preferences and secret store as interfaces, so `DictationViewModelTest` drives the real
-ViewModel with fakes. `CloudParityTest` reads `Sources/SpeakCore` to keep model IDs,
-credential IDs and the cleanup prompt identical to the Mac app.
+ViewModel with fakes.
+
+Shared catalogues are generated from `Sources/SpeakCore`, never parsed from Swift:
+`assets/settings_search.json` (settings search) and `assets/cloud_catalog.json` (cloud providers,
+credential IDs, the models Android offers with their wire fields, the cleanup model and prompt).
+Regenerate both with `scripts/update-android-assets`; the Swift export tests fail when an asset is
+stale, and `CloudCatalogParityTest` fails when `CloudCatalog`/`CleanupPolicy` differ from it.
 
 ## Privacy
 

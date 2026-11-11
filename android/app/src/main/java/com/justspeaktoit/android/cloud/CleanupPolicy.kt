@@ -3,8 +3,9 @@ package com.justspeaktoit.android.cloud
 import org.json.JSONObject
 
 /**
- * Android copy of the Mac `TranscriptCleanupPolicy`. `CleanupPolicyParityTest` compares
- * [BASE_SYSTEM_PROMPT] with the Swift source so both platforms clean transcripts identically.
+ * Android copy of the shared `TranscriptCleanupPolicy`. `CloudCatalogParityTest` compares
+ * [systemPrompt] with the prompt exported to `assets/cloud_catalog.json`, so both platforms clean
+ * transcripts identically.
  */
 object CleanupPolicy {
     val BASE_SYSTEM_PROMPT = """

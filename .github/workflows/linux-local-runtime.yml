@@ -23,7 +23,7 @@ jobs:
       - name: Record host work-tree owner
         if: runner.environment == 'self-hosted'
         run: stat -c '%u:%g' /__w > "$RUNNER_TEMP/jsti-host-owner"
-      # Runs before checkout, so it cannot use scripts/retry-network.sh. Ubuntu
+      # Runs before checkout, so it cannot use scripts/ci/retry-network.sh. Ubuntu
       # mirrors have been unreachable for minutes at a time (run 42551184010).
       - name: Install the build tools
         run: |

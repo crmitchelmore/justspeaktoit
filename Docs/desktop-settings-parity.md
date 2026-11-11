@@ -1622,7 +1622,7 @@ For that prior source only, the cached WSL Swift toolchain ran these commands th
   **135 passed / 0 failures**.
 - `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4`:
   **1924 tests / 30 skipped / 0 failures**.
-- `bash scripts/typecheck-windows-swift.sh --jobs 4` (CRLF-normalized script,
+- `bash scripts/ci/typecheck-windows-swift.sh --jobs 4` (CRLF-normalized script,
   `SPEAK_WINDOWS_TYPECHECK_DIR=/tmp/jsti-feedback-windows-typecheck-eacacdaf`):
   all four Windows Swift projections passed; these are compile-only stub graphs.
 - `swiftlint lint --strict --config .swiftlint.yml --baseline .swiftlint-baseline.json`

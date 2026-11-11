@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""Bounded, credential-free RFC6455 echo peer for the native Swift runtime probe.
+
+Only binds IPv4 loopback. No third-party packages or external connections.
+The slow route deliberately applies socket backpressure; it is not a benchmark.
+
+This file owns the server, the handshake and the frame transport, and serves
+the echo routes itself. Each live-provider route plays that provider's peer for
+the actual shared Swift client, with a synthetic key and generated audio only,
+from a sibling module:
+  loopback_mistral     Voxtral realtime transcription
+  loopback_gladia      Gladia's two-stage live protocol (session POST, then socket)
+  loopback_cartesia    Cartesia Ink-2 automatic turns
+  loopback_revai       Rev.ai streaming speech-to-text
+  loopback_azure       Azure Voice Live input transcription
+  loopback_additional  Gemini, Meta, Modulate and Grok, chosen by x-jsti-provider
+  loopback_wire        shared bounds, the JSON log and fragmented JSON text
+"""
+import argparse
+import base64
+import hashlib
+import json
+from pathlib import Path
+import socket
+import socketserver
+import struct
+import sys
+import threading
+import time
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+from loopback_additional import accept_additional_provider  # noqa: E402
+from loopback_azure import AZURE_ROUTE, AzurePeer, verify_azure  # noqa: E402
+from loopback_cartesia import CARTESIA_ROUTE, CartesiaPeer, verify_cartesia  # noqa: E402
+from loopback_gladia import GLADIA_ROUTE, GladiaPeer, consume_gladia_token, create_gladia_session  # noqa: E402
+from loopback_mistral import MISTRAL_PATH, MistralPeer, verify_mistral_request  # noqa: E402
+from loopback_revai import REVAI_ROUTE, RevAIPeer, verify_revai  # noqa: E402
+from loopback_wire import GUID, MAX_PAYLOAD, log  # noqa: E402,F401
+
+ECHO_ROUTES = ("/echo", "/slow", "/hold", "/abrupt", "/delay", "/fragment", "/oversize")
+
+
+class ProbeHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        if not self.server.slots.acquire(blocking=False):
+            return
+        try:
+            self.request.settimeout(10)
+            self.request.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024)
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.pending = bytearray()
+            self.slow = False
+            self.upgraded = False
+            self.run_connection()
+        except (ConnectionError, TimeoutError, OSError) as error:
+            log("connection-ended", reason=type(error).__name__)
+        except ValueError as error:
+            log("protocol-error", reason=str(error))
+            if not self.upgraded:
+                try:
+                    self.request.sendall(
+                        b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                except OSError:
+                    pass
+        finally:
+            self.server.slots.release()
+
+    def read_exact(self, count):
+        result = bytearray()
+        if self.pending:
+            take = min(count, len(self.pending))
+            result.extend(self.pending[:take])
+            del self.pending[:take]
+        while len(result) < count:
+            block = self.request.recv(min(count - len(result), 4096))
+            if not block:
+                raise ConnectionError("peer disconnected")
+            result.extend(block)
+            if self.slow and count > 4096:
+                time.sleep(0.002)
+        return result
+
+    def handshake(self):
+        """Reads the upgrade, admits it for its route and answers it. Returns the
+        upgraded path, or None when the request was a Gladia session POST; a
+        provider route's peer is left in self.peer."""
+        while b"\r\n\r\n" not in self.pending:
+            block = self.request.recv(2048)
+            if not block:
+                raise ConnectionError("peer disconnected before handshake")
+            self.pending.extend(block)
+            if len(self.pending) > 16 * 1024:
+                raise ValueError("handshake exceeded bound")
+        header, remainder = self.pending.split(b"\r\n\r\n", 1)
+        self.pending = bytearray(remainder)
+        lines = header.decode("ascii").split("\r\n")
+        method, path, version = lines[0].split(" ")
+        route, _, query = path.partition("?")
+        headers = {}
+        for line in lines[1:]:
+            name, value = line.split(":", 1)
+            name, value = name.lower(), value.strip()
+            headers[name] = headers[name] + ", " + value if name in headers else value
+        gladia = GLADIA_ROUTE.fullmatch(route)
+        # Only protocol fields and the synthetic marker are recorded. No
+        # credentials, arbitrary request headers or WebSocket keys enter logs,
+        # and the query of a Gladia route (its session token) or a Rev.ai route
+        # (its access token) is dropped.
+        additional_provider = headers.get("x-jsti-provider")
+        logged_path = route if gladia or route == REVAI_ROUTE or additional_provider else path
+        log("handshake-request", method=method, path=logged_path, version=version,
+            connection=headers.get("connection"), upgrade=headers.get("upgrade"),
+            websocketVersion=headers.get("sec-websocket-version"),
+            subprotocol=headers.get("sec-websocket-protocol"),
+            markerVerified=headers.get("x-jsti-probe") == "local-only")
+        if gladia and gladia.group(2) == "v2/live":
+            create_gladia_session(self, method, gladia.group(1), headers)
+            return None
+        connection_tokens = {value.strip().lower() for value in headers.get("connection", "").split(",")}
+        if (method != "GET" or version != "HTTP/1.1"
+                or headers.get("upgrade", "").lower() != "websocket"
+                or "upgrade" not in connection_tokens
+                or headers.get("sec-websocket-version") != "13"
+                or headers.get("x-jsti-probe") != "local-only"
+                or headers.get("sec-websocket-protocol") != "jsti-probe"):
+            raise ValueError("unexpected handshake")
+        key = headers.get("sec-websocket-key", "")
+        if len(base64.b64decode(key, validate=True)) != 16:
+            raise ValueError("invalid handshake key")
+        self.peer = None
+        if additional_provider:
+            self.peer = accept_additional_provider(self, additional_provider, route, query, headers)
+            path = route
+        elif route == MISTRAL_PATH:
+            self.peer = MistralPeer(self, verify_mistral_request(query, headers))
+            path = route
+        elif gladia:
+            self.peer = GladiaPeer(self, route, consume_gladia_token(self, gladia.group(1), query, headers))
+            path = route
+        elif route == CARTESIA_ROUTE:
+            self.peer = CartesiaPeer(self, verify_cartesia(query, headers))
+            path = route
+        elif route == REVAI_ROUTE:
+            self.peer = RevAIPeer(self, verify_revai(query, headers))
+            path = route
+        elif route == AZURE_ROUTE:
+            self.peer = AzurePeer(self, verify_azure(query, headers))
+            path = route
+        elif path not in ECHO_ROUTES:
+            raise ValueError("unknown route")
+        if path == "/delay":
+            time.sleep(1)
+        accept = base64.b64encode(hashlib.sha1((key + GUID).encode("ascii")).digest()).decode("ascii")
+        response = (
+            "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            f"Sec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: jsti-probe\r\n\r\n"
+        )
+        self.request.sendall(response.encode("ascii"))
+        self.upgraded = True
+        log("handshake", path=path, headerVerified=True)
+        return path
+
+    def read_frame(self):
+        first, second = self.read_exact(2)
+        if first & 0x70 or not second & 0x80:
+            raise ValueError("unsupported flags or unmasked client frame")
+        final, opcode, length = bool(first & 0x80), first & 0x0F, second & 0x7F
+        if length == 126:
+            length = struct.unpack("!H", self.read_exact(2))[0]
+        elif length == 127:
+            length = struct.unpack("!Q", self.read_exact(8))[0]
+        if length > MAX_PAYLOAD or (opcode >= 8 and (not final or length > 125)):
+            raise ValueError("frame exceeded bound")
+        mask = self.read_exact(4)
+        payload = self.read_exact(length)
+        for index in range(length):
+            payload[index] ^= mask[index % 4]
+        return final, opcode, payload
+
+    def send_frame(self, opcode, payload, final=True):
+        length = len(payload)
+        flags = (0x80 if final else 0) | opcode
+        if length < 126:
+            header = bytes([flags, length])
+        elif length <= 65535:
+            header = bytes([flags, 126]) + struct.pack("!H", length)
+        else:
+            header = bytes([flags, 127]) + struct.pack("!Q", length)
+        self.request.sendall(header)
+        self.request.sendall(payload)
+
+    def read_message(self, close_ends=True):
+        """Returns one complete data message, answering pings; a close ends the peer.
+
+        With close_ends=False a close frame is returned as (8, payload) instead,
+        for a peer that initiated the closing handshake or is waiting for one."""
+        message = bytearray()
+        message_opcode = None
+        while True:
+            final, opcode, payload = self.read_frame()
+            if opcode == 8:
+                if not close_ends:
+                    return 8, bytes(payload)
+                self.send_frame(8, payload)
+                raise ConnectionError("client closed")
+            if opcode == 9:
+                self.send_frame(10, payload)
+                continue
+            if opcode == 10:
+                continue
+            if opcode in (1, 2) and message_opcode is None:
+                message_opcode = opcode
+            elif opcode != 0 or message_opcode is None:
+                raise ValueError("invalid continuation")
+            if len(message) + len(payload) > MAX_PAYLOAD:
+                raise ValueError("message exceeded bound")
+            message.extend(payload)
+            if final:
+                return message_opcode, bytes(message)
+
+    def run_connection(self):
+        path = self.handshake()
+        if path is None:
+            return None
+        if self.peer is not None:
+            return self.peer.run()
+        return self.run_echo(path)
+
+    def run_echo(self, path):
+        """Echoes up to 64 messages as the echo route asks."""
+        self.slow = path == "/slow"
+        if self.slow:
+            time.sleep(0.25)
+        message = bytearray()
+        message_opcode = None
+        message_count = 0
+        awaiting_pong = False
+        while message_count < 64:
+            final, opcode, payload = self.read_frame()
+            if opcode == 8:
+                self.send_frame(8, payload)
+                log("client-close", path=path)
+                return
+            if opcode == 9:
+                self.send_frame(10, payload)
+                continue
+            if opcode == 10:
+                if awaiting_pong:
+                    if payload != b"server-probe":
+                        raise ValueError("server ping payload not preserved")
+                    awaiting_pong = False
+                    self.send_frame(1, b"server-pong-verified")
+                    log("server-pong-verified", path=path)
+                continue
+            if opcode in (1, 2) and message_opcode is None:
+                message_opcode = opcode
+            elif opcode != 0 or message_opcode is None:
+                raise ValueError("invalid continuation")
+            if len(message) + len(payload) > MAX_PAYLOAD:
+                raise ValueError("message exceeded bound")
+            message.extend(payload)
+            if not final:
+                continue
+            message_count += 1
+            log("message", path=path, number=message_count, opcode=message_opcode,
+                bytes=len(message), sha256=hashlib.sha256(message).hexdigest())
+            if path == "/abrupt":
+                return
+            if path == "/oversize":
+                self.send_frame(2, bytes(MAX_PAYLOAD), final=False)
+                self.send_frame(0, b"x")
+                return
+            if message_opcode == 1 and message == b"server-ping":
+                awaiting_pong = True
+                self.send_frame(9, b"server-probe")
+                message.clear()
+                message_opcode = None
+                continue
+            if message_opcode == 1 and message == b"server-close":
+                self.send_frame(8, struct.pack("!H", 1000) + b"probe-complete")
+                log("server-close", path=path)
+                _, reply_opcode, _ = self.read_frame()
+                if reply_opcode != 8:
+                    raise ValueError("expected close acknowledgement")
+                log("close-acknowledged", path=path)
+                return
+            if path == "/fragment":
+                # Split through a possible UTF-8 scalar and require complete
+                # message assembly, independently of TCP receive chunking.
+                split = min(2, len(message))
+                self.send_frame(message_opcode, message[:split], final=False)
+                self.send_frame(0, message[split:])
+            elif path != "/hold":
+                self.send_frame(message_opcode, message)
+            message.clear()
+            message_opcode = None
+        raise ValueError("message count exceeded bound")
+
+
+class ProbeServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    daemon_threads = True
+    allow_reuse_address = False
+    slots = threading.BoundedSemaphore(8)
+    gladia_lock = threading.Lock()
+    gladia_tokens = {}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ready-file", type=Path, required=True)
+    parser.add_argument("--max-seconds", type=int, default=120)
+    arguments = parser.parse_args()
+    if not 1 <= arguments.max_seconds <= 600:
+        parser.error("max-seconds must be between 1 and 600")
+    with ProbeServer(("127.0.0.1", 0), ProbeHandler) as server:
+        ready = {"host": "127.0.0.1", "port": server.server_address[1], "maximumPayloadBytes": MAX_PAYLOAD}
+        temporary = arguments.ready_file.with_suffix(".tmp")
+        temporary.write_text(json.dumps(ready), encoding="utf-8")
+        temporary.replace(arguments.ready_file)
+        timer = threading.Timer(arguments.max_seconds, server.shutdown)
+        timer.daemon = True
+        timer.start()
+        log("ready", **ready)
+        try:
+            server.serve_forever(poll_interval=0.1)
+        finally:
+            timer.cancel()
+            log("stopped")
+
+
+if __name__ == "__main__":
+    main()

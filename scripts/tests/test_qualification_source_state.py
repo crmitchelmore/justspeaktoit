@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 
-HELPER = Path(__file__).resolve().parents[1] / "qualification_source_state.py"
+HELPER = Path(__file__).resolve().parents[1] / "qualification/qualification_source_state.py"
 SPEC = importlib.util.spec_from_file_location("source_state", HELPER)
 STATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(STATE)

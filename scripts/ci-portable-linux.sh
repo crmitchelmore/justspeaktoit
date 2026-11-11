@@ -7,8 +7,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 scratch=()
 if [ -n "${JSTI_SCRATCH_PATH:-}" ]; then scratch=(--scratch-path "$JSTI_SCRATCH_PATH"); fi
-python3 scripts/verify-portable-core-boundary.py
+python3 scripts/ci/verify-portable-core-boundary.py
 swift --version
-scripts/retry-network.sh swift package resolve "${scratch[@]}"
+scripts/ci/retry-network.sh swift package resolve "${scratch[@]}"
 swift build --build-tests --jobs 4 "${scratch[@]}"
 swift test --skip-build "${scratch[@]}"

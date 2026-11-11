@@ -1,6 +1,6 @@
 # Release notes
 
-macOS releases use `scripts/generate-release-notes.mjs` to turn the commits and
+macOS releases use `scripts/release-maintenance/generate-release-notes.mjs` to turn the commits and
 changed-file summary between adjacent `mac-v*` tags into detailed, user-facing
 notes. The generator calls the OpenAI Responses API with `gpt-5.6-luna` and
 medium reasoning effort.
@@ -18,7 +18,7 @@ conventional commit type so an otherwise valid release is not blocked.
 ## Generate notes locally
 
 ```bash
-OPENAI_API_KEY="..." node scripts/generate-release-notes.mjs \
+OPENAI_API_KEY="..." node scripts/release-maintenance/generate-release-notes.mjs \
   --tag mac-v2.41.0 \
   --output /tmp/release-notes.md \
   --html-output /tmp/release-notes.html
@@ -51,7 +51,7 @@ release's complete notes instead of publishing a partial history.
 Generate a reviewable cache without changing GitHub:
 
 ```bash
-OPENAI_API_KEY="..." node scripts/backfill-release-notes.mjs \
+OPENAI_API_KEY="..." node scripts/release-maintenance/backfill-release-notes.mjs \
   --output-dir /tmp/justspeaktoit-release-notes
 ```
 

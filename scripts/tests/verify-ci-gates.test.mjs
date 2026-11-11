@@ -32,7 +32,7 @@ const nativeEligibleJobs = [
 // Hosted macOS concurrency is a fixed per-account cap shared by Intel and ARM,
 // so Intel adds no capacity and only slows jobs: every hosted fallback is ARM.
 const hostedFallback = () => 'macos-latest';
-const journeyStages = readFileSync(new URL('../run-core-journey-stages.py', import.meta.url), 'utf8');
+const journeyStages = readFileSync(new URL('../core-journey/run-core-journey-stages.py', import.meta.url), 'utf8');
 
 test('product checks cover stacked pull requests without broadening push or credential permissions', () => {
   for (const name of ['ci', 'linux']) {
@@ -74,12 +74,12 @@ test('journey cold preparation and actual runtime have separate finite budgets a
   const ui = jobBodies['core-journey-fixture-ui'];
   assert.match(swift, /^\s+timeout-minutes: 40$/m);
   assert.match(ui, /^\s+timeout-minutes: 47$/m);
-  assert.match(ui, /timeout-minutes: 11\n\s+run: python3 scripts\/run-core-journey-stages.py ui --phase setup/);
-  assert.match(swift, /timeout-minutes: 17\n\s+run: scripts\/run-core-journey-e2e.sh --phase build/);
-  assert.match(swift, /timeout-minutes: 10\n\s+run: python3 scripts\/with-test-keychain.py bash scripts\/run-core-journey-e2e.sh --phase test/);
+  assert.match(ui, /timeout-minutes: 11\n\s+run: python3 scripts\/core-journey\/run-core-journey-stages.py ui --phase setup/);
+  assert.match(swift, /timeout-minutes: 17\n\s+run: scripts\/core-journey\/run-core-journey-e2e.sh --phase build/);
+  assert.match(swift, /timeout-minutes: 10\n\s+run: python3 scripts\/with-test-keychain.py bash scripts\/core-journey\/run-core-journey-e2e.sh --phase test/);
   assert.ok(swift.indexOf('--phase build') < swift.indexOf('--phase test'));
   for (const phase of ['setup', 'build', 'test']) {
-    assert.match(ui, new RegExp(`run: python3 scripts/run-core-journey-stages.py ui --phase ${phase}`));
+    assert.match(ui, new RegExp(`run: python3 scripts/core-journey/run-core-journey-stages.py ui --phase ${phase}`));
   }
   assert.ok(ui.indexOf('--phase setup') < ui.indexOf('--phase build'));
   assert.ok(ui.indexOf('--phase build') < ui.indexOf('--phase test'));
@@ -142,7 +142,7 @@ test('macOS Debug and Core Journey share coverage instrumentation and cache keys
   }
   assert.match(body, /^\s+timeout-minutes: 45$/m);
   assert.match(body, /name: Build\n\s+id: build\n(?:\s+#[^\n]*\n)*\s+run: SWIFT_FLAGS="--enable-code-coverage --disable-dependency-cache" make build/);
-  assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?[\s\S]*?python3 scripts\/with-test-keychain.py python3 scripts\/retry-xctest-crash.py swift test --enable-code-coverage --disable-dependency-cache "\$\{args\[@\]\}"/);
+  assert.match(body, /name: Test \(Debug\)\n(?:\s+id: [\w-]+\n)?[\s\S]*?python3 scripts\/with-test-keychain.py python3 scripts\/ci\/retry-xctest-crash.py swift test --enable-code-coverage --disable-dependency-cache "\$\{args\[@\]\}"/);
   assert.ok(body.indexOf('name: Build') < body.indexOf('name: Test (Debug)'),
     'Build must run before Test (Debug) so the coverage-enabled cache is already warm');
   assert.doesNotMatch(body, /-DAPP_STORE/,
@@ -288,8 +288,8 @@ const simulatorPreparation = jobBodies['build-ios'].match(
   /- name: Create owned iOS Simulator matching the selected configuration\n        run: \|\n([\s\S]*?)(?=\n      - name:)/,
 )?.[1];
 assert.ok(simulatorPreparation, 'owned simulator creation must precede preparation');
-const iosPreparation = readFileSync(new URL('../prepare-ios-ci.py', import.meta.url), 'utf8');
-const ownedSimulator = fileURLToPath(new URL('../owned-ios-ci-simulator.py', import.meta.url));
+const iosPreparation = readFileSync(new URL('../ios/prepare-ios-ci.py', import.meta.url), 'utf8');
+const ownedSimulator = fileURLToPath(new URL('../ios/owned-ios-ci-simulator.py', import.meta.url));
 
 function prepareSimulator(devices) {
   // Execute the canonical selector without invoking simctl or creating devices.
@@ -309,8 +309,8 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   // 30 minutes for the gated run plus the bounded 5-minute quarantine step.
   assert.match(body, /^\s+timeout-minutes: 35$/m);
   assert.ok(body.indexOf('Create owned iOS Simulator') < body.indexOf('- name: Prepare iOS Simulator'));
-  assert.match(body, /python3 scripts\/prepare-ios-ci\.py "\$SIMULATOR_ID"/);
-  assert.match(simulatorPreparation, /python3 scripts\/owned-ios-ci-simulator\.py create/);
+  assert.match(body, /python3 scripts\/ios\/prepare-ios-ci\.py "\$SIMULATOR_ID"/);
+  assert.match(simulatorPreparation, /python3 scripts\/ios\/owned-ios-ci-simulator\.py create/);
   assert.match(simulatorPreparation, /--receipt "\$RUNNER_TEMP\/owned-ios-simulator\.json" --github-env "\$GITHUB_ENV"/);
   assert.match(simulatorPreparation, /--owner "\$GITHUB_RUN_ID:\$GITHUB_RUN_ATTEMPT:\$GITHUB_JOB"/);
   assert.match(body, /name: Remove only the simulator created by this job\n\s+if: always\(\)/);
@@ -322,19 +322,19 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(body, /xcodebuild test-without-building/);
   assert.match(body, /^    needs: build-ios-test-products$/m);
   assert.match(body, /artifact-ids: \$\{\{ needs.build-ios-test-products.outputs.artifact-id \}\}/);
-  assert.match(body, /scripts\/ios-test-products.py unpack/);
+  assert.match(body, /scripts\/ios\/ios-test-products.py unpack/);
   assert.match(body, /-testProductsPath "\$RUNNER_TEMP\/ios-test-products\/SpeakiOS.xctestproducts"/);
   assert.match(body, /name: Upload complete iOS XCTest log separately\n\s+if: always\(\)/);
   const products = jobBodies['build-ios-test-products'];
   assert.match(products, /^\s+runs-on: macos-latest$/m);
   assert.match(products, /^\s+timeout-minutes: 30$/m);
-  assert.match(products, /TUIST_IOS_KEYBOARD=1 scripts\/retry-network.sh tuist generate/);
-  assert.match(products, /scripts\/retry-network.sh xcodebuild -resolvePackageDependencies/);
+  assert.match(products, /TUIST_IOS_KEYBOARD=1 scripts\/ci\/retry-network.sh tuist generate/);
+  assert.match(products, /scripts\/ci\/retry-network.sh xcodebuild -resolvePackageDependencies/);
   assert.match(products, /xcodebuild build-for-testing/);
   assert.match(products, /-only-testing:SpeakiOSTests/);
   assert.match(products, /-only-testing:SpeakiOSUITests/);
   assert.match(products, /ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO/);
-  assert.match(products, /scripts\/ios-test-products.py pack/);
+  assert.match(products, /scripts\/ios\/ios-test-products.py pack/);
   assert.doesNotMatch(products, /simctl|bravo-mini-local|jsti-macos-build/);
   assert.deepEqual(laneJobs.ios, ['build-ios-test-products', 'build-ios', 'build-ios-keyboard']);
   assert.match(aggregate, /^\s+- ios$/m);
@@ -707,7 +707,7 @@ test('API compatibility diffs batches against main and main against its previous
 
 test('pull requests rely on pre-pr for the API check; full runs keep the API job', () => {
   assert.doesNotMatch(jobBodies['build-macos'], /check-api-compatibility|Public API compatibility/);
-  assert.match(jobBodies['api-compatibility'], /bash scripts\/check-api-compatibility\.sh "\$BASELINE"/);
+  assert.match(jobBodies['api-compatibility'], /bash scripts\/ci\/check-api-compatibility\.sh "\$BASELINE"/);
 });
 
 test('batch and main failures open a tracking issue from a main-only, checkout-free job', () => {
@@ -741,7 +741,7 @@ test('launched-app UI shards in CI match every shard the verifier requires', () 
   const matrix = ui.match(/^\s+shard: \[([^\]]+)\]$/m);
   assert.ok(matrix, 'the UI gate must declare its shard matrix');
   const ciShards = matrix[1].split(',').map(value => value.trim()).sort();
-  const verifier = readFileSync(new URL('../verify-core-journey-ui.py', import.meta.url), 'utf8');
+  const verifier = readFileSync(new URL('../core-journey/verify-core-journey-ui.py', import.meta.url), 'utf8');
   const block = verifier.match(/^SHARDS = \{\n([\s\S]*?)^\}/m);
   assert.ok(block, 'the verifier must declare SHARDS');
   const verifierShards = [...block[1].matchAll(/^    "([a-z0-9-]+)": \(/gm)].map(([, name]) => name).sort();
@@ -752,7 +752,7 @@ test('launched-app UI shards in CI match every shard the verifier requires', () 
 });
 
 test('network-bound package resolution and Tuist generation retry before Apple builds', () => {
-  const retry = 'scripts/retry-network.sh';
+  const retry = 'scripts/ci/retry-network.sh';
   for (const id of ['build-macos', 'release-validation']) {
     const body = jobBodies[id];
     const resolve = body.indexOf(`run: ${retry} swift package resolve`);

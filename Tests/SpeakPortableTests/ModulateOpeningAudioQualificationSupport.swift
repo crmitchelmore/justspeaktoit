@@ -18,7 +18,8 @@ final class ModulateOpeningHarness: @unchecked Sendable {
         #else
         guard let value = ProcessInfo.processInfo.environment["JSTI_MODULATE_OPENING_PROBE_PORT"],
               let port = Int(value), (1...65535).contains(port) else {
-            throw XCTSkip("Requires scripts/modulate-opening-audio-probe.py on an ephemeral loopback port")
+            throw XCTSkip(
+                "Requires scripts/qualification/modulate-opening-audio-probe.py on an ephemeral loopback port")
         }
         let identifiers = (0..<sessionCount).map { _ in UUID().uuidString.lowercased() }
         let events = ModulateOpeningEvents(identifiers: identifiers)

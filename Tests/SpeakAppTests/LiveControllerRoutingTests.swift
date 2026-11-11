@@ -30,7 +30,6 @@ final class LiveControllerRoutingTests: XCTestCase {
             case .openai: XCTAssertTrue(controller is OpenAIRealtimeLiveController, route.modelID)
             case .modulate: XCTAssertTrue(controller is ModulateLiveController, route.modelID)
             case .elevenlabs: XCTAssertTrue(controller is ElevenLabsLiveController, route.modelID)
-            case .soniox: XCTAssertTrue(controller is SonioxLiveController, route.modelID)
             default: XCTAssertTrue(controller is SharedClientLiveController, route.modelID)
             }
         }

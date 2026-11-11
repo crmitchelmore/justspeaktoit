@@ -85,14 +85,13 @@ final class CartesiaSharedRouteParityTests: XCTestCase {
     }
 
     private func makeFixture(grace: TimeInterval = 0) throws -> SharedClientParityFixture {
-        try SharedClientParityFixture(
-            model: "cartesia/ink-2-streaming", stopGrace: grace
-        ) { route, options, socket, clock in
+        try SharedClientParityFixture(model: "cartesia/ink-2-streaming", stopGrace: grace) { context in
             CartesiaLiveClient(
-                apiKey: "synthetic", model: route.apiModelName, sampleRate: route.sampleRate,
-                postStopFinalizeBudget: options.postStopFinalizeBudget ?? 1.5,
-                stopGracePeriod: options.stopGracePeriod,
-                makeConnection: { _ in socket }, schedule: { clock.schedule($0, action: $1) }
+                apiKey: "synthetic", model: context.route.apiModelName, sampleRate: context.route.sampleRate,
+                postStopFinalizeBudget: context.options.postStopFinalizeBudget ?? 1.5,
+                stopGracePeriod: context.options.stopGracePeriod,
+                makeConnection: { [socket = context.socket] _ in socket },
+                schedule: { [clock = context.clock] in clock.schedule($0, action: $1) }
             )
         }
     }

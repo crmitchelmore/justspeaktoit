@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import base64
+import io
 import socket
 from pathlib import Path
 import tempfile
@@ -400,7 +401,7 @@ class TransportTests(unittest.TestCase):
 
     def error(self, status):
         return urllib.error.HTTPError(
-            "https://test.cognitiveservices.azure.com", status, "Not logged", {}, None,
+            "https://test.cognitiveservices.azure.com", status, "Not logged", {}, io.BytesIO(),
         )
 
     def response(self, data=b"RIFFtestWAVE"):

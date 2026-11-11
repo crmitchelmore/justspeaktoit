@@ -146,7 +146,8 @@ def stage(binary, output, prefix="/usr/local", local_llm_runtime=None, *, cli=No
     desktop = desktop.replace("Exec=justspeaktoit", f'Exec="{quoted}"')
     applications = output / "share/applications"
     applications.mkdir(parents=True)
-    (applications / f"{APP_ID}.desktop").write_text(desktop, encoding="utf-8", newline="\n")
+    with open(applications / f"{APP_ID}.desktop", "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(desktop)
     metainfo = output / "share/metainfo"
     metainfo.mkdir(parents=True)
     shutil.copy2(ROOT / f"packaging/linux/{APP_ID}.metainfo.xml", metainfo)

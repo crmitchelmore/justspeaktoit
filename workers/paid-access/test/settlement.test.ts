@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index.js';
 import { issueAccessToken } from '../src/auth/session.js';
 import { billingPeriod } from '../src/entitlement.js';
-import { Repository } from '../src/data/repository.js';
+import { Repository, UsageRepository } from '../src/data/repository.js';
 import { QuotaClient } from '../src/quota.js';
 import { QuotaDurableObject } from '../src/do/quota.js';
 import { pendingKey, receiptKey, type SettlementReceipt, type SettlementRequest,
@@ -176,9 +176,9 @@ describe('actual routed settlement faults', () => {
       return input.kind === 'operation_reconcile' ? operation(user, input) : rpc.call(this, user, input);
     });
     // eslint-disable-next-line @typescript-eslint/unbound-method -- .call preserves the actual repository receiver.
-    const insert = Repository.prototype.reconcileUsage;
+    const insert = UsageRepository.prototype.reconcileUsage;
     let injected = false;
-    vi.spyOn(Repository.prototype, 'reconcileUsage').mockImplementationOnce(async function(this: Repository, input) {
+    vi.spyOn(UsageRepository.prototype, 'reconcileUsage').mockImplementationOnce(async function(this: UsageRepository, input) {
       await insert.call(this, input); injected = true; throw new Error('synthetic-committed-ledger-ack-lost');
     });
     const first = await worker.fetch(request(a.token), env);
@@ -253,7 +253,7 @@ describe('actual routed settlement faults', () => {
     const a = await account();
     const auth = await worker.fetch(request('invalid-token', KEY, version), env);
     expect(await auth.json()).toMatchObject({ error: { code: version === null ? 'already_processed' : 'outcome_unknown' } });
-    vi.spyOn(Repository.prototype, 'claimRequest').mockRejectedValueOnce(new Error('synthetic-lookup-failure'));
+    vi.spyOn(UsageRepository.prototype, 'claimRequest').mockRejectedValueOnce(new Error('synthetic-lookup-failure'));
     const history = await worker.fetch(request(a.token, KEY, version), env);
     expect(await history.json()).toMatchObject({ error: { code: version === null ? 'already_processed' : 'outcome_unknown' } });
   });
@@ -323,7 +323,7 @@ describe('durable receipt ownership, periods and alarms', () => {
     await measure(a.userId, first);
     const second = await start(a.userId, await reserve(a.userId, KEY + '-second'));
     await measure(a.userId, second, 20);
-    await new Repository(env.DB).recordUsage({ userId: a.userId, idempotencyKey: KEY, operation: 'post_processing',
+    await new Repository(env.DB).usage.recordUsage({ userId: a.userId, idempotencyKey: KEY, operation: 'post_processing',
       provider: 'openrouter', model: 'openai/gpt-5-mini', unitKind: 'tokens', units: 99,
       billingPeriod: first.billingPeriod, correlationId: 'different', nowSeconds: now() });
     await alarm(a.userId);

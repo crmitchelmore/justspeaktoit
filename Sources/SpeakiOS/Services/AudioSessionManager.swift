@@ -223,15 +223,20 @@ public final class AudioSessionManager: ObservableObject {
     /// Deactivate audio session when done recording.
     ///
     /// Skipped while ``activeSessionHold`` reports that keyboard readiness is
-    /// still recording on the same session (issue #1469): deactivating would
-    /// stop it, and a background app cannot start recording again.
+    /// still recording on the same mixable session (issue #1469): deactivating
+    /// would stop it, and a background app cannot start recording again. The
+    /// hold is not cleared per request, because a cancelled transcriber can
+    /// release the session after the request has already ended.
     public func deactivate() {
         if let deactivateRecording {
             deactivateRecording()
             isConfigured = false
             return
         }
-        if Self.activeSessionHold?() == true {
+        // Honoured only while the session is still the mixable one readiness
+        // records on; a foreground capture's isolated session deactivates.
+        let session = AVAudioSession.sharedInstance()
+        if Self.activeSessionHold?() == true, session.categoryOptions.contains(.mixWithOthers) {
             isConfigured = false
             logger.info("Kept session active for keyboard readiness")
             return

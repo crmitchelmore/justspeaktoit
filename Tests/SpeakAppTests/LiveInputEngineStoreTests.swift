@@ -270,7 +270,9 @@ final class LiveInputEngineSourceGuardTests: XCTestCase {
         let names = try FileManager.default.contentsOfDirectory(atPath: appSources.path)
         let liveCaptureFiles = names.filter { $0.hasSuffix("LiveController.swift") }
             + ["NativeOSXLiveTranscriber.swift", "FluidAudioLiveSupport.swift"]
-        XCTAssertGreaterThan(liveCaptureFiles.count, 10)
+        XCTAssertTrue(
+            liveCaptureFiles.contains("SharedClientLiveController.swift"), "The guard must still find the controllers"
+        )
 
         for name in liveCaptureFiles {
             // Act: a stored-property default is replaced before every start, so

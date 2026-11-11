@@ -21,4 +21,5 @@ object AutomationIds {
     const val SETTINGS_BACK = "settings.back"
     const val SETTINGS_SEARCH = "settingsSearchField"
     const val SETTINGS_SEARCH_CLEAR = "settingsSearchClear"
+    const val API_KEYS_FILTER = "settings.apiKeysFilter"
 }

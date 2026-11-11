@@ -62,7 +62,10 @@ add a small adapter to the platform monitor instead
   `WindowsCapturePrewarm` worker: the shared host polls its state every second
   and ends the hold (and joins the worker) as soon as its ten-minute lifetime
   ends or the endpoint proves unavailable, without waiting for the next idle
-  transition.
+  transition. The Windows workflow's executable self-test drives the
+  window's fixture (`jsti_system_resources_self_test`) and names the first
+  check that fails. `NativeCallbackContextTests` fails when a raw `Unmanaged`
+  pointer reaches a callback that resolves a `NativeCallbackContext`.
 - **Android**: Settings › *System resources in use* (issue #1473). Kotlin
   can't read the Swift model, so `resources/SystemResources.kt` mirrors the
   kinds, the release semantics and the summary wording, and

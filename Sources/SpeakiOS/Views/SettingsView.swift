@@ -177,7 +177,7 @@ public struct SettingsView: View {
                             HStack {
                                 Text(option.displayName)
                                 Spacer()
-                                IOSModelCredentialStatusView(
+                                ModelCredentialStatusView(
                                     availability: ModelCredentialResolver.availability(
                                         for: option.id,
                                         purpose: .liveTranscription,
@@ -226,7 +226,7 @@ public struct SettingsView: View {
                                         HStack {
                                             Text(option.displayName)
                                             Spacer()
-                                            IOSModelCredentialStatusView(
+                                            ModelCredentialStatusView(
                                                 availability: ModelCredentialResolver.availability(
                                                     for: option.id,
                                                     purpose: .liveTranscription,
@@ -256,7 +256,7 @@ public struct SettingsView: View {
                                         HStack {
                                             Text(ModelCatalog.friendlyName(for: option.id))
                                             Spacer()
-                                            IOSModelCredentialStatusView(
+                                            ModelCredentialStatusView(
                                                 availability: ModelCredentialResolver.availability(
                                                     for: option.id,
                                                     purpose: .batchTranscription,

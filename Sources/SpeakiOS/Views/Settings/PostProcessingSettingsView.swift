@@ -38,7 +38,7 @@ struct PostProcessingSettingsView: View {
 
                             Spacer()
 
-                            IOSModelCredentialStatusView(
+                            ModelCredentialStatusView(
                                 availability: ModelCredentialResolver.availability(
                                     for: model.id,
                                     purpose: .postProcessing,

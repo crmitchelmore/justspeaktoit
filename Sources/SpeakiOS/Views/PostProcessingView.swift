@@ -398,7 +398,7 @@ private extension PostProcessingView {
                             
                             Spacer()
 
-                            IOSModelCredentialStatusView(
+                            ModelCredentialStatusView(
                                 availability: ModelCredentialResolver.availability(
                                     for: model.id,
                                     purpose: .postProcessing,

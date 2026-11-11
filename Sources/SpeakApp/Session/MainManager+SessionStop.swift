@@ -3,8 +3,8 @@ import AVFoundation
 import AppKit
 import Foundation
 
-/// Stopping a recording and handing it to transcription, post-processing
-/// and delivery.
+/// Stopping a recording and handing it to `SessionCompletionPipeline` for
+/// transcription, post-processing and delivery.
 extension MainManager {
   enum SessionStopError: LocalizedError {
     case recordingStopTimedOut(seconds: TimeInterval)
@@ -78,13 +78,7 @@ extension MainManager {
       session.recordingSummary = summary
       session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
 
-      let transcribed = isStreamingTranscriptionMode
-        ? try await finishLiveTranscription(for: session)
-        : try await transcribeRecording(summary, for: session)
-      guard transcribed else { return }
-      let correctedText = text.applyVoiceCommandsAndLexicon(to: session.transcriptionResult?.text ?? "", for: session)
-      guard let processed = await postProcessIfNeeded(correctedText, for: session) else { return }
-      await deliver(processed.text, postProcessingFailure: processed.failureMessage, for: session)
+      try await completionPipeline.complete(session, recording: summary, isStreaming: isStreamingTranscriptionMode)
     } catch {
       guard sessionProcessingShouldContinue(session) else { return }
       session.errors.append(

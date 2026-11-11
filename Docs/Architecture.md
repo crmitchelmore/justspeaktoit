@@ -228,8 +228,8 @@ audio processing, live input), `Transcription/` (manager and batch providers), `
 `DataMigration/`, `PaidAccess/`, `Services/`, `TextToSpeech/`, `Transport/` and `VoiceEdit/` folders.
 
 `MainManager` owns the dictation session lifecycle and coordinates recording, transcription, optional polishing,
-delivery, HUD transitions and history finalisation. The stages after a stop live in `MainManager+SessionPipeline`;
-`SessionGestureRouter` turns hotkey gestures into starts and stops, and `SilenceAutoStop`, `HUDOcclusionObserver`,
+delivery, HUD transitions and history finalisation. The stages after a stop live in `SessionCompletionPipeline`
+and `SessionDelivery`; `SessionGestureRouter` turns hotkey gestures into starts and stops, and `SilenceAutoStop`, `HUDOcclusionObserver`,
 `PostProcessingRetryStore` and `SessionNetworkExchanges` own their own state and tests. `SmartTextOutput` chooses accessibility insertion or paste/clipboard
 fallback. Cancellation is scoped to the active session/run, and live-controller teardown waits for provider startup
 where necessary so a late start cannot capture for a replacement run.

@@ -43,9 +43,6 @@ final class ReprocessingCoordinator {
   private let history: HistoryManager
   private let hud: HUDManager
 
-  private static let missingPostProcessingKeyMessage =
-    "Post-processing requires an OpenRouter API key. Add one in Settings › API Keys."
-
   init(
     settings: AppSettings,
     permissions: PermissionsManager,
@@ -69,7 +66,7 @@ final class ReprocessingCoordinator {
     guard let url = item.audioFileURL else { return }
 
     host.publish(.processing)
-    hud.beginTranscribing(subheadline: MainManager.rawTranscriptionSubheadline(settings: settings))
+    hud.beginTranscribing(subheadline: SessionCompletionPipeline.rawTranscriptionSubheadline(settings: settings))
 
     let session = ActiveSession(gesture: .uiButton, hotKeyDescription: item.trigger.hotKeyDescription)
     session.diagnosticContext = host.makeDiagnosticContext()
@@ -294,7 +291,9 @@ final class ReprocessingCoordinator {
 
   private func ensurePostProcessingAPIKey(for session: ActiveSession) async -> Bool {
     guard await text.postProcessing.hasRequiredAPIKey() else {
-      await host?.failForMissingAPIKey(session, phase: .postProcessing, message: Self.missingPostProcessingKeyMessage)
+      await host?.failForMissingAPIKey(
+        session, phase: .postProcessing, message: SessionCompletionPipeline.missingPostProcessingKeyMessage
+      )
       return false
     }
     return true

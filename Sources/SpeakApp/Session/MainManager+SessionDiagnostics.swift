@@ -14,22 +14,6 @@ extension MainManager {
         return true
     }
 
-    func ensureBatchAPIKeyAvailable(for session: ActiveSession, message: String) async -> Bool {
-        guard await transcriptionManager.hasValidBatchAPIKey() else {
-            await handleMissingAPIKey(session, phase: .transcription, message: message)
-            return false
-        }
-        return true
-    }
-
-    func ensurePostProcessingAPIKeyAvailable(for session: ActiveSession, message: String) async -> Bool {
-        guard await text.postProcessing.hasRequiredAPIKey() else {
-            await handleMissingAPIKey(session, phase: .postProcessing, message: message)
-            return false
-        }
-        return true
-    }
-
     func handleMissingAPIKey(_ session: ActiveSession, phase: HistoryError.Phase, message: String) async {
         session.errors.append(HistoryError(phase: phase, message: message, debugDescription: nil))
         session.events.append(HistoryEvent(kind: .error, description: message))
@@ -100,16 +84,6 @@ extension MainManager {
             group.cancelAll()
             return summary
         }
-    }
-
-    func getFocusedElement() -> AXUIElement? {
-        let systemWideElement = AXUIElementCreateSystemWide()
-        var rawFocused: CFTypeRef?
-        let copyStatus = AXUIElementCopyAttributeValue(
-            systemWideElement, kAXFocusedUIElementAttribute as CFString, &rawFocused
-        )
-        guard copyStatus == .success, let rawFocused else { return nil }
-        return unsafeBitCast(rawFocused, to: AXUIElement.self)
     }
 
 }

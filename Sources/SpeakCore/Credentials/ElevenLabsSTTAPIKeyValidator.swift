@@ -36,11 +36,11 @@ public struct ElevenLabsSTTAPIKeyValidator {
             guard let http = response as? HTTPURLResponse else {
                 return .failure(
                     message: "Received a non-HTTP response",
-                    debug: debugSnapshot(request: request)
+                    debug: APIKeyValidationDebugSnapshot.capture(request: request)
                 )
             }
 
-            let debug = debugSnapshot(request: request, response: http, data: data)
+            let debug = APIKeyValidationDebugSnapshot.capture(request: request, response: http, data: data)
             guard http.statusCode != 401 else {
                 return .failure(message: "Invalid API key", debug: debug)
             }
@@ -50,7 +50,7 @@ public struct ElevenLabsSTTAPIKeyValidator {
         } catch {
             return .failure(
                 message: "Validation failed: \(error.localizedDescription)",
-                debug: debugSnapshot(request: request, error: error)
+                debug: APIKeyValidationDebugSnapshot.capture(request: request, error: error)
             )
         }
 
@@ -92,11 +92,11 @@ public struct ElevenLabsSTTAPIKeyValidator {
             guard let http = response as? HTTPURLResponse else {
                 return .failure(
                     message: "Received a non-HTTP response from Scribe",
-                    debug: debugSnapshot(request: request)
+                    debug: APIKeyValidationDebugSnapshot.capture(request: request)
                 )
             }
 
-            let debug = debugSnapshot(request: request, response: http, data: data)
+            let debug = APIKeyValidationDebugSnapshot.capture(request: request, response: http, data: data)
             if http.statusCode == 403 {
                 return .failure(
                     message: "API key does not have Scribe (speech-to-text) access. Use a key with both "
@@ -118,36 +118,12 @@ public struct ElevenLabsSTTAPIKeyValidator {
         } catch {
             return .failure(
                 message: "Scribe validation failed: \(error.localizedDescription)",
-                debug: debugSnapshot(request: request, error: error)
+                debug: APIKeyValidationDebugSnapshot.capture(request: request, error: error)
             )
         }
     }
 
     private func isAcceptedScribeProbeStatus(_ statusCode: Int) -> Bool {
         (200..<300).contains(statusCode) || statusCode == 400 || statusCode == 415 || statusCode == 422
-    }
-
-    private func debugSnapshot(
-        request: URLRequest,
-        response: HTTPURLResponse? = nil,
-        data: Data? = nil,
-        error: Error? = nil
-    ) -> APIKeyValidationDebugSnapshot {
-        APIKeyValidationDebugSnapshot(
-            url: request.url?.absoluteString ?? "",
-            method: request.httpMethod ?? "GET",
-            requestHeaders: request.allHTTPHeaderFields ?? [:],
-            requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-            statusCode: response?.statusCode,
-            responseHeaders: response.map { headers in
-                headers.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
-                    guard let key = entry.key as? String else { return }
-                    partialResult[key] = String(describing: entry.value)
-                }
-
-            } ?? [:],
-            responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
-            errorDescription: error?.localizedDescription
-        )
     }
 }

@@ -9,14 +9,13 @@ import { pathToFileURL } from 'node:url';
 // unless only docs, the website, Android or Workers changed; and, for Swift
 // changes, the portable Linux graph and one macOS job. Every other macOS gate
 // runs only on merge batches, main and `ci:full` pull requests.
+// The macOS lanes are reusable workflows (ci-*.yml); each lane job fails when
+// any job inside it does, so the gate checks lanes, not their jobs.
 export const gateJobs = {
   workers: ['paid-access-worker'],
   apple: ['lint'],
-  swift: ['build-macos', 'portable-linux'],
-  full: [
-    'build-ios', 'build-ios-test-products', 'build-ios-keyboard', 'release-validation',
-    'core-journey-e2e', 'core-journey-fixture-ui', 'api-compatibility',
-  ],
+  swift: ['macos-debug', 'portable-linux'],
+  full: ['ios', 'macos-release', 'journey-ui'],
 };
 
 export function assessCIGates(needs, event) {

@@ -31,9 +31,12 @@ const DETERMINISTIC_JOBS = new Set(['Lint', 'Portable Swift (Linux)', 'Public AP
     'Paid Access Worker', 'Detect Release-Relevant Changes', 'Pre-PR evidence (blocking)']);
 const DETERMINISTIC_STEP = /^(Build|Compile)\b/i;
 
+// A job inside a reusable workflow (ci.yml's macOS lanes) is named "<lane> / <job>".
+const jobName = job => job.name.split(' / ').at(-1);
+
 export function classifyFailure(jobs) {
-    const failed = jobs.filter(job => job.conclusion === 'failure' && !AGGREGATE_JOBS.has(job.name));
-    const deterministic = failed.some(job => DETERMINISTIC_JOBS.has(job.name)
+    const failed = jobs.filter(job => job.conclusion === 'failure' && !AGGREGATE_JOBS.has(jobName(job)));
+    const deterministic = failed.some(job => DETERMINISTIC_JOBS.has(jobName(job))
         || (job.steps ?? []).some(step => step.conclusion === 'failure' && DETERMINISTIC_STEP.test(step.name)));
     return { failed: failed.map(job => job.name), deterministic };
 }

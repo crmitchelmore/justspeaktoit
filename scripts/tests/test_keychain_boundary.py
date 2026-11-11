@@ -23,12 +23,12 @@ class KeychainBoundaryTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_native_and_hosted_gates_verify_real_process_isolation(self):
-        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        workflow = (ROOT / '.github/workflows/ci-macos-debug.yml').read_text()
         self.assertIn('python3 -B -m unittest scripts.tests.test_private_test_keychain -v', workflow)
         self.assertIn('python3 scripts/with-test-keychain.py bash scripts/run-core-journey-e2e.sh --phase test', workflow)
 
     def test_test_redirect_is_scoped_to_ci_test_commands(self):
-        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        workflow = (ROOT / '.github/workflows/ci-macos-debug.yml').read_text()
         for job in ('build-macos', 'core-journey-e2e'):
             body = re.split(r'\n  [a-z0-9-]+:\n', workflow.split(f'\n  {job}:\n', 1)[1], maxsplit=1)[0]
             self.assertIn('JSTI_TEST_KEYCHAIN_REDIRECT: "1"', body, job)

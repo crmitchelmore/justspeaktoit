@@ -1,4 +1,4 @@
-"""Tests for scripts/ci/xcode-unsigned-build.sh, ci.yml's unsigned keyboard and watch builds."""
+"""Tests for scripts/ci/xcode-unsigned-build.sh, ci-ios.yml's unsigned keyboard and watch builds."""
 import os
 import subprocess
 import tempfile

@@ -55,7 +55,8 @@ IS_MAC = sys.platform == 'darwin'
 # Test targets that drive real UI. They are never selected, whatever changed.
 UI_TEST_TARGETS = {'SpeakAppUITests', 'SpeakiOSUITests'}
 
-# Test targets the macOS job leaves to Portable Swift (Linux), as ci.yml passes them to affected-swift-tests.py.
+# Test targets the macOS job leaves to Portable Swift (Linux), as ci-macos-debug.yml passes them to
+# affected-swift-tests.py.
 CI_MACOS_SKIP_TARGETS = {'SpeakDesktopTests', 'SpeakAutomationKitTests'}
 # Cheap static checks run first so most failures surface within seconds.
 COST = {'swift-test-coverage': 0, 'actionlint': 0, 'shellcheck': 0, 'swiftformat': 1, 'landing-tests': 1,

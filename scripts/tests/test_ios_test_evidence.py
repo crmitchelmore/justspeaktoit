@@ -350,7 +350,7 @@ class IOSCoverageTests(unittest.TestCase):
 class WorkflowEvidenceTests(unittest.TestCase):
     @staticmethod
     def step(name):
-        workflow = SCRIPT.parents[1] / ".github/workflows/ci.yml"
+        workflow = SCRIPT.parents[1] / ".github/workflows/ci-ios.yml"
         return workflow.read_text().split(f"      - name: {name}\n", 1)[1].split("\n      - name:", 1)[0]
 
     def test_full_test_records_and_verifier_are_required_on_success(self):

@@ -167,9 +167,11 @@ class CIParityTests(unittest.TestCase):
     """pre-pr must run CI's commands. Path routing is shared through scripts/ci/routing.json (test_ci_routing)."""
 
     ci = (ROOT / '.github' / 'workflows' / 'ci.yml').read_text(encoding='utf-8')
+    # ci.yml's macOS Debug lane, which runs the affected unit tests.
+    macos = (ROOT / '.github' / 'workflows' / 'ci-macos-debug.yml').read_text(encoding='utf-8')
 
     def test_macos_skip_targets_match_ci(self):
-        self.assertEqual(set(re.findall(r'--skip-target (\w+)', self.ci)), pre_pr.CI_MACOS_SKIP_TARGETS)
+        self.assertEqual(set(re.findall(r'--skip-target (\w+)', self.macos)), pre_pr.CI_MACOS_SKIP_TARGETS)
 
     def test_android_command_matches_android_yml(self):
         android = (ROOT / '.github' / 'workflows' / 'android.yml').read_text(encoding='utf-8')

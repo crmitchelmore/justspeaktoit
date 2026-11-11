@@ -4,8 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "LinuxAtspi.h"
-#include "VoiceSources.h"
-#include "VoiceAudioCodec.h"
+/* Desktop ABI headers shared with Windows: one copy, in CWindowsSupport/include. */
+#include "../../CWindowsSupport/include/VoiceSources.h"
+#include "../../CWindowsSupport/include/VoiceAudioCodec.h"
 #include "../../CWindowsSupport/include/VoiceCredentials.h"
 #include "../../CWindowsSupport/include/LocalCleanup.h"
 

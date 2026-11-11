@@ -187,10 +187,13 @@ cross-cutting utilities stay at the top level.
 | `Capture/`, `Recording/`, `Keyboard/`, `LiveActivity/` | Capture policy and health, recording lifecycle and hot-key gestures, keyboard handoff, Live Activity state. |
 | `AppleSpeech/`, `LocalModels/`, `Audio/` | Apple Speech adapters, downloaded local-model records, PCM/MP3/WAV helpers. |
 | `PostProcessing/`, `Vocabulary/`, `OpenRouter/` | Cleanup/polish policy, lexicon/auto-correction/pronunciation, OpenRouter chat and audio. |
-| `History/`, `Credentials/`, `Balance/`, `Sync/`, `DataMigration/`, `Automation/`, `Analytics/`, `Desktop/`, `App/` | History records and diagnostics, keys and validation, provider balances, settings/key/config transfer, migration, automation protocol, analytics, portable desktop configuration, app information and shared UI. |
+| `History/`, `Credentials/`, `Balance/`, `Sync/`, `DataMigration/`, `Automation/`, `Analytics/`, `Desktop/`, `App/` | History records and diagnostics, keys and validation, provider balances, settings/key/config transfer, migration, automation protocol, analytics, portable desktop configuration and app information. |
 | `ModelComparison/`, `PaidAccess/`, `SettingsSearch/`, `SpeechInsights/`, `Resources/` | Existing feature folders and bundled resources. |
+| `AppleUI/` | Apple-only SwiftUI views shared by the macOS and iOS apps (skeletons, release notes, credential status, provider fields, balances, OpenRouter audio browser). |
 
-`appleCoreSources` in `Package.swift` lists Apple-only files by their path relative to `Sources/SpeakCore`.
+`appleCoreSources` in `Package.swift` lists Apple-only files by their path relative to `Sources/SpeakCore`, or a
+whole Apple-only folder by its name. SwiftUI views live in `AppleUI/` (excluded as a folder), so a new view never edits
+the manifest; `scripts/verify-portable-core-boundary.py` rejects a view declared anywhere else.
 
 ## macOS runtime
 

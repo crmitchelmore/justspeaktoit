@@ -14,14 +14,26 @@ manifest = (root / "Package.swift").read_text(encoding="utf-8")
 match = re.search(r"let appleCoreSources: \[String\] = \[(.*?)\n\]", manifest, re.S)
 if not match:
     sys.exit("Missing explicit appleCoreSources platform boundary")
-excluded = re.findall(r'"([^"\n]+\.swift)"', match.group(1))
-if len(excluded) != len(set(excluded)):
+entries = re.findall(r'"([^"\n]+)"', match.group(1))
+if len(entries) != len(set(entries)):
     sys.exit("Duplicate Apple source exclusion")
 source_root = root / "Sources" / "SpeakCore"
-for name in excluded:
+# An entry is either one Apple adapter file or a whole Apple-only folder.
+excluded_files = [name for name in entries if name.endswith(".swift")]
+excluded_folders = [name for name in entries if not name.endswith(".swift")]
+for name in entries:
     relative = Path(name)
-    if relative.is_absolute() or ".." in relative.parts or not (source_root / relative).is_file():
+    target = source_root / relative
+    exists = target.is_file() if name.endswith(".swift") else target.is_dir() and any(target.rglob("*.swift"))
+    if relative.is_absolute() or ".." in relative.parts or not exists:
         sys.exit(f"Invalid or stale Apple source exclusion: {name}")
+for name in excluded_files:
+    if folder := next((f for f in excluded_folders if Path(name).is_relative_to(f)), None):
+        sys.exit(f"Apple source exclusion {name} is already covered by the {folder} folder")
+excluded = excluded_files + [
+    path.relative_to(source_root).as_posix()
+    for folder in excluded_folders for path in (source_root / folder).rglob("*.swift")
+]
 portable = manifest.split("let portablePackage = Package(", 1)[1].split(
     "let package = portableCoreBuild", 1
 )[0]
@@ -36,6 +48,14 @@ required = {"ModelCatalog.swift", "ModelCatalogTypes.swift", "Live/StreamingTran
             "PaidAccess/PaidAccessClient.swift", "PaidAccess/PaidAccessSessionLifecycle.swift"}
 if missing := required - included:
     sys.exit("Canonical domain sources excluded from portable builds: " + ", ".join(sorted(missing)))
+
+# SwiftUI views are Apple presentation, not shared domain code: they live in the
+# Apple-only AppleUI/ folder so Core's portable surface stays free of UI.
+view_declaration = re.compile(r"^\s*(?:public\s+|internal\s+|private\s+|fileprivate\s+)?struct\s+\w+\s*:\s*View\b", re.M)
+for path in sorted(source_root.rglob("*.swift")):
+    relative = path.relative_to(source_root).as_posix()
+    if not relative.startswith("AppleUI/") and view_declaration.search(path.read_text(encoding="utf-8")):
+        sys.exit(f"SwiftUI view outside Sources/SpeakCore/AppleUI: {relative}")
 
 # Paid domain/session contracts stay shared; only the existing Apple I/O
 # adapters are excluded. Keychain storage inside the shared client file is
@@ -72,5 +92,6 @@ for shared in ("SpeakDesktop", "SpeakDesktopHost"):
         imports = set(re.findall(r"^\s*import\s+(\w+)", path.read_text(encoding="utf-8"), re.M))
         if leaked := imports & native_modules:
             sys.exit(f"{path.relative_to(root)} imports host-native modules: {', '.join(sorted(leaked))}")
-print(f"Portable boundary: {len(included)} shared Swift sources, {len(excluded)} explicit platform exclusions; "
+print(f"Portable boundary: {len(included)} shared Swift sources, {len(excluded)} Apple-only "
+      f"({len(excluded_files)} files, {len(excluded_folders)} folders); "
       f"sync: {len(sync_sources) - len(sync_excluded)} shared, {len(sync_excluded)} Apple-only")

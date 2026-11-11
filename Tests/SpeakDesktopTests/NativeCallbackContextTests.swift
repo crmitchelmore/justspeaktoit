@@ -51,6 +51,58 @@ final class NativeCallbackContextTests: XCTestCase {
         XCTAssertNil(weakBox)
     }
 
+    /// A C callback that resolves its context as a `NativeCallbackContext` must
+    /// get `pointer`, never a raw `Unmanaged` object: that reads a different
+    /// layout and crashed the Windows self-test (#1473). Scans the desktop
+    /// hosts, which the portable run cannot execute.
+    func testNativeCallbacksNeverReceiveARawUnmanagedContext() throws {
+        let sources = try ["Sources/SpeakWindows", "Sources/SpeakWindowsPlatform", "Sources/SpeakLinux",
+                           "Sources/SpeakLinuxPlatform"].flatMap(swiftSources)
+        let declaration = try NSRegularExpression(pattern: #"^(?:(?:private|fileprivate) )?func (\w+)\("#)
+        var callbacks = Set<String>()
+        for (_, lines) in sources {
+            var current: String?
+            for line in lines {
+                let range = NSRange(line.startIndex..., in: line)
+                if let match = declaration.firstMatch(in: line, range: range),
+                   let name = Range(match.range(at: 1), in: line) {
+                    current = String(line[name])
+                } else if line.hasPrefix("}") || (!line.hasPrefix(" ") && !line.isEmpty) {
+                    current = nil
+                }
+                if let current, line.contains("NativeCallbackContext<"), line.contains(".resolve(") {
+                    callbacks.insert(current)
+                }
+            }
+        }
+        XCTAssertTrue(callbacks.contains("captureAudio"), "The callback scan no longer finds captureAudio.")
+        var violations: [String] = []
+        for (file, lines) in sources {
+            for (index, line) in lines.enumerated() where line.contains("Unmanaged.pass") {
+                let call = lines[max(0, index - 3)...min(lines.count - 1, index + 3)].joined(separator: "\n")
+                for name in callbacks where call.range(of: #"\b\#(name)\b"#, options: .regularExpression) != nil {
+                    violations.append("\(file):\(index + 1) passes Unmanaged to \(name)")
+                }
+            }
+        }
+        XCTAssertEqual(violations, [], "Hand these callbacks NativeCallbackContext.pointer or withScoped.")
+    }
+
+    private func swiftSources(_ relativePath: String) throws -> [(String, [String])] {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let directory = root.appendingPathComponent(relativePath, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: directory.path) else {
+            throw XCTSkip("\(relativePath) is not available where these tests run; the source checkout runs them.")
+        }
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        return try files.map { file in
+            let text = try String(contentsOf: file, encoding: .utf8)
+            return ("\(relativePath)/\(file.lastPathComponent)", text.components(separatedBy: "\n"))
+        }
+    }
+
     func testSlotReplacesDetachesAndRejectsRefusedRegistrations() {
         let attached = AttachLog()
         let slot = NativeCallbackSlot<Target> { attached.record($0) }

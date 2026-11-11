@@ -351,6 +351,14 @@ bool jsti_system_resources_self_test(HWND owner, std::string &error) {
         while (PeekMessageW(&message, window, refreshMessage, refreshMessage, PM_REMOVE)) DispatchMessageW(&message);
     };
     auto enabled = [&](int id) { return IsWindowEnabled(GetDlgItem(window, id)) != FALSE; };
+    // The fixture window stays hidden, so IsWindowVisible is false for every
+    // child; the style bit says whether layout shows it.
+    auto shown = [](HWND control) { return (GetWindowLongPtrW(control, GWL_STYLE) & WS_VISIBLE) != 0; };
+    // BM_CLICK can fail on an inactive window; deliver the click's command.
+    auto click = [&](int id) {
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(id, BN_CLICKED),
+                     reinterpret_cast<LPARAM>(GetDlgItem(window, id)));
+    };
     auto text = [&](int id) {
         wchar_t buffer[512]{}; GetDlgItemTextW(window, id, buffer, 512); return std::wstring(buffer);
     };
@@ -361,42 +369,53 @@ bool jsti_system_resources_self_test(HWND owner, std::string &error) {
     JSTISystemResourcesView view{"2 resources in use.", "Windows reports the microphone is open, but nothing in "
         "Just Speak to It claims it.", "Just Speak to It isn't holding anything.",
         "Windows: this app is recording from a microphone.", rows, 2, 1};
-    bool passed = jsti_window_set_system_resources(nullptr) == -1;
+    // Records the first failed step, so a CI failure names it.
+    std::string step;
+    auto check = [&](bool ok, const char *name) {
+        if (!ok && step.empty()) step = name;
+        return ok;
+    };
+    bool passed = check(jsti_window_set_system_resources(nullptr) == -1, "a null view was accepted");
     JSTISystemResourcesView invalid = view;
     invalid.row_count = maximumRows + 1;
-    passed = jsti_window_set_system_resources(&invalid) == -1 && passed;
-    passed = jsti_window_set_system_resources(&view) == 0 && passed;
+    passed = check(jsti_window_set_system_resources(&invalid) == -1, "too many rows were accepted") && passed;
+    passed = check(jsti_window_set_system_resources(&view) == 0, "a valid view was refused") && passed;
     drain();
-    passed = passed && SendDlgItemMessageW(window, listID, LB_GETCOUNT, 0, 0) == 2 &&
-        text(headlineID) == L"2 resources in use." && IsWindowVisible(GetDlgItem(window, warningID)) &&
-        enabled(releaseID) && text(releaseID) == L"&Stop playback" && enabled(releaseAllID);
-    SendDlgItemMessageW(window, releaseID, BM_CLICK, 0, 0);
-    passed = passed && observed.calls == 1 && observed.event == JSTI_EVENT_SYSTEM_RESOURCE_RELEASE &&
-        observed.text == "playback" && !enabled(releaseID);
+    passed = check(SendDlgItemMessageW(window, listID, LB_GETCOUNT, 0, 0) == 2 &&
+        text(headlineID) == L"2 resources in use." && shown(GetDlgItem(window, warningID)),
+        "the rows, headline or warning were not shown") && passed;
+    passed = check(enabled(releaseID) && text(releaseID) == L"&Stop playback" && enabled(releaseAllID),
+        "the first row's release buttons were not offered") && passed;
+    click(releaseID);
+    passed = check(observed.calls == 1 && observed.event == JSTI_EVENT_SYSTEM_RESOURCE_RELEASE &&
+        observed.text == "playback" && !enabled(releaseID), "Release did not report the selected row once") && passed;
     // A hold without a release (the shortcut) keeps its button disabled.
     SendDlgItemMessageW(window, listID, LB_SETCURSEL, 1, 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(listID, LBN_SELCHANGE),
                  reinterpret_cast<LPARAM>(GetDlgItem(window, listID)));
-    passed = passed && !enabled(releaseID) && text(detailID) == L"Listens for your hotkey. Nothing is recorded.";
+    passed = check(!enabled(releaseID) && text(detailID) == L"Listens for your hotkey. Nothing is recorded.",
+        "a row without a release offered one, or did not show its reason") && passed;
     // A refresh keeps the selected row by id.
     passed = jsti_window_set_system_resources(&view) == 0 && passed;
     drain();
-    passed = passed && SendDlgItemMessageW(window, listID, LB_GETCURSEL, 0, 0) == 1;
-    SendDlgItemMessageW(window, releaseAllID, BM_CLICK, 0, 0);
-    passed = passed && observed.calls == 2 && observed.event == JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL;
+    passed = check(SendDlgItemMessageW(window, listID, LB_GETCURSEL, 0, 0) == 1,
+        "a refresh lost the selected row") && passed;
+    click(releaseAllID);
+    passed = check(observed.calls == 2 && observed.event == JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL,
+        "Release everything was not reported") && passed;
     JSTISystemResourcesView empty{"Nothing is in use.", nullptr, "Just Speak to It isn't holding anything.",
         "Windows: no microphone is in use by this app.", nullptr, 0, 0};
     passed = jsti_window_set_system_resources(&empty) == 0 && passed;
     drain();
-    passed = passed && SendDlgItemMessageW(window, listID, LB_GETCOUNT, 0, 0) == 0 &&
-        !IsWindowVisible(GetDlgItem(window, warningID)) && !enabled(releaseID) && !enabled(releaseAllID) &&
-        text(detailID) == L"Just Speak to It isn't holding anything.";
+    passed = check(SendDlgItemMessageW(window, listID, LB_GETCOUNT, 0, 0) == 0 &&
+        !shown(GetDlgItem(window, warningID)) && !enabled(releaseID) && !enabled(releaseAllID) &&
+        text(detailID) == L"Just Speak to It isn't holding anything.", "the empty state was wrong") && passed;
     passed = jsti_window_set_system_resources(&view) == 0 && passed;
     drain();
     auto fits = [&] {
         RECT client{}; GetClientRect(window, &client);
         for (HWND child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
-            if (!IsWindowVisible(child)) continue;
+            if (!shown(child)) continue;
             RECT bounds{}; GetWindowRect(child, &bounds);
             MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&bounds), 2);
             if (bounds.left < 0 || bounds.top < 0 || bounds.right > client.right || bounds.bottom > client.bottom)
@@ -404,11 +423,11 @@ bool jsti_system_resources_self_test(HWND owner, std::string &error) {
         }
         return true;
     };
-    passed = fits() && passed;
+    passed = check(fits(), "a control fell outside the window") && passed;
     RECT originalBounds{}; GetWindowRect(window, &originalBounds);
     MINMAXINFO minimum{}; SendMessageW(window, WM_GETMINMAXINFO, 0, reinterpret_cast<LPARAM>(&minimum));
     SetWindowPos(window, nullptr, 0, 0, minimum.ptMinTrackSize.x, minimum.ptMinTrackSize.y, SWP_NOMOVE | SWP_NOZORDER);
-    passed = fits() && passed;
+    passed = check(fits(), "a control fell outside the window at its minimum size") && passed;
     SetWindowPos(window, nullptr, 0, 0, originalBounds.right - originalBounds.left,
         originalBounds.bottom - originalBounds.top, SWP_NOMOVE | SWP_NOZORDER);
     std::vector<wchar_t> path(32768, 0);
@@ -422,12 +441,11 @@ bool jsti_system_resources_self_test(HWND owner, std::string &error) {
     DestroyWindow(window);
     fixtureEvent = nullptr;
     const int probe = jsti_audio_process_capturing();
-    passed = passed && probe >= -1 && probe <= 1;
+    passed = check(probe >= -1 && probe <= 1, "the microphone probe returned an unknown value") && passed;
     {
         std::lock_guard<std::mutex> lock(viewMutex);
         latest = std::move(original);
     }
-    if (!passed && error.empty())
-        error = "System resources fixture failed its rows, release buttons, selection, empty state or bounds.";
+    if (!passed && error.empty()) error = "System resources fixture failed: " + step + ".";
     return passed;
 }

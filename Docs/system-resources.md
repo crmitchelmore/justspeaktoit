@@ -58,7 +58,10 @@ add a small adapter to the platform monitor instead
   stops resolving when the window closes. WASAPI supplies the OS view: an
   active `IAudioSessionManager2` session owned by this process on any active
   capture endpoint (`jsti_audio_process_capturing`). The same monitor polls it
-  every 2 seconds.
+  every 2 seconds. The Windows workflow's executable self-test drives the
+  window's fixture (`jsti_system_resources_self_test`) and names the first
+  check that fails. `NativeCallbackContextTests` fails when a raw `Unmanaged`
+  pointer reaches a callback that resolves a `NativeCallbackContext`.
 - **Android**: Settings › *System resources in use* (issue #1473). Kotlin
   can't read the Swift model, so `resources/SystemResources.kt` mirrors the
   kinds, the release semantics and the summary wording, and

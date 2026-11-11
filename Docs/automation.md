@@ -89,9 +89,10 @@ Shortcuts → Action Button & Shortcuts**):
 | **Stop Dictation and Get Text** | Stops a recording and returns the text to the next action. |
 
 The **Transcribe Voice** control (Control Center, Lock Screen, Action Button) is
-the Control version of Toggle Recording. Its backing "Toggle Transcription"
-intent and the Live Activity's "Copy Last Transcript" button are hidden from the
-Shortcuts action list; shortcuts saved with them keep working.
+the Control version of Toggle Recording. Its action appears in Shortcuts as
+"Transcribe Voice Control" (formerly "Toggle Transcription"); use Toggle
+Recording in your own shortcuts. "Copy Last Transcript" is the Live Activity's
+copy button; use Copy Full Transcript or Get Last Transcription instead.
 
 Notes:
 

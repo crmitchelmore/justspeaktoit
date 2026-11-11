@@ -90,7 +90,10 @@ enum IOSSettingsPage: String, CaseIterable, Identifiable, Hashable {
 
     /// The page whose section matches a search entry's title.
     static func page(for entry: SettingsSearchEntry) -> IOSSettingsPage? {
-        allCases.first { $0.sectionTitles.contains(entry.title) }
+        if entry.id.hasPrefix(IOSSettingsSearch.pageEntryPrefix) {
+            return IOSSettingsPage(rawValue: String(entry.id.dropFirst(IOSSettingsSearch.pageEntryPrefix.count)))
+        }
+        return allCases.first { $0.sectionTitles.contains(entry.title) }
     }
 }
 

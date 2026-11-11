@@ -524,11 +524,17 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
 @available(iOS 18, *)
 public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIntent, LiveActivityIntent,
     ForegroundContinuableIntent {
-    public static var title: LocalizedStringResource = "Toggle Transcription"
-    /// Backs the Transcribe Voice control only. Shortcuts already offers the
-    /// same start/stop as Toggle Recording, and listing both read as two
-    /// different features (#1470). Hiding it keeps saved shortcuts running.
-    public static var isDiscoverable: Bool { false }
+    /// Named after the control it backs (#1470): "Toggle Transcription" read as
+    /// a different feature from Toggle Recording. Renaming the title keeps saved
+    /// shortcuts working, which hiding the intent would not.
+    public static var title: LocalizedStringResource = "Transcribe Voice Control"
+    public static var description = IntentDescription(
+        """
+        The action behind the Transcribe Voice control: turns recording on or off. \
+        In your own shortcuts, use Toggle Recording instead.
+        """,
+        categoryName: "Recording"
+    )
 
     /// Deliberately runs without authentication: Control Center is reachable
     /// from the lock screen and this toggle returns no transcript — results
@@ -620,11 +626,12 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
 public struct CopyLastTranscriptIntent: LiveActivityIntent {
     public static var title: LocalizedStringResource = "Copy Last Transcript"
     public static var description = IntentDescription(
-        "Copies the transcript shown on the completed recording row to the clipboard."
+        """
+        The Live Activity's copy button, tied to one completed recording. \
+        In your own shortcuts, use Copy Full Transcript or Get Last Transcription.
+        """,
+        categoryName: "Transcripts"
     )
-    /// The Live Activity row button: it needs that row's completion ID, so it
-    /// cannot be built usefully in Shortcuts (#1470). Saved shortcuts still run.
-    public static var isDiscoverable: Bool { false }
 
     public static var openAppWhenRun: Bool = false
     /// Reads and writes private transcript data, so never run on a locked device.
@@ -676,7 +683,10 @@ public struct CopyLastTranscriptIntent: LiveActivityIntent {
 struct CopyLastSentenceIntent: AppIntent {
     static var title: LocalizedStringResource = "Copy Last Sentence"
     static var description = IntentDescription(
-        "Copies the last sentence of the current or most recent recording to the clipboard.",
+        """
+        Copies the last sentence of the current or most recent recording to the clipboard. \
+        Recordings saved to History only aren't available here.
+        """,
         categoryName: "Transcripts"
     )
 
@@ -708,7 +718,10 @@ struct CopyLastSentenceIntent: AppIntent {
 struct CopyFullTranscriptIntent: AppIntent {
     static var title: LocalizedStringResource = "Copy Full Transcript"
     static var description = IntentDescription(
-        "Copies the full text of the current or most recent recording to the clipboard.",
+        """
+        Copies the full text of the current or most recent recording to the clipboard. \
+        Recordings saved to History only aren't available here; use Get Last Transcription.
+        """,
         categoryName: "Transcripts"
     )
 

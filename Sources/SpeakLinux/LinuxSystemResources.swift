@@ -26,44 +26,18 @@ func linuxSystemResourcesEvent(
 
 enum LinuxSystemResources {
     static func makeMonitor() -> DesktopSystemResourcesMonitor {
-        DesktopSystemResourcesMonitor(
-            osName: "The sound server",
-            probe: {
-                switch jsti_audio_process_capturing() {
-                case 1: true
-                case 0: false
-                default: nil
-                }
-            },
-            publish: { show($0) },
-            report: { log($0) }
+        DesktopNativeSystemResources.monitor(
+            osName: "The sound server", capturing: jsti_audio_process_capturing, show: show
         )
     }
 
-    static func log(_ line: String) {
-        FileHandle.standardError.write(Data("System resources: \(line)\n".utf8))
-    }
+    static func log(_ line: String) { DesktopNativeSystemResources.log(line) }
 
     static func show(_ presentation: DesktopSystemResources.Presentation) {
-        let strings = DesktopNativeStrings()
-        let rows = presentation.rows.map { row in
-            JSTISystemResourceRow(
-                id: strings.add(row.id), title: strings.add(row.title), reason: strings.add(row.reason),
-                caption: strings.add(row.caption), release_title: row.releaseTitle.map(strings.add),
-                releasing: row.releasing ? 1 : 0
-            )
-        }
-        withExtendedLifetime(strings) {
-            rows.withUnsafeBufferPointer { buffer in
-                var view = JSTISystemResourcesView(
-                    headline: strings.add(presentation.headline), warning: presentation.warning.map(strings.add),
-                    empty: strings.add(presentation.empty), microphone: strings.add(presentation.microphone),
-                    rows: buffer.baseAddress, row_count: Int32(buffer.count),
-                    can_release_everything: presentation.canReleaseEverything ? 1 : 0
-                )
-                _ = jsti_window_set_system_resources(&view)
-            }
-        }
+        DesktopNativeSystemResources.show(
+            presentation, row: JSTISystemResourceRow.init, view: JSTISystemResourcesView.init,
+            set: jsti_window_set_system_resources
+        )
     }
 
     /// The dictation shortcut's listener, while one is registered. It has no

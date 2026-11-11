@@ -1,5 +1,8 @@
-/* Private to the LinuxAtspi*.c units: session and target state shared by the
- * accessibility bus worker, requests and contracts. Never exported. */
+/* Private to the LinuxAtspi*.c units: the session and target types shared by
+ * the accessibility bus worker, requests and contracts. Never exported. The
+ * published sessions, the selection admission gate and the lock that guards
+ * them are static in LinuxAtspi.c; other units reach them only through the
+ * functions below. */
 #ifndef JSTI_LINUX_ATSPI_INTERNAL_H
 #define JSTI_LINUX_ATSPI_INTERNAL_H
 #include "include/LinuxAtspi.h"
@@ -75,10 +78,13 @@ typedef struct {
 
 #pragma GCC visibility push(hidden)
 
-extern GMutex state_lock;  /* LinuxAtspi.c */
-extern Session *current;  /* LinuxAtspi.c */
-extern Session *selection_current;  /* LinuxAtspi.c */
-extern SelectionAdmission selection_admission;  /* LinuxAtspi.c */
+/* LinuxAtspi.c's state lock. It guards session publication, `stopped`,
+ * `focus` and `admitted`, and the hand-off of work to a session's context;
+ * never hold it across IPC. */
+void atspi_lock(void);
+void atspi_unlock(void);
+/* The published selection session, or NULL. Hold the state lock. */
+Session *selection_session_locked(void);
 Session *session_ref(Session *s);
 void session_unref(Session *s);
 JSTIAtspiTarget *target_ref(JSTIAtspiTarget *t);

@@ -6,14 +6,9 @@ typedef struct {
     void *context;
 } Configuration;
 static Configuration configuration;
-MarkupConfiguration markup_configuration;
-guint generation_flags;
-gboolean generation_working;
-gchar *generated_result;
-gchar *generated_format;
-FormatState format_state;
-
-Dialog *active;
+/* The dialog jsti_show_voice_sources opened; cleared when it is destroyed. */
+static Dialog *active;
+Dialog *voice_open_dialog(void) { return active != NULL && active->window != NULL ? active : NULL; }
 Dialog *retain(Dialog *dialog) { ++dialog->refs; return dialog; }
 void release(gpointer data) {
     Dialog *dialog = data;
@@ -31,7 +26,7 @@ gchar *text(Dialog *dialog) {
     return gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
 }
 gboolean can_edit_markup(Dialog *dialog) {
-    return markup_configuration.enabled && markup_configuration.wrap != NULL &&
+    return markup_configured() &&
         dialog->window != NULL && dialog->import_token == NULL && (dialog->selected == 1 || dialog->selected == 3);
 }
 void refresh(Dialog *dialog) {
@@ -40,8 +35,7 @@ void refresh(Dialog *dialog) {
         (dialog->selected != 0 || dialog->record[0] != '\0');
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->read), ready);
     guint format_index = dialog->format != NULL ? gtk_drop_down_get_selected(dialog->format) : GTK_INVALID_LIST_POSITION;
-    gboolean format_ready = !dialog->format_pending && (format_state.identifiers == NULL ||
-        (format_index < g_strv_length(format_state.identifiers) && format_state.identifiers[format_index][0] != '\0'));
+    gboolean format_ready = !dialog->format_pending && format_available(format_index);
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->export_button), ready && format_ready);
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->generate), ready && format_ready);
     gboolean result_ready = !dialog->working && dialog->result_id[0] != '\0';
@@ -87,9 +81,7 @@ Dialog *make_dialog(GtkWindow *owner, const char *record, const char *history) {
     dialog->refs = 1; dialog->record = g_strdup(record != NULL ? record : "");
     dialog->history = g_strdup(history != NULL ? history : "");
     dialog->typed = g_strdup(""); dialog->clipboard = g_strdup(""); dialog->file = g_strdup("");
-    dialog->result_id = g_strdup(generated_result != NULL ? generated_result : "");
-    dialog->result_format = g_strdup(generated_format != NULL ? generated_format : "wav");
-    dialog->generation_flags = generation_flags; dialog->working = generation_working;
+    adopt_generation_state(dialog);
     dialog->callback = configuration.callback; dialog->context = configuration.context;
     dialog->window = GTK_WINDOW(gtk_window_new());
     g_object_set_data_full(G_OBJECT(dialog->window), "voice-sources", dialog, destroyed);
@@ -150,8 +142,8 @@ Dialog *make_dialog(GtkWindow *owner, const char *record, const char *history) {
     GtkWidget *options = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     dialog->auto_play = GTK_CHECK_BUTTON(gtk_check_button_new_with_label("Auto-play generated audio"));
     dialog->save = GTK_CHECK_BUTTON(gtk_check_button_new_with_label("Save audio to recordings"));
-    gtk_check_button_set_active(dialog->auto_play, generation_flags & 1);
-    gtk_check_button_set_active(dialog->save, generation_flags & 2);
+    gtk_check_button_set_active(dialog->auto_play, dialog->generation_flags & 1);
+    gtk_check_button_set_active(dialog->save, dialog->generation_flags & 2);
     gtk_widget_set_size_request(GTK_WIDGET(dialog->auto_play), -1, 44);
     gtk_widget_set_size_request(GTK_WIDGET(dialog->save), -1, 44);
     gtk_widget_set_hexpand(GTK_WIDGET(dialog->auto_play), TRUE);
@@ -209,7 +201,7 @@ void jsti_voice_sources_close(void) {
     }
     active = NULL;
     configuration.callback = NULL; configuration.context = NULL;
-    clear_markup(&markup_configuration);
+    reset_markup_configuration();
 }
 void jsti_voice_sources_show_fixture(GtkWindow *owner) {
     jsti_show_voice_sources(owner, "", "");

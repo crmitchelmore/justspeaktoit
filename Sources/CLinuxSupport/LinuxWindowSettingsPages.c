@@ -24,9 +24,9 @@ AboutPage *about_page(void) { return &about_state; }
 
 static void on_voice_sources(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    gboolean presented = history_page()->selected_id != NULL && g_strcmp0(history_page()->presented_id, history_page()->selected_id) == 0;
+    gboolean presented = history_selection_presented();
     gchar *snapshot = presented ? displayed_transcript() : g_strdup("");
-    jsti_show_voice_sources(ui.window, presented ? history_page()->selected_id : "", snapshot);
+    jsti_show_voice_sources(ui.window, presented ? history_selected_id() : "", snapshot);
     g_free(snapshot);
 }
 
@@ -172,11 +172,7 @@ GtkWidget *build_general(void) {
     GtkWidget *cleanup = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(cleanup), "Saved recordings");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(cleanup), "Delete saved audio without removing History entries.");
-    history_page()->audio_cleanup = GTK_BUTTON(gtk_button_new_with_mnemonic("Delete _audio…"));
-    gtk_widget_add_css_class(GTK_WIDGET(history_page()->audio_cleanup), "destructive-action");
-    gtk_widget_set_valign(GTK_WIDGET(history_page()->audio_cleanup), GTK_ALIGN_CENTER);
-    g_signal_connect(history_page()->audio_cleanup, "clicked", G_CALLBACK(on_audio_cleanup), NULL);
-    adw_action_row_add_suffix(ADW_ACTION_ROW(cleanup), GTK_WIDGET(history_page()->audio_cleanup));
+    adw_action_row_add_suffix(ADW_ACTION_ROW(cleanup), history_audio_cleanup_button());
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(housekeeping), cleanup);
     gtk_box_append(GTK_BOX(column), housekeeping);
     GtkWidget *backup = group("Data backup");

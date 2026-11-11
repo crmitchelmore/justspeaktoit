@@ -71,14 +71,16 @@ struct MarkupDialog {
     void *copyContext = nullptr;
 };
 
-// Host state, guarded by `mutex`.
-extern std::mutex mutex;
-extern Configuration configuration;
-extern MarkupConfiguration markupConfiguration;
-extern FormatState formatState;
-extern GenerationState generationState;
-extern HWND generationWindow;
-extern ImportResult importResult;
+// The host's staged state is private to WindowsVoiceSources.cpp, behind its
+// mutex. These take the lock; the self-test swaps fixtures in and out with them.
+Configuration hostConfiguration();
+MarkupConfiguration exchangeMarkupConfiguration(MarkupConfiguration next);
+void setMarkupEnabled(bool enabled);
+FormatState exchangeFormats(FormatState next);
+GenerationState hostGeneration();
+void replaceGeneration(GenerationState next);
+// Waits for jsti_window_set_voice_text_import(token) to answer `window`.
+void expectImport(HWND window, const std::string &token);
 
 // The text box's contents.
 std::wstring text(HWND window);

@@ -33,14 +33,30 @@ static gboolean markup_fixture_copy(GtkWidget *widget, const char *value, gpoint
     (void)widget;
     gchar **captured = data; g_free(*captured); *captured = g_strdup(value); return TRUE;
 }
+/* Turns the installed markup configuration on or off, as the host would. */
+static void set_markup_enabled(gboolean enabled) {
+    MarkupConfiguration current = {0};
+    swap_markup_configuration(&current); current.enabled = enabled; swap_markup_configuration(&current);
+}
+/* Installs synthetic format rows, as jsti_window_set_voice_audio_formats would. */
+static void use_formats(const char *labels, const char *identifiers, guint selected) {
+    FormatState value = {
+        .labels = g_strsplit(labels, "\n", -1), .identifiers = g_strsplit(identifiers, "\n", -1),
+        .selected = selected };
+    swap_format_state(&value); clear_formats(&value);
+}
 static gboolean markup_self_test(Dialog *dialog) {
-    MarkupConfiguration original = markup_configuration;
+    MarkupConfiguration original = {0};
+    swap_markup_configuration(&original);
+    gboolean passed = !markup_configured();
     gchar *original_text = text(dialog);
     guint original_source = dialog->selected;
     const gchar *fixture_texts[] = {"Synthetic & <tag>", "Synthetic \xC9\x99 & <other>", NULL};
     const gchar *fixture_descriptions[] = {"First synthetic example", "Second synthetic example", NULL};
-    markup_configuration = (MarkupConfiguration){TRUE, g_strdupv((gchar **)fixture_texts),
+    MarkupConfiguration fixture = {TRUE, g_strdupv((gchar **)fixture_texts),
         g_strdupv((gchar **)fixture_descriptions), markup_fixture_wrap};
+    swap_markup_configuration(&fixture);
+    passed = markup_configured() && passed;
     dialog->selected = 3; refresh(dialog);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(dialog->editor);
     const gchar *draft = "\xCE\xA9 \xF0\x9F\x98\x80 & <";
@@ -50,7 +66,7 @@ static gboolean markup_self_test(Dialog *dialog) {
     gtk_text_buffer_get_iter_at_offset(buffer, &bound, 2);
     gtk_text_buffer_select_range(buffer, &insert, &bound);
     MarkupHelper *helper = make_markup_helper(dialog);
-    gboolean passed = helper != NULL;
+    passed = helper != NULL && passed;
     gchar *copied = NULL;
     if (helper != NULL) {
         helper->copy = markup_fixture_copy; helper->copy_context = &copied;
@@ -99,12 +115,12 @@ static gboolean markup_self_test(Dialog *dialog) {
         gtk_text_buffer_set_text(buffer, "Reject", -1);
         passed = !apply_markup(helper) && passed;
         gchar *unchanged = text(dialog); passed = strcmp(unchanged, "Reject") == 0 && passed; g_free(unchanged);
-        markup_configuration.enabled = FALSE; refresh(dialog);
+        set_markup_enabled(FALSE); refresh(dialog);
         passed = !gtk_widget_get_sensitive(dialog->helper) &&
             !gtk_widget_get_sensitive(dialog->markup_apply) && !apply_markup(helper) && passed;
         close_markup(NULL, helper);
     } else passed = FALSE;
-    markup_configuration.enabled = TRUE;
+    set_markup_enabled(TRUE);
     for (guint source = 0; source <= 2; source += 2) {
         dialog->selected = source; refresh(dialog);
         passed = !gtk_widget_get_sensitive(dialog->helper) && !can_edit_markup(dialog) && passed;
@@ -113,7 +129,7 @@ static gboolean markup_self_test(Dialog *dialog) {
     passed = !gtk_widget_get_sensitive(dialog->helper) && passed;
     g_clear_pointer(&dialog->import_token, g_free);
     passed = jsti_window_set_voice_markup_helper(2, NULL, 0, NULL) == -1 && passed;
-    clear_markup(&markup_configuration); markup_configuration = original;
+    swap_markup_configuration(&original); clear_markup(&original);
     dialog->selected = original_source; gtk_text_buffer_set_text(buffer, original_text, -1); refresh(dialog);
     g_free(original_text); g_free(copied);
     return passed;
@@ -123,26 +139,24 @@ static gboolean format_self_test(Dialog *dialog) {
     void *context = dialog->context;
     Received received = {0};
     dialog->callback = receive_fixture; dialog->context = &received;
-    format_state = (FormatState) {
-        .labels = g_strsplit("MP3\nAAC (M4A)\nWAV", "\n", -1),
-        .identifiers = g_strsplit("mp3\nm4a\nwav", "\n", -1), .selected = 2 };
+    gboolean passed = format_available(0) && format_available(7);
+    use_formats("MP3\nAAC (M4A)\nWAV", "mp3\nm4a\nwav", 2);
     show_formats(dialog);
     generate_audio(NULL, dialog);
-    gboolean passed = g_list_model_get_n_items(gtk_drop_down_get_model(dialog->format)) == 3 &&
-        g_strcmp0(received.generate_flags, "2|wav") == 0;
+    passed = g_list_model_get_n_items(gtk_drop_down_get_model(dialog->format)) == 3 &&
+        format_available(2) && !format_available(3) &&
+        g_strcmp0(received.generate_flags, "2|wav") == 0 && passed;
     gtk_drop_down_set_selected(dialog->format, 0);
     passed = dialog->format_pending && !gtk_widget_get_sensitive(GTK_WIDGET(dialog->generate)) && passed;
-    format_state.selected = 0; show_formats(dialog);
+    use_formats("MP3\nAAC (M4A)\nWAV", "mp3\nm4a\nwav", 0); show_formats(dialog);
     generate_audio(NULL, dialog);
     passed = g_strcmp0(received.generate_flags, "2|mp3") == 0 && passed;
     g_free(dialog->result_format); dialog->result_format = g_strdup("m4a");
     passed = strcmp(selected_format(dialog), "mp3") == 0 &&
         gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_result)) && passed;
     /* Match the production parser's explicit non-executable stored-format row. */
-    g_strfreev(format_state.labels); g_strfreev(format_state.identifiers);
-    format_state.labels = g_strsplit("MP3\nAAC (M4A)\nWAV\nUnavailable stored format", "\n", -1);
-    format_state.identifiers = g_strsplit("mp3\nm4a\nwav\n", "\n", -1);
-    format_state.selected = 3; show_formats(dialog);
+    use_formats("MP3\nAAC (M4A)\nWAV\nUnavailable stored format", "mp3\nm4a\nwav\n", 3); show_formats(dialog);
+    passed = !format_available(3) && passed;
     passed = strcmp(selected_format(dialog), "") == 0 &&
         !gtk_widget_get_sensitive(GTK_WIDGET(dialog->generate)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_button)) &&
@@ -150,20 +164,20 @@ static gboolean format_self_test(Dialog *dialog) {
         gtk_widget_get_sensitive(GTK_WIDGET(dialog->export_result)) && passed;
     gtk_drop_down_set_selected(dialog->format, 0);
     passed = dialog->format_pending && !gtk_widget_get_sensitive(GTK_WIDGET(dialog->generate)) && passed;
-    format_state.selected = 0; show_formats(dialog);
+    use_formats("MP3\nAAC (M4A)\nWAV\nUnavailable stored format", "mp3\nm4a\nwav\n", 0); show_formats(dialog);
     generate_audio(NULL, dialog);
     passed = g_strcmp0(received.generate_flags, "2|mp3") == 0 &&
         gtk_widget_get_sensitive(GTK_WIDGET(dialog->generate)) && passed;
     dialog->callback = callback; dialog->context = context;
     g_free(received.generate_flags); g_free(received.played_result);
-    clear_formats(&format_state);
+    FormatState fixture = {0}; swap_format_state(&fixture); clear_formats(&fixture);
     return passed;
 }
 int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capacity) {
-    FormatState original_formats = format_state; format_state = (FormatState){0};
+    FormatState original_formats = {0}; swap_format_state(&original_formats);
     Dialog *dialog = make_dialog(owner, "synthetic-record", "Synthetic History snapshot");
     if (dialog == NULL) {
-        format_state = original_formats;
+        swap_format_state(&original_formats);
         jsti_set_error(error, capacity, "Voice sources fixture could not open."); return -1;
     }
     Received received = {0};
@@ -226,7 +240,7 @@ int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capac
         received.calls == 4 && received.generated == 1 && received.flags == 2;
     gboolean formats = format_self_test(dialog);
     gtk_window_destroy(dialog->window);
-    format_state = original_formats;
+    swap_format_state(&original_formats);
     g_free(received.text); g_free(received.record);
     g_free(received.generate_flags); g_free(received.played_result);
     gboolean passed = history && typed && unavailable && history_snapshot && typed_snapshot &&

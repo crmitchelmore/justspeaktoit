@@ -1,7 +1,7 @@
 /* Self-tests for post-processing, local cleanup sources, cleanup preview and migration restore. */
 #include "LinuxWindowSelfTestInternal.h"
 #include "../CLinuxSupport/LinuxWindowDashboardPage.h"
-#include "../CLinuxSupport/LinuxWindowHistoryPage.h"
+#include "../CLinuxSupport/LinuxWindowHistoryState.h"
 #include "../CLinuxSupport/LinuxWindowPolishPage.h"
 #include "../CLinuxSupport/LinuxWindowStoragePage.h"
 

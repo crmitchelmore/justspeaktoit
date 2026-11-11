@@ -38,6 +38,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(selected, ['ci-lint'])
         self.assertEqual(checks[0].command, ['make', 'ci-lint'])
         self.assertEqual(checks[0].forbid_drift, ('Tooling/Package.resolved',))
+        self.assertEqual(checks[0].env, {'JSTI_LINT_BASELINE_BASE': 'origin/main'})
 
     def test_workflow_change_adds_actionlint(self):
         selected, _, _ = ids(['.github/workflows/ci.yml'])

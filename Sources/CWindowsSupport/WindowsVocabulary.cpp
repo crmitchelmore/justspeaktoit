@@ -262,7 +262,7 @@ void action(Dialog &d, const char *name) {
         ? "Stop requested; waiting for confirmation..." : "Saving or previewing...");
     d.emit(70, payload.c_str(), d.kind);
 }
-int scale(HWND w, int v) { return MulDiv(v, static_cast<int>(GetDpiForWindow(w)), 96); }
+using jsti::chrome::scale;
 void layout(Dialog &d) {
     RECT r{}; GetClientRect(d.window, &r);
     if (d.kind == 2) {

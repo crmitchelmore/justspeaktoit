@@ -180,6 +180,25 @@ void themeWindow(HWND window) {
     }, 0);
 }
 
+int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+
+void minimumTrackSize(HWND window, LPARAM lparam, int clientWidth, int clientHeight, DWORD style, DWORD exStyle) {
+    RECT frame{0, 0, scale(window, clientWidth), scale(window, clientHeight)};
+    AdjustWindowRectExForDpi(&frame, style, FALSE, exStyle, GetDpiForWindow(window));
+    reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {frame.right - frame.left, frame.bottom - frame.top};
+}
+
+void applySuggestedBounds(HWND window, LPARAM lparam) {
+    const RECT *bounds = reinterpret_cast<RECT *>(lparam);
+    SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
+        bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void rememberFocus(HWND window, WPARAM wparam, HWND &focus, int fallback) {
+    if (LOWORD(wparam) == WA_INACTIVE) { focus = GetFocus(); return; }
+    SetFocus(focus && IsChild(window, focus) ? focus : GetDlgItem(window, fallback));
+}
+
 bool dialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT &result) {
     switch (message) {
     case WM_CREATE: themeTitleBar(window); return false;

@@ -26,7 +26,7 @@ struct Panel {
     int scrollOffset = 0;
     ~Panel() { if (background) DeleteObject(background); }
 };
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 std::string json(const std::string &value) {
     std::string result = "\"";
     for (unsigned char byte : value) {

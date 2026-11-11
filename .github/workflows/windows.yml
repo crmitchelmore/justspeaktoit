@@ -62,7 +62,7 @@ jobs:
           update-sdk-modules: false
 
       - name: Verify portable source boundary
-        run: python scripts/verify-portable-core-boundary.py
+        run: python scripts/ci/verify-portable-core-boundary.py
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -179,7 +179,7 @@ jobs:
           $probe = $null
           try {
             $server = Start-Process -FilePath (Get-Command python).Source -PassThru -NoNewWindow `
-              -ArgumentList @('-u', 'scripts/websocket-loopback-probe.py', '--ready-file', $readyPath, '--max-seconds', '120') `
+              -ArgumentList @('-u', 'scripts/loopback/websocket-loopback-probe.py', '--ready-file', $readyPath, '--max-seconds', '120') `
               -RedirectStandardOutput windows-websocket-server.log -RedirectStandardError windows-websocket-server-errors.log
             $deadline = [DateTime]::UtcNow.AddSeconds(10)
             while (-not (Test-Path $readyPath)) {
@@ -371,7 +371,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Verify portable source boundary
-        run: python3 scripts/verify-portable-core-boundary.py
+        run: python3 scripts/ci/verify-portable-core-boundary.py
       - name: Verify additional provider loopback peer contracts
         run: |
           python3 -B -m unittest discover -s scripts/tests -p test_additional_provider_loopback.py
@@ -380,7 +380,7 @@ jobs:
       - name: Record source state before portable compilation and tests
         continue-on-error: true # Advisory evidence only; existing native gates are unchanged.
         run: |
-          python3 -B scripts/qualification_source_state.py --phase before-portable-build-tests \
+          python3 -B scripts/qualification/qualification_source_state.py --phase before-portable-build-tests \
             --output "$RUNNER_TEMP/portable-macos-source-state/before.json"
       - name: Test portable graph with Xcode Apple Swift
         id: portable_graph_tests
@@ -391,7 +391,7 @@ jobs:
         if: always()
         continue-on-error: true # Missing/partial evidence is never clean-source proof.
         run: |
-          python3 -B scripts/qualification_source_state.py --phase after-portable-build-tests \
+          python3 -B scripts/qualification/qualification_source_state.py --phase after-portable-build-tests \
             --command-outcome "${{ steps.portable_graph_tests.outcome }}" \
             --output "$RUNNER_TEMP/portable-macos-source-state/after.json"
       - name: Probe additional shared providers over native Apple WebSockets
@@ -399,7 +399,7 @@ jobs:
         run: |
           set -euo pipefail
           ready="$RUNNER_TEMP/additional-provider-peer.json"
-          python3 scripts/websocket-loopback-probe.py --ready-file "$ready" --max-seconds 60 \
+          python3 scripts/loopback/websocket-loopback-probe.py --ready-file "$ready" --max-seconds 60 \
             > "$RUNNER_TEMP/additional-provider-peer.log" 2>&1 &
           peer=$!
           trap 'kill "$peer" 2>/dev/null || true; cat "$RUNNER_TEMP/additional-provider-peer.log"' EXIT
@@ -415,7 +415,7 @@ jobs:
           xcrun swift test --configuration release --skip-build --filter GladiaLoopbackRuntimeTests
       - name: Qualify Modulate opening PCM across an explicitly held HTTP101
         run: |
-          python3 -B scripts/qualify-modulate-opening-audio.py \
+          python3 -B scripts/qualification/qualify-modulate-opening-audio.py \
             --output-dir "$RUNNER_TEMP/modulate-opening-qualification" -- \
             xcrun swift test --configuration release --jobs 2 --skip-build --filter ModulateOpeningAudioQualificationTests
       - name: Preserve Modulate synthetic transport receipt

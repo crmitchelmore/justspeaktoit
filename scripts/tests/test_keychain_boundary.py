@@ -25,7 +25,7 @@ class KeychainBoundaryTests(unittest.TestCase):
     def test_native_and_hosted_gates_verify_real_process_isolation(self):
         workflow = (ROOT / '.github/workflows/ci-macos-debug.yml').read_text()
         self.assertIn('python3 -B -m unittest scripts.tests.test_private_test_keychain -v', workflow)
-        self.assertIn('python3 scripts/with-test-keychain.py bash scripts/run-core-journey-e2e.sh --phase test', workflow)
+        self.assertIn('python3 scripts/with-test-keychain.py bash scripts/core-journey/run-core-journey-e2e.sh --phase test', workflow)
 
     def test_test_redirect_is_scoped_to_ci_test_commands(self):
         workflow = (ROOT / '.github/workflows/ci-macos-debug.yml').read_text()

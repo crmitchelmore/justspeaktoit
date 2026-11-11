@@ -94,7 +94,7 @@ adapters. An allow-list of portable files makes every new feature Apple-only
 until somebody remembers to copy it into the other graph.
 
 [Package.swift](../Package.swift) and
-[the boundary verifier](../scripts/verify-portable-core-boundary.py) enforce
+[the boundary verifier](../scripts/ci/verify-portable-core-boundary.py) enforce
 this source-discovery rule and reject native imports in shared desktop layers.
 The verifier is structural; native compilation is still necessary.
 

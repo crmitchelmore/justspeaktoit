@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
-    "apple_accessibility", ROOT / "scripts/check-apple-accessibility.py"
+    "apple_accessibility", ROOT / "scripts/accessibility/check-apple-accessibility.py"
 )
 CHECK = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = CHECK

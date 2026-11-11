@@ -55,7 +55,7 @@ available.
    `configureManualSigning` in `Project.swift`. Add `TUIST_WATCH_APP=1` to the
    release generate step at that point.
 6. The watch `AppIcon` asset catalog is generated alongside the Mac/iOS artwork
-   by `scripts/generate-icon.swift` and bundled by the watch target. Validate the
+   by `scripts/assets/generate-icon.swift` and bundled by the watch target. Validate the
    icon and provisioning in the archived Watch app before App Store submission.
 
 ## Device checklist

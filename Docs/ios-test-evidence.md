@@ -4,7 +4,7 @@ The CI iOS job runs `SpeakiOSTests` and `SpeakiOSUITests` without Xcode's
 `-quiet` flag. Its full console log retains XCTest completion records; only
 the last 50 lines are echoed into the job log.
 
-`scripts/verify-ios-test-evidence.py` uses the shared XCTest case parser to
+`scripts/ios/verify-ios-test-evidence.py` uses the shared XCTest case parser to
 require at least one passing case with each selected target's exact module
 identity. It additionally requires passing cases from both
 `SpeakiOSTests.OpenRouterAudioSettingsTests` and

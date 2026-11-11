@@ -33,14 +33,14 @@ You generally **can’t fully automate initial certificate enrollment** (Apple l
 - creating/updating provisioning profiles on the build machine (via Xcode automatic signing)
 - building an `.xcarchive` and exporting an `.ipa`
 
-This repo includes `scripts/ios-build-ipa.sh` which runs `xcodebuild archive` + `xcodebuild -exportArchive` using **automatic signing**:
+This repo includes `scripts/ios/ios-build-ipa.sh` which runs `xcodebuild archive` + `xcodebuild -exportArchive` using **automatic signing**:
 
 ```bash
 # Development IPA
-EXPORT_METHOD=development ./scripts/ios-build-ipa.sh
+EXPORT_METHOD=development ./scripts/ios/ios-build-ipa.sh
 
 # Ad Hoc IPA (requires you to have an Ad Hoc profile + registered device UDIDs)
-EXPORT_METHOD=ad-hoc ./scripts/ios-build-ipa.sh
+EXPORT_METHOD=ad-hoc ./scripts/ios/ios-build-ipa.sh
 ```
 
 Notes:

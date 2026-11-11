@@ -428,7 +428,7 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
                                     failure=f'no unit-test target covers {", ".join(missing)}; add tests for it'))
     if windows:
         checks.append(Check('windows-typecheck', 'windows', 'Windows Swift type check',
-                            ['bash', 'scripts/typecheck-windows-swift.sh'],
+                            ['bash', 'scripts/ci/typecheck-windows-swift.sh'],
                             env={'SPEAK_WINDOWS_TYPECHECK_DIR': str(OUT / 'windows-typecheck')},
                             # The executable target links Win32 libraries under Xcode's toolchain;
                             # CI runs this check on Linux (linux.yml); Portable Swift (Linux) covers the shared graph.

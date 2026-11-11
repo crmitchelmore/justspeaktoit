@@ -16,7 +16,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-SPEC = importlib.util.spec_from_file_location("modulate_opening", Path(__file__).resolve().parents[1] / "modulate-opening-audio-probe.py")
+SPEC = importlib.util.spec_from_file_location("modulate_opening", Path(__file__).resolve().parents[1] / "qualification/modulate-opening-audio-probe.py")
 PEER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PEER)
 
@@ -186,7 +186,7 @@ class HeldModulatePeerTests(unittest.TestCase):
 
 
 RUNNER_SPEC = importlib.util.spec_from_file_location(
-    "modulate_runner", Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py")
+    "modulate_runner", Path(__file__).resolve().parents[1] / "qualification/qualify-modulate-opening-audio.py")
 RUNNER = importlib.util.module_from_spec(RUNNER_SPEC)
 RUNNER_SPEC.loader.exec_module(RUNNER)
 # This contract lists the four semantic scenarios independently of runner code.
@@ -212,7 +212,7 @@ class OwnedRunnerTests(unittest.TestCase):
                 self.assertTrue(RUNNER.qualification(output)[0])
 
     def test_runner_reaps_owned_peer_and_command_and_preserves_nonzero_and_timeout(self):
-        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        runner = Path(__file__).resolve().parents[1] / "qualification/qualify-modulate-opening-audio.py"
         with tempfile.TemporaryDirectory(prefix="modulate-owned-runner-") as directory:
             for scenario, expected in (("pass", 0), ("timeout", 124), ("fake-zero", 1), ("failed-command", 7)):
                 output = Path(directory) / scenario
@@ -242,7 +242,7 @@ class OwnedRunnerTests(unittest.TestCase):
 
 
     def test_sigterm_enters_owned_cleanup_and_writes_a_failing_receipt(self):
-        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        runner = Path(__file__).resolve().parents[1] / "qualification/qualify-modulate-opening-audio.py"
         with tempfile.TemporaryDirectory(prefix="modulate-owned-signal-") as directory:
             output = Path(directory) / "receipt"
             process = subprocess.Popen([sys.executable, "-B", str(runner), "--output-dir", str(output), "--",
@@ -265,7 +265,7 @@ class OwnedRunnerTests(unittest.TestCase):
                     process.communicate(timeout=10)
 
     def test_edited_symlink_directory_or_unverifiable_lock_refuses_command_before_any_child(self):
-        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        runner = Path(__file__).resolve().parents[1] / "qualification/qualify-modulate-opening-audio.py"
         with tempfile.TemporaryDirectory(prefix="modulate-lock-admission-") as directory:
             for kind in ("edited", "symlink", "directory", "unverifiable"):
                 root = Path(directory) / kind
@@ -355,7 +355,7 @@ class OwnedRunnerTests(unittest.TestCase):
                 self.assertEqual(target.read_bytes(), original)
 
     def test_runner_records_before_command_pre_restore_and_after_without_changing_test_exit_semantics(self):
-        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        runner = Path(__file__).resolve().parents[1] / "qualification/qualify-modulate-opening-audio.py"
         with tempfile.TemporaryDirectory(prefix="modulate-source-state-") as directory:
             for scenario, expected in (("deleted-lock", 0), ("initially-missing-lock", 0),
                                        ("source-change", 0), ("failed-source-change", 7)):

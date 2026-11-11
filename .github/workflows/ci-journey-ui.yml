@@ -16,7 +16,7 @@ jobs:
     runs-on: macos-latest
     # Each hotkey journey spends ~60s in real gesture windows. Parallel shards
     # keep every shard inside the unchanged 600s UI runtime budget; the shard
-    # list in scripts/verify-core-journey-ui.py assigns every suite exactly once.
+    # list in scripts/core-journey/verify-core-journey-ui.py assigns every suite exactly once.
     strategy:
       fail-fast: false
       # One shard at a time, so the UI gate holds a single macOS slot.
@@ -37,15 +37,15 @@ jobs:
 
       - name: Prepare Tuist and macOS project
         timeout-minutes: 11
-        run: python3 scripts/run-core-journey-stages.py ui --phase setup
+        run: python3 scripts/core-journey/run-core-journey-stages.py ui --phase setup
 
       - name: Build launched fixture test products
         timeout-minutes: 17
-        run: python3 scripts/run-core-journey-stages.py ui --phase build
+        run: python3 scripts/core-journey/run-core-journey-stages.py ui --phase build
 
       - name: Test Speak bootstrap, global hotkey, and launched fixture
         timeout-minutes: 12
-        run: python3 scripts/run-core-journey-stages.py ui --phase test
+        run: python3 scripts/core-journey/run-core-journey-stages.py ui --phase test
 
       - name: Upload launched-app diagnostics
         if: always()

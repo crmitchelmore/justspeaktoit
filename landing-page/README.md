@@ -61,4 +61,4 @@ These exist in the tree but are flagged off, unverified, or not user-reachable. 
 - Android downloads until a public Android release artefact is published.
 - Mac to iPhone history sync: the two platforms use different CloudKit containers, so sync is within a platform family. *Send to Mac* is the cross-device path that genuinely works.
 
-All brand icons come from `scripts/generate-icon.swift`. See `Resources/Brand/README.md` for native sizes, appearance variants and regeneration. The SVG favicon is also used as the header/footer and privacy-page mark; PNG fallbacks, an Apple touch icon and a web manifest cover browser and Home Screen surfaces.
+All brand icons come from `scripts/assets/generate-icon.swift`. See `Resources/Brand/README.md` for native sizes, appearance variants and regeneration. The SVG favicon is also used as the header/footer and privacy-page mark; PNG fallbacks, an Apple touch icon and a web manifest cover browser and Home Screen surfaces.

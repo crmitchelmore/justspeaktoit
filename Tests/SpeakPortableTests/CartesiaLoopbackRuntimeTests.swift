@@ -5,7 +5,7 @@ import FoundationNetworking
 import XCTest
 @testable import SpeakCore
 
-/// The Ink-2 scenario of `scripts/websocket-loopback-probe.py` over the Apple
+/// The Ink-2 scenario of `scripts/loopback/websocket-loopback-probe.py` over the Apple
 /// default transport (`URLSessionStreamingConnection`); the WinHTTP adapter runs
 /// the same scenario in `CartesiaWinHTTPRuntimeTests`. Enabled only with the
 /// standard-library loopback peer: no credential, provider or external network.

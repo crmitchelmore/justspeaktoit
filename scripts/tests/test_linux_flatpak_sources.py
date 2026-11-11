@@ -138,7 +138,7 @@ class BuildRevisionTests(unittest.TestCase):
                 self.verify(record['builtRevision'], record['parents'], self.metadata('push'), record, self.digest)
 
 
-QUALIFICATION = runpy.run_path(str(ROOT / 'scripts/linux-flatpak-qualification.py'))
+QUALIFICATION = runpy.run_path(str(ROOT / 'scripts/linux/linux-flatpak-qualification.py'))
 
 
 class QualificationPreconditionsTests(unittest.TestCase):
@@ -562,7 +562,7 @@ class RuntimeCleanupTests(unittest.TestCase):
                       '-DGGML_CPU_ALL_VARIANTS=ON', '-DGGML_VULKAN=ON', 'whisper.cpp/LICENSE']:
             self.assertIn(value, text)
         self.assertNotIn('- /lib/justspeaktoit/libparakeet.so', text)
-        checks = (ROOT / 'scripts/linux-flatpak-checks.sh').read_text()
+        checks = (ROOT / 'scripts/linux/linux-flatpak-checks.sh').read_text()
         self.assertIn('flatpak info --user --show-location "$app"', checks)
         self.assertIn('--runtime-directory "$installed_root/files/lib/justspeaktoit"', checks)
 

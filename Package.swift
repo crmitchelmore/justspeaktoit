@@ -31,143 +31,44 @@ let portableCoreBuild = true
 // no shipped binary contains the redirect's environment names.
 let testKeychainRedirect = ProcessInfo.processInfo.environment["JSTI_TEST_KEYCHAIN_REDIRECT"] == "1"
 
-// New SpeakCore files are portable by default. An Apple adapter must be
-// explicitly classified here, so future domain work reaches every platform.
-// A folder entry excludes a whole Apple-only folder: every SwiftUI view in
-// SpeakCore lives in AppleUI/, so adding a view never edits this manifest.
-// Mixed folders keep their Apple adapters listed file by file.
+// New SpeakCore files are portable by default. Apple adapters are classified by
+// folder only: each feature keeps its Apple-only adapters in an `Apple/`
+// subfolder (SwiftUI views in AppleUI/, root helpers in AppleSupport/), so
+// adding an adapter or a portable file never edits this manifest.
 let appleCoreSources: [String] = [
+    "Analytics/Apple",
+    "App/Apple",
     "AppleSpeech",
+    "AppleSupport",
     "AppleUI",
-    "Analytics/FileProductAnalyticsStateStore.swift",
-    "Analytics/ProductAnalytics.swift",
-    "Analytics/ProductAnalyticsDimensions.swift",
-    "App/BrandColors.swift",
-    "App/ReleaseNotes.swift",
-    "App/ReleaseTrainCompatibility.swift",
-    "Audio/AudioTapInstallation.swift",
-    "Audio/ManagedAudioPlayer.swift",
-    "Automation/AutomationIntentSupport.swift",
-    "Automation/SpeakCLIManifest.swift",
-    "Balance/DeepgramBalanceClient.swift",
-    "Balance/ElevenLabsBalanceClient.swift",
-    "Balance/OpenRouterBalanceClient.swift",
-    "Balance/ProviderBalanceStore.swift",
-    "Balance/ProviderBalanceTransport.swift",
-    "Balance/RevAIBalanceClient.swift",
-    "Capture/CaptureDisruptionObserver.swift",
-    "Capture/CaptureEndPointing.swift",
-    "Capture/CaptureHealth.swift",
-    "Capture/CaptureHealthReportBuilder.swift",
-    "Capture/CaptureOnboarding.swift",
-    "Capture/CaptureOnboardingStore.swift",
-    "Capture/CaptureSafetyClaim.swift",
-    "Capture/CaptureSelfTest.swift",
-    "Capture/CaptureWatchdogs.swift",
-    "Capture/HandsFreeAudioPreRollBuffer.swift",
-    "Capture/HandsFreeDictationApple.swift",
-    "Credentials/KeychainAccessibilityMigration.swift",
-    "Credentials/KeyDerivation.swift",
-    "Credentials/SecureStorage.swift",
-    "DeprecatedCompatibility.swift",
-    "History/StartupDiagnostics.swift",
-    "Keyboard/KeyboardDelivery.swift",
-    "Keyboard/KeyboardDeliveryPolicies.swift",
-    "Keyboard/KeyboardDeliveryStore.swift",
-    "Keyboard/KeyboardDictationMachine.swift",
-    "Keyboard/KeyboardDictationPreferences.swift",
-    "Keyboard/KeyboardDictationProfile.swift",
-    "Keyboard/KeyboardHandoff.swift",
-    "Keyboard/KeyboardHandoffModels.swift",
-    "Keyboard/KeyboardHandoffStartDiagnosis.swift",
-    "Keyboard/KeyboardHandoffStorage.swift",
-    "Keyboard/KeyboardHandoffTransitions.swift",
-    "Keyboard/KeyboardInstantDictation.swift",
-    "Keyboard/KeyboardTranscriptStreamer.swift",
-    "Live/LiveAudioConverterDrain.swift",
-    "Live/LivePCMBufferPool.swift",
-    "Live/LiveTranscriptionClientFactory.swift",
-    "LiveActivity/TranscriptHandoffActivity.swift",
-    "LiveActivity/TranscriptionActivityHandle.swift",
-    "LiveActivity/TranscriptionActivityManager+ResultRow.swift",
-    "LiveActivity/TranscriptionActivityManager.swift",
-    "Logging.swift",
-    "OpenRouter/OpenRouterAPIClient.swift",
-    "OpenRouter/OpenRouterAudioClient+Download.swift",
-    "OpenRouter/OpenRouterAudioClient+Speech.swift",
-    "OpenRouter/OpenRouterAudioFilter.swift",
-    "OpenRouter/OpenRouterAudioPreview.swift",
-    "PaidAccess/PaidAccessHTTPClient.swift",
-    "PaidAccess/PaidAudioPayload.swift",
-    "PaidAccess/PaidStoreKitSync.swift",
-    "Recording/RecordingSoundPlayer.swift",
-    "SpeechInsights/SpeechInsightsAggregate.swift",
-    "SpeechInsights/SpeechInsightsConfiguration.swift",
-    "SpeechInsights/SpeechInsightsEngine.swift",
-    "SpeechInsights/SpeechInsightsSummary.swift",
-    "SpeechInsights/SpeechInsightsSummaryBuilder.swift",
-    "SpeechInsights/SpeechSessionRecord.swift",
-    "SpeechInsights/SpeechTokenizer.swift",
-    "Sync/AppGroupAvailability.swift",
-    "Sync/ConfigTransferManager+Envelope.swift",
-    "Sync/ConfigTransferManager+Import.swift",
-    "Sync/ConfigTransferManager.swift",
-    "Sync/ConfigTransferModels.swift",
-    "Sync/DeviceIdentityStore.swift",
-    "Sync/KeychainSync.swift",
-    "Sync/MacConnection.swift",
-    "Sync/SettingsSync.swift",
-    "Sync/SharedAudioImport.swift",
-    "Sync/SharedRecordingInbox.swift",
-    "Sync/TransportChannel.swift",
-    "Sync/TransportProtocol.swift",
-    "Sync/WatchCaptureImportJournal.swift",
-    "TTS/Providers/SonioxTTSRealtime.swift",
-    "TTS/Providers/XAITTSRealtime.swift",
-    "Vocabulary/AutoCorrectionEngine.swift",
-    "Vocabulary/PersonalLexiconService.swift",
-    "Vocabulary/PronunciationManager.swift"
+    "Audio/Apple",
+    "Automation/Apple",
+    "Balance/Apple",
+    "Capture/Apple",
+    "Credentials/Apple",
+    "History/Apple",
+    "Keyboard/Apple",
+    "Live/Apple",
+    "LiveActivity/Apple",
+    "OpenRouter/Apple",
+    "PaidAccess/Apple",
+    "Recording/Apple",
+    "SpeechInsights",
+    "Sync/Apple",
+    "TTS/Apple",
+    "Vocabulary/Apple"
 ]
 
 // SpeakSync's schema, reconciliation and CloudKit Web Services transport are
-// portable by default. These files adapt the native CloudKit framework (and its
-// CryptoKit/Combine surfaces) and stay on Apple platforms.
+// portable by default. The AppleCloudKit folder adapts the native CloudKit
+// framework (and its CryptoKit/Combine surfaces) and stays on Apple platforms.
 let appleSyncSources: [String] = [
-    "CloudKitComparisonSyncTransport.swift",
-    "CloudKitHistorySyncTransport.swift",
-    "CloudKitKeySync.swift",
-    "CloudKitKeySyncDependencies.swift",
-    "CloudKitKeySyncRecordMappers.swift",
-    "CloudKitKeySync+Generation.swift",
-    "CloudKitKeySyncStatus.swift",
-    "CloudKitRecordFields.swift",
-    "ComparisonSyncEngine.swift",
-    "ComparisonSyncRecord.swift",
-    "CryptoKitSyncEnvelopeCryptography.swift",
-    "EncryptedSecretCrypto.swift",
-    "HistorySyncEngine.swift",
-    "HistorySyncPushRouting.swift",
-    "KeySyncCloudOperations.swift",
-    "KeySyncFetchOperation.swift",
-    "KeySyncLocalState.swift",
-    "KeySyncPendingMutations.swift",
-    "KeySyncSecretTransfer.swift",
-    "KeySyncUploadScheduler.swift",
-    "SyncConfiguration.swift",
-    "SyncContainerTransition.swift",
-    "SyncRecord.swift",
-    "SyncState.swift"
+    "AppleCloudKit"
 ]
 
 // Tests of those native adapters. Every other SpeakSync test runs on all platforms.
 let appleSyncTestSources: [String] = [
-    "CloudKitKeySyncTests.swift",
-    "ComparisonSyncTests.swift",
-    "HistorySyncEngineGuardTests.swift",
-    "HistorySyncSwitchTests.swift",
-    "HistorySyncEngineTests.swift",
-    "NativeRecordParityTests.swift",
-    "SyncContainerTransitionTests.swift"
+    "AppleCloudKit"
 ]
 
 let migrationArchiveTarget = Target.target(

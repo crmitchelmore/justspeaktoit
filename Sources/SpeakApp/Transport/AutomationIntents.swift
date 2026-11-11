@@ -5,7 +5,7 @@ import SpeakCore
 // App Intents (Shortcuts) surface for the mac app. The intents are thin: they
 // resolve the shared AppEnvironment and delegate to the same managers the
 // hotkey/UI paths use; parameter mapping and validation live in
-// `SpeakCore/Automation/AutomationIntentSupport.swift` where they are unit-tested.
+// `SpeakCore/Automation/Apple/AutomationIntentSupport.swift` where they are unit-tested.
 
 // MARK: - Errors
 

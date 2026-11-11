@@ -249,6 +249,24 @@ describe('actual routed settlement faults', () => {
     expect(await receipt(a.userId)).toBeUndefined(); expect(await ledger(a.userId)).toHaveLength(0);
   });
 
+  it('keeps a claim whose release fails and logs the unknown outcome with metadata only', async () => {
+    const a = await account();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(UsageRepository.prototype, 'releaseRequestClaim')
+      .mockRejectedValueOnce(new Error(`synthetic-release-failure ${KEY} ${TEXT}`));
+    const result = await worker.fetch(request(a.token, KEY, null), env);
+    expect(await result.json()).toMatchObject({ error: { code: 'paid_routing_disabled' } });
+
+    const lines = warn.mock.calls.map(([line]) => String(line));
+    const logged = lines.filter(line => line.includes('paid.claim_release_unknown'));
+    expect(logged).toHaveLength(1);
+    expect(JSON.parse(logged[0]!)).toMatchObject({ level: 'warn', step: 'claim_release', error: 'Error' });
+    expect(logged[0]).not.toContain(KEY);
+    expect(logged[0]).not.toContain(TEXT);
+    const claims = await env.DB.prepare('SELECT status FROM request_claims WHERE user_id=?1').bind(a.userId).all();
+    expect(claims.results).toHaveLength(1);
+  });
+
   it.each(['1', null])('auth/receipt-history failures stay uncertain for contract %s', async version => {
     const a = await account();
     const auth = await worker.fetch(request('invalid-token', KEY, version), env);

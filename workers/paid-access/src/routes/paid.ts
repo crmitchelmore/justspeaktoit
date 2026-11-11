@@ -25,6 +25,7 @@ import {
 } from '../http.js';
 import { claimOperation, runOperation, SETTLEMENT_HEADER, SETTLEMENT_VERSION } from './settlement.js';
 import { providerSecretResolver } from '../env.js';
+import { describeError } from '../logging.js';
 import { billingPeriod, grantsAccess } from '../entitlement.js';
 import { bestRoute, policyDocument } from '../policy.js';
 import { wavDurationSeconds } from '../audio/wav.js';
@@ -80,11 +81,21 @@ async function requireNewOperationAccess(request: Request, context: Authenticate
   await requirePaidAccess(context);
 }
 
+/**
+ * Releases the claim of an operation that failed before dispatch, so the key can be retried. If
+ * the receipt or release cannot be read, the claim is kept (operational claim expiry never deletes
+ * a DO receipt) and the unknown outcome is logged with metadata only, for reconciliation.
+ */
 async function releaseUnstartedClaim(context: AuthenticatedContext, key: string): Promise<void> {
+  let step: 'receipt_lookup' | 'claim_release' = 'receipt_lookup';
   try {
     const receipt = await context.quota.operationReceipt(context.session.userId, key, Math.floor(Date.now() / 1000));
-    if (receipt === null) await context.repository.usage.releaseRequestClaim({ userId: context.session.userId, idempotencyKey: key });
-  } catch { /* Unknown is retained. Operational claim expiry never deletes a DO receipt. */ }
+    if (receipt !== null) return;
+    step = 'claim_release';
+    await context.repository.usage.releaseRequestClaim({ userId: context.session.userId, idempotencyKey: key });
+  } catch (error) {
+    context.logger.warn('paid.claim_release_unknown', { step, error: describeError(error) });
+  }
 }
 
 export function handlePolicy(context: AuthenticatedContext): Response {

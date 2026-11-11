@@ -302,8 +302,8 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
     }
 
     func testMultiDayPollingBudgetIsNotShortened() throws {
-        XCTAssertEqual(try GeminiInteractionsClient.processingBudget(for: 172_800), 172_800)
-        XCTAssertThrowsError(try GeminiInteractionsClient.processingBudget(for: .greatestFiniteMagnitude))
+        XCTAssertEqual(try GeminiFilesAPI.processingBudget(for: 172_800), 172_800)
+        XCTAssertThrowsError(try GeminiFilesAPI.processingBudget(for: .greatestFiniteMagnitude))
     }
 
     func testDeadlineCancelsAnInFlightStatusRequest() async throws {

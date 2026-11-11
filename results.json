@@ -1,0 +1,72 @@
+[
+  {
+    "id": "iphone-settings-search",
+    "result": "pass",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro Max), build 779bbf50. Empty search lists recent and suggested destinations. 'live act' opens Behavior with the matching rows tinted; 'action button' opens Hardware Trigger with the matching row tinted; 'deepgram' -> 'Deepgram API key' opens API Keys. Each result's accessibility label is its title and its hint is the summary, and the result count is announced as e.g. '2 settings found' (accessibility tree). VoiceOver speech can't be heard, hence review. UX note: while typing, the typeahead completion rows cover the result cards until a completion is tapped.",
+    "screenshots": [
+      "screenshots/iphone-settings-search-1.png",
+      "screenshots/iphone-settings-search-2.png",
+      "screenshots/iphone-settings-search-3.png",
+      "screenshots/iphone-settings-search-4.png"
+    ]
+  },
+  {
+    "id": "iphone-native-first-model-picker",
+    "result": "pass",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro Max), build 779bbf50. Native models (Gemini, Mistral, GPT-5 Mini, GPT-5.4 Mini, GPT-6 Luna, GPT-6.1 Sol) are listed before a single 'OpenRouter' row. Picking native GPT-6 Luna shows 'GPT-6 Luna'. OpenRouter -> search 'luna' -> GPT-6 Luna sets the accessibility label 'OpenRouter › GPT-6 Luna'. Review because the visible row truncates to 'OpenRouter › GPT-…' even at the default text size on the largest iPhone.",
+    "screenshots": [
+      "screenshots/iphone-native-first-model-picker-1.png",
+      "screenshots/iphone-native-first-model-picker-2.png",
+      "screenshots/iphone-native-first-model-picker-3.png",
+      "screenshots/iphone-native-first-model-picker-4.png"
+    ]
+  },
+  {
+    "id": "iphone-keep-audio-on-cancel",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro Max), build 779bbf50. Not exercisable on this simulator: starting a recording aborts the app inside CoreAudio ('AURemoteIO::Initialize: RPC timeout. Apparently deadlocked. Aborting now.') from AVAudioEngine.inputNode in iOSLiveTranscriber.startSpeechAnalyzer. This happened twice, after the Apple model was prepared. It is a host/simulator audio-input environment fault, not an app bug. Only the setting itself was verified: Settings › Recordings shows Keep Audio When Cancelled (on) with the explanatory footer, and Saved Recordings is empty.",
+    "screenshots": [
+      "screenshots/iphone-keep-audio-on-cancel-1.png"
+    ]
+  },
+  {
+    "id": "iphone-history-upgrade",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro Max), build 779bbf50. The previous released iOS build can't be installed on a simulator: TestFlight/App Store builds are device-only, and the GitHub alpha releases carry only macOS assets. A new recording is also impossible here, because simulator mic capture aborts the app in CoreAudio. Needs a real device upgrade from the previous TestFlight build.",
+    "screenshots": []
+  },
+  {
+    "id": "iphone-controls-and-hints",
+    "result": "pass",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro Max), build 779bbf50. Settings › Hardware Trigger › Action Button & Shortcuts shows 'Set Up Transcribe Voice' with Action Button, Control Center and Lock Screen paths. The Control Center path matches the system UI: Control Center opens with '+' at top left. The add-control gallery couldn't be driven past the '+' on the simulator. The Action Button, Lock Screen controls, the in-app hints after a real recording and paste aren't verifiable: no hardware button, and simulator mic capture aborts the app. Needs device confirmation.",
+    "screenshots": [
+      "screenshots/iphone-controls-and-hints-1.png",
+      "screenshots/iphone-controls-and-hints-2.png"
+    ]
+  },
+  {
+    "id": "iphone-transcript-alerts",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro Max), build 779bbf50. Needs a real background recording, a stop from Control Center or the Action Button, and the lock screen. Simulator mic capture aborts the app in CoreAudio, so no saved result can be produced. Only the setting itself was verified: Settings › Saved Results shows 'Transcript Ready Alerts' with the 'Private alerts contain no transcript' footer, reachable via settings search.",
+    "screenshots": [
+      "screenshots/iphone-transcript-alerts-1.png"
+    ]
+  },
+  {
+    "id": "iphone-voiceover-pass",
+    "result": "pass",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro Max), build 779bbf50. Checked at the largest accessibility text size (AX XXXL) through the agent-device accessibility tree. Main screen: History, Settings and 'Start recording' are named. History, with 2 fictional seeded items: 'Filter history' and 'Clear all history' are named, rows reflow without clipping and the cloud status image reads 'Not Uploaded To Icloud'. Settings reflows, and all buttons are named. Findings to confirm with real VoiceOver: two segmented controls have no accessible label (one exposes only the identifier 'transcriptionLocationPicker'), and each toggle appears twice in the tree (once labelled, once as a bare '0'/'1' switch). Not verifiable here: the Recording/Transcribing announcements (mic aborts the app), the share-sheet import scrub (Share extension not in default or TestFlight builds), the keyboard in Notes (Notes isn't on the simulator) and an audible VoiceOver run. Accessibility Inspector GUI audit not run.",
+    "screenshots": [
+      "screenshots/iphone-voiceover-pass-1.png",
+      "screenshots/iphone-voiceover-pass-2.png",
+      "screenshots/iphone-voiceover-pass-3.png"
+    ]
+  }
+]

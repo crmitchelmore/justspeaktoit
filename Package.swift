@@ -384,7 +384,7 @@ if windowsTargetBuild {
             name: "SpeakWindowsPlatformTests",
             dependencies: [
                 "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsSelfTest",
-                "SpeakTestSupport", "SpeakAutomationKit"
+                "SpeakTestSupport", "SpeakAutomationKit", "SpeakDesktopHost"
             ],
             resources: [.copy("Fixtures")]
         )
@@ -491,7 +491,7 @@ if linuxTargetBuild {
             name: "SpeakLinuxPlatformTests",
             dependencies: [
                 "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakDesktopSync", "SpeakLinuxPlatform", "CLinuxSupport",
-                "CLinuxSelfTest", "SpeakTestSupport"
+                "CLinuxSelfTest", "SpeakTestSupport", "SpeakDesktopHost"
             ]
         ),
         .testTarget(

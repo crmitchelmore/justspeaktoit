@@ -13,13 +13,13 @@ final class WindowsSettingsSearch {
     private let session = DesktopSettingsSearchSession(platform: .windows)
 
     /// Called from the native window event callback; returns false for other events.
-    func handle(_ event: Int32, query: String, row: Int) -> Bool {
+    func handle(_ event: DesktopNativeWindowEvent, query: String, row: Int) -> Bool {
         switch event {
-        case Int32(JSTI_EVENT_SETTINGS_SEARCH.rawValue):
+        case .settingsSearch:
             if !DesktopNativeBindings.settingsSearchResults(session.results(for: query)) {
                 WindowsNative.update("Settings search results could not be shown.")
             }
-        case Int32(JSTI_EVENT_SETTINGS_SEARCH_OPEN.rawValue):
+        case .settingsSearchOpen:
             guard let target = session.choose(row) else { return true }
             // Windows shows Corrections and Pronunciation as sidebar pages of their own.
             _ = jsti_window_show_page(DesktopNativePage(target.destination).rawValue)

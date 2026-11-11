@@ -54,6 +54,25 @@ object WavFormat {
     }
 }
 
+/** A microphone capture to one file; [WavRecorder] in production. */
+interface AudioRecorder {
+    /** Returns false when the microphone cannot be opened. */
+    fun start(): Boolean
+
+    /** Stops capture and returns the audio bytes recorded, or -1 if capture failed. Idempotent; may block. */
+    fun stop(): Long
+}
+
+/** Creates the recorder for each Cloud session. */
+fun interface RecorderFactory {
+    fun create(
+        file: File,
+        onLevel: (Float) -> Unit,
+        onLimitReached: () -> Unit,
+        onCaptureFailed: () -> Unit,
+    ): AudioRecorder
+}
+
 /**
  * Captures microphone audio to a WAV file on a dedicated thread. Capture stops automatically at
  * [maxSeconds] so an upload stays within provider size limits.
@@ -65,7 +84,7 @@ class WavRecorder(
     /** Called on the capture thread when the microphone or disk fails mid-recording. */
     private val onCaptureFailed: () -> Unit,
     private val maxSeconds: Int = 600,
-) {
+) : AudioRecorder {
     @Volatile private var running = false
 
     @Volatile private var failed = false
@@ -74,7 +93,7 @@ class WavRecorder(
 
     /** Returns false when the microphone cannot be opened. Requires RECORD_AUDIO. */
     @SuppressLint("MissingPermission")
-    fun start(): Boolean {
+    override fun start(): Boolean {
         val minBuffer = AudioRecord.getMinBufferSize(
             WavFormat.SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
@@ -159,7 +178,7 @@ class WavRecorder(
      * Idempotent and serialised, so overlapping disposals cannot release the recorder twice.
      */
     @Synchronized
-    fun stop(): Long {
+    override fun stop(): Long {
         running = false
         record?.let {
             runCatching { it.stop() }

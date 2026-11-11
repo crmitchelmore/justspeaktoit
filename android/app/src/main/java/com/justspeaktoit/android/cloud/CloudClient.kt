@@ -27,14 +27,8 @@ class CallHandle {
     }
 }
 
-/**
- * Blocking HTTPS client for OpenAI-compatible APIs; call from a background dispatcher. Keys are
- * only sent as bearer tokens and never logged.
- */
-class CloudClient(
-    private val connectTimeoutMs: Int = 15_000,
-    private val readTimeoutMs: Int = 120_000,
-) {
+/** Blocking cloud requests; [CloudClient] in production. [call] lets another thread abort them. */
+interface CloudService {
     fun transcribe(
         model: CloudModel,
         apiKey: String,
@@ -42,6 +36,26 @@ class CloudClient(
         languageTag: String?,
         call: CallHandle,
         format: SharedAudio.Format = SharedAudio.Format("wav", "audio/wav"),
+    ): String
+
+    fun cleanup(apiKey: String, transcript: String, call: CallHandle): String
+}
+
+/**
+ * Blocking HTTPS client for OpenAI-compatible APIs; call from a background dispatcher. Keys are
+ * only sent as bearer tokens and never logged.
+ */
+class CloudClient(
+    private val connectTimeoutMs: Int = 15_000,
+    private val readTimeoutMs: Int = 120_000,
+) : CloudService {
+    override fun transcribe(
+        model: CloudModel,
+        apiKey: String,
+        audio: File,
+        languageTag: String?,
+        call: CallHandle,
+        format: SharedAudio.Format,
     ): String {
         val multipart = CloudWire.multipart(
             fields = CloudWire.transcriptionFields(model, languageTag),
@@ -62,7 +76,7 @@ class CloudClient(
         return CloudWire.transcriptText(body)
     }
 
-    fun cleanup(apiKey: String, transcript: String, call: CallHandle): String {
+    override fun cleanup(apiKey: String, transcript: String, call: CallHandle): String {
         val json = CloudWire.cleanupBody(CloudCatalog.CLEANUP_MODEL, transcript).toByteArray()
         val url = "${CloudProvider.OpenRouter.baseUrl}/chat/completions"
         val body = post(url, apiKey, "application/json", call) { conn ->

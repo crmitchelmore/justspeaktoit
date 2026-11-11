@@ -14,13 +14,30 @@ import android.speech.SpeechRecognizer
 import androidx.annotation.MainThread
 import androidx.annotation.RequiresApi
 
+/** The recogniser the ViewModel drives; [AndroidSpeechEngine] in production. Main thread only. */
+interface SpeechEngine {
+    fun capabilities(): RecognizerCapabilities
+
+    fun checkOnDeviceLanguage(languageTag: String, onResult: (LanguageResolution) -> Unit)
+
+    fun requestOnDeviceModel(languageTag: String)
+
+    fun start(mode: RecognitionMode, languageTag: String, onEvent: (DictationEvent) -> Unit, onLevel: (Float) -> Unit)
+
+    fun stop()
+
+    fun cancel()
+
+    fun close()
+}
+
 /**
  * Thin wrapper over the platform [SpeechRecognizer]. All calls must be made on the main thread,
  * which is also where callbacks arrive. Each session gets a fresh recogniser, and callbacks from a
  * replaced or cancelled session are dropped so a late result can never complete the wrong session.
  */
 @MainThread
-class AndroidSpeechEngine(context: Context) {
+class AndroidSpeechEngine(context: Context) : SpeechEngine {
     private val context = context.applicationContext
     private var recognizer: SpeechRecognizer? = null
     private var modelDownloader: SpeechRecognizer? = null
@@ -29,7 +46,7 @@ class AndroidSpeechEngine(context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var session = 0L
 
-    fun capabilities(): RecognizerCapabilities = RecognizerCapabilities(
+    override fun capabilities(): RecognizerCapabilities = RecognizerCapabilities(
         sdkInt = Build.VERSION.SDK_INT,
         speechServiceAvailable = SpeechRecognizer.isRecognitionAvailable(context),
         onDeviceAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
@@ -41,7 +58,7 @@ class AndroidSpeechEngine(context: Context) {
      * unknown. A newer check supersedes an outstanding one, and a service that does not answer
      * within [SUPPORT_TIMEOUT_MS] is reported as unknown so the other modes stay usable.
      */
-    fun checkOnDeviceLanguage(languageTag: String, onResult: (LanguageResolution) -> Unit) {
+    override fun checkOnDeviceLanguage(languageTag: String, onResult: (LanguageResolution) -> Unit) {
         releaseProbe()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || !capabilities().onDeviceAvailable) {
             onResult(LanguageResolution(LanguageSupport.Unknown, languageTag))
@@ -93,7 +110,7 @@ class AndroidSpeechEngine(context: Context) {
     }
 
     /** Asks the system to download the on-device model; progress is shown by the system. */
-    fun requestOnDeviceModel(languageTag: String) {
+    override fun requestOnDeviceModel(languageTag: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         // Kept alive until close() so the request is not dropped when the service unbinds.
         modelDownloader?.destroy()
@@ -106,7 +123,7 @@ class AndroidSpeechEngine(context: Context) {
         }
     }
 
-    fun start(mode: RecognitionMode, languageTag: String, onEvent: (DictationEvent) -> Unit, onLevel: (Float) -> Unit) {
+    override fun start(mode: RecognitionMode, languageTag: String, onEvent: (DictationEvent) -> Unit, onLevel: (Float) -> Unit) {
         release()
         val id = ++session
         // Availability can change after it was checked; the factories then throw rather than return.
@@ -148,7 +165,7 @@ class AndroidSpeechEngine(context: Context) {
     private var activeListener: Listener? = null
 
     /** Stops capturing audio; the recogniser then delivers its final result or an error. */
-    fun stop() {
+    override fun stop() {
         val recognizer = recognizer ?: return
         recognizer.stopListening()
         // A service that never delivers a result ends the session as a failure; partial words are
@@ -157,12 +174,12 @@ class AndroidSpeechEngine(context: Context) {
     }
 
     /** Abandons the session; no further events are delivered for it. */
-    fun cancel() {
+    override fun cancel() {
         session++
         release()
     }
 
-    fun close() {
+    override fun close() {
         cancel()
         releaseProbe()
         modelDownloader?.destroy()

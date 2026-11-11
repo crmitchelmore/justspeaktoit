@@ -16,7 +16,7 @@ final class PostProcessingOutputLanguageTests: XCTestCase {
   }
 
   func testLocalPromptPreview_usesTheConfiguredOutputLanguage() {
-    let preview = SettingsView.systemPromptPreviewText(
+    let preview = CleanupPromptPreview.text(
       model: localModelID,
       outputLanguage: "French",
       lexiconRuleCount: 0,
@@ -30,14 +30,14 @@ final class PostProcessingOutputLanguageTests: XCTestCase {
 
   func testLocalAndRemotePromptPreviews_bothTrackTheOutputLanguage() {
     for model in [localModelID, remoteModelID] {
-      let english = SettingsView.systemPromptPreviewText(
+      let english = CleanupPromptPreview.text(
         model: model,
         outputLanguage: "English",
         lexiconRuleCount: 0,
         includeLexiconDirectives: false,
         includeContextTags: false
       )
-      let japanese = SettingsView.systemPromptPreviewText(
+      let japanese = CleanupPromptPreview.text(
         model: model,
         outputLanguage: "Japanese",
         lexiconRuleCount: 0,
@@ -51,7 +51,7 @@ final class PostProcessingOutputLanguageTests: XCTestCase {
   }
 
   func testLocalPromptPreview_normalisesTheBritishEnglishAlias() {
-    let preview = SettingsView.systemPromptPreviewText(
+    let preview = CleanupPromptPreview.text(
       model: localModelID,
       outputLanguage: "ENGB",
       lexiconRuleCount: 0,
@@ -72,7 +72,7 @@ final class PostProcessingOutputLanguageTests: XCTestCase {
     // post-processing locations build.
     for language in options {
       for model in [localModelID, remoteModelID] {
-        let preview = SettingsView.systemPromptPreviewText(
+        let preview = CleanupPromptPreview.text(
           model: model,
           outputLanguage: language,
           lexiconRuleCount: 0,
@@ -85,7 +85,7 @@ final class PostProcessingOutputLanguageTests: XCTestCase {
   }
 
   func testBuiltInRulesCleaner_hasNoPromptToLocalise() {
-    let preview = SettingsView.systemPromptPreviewText(
+    let preview = CleanupPromptPreview.text(
       model: LocalPostProcessingModelManager.builtInRulesModelID,
       outputLanguage: "French",
       lexiconRuleCount: 0,

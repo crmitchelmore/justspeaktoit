@@ -4,59 +4,21 @@ import SpeakSync
 import AppKit
 import SwiftUI
 
-// swiftlint:disable file_length type_body_length
-
-struct MacAPIKeyItem: Identifiable {
-  enum Source {
-    case openRouter
-    case transcription(TranscriptionProviderMetadata)
-    case textToSpeech(TTSProvider)
-  }
-
-  let entry: APIKeyListEntry
-  let source: Source
-  var id: String { entry.id }
-}
-
-extension TTSProvider {
-  /// Voice-output providers with their own API-key card, in display order.
-  /// OpenRouter shares the general card; the system voice needs no key.
-  static let apiKeyCardProviders: [TTSProvider] = [
-    .elevenlabs, .openai, .azure, .deepgram, .soniox, .cartesia,
-    .groq, .gemini, .mistral, .speechmatics, .xai
-  ]
-}
-
-struct SettingsView: View {
+struct SettingsView: View, AppSettingsBindingProviding, LocalModelRowPresenting {
   @EnvironmentObject var environment: AppEnvironment
   @EnvironmentObject var settings: AppSettings
   @EnvironmentObject var paidAccess: PaidAccessManager
   @EnvironmentObject var audioDevices: AudioInputDeviceManager
   @ObservedObject var updaterManager = UpdaterManager.shared
-  @ObservedObject var localModels = LocalModelManager.shared
-  @ObservedObject var fluidAudioModels = FluidAudioModelManager.shared
-  #if !APP_STORE
-  @ObservedObject var sherpaRuntime = SherpaOnnxRuntimeManager.shared
-  #endif
   @ObservedObject var localPostProcessingModels = LocalPostProcessingModelManager.shared
   @ObservedObject var cliInstaller = SpeakCLIInstaller.shared
   let tab: SettingsTab
   @Binding var sidebarSelection: SidebarItem?
-  @State var newAPIKeyValue: String = ""
-  @State var apiKeyValidationState: ValidationViewState = .idle
   @State var isDeletingRecordings: Bool = false
   @State private var transcriptionProviders: [TranscriptionProviderMetadata] = []
   /// Voices only a keyed account lists — Mistral publishes no presets.
-  @State private var accountListedVoices: [TTSVoice] = []
-  @State var providerAPIKeys: [String: String] = [:]
-  @State var providerValidationStates: [String: ValidationViewState] = [:]
-  @State var ttsProviderAPIKeys: [String: String] = [:]
-  @State var ttsProviderValidationStates: [String: ValidationViewState] = [:]
   @State var apiKeySearchText = ""
-  /// Provider credit balances shown beside the saved keys. Deduplicated by
-  /// account, so one account is fetched and displayed once however many cards
-  /// its key powers.
-  @StateObject var providerBalances = ProviderBalanceStore()
+  @StateObject var apiKeyForm = APIKeyFormModel()
   @State var apiKeyStatusFilter: APIKeyStatusFilter = .all
   @State var apiKeySortOrder: APIKeySortOrder = .name
   @State private var didResolveAPIKeyStorage = false
@@ -67,105 +29,101 @@ struct SettingsView: View {
   @State var showingConfigTransfer = false
   @State var showingReleaseNotes = false
   @State private var soundPreviewPlayer: RecordingSoundPlayer?
-  @State var huggingFaceRepoID: String = "argmaxinc/whisperkit-coreml"
-  @State var huggingFaceModelName: String = "tiny"
-  @State var huggingFaceImportError: String?
-  @State var isLocalTranscriptionAdvancedExpanded = false
   /// Tracks the newest starter-preset download so a stale one cannot activate.
   @State var starterPresetActivationTask: Task<Void, Never>?
-  #if !APP_STORE
-  @State var streamingHuggingFaceRepoID: String =
-    "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26"
-  @State var streamingHuggingFaceModelName: String = "streaming-zipformer-en-2023-06-26"
-  @State var selectedRecommendedStreamingSourceID: String =
-    LocalModelManager.recommendedStreamingModelSources.first?.id ?? ""
-  @State var streamingHuggingFaceImportError: String?
-  #endif
-  #if !APP_STORE
-  @State var localPostProcessingRepoID: String = "unsloth/Qwen3-0.6B-GGUF"
-  @State var localPostProcessingFilename: String = "Qwen3-0.6B-Q4_K_M.gguf"
-  @State var localPostProcessingSizeMB: String = "450"
-  @State var localPostProcessingImportError: String?
-  #endif
-  let openRouterKeyIdentifier = "openrouter.apiKey"
 
   typealias TranscriptionLocation = AppSettings.TranscriptionLocation
   typealias RemoteTranscriptionMode = AppSettings.RemoteTranscriptionMode
   typealias LocalTranscriptionSource = AppSettings.LocalTranscriptionSource
-
-  enum StarterPresetInstallState: Equatable {
-    case notInstalled
-    case installing
-    case installed
-    case failed(String)
-  }
 
   let orderedLocalTranscriptionModes: [AppSettings.LocalTranscriptionMode] = {
     DistributionChannel.current.supportsInProcessLocalStreaming ? [.streaming, .batch] : [.batch]
   }()
   let orderedRemoteTranscriptionModes: [RemoteTranscriptionMode] = [.streaming, .batch]
 
-  private enum PostProcessingLocation: String, CaseIterable, Identifiable {
-    case remote
-    case local
-
-    var id: String { rawValue }
-
-    var displayName: String {
-      switch self {
-      case .remote: return "Remote"
-      case .local: return "Local"
+  var body: some View {
+    let density = settings.visualDensity
+    ScrollViewReader { proxy in
+      ScrollView {
+        VStack(alignment: .leading, spacing: density.isCompact ? density.sectionSpacing : 28) {
+          SettingsOverviewHeader(isOpenRouterKeyStored: isOpenRouterKeyStored)
+          tabContent
+        }
+        .padding(density.pagePadding)
+        .frame(maxWidth: 1100, alignment: .center)
+      }
+      .environment(\.settingsSearchHighlightID, settingsSearchHighlightID)
+      .task(id: environment.settingsSearchTarget) {
+        await revealSettingsSearchTarget(using: proxy)
+      }
+      .task(id: settingsSearchHighlightID) {
+        guard settingsSearchHighlightID != nil else { return }
+        try? await Task.sleep(for: .seconds(2.5))
+        guard !Task.isCancelled else { return }
+        settingsSearchHighlightID = nil
       }
     }
+    .background(
+      LinearGradient(
+        colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
+    .task {
+      transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
+      keytermSync.syncFromPronunciation()
+      await resolveAPIKeyStorage()
+    }
+    .onChange(of: settings.liveTranscriptionModel) { _, newValue in
+      let newIsAssembly = newValue.localizedCaseInsensitiveContains("assemblyai")
+      if newIsAssembly {
+        settings.postProcessingEnabled = false
+        keytermSync.syncFromPronunciation()
+      }
+    }
+    .onChange(of: settings.assemblyAIKeyterms) { _, _ in
+      keytermSync.syncIgnored()
+    }
+    .onChange(of: settings.ttsPronunciationDictionary) { _, _ in
+      keytermSync.syncFromPronunciation()
+    }
+    .alert(
+      missingTranscriptionAPIKeyAlert?.title ?? "API key required",
+      isPresented: Binding(
+        get: { missingTranscriptionAPIKeyAlert != nil },
+        set: { if !$0 { missingTranscriptionAPIKeyAlert = nil } }
+      ),
+      presenting: missingTranscriptionAPIKeyAlert
+    ) { alert in
+      Button("Add API Key") {
+        // A provider whose single key also powers voice output has no
+        // transcription card; its combined card lives in the TTS list.
+        let sharedCredentialID = TTSProvider.allCases
+          .first { $0.sharesTranscriptionCredential && $0.id == alert.provider.id }?
+          .id
+        environment.apiKeysScrollTarget = sharedCredentialID.map { "tts-\($0)" }
+          ?? "transcription-\(alert.provider.id)"
+        sidebarSelection = .settings(.apiKeys)
+        missingTranscriptionAPIKeyAlert = nil
+      }
+      if let url = alert.keyPageURL {
+        Button("Get API Key") {
+          NSWorkspace.shared.open(url)
+          missingTranscriptionAPIKeyAlert = nil
+        }
+      }
+      Button("Cancel", role: .cancel) {
+        missingTranscriptionAPIKeyAlert = nil
+      }
+    } message: { alert in
+      Text(alert.message)
+    }
+    .onReceive(environment.pronunciationManager.$entries) { _ in
+      keytermSync.syncFromPronunciation()
+    }
   }
+}
 
-  enum ValidationViewState {
-    case idle
-    case validating
-    case finished(APIKeyValidationResult)
-  }
-
-  struct APIKeyCardConfiguration {
-    let title: String
-    let tint: Color
-    let statusIcon: String
-    let statusTint: Color
-    let isStored: Bool
-    let descriptionText: String
-    let keyFieldLabel: String
-    let keyBinding: Binding<String>
-    let onSave: () -> Void
-    let onValidate: (() -> Void)?
-    let onRemove: (() -> Void)?
-    let isSaveDisabled: Bool
-    let isValidateDisabled: Bool
-    let isRemoveDisabled: Bool
-    let validationState: ValidationViewState
-    /// Keychain identifier of the credential this card manages, used to look up
-    /// the account's balance.
-    let credentialIdentifier: String
-    /// Whether this is the card that shows the account's balance.
-    ///
-    /// Two cards can manage the same Keychain item — Deepgram has a
-    /// transcription card and a voice-output card, both on `deepgram.apiKey` —
-    /// and the identifier cannot tell them apart, so the one that does not own
-    /// the account sets this to `false` and the figure appears exactly once.
-    var presentsAccountBalance = true
-    let saveButtonTitle: String
-    let saveTooltip: String
-    let validateButtonTitle: String
-    let validateTooltip: String
-    let removeButtonTitle: String
-    let removeTooltip: String
-    let link: URL?
-    let linkLabel: String?
-    let statusLabel: String
-    /// The uses this card covers, for its least-privilege key guide.
-    let guideUses: APIKeyUses
-  }
-
+extension SettingsView {
   var isOpenRouterKeyStored: Bool {
-    isAPIKeyStored(openRouterKeyIdentifier)
+    isAPIKeyStored(APIKeyFormModel.openRouterKeyIdentifier)
   }
 
   func isAPIKeyStored(_ identifier: String) -> Bool {
@@ -198,94 +156,12 @@ struct SettingsView: View {
     }
   }
 
+  var allMacAPIKeyItems: [MacAPIKeyItem] {
+    MacAPIKeyItem.all(transcriptionProviders: transcriptionProviders, form: apiKeyForm, isStored: isAPIKeyStored)
+  }
+
   var isCloudPostProcessingModelSelected: Bool {
     !PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
-  }
-
-  var isValidatingKey: Bool {
-    if case .validating = apiKeyValidationState { return true }
-    return false
-  }
-
-  var allMacAPIKeyItems: [MacAPIKeyItem] {
-    var items = [
-      MacAPIKeyItem(
-        entry: APIKeyListEntry(
-          id: "general-openrouter",
-          title: "OpenRouter",
-          category: "Transcription, Voice Output & Post-processing",
-          isStored: isOpenRouterKeyStored,
-          hasError: Self.failedValidation(apiKeyValidationState)
-        ),
-        source: .openRouter
-      )
-    ]
-    // ElevenLabs, Soniox and Cartesia each use one key for transcription and
-    // voice output; their combined card is contributed by the TTS list below.
-    let sharedCredentialProviderIDs = Set(
-      TTSProvider.allCases.filter(\.sharesTranscriptionCredential).map(\.id)
-    )
-    items += transcriptionProviders
-      .filter { !sharedCredentialProviderIDs.contains($0.id) }
-      .map { provider in
-        MacAPIKeyItem(
-          entry: APIKeyListEntry(
-            id: "transcription-\(provider.id)",
-            title: provider.displayName,
-            category: "Transcription",
-            isStored: isAPIKeyStored(provider.apiKeyIdentifier),
-            hasError: Self.failedValidation(providerValidationStates[provider.id])
-          ),
-          source: .transcription(provider)
-        )
-      }
-    items += TTSProvider.apiKeyCardProviders.map { provider in
-      let isShared = provider.sharesTranscriptionCredential
-      return MacAPIKeyItem(
-        entry: APIKeyListEntry(
-          id: "tts-\(provider.id)",
-          title: provider == .elevenlabs ? "ElevenLabs" : provider.displayName,
-          category: isShared ? "Transcription & Voice Output" : "Voice Output",
-          isStored: isAPIKeyStored(provider.apiKeyIdentifier),
-          hasError: Self.failedValidation(ttsProviderValidationStates[provider.rawValue])
-        ),
-        source: .textToSpeech(provider)
-      )
-    }
-    return items
-  }
-
-  /// Whether a card's last check failed, which the Errors filter shows.
-  static func failedValidation(_ state: ValidationViewState?) -> Bool {
-    guard case .finished(let result) = state, case .failure = result.outcome else { return false }
-    return true
-  }
-
-  var visibleMacAPIKeyItems: [MacAPIKeyItem] {
-    let orderedEntries = APIKeyListQuery.apply(
-      to: allMacAPIKeyItems.map(\.entry),
-      searchText: apiKeySearchText,
-      status: apiKeyStatusFilter,
-      sortOrder: apiKeySortOrder
-    )
-    let itemsByID = Dictionary(uniqueKeysWithValues: allMacAPIKeyItems.map { ($0.id, $0) })
-    return orderedEntries.compactMap { itemsByID[$0.id] }
-  }
-
-  private var usesRealtimeVoice: Bool {
-    OpenAIRealtimeSpeech.voiceID(fromProviderVoiceID: settings.defaultTTSVoice) != nil
-  }
-
-  private var overviewPostProcessingValue: String {
-    if settings.isActiveAssemblyAILiveModel {
-      return "Keyterms only"
-    }
-    guard settings.postProcessingEnabled, settings.speedMode == .instant else {
-      return "Disabled"
-    }
-    return PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
-      ? "Local"
-      : "Remote"
   }
 
   var systemGeneratedPartsHelpText: String {
@@ -299,121 +175,6 @@ struct SettingsView: View {
       """
     }
     return "Choose the language and lexicon context layered into the canonical local cleanup policy."
-  }
-
-  @ViewBuilder
-  private var overviewHeader: some View {
-    if settings.visualDensity.isCompact {
-      compactOverviewHeader
-    } else {
-      normalOverviewHeader
-    }
-  }
-
-  private var compactOverviewHeader: some View {
-    HStack(spacing: settings.visualDensity.groupSpacing) {
-      Label("Settings", systemImage: "slider.horizontal.3")
-        .font(.subheadline.bold())
-        .lineLimit(1)
-
-      Spacer(minLength: 4)
-
-      compactOverviewMetric(
-        title: "Mode",
-        value: overviewModeValue,
-        systemImage: "waveform"
-      )
-      compactOverviewMetric(
-        title: settings.isActiveAssemblyAILiveModel ? "Pre-processing" : "Post-processing",
-        value: overviewPostProcessingValue,
-        systemImage: "wand.and.stars"
-      )
-      compactOverviewMetric(
-        title: "Output",
-        value: settings.textOutputMethod.displayName,
-        systemImage: "text.alignleft"
-      )
-      compactOverviewMetric(
-        title: "OpenRouter Key",
-        value: isOpenRouterKeyStored ? "Stored" : "Missing",
-        systemImage: isOpenRouterKeyStored ? "checkmark.seal.fill" : "key.fill"
-      )
-    }
-    .padding(settings.visualDensity.cardPadding)
-    .foregroundStyle(.white)
-    .background(
-      LinearGradient(
-        colors: [Color.orange, Color.orange.opacity(0.72)],
-        startPoint: .leading,
-        endPoint: .trailing
-      ),
-      in: RoundedRectangle(
-        cornerRadius: settings.visualDensity.cardCornerRadius,
-        style: .continuous
-      )
-    )
-  }
-
-  private func compactOverviewMetric(
-    title: String,
-    value: String,
-    systemImage: String
-  ) -> some View {
-    Label(value, systemImage: systemImage)
-      .font(.caption2.weight(.semibold))
-      .lineLimit(1)
-      .accessibilityLabel("\(title): \(value)")
-  }
-
-  private var normalOverviewHeader: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      HStack(alignment: .center) {
-        Image(systemName: "sparkles.rectangle.stack")
-          .symbolRenderingMode(.palette)
-          .foregroundStyle(.white, .white.opacity(0.7))
-          .font(.system(size: 34, weight: .semibold))
-          .frame(width: 56, height: 56)
-          .background(
-            Color.orange.opacity(0.6),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Tune Speak to match your flow")
-            .font(.title2.bold())
-            .foregroundStyle(.white)
-          Text(
-            "Choose recording modes, manage keys, and keep permissions in sync—all in one place."
-          )
-          .font(.callout)
-          .foregroundStyle(.white.opacity(0.8))
-        }
-        Spacer()
-      }
-
-      HStack(spacing: 16) {
-        overviewChip(
-          title: "Mode", value: overviewModeValue, systemImage: "waveform")
-        overviewChip(
-          title: settings.isActiveAssemblyAILiveModel ? "Pre-processing" : "Post-processing",
-          value: overviewPostProcessingValue,
-          systemImage: "wand.and.stars")
-        overviewChip(
-          title: "Output", value: settings.textOutputMethod.displayName,
-          systemImage: "text.alignleft")
-        overviewChip(
-          title: "OpenRouter Key", value: isOpenRouterKeyStored ? "Stored" : "Missing",
-          systemImage: isOpenRouterKeyStored ? "checkmark.seal.fill" : "key.fill")
-      }
-    }
-    .padding(24)
-    .background(
-      LinearGradient(
-        colors: [Color.orange, Color.orange.opacity(0.7)], startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-      .cornerRadius(24)
-      .shadow(color: Color.orange.opacity(0.3), radius: 18, x: 0, y: 12)
-    )
   }
 
   @MainActor
@@ -481,7 +242,7 @@ struct SettingsView: View {
     case .profiles:
       profilesSettings
     case .voiceOutput:
-      voiceOutputSettings
+      VoiceOutputSettingsSection()
     case .pronunciation:
       pronunciationSettings
     case .apiKeys:
@@ -537,45 +298,6 @@ struct SettingsView: View {
     _sidebarSelection = sidebarSelection
   }
 
-  private var overviewModeValue: String {
-    settings.effectiveTranscriptionModeDisplayName
-  }
-
-  var transcriptionLocationBinding: Binding<TranscriptionLocation> {
-    Binding(
-      get: { settings.transcriptionLocation },
-      set: { settings.selectTranscriptionLocation($0) }
-    )
-  }
-
-  var localTranscriptionSourceBinding: Binding<LocalTranscriptionSource> {
-    Binding(
-      get: { settings.localTranscriptionSource },
-      set: { settings.selectLocalTranscriptionSource($0) }
-    )
-  }
-
-  var remoteTranscriptionModeBinding: Binding<RemoteTranscriptionMode> {
-    Binding(
-      get: { settings.remoteTranscriptionMode },
-      set: { settings.selectRemoteTranscriptionMode($0) }
-    )
-  }
-
-  func transcriptionModeSegmentLabel(from displayName: String) -> String {
-    displayName
-      .replacingOccurrences(of: "Local ", with: "")
-      .replacingOccurrences(of: "Remote ", with: "")
-  }
-
-  var isStreamingTranscriptionSelected: Bool { settings.isStreamingTranscriptionSelected }
-
-  var isAppleOnDeviceTranscriptionSelected: Bool { settings.isAppleOnDeviceTranscriptionSelected }
-
-  var isLocalTranscriptionSelected: Bool { settings.isLocalTranscriptionSelected }
-
-  var isRemoteStreamingTranscriptionSelected: Bool { settings.isRemoteStreamingTranscriptionSelected }
-
   var cloudPostProcessingModelBinding: Binding<String> {
     Binding(
       get: {
@@ -595,143 +317,6 @@ struct SettingsView: View {
     )
   }
 
-  var localPostProcessingModelBinding: Binding<String> {
-    Binding(
-      get: {
-        if PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
-          guard localPostProcessingOptions.contains(where: { $0.id == settings.postProcessingModel }) else {
-            return localPostProcessingOptions.first?.id ?? LocalPostProcessingModelManager.builtInRulesModelID
-          }
-          return settings.postProcessingModel
-        }
-        return localPostProcessingOptions.first?.id ?? LocalPostProcessingModelManager.builtInRulesModelID
-      },
-      set: { model in
-        guard PostProcessingManager.isLocalPostProcessingModel(model),
-          localPostProcessingOptions.contains(where: { $0.id == model })
-        else { return }
-        settings.postProcessingModel = model
-      }
-    )
-  }
-
-  var localTranscriptionModelBinding: Binding<String> {
-    Binding(
-      get: {
-        guard localTranscriptionOptions.contains(where: { $0.id == settings.localTranscriptionModel }) else {
-          return localTranscriptionOptions.first?.id ?? ""
-        }
-        return settings.localTranscriptionModel
-      },
-      set: { model in
-        guard localTranscriptionOptions.contains(where: { $0.id == model }) else { return }
-        settings.localTranscriptionModel = model
-      }
-    )
-  }
-
-  private var postProcessingLocationBinding: Binding<PostProcessingLocation> {
-    Binding(
-      get: {
-        PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) ? .local : .remote
-      },
-      set: { location in
-        let currentLocation = PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
-          ? PostProcessingLocation.local
-          : .remote
-        guard location != currentLocation else { return }
-        selectPostProcessingLocation(location)
-      }
-    )
-  }
-
-  var postProcessingLocationSelector: some View {
-    HStack(spacing: 8) {
-      ForEach(PostProcessingLocation.allCases) { location in
-        Button {
-          postProcessingLocationBinding.wrappedValue = location
-        } label: {
-          Text(location.displayName)
-            .font(.subheadline.weight(.semibold))
-            .padding(.vertical, 8)
-            .padding(.horizontal, 28)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(postProcessingLocationBinding.wrappedValue == location ? .white : .primary)
-        .background(
-          RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(postProcessingLocationBinding.wrappedValue == location ? Color.brandAccent : Color.clear)
-        )
-      }
-    }
-    .fixedSize()
-    .padding(4)
-    .background(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .fill(Color(nsColor: .controlBackgroundColor))
-    )
-  }
-
-  private func selectPostProcessingLocation(_ location: PostProcessingLocation) {
-    switch location {
-    case .local:
-      settings.postProcessingModel = localPostProcessingOptions.first?.id ?? "local/post-processing/rules"
-    case .remote:
-      settings.postProcessingModel = cloudPostProcessingOptions.first {
-        $0.id == "openai/gpt-5-mini"
-      }?.id ?? cloudPostProcessingOptions.first?.id ?? settings.postProcessingModel
-    }
-  }
-
-  private func overviewChip(title: String, value: String, systemImage: String) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Label(title, systemImage: systemImage)
-        .font(.caption)
-        .labelStyle(.titleAndIcon)
-        .foregroundStyle(.white.opacity(0.8))
-      Text(value)
-        .font(.headline)
-        .foregroundStyle(.white)
-    }
-    .padding(16)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(
-      Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-  }
-
-  func localModelBadge(_ title: String, tint: Color) -> some View {
-    Text(title)
-      .font(.caption2.weight(.semibold))
-      .foregroundStyle(tint)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 3)
-      .background(Capsule().fill(tint.opacity(0.12)))
-  }
-
-  func selectedModelBadge(tint: Color = .green) -> some View {
-    Label("Selected", systemImage: "checkmark.circle.fill")
-      .font(.caption.weight(.semibold))
-      .foregroundStyle(tint)
-  }
-
-  func localModelRowContainer<Content: View>(
-    isSelected: Bool,
-    tint: Color,
-    @ViewBuilder content: () -> Content
-  ) -> some View {
-    content()
-      .padding(12)
-      .background(
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-          .fill(isSelected ? tint.opacity(0.13) : Color(nsColor: .controlBackgroundColor))
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-          .stroke(isSelected ? tint.opacity(0.8) : Color.clear, lineWidth: isSelected ? 2 : 0)
-      )
-      .shadow(color: isSelected ? tint.opacity(0.16) : .clear, radius: 10, y: 3)
-  }
-
   func previewRecordingSound(_ sound: RecordingSoundPlayer.RecordingSound) {
     let player = RecordingSoundPlayer()
     player.profile = settings.recordingSoundProfile
@@ -739,334 +324,8 @@ struct SettingsView: View {
     soundPreviewPlayer = player
   }
 
-  var body: some View {
-    let density = settings.visualDensity
-    ScrollViewReader { proxy in
-      ScrollView {
-        VStack(alignment: .leading, spacing: density.isCompact ? density.sectionSpacing : 28) {
-          overviewHeader
-          tabContent
-        }
-        .padding(density.pagePadding)
-        .frame(maxWidth: 1100, alignment: .center)
-      }
-      .environment(\.settingsSearchHighlightID, settingsSearchHighlightID)
-      .task(id: environment.settingsSearchTarget) {
-        await revealSettingsSearchTarget(using: proxy)
-      }
-      .task(id: settingsSearchHighlightID) {
-        guard settingsSearchHighlightID != nil else { return }
-        try? await Task.sleep(for: .seconds(2.5))
-        guard !Task.isCancelled else { return }
-        settingsSearchHighlightID = nil
-      }
-    }
-    .background(
-      LinearGradient(
-        colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
-    .task {
-      transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
-      syncAssemblyAIKeytermsFromPronunciation()
-      await resolveAPIKeyStorage()
-    }
-    .onChange(of: settings.liveTranscriptionModel) { _, newValue in
-      let newIsAssembly = newValue.localizedCaseInsensitiveContains("assemblyai")
-      if newIsAssembly {
-        settings.postProcessingEnabled = false
-        syncAssemblyAIKeytermsFromPronunciation()
-      }
-    }
-    .onChange(of: settings.assemblyAIKeyterms) { _, _ in
-      syncIgnoredPronunciationKeyterms()
-    }
-    .onChange(of: settings.ttsPronunciationDictionary) { _, _ in
-      syncAssemblyAIKeytermsFromPronunciation()
-    }
-    .alert(
-      missingTranscriptionAPIKeyAlert?.title ?? "API key required",
-      isPresented: Binding(
-        get: { missingTranscriptionAPIKeyAlert != nil },
-        set: { if !$0 { missingTranscriptionAPIKeyAlert = nil } }
-      ),
-      presenting: missingTranscriptionAPIKeyAlert
-    ) { alert in
-      Button("Add API Key") {
-        // A provider whose single key also powers voice output has no
-        // transcription card; its combined card lives in the TTS list.
-        let sharedCredentialID = TTSProvider.allCases
-          .first { $0.sharesTranscriptionCredential && $0.id == alert.provider.id }?
-          .id
-        environment.apiKeysScrollTarget = sharedCredentialID.map { "tts-\($0)" }
-          ?? "transcription-\(alert.provider.id)"
-        sidebarSelection = .settings(.apiKeys)
-        missingTranscriptionAPIKeyAlert = nil
-      }
-      if let url = alert.keyPageURL {
-        Button("Get API Key") {
-          NSWorkspace.shared.open(url)
-          missingTranscriptionAPIKeyAlert = nil
-        }
-      }
-      Button("Cancel", role: .cancel) {
-        missingTranscriptionAPIKeyAlert = nil
-      }
-    } message: { alert in
-      Text(alert.message)
-    }
-    .onReceive(environment.pronunciationManager.$entries) { _ in
-      syncAssemblyAIKeytermsFromPronunciation()
-    }
-  }
-
-  /// The Default Voice list: the offline catalogue plus whatever the stored
-  /// keys' accounts list, so a Mistral voice can be made the default here and
-  /// not only chosen ad hoc in Voice Output.
-  private var defaultVoicePickerOptions: [TTSVoice] {
-    VoiceCatalog.includingSelection(
-      settings.defaultTTSVoice,
-      in: VoiceCatalog.allVoices + accountListedVoices
-    )
-  }
-
-  private var voiceOutputSettings: some View {
-    SpeakDensitySettingsSection(density: settings.visualDensity) {
-      SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
-        VStack(alignment: .leading, spacing: 12) {
-          VStack(alignment: .leading, spacing: 8) {
-            VoicePicker(
-              voices: defaultVoicePickerOptions,
-              storedAPIKeyIdentifiers: settings.trackedAPIKeyIdentifiers,
-              selection: settingsBinding(\AppSettings.defaultTTSVoice)
-            )
-            .speakTooltip("Choose your preferred voice for text-to-speech synthesis")
-
-            OpenRouterSpeechPickerButton(selectedVoice: settingsBinding(\AppSettings.defaultTTSVoice))
-
-            Text("Your default voice for converting text to speech")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-
-          LongListPicker(
-            title: "Language", items: VoiceOutputLanguageCatalog.options,
-            id: { $0.id }, selection: settingsBinding(\AppSettings.ttsLanguageIdentifier),
-            searchText: { [$0.displayName, $0.id] },
-            row: { option in
-            Text(option.displayName)
-          })
-          .pickerStyle(.menu)
-
-          if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .mistral {
-            Picker("Mistral Model", selection: settingsBinding(\AppSettings.mistralTTSModel)) {
-              ForEach(MistralTTSCatalog.models) { model in
-                Text(model.displayName).tag(model)
-              }
-            }
-            .pickerStyle(.menu)
-            if settings.mistralTTSModel == .voxtralMiniTTS3 {
-              Text("Voxtral TTS 3 is a public preview. Use [emotion=happy] or [pace=slow] in your text "
-                + "to direct delivery.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            Text("Speed, pitch and SSML controls are unsupported by Mistral.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-
-          if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .openai,
-            OpenAIRealtimeSpeech.voiceID(fromProviderVoiceID: settings.defaultTTSVoice) == nil,
-            let retirement = OpenAITTSModel.standard.retirement {
-            Text("OpenAI speech models: \(retirement.notice)")
-              .font(.caption)
-              .foregroundStyle(.orange)
-          }
-
-          if TTSProvider.from(voiceID: settings.defaultTTSVoice) == .soniox {
-            Picker("Soniox Region", selection: settingsBinding(\AppSettings.sonioxTTSRegion)) {
-              ForEach(SonioxTTSRegion.allCases) { region in
-                Text(region.displayName).tag(region)
-              }
-            }
-            .pickerStyle(.segmented)
-          }
-        }
-      }
-      .speakTooltip("Select which voice to use by default when generating speech from text.")
-      .task {
-        accountListedVoices = await environment.tts.accountListedVoices()
-      }
-
-      SettingsCard(title: "Audio Quality & Performance", systemImage: "waveform.circle", tint: Color.green) {
-        VStack(alignment: .leading, spacing: 16) {
-          VStack(alignment: .leading, spacing: 8) {
-            Picker("Quality", selection: settingsBinding(\AppSettings.ttsQuality)) {
-              ForEach(TTSQuality.allCases) { quality in
-                Text(quality.displayName).tag(quality)
-              }
-            }
-            .pickerStyle(.segmented)
-
-            Text(settings.ttsQuality.description)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-          .speakTooltip("Fast uses low-latency models, Best Quality uses HD models")
-
-          VStack(alignment: .leading, spacing: 8) {
-            HStack {
-              Text("Speed")
-              Spacer()
-              Text(String(format: "%.2fx", settings.ttsSpeed))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            }
-            Slider(
-              value: settingsBinding(\AppSettings.ttsSpeed), in: usesRealtimeVoice ? 0.5...1.5 : 0.5...2.0, step: 0.1)
-              .speakTooltip("Adjust playback speed from 0.5x (slower) to 2.0x (faster)")
-          }
-
-          VStack(alignment: .leading, spacing: 8) {
-            HStack {
-              Text("Pitch")
-              Spacer()
-              Text("\(settings.ttsPitch > 0 ? "+" : "")\(Int(settings.ttsPitch)) semitones")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            }
-            Slider(value: settingsBinding(\AppSettings.ttsPitch), in: -12...12, step: 1)
-              .speakTooltip("Adjust voice pitch from -12 (lower) to +12 (higher) semitones")
-          }
-        }
-      }
-      .speakTooltip("Control audio quality, playback speed, and voice pitch for generated speech.")
-
-      SettingsCard(title: "Output & Export", systemImage: "arrow.down.circle", tint: Color.brandAccentWarm) {
-        VStack(alignment: .leading, spacing: 12) {
-          VStack(alignment: .leading, spacing: 8) {
-            Picker("File Format", selection: settingsBinding(\AppSettings.ttsOutputFormat)) {
-              ForEach(AudioFormat.allCases) { format in
-                Text(format.displayName).tag(format)
-              }
-            }
-            .pickerStyle(.segmented)
-            .disabled(usesRealtimeVoice)
-            .speakTooltip("Choose the audio file format for exported speech")
-            if usesRealtimeVoice {
-              Text("OpenAI Realtime voices always save WAV.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-          }
-
-          settingsToggle(
-            "Auto-play after synthesis",
-            isOn: settingsBinding(\AppSettings.ttsAutoPlay),
-            tint: .brandAccentWarm
-          )
-          .speakTooltip("Automatically play audio after synthesis completes")
-
-          settingsToggle(
-            "Save to recordings directory",
-            isOn: settingsBinding(\AppSettings.ttsSaveToDirectory),
-            tint: .brandAccentWarm
-          )
-          .speakTooltip("Automatically save generated speech files to your recordings folder")
-
-          settingsToggle(
-            "Enable SSML support",
-            isOn: settingsBinding(\AppSettings.ttsUseSSML),
-            tint: .brandAccentWarm
-          )
-          .speakTooltip("Enable Speech Synthesis Markup Language for advanced voice control")
-        }
-      }
-      .speakTooltip("Configure how generated speech is saved and played back.")
-
-      SettingsCard(title: "Favorite Voices", systemImage: "star.fill", tint: Color.yellow) {
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Quick access to your preferred voices")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-          if settings.ttsFavoriteVoices.isEmpty {
-            Text("No favorites yet. Add voices from the Voice Output view.")
-              .font(.caption)
-              .foregroundStyle(.tertiary)
-              .padding(.vertical, 8)
-          } else {
-            ForEach(settings.ttsFavoriteVoices, id: \.self) { voiceID in
-              if let voice = VoiceCatalog.voice(forID: voiceID) {
-                HStack {
-                  Text(voice.displayName)
-                    .font(.subheadline)
-                  Spacer()
-                  Button {
-                    settings.ttsFavoriteVoices.removeAll { $0 == voiceID }
-                  } label: {
-                    Image(systemName: "xmark.circle.fill")
-                      .foregroundStyle(.secondary)
-                  }
-                  .buttonStyle(.plain)
-                  .accessibilityLabel("Remove \(voice.displayName) from favourites")
-                  .accessibilityIdentifier("ttsFavoriteVoiceRemove-\(voiceID)")
-                }
-                .padding(.vertical, 4)
-              }
-            }
-          }
-        }
-      }
-      .speakTooltip("Manage your favorite voices for quick access.")
-
-      SettingsCard(title: "Pronunciation Dictionary", systemImage: "text.book.closed", tint: Color.brandAccent) {
-        VStack(alignment: .leading, spacing: 12) {
-          Text("Custom pronunciations for words the TTS mispronounces")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-          if settings.ttsPronunciationDictionary.isEmpty {
-            Text("No custom pronunciations. Add words that are commonly mispronounced.")
-              .font(.caption)
-              .foregroundStyle(.tertiary)
-              .padding(.vertical, 8)
-          } else {
-            ForEach(Array(settings.ttsPronunciationDictionary.keys.sorted()), id: \.self) { word in
-              if let pronunciation = settings.ttsPronunciationDictionary[word] {
-                HStack {
-                  Text(word)
-                    .font(.subheadline.bold())
-                  Text("→")
-                    .foregroundStyle(.secondary)
-                  Text(pronunciation)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                  Spacer()
-                  Button {
-                    settings.ttsPronunciationDictionary.removeValue(forKey: word)
-                  } label: {
-                    Image(systemName: "xmark.circle.fill")
-                      .foregroundStyle(.secondary)
-                  }
-                  .buttonStyle(.plain)
-                  .accessibilityLabel("Remove pronunciation for \(word)")
-                  .accessibilityIdentifier("ttsPronunciationRemove-\(word)")
-                }
-                .padding(.vertical, 4)
-              }
-            }
-          }
-
-          Divider()
-
-          PronunciationEntryView(dictionary: Binding(
-            get: { settings.ttsPronunciationDictionary },
-            set: { settings.ttsPronunciationDictionary = $0 }
-          ))
-        }
-      }
-      .speakTooltip("Add custom pronunciations for words that TTS engines commonly mispronounce.")
-    }
+  private var keytermSync: AssemblyAIPronunciationKeytermSync {
+    AssemblyAIPronunciationKeytermSync(settings: settings, pronunciation: environment.pronunciationManager)
   }
 
   private var pronunciationSettings: some View {
@@ -1074,182 +333,15 @@ struct SettingsView: View {
       .environmentObject(environment.pronunciationManager)
   }
 
-  func saveAPIKey() {
-    apiKeyValidationState = .validating
-    let value = newAPIKeyValue.trimmingCharacters(in: .whitespacesAndNewlines)
-
-    Task {
-      let validation = await environment.openRouter.validateAPIKey(value)
-
-      switch validation.outcome {
-      case .success:
-        do {
-          try await environment.secureStorage.storeSecret(
-            value,
-            identifier: openRouterKeyIdentifier,
-            label: "OpenRouter API Key"
-          )
-
-          let result = validation.updatingOutcome(
-            .success(message: "Key saved and validated")
-          )
-
-          await MainActor.run {
-            apiKeyValidationState = .finished(result)
-            newAPIKeyValue = ""
-          }
-        } catch {
-          let failure = APIKeyValidationResult.failure(
-            message: "Failed to store key: \(error.localizedDescription)",
-            debug: validation.debug
-          )
-          await MainActor.run {
-            apiKeyValidationState = .finished(failure)
-          }
-        }
-      case .failure:
-        await MainActor.run {
-          apiKeyValidationState = .finished(validation)
-        }
-      }
-    }
-  }
-
-  private func pronunciationSeedKeyterms() -> [String] {
-    let modernDictionaryTerms = environment.pronunciationManager.entries
-      .filter { !$0.isRegex }
-      .map(\.word)
-    return AssemblyAIPronunciationKeyterms.seeds(
-      modern: modernDictionaryTerms, legacy: Array(settings.ttsPronunciationDictionary.keys))
-  }
-
-  private func syncAssemblyAIKeytermsFromPronunciation() {
-    guard settings.isActiveAssemblyAILiveModel else { return }
-
-    let seedTerms = pronunciationSeedKeyterms()
-    let mergedKeyterms = AssemblyAIPronunciationKeyterms.merged(
-      current: AssemblyAIPronunciationKeyterms.parse(settings.assemblyAIKeyterms),
-      seeds: seedTerms, ignored: settings.assemblyAIIgnoredPronunciationTerms
-    ).joined(separator: ", ")
-    if mergedKeyterms != settings.assemblyAIKeyterms {
-      settings.assemblyAIKeyterms = mergedKeyterms
-    }
-
-    syncIgnoredPronunciationKeyterms(seedTerms: seedTerms)
-  }
-
-  private func syncIgnoredPronunciationKeyterms(seedTerms: [String]? = nil) {
-    guard settings.isActiveAssemblyAILiveModel else { return }
-
-    let pronunciationTerms = seedTerms ?? pronunciationSeedKeyterms()
-    let updatedIgnored = AssemblyAIPronunciationKeyterms.ignored(
-      selected: settings.assemblyAIKeyterms, seeds: pronunciationTerms,
-      stored: settings.assemblyAIIgnoredPronunciationTerms)
-    if updatedIgnored != settings.assemblyAIIgnoredPronunciationTerms {
-      settings.assemblyAIIgnoredPronunciationTerms = updatedIgnored
-    }
-  }
-
-  func settingsBinding<Value: Hashable>(
-    _ keyPath: ReferenceWritableKeyPath<AppSettings, Value>
-  ) -> Binding<Value> {
-    Binding(
-      get: { settings[keyPath: keyPath] },
-      set: { settings[keyPath: keyPath] = $0 }
-    )
-  }
-
-  func settingsToggle(_ label: String, isOn: Binding<Bool>, tint: Color) -> some View {
-    Toggle(label, isOn: isOn)
-      .tint(tint)
-      .settingsControlChrome()
-  }
-
-  func speedModeIcon(for mode: AppSettings.SpeedMode) -> String {
-    switch mode {
-    case .instant:
-      return "bolt.fill"
-    case .livePolish:
-      return "sparkles"
-    }
-  }
-
   @MainActor
   func generateSystemPromptPreview() {
-    self.systemPromptPreview = Self.systemPromptPreviewText(
+    self.systemPromptPreview = CleanupPromptPreview.text(
       model: settings.postProcessingModel,
       outputLanguage: settings.postProcessingOutputLanguage,
       lexiconRuleCount: environment.personalLexicon.rules.count,
       includeLexiconDirectives: settings.postProcessingIncludeLexiconDirectives,
       includeContextTags: settings.postProcessingIncludeContextTags
     )
-  }
-
-  /// Renders the Cleanup Context prompt preview.
-  ///
-  /// Pure so the preview can be exercised in tests: in particular the
-  /// downloaded-local branch consumes `outputLanguage` exactly like the remote
-  /// branch does, which is why the Output Language picker has to be reachable for
-  /// both post-processing locations (issue #852).
-  static func systemPromptPreviewText(
-    model: String,
-    outputLanguage: String,
-    lexiconRuleCount: Int,
-    includeLexiconDirectives: Bool,
-    includeContextTags: Bool
-  ) -> String {
-    if PostProcessingManager.isBuiltInLocalPostProcessingModel(model) {
-      return """
-      The built-in rules cleaner does not send a prompt.
-
-      It runs deterministic local cleanup rules on the raw transcript. Lexicon directives and context tags apply to \
-      remote models and downloaded local LLMs only.
-      """
-    }
-
-    let rawLanguage = outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
-    let language: String
-    if rawLanguage.uppercased() == "ENGB" || rawLanguage.lowercased() == "en_gb" {
-      language = "British English"
-    } else {
-      language = rawLanguage
-    }
-
-    let effectiveSystemPrompt = TranscriptCleanupPolicy.systemPrompt(
-      outputLanguage: language,
-      lexiconDirectives: includeLexiconDirectives
-        ? ["[Example: \(lexiconRuleCount) active correction rules will be inserted here]"]
-        : [],
-      lexiconContextTags: includeContextTags
-        ? ["Tags will be inserted based on active app context"]
-        : []
-    )
-
-    if PostProcessingManager.isDownloadedLocalPostProcessingModel(model) {
-      let localUserPrompt = LocalPostProcessingModelManager.localUserPrompt(
-        systemPrompt: effectiveSystemPrompt,
-        rawText: "{{RAW_TRANSCRIPT}}"
-      )
-      return """
-      System prompt sent to the local model:
-
-      \(LocalPostProcessingModelManager.localSystemPrompt(effectiveSystemPrompt))
-
-      User prompt sent to the local model:
-
-      \(localUserPrompt)
-      """
-    }
-
-    return """
-    System prompt:
-
-    \(effectiveSystemPrompt)
-
-    User message preview:
-
-    \(TranscriptCleanupPolicy.userMessage(transcript: "{{RAW_TRANSCRIPT}}"))
-    """
   }
 }
 
@@ -1261,4 +353,3 @@ struct SettingsView: View {
 // - Hotkey management and configuration: Allow selection of a hotkey, defaulting to the fn key.
 // - Permission management: Let users inspect and validate required permissions.
 // And then any other sections you think are relevant. This should be presented in a concise but user-friendly format.
-// swiftlint:enable file_length type_body_length

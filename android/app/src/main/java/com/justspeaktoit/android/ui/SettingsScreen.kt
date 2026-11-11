@@ -206,7 +206,7 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
                 Switch(checked = state.cleanupEnabled, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_cleanup_note), style = MaterialTheme.typography.bodyMedium)
-            if (state.cleanupEnabled && CloudProvider.OpenRouter !in state.savedKeys) {
+            if (state.cleanupEnabled && CloudCatalog.cleanupProvider !in state.savedKeys) {
                 Text(stringResource(R.string.settings_cleanup_needs_key), color = MaterialTheme.colorScheme.error)
             }
 

@@ -377,12 +377,11 @@ struct KeyboardRootView: View {
         case .targetChanged:
             return "The destination changed, so nothing was inserted. Tap the mic to retry."
         case .profileUnavailable:
-            // The app saves the raw transcript to History before it reports this
-            // failure, so tell the user their words are not lost. A profile that
-            // is unavailable before recording starts records nothing, thus
-            // "Recorded dictation" and not "Your dictation".
+            // Reported both before recording (missing model or credentials,
+            // nothing recorded) and after a failed polish (raw transcript saved
+            // to History), so the copy must hold for either.
             return "This profile is unavailable. Open Just Speak to check its model and credentials. "
-                + "Recorded dictation is saved in the app's History."
+                + "Anything already recorded is saved in the app's History."
         }
     }
 

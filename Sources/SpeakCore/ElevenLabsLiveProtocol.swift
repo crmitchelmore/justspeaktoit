@@ -9,7 +9,7 @@ import FoundationNetworking
 // unit-tested without a socket, the way `DeepgramLiveProtocol` is.
 //
 // Verified against ElevenLabs' realtime speech-to-text reference and the
-// shipping Apple `ElevenLabsLiveTranscriber`: a `/v1/speech-to-text/realtime`
+// former Apple `ElevenLabsLiveTranscriber`: a `/v1/speech-to-text/realtime`
 // socket, `xi-api-key` auth, base64 `input_audio_chunk` frames and
 // `partial_transcript` / `committed_transcript` results under
 // `commit_strategy=vad`, with one manual commit to flush the tail at stop. No

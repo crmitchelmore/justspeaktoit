@@ -209,3 +209,47 @@ final class FirstTranscriptionAnalyticsTests: XCTestCase {
         XCTAssertEqual(FirstTranscriptionAnalytics.provider(for: "mystery"), .other)
     }
 }
+
+@MainActor
+final class SessionRetirementTests: XCTestCase {
+    private var log: [String] = []
+
+    private func makeRetirement() -> SessionRetirement {
+        SessionRetirement(steps: SessionRetirement.Steps(
+            finishAutomationCapture: { [unowned self] id in self.log.append("automation \(id)") },
+            restoreProfile: { [unowned self] in self.log.append("profile") },
+            resumeCaptureWarming: { [unowned self] in self.log.append("warming") },
+            releaseDictationCapture: { [unowned self] in self.log.append("capture") },
+            resumeKeyPressPriming: { [unowned self] in self.log.append("primer") }
+        ))
+    }
+
+    func testRetire_runsEveryStepInOrder() {
+        let session = ActiveSession(gesture: .uiButton, hotKeyDescription: "Fn")
+
+        makeRetirement().retire(session)
+
+        XCTAssertEqual(log, ["profile", "warming", "capture", "primer"])
+    }
+
+    func testRetire_finishesALocalAutomationCaptureFirst() {
+        let session = ActiveSession(gesture: .uiButton, hotKeyDescription: "Fn", trigger: .automation)
+        session.isLocalAutomationCapture = true
+
+        makeRetirement().retire(session)
+
+        XCTAssertEqual(log, ["automation \(session.id)", "profile", "warming", "capture", "primer"])
+    }
+
+    func testRetire_withoutASessionStillRestoresAndReleases() {
+        makeRetirement().retire(nil)
+
+        XCTAssertEqual(log, ["profile", "warming", "capture", "primer"])
+    }
+
+    func testAbandonStart_onlyUndoesWhatAStartTookBeforeASessionExisted() {
+        makeRetirement().abandonStart()
+
+        XCTAssertEqual(log, ["profile", "warming"], "Nothing was reserved, so capture and the primer are untouched")
+    }
+}

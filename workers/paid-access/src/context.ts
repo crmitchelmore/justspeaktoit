@@ -73,11 +73,11 @@ export async function authenticate(
     throw new ApiError('unauthorized', 'Access token is not valid');
   }
 
-  const user = await context.repository.findUserById(session.userId);
+  const user = await context.repository.users.findUserById(session.userId);
   if (user === null || user.disabledAt !== null) {
     throw new ApiError('unauthorized', 'Access token is not valid');
   }
-  if (!(await context.repository.isAuthSessionActive(session.sessionId, context.nowSeconds))) {
+  if (!(await context.repository.users.isAuthSessionActive(session.sessionId, context.nowSeconds))) {
     // Sign-out and refresh reuse detection revoke the session row; an access
     // token minted before that must stop working immediately.
     throw new ApiError('unauthorized', 'Access token is not valid');

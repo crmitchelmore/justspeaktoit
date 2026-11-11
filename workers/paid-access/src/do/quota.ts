@@ -456,7 +456,7 @@ export class QuotaDurableObject implements DurableObject {
     if (receipt?.phase !== 'ledger_pending' || receipt.lastFailure === 'ledger_conflict') return;
     let result: 'matched' | 'conflict' | 'unavailable';
     try {
-      result = await new Repository(this.env.DB).reconcileUsage({ ledgerEntryId: receipt.ledgerEntryId,
+      result = await new Repository(this.env.DB).usage.reconcileUsage({ ledgerEntryId: receipt.ledgerEntryId,
         userId: receipt.userId, idempotencyKey: receipt.idempotencyKey, operation: receipt.operation,
         provider: receipt.provider, model: receipt.model, unitKind: receipt.unitKind,
         units: receipt.actualUnits!, billingPeriod: receipt.billingPeriod,
@@ -483,7 +483,7 @@ export class QuotaDurableObject implements DurableObject {
     });
     // Claims are only a projection. Their failure cannot undo durable settlement.
     if (result === 'matched') {
-      await new Repository(this.env.DB).completeRequestClaim({ userId: receipt.userId,
+      await new Repository(this.env.DB).usage.completeRequestClaim({ userId: receipt.userId,
         idempotencyKey: key, nowSeconds: Math.floor(Date.now() / 1000) }).catch(() => undefined);
     }
   }

@@ -58,7 +58,7 @@ export async function transitionEntitlement(
   },
 ): Promise<{ applied: boolean; entitlement: Entitlement }> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const current = await context.repository.ensureSubscription(
+    const current = await context.repository.entitlements.ensureSubscription(
       input.userId, input.source, input.sourceReference, context.nowSeconds,
     );
     const outcome = applyUpdate(
@@ -78,10 +78,10 @@ export async function transitionEntitlement(
     );
 
     if (outcome.kind === 'stale') {
-      return { applied: false, entitlement: (await context.repository.findEntitlement(input.userId, context.nowSeconds))! };
+      return { applied: false, entitlement: (await context.repository.entitlements.findEntitlement(input.userId, context.nowSeconds))! };
     }
 
-    const written = await context.repository.writeEntitlementTransition({
+    const written = await context.repository.entitlements.writeEntitlementTransition({
       next: outcome.next,
       expectedVersion: current.version,
       scopeToSubscription: true,
@@ -93,14 +93,14 @@ export async function transitionEntitlement(
       nowSeconds: context.nowSeconds,
     });
     if (written) {
-      return { applied: true, entitlement: (await context.repository.findEntitlement(input.userId, context.nowSeconds))! };
+      return { applied: true, entitlement: (await context.repository.entitlements.findEntitlement(input.userId, context.nowSeconds))! };
     }
   }
   throw new ApiError('conflict', 'Entitlement is being updated concurrently; retry');
 }
 
 export async function handleEntitlement(context: AuthenticatedContext): Promise<Response> {
-  const entitlement = await context.repository.ensureEntitlement(
+  const entitlement = await context.repository.entitlements.ensureEntitlement(
     context.session.userId,
     context.nowSeconds,
   );
@@ -179,21 +179,21 @@ function requireDirectChannel(body: CheckoutBody): void {
 }
 
 async function stripeCustomerFor(context: AuthenticatedContext): Promise<string> {
-  const existing = await context.repository.findBillingCustomer(context.session.userId, 'stripe');
+  const existing = await context.repository.entitlements.findBillingCustomer(context.session.userId, 'stripe');
   if (existing !== null) return existing;
 
   const stripe = new StripeClient(
     requireSecret(context.env, 'STRIPE_SECRET_KEY'),
     context.config.upstreamTimeoutMs,
   );
-  const user = await context.repository.findUserById(context.session.userId);
+  const user = await context.repository.users.findUserById(context.session.userId);
   const customer = await stripe.createCustomer({
     userId: context.session.userId,
     email: user?.email ?? null,
     // Stable key: retries reuse the same Stripe customer instead of creating one per attempt.
     idempotencyKey: `customer:${context.session.userId}`,
   });
-  await context.repository.linkBillingCustomer({
+  await context.repository.entitlements.linkBillingCustomer({
     userId: context.session.userId,
     provider: 'stripe',
     providerCustomerId: customer.id,
@@ -226,7 +226,7 @@ export async function handleStripeCheckout(
     idempotencyKey: `checkout:${context.session.userId}:${context.correlationId}`,
   });
 
-  await context.repository.recordAudit({
+  await context.repository.audit.recordAudit({
     userId: context.session.userId,
     actor: 'user',
     action: 'billing.stripe.checkout_created',
@@ -249,7 +249,7 @@ export async function handleStripePortal(
   const body = await readJson<CheckoutBody>(request, MAX_BILLING_BODY_BYTES);
   requireDirectChannel(body);
 
-  const customerId = await context.repository.findBillingCustomer(
+  const customerId = await context.repository.entitlements.findBillingCustomer(
     context.session.userId,
     'stripe',
   );
@@ -307,7 +307,7 @@ export async function handleStoreKitSync(
   } catch (error) {
     const foreign = error instanceof StoreKitError && error.reason === 'not_this_account';
     context.logger.warn('billing.storekit.rejected', { foreign });
-    await context.repository.recordAudit({
+    await context.repository.audit.recordAudit({
       userId: context.session.userId,
       actor: 'user',
       action: 'billing.storekit.sync',
@@ -351,7 +351,7 @@ export async function handleStoreKitSync(
 
   // A subscription may only ever belong to one account. Without this, a shared
   // Apple ID receipt could grant paid access to unlimited accounts.
-  const owner = await context.repository.findUserIdBySourceReference(
+  const owner = await context.repository.entitlements.findUserIdBySourceReference(
     'storekit',
     view.originalTransactionId,
   );
@@ -363,7 +363,7 @@ export async function handleStoreKitSync(
   // The unique constraint on the billing customer is the real guard, so a
   // constraint failure is reported as the same conflict rather than a 500.
   try {
-    await context.repository.linkBillingCustomer({
+    await context.repository.entitlements.linkBillingCustomer({
       userId: context.session.userId,
       provider: 'storekit',
       providerCustomerId: view.originalTransactionId,

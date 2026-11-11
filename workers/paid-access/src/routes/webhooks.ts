@@ -43,7 +43,7 @@ async function acknowledgeIllegalTransition(
   eventType: string,
   error: EntitlementTransitionError,
 ): Promise<Response> {
-  await context.repository.completeWebhookEvent({
+  await context.repository.entitlements.completeWebhookEvent({
     provider,
     eventId,
     status: 'ignored',
@@ -80,7 +80,7 @@ export async function handleStripeWebhook(
     throw new ApiError('unauthorized', 'Stripe signature verification failed');
   }
 
-  const claimed = await context.repository.claimWebhookEvent({
+  const claimed = await context.repository.entitlements.claimWebhookEvent({
     provider: 'stripe',
     eventId: event.id,
     eventType: event.type,
@@ -96,7 +96,7 @@ export async function handleStripeWebhook(
   try {
     const view = subscriptionView(event);
     if (view === null) {
-      await context.repository.completeWebhookEvent({
+      await context.repository.entitlements.completeWebhookEvent({
         provider: 'stripe',
         eventId: event.id,
         status: 'ignored',
@@ -117,7 +117,7 @@ export async function handleStripeWebhook(
     // failure that costs us money rather than protecting it.
     const grantsAccess = view.status !== 'expired';
     if (grantsAccess && !view.priceIds.some((id) => context.config.stripePriceIds.includes(id))) {
-      await context.repository.completeWebhookEvent({
+      await context.repository.entitlements.completeWebhookEvent({
         provider: 'stripe',
         eventId: event.id,
         status: 'ignored',
@@ -133,9 +133,9 @@ export async function handleStripeWebhook(
     // dashboard and by anything holding an API key, so it is only ever a
     // cross-check: if it disagrees with the mapping, something is wrong and the
     // safe move is to change nothing.
-    const userId = await context.repository.findUserByBillingCustomer('stripe', view.customerId);
+    const userId = await context.repository.entitlements.findUserByBillingCustomer('stripe', view.customerId);
     if (userId !== null && view.userIdHint !== null && view.userIdHint !== userId) {
-      await context.repository.completeWebhookEvent({
+      await context.repository.entitlements.completeWebhookEvent({
         provider: 'stripe',
         eventId: event.id,
         status: 'failed',
@@ -151,9 +151,9 @@ export async function handleStripeWebhook(
     // product on the same Stripe customer, or a previous subscription of ours.
     // It may only apply to the subscription the entitlement actually names.
     if (!grantsAccess && userId !== null) {
-      const owner = await context.repository.findUserIdBySourceReference('stripe', view.subscriptionId);
+      const owner = await context.repository.entitlements.findUserIdBySourceReference('stripe', view.subscriptionId);
       if (owner !== userId) {
-        await context.repository.completeWebhookEvent({
+        await context.repository.entitlements.completeWebhookEvent({
           provider: 'stripe',
           eventId: event.id,
           status: 'ignored',
@@ -171,7 +171,7 @@ export async function handleStripeWebhook(
     if (userId === null) {
       // The subscription exists but we cannot attribute it. Recording this as
       // failed keeps it visible for reconciliation instead of silently dropping.
-      await context.repository.completeWebhookEvent({
+      await context.repository.entitlements.completeWebhookEvent({
         provider: 'stripe',
         eventId: event.id,
         status: 'failed',
@@ -208,14 +208,14 @@ export async function handleStripeWebhook(
       return acknowledgeIllegalTransition(context, 'stripe', event.id, event.type, error);
     }
 
-    await context.repository.completeWebhookEvent({
+    await context.repository.entitlements.completeWebhookEvent({
       provider: 'stripe',
       eventId: event.id,
       status: 'processed',
       failureReason: null,
       nowSeconds: context.nowSeconds,
     });
-    await context.repository.recordAudit({
+    await context.repository.audit.recordAudit({
       userId,
       actor: 'webhook',
       action: `webhook.stripe.${event.type}`,
@@ -229,7 +229,7 @@ export async function handleStripeWebhook(
     // A processing failure is transient by assumption, so the claim is released
     // and the provider's retry is processed instead of being answered as a
     // duplicate and dropped for ever.
-    await context.repository.releaseWebhookClaim({ provider: 'stripe', eventId: event.id });
+    await context.repository.entitlements.releaseWebhookClaim({ provider: 'stripe', eventId: event.id });
     context.logger.error('webhook.stripe.failed', {
       event_type: event.type,
       reason: error instanceof Error ? error.name : 'unknown',
@@ -271,7 +271,7 @@ export async function handleAppStoreWebhook(
   }
 
   const notificationId = notification.notificationUUID as string;
-  const claimed = await context.repository.claimWebhookEvent({
+  const claimed = await context.repository.entitlements.claimWebhookEvent({
     provider: 'appstore',
     eventId: notificationId,
     eventType: notification.notificationType ?? 'unknown',
@@ -287,7 +287,7 @@ export async function handleAppStoreWebhook(
   try {
     const signedTransaction = notification.data?.signedTransactionInfo;
     if (typeof signedTransaction !== 'string') {
-      await context.repository.completeWebhookEvent({
+      await context.repository.entitlements.completeWebhookEvent({
         provider: 'appstore',
         eventId: notificationId,
         status: 'ignored',
@@ -336,7 +336,7 @@ export async function handleAppStoreWebhook(
       throw new ApiError('bad_request', 'Notification transaction has no original transaction id');
     }
 
-    const userId = await context.repository.findUserByBillingCustomer(
+    const userId = await context.repository.entitlements.findUserByBillingCustomer(
       'storekit',
       originalTransactionId,
     );
@@ -344,7 +344,7 @@ export async function handleAppStoreWebhook(
       // Apple can notify before the client has synced its first transaction.
       // Recording as ignored is correct: the next client sync establishes the
       // link and reads current state directly from the signed transaction.
-      await context.repository.completeWebhookEvent({
+      await context.repository.entitlements.completeWebhookEvent({
         provider: 'appstore',
         eventId: notificationId,
         status: 'ignored',
@@ -382,7 +382,7 @@ export async function handleAppStoreWebhook(
       );
     }
 
-    await context.repository.completeWebhookEvent({
+    await context.repository.entitlements.completeWebhookEvent({
       provider: 'appstore',
       eventId: notificationId,
       status: 'processed',
@@ -393,7 +393,7 @@ export async function handleAppStoreWebhook(
       notification_type: notification.notificationType ?? 'unknown',
     });
   } catch (error) {
-    await context.repository.releaseWebhookClaim({
+    await context.repository.entitlements.releaseWebhookClaim({
       provider: 'appstore',
       eventId: notificationId,
     });

@@ -13,8 +13,17 @@
 
 namespace {
 enum Control {
-    introID = 1100, listLabelID, listID, detailID, keyLabelID, keyID, saveID, removeID, validateID, linkID, statusID
+    introID = 1100, listLabelID, listID, detailID, keyLabelID, keyID, saveID, removeID, validateID, linkID, statusID,
+    filterLabelID, filterID
 };
+// SpeakCore's APIKeyStatusFilter cases in order; a row passes filter `i` when
+// bit `i` of its host-computed mask is set, so the predicate stays shared.
+constexpr const wchar_t *filterNames[] = {L"All", L"Errors", L"Set", L"Unset"};
+constexpr const wchar_t *emptyMessages[] = {
+    L"No provider keys are available.", L"No key failed its last check.", L"No API key is saved yet.",
+    L"Every provider has a saved key."
+};
+constexpr int filterCount = 4;
 constexpr UINT refreshMessage = WM_APP + 97;
 constexpr DWORD windowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
 constexpr DWORD windowExStyle = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
@@ -25,6 +34,7 @@ struct Row {
     std::string identifier;
     std::wstring label, uses, status, url, hint;
     bool saved = false;
+    uint32_t filters = 1;
 };
 
 struct Configuration {
@@ -53,6 +63,8 @@ struct Dialog {
     HWND focus = nullptr;
     std::vector<HWND> controls;
     int selected = 0;
+    int filter = 0;
+    std::vector<size_t> visible; // List index -> row index for the current filter.
     bool busy = false;
 };
 
@@ -79,7 +91,9 @@ void layout(HWND window) {
     const int detailTop = keyTop - gap - detailHeight;
     const int listTop = at(82);
     move(introID, margin, at(14), width, at(40));
-    move(listLabelID, margin, at(58), width, at(22));
+    move(listLabelID, margin, at(58), width - at(230), at(22));
+    move(filterLabelID, margin + width - at(220), at(58), at(56), at(22));
+    move(filterID, margin + width - at(160), at(54), at(160), at(160));
     move(listID, margin, listTop, width, std::max(at(96), detailTop - gap - listTop));
     move(detailID, margin, detailTop, width, detailHeight);
     move(keyLabelID, margin, keyTop + at(4), at(120), at(22));
@@ -121,6 +135,7 @@ void updateActions(HWND window, Dialog &dialog) {
     EnableWindow(GetDlgItem(window, linkID), row && !row->url.empty());
     EnableWindow(GetDlgItem(window, keyID), row != nullptr && !dialog.busy);
     std::wstring detail;
+    if (dialog.visible.empty()) detail = emptyMessages[dialog.filter];
     if (row) {
         detail = L"Used for: " + row->uses + L"\r\n" + row->status;
         if (!row->hint.empty()) detail += L"\r\n" + row->hint;
@@ -133,16 +148,21 @@ bool populate(HWND window, Dialog &dialog, const std::string &keep) {
     SendMessageW(list, WM_SETREDRAW, FALSE, 0);
     SendMessageW(list, LB_RESETCONTENT, 0, 0);
     bool okay = true;
+    int position = -1;
+    dialog.visible.clear();
     for (size_t index = 0; index < dialog.config.rows.size(); ++index) {
         const Row &row = dialog.config.rows[index];
+        if ((row.filters & (1u << dialog.filter)) == 0) continue;
         const std::wstring text = row.label + L" — " + row.status;
         const LRESULT added = SendMessageW(list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text.c_str()));
         if (added == LB_ERR || added == LB_ERRSPACE) { okay = false; break; }
-        if (!keep.empty() && row.identifier == keep) dialog.selected = static_cast<int>(index);
+        if (!keep.empty() && row.identifier == keep) position = static_cast<int>(dialog.visible.size());
+        dialog.visible.push_back(index);
     }
-    if (dialog.config.rows.empty()) dialog.selected = -1;
-    else dialog.selected = std::min(std::max(dialog.selected, 0), static_cast<int>(dialog.config.rows.size()) - 1);
-    SendMessageW(list, LB_SETCURSEL, static_cast<WPARAM>(dialog.selected), 0);
+    if (dialog.visible.empty()) position = -1;
+    else position = std::max(position, 0);
+    dialog.selected = position < 0 ? -1 : static_cast<int>(dialog.visible[static_cast<size_t>(position)]);
+    SendMessageW(list, LB_SETCURSEL, static_cast<WPARAM>(position), 0);
     SendMessageW(list, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(list, nullptr, TRUE);
     SetDlgItemTextW(window, statusID, dialog.config.status.c_str());
@@ -163,6 +183,8 @@ bool createControls(HWND window, Dialog &dialog) {
         add(L"STATIC", L"Keys stay in Windows Credential Manager and are shared with the Transcription and Voice "
             L"settings. Only the last four characters are ever shown.", SS_LEFT, introID) &&
         add(L"STATIC", L"&Providers", 0, listLabelID) &&
+        add(L"STATIC", L"Sho&w", 0, filterLabelID) &&
+        add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, filterID) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP, listID) &&
         add(L"STATIC", L"", SS_LEFT, detailID) &&
         add(L"STATIC", L"API &key", 0, keyLabelID) &&
@@ -175,6 +197,10 @@ bool createControls(HWND window, Dialog &dialog) {
         add(L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, IDCANCEL);
     if (!okay) return false;
     SendDlgItemMessageW(window, keyID, EM_SETLIMITTEXT, keyCapacity - 1, 0);
+    for (const wchar_t *name : filterNames) {
+        SendDlgItemMessageW(window, filterID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name));
+    }
+    SendDlgItemMessageW(window, filterID, CB_SETCURSEL, 0, 0);
     refreshFont(window, dialog);
     layout(window);
     return populate(window, dialog, {});
@@ -267,9 +293,21 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case listID:
             if (HIWORD(wparam) == LBN_SELCHANGE) {
                 const LRESULT chosen = SendDlgItemMessageW(window, listID, LB_GETCURSEL, 0, 0);
-                dialog->selected = chosen == LB_ERR ? -1 : static_cast<int>(chosen);
+                dialog->selected = chosen == LB_ERR || static_cast<size_t>(chosen) >= dialog->visible.size()
+                    ? -1 : static_cast<int>(dialog->visible[static_cast<size_t>(chosen)]);
                 SetDlgItemTextW(window, keyID, L"");
                 updateActions(window, *dialog);
+            }
+            return 0;
+        case filterID:
+            if (HIWORD(wparam) == CBN_SELCHANGE) {
+                const LRESULT chosen = SendDlgItemMessageW(window, filterID, CB_GETCURSEL, 0, 0);
+                if (chosen == CB_ERR || chosen >= filterCount) return 0;
+                const Row *row = selectedRow(*dialog);
+                const std::string keep = row ? row->identifier : std::string();
+                dialog->filter = static_cast<int>(chosen);
+                SetDlgItemTextW(window, keyID, L"");
+                populate(window, *dialog, keep);
             }
             return 0;
         case keyID: if (HIWORD(wparam) == EN_CHANGE) updateActions(window, *dialog); return 0;
@@ -376,6 +414,7 @@ int jsti_window_set_api_keys(const JSTIAPIKeyRow *rows, size_t count, const char
             }
             row.identifier = source.identifier;
             row.saved = source.saved == 1;
+            row.filters = source.filters;
             updated.rows.push_back(std::move(row));
         }
         if (status && (!jsti::wide(status, updated.status) || updated.status.size() > 1024)) return -1;
@@ -417,10 +456,11 @@ bool jsti_api_keys_self_test(HWND owner, std::string &error) {
     bool passed = false;
     try {
         JSTIAPIKeyRow rows[] = {
-            {"openrouter.apiKey", "OpenRouter", "Post-processing", "Not set", "https://openrouter.ai/keys", "", 0},
+            {"openrouter.apiKey", "OpenRouter", "Post-processing", "Not set", "https://openrouter.ai/keys", "", 0,
+             0b1001},
             {"openai.apiKey", "OpenAI", "Transcription",
              "Saved \xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2" "abcd",
-             "https://platform.openai.com/api-keys", "", 1}
+             "https://platform.openai.com/api-keys", "", 1, 0b0101}
         };
         JSTIAPIKeyRow insecure = rows[0];
         insecure.url = "http://openrouter.ai/keys";
@@ -444,6 +484,11 @@ bool jsti_api_keys_self_test(HWND owner, std::string &error) {
                     SendMessageW(window, WM_COMMAND, MAKEWPARAM(listID, LBN_SELCHANGE), 0);
                 };
                 auto click = [&](int id) { SendMessageW(window, WM_COMMAND, MAKEWPARAM(id, BN_CLICKED), 0); };
+                auto show = [&](int filter) {
+                    SendDlgItemMessageW(window, filterID, CB_SETCURSEL, static_cast<WPARAM>(filter), 0);
+                    SendMessageW(window, WM_COMMAND, MAKEWPARAM(filterID, CBN_SELCHANGE), 0);
+                };
+                auto count = [&] { return SendDlgItemMessageW(window, listID, LB_GETCOUNT, 0, 0); };
                 auto enabled = [&](int id) { return IsWindowEnabled(GetDlgItem(window, id)) != FALSE; };
                 auto type = [&](const wchar_t *text) {
                     SetDlgItemTextW(window, keyID, text);
@@ -453,7 +498,15 @@ bool jsti_api_keys_self_test(HWND owner, std::string &error) {
                     jsti_window_set_api_keys(rows, 2, status, recordAPIKeyAction, &calls);
                     SendMessageW(window, refreshMessage, 0, 0);
                 };
-                const bool listed = SendDlgItemMessageW(window, listID, LB_GETCOUNT, 0, 0) == 2;
+                const bool listed = count() == 2;
+                show(2);
+                const bool setOnly = count() == 1 && dialog.selected == 1;
+                show(1);
+                const bool noErrors = count() == 0 && dialog.selected == -1 && !enabled(saveID);
+                show(3);
+                const bool unsetOnly = count() == 1 && dialog.selected == 0;
+                show(0);
+                const bool filtered = setOnly && noErrors && unsetOnly && count() == 2;
                 select(0);
                 const bool unsaved = !enabled(saveID) && !enabled(removeID) && !enabled(validateID) && enabled(linkID);
                 type(L"sk-or-fixture-0000");
@@ -462,6 +515,7 @@ bool jsti_api_keys_self_test(HWND owner, std::string &error) {
                 const bool wiped = GetWindowTextLengthW(GetDlgItem(window, keyID)) == 0;
                 const bool busy = dialog.busy && !enabled(saveID) && !enabled(validateID) && !enabled(keyID);
                 rows[0].saved = 1;
+                rows[0].filters = 0b0101;
                 rows[0].status = "Saved \xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2" "0000";
                 refresh("OpenRouter API key saved and validated successfully.");
                 wchar_t replace[32] = {};
@@ -486,7 +540,7 @@ bool jsti_api_keys_self_test(HWND owner, std::string &error) {
                     Call{JSTI_API_KEY_VALIDATE, "openai.apiKey", "<none>"},
                     Call{JSTI_API_KEY_REMOVE, "openai.apiKey", "<none>"}
                 };
-                passed = listed && unsaved && typed && wiped && busy && kept && declined && closed && calls == expected;
+                passed = listed && filtered && unsaved && typed && wiped && busy && kept && declined && closed && calls == expected;
                 if (!passed) error = "The API keys dialog did not match its row states or reported the wrong action.";
             }
         }

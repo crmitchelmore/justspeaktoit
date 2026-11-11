@@ -72,19 +72,20 @@ final class SiteMediaCaptureUITests: XCTestCase {
     private func showSettings() {
         let settings = app.buttons["settingsNavLink"]
         XCTAssertTrue(settings.waitForExistence(timeout: Self.elementTimeout))
-        settings.tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: Self.elementTimeout))
+        XCTAssertTrue(
+            app.tap(settings, until: app.navigationBars["Settings"], inChrome: true, timeout: Self.elementTimeout)
+        )
         mark("settings")
         pause(2)
         save("ios-settings")
-        openSettingsPage("transcription")
+        openSettingsPage("transcription", title: "Transcription")
         if scrollUpUntilExists(app.segmentedControls["transcriptionLocationPicker"]) {
             mark("models")
             pause(3)
             save("ios-models")
         }
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        openSettingsPage("recording")
+        openSettingsPage("recording", title: "Recording & Shortcuts")
         let trigger = app.buttons["hardwareTriggerSettingsLink"]
         if scrollUpUntilExists(trigger) {
             trigger.tap()
@@ -97,11 +98,14 @@ final class SiteMediaCaptureUITests: XCTestCase {
         }
     }
 
-    private func openSettingsPage(_ page: String) {
+    private func openSettingsPage(_ page: String, title: String) {
         let link = app.buttons["settingsPage.\(page)"]
-        XCTAssertTrue(scrollUpUntilExists(link), "settingsPage.\(page) not found in Settings")
-        link.tap()
-        XCTAssertTrue(link.waitForNonExistence(timeout: Self.elementTimeout), "settingsPage.\(page) did not open")
+        // A tap sent while the list is still scrolling or the back transition is
+        // settling was dropped on hosted runners (runs 43063865700, 43067848016).
+        XCTAssertTrue(
+            app.tap(link, until: app.navigationBars[title], timeout: Self.elementTimeout),
+            "settingsPage.\(page) did not open"
+        )
     }
 
     private func scrollUpUntilExists(_ element: XCUIElement, maxSwipes: Int = 6) -> Bool {

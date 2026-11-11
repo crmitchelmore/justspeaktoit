@@ -222,8 +222,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     case .modulate: return controllers.modulate
     case .elevenlabs: return controllers.elevenlabs
     case .soniox: return controllers.soniox
-    case .cartesia: return controllers.cartesia
-    case .assemblyai, .gladia, .google, .xai, .azure, .alibaba, .meta, .speechmatics, .revai, .mistral, .reson8:
+    case .assemblyai, .cartesia, .gladia, .google, .xai, .azure, .alibaba, .meta, .speechmatics, .revai,
+         .mistral, .reson8:
       return controllers.sharedClient
     }
   }
@@ -398,7 +398,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     let modulate: ModulateLiveController
     let elevenlabs: ElevenLabsLiveController
     let soniox: SonioxLiveController
-    let cartesia: CartesiaLiveController
     let openAIRealtime: OpenAIRealtimeLiveController
     let sharedClient: SharedClientLiveController
     let fluidAudio: FluidAudioParakeetLiveController
@@ -449,12 +448,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         audioDeviceManager: audioDeviceManager,
         secureStorage: secureStorage
       )
-      cartesia = CartesiaLiveController(
-        appSettings: appSettings,
-        permissionsManager: permissionsManager,
-        audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
-      )
       openAIRealtime = OpenAIRealtimeLiveController(
         appSettings: appSettings,
         permissionsManager: permissionsManager,
@@ -497,7 +490,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         modulate,
         elevenlabs,
         soniox,
-        cartesia,
         openAIRealtime,
         sharedClient,
         whisperKit,

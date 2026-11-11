@@ -199,10 +199,9 @@ a default-device switch, rather than building an engine the next press will disc
 
 [SwitchingLiveTranscriber.swift](../Sources/SpeakApp/SwitchingLiveTranscriber.swift) is deliberately mixed today:
 
-- dedicated macOS controllers handle Deepgram, Modulate, ElevenLabs, Soniox, Cartesia, Gladia and OpenAI
-  Realtime;
-- `SharedClientLiveController` supplies macOS capture for the shared `SpeakCore` clients used by AssemblyAI, Gemini live, xAI,
-  Azure, Meta, Speechmatics, Rev.ai and Mistral;
+- a dedicated macOS controller handles OpenAI Realtime;
+- `SharedClientLiveController` supplies macOS capture for the shared `SpeakCore` clients used by every other cloud
+  provider, including Deepgram, Modulate, ElevenLabs, Soniox, Cartesia, Gladia and AssemblyAI;
 - Apple legacy/analyzer, FluidAudio Parakeet, WhisperKit and the non-App-Store sherpa-onnx runtime have local controllers.
 
 Azure's shared catalogue distinguishes the legacy turn-based `mai-transcribe` alias
@@ -442,8 +441,7 @@ been eliminated.
   A live provider is registered in `ModelCatalog`, `LiveTranscriptionProviderID` and a
   `LiveTranscriptionClientFactory` case. The Mac's `SwitchingLiveTranscriber` chooses a cloud controller with an
   exhaustive switch over `LiveTranscriptionProviderID`, so a new case fails to compile until it is assigned (normally
-  the shared client); Deepgram, Modulate, ElevenLabs, Soniox and Cartesia keep dedicated Mac controllers and OpenAI
-  keeps its platform adapters. `ProviderCatalogueCoverageTests` fails when a catalogued live model has no factory
+  the shared client); only OpenAI keeps its platform adapters. `ProviderCatalogueCoverageTests` fails when a catalogued live model has no factory
   client, and `BatchCatalogueCoverageTests` when a batch model has no route on either platform.
   AssemblyAI's bounded shared-route fold and outstanding provider/device gates are recorded in
   [the parity inventory](assemblyai-shared-live-parity.md).

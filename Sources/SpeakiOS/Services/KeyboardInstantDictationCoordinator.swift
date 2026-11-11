@@ -377,7 +377,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
     private func beginRecording(for record: KeyboardHandoffRecord, requestedAt: Date) async {
         let requestID = record.requestID
         guard activeRequestID == nil, !recordingService.isRunning else {
-            _ = try? handoffStore.fail(requestID: requestID, code: .recordingUnavailable)
+            failStart(requestID: requestID, stage: .busy)
             return
         }
         let settings = AppSettings.shared
@@ -389,12 +389,12 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
                     purpose: profile.transcriptionMode == .batch ? .batchTranscription : .liveTranscription
                 )
             } catch {
-                _ = try? handoffStore.fail(requestID: requestID, code: .recordingUnavailable)
+                failStart(requestID: requestID, stage: .credentials, error: error)
                 return
             }
         }
         guard let profile = record.profile, profileIsAvailable(profile) else {
-            _ = try? handoffStore.fail(requestID: requestID, code: .profileUnavailable)
+            failStart(requestID: requestID, stage: .profile)
             return
         }
 
@@ -421,11 +421,45 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         } catch {
             partialTranscriptObservation = nil
             recordingService.cancelRecording()
-            _ = try? handoffStore.fail(requestID: requestID, code: .recordingUnavailable)
+            failStart(requestID: requestID, stage: .recording, error: error)
             activeRequestID = nil
             activeProfile = nil
             await resumeReadinessAfterRequest()
         }
+    }
+
+    /// Fails a hand-off start with the code that says what actually went
+    /// wrong, and logs a privacy-safe line naming the stage, app state and
+    /// audio error so a device report is diagnosable (issue #1469).
+    private func failStart(
+        requestID: UUID,
+        stage: KeyboardHandoffStartDiagnosis.Stage,
+        error: Error? = nil
+    ) {
+        let cause = error.map(Self.audioCause(of:))
+        let inForeground = UIApplication.shared.applicationState != .background
+        let summary = KeyboardHandoffStartDiagnosis.diagnosticSummary(
+            stage: stage, error: cause, applicationIsInForeground: inForeground
+        )
+        SpeakLogger.transcription.error("Keyboard hand-off start failed: \(summary, privacy: .public)")
+        _ = try? handoffStore.fail(
+            requestID: requestID,
+            code: KeyboardHandoffStartDiagnosis.failureCode(
+                stage: stage, error: cause, applicationIsInForeground: inForeground
+            )
+        )
+    }
+
+    /// The `AVAudioSession` error behind a wrapped transcriber start failure.
+    static func audioCause(of error: Error) -> Error {
+        var cause = error
+        if case let iOSTranscriptionError.audioSessionFailed(inner) = cause {
+            cause = inner
+        }
+        if let configuration = cause as? AudioSessionConfigurationError {
+            return configuration.underlying
+        }
+        return cause
     }
 
     func finishRecording(for requestID: UUID) async {
@@ -616,10 +650,13 @@ private final class KeyboardReadinessAudioSession {
     func start() throws {
         guard !engine.isRunning else { return }
         let session = AVAudioSession.sharedInstance()
+        // Same category, mode and options as a background recording start,
+        // so a keyboard hand-off never reconfigures this active session from
+        // the background (issue #1469).
         try session.setCategory(
             .playAndRecord,
             mode: .measurement,
-            options: [.mixWithOthers, .allowBluetoothHFP]
+            options: AudioSessionManager.mixableRecordingOptions
         )
         try session.setActive(true)
 

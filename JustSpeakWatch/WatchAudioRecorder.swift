@@ -117,8 +117,16 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
         guard !isRecording else { return }
 
         await recoverInterruptedCapture()
-        guard activeCaptureRegistry.load() == nil else {
+        switch activeCaptureRegistry.loadMarker() {
+        case .absent:
+            break
+        case .present:
             lastError = "The previous recording is still waiting to be recovered."
+            return
+        case .unreadable, .corrupt:
+            // Recovery has already said why. Recording would replace the
+            // marker, so it waits until the marker can be read or set aside.
+            if lastError == nil { lastError = Self.unreadableMarkerMessage }
             return
         }
 
@@ -191,7 +199,22 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
     func recoverInterruptedCapture() async {
         guard !didRecoverInterruptedCapture else { return }
         didRecoverInterruptedCapture = true
-        guard let capture = activeCaptureRegistry.load() else { return }
+        let capture: WatchActiveCapture
+        switch activeCaptureRegistry.loadMarker() {
+        case .absent:
+            return
+        case .present(let marker):
+            capture = marker
+        case .unreadable:
+            // Possibly locked by data protection. Keep it and try again on the
+            // next start rather than mistaking it for no pending recording.
+            didRecoverInterruptedCapture = false
+            lastError = Self.unreadableMarkerMessage
+            return
+        case .corrupt:
+            setAsideCorruptMarker()
+            return
+        }
 
         // A crash between queue persistence and marker cleanup must not create
         // a duplicate transfer on the next launch.
@@ -303,6 +326,24 @@ final class WatchAudioRecorder: NSObject, ObservableObject {
                 allowRecoveryRetry(for: finalisation.capture)
                 lastError = "Recording was queued, but recovery cleanup was deferred."
             }
+        }
+    }
+
+    private static let unreadableMarkerMessage =
+        "The previous recording's state couldn't be read yet. Try again in a moment."
+
+    /// A marker that cannot decode names no capture we can finish. Keep its
+    /// bytes under another name and tell the user, rather than deleting it or
+    /// letting the next recording overwrite it. Audio files are left alone.
+    private func setAsideCorruptMarker() {
+        do {
+            try activeCaptureRegistry.quarantineCorruptMarker()
+            lastError = "The previous recording's state was damaged and has been set aside. "
+                + "Its audio is still on the watch."
+        } catch {
+            didRecoverInterruptedCapture = false
+            lastError = "The previous recording's state is damaged and could not be set aside: "
+                + error.localizedDescription
         }
     }
 

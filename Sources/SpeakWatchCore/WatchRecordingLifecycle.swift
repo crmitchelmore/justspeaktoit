@@ -53,6 +53,38 @@ public struct WatchActiveCapture: Codable, Equatable, Sendable {
     }
 }
 
+/// What is on disk where the active-capture marker lives.
+///
+/// A damaged marker is not the same as no marker: it may still name audio
+/// that has not reached the queue, so callers must neither treat it as absent
+/// nor overwrite it.
+public enum WatchActiveCaptureMarker: Equatable, Sendable {
+    /// No marker: nothing is waiting to be recovered.
+    case absent
+    /// A readable marker for a capture that has not reached the queue.
+    case present(WatchActiveCapture)
+    /// The marker exists but could not be read, for example while data
+    /// protection still locks it. Possibly transient: leave it and retry.
+    case unreadable(reason: String)
+    /// The marker was read but does not decode. It will not get better, so
+    /// `quarantineCorruptMarker()` preserves it under another name.
+    case corrupt(reason: String)
+}
+
+public enum WatchActiveCaptureRegistryError: LocalizedError, Equatable {
+    /// `persist` refuses to replace a marker it cannot read.
+    case damagedMarker
+    /// `quarantineCorruptMarker` found no corrupt marker to set aside.
+    case markerNotCorrupt
+
+    public var errorDescription: String? {
+        switch self {
+        case .damagedMarker: return "The saved recording state is damaged."
+        case .markerNotCorrupt: return "The saved recording state is not damaged."
+        }
+    }
+}
+
 /// File-backed active-capture marker. A new instance reading the same URL
 /// models app relaunch, so recovery behaviour can be tested without watchOS.
 public struct WatchActiveCaptureRegistry: Sendable {
@@ -63,6 +95,12 @@ public struct WatchActiveCaptureRegistry: Sendable {
     }
 
     public func persist(_ capture: WatchActiveCapture) throws {
+        switch loadMarker() {
+        case .unreadable, .corrupt:
+            throw WatchActiveCaptureRegistryError.damagedMarker
+        case .absent, .present:
+            break
+        }
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -72,16 +110,52 @@ public struct WatchActiveCaptureRegistry: Sendable {
         try encoder.encode(capture).write(to: fileURL, options: .atomic)
     }
 
-    public func load() -> WatchActiveCapture? {
-        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+    /// Distinguishes a missing marker from one that is present but damaged.
+    public func loadMarker() -> WatchActiveCaptureMarker {
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return .absent
+        } catch {
+            guard FileManager.default.fileExists(atPath: fileURL.path) else { return .absent }
+            return .unreadable(reason: error.localizedDescription)
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(WatchActiveCapture.self, from: data)
+        do {
+            return .present(try decoder.decode(WatchActiveCapture.self, from: data))
+        } catch {
+            return .corrupt(reason: error.localizedDescription)
+        }
+    }
+
+    /// The readable marker, if any. Use `loadMarker()` wherever a damaged
+    /// marker must not be mistaken for an absent one.
+    public func load() -> WatchActiveCapture? {
+        guard case .present(let capture) = loadMarker() else { return nil }
+        return capture
     }
 
     public func clear(matching id: UUID) throws {
         guard let capture = load(), capture.id == id else { return }
         try FileManager.default.removeItem(at: fileURL)
+    }
+
+    /// Moves a corrupt marker aside so recording can continue, keeping its
+    /// bytes for diagnosis. Never deletes it and never replaces an existing
+    /// file. Returns where the marker now lives.
+    @discardableResult
+    public func quarantineCorruptMarker() throws -> URL {
+        guard case .corrupt = loadMarker() else {
+            throw WatchActiveCaptureRegistryError.markerNotCorrupt
+        }
+        let name = fileURL.deletingPathExtension().lastPathComponent
+        let destination = fileURL.deletingLastPathComponent()
+            .appendingPathComponent("\(name).corrupt-\(UUID().uuidString)")
+            .appendingPathExtension(fileURL.pathExtension)
+        try FileManager.default.moveItem(at: fileURL, to: destination)
+        return destination
     }
 
     /// Runs the durable queue write first and consumes the marker only when it

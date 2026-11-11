@@ -8,7 +8,8 @@ import SpeakCore
 /// Converts text to speech using Deepgram's Aura API.
 ///
 /// HTTP transport lives in `SpeakCore.DeepgramTTSAPI`, shared with the macOS
-/// client; this wrapper adds audio-session management and playback.
+/// client; playback and the audio-session lease belong to
+/// ``VoiceOutputAudioPlayback``, as for every iOS voice-output provider.
 @MainActor
 public final class DeepgramTTSClient: ObservableObject {
     // MARK: - Published State
@@ -18,7 +19,8 @@ public final class DeepgramTTSClient: ObservableObject {
 
     // MARK: - Private
 
-    private var audioPlayer: AVAudioPlayer?
+    private var playback: VoiceOutputAudioPlayback?
+    private let makePlayback: () -> VoiceOutputAudioPlayback
     private let api: DeepgramTTSAPI
     private let logger = SpeakLogger.logger(category: "DeepgramTTS")
 
@@ -33,6 +35,13 @@ public final class DeepgramTTSClient: ObservableObject {
 
     public init(session: URLSession = .shared) {
         self.api = DeepgramTTSAPI(session: session)
+        self.makePlayback = { VoiceOutputAudioPlayback() }
+    }
+
+    /// Lets ownership tests play through fake audio boundaries.
+    init(session: URLSession, makePlayback: @escaping () -> VoiceOutputAudioPlayback) {
+        self.api = DeepgramTTSAPI(session: session)
+        self.makePlayback = makePlayback
     }
 
     // MARK: - Public API
@@ -45,7 +54,7 @@ public final class DeepgramTTSClient: ObservableObject {
         }
 
         let audioData = try await synthesize(text: text, apiKey: apiKey)
-        try await playAudio(audioData)
+        try await play(audioData)
     }
 
     /// Convert text to speech and return audio data without playing.
@@ -82,46 +91,39 @@ public final class DeepgramTTSClient: ObservableObject {
 
     /// Stop any currently playing audio.
     public func stop() {
-        audioPlayer?.stop()
-        audioPlayer = nil
+        playback?.stop()
+        playback = nil
         isSpeaking = false
     }
 
-    // MARK: - Private
+    // MARK: - Playback
 
-    private func playAudio(_ data: Data) async throws {
+    /// Plays synthesized audio to the end. `stop()` ends it quietly, as it
+    /// always has; cancelling the calling task stops the audio too.
+    func play(_ data: Data) async throws {
         stop()
-
-        do {
-            // Use playAndRecord so we don't tear down the mic session
-            // when conversation mode will immediately resume recording.
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(
-                .playAndRecord,
-                mode: .spokenAudio,
-                options: [.allowBluetooth, .defaultToSpeaker, .allowBluetoothA2DP]
-            )
-            try audioSession.setActive(true)
-
-            audioPlayer = try AVAudioPlayer(data: data)
-            audioPlayer?.enableRate = true
-            audioPlayer?.rate = Float(speed)
-            audioPlayer?.prepareToPlay()
-
-            isSpeaking = true
-            audioPlayer?.play()
-
-            // Wait for playback to complete
-            while audioPlayer?.isPlaying == true {
-                try await Task.sleep(for: .milliseconds(30))
+        let operation = makePlayback()
+        playback = operation
+        defer {
+            if playback === operation {
+                playback = nil
+                isSpeaking = false
             }
-
-            isSpeaking = false
-            try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+        }
+        do {
+            let rate = VoiceOutputAudioPlayback.playbackRate(for: speed, in: VoiceOutputProvider.deepgram.speedRange)
+            try operation.start(.data(data), rate: rate)
+            isSpeaking = true
+            try await operation.waitForCompletion()
+        } catch is CancellationError where playback !== operation {
+            return
         } catch {
-            isSpeaking = false
-            self.error = error
-            throw error
+            operation.stop()
+            if error is CancellationError { throw error }
+            let surfaced: Error = (error as? VoiceOutputPlaybackError) == .playbackFailed
+                ? DeepgramTTSError.playbackFailed : error
+            self.error = surfaced
+            throw surfaced
         }
     }
 }

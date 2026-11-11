@@ -20,7 +20,7 @@ void presentation_apply(gpointer pointer) {
     }
     g_free(ui.presented_id);
     ui.presented_id = g_strdup(presentation->id);
-    cleanup_visible = FALSE;
+    cleanup_preview.visible = FALSE;
     ui.presented_variant = presentation->variant;
     ui.presented_switchable = presentation->switchable;
     if (presentation->variant >= 0) gtk_drop_down_set_selected(ui.version, (guint)presentation->variant);

@@ -63,8 +63,8 @@ void refresh_actions(void) {
     g_free(text);
     gboolean has_record = ui.selected_id != NULL;
     gboolean presented = has_record && g_strcmp0(ui.presented_id, ui.selected_id) == 0;
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.copy), has_text && !cleanup_visible);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard_copy), has_text && !cleanup_visible);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.copy), has_text && !cleanup_preview.visible);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard_copy), has_text && !cleanup_preview.visible);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.cancel), ui.state == JSTI_STATE_WORKING);
     gtk_widget_set_visible(GTK_WIDGET(ui.cancel), ui.state == JSTI_STATE_WORKING);
     gboolean recording = ui.state == JSTI_STATE_RECORDING;
@@ -165,7 +165,7 @@ void on_cancel(GtkButton *button, gpointer data) {
 
 void on_copy(GtkButton *button, gpointer data) {
     (void)button; (void)data;
-    if (cleanup_visible) return;
+    if (cleanup_preview.visible) return;
     emit(JSTI_EVENT_COPY, "", 0);
 }
 

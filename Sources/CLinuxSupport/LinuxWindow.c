@@ -37,19 +37,14 @@ int32_t jsti_window_escape_is_current(uint64_t token) {
     return (token & 1u) && token == escape_token(&escape_policy);
 }
 
-GMutex cleanup_lock;
-guint64 cleanup_ticket;
-gboolean cleanup_active, cleanup_posted;
-gchar *cleanup_text;
-/* UI-thread only; preview text is never a Copy/export/read-aloud source. */
-gboolean cleanup_visible;
+CleanupPreview cleanup_preview;
 
 void retire_cleanup_preview(void) {
-    g_mutex_lock(&cleanup_lock);
-    ++cleanup_ticket;
-    cleanup_active = FALSE;
-    g_clear_pointer(&cleanup_text, g_free);
-    g_mutex_unlock(&cleanup_lock);
+    g_mutex_lock(&cleanup_preview.lock);
+    ++cleanup_preview.ticket;
+    cleanup_preview.active = FALSE;
+    g_clear_pointer(&cleanup_preview.text, g_free);
+    g_mutex_unlock(&cleanup_preview.lock);
 }
 
 UI ui;

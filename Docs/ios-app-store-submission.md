@@ -76,7 +76,7 @@ Source: [Apple encryption documentation requirements](https://developer.apple.co
 
 `https://justspeaktoit.com/privacy` is linked from Settings, both in the About
 section and at the foot of the Privacy screen, through
-the shared URL in `Sources/SpeakCore/PrivacyPolicy.swift`. App Review looks for the published
+the shared URL in `Sources/SpeakCore/App/PrivacyPolicy.swift`. App Review looks for the published
 policy from inside the app, not only in the listing metadata.
 
 ## The answers to every App Store Connect compliance question

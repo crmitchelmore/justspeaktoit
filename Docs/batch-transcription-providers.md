@@ -93,7 +93,7 @@ an account without batch access surfaces the provider's own rejection.
 
 ## Shapes
 
-`Sources/SpeakCore/BatchTranscriptionJob.swift` holds what the asynchronous job
+`Sources/SpeakCore/Batch/BatchTranscriptionJob.swift` holds what the asynchronous job
 APIs share: the on-disk multipart snapshot (the recording is copied in 64 KiB
 chunks and never held in memory), the polling loop, cancellation checks, the
 non-2xx rejection, and the credential boundary. Cartesia's `/stt` endpoint answers in one round trip and keeps

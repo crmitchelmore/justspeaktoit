@@ -157,19 +157,40 @@ Linux in [linux-development.md](linux-development.md).
 
 | Concern | Current owner |
 | --- | --- |
-| Model catalogue and placement | [ModelCatalog.swift](../Sources/SpeakCore/ModelCatalog.swift), [ModelRouting.swift](../Sources/SpeakCore/ModelRouting.swift) and provider-specific shared catalogues. |
-| Live routes and client construction | [LiveTranscriptionSelection.swift](../Sources/SpeakCore/LiveTranscriptionSelection.swift) and [LiveTranscriptionClientFactory.swift](../Sources/SpeakCore/LiveTranscriptionClientFactory.swift). |
-| Batch-provider contract and metadata | [TranscriptionProviderRegistry.swift](../Sources/SpeakCore/TranscriptionProviderRegistry.swift) defines `TranscriptionProvider` and metadata. The concrete macOS actor is a different file with the same name under [SpeakApp](../Sources/SpeakApp/TranscriptionProviderRegistry.swift). |
-| Capture start and opening audio | [RecordingStartSequence.swift](../Sources/SpeakCore/RecordingStartSequence.swift) contains `RecordingStartSequencer`; [StreamingAudioPreroll.swift](../Sources/SpeakCore/StreamingAudioPreroll.swift) retains ordered opening buffers. |
-| Language, results, keychain and privacy-safe types | `SpeakCore`, including [SecureStorage.swift](../Sources/SpeakCore/SecureStorage.swift), [SensitiveHeaderRedactor.swift](../Sources/SpeakCore/SensitiveHeaderRedactor.swift) and closed analytics dimensions. |
-| Lexicon | [PersonalLexiconService.swift](../Sources/SpeakCore/PersonalLexiconService.swift) and `PersonalLexiconStore`. |
+| Model catalogue and placement | [ModelCatalog.swift](../Sources/SpeakCore/ModelCatalog.swift), [ModelRouting.swift](../Sources/SpeakCore/Transcription/ModelRouting.swift) and provider-specific shared catalogues. |
+| Live routes and client construction | [LiveTranscriptionSelection.swift](../Sources/SpeakCore/Live/LiveTranscriptionSelection.swift) and [LiveTranscriptionClientFactory.swift](../Sources/SpeakCore/Live/LiveTranscriptionClientFactory.swift). |
+| Batch-provider contract and metadata | [TranscriptionProviderRegistry.swift](../Sources/SpeakCore/Transcription/TranscriptionProviderRegistry.swift) defines `TranscriptionProvider` and metadata. The concrete macOS actor is a different file with the same name under [SpeakApp](../Sources/SpeakApp/TranscriptionProviderRegistry.swift). |
+| Capture start and opening audio | [RecordingStartSequence.swift](../Sources/SpeakCore/Recording/RecordingStartSequence.swift) contains `RecordingStartSequencer`; [StreamingAudioPreroll.swift](../Sources/SpeakCore/Live/StreamingAudioPreroll.swift) retains ordered opening buffers. |
+| Language, results, keychain and privacy-safe types | `SpeakCore`, including [SecureStorage.swift](../Sources/SpeakCore/Credentials/SecureStorage.swift), [SensitiveHeaderRedactor.swift](../Sources/SpeakCore/History/SensitiveHeaderRedactor.swift) and closed analytics dimensions. |
+| Lexicon | [PersonalLexiconService.swift](../Sources/SpeakCore/Vocabulary/PersonalLexiconService.swift) and `PersonalLexiconStore`. |
 | Extension protocols and stores | Keyboard handoff/delivery, App Group availability, shared recording inbox, Watch capture and complication files in [SpeakCore](../Sources/SpeakCore/). |
-| History presentation | [HistoryPresentation.swift](../Sources/SpeakCore/HistoryPresentation.swift) supplies shared display rules; each platform owns its richer persisted record. |
+| History presentation | [HistoryPresentation.swift](../Sources/SpeakCore/History/HistoryPresentation.swift) supplies shared display rules; each platform owns its richer persisted record. |
 | Release identities | [ReleaseTrains.json](../Sources/SpeakCore/Resources/ReleaseTrains.json) is canonical; generated Swift exposes the selected train. |
 
 Shared catalogue ownership does not make every adapter platform-neutral. A provider addition can require catalogue,
 credential, route, transport, platform registration, settings and tests according to the provider's live/batch and
 platform capabilities.
+
+### SpeakCore source layout
+
+`Sources/SpeakCore` is grouped by feature. The canonical model and provider catalogues (`ModelCatalog*`,
+`*Catalog*.swift`, `ProviderCredentialCatalogue`, retirements and the Android-exported model files) and a few
+cross-cutting utilities stay at the top level.
+
+| Folder | Contents |
+| --- | --- |
+| `Live/` | Shared live-streaming infrastructure: client protocol, routing, factory, sessions/runs, sending, framing, readiness, finalisation and transcript reconciliation. |
+| `Live/Providers/<Provider>/` | One provider's live client family (`…LiveClient`, `…Run`, `…Connection`, `…Sending`, `…Protocol`, events). |
+| `Batch/`, `Batch/Providers/` | Batch jobs, routing and multipart upload staging; one batch client per provider. |
+| `Transcription/`, `Transcription/Providers/` | Provider contract, routing, language and keyword policy; provider configuration and model metadata. |
+| `TTS/`, `TTS/Providers/`, `TTS/Desktop/` | Voice output preferences and segmentation; provider TTS APIs; portable desktop synthesis. |
+| `Capture/`, `Recording/`, `Keyboard/`, `LiveActivity/` | Capture policy and health, recording lifecycle and hot-key gestures, keyboard handoff, Live Activity state. |
+| `AppleSpeech/`, `LocalModels/`, `Audio/` | Apple Speech adapters, downloaded local-model records, PCM/MP3/WAV helpers. |
+| `PostProcessing/`, `Vocabulary/`, `OpenRouter/` | Cleanup/polish policy, lexicon/auto-correction/pronunciation, OpenRouter chat and audio. |
+| `History/`, `Credentials/`, `Balance/`, `Sync/`, `DataMigration/`, `Automation/`, `Analytics/`, `Desktop/`, `App/` | History records and diagnostics, keys and validation, provider balances, settings/key/config transfer, migration, automation protocol, analytics, portable desktop configuration, app information and shared UI. |
+| `ModelComparison/`, `PaidAccess/`, `SettingsSearch/`, `SpeechInsights/`, `Resources/` | Existing feature folders and bundled resources. |
+
+`appleCoreSources` in `Package.swift` lists Apple-only files by their path relative to `Sources/SpeakCore`.
 
 ## macOS runtime
 

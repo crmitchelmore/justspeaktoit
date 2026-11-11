@@ -2,7 +2,7 @@
 
 This is a settings slice, **not full Windows/Linux feature parity**. Baseline:
 macOS `AppSettings.DefaultsKey` aliases the shared 92-key
-`ApplicationPreferenceKey` (`Sources/SpeakCore/ApplicationPreferenceKey.swift`),
+`ApplicationPreferenceKey` (`Sources/SpeakCore/App/ApplicationPreferenceKey.swift`),
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
@@ -460,7 +460,7 @@ Windows About and the Open Troubleshooting action now open a distinct modeless
 report, not an alias for Permissions. It checks the saved recording shortcut,
 clipboard restoration, missing remote post-processing credentials and observed
 Windows permission states. The configuration check inventory, wording, severity,
-destinations and explicit fixes live in `SpeakCore/DesktopTroubleshooting.swift`;
+destinations and explicit fixes live in `SpeakCore/Desktop/DesktopTroubleshooting.swift`;
 macOS consumes that inventory while retaining its own permission and Fn guidance.
 Linux About now opens a native GTK Troubleshooting report using the same
 configuration policy. It retains the current shortcut listener's actual hint,
@@ -1185,7 +1185,7 @@ does not establish runtime, multi-DPI or installed-product acceptance.
 
 ## App shell, recordings folder and analytics (source only)
 
-`ShellPreference.fields` (`Sources/SpeakCore/DesktopShellPreference.swift`)
+`ShellPreference.fields` (`Sources/SpeakCore/Desktop/DesktopShellPreference.swift`)
 adds `appVisibility`, `compactStatusBarIcon` and `analyticsEnabled` to General
 with the Mac keys, defaults and strict values, so save, restart and portable
 JSON import/export round-trip them. `appVisibility` reuses the Mac's stored
@@ -1414,7 +1414,7 @@ proof of complete backup**. The isolated codec below is an opt-in transport seam
 parent aggregation and a safe target retention route remain separate. No schema format,
 settings keys, controls, ABI, runtime behavior, profiles or credentials change.
 
-`SpeakCore/DesktopNativeConfigurationField.swift` is the single noncredential
+`SpeakCore/Desktop/DesktopNativeConfigurationField.swift` is the single noncredential
 source-path/owner/type definition. Opt-in paths cover `postProcessing.customPrompt`,
 separately `configuration.postProcessingSystemPrompt`, `microphoneDeviceID`,
 `localUseGPU`, `azureSpeechResourceEndpoint`, `voiceOutput.modelID`,
@@ -1711,7 +1711,7 @@ re-run on the integration head.
 
 After freezing reader commit `3c88f274`, `NativeConfigurationJSONScan` delegates
 to the separately selected `JSONMemberPreflight` rather than owning a second
-state machine. Only `Sources/SpeakCore/JSONMemberPreflight.swift` (blob
+state machine. Only `Sources/SpeakCore/Desktop/JSONMemberPreflight.swift` (blob
 `dd5603ef399859c946b647909da85f40e448fc55`) and its seven-case test corpus (blob
 `674c22469281a51c57ad6e2ed2044b01326cccd8`) are imported from qualified peer
 `75a81b5f188a7ea89c1e907c53e7201a6470e0fe`; its native-source codec, metadata
@@ -1924,7 +1924,7 @@ IDs, events, C headers, clipboard ownership algorithm or icon assets changed.
 
 ## Capture warm-up, remote paste and Mac-only delivery settings (source only)
 
-`SpeakCore/CaptureDeliveryPreference.swift` registers five canonical Mac keys
+`SpeakCore/Capture/CaptureDeliveryPreference.swift` registers five canonical Mac keys
 in the shared generic editor, strict validation and JSON transfer. Mac defaults
 apply: capture preparation and key-press warm-up on, streaming insertion and
 remote paste off, History interval 5 s. The interval accepts 0...30 so stored
@@ -1981,7 +1981,7 @@ Swift/native build, test or device check has run for this source.
 
 ## Recording feedback (native qualified; package acceptance pending)
 
-`SpeakCore/RecordingFeedback.swift` now owns the four existing profiles, eight
+`SpeakCore/Recording/RecordingFeedback.swift` now owns the four existing profiles, eight
 M4A names, enabled/classic/0.7 defaults and the Mac player's volume-squared curve.
 The Apple player keeps its nested API names as aliases to this catalogue and
 still reads its established main-bundle resources. `SpeakFeedbackResources`
@@ -2121,7 +2121,7 @@ fixture has run.
 Windows uses **Dictation preferences...** from General, Transcription,
 Post-processing and Keyboard. Linux uses native libadwaita preference groups
 in those same destinations. Fields are defined once in
-`Sources/SpeakCore/DesktopConfiguration.swift`; native controls receive that
+`Sources/SpeakCore/Desktop/DesktopConfiguration.swift`; native controls receive that
 schema rather than maintaining copies of defaults. Scalar defaults now use
 `SpeechDefaults` in the shared schema and canonical Mac `AppSettings` initializer;
 an Apple test compares all fourteen preferences to a fresh Mac settings store.
@@ -2258,7 +2258,7 @@ it restores the original output options before subsequent stages.
 
 ### Application-switch delivery
 
-`SpeakCore/AppSwitchDelivery.swift` is the canonical three-policy catalogue.
+`SpeakCore/Recording/AppSwitchDelivery.swift` is the canonical three-policy catalogue.
 Mac keeps its existing raw values, labels, explanations and original-app
 default through the `AppSettings.AppSwitchDelivery` typealias. Native Text output
 controls receive those labels from Swift; the general scalar editor uses the
@@ -2332,7 +2332,7 @@ used when checking.
   text, or the stored key when the field is empty. **Get API key…** opens the
   provider's https key page.
 - Checking reuses the shared provider validators where they exist;
-  `SpeakCore/APIKeyValidation.swift` adds portable probes for OpenRouter,
+  `SpeakCore/Credentials/APIKeyValidation.swift` adds portable probes for OpenRouter,
   Gladia and Azure Speech (resource health or voice list). Alibaba is
   format-checked only and is not executable on Windows.
 - Storage is the same Windows Credential Manager identifier the Transcription,
@@ -2556,7 +2556,7 @@ The Mac's `OnboardingView`, `PermissionsManager`, `PermissionRecoveryHelp` and
 Windows/Linux surfaces. Earlier baseline notes that called these surfaces
 missing are superseded by the source below; runtime qualification is separate.
 
-- **Shared model** (`SpeakCore/DesktopOnboarding.swift`,
+- **Shared model** (`SpeakCore/Desktop/DesktopOnboarding.swift`,
   `SpeakDesktopHost/DesktopHostOnboarding.swift`): ordered steps (welcome,
   microphone, text insertion, transcription route, shortcut practice, optional
   post-processing, done), their actions and plain-language guidance; permission
@@ -2649,12 +2649,12 @@ parity. Evidence labels refer to executable surfaces:
 
 | Label | Files |
 |---|---|
-| Config | `SpeakCore/DesktopConfiguration.swift`, `SpeakDesktopHost/DesktopHostConfiguration.swift`, `SpeakWindows/WindowsConfiguration.swift`, `SpeakLinux/LinuxConfiguration.swift` (all under `Sources`) |
+| Config | `SpeakCore/Desktop/DesktopConfiguration.swift`, `SpeakDesktopHost/DesktopHostConfiguration.swift`, `SpeakWindows/WindowsConfiguration.swift`, `SpeakLinux/LinuxConfiguration.swift` (all under `Sources`) |
 | Models | `Sources/SpeakDesktopHost/DesktopHostModels.swift`, `DesktopHostModelDiscovery.swift`, `DesktopHostLocalModels.swift`, `SpeakDesktop/DesktopLiveTranscription.swift` |
 | Output | `Sources/SpeakWindows/WindowsTextOutputSettings.swift`, `SpeakLinux/LinuxControllerSettings.swift`, `SpeakLinuxPlatform/LinuxTextOutput.swift` |
 | HUD | `Sources/SpeakDesktopHost/DesktopHostHUD.swift`, `Sources/SpeakDesktop/DesktopHUD.swift` |
 | Keys | `Sources/SpeakDesktopHost/DesktopHostCredentials.swift`, `DesktopHostAPIKeys.swift`, `SpeakCore/APIKeyCatalog.swift`, `SpeakWindows/WindowsNative.swift`, `SpeakWindows/WindowsAPIKeys.swift`, `SpeakLinuxPlatform/LinuxCredentialStore.swift` |
-| Shortcuts | `Sources/SpeakWindows/WindowsHotKey.swift`, `Sources/SpeakLinux/LinuxShortcutGestures.swift`, `SpeakCore/HotKeyGestureMachine.swift` |
+| Shortcuts | `Sources/SpeakWindows/WindowsHotKey.swift`, `Sources/SpeakLinux/LinuxShortcutGestures.swift`, `SpeakCore/Recording/HotKeyGestureMachine.swift` |
 | Voice | `Sources/SpeakDesktopHost/DesktopHostReadAloud.swift`, `SpeakWindows/WindowsReadAloud.swift`, `SpeakLinux/LinuxReadAloud.swift` |
 | General | `Sources/SpeakDesktopHost/DesktopHostSettings.swift`, `DesktopHostLoginItem.swift`, `SpeakWindows/WindowsLoginItemHost.swift`, `SpeakLinux/LinuxLoginItemHost.swift` |
 | Automation | Windows per-user named pipe, `WindowsAutomation.swift`, `WindowsAutomationSetup.swift` and General › CLI and MCP setup (`CWindowsSupport/WindowsAutomationSettings.cpp`, source-only); Linux `LinuxAutomation.swift`, shared Host commands and `SpeakLinuxAutomation` private Unix socket/`speak` journey (source-only, native qualification pending); `--toggle` remains |

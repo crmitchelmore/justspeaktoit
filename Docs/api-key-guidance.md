@@ -2,7 +2,7 @@
 
 Speak helps people create provider keys with the least access its features
 need. The single source is `APIKeyGuidance` in SpeakCore
-(`Sources/SpeakCore/APIKeyGuidance.swift`, provider table in
+(`Sources/SpeakCore/Credentials/APIKeyGuidance.swift`, provider table in
 `APIKeyGuidanceProviders.swift`). Every surface reads it:
 
 | Surface | Where |

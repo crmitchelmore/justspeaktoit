@@ -872,7 +872,7 @@ scales with the monitor's DPI.
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows, Linux and the Mac show the same figures.
-- Colours are the brand tokens in `SpeakCore/BrandColors.swift`
+- Colours are the brand tokens in `SpeakCore/App/BrandColors.swift`
   (`WindowsWindowChrome.cpp`). The window follows Windows' app mode
   (`AppsUseLightTheme`) with a dark title bar and dark common controls;
   **General › Appearance** overrides it (Follow Windows, Light, Dark), saved as
@@ -954,7 +954,7 @@ flowchart TB
 |---|---|---|
 | Canonical domain | Model identifiers, provider routes, transcript semantics, Unicode reconciliation, lifecycle ownership, PCM/WAV, comparison and history projections | `Sources/SpeakCore/` |
 | Shared batch transport | Seventeen provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/DesktopTranscription.swift` |
-| Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/DesktopPostProcessing.swift` |
+| Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouter/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/DesktopPostProcessing.swift` |
 | Desktop behaviour | Implemented-model projection, durable recording records, recovery, export and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
 | Windows services | Event-driven WASAPI capture with a bounded writer queue, native History playback through Media Foundation decoding and event-driven WASAPI rendering, native history/settings UI, hotkey, Credential Manager, clipboard, and captured-field insertion through native controls, UI Automation and a guarded paste | `Sources/CWindowsSupport/` |

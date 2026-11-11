@@ -3,7 +3,7 @@ import AppIntents
 import SpeakCore
 
 // The Shortcuts-facing half of the per-run capture parameters (issue #1013).
-// Everything that *decides* anything is in `SpeakCore/CaptureParameters.swift`
+// Everything that *decides* anything is in `SpeakCore/Capture/CaptureParameters.swift`
 // and unit-tested on the host; this file only describes the parameters to
 // Shortcuts and converts between its types and plain identifiers.
 //

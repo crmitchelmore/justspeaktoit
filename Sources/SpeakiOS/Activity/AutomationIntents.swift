@@ -5,7 +5,7 @@ import SpeakCore
 
 // Shortcuts automation surface for iOS, extending the recording intents in
 // `TranscriptionIntents.swift`. The intents are thin: parameter mapping and
-// validation live in `SpeakCore/AutomationIntentSupport.swift` where they are
+// validation live in `SpeakCore/Automation/AutomationIntentSupport.swift` where they are
 // unit-tested, and all real work happens in the existing services. They are
 // internal on purpose — nothing outside SpeakiOSLib references them, and the
 // AppIntents metadata extractor does not need public visibility.

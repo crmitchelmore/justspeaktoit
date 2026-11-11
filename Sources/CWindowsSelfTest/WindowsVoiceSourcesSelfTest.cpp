@@ -7,6 +7,7 @@
 int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t capacity);
 
 using namespace jsti::voiceSources;
+using jsti::chrome::scale;
 
 bool jsti_voice_controls_self_test(HWND owner, std::string &error);
 bool jsti_voice_usage_self_test(HWND owner, std::string &error);

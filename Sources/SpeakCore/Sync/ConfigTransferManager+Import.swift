@@ -25,7 +25,7 @@ extension ConfigTransferManager {
         payload: ConfigTransferPayload,
         storage: SecureStorage,
         defaults: UserDefaults = .standard,
-        liveModelDefaultsKey: String = "selectedModel"
+        liveModelDefaultsKey: String = SharedApplicationPreferences.liveTranscriptionModel.iOS.key
     ) async throws {
         try Self.validateImport(payload: payload)
 

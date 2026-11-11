@@ -40,6 +40,43 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testSharedPreferences_LoadOldValuesAndPersistEditsUnderExistingKeys() {
+        defaults.set("groq/whisper-large-v3-turbo", forKey: "batchTranscriptionModel")
+        defaults.set("anthropic/claude-haiku-4.5", forKey: "postProcessingModel")
+        defaults.set("fr_FR", forKey: "preferredLocale")
+        defaults.set("compact", forKey: "visualDensity")
+        defaults.set(false, forKey: "postProcessingEnabled")
+        defaults.set(true, forKey: "handsFreeDictationEnabled")
+        defaults.set(false, forKey: "keepAudioOnCancel")
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.batchTranscriptionModel, "groq/whisper-large-v3-turbo")
+        XCTAssertEqual(settings.postProcessingModel, "anthropic/claude-haiku-4.5")
+        XCTAssertEqual(settings.preferredLocaleIdentifier, "fr_FR")
+        XCTAssertEqual(settings.visualDensity, .compact)
+        XCTAssertFalse(settings.postProcessingEnabled)
+        XCTAssertTrue(settings.handsFreeDictationEnabled)
+        XCTAssertFalse(settings.keepAudioOnCancel)
+
+        settings.preferredLocaleIdentifier = "en_GB"
+        settings.keepAudioOnCancel = true
+        XCTAssertEqual(defaults.string(forKey: "preferredLocale"), "en_GB")
+        XCTAssertEqual(defaults.object(forKey: "keepAudioOnCancel") as? Bool, true)
+        XCTAssertEqual(AppSettings(defaults: defaults).preferredLocaleIdentifier, "en_GB")
+    }
+
+    @MainActor
+    func testSharedPreferences_MissingKeysKeepMacDefaults() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertTrue(settings.postProcessingEnabled, "iOS defaults this off; the Mac keeps it on")
+        XCTAssertFalse(settings.handsFreeDictationEnabled)
+        XCTAssertTrue(settings.keepAudioOnCancel)
+        XCTAssertFalse(settings.cleanupModelDiscoveryEnabled)
+        XCTAssertEqual(settings.visualDensity, .normal)
+        XCTAssertEqual(settings.preferredLocaleIdentifier, "automatic")
+        XCTAssertEqual(settings.transcriptionKeywords, "")
+    }
+
+    @MainActor
     func testPortablePreferenceDefaultsMatchCanonicalMacSettings() throws {
         let settings = AppSettings(defaults: defaults)
         let portable = try DesktopConfiguration()

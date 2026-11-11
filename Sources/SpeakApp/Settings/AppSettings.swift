@@ -257,6 +257,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   typealias DefaultsKey = ApplicationPreferenceKey
+  /// Keys, defaults and value domains shared with the iOS store.
+  private typealias Shared = SharedApplicationPreferences
 
   private static let defaultLocalTranscriptionModel = "local/whisperkit/tiny"
 
@@ -444,7 +446,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   /// Device-local metadata discovery; intentionally outside automatic settings transfer.
   @Published var cleanupModelDiscoveryEnabled: Bool {
-    didSet { defaults.set(cleanupModelDiscoveryEnabled, forKey: CleanupModelSelection.preferenceKey) }
+    didSet { defaults.set(cleanupModelDiscoveryEnabled, forKey: Shared.cleanupModelDiscoveryEnabled.macOS.key) }
   }
 
   @Published var postProcessingModel: String {
@@ -1094,10 +1096,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       Appearance(
         rawValue: defaults.string(forKey: DefaultsKey.appearance.rawValue)
           ?? Appearance.system.rawValue) ?? .system
-    visualDensity =
-      AppVisualDensity(
-        rawValue: defaults.string(forKey: DefaultsKey.visualDensity.rawValue)
-          ?? AppVisualDensity.normal.rawValue) ?? .normal
+    visualDensity = Shared.visualDensity.macOS.value(in: defaults)
     let loadedTranscriptionMode =
       TranscriptionMode(
         rawValue: defaults.string(forKey: DefaultsKey.transcriptionMode.rawValue)
@@ -1105,9 +1104,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     transcriptionMode = loadedTranscriptionMode
     // Remote choices relaunch as saved unless the shared catalogue retired
     // them, so a current entry such as Deepgram Flux is never reset.
-    liveTranscriptionModel =
-      ModelCatalog.normalizedLiveTranscriptionModel(
-        defaults.string(forKey: DefaultsKey.liveTranscriptionModel.rawValue))
+    liveTranscriptionModel = Shared.liveTranscriptionModel.macOS.value(in: defaults)
     liveTranscriptionSelection = LiveTranscriptionSelection(defaults: defaults)
     rememberedLocalTranscriptionSource =
       LocalTranscriptionSource(
@@ -1117,9 +1114,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       RemoteTranscriptionMode(
         rawValue: defaults.string(forKey: DefaultsKey.rememberedRemoteTranscriptionMode.rawValue) ?? ""
       ) ?? (loadedTranscriptionMode == .batchRemote ? .batch : .streaming)
-    batchTranscriptionModel =
-      Self.normalizedBatchModel(
-        defaults.string(forKey: DefaultsKey.batchTranscriptionModel.rawValue))
+    batchTranscriptionModel = Shared.batchTranscriptionModel.macOS.value(in: defaults)
     localTranscriptionModel =
       Self.normalizedLocalTranscriptionModel(
         defaults.string(forKey: DefaultsKey.localTranscriptionModel.rawValue)
@@ -1136,21 +1131,16 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     storedLocalStreamingModelSource = defaults.string(
       forKey: DefaultsKey.localStreamingModelSource.rawValue
     )
-    preferredLocaleIdentifier = TranscriptionLanguageCatalog.normalizedIdentifier(
-      defaults.string(forKey: DefaultsKey.preferredLocale.rawValue)
-    )
+    preferredLocaleIdentifier = Shared.preferredLocale.macOS.value(in: defaults)
     preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.rawValue)
-    postProcessingEnabled =
-      defaults.object(forKey: DefaultsKey.postProcessingEnabled.rawValue) as? Bool ?? true
-    cleanupModelDiscoveryEnabled = defaults.bool(forKey: CleanupModelSelection.preferenceKey)
-    postProcessingModel = Self.normalizedPostProcessingModel(
-      defaults.string(forKey: DefaultsKey.postProcessingModel.rawValue)
-    )
+    postProcessingEnabled = Shared.postProcessingEnabled.macOS.value(in: defaults)
+    cleanupModelDiscoveryEnabled = Shared.cleanupModelDiscoveryEnabled.macOS.value(in: defaults)
+    postProcessingModel = Shared.postProcessingModel.macOS.value(in: defaults)
     postProcessingTemperature =
       defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? SpeechDefaults.temperature
     // Without timestamps, preserve competing nonempty edits. A deliberate clear
     // after migration wins over a conflicting edit, which remains recoverable.
-    let storedKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
+    let storedKeywords = Shared.transcriptionKeywords.macOS.value(in: defaults)
     let storedKeyterms = defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
     let lastReconciled = defaults.string(forKey: DefaultsKey.transcriptionKeywordsLastReconciled.rawValue)
     let reconciliation = Self.mergedTranscriptionKeywords(
@@ -1211,9 +1201,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     cancelRecordingOnEscape =
       defaults.object(forKey: DefaultsKey.cancelRecordingOnEscape.rawValue) as? Bool
       ?? SpeechDefaults.cancelRecordingOnEscape
-    keepAudioOnCancel =
-      defaults.object(forKey: DefaultsKey.keepAudioOnCancel.rawValue) as? Bool
-      ?? SpeechDefaults.keepAudioOnCancel
+    keepAudioOnCancel = Shared.keepAudioOnCancel.macOS.value(in: defaults)
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? SpeechDefaults.showHUD
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? SpeechDefaults.liveTranscriptHUD
@@ -1380,8 +1368,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     // Silence Detection Settings
     silenceDetectionEnabled =
       defaults.object(forKey: DefaultsKey.silenceDetectionEnabled.rawValue) as? Bool ?? false
-    handsFreeDictationEnabled =
-      defaults.object(forKey: DefaultsKey.handsFreeDictationEnabled.rawValue) as? Bool ?? false
+    handsFreeDictationEnabled = Shared.handsFreeDictationEnabled.macOS.value(in: defaults)
     silenceThreshold =
       Float(defaults.object(forKey: DefaultsKey.silenceThreshold.rawValue) as? Double
         ?? DictationSilencePolicy.defaultThreshold)

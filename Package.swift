@@ -484,7 +484,7 @@ if linuxTargetBuild {
             name: "SpeakLinuxPlatformTests",
             dependencies: [
                 "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakDesktopSync", "SpeakLinuxPlatform", "CLinuxSupport",
-                "SpeakTestSupport"
+                "CLinuxSelfTest", "SpeakTestSupport"
             ]
         ),
         .testTarget(

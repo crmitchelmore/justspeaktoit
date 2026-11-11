@@ -73,10 +73,8 @@ final class LocalPostProcessingModelManager: ObservableObject {
   private let baseDirectory: URL
   private let modelsDirectory: URL
   private let runtimeDirectory: URL
-  private let sidecarURL: URL
-  private let virtualEnvironmentURL: URL
+  private let sidecar: LocalPythonSidecar
   private let importedModelsURL: URL
-  private var pythonExecutableCache: URL?
   #endif
 
   private init(fileManager: FileManager = .default) {
@@ -90,13 +88,18 @@ final class LocalPostProcessingModelManager: ObservableObject {
       .appendingPathComponent("LocalPostProcessing", isDirectory: true)
     modelsDirectory = baseDirectory.appendingPathComponent("Models", isDirectory: true)
     runtimeDirectory = baseDirectory.appendingPathComponent("runtime", isDirectory: true)
-    sidecarURL = runtimeDirectory.appendingPathComponent("local_post_processing.py")
-    virtualEnvironmentURL = baseDirectory.appendingPathComponent("venv", isDirectory: true)
+    sidecar = LocalPythonSidecar(
+      virtualEnvironmentURL: baseDirectory.appendingPathComponent("venv", isDirectory: true),
+      scriptURL: runtimeDirectory.appendingPathComponent("local_post_processing.py"),
+      script: Self.sidecarScript,
+      fileManager: fileManager,
+      pythonUnavailable: { LocalPostProcessingModelError.pythonUnavailable }
+    )
     importedModelsURL = baseDirectory.appendingPathComponent("imported-hugging-face-gguf-models.json")
     do {
       try fileManager.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
       try fileManager.createDirectory(at: runtimeDirectory, withIntermediateDirectories: true)
-      try writeSidecarIfNeeded()
+      try sidecar.writeScriptIfNeeded()
     } catch {
       runtimeState = .failed(error.localizedDescription)
     }
@@ -180,16 +183,9 @@ final class LocalPostProcessingModelManager: ObservableObject {
     let previousState = runtimeState
     runtimeState = .installing
     do {
-      let bootstrapPython = try bootstrapPythonExecutable()
-      if !fileManager.fileExists(atPath: venvPythonURL.path) {
-        _ = try await Self.runProcess(
-          executableURL: bootstrapPython,
-          arguments: ["-m", "venv", virtualEnvironmentURL.path]
-        )
+      let python = try await sidecar.prepareVirtualEnvironment { bootstrapPython, arguments in
+        _ = try await Self.runProcess(executableURL: bootstrapPython, arguments: arguments)
       }
-
-      let python = venvPythonURL
-      pythonExecutableCache = python
       _ = try await Self.runProcess(
         executableURL: python,
         arguments: ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel", "cmake", "ninja"]
@@ -331,37 +327,11 @@ final class LocalPostProcessingModelManager: ObservableObject {
   }
 
   func sidecarScriptURL() throws -> URL {
-    try writeSidecarIfNeeded()
-    return sidecarURL
+    try sidecar.currentScriptURL()
   }
 
   func pythonExecutable() throws -> URL {
-    if fileManager.isExecutableFile(atPath: venvPythonURL.path) {
-      pythonExecutableCache = venvPythonURL
-      return venvPythonURL
-    }
-    if let pythonExecutableCache { return pythonExecutableCache }
-    return try bootstrapPythonExecutable()
-  }
-
-  private var venvPythonURL: URL {
-    virtualEnvironmentURL
-      .appendingPathComponent("bin", isDirectory: true)
-      .appendingPathComponent("python3")
-  }
-
-  private func bootstrapPythonExecutable() throws -> URL {
-    let candidates = [
-      "/opt/homebrew/bin/python3",
-      "/usr/local/bin/python3",
-      "/usr/bin/python3"
-    ]
-    for candidate in candidates where fileManager.isExecutableFile(atPath: candidate) {
-      let url = URL(fileURLWithPath: candidate)
-      pythonExecutableCache = url
-      return url
-    }
-    throw LocalPostProcessingModelError.pythonUnavailable
+    try sidecar.pythonExecutable()
   }
 
   private func refreshRuntimeState() async {
@@ -397,21 +367,10 @@ final class LocalPostProcessingModelManager: ObservableObject {
   }
 
   private func downloadFile(repoID: String, filename: String, to destination: URL) async throws {
-    let encodedFile = filename
-      .split(separator: "/")
-      .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
-      .joined(separator: "/")
-    guard let url = URL(string: "https://huggingface.co/\(repoID)/resolve/main/\(encodedFile)?download=true") else {
-      throw LocalPostProcessingModelError.downloadFailed("Invalid Hugging Face URL for \(filename).")
-    }
-    let (downloadedURL, response) = try await URLSession.shared.download(from: url)
-    defer { try? fileManager.removeItem(at: downloadedURL) }
-    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-      throw LocalPostProcessingModelError.downloadFailed(
-        "Hugging Face returned HTTP \(http.statusCode) for \(filename)."
-      )
-    }
-    try fileManager.moveItem(at: downloadedURL, to: destination)
+    try await HuggingFaceFileDownload.download(
+      repoID: repoID, filename: filename, to: destination, fileManager: fileManager,
+      failure: LocalPostProcessingModelError.downloadFailed
+    )
   }
 
   private func loadImportedModels() {
@@ -431,12 +390,6 @@ final class LocalPostProcessingModelManager: ObservableObject {
     try data.write(to: importedModelsURL, options: .atomic)
   }
 
-  private func writeSidecarIfNeeded() throws {
-    try fileManager.createDirectory(at: runtimeDirectory, withIntermediateDirectories: true)
-    let data = Data(Self.sidecarScript.utf8)
-    if let existing = try? Data(contentsOf: sidecarURL), existing == data { return }
-    try data.write(to: sidecarURL, options: .atomic)
-  }
   #endif
 
   // Identity rules are canonical in SpeakCore; these forwarders keep existing

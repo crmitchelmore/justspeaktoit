@@ -1,5 +1,6 @@
 #if os(Windows)
 import Foundation
+import SpeakDesktopSync
 import SpeakSync
 import WinSDK
 import XCTest
@@ -13,7 +14,7 @@ final class WindowsLoopbackListenerTests: XCTestCase {
     func testIdleAbandonedAndOversizedConnectionsDoNotHoldTheCallback() async throws {
         let listener = try WindowsLoopbackListener(requestWindow: .milliseconds(200))
         let port = listener.port
-        let accepted = Task { try await listener.accept(timeout: .seconds(20)) }
+        let accepted = Task { try await listener.nextRequest(within: .seconds(20)) }
         // A preconnection that never sends, one that closes halfway, and one
         // whose declared body would overflow the request bound.
         let idle = try XCTUnwrap(connectLoopback(port: port))
@@ -32,8 +33,9 @@ final class WindowsLoopbackListenerTests: XCTestCase {
                 CloudKitWebServicesHTTPRequest(method: "GET", url: url, headers: [:], body: nil), responseLimit: 4096
             )
         }
-        let connection = try await accepted.value
-        let received = connection.target
+        let next = try await accepted.value
+        let connection = try XCTUnwrap(next)
+        let received = connection.head?.target
         connection.respond(Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".utf8))
         let response = try await reply.value
         listener.close()

@@ -4,7 +4,8 @@
     python3 scripts/ci/routing.py           fail when a workflow `paths:` list differs from routing.json
     python3 scripts/ci/routing.py --write   rewrite those workflow lists from routing.json
 
-scripts/pre-pr imports this module to decide which checks a changed path selects.
+scripts/pre-pr imports this module to decide which checks a changed path selects; routing.mjs is the
+same evaluator for Node tooling (auto-revert.mjs), and both are checked against one truth table.
 Patterns follow GitHub's path-filter globs (dorny/paths-filter and `on.<event>.paths`):
 `**` spans directories, `*` and `?` stay inside one, and dot files match.
 """

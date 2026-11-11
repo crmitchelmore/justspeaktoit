@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { canAffect, classifyFailure, prNumber, redEpisode, revertedShas, selectCulprits, shouldRevert, TRAILER } from '../ci/auto-revert.mjs';
+import { routeMatches } from '../ci/routing.mjs';
 
 const script = fileURLToPath(new URL('../ci/auto-revert.mjs', import.meta.url));
 const workflow = readFileSync(new URL('../../.github/workflows/auto-revert.yml', import.meta.url), 'utf8');
@@ -24,11 +25,19 @@ test('test and journey failures are re-run once; lint, build and API failures ar
         'aggregates name no cause');
 });
 
+const apple = file => routeMatches('apple', file);
+
 test('a commit can only be blamed by a job that reads its files', () => {
-    assert.equal(canAffect(['Docs/x.md', 'android/a.kt'], ['Build iOS']), false);
-    assert.equal(canAffect(['Sources/SpeakCore/A.swift'], ['Build iOS']), true);
-    assert.equal(canAffect(['Sources/SpeakCore/A.swift'], ['Paid Access Worker']), false);
-    assert.equal(canAffect(['workers/paid-access/src/a.ts'], ['Paid Access Worker']), true);
+    assert.equal(canAffect(['Docs/x.md', 'android/a.kt'], ['Build iOS'], apple), false);
+    assert.equal(canAffect(['README.md', 'landing-page/a.html', '.github/workflows/android.yml'], ['Lint'], apple), false);
+    assert.equal(canAffect(['Sources/SpeakCore/A.swift'], ['Build iOS'], apple), true);
+    assert.equal(canAffect(['Sources/SpeakCore/A.swift'], ['Paid Access Worker'], apple), false);
+    assert.equal(canAffect(['workers/paid-access/src/a.ts'], ['Paid Access Worker'], apple), true);
+});
+
+test('verify runs from a lone copy of the script, so it imports no sibling module statically', () => {
+    const source = readFileSync(new URL('../ci/auto-revert.mjs', import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /^import .* from '\.\.?\//m);
 });
 
 test('suspects narrow to relevant commits, fall back to all, and skip earlier reverts', () => {
@@ -38,9 +47,9 @@ test('suspects narrow to relevant commits, fall back to all, and skip earlier re
         { sha: sha(3), message: `revert: auto-revert #1\n\n${TRAILER} ${sha(4)}`, files: ['Sources/B.swift'] },
         { sha: sha(4), message: 'feat: z (#1)', files: ['Sources/B.swift'] },
     ];
-    assert.deepEqual(selectCulprits(commits, ['Build iOS']), [sha(2)]);
-    assert.deepEqual(selectCulprits(commits.slice(0, 1), ['Build iOS']), [sha(1)], 'nothing relevant: blame every suspect');
-    assert.deepEqual(selectCulprits(commits.slice(1, 2), ['Lint'], new Set([sha(2)])), [], 'already reverted later on main');
+    assert.deepEqual(selectCulprits(commits, ['Build iOS'], apple), [sha(2)]);
+    assert.deepEqual(selectCulprits(commits.slice(0, 1), ['Build iOS'], apple), [sha(1)], 'nothing relevant: blame every suspect');
+    assert.deepEqual(selectCulprits(commits.slice(1, 2), ['Lint'], apple, new Set([sha(2)])), [], 'already reverted later on main');
     assert.deepEqual(revertedShas(`x\n\n${TRAILER} ${sha(5)} ${sha(6)}\n`), [sha(5), sha(6)]);
     assert.equal(prNumber('feat: y (#1234)'), '1234');
     assert.equal(prNumber('feat: y'), null);

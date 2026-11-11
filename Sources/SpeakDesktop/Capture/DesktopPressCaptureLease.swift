@@ -4,8 +4,6 @@ import Foundation
 /// No native adapter is installed by this type. An external capture must also honor the lease
 /// arbitration before opening a microphone; an `.idle` admission is not OS ownership proof.
 package actor DesktopPressCaptureLease {
-    // swiftlint:disable:previous type_body_length
-    // existing owned capture-lease arbitration state machine; no behavior change.
     private struct Run {
         let token: DesktopPressCaptureToken
         let identity: DesktopPressCaptureIdentity
@@ -145,13 +143,6 @@ package actor DesktopPressCaptureLease {
         }
     }
 
-    package func adopt(
-        _ token: DesktopPressCaptureToken, identity: DesktopPressCaptureIdentity,
-        admission: DesktopPressCaptureAdmission, sink: @escaping @Sendable (Data) -> Void
-    ) throws {
-        try adoptDelivery(token, identity: identity, admission: admission, onPCMDelivery: { sink($0.data) })
-    }
-
     package func adoptDelivery(
         _ token: DesktopPressCaptureToken, identity: DesktopPressCaptureIdentity,
         admission: DesktopPressCaptureAdmission,
@@ -287,6 +278,14 @@ package actor DesktopPressCaptureLease {
 }
 
 extension DesktopPressCaptureLease {
+    /// Adopts the reserved capture with a plain PCM sink.
+    package func adopt(
+        _ token: DesktopPressCaptureToken, identity: DesktopPressCaptureIdentity,
+        admission: DesktopPressCaptureAdmission, sink: @escaping @Sendable (Data) -> Void
+    ) throws {
+        try adoptDelivery(token, identity: identity, admission: admission, onPCMDelivery: { sink($0.data) })
+    }
+
     private func quiesce(_ current: Run) async {
         guard let quiescing = current.quiescingWorker else { return }
         run?.quiescingWorker = nil

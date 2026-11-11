@@ -1,4 +1,3 @@
-// swiftlint:disable file_length
 import CryptoKit
 import Foundation
 
@@ -9,172 +8,21 @@ import Foundation
 /// headers — with two additions the paid path needs: an explicit request
 /// timeout, and a correlation identifier on every request so a user-visible
 /// failure can be traced in the Worker's logs without asking for any content.
-public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:this type_body_length
+public struct PaidAccessHTTPClient: PaidAccessClienting {
     /// Production by default. An internal app resolves its own build flag and
     /// injects a staging endpoint explicitly; SwiftPM does not inherit app flags.
     public static var defaultBaseURL: URL {
         URL(string: "https://api.justspeaktoit.com")!
     }
 
-    private let baseURL: URL
-    private let session: URLSession
-    private let timeout: TimeInterval
+    private let transport: PaidAccessTransport
 
     public init(
         baseURL: URL = PaidAccessHTTPClient.defaultBaseURL,
         session: URLSession = .shared,
         timeout: TimeInterval = 60
     ) {
-        self.baseURL = baseURL
-        self.session = session
-        self.timeout = timeout
-    }
-
-    // MARK: - Request plumbing
-
-    private func makeRequest(
-        path: String,
-        method: String,
-        session sessionToken: PaidAccessSession?,
-        query: [URLQueryItem] = []
-    ) throws -> URLRequest {
-        guard var components = URLComponents(
-            url: self.baseURL.appendingPathComponent(path),
-            resolvingAgainstBaseURL: false
-        ) else {
-            throw PaidAccessError.invalidResponse
-        }
-        if !query.isEmpty {
-            components.queryItems = query
-        }
-        guard let url = components.url else {
-            throw PaidAccessError.invalidResponse
-        }
-
-        var request = URLRequest(url: url, timeoutInterval: self.timeout)
-        request.httpMethod = method
-        request.setValue(Self.newCorrelationID(), forHTTPHeaderField: "X-Correlation-ID")
-        if let sessionToken {
-            request.setValue("Bearer \(sessionToken.accessToken)", forHTTPHeaderField: "Authorization")
-        }
-        return request
-    }
-
-    /// URL-safe, matching the Worker's accepted correlation-id shape.
-    static func newCorrelationID() -> String {
-        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-    }
-
-    private func send<Response: Decodable>(
-        _ request: URLRequest,
-        as type: Response.Type
-    ) async throws -> Response {
-        let data = try await self.sendExpectingData(request)
-        do {
-            return try JSONDecoder.paidAccess.decode(Response.self, from: data)
-        } catch {
-            throw Self.submissionUncertainty(request) ?? PaidAccessError.invalidResponse
-        }
-    }
-
-    private static func submissionUncertainty(_ request: URLRequest) -> PaidAccessError? {
-        guard request.value(forHTTPHeaderField: "X-Paid-Settlement-Contract") == "1",
-              let key = request.value(forHTTPHeaderField: "Idempotency-Key") else { return nil }
-        return .operationOutcome(.unknown, idempotencyKey: key,
-                                 correlationID: request.value(forHTTPHeaderField: "X-Correlation-ID"))
-    }
-
-    private func sendExpectingData(_ request: URLRequest) async throws -> Data {
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await self.session.data(for: request)
-        } catch {
-            throw Self.submissionUncertainty(request) ?? PaidAccessError.network(error.localizedDescription)
-        }
-
-        guard let http = response as? HTTPURLResponse else {
-            throw Self.submissionUncertainty(request) ?? PaidAccessError.invalidResponse
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw Self.error(
-                forStatus: http.statusCode, body: data,
-                submittedOperation: Self.submissionUncertainty(request) == nil ? nil
-                    : request.value(forHTTPHeaderField: "Idempotency-Key"),
-                correlationID: request.value(forHTTPHeaderField: "X-Correlation-ID")
-            )
-        }
-        return data
-    }
-
-    /// Maps the Worker's error vocabulary onto ``PaidAccessError``.
-    ///
-    /// Response bodies are parsed for the machine-readable `code` only; the
-    /// human message is not echoed because upstream messages can contain
-    /// request content.
-    static func error(
-        forStatus statusCode: Int, body: Data,
-        submittedOperation: String? = nil, correlationID: String? = nil
-    ) -> PaidAccessError {
-        let code = (try? JSONDecoder().decode(ErrorEnvelope.self, from: body))?.error.code
-        let unknown = PaidAccessError.operationOutcome(
-            .unknown, idempotencyKey: submittedOperation ?? "", correlationID: correlationID
-        )
-        if let retained = Self.settlementError(
-            for: code, submittedOperation: submittedOperation, correlationID: correlationID, unknown: unknown
-        ) {
-            return retained
-        }
-        switch code {
-        case "entitlement_required": return .entitlementRequired
-        case "quota_exceeded": return .quotaExceeded
-        case "too_many_sessions": return .tooManySessions
-        case "paid_routing_disabled": return .paidRoutingDisabled
-        case "unauthorized": return submittedOperation == nil ? .notSignedIn : unknown
-        case "already_processed": return .alreadyProcessed
-        case "forbidden":
-            return .billingChannelUnavailable(
-                "This build cannot use that payment method."
-            )
-        default:
-            if submittedOperation != nil { return unknown }
-            return statusCode == 401 ? .notSignedIn : .serviceUnavailable(statusCode: statusCode)
-        }
-    }
-
-    private static func settlementError(
-        for code: String?, submittedOperation: String?, correlationID: String?, unknown: PaidAccessError
-    ) -> PaidAccessError? {
-        switch code {
-        case "request_in_progress":
-            return .operationOutcome(
-                .inProgress, idempotencyKey: submittedOperation ?? "", correlationID: correlationID
-            )
-        case "settlement_pending":
-            return .operationOutcome(
-                .settlementPending, idempotencyKey: submittedOperation ?? "", correlationID: correlationID
-            )
-        case "outcome_unknown": return unknown
-        case "request_not_started": return .requestNotStarted
-        default: return nil
-        }
-    }
-
-    private struct ErrorPayload: Decodable {
-        let code: String
-    }
-
-    private struct ErrorEnvelope: Decodable {
-        let error: ErrorPayload
-    }
-
-    private func encodeBody(_ value: [String: Any], into request: inout URLRequest) throws {
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: value)
-        } catch {
-            throw PaidAccessError.invalidResponse
-        }
+        self.transport = PaidAccessTransport(baseURL: baseURL, session: session, timeout: timeout)
     }
 
     // MARK: - Authentication
@@ -184,29 +32,29 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         rawNonce: String,
         deviceLabel: String?
     ) async throws -> PaidAccessSession {
-        var request = try self.makeRequest(path: "v1/auth/apple", method: "POST", session: nil)
+        var request = try self.transport.makeRequest(path: "v1/auth/apple", method: "POST", session: nil)
         var body: [String: Any] = ["identity_token": identityToken, "nonce": rawNonce]
         if let deviceLabel {
             body["device_label"] = deviceLabel
         }
-        try self.encodeBody(body, into: &request)
-        return try await self.send(request, as: SessionResponse.self).session
+        try self.transport.encodeBody(body, into: &request)
+        return try await self.transport.send(request, as: SessionResponse.self).session
     }
 
     public func refresh(session: PaidAccessSession) async throws -> PaidAccessSession {
-        var request = try self.makeRequest(path: "v1/auth/refresh", method: "POST", session: nil)
-        try self.encodeBody(["refresh_token": session.refreshToken], into: &request)
-        return try await self.send(request, as: SessionResponse.self).session
+        var request = try self.transport.makeRequest(path: "v1/auth/refresh", method: "POST", session: nil)
+        try self.transport.encodeBody(["refresh_token": session.refreshToken], into: &request)
+        return try await self.transport.send(request, as: SessionResponse.self).session
     }
 
     public func signOut(session: PaidAccessSession) async {
-        guard var request = try? self.makeRequest(
+        guard var request = try? self.transport.makeRequest(
             path: "v1/auth/sign-out",
             method: "POST",
             session: session
         ) else { return }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        _ = try? await self.sendExpectingData(request)
+        _ = try? await self.transport.sendExpectingData(request)
     }
 
     // MARK: - Entitlement
@@ -214,20 +62,20 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
     /// One round trip returns both halves of the state, so the app never has to
     /// stitch an entitlement to a policy fetched by a second call that may fail.
     public func entitlement(session: PaidAccessSession) async throws -> PaidAccessState {
-        let request = try self.makeRequest(path: "v1/entitlement", method: "GET", session: session)
-        return try await self.send(request, as: EntitlementResponse.self).state
+        let request = try self.transport.makeRequest(path: "v1/entitlement", method: "GET", session: session)
+        return try await self.transport.send(request, as: EntitlementResponse.self).state
     }
 
     // MARK: - Billing
 
     public func createCheckoutURL(session: PaidAccessSession) async throws -> URL {
-        var request = try self.makeRequest(
+        var request = try self.transport.makeRequest(
             path: "v1/billing/stripe/checkout",
             method: "POST",
             session: session
         )
-        try self.encodeBody(["channel": "direct"], into: &request)
-        let response = try await self.send(request, as: CheckoutResponse.self)
+        try self.transport.encodeBody(["channel": "direct"], into: &request)
+        let response = try await self.transport.send(request, as: CheckoutResponse.self)
         guard let url = URL(string: response.checkoutURL) else {
             throw PaidAccessError.invalidResponse
         }
@@ -235,13 +83,13 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
     }
 
     public func createBillingPortalURL(session: PaidAccessSession) async throws -> URL {
-        var request = try self.makeRequest(
+        var request = try self.transport.makeRequest(
             path: "v1/billing/stripe/portal",
             method: "POST",
             session: session
         )
-        try self.encodeBody(["channel": "direct"], into: &request)
-        let response = try await self.send(request, as: PortalResponse.self)
+        try self.transport.encodeBody(["channel": "direct"], into: &request)
+        let response = try await self.transport.send(request, as: PortalResponse.self)
         guard let url = URL(string: response.portalURL) else {
             throw PaidAccessError.invalidResponse
         }
@@ -253,7 +101,7 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         signedTransaction: String,
         signedRenewalInfo: String?
     ) async throws -> PaidEntitlement {
-        var request = try self.makeRequest(
+        var request = try self.transport.makeRequest(
             path: "v1/billing/storekit/sync",
             method: "POST",
             session: session
@@ -262,8 +110,8 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         if let signedRenewalInfo {
             body["signed_renewal_info"] = signedRenewalInfo
         }
-        try self.encodeBody(body, into: &request)
-        return try await self.send(request, as: StoreKitSyncResponse.self).entitlement
+        try self.transport.encodeBody(body, into: &request)
+        return try await self.transport.send(request, as: StoreKitSyncResponse.self).entitlement
     }
 
     // MARK: - Paid routing
@@ -275,7 +123,7 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         language: String?,
         idempotencyKey: String
     ) async throws -> String {
-        var request = try self.makeRequest(
+        var request = try self.transport.makeRequest(
             path: "v1/paid/transcribe/batch",
             method: "POST",
             session: session,
@@ -285,7 +133,7 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
         request.setValue("1", forHTTPHeaderField: "X-Paid-Settlement-Contract")
         request.httpBody = audio
-        return try await self.send(request, as: TextResponse.self).text
+        return try await self.transport.send(request, as: TextResponse.self).text
     }
 
     public func postProcess(
@@ -295,7 +143,7 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         temperature: Double,
         idempotencyKey: String
     ) async throws -> String {
-        var request = try self.makeRequest(
+        var request = try self.transport.makeRequest(
             path: "v1/paid/post-process",
             method: "POST",
             session: session
@@ -310,8 +158,8 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         if let systemPrompt {
             body["system_prompt"] = systemPrompt
         }
-        try self.encodeBody(body, into: &request)
-        return try await self.send(request, as: TextResponse.self).text
+        try self.transport.encodeBody(body, into: &request)
+        return try await self.transport.send(request, as: TextResponse.self).text
     }
 
     public func liveTranscriptionRequest(
@@ -323,7 +171,7 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         if let language {
             query.append(URLQueryItem(name: "language", value: language))
         }
-        var request = try self.makeRequest(
+        var request = try self.transport.makeRequest(
             path: "v1/paid/transcribe/live",
             method: "GET",
             session: session,
@@ -392,206 +240,4 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         hasher.update(data: payload)
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
-}
-
-// MARK: - Wire types
-
-private struct SessionResponse: Decodable {
-    let accessToken: String
-    let accessTokenExpiresAt: Double
-    let refreshToken: String
-    let refreshTokenExpiresAt: Double
-    let userID: String
-
-    enum CodingKeys: String, CodingKey {
-        case accessToken = "access_token"
-        case accessTokenExpiresAt = "access_token_expires_at"
-        case refreshToken = "refresh_token"
-        case refreshTokenExpiresAt = "refresh_token_expires_at"
-        case userID = "user_id"
-    }
-
-    var session: PaidAccessSession {
-        PaidAccessSession(
-            accessToken: self.accessToken,
-            accessTokenExpiresAt: Date(timeIntervalSince1970: self.accessTokenExpiresAt),
-            refreshToken: self.refreshToken,
-            refreshTokenExpiresAt: Date(timeIntervalSince1970: self.refreshTokenExpiresAt),
-            userID: self.userID
-        )
-    }
-}
-
-struct UsagePayload: Decodable {
-    let period: String
-    let audioSecondsUsed: Int
-    let audioSecondsLimit: Int
-    let tokensUsed: Int
-    let tokensLimit: Int
-    let activeSessions: Int
-    let maxConcurrentSessions: Int
-    let audioSecondsMeasured: Int?
-    let audioSecondsHeld: Int?
-    let tokensMeasured: Int?
-    let tokensHeld: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case period
-        case audioSecondsUsed = "audio_seconds_used"
-        case audioSecondsLimit = "audio_seconds_limit"
-        case tokensUsed = "tokens_used"
-        case tokensLimit = "tokens_limit"
-        case activeSessions = "active_sessions"
-        case maxConcurrentSessions = "max_concurrent_sessions"
-        case audioSecondsMeasured = "audio_seconds_measured"
-        case audioSecondsHeld = "audio_seconds_held"
-        case tokensMeasured = "tokens_measured"
-        case tokensHeld = "tokens_held"
-    }
-
-    var snapshot: PaidUsageSnapshot {
-        PaidUsageSnapshot(
-            period: self.period,
-            audioSecondsUsed: self.audioSecondsUsed,
-            audioSecondsLimit: self.audioSecondsLimit,
-            tokensUsed: self.tokensUsed,
-            tokensLimit: self.tokensLimit,
-            activeSessions: self.activeSessions,
-            maxConcurrentSessions: self.maxConcurrentSessions,
-            audioSecondsMeasured: self.audioSecondsMeasured,
-            audioSecondsHeld: self.audioSecondsHeld,
-            tokensMeasured: self.tokensMeasured,
-            tokensHeld: self.tokensHeld
-        )
-    }
-}
-
-struct RoutePayload: Decodable {
-    let operation: String
-    let provider: String
-    let model: String
-    let displayName: String
-
-    enum CodingKeys: String, CodingKey {
-        case operation
-        case provider
-        case model
-        case displayName = "display_name"
-    }
-
-    var route: PaidRoute? {
-        guard let operation = PaidOperation(rawValue: self.operation) else { return nil }
-        return PaidRoute(
-            operation: operation,
-            provider: self.provider,
-            model: self.model,
-            displayName: self.displayName
-        )
-    }
-}
-
-struct PolicyPayload: Decodable {
-    let version: String
-    let routes: [RoutePayload]
-
-    var policy: PaidRoutingPolicy {
-        // Unknown operations are dropped rather than guessed at, so a newer
-        // server cannot make an older client route work it does not understand.
-        PaidRoutingPolicy(version: self.version, routes: self.routes.compactMap(\.route))
-    }
-}
-
-/// Internal rather than private so the tests can cover the one guarantee
-/// that matters here: an entitlement and the policy it was issued with are
-/// decoded from a single payload, and therefore committed together.
-struct EntitlementResponse: Decodable {
-    let status: String
-    let planID: String
-    let source: String
-    let currentPeriodEnd: Double?
-    let cancelAtPeriodEnd: Bool
-    let paidRoutingAvailable: Bool
-    let usage: UsagePayload?
-    let policy: PolicyPayload?
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case planID = "plan_id"
-        case source
-        case currentPeriodEnd = "current_period_end"
-        case cancelAtPeriodEnd = "cancel_at_period_end"
-        case paidRoutingAvailable = "paid_routing_available"
-        case usage
-        case policy
-    }
-
-    var entitlement: PaidEntitlement {
-        PaidEntitlement(
-            // An unrecognised status is treated as no entitlement rather than
-            // being optimistically accepted.
-            status: PaidEntitlementStatus(rawValue: self.status) ?? .none,
-            planID: self.planID,
-            provider: PaidBillingProvider(rawValue: self.source) ?? .manual,
-            currentPeriodEnd: self.currentPeriodEnd.map { Date(timeIntervalSince1970: $0) },
-            cancelAtPeriodEnd: self.cancelAtPeriodEnd,
-            paidRoutingAvailable: self.paidRoutingAvailable,
-            usage: self.usage?.snapshot
-        )
-    }
-
-    /// A response without a policy yields ``PaidRoutingPolicy/unknown`` rather
-    /// than an error: the entitlement is still worth publishing, and a router
-    /// with no routes falls the request back to the user's own configuration.
-    var state: PaidAccessState {
-        PaidAccessState(
-            entitlement: self.entitlement,
-            policy: self.policy?.policy ?? .unknown
-        )
-    }
-}
-
-private struct StoreKitSyncResponse: Decodable {
-    let status: String
-    let active: Bool
-    let currentPeriodEnd: Double?
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case active
-        case currentPeriodEnd = "current_period_end"
-    }
-
-    var entitlement: PaidEntitlement {
-        PaidEntitlement(
-            status: PaidEntitlementStatus(rawValue: self.status) ?? .none,
-            planID: "paid",
-            provider: .storeKit,
-            currentPeriodEnd: self.currentPeriodEnd.map { Date(timeIntervalSince1970: $0) },
-            cancelAtPeriodEnd: false,
-            paidRoutingAvailable: self.active,
-            usage: nil
-        )
-    }
-}
-
-private struct CheckoutResponse: Decodable {
-    let checkoutURL: String
-
-    enum CodingKeys: String, CodingKey {
-        case checkoutURL = "checkout_url"
-    }
-}
-
-private struct PortalResponse: Decodable {
-    let portalURL: String
-
-    enum CodingKeys: String, CodingKey {
-        case portalURL = "portal_url"
-    }
-}
-
-private struct TextResponse: Decodable {
-    let text: String
-    let model: String
-    let provider: String
 }

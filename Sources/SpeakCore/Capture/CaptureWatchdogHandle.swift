@@ -13,8 +13,12 @@ import Foundation
 ///   that wakes after run B was armed fails the identity check and ends; it
 ///   can never evaluate or act on B.
 ///
-/// The action re-checks ownership itself, because a run can end between the
-/// evaluation and the action.
+/// A trip is acted on in its own task, never inside the tick. Acting on a
+/// terminal trip ends the run, and ending the run retires this handle; doing
+/// that from inside the tick would cancel the very task carrying out the stop,
+/// and every cancellation check further down the stop would see it. The
+/// action re-checks ownership itself, because a run can end between the tick
+/// and the action.
 @MainActor
 public final class CaptureWatchdogHandle {
     public typealias Sleep = @Sendable (TimeInterval) async -> Void
@@ -63,7 +67,7 @@ public final class CaptureWatchdogHandle {
     /// - Parameters:
     ///   - isLive: whether the owner still considers the run in flight. A run
     ///     that ended by any other route is never evaluated.
-    ///   - onTrip: acts on a trip. A non-terminal trip
+    ///   - onTrip: acts on a trip, in its own task. A non-terminal trip
     ///     (``CaptureWatchdogTrip/maximumDurationWarning``) keeps the tick
     ///     running; a terminal one ends it, because a run cannot end twice.
     public func arm(
@@ -82,7 +86,7 @@ public final class CaptureWatchdogHandle {
                 await sleep(tickSeconds)
                 guard !Task.isCancelled, let self, self.owns(run) else { return }
                 guard let trip = self.evaluate(run: run, isLive: isLive) else { continue }
-                await onTrip(trip, run)
+                Task { @MainActor in await onTrip(trip, run) }
                 guard trip == .maximumDurationWarning else { return }
             }
         }

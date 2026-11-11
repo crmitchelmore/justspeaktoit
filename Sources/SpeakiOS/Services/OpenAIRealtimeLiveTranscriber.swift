@@ -54,8 +54,6 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
     private let audioSessionManager: AudioSessionManager
     private let startup = RecordingStartupOperation()
-    private var ownsAudioSession = false
-    private var hasInputTap = false
     /// Replaced per start so a retired run's tap can never report input for
     /// the run that replaced it.
     private var firstInputSignal = FirstInputSignal()
@@ -66,20 +64,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         onFirstInputBuffer?()
     }
 
-    private func releaseAudioSession() {
-        guard ownsAudioSession else { return }
-        audioSessionManager.deactivate()
-        ownsAudioSession = false
-    }
-
-    private func removeInputTap() {
-        guard hasInputTap else { return }
-        audioEngine.inputNode.removeTap(onBus: 0)
-        hasInputTap = false
-    }
-    private let audioEngine = AVAudioEngine()
-    private let configurationObserver = CaptureDisruptionObserver()
-    private let captureInterruptionObserver = CaptureDisruptionObserver()
+    private let captureInput: LiveCaptureInput
     private var apiKey: String?
     private var makeClient: (() -> OpenAIRealtimeWebSocketClient)?
     private var startCaptureOverride: ((AudioRecordingPersistence) throws -> Void)?
@@ -121,6 +106,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
     public init(audioSessionManager: AudioSessionManager) {
         self.audioSessionManager = audioSessionManager
+        captureInput = LiveCaptureInput(audioSessionManager: audioSessionManager)
     }
 
     /// Allows lifecycle tests to supply PCM and acknowledgement timing without a microphone or network.
@@ -178,7 +164,6 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
         try await ensureMicrophonePermission()
         try Task.checkCancellation()
-        ownsAudioSession = true
         try await configureAudioSession()
         try Task.checkCancellation()
         if startCaptureAudio == nil { connectClient(apiKey: apiKey) }
@@ -200,31 +185,19 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     }
 
     private func observeCaptureConfiguration() {
-        configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
-            self?.audioEngine.isRunning == true
-        } onDisruption: { [weak self] in
-            self?.handleCaptureDisruption(.microphoneChanged)
+        captureInput.armDisruptionHandling { [weak self] in
+            guard let self else { return false }
+            return self.isRunning && !self.isStopping
+        } onStopped: { [weak self] reason in
+            // The owner drains the provider and recording once through its normal stop path.
+            // Interruption itself is a stopped notice; a real drain failure still reaches onError.
+            if !reason.isControlledInterruption { self?.error = reason }
+            self?.onError?(reason)
         }
-        captureInterruptionObserver.observeAudioInterruption { [weak self] in
-            self?.handleCaptureDisruption(.interrupted)
-        }
-    }
-
-    private func handleCaptureDisruption(_ reason: iOSTranscriptionError) {
-        guard isRunning, !isStopping else { return }
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
-        audioEngine.stop()
-        removeInputTap()
-        // The owner drains the provider and recording once through its normal stop path.
-        // Interruption itself is a stopped notice; a real drain failure still reaches onError.
-        if !reason.isControlledInterruption { error = reason }
-        onError?(reason)
     }
 
     public func stop() async -> TranscriptionResult {
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
+        captureInput.disarmDisruptionHandling()
         let lossRun = recordingLoss.currentReport
         guard isRunning, !hasFinishedStopping else {
             return emptyResult()
@@ -233,8 +206,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         hasFinishedStopping = true
         isStopping = true
         defer { isStopping = false }
-        audioEngine.stop()
-        removeInputTap()
+        captureInput.halt()
 
         // Buffers handed to the queue just before the tap came off are still
         // being written and sent; let them land before the input buffer is
@@ -275,7 +247,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
         isRunning = false
         activeCaptureID = nil
-        releaseAudioSession()
+        captureInput.releaseAudioSession()
 
         SpeakLogger.logTranscription(
             event: "stop",
@@ -340,20 +312,17 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     }
 
     public func cancel() {
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
+        captureInput.disarmDisruptionHandling()
         startup.cancel()
         cleanupCapture()
     }
 
     private func cleanupCapture() {
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
+        captureInput.disarmDisruptionHandling()
         recordingLoss.cancel()
-        guard isRunning || ownsAudioSession || hasInputTap else { return }
+        guard isRunning || captureInput.holdsCaptureResources else { return }
 
-        audioEngine.stop()
-        removeInputTap()
+        captureInput.halt()
         // Cancelled audio is thrown away, so there is nothing to drain — just
         // wait out queued chunks and drop the converter so the next session
         // builds a fresh one.
@@ -365,7 +334,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
         isRunning = false
         activeCaptureID = nil
-        releaseAudioSession()
+        captureInput.releaseAudioSession()
 
         logger.info("Cancelled")
     }
@@ -387,7 +356,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
     private func configureAudioSession() async throws {
         do {
-            try await audioSessionManager.configureForRecording()
+            try await captureInput.claimAudioSession()
             onStartupObservation?(.stage(.audioSessionConfigured))
             SpeakLogger.audio.info("Audio session configured for OpenAI Realtime")
         } catch {
@@ -440,7 +409,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     }
 
     private func startAudioEngine() throws {
-        let inputNode = audioEngine.inputNode
+        let inputNode = captureInput.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         guard let outputFormat = audioProcessor.prepareOutputFormat(
             from: nativeFormat, sampleRate: Self.targetSampleRate
@@ -471,11 +440,8 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
             send: { client?.sendAudio($0) },
             onConversionFailure: conversionFailure
         )
-        try audioProcessor.installTap(on: inputNode, format: nativeFormat, run: run)
-        hasInputTap = true
-
-        audioEngine.prepare()
-        try audioEngine.start()
+        try captureInput.installTap { try audioProcessor.installTap(on: $0, format: nativeFormat, run: run) }
+        try captureInput.startEngine()
         // Only after the engine actually returned.
         onStartupObservation?(.stage(.engineStarted))
     }

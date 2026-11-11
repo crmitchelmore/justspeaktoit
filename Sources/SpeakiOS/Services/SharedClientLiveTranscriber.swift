@@ -49,8 +49,6 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private var displayedTranscriptRevision: UInt64 = 0
     private var reportedClientFailure = false
 
-    private var ownsAudioSession = false
-    private var hasInputTap = false
     // Isolates system boundaries in lifecycle tests.
     var drainCaptureWork: (() async -> Void)?
     var clientFactory: (() -> StreamingTranscriptionClient?)?
@@ -59,21 +57,14 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         Task { @MainActor in update() }
     }
 
-    private func removeInputTap() {
-        guard hasInputTap else { return }
-        audioEngine.inputNode.removeTap(onBus: 0)
-        hasInputTap = false
-    }
     private let route: LiveTranscriptionRoute
     private let apiKey: String
     private let language: String?
     private let keywords: [String]
 
     private var client: StreamingTranscriptionClient?
-    private let audioEngine = AVAudioEngine()
-    private let configurationObserver = CaptureDisruptionObserver()
-    private let captureInterruptionObserver = CaptureDisruptionObserver()
-    var configurationNotificationObject: AnyObject { audioEngine }
+    private let captureInput: LiveCaptureInput
+    var configurationNotificationObject: AnyObject { captureInput.engine }
     private var startTime: Date?
     /// Finalised text so far, folded by the hosted client's declared final
     /// shape once `start()` knows which client is in use (issue #700).
@@ -108,6 +99,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         self.language = language
         self.keywords = keywords
         self.audioSessionManager = audioSessionManager
+        captureInput = LiveCaptureInput(audioSessionManager: audioSessionManager)
     }
 
     public func start() async throws {
@@ -148,7 +140,6 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
         try await ensureMicrophonePermission()
         try Task.checkCancellation()
-        ownsAudioSession = true
         try await configureAudioSession()
         try Task.checkCancellation()
 
@@ -207,31 +198,19 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     private func observeCaptureConfiguration() {
-        configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
-            self?.audioEngine.isRunning == true
-        } onDisruption: { [weak self] in
-            self?.handleCaptureDisruption(.microphoneChanged)
+        captureInput.armDisruptionHandling { [weak self] in
+            guard let self else { return false }
+            return self.isRunning && !self.isStopping
+        } onStopped: { [weak self] reason in
+            // The owner drains the provider and recording once through its normal stop path.
+            // Interruption itself is a stopped notice; a real drain failure still reaches onError.
+            if !reason.isControlledInterruption { self?.error = reason }
+            self?.onError?(reason)
         }
-        captureInterruptionObserver.observeAudioInterruption { [weak self] in
-            self?.handleCaptureDisruption(.interrupted)
-        }
-    }
-
-    private func handleCaptureDisruption(_ reason: iOSTranscriptionError) {
-        guard isRunning, !isStopping else { return }
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
-        audioEngine.stop()
-        removeInputTap()
-        // The owner drains the provider and recording once through its normal stop path.
-        // Interruption itself is a stopped notice; a real drain failure still reaches onError.
-        if !reason.isControlledInterruption { error = reason }
-        onError?(reason)
     }
 
     public func stop() async -> TranscriptionResult {
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
+        captureInput.disarmDisruptionHandling()
         let lossRun = recordingLoss.currentReport
         guard isRunning, !isStopping else {
             await cleanupTask?.value
@@ -241,8 +220,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         isStopping = true
         defer { isStopping = false }
 
-        audioEngine.stop()
-        removeInputTap()
+        captureInput.halt()
         // Buffers handed to the queue just before the tap came off are still
         // being written and sent; let them land before the client is finalised
         // and the recorder is closed.
@@ -269,7 +247,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         activeCaptureID = nil
         recordingLoss.finish(recorder: audioRecorder, run: lossRun)
         isRunning = false
-        releaseAudioSession()
+        captureInput.releaseAudioSession()
 
         // `partialText` is the fullest view (finalised text plus any trailing
         // non-final words); fall back to the accumulated finals if empty.
@@ -284,8 +262,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     public func cancel() {
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
+        captureInput.disarmDisruptionHandling()
         startup.cancel()
         _ = cleanupCapture()
     }
@@ -295,13 +272,11 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     private func cleanupCapture() -> Task<Void, Never>? {
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
+        captureInput.disarmDisruptionHandling()
         recordingLoss.cancel()
         if let cleanupTask { return cleanupTask }
-        guard isRunning || ownsAudioSession || hasInputTap else { return nil }
-        audioEngine.stop()
-        removeInputTap()
+        guard isRunning || captureInput.holdsCaptureResources else { return nil }
+        captureInput.halt()
         if let state = transcriptState { apply(state.cancel(), from: state, notify: false) }
         activeCaptureID = nil
         isRunning = false
@@ -326,7 +301,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         audioProcessor.finishRun()
         // Cancel persistent recording (keeps the partial file).
         audioRecorder.cancelRecording()
-        releaseAudioSession()
+        captureInput.releaseAudioSession()
     }
 
 }
@@ -341,12 +316,6 @@ extension SharedClientLiveTranscriber {
     }
 
     // MARK: - Private
-
-    private func releaseAudioSession() {
-        guard ownsAudioSession else { return }
-        audioSessionManager.deactivate()
-        ownsAudioSession = false
-    }
 
     /// Closes the client, giving providers that can still deliver words a
     /// bounded grace period first.
@@ -430,7 +399,7 @@ extension SharedClientLiveTranscriber {
 
     private func configureAudioSession() async throws {
         do {
-            try await audioSessionManager.configureForRecording()
+            try await captureInput.claimAudioSession()
             onStartupObservation?(.stage(.audioSessionConfigured))
         } catch {
             if Task.isCancelled || error is CancellationError { throw CancellationError() }
@@ -456,7 +425,7 @@ extension SharedClientLiveTranscriber {
 
 private extension SharedClientLiveTranscriber {
     func startAudioEngine() throws {
-        let inputNode = audioEngine.inputNode
+        let inputNode = captureInput.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         guard let outputFormat = audioProcessor.prepareOutputFormat(
             from: nativeFormat, sampleRate: Double(route.sampleRate)
@@ -485,11 +454,8 @@ private extension SharedClientLiveTranscriber {
             send: Self.sender(to: client, recording: unansweredAudio) ?? { _ in },
             onConversionFailure: conversionFailure
         )
-        try audioProcessor.installTap(on: inputNode, format: nativeFormat, run: run)
-        hasInputTap = true
-
-        audioEngine.prepare()
-        try audioEngine.start()
+        try captureInput.installTap { try audioProcessor.installTap(on: $0, format: nativeFormat, run: run) }
+        try captureInput.startEngine()
         // Only after the engine actually returned.
         onStartupObservation?(.stage(.engineStarted))
     }

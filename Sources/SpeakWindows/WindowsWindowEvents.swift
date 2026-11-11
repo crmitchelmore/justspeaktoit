@@ -1,5 +1,6 @@
 import Foundation
 import CWindowsSupport
+import CWindowsSelfTest
 import SpeakDesktop
 import SpeakDesktopHost
 import SpeakWindowsPlatform

@@ -109,10 +109,38 @@ final class HistoryIssueReporterTests: XCTestCase {
   }
 
   func testSuccessfulRequest_reportsRelativeTimingsWithoutFailuresOrPrivateText() throws {
+    let model = try XCTUnwrap(ModelCatalog.allOptions.first { $0.id != ModelCatalog.customOptionID })
+    let item = makeSuccessfulItem(models: [model.id, "private/custom-model"])
+    let report = HistoryIssueReporter.report(for: item)
+    let publicOutputs = report.body + report.jsonString + (report.issueURL?.absoluteString ?? "")
+    for excluded in ["secret dictated transcript", "corrected private transcript", "private.m4a",
+                     "/Users/cm", "Private Notes", "1717171717", item.id.uuidString, "private/custom-model"] {
+      XCTAssertFalse(publicOutputs.contains(excluded), "Private data appeared in a successful report")
+    }
+    let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: report.jsonData) as? [String: Any])
+    XCTAssertEqual((payload["failures"] as? [Any])?.count, 0)
+    let models = try XCTUnwrap(payload["recordedModels"] as? [[String: Any]])
+    XCTAssertEqual(models.first?["identifier"] as? String, model.id)
+    XCTAssertEqual(models.count, 2)
+    let timeline = try XCTUnwrap(payload["timeline"] as? [[String: Any]])
+    XCTAssertEqual(timeline.map { $0["stage"] as? String }, ["request", "postProcessing", "output"])
+    XCTAssertEqual(timeline.map { $0["outcome"] as? String }, ["succeeded", "succeeded", "succeeded"])
+    // Output is measured from the end of processing, not from the end of recording.
+    XCTAssertEqual(timeline.map { $0["elapsedMilliseconds"] as? Int }, [1_250, 500, 250])
+    XCTAssertNil(HistoryIssueReporter.report(for: item, includeDiagnostics: false).jsonString
+      .range(of: "elapsedMilliseconds"))
+  }
+
+  func testLiveRequest_labelsTranscriptionIntervalAsFinalization() {
+    let item = makeSuccessfulItem(models: [], live: true)
+    XCTAssertEqual(HistoryIssueReporter.timeline(for: item).first?.stage, .finalization)
+  }
+
+  private func makeSuccessfulItem(models: [String], live: Bool = false) -> HistoryItem {
     let start = Date(timeIntervalSince1970: 1_717_171_717)
-    let item = HistoryItem(
-      modelsUsed: ["deepgram/nova-3"],
-      modelUsages: [],
+    return HistoryItem(
+      modelsUsed: models,
+      modelUsages: live ? [ModelUsage(modelIdentifier: "x", phase: .transcriptionLive)] : [],
       rawTranscription: "secret dictated transcript",
       postProcessedTranscription: "corrected private transcript",
       recordingDuration: 2,
@@ -131,20 +159,6 @@ final class HistoryIssueReporterTests: XCTestCase {
       personalCorrections: nil,
       errors: []
     )
-    let report = HistoryIssueReporter.report(for: item)
-    let publicOutputs = report.body + report.jsonString + (report.issueURL?.absoluteString ?? "")
-    for excluded in ["secret dictated transcript", "corrected private transcript", "private.m4a",
-                     "/Users/cm", "Private Notes", "1717171717", item.id.uuidString] {
-      XCTAssertFalse(publicOutputs.contains(excluded), "Private data appeared in a successful report")
-    }
-    let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: report.jsonData) as? [String: Any])
-    XCTAssertEqual((payload["failures"] as? [Any])?.count, 0)
-    let timeline = try XCTUnwrap(payload["timeline"] as? [[String: Any]])
-    XCTAssertEqual(timeline.map { $0["stage"] as? String }, ["request", "postProcessing", "output"])
-    XCTAssertEqual(timeline.map { $0["outcome"] as? String }, ["succeeded", "succeeded", "succeeded"])
-    XCTAssertEqual(timeline.map { $0["elapsedMilliseconds"] as? Int }, [1_250, 500, 2_000])
-    XCTAssertNil(HistoryIssueReporter.report(for: item, includeDiagnostics: false).jsonString
-      .range(of: "elapsedMilliseconds"))
   }
 
   // swiftlint:disable:next function_body_length

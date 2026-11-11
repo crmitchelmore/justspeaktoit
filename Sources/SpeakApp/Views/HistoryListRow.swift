@@ -247,12 +247,14 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
     } label: {
       Label("Review Issue Report…", systemImage: "ladybug")
     }
+    .accessibilityIdentifier("historyMenuReviewIssueReport-\(item.id)")
 
     Button {
       copyIssueReport()
     } label: {
       Label("Review Before Copying…", systemImage: "doc.on.clipboard")
     }
+    .accessibilityIdentifier("historyMenuReviewBeforeCopying-\(item.id)")
 
     Divider()
 
@@ -1007,7 +1009,7 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
           Label("Review Issue Report…", systemImage: "ladybug")
         }
         .buttonStyle(.bordered)
-        .accessibilityIdentifier("historyReviewIssueReport")
+        .accessibilityIdentifier("historyReviewIssueReport-\(item.id)")
         .speakTooltip("Report wrong text, a slow request or the wrong model. Review the exact public draft first.")
       }
       if environment.main.isBusy {

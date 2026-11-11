@@ -24,22 +24,22 @@ struct SettingsOverviewHeader: View {
 
       Spacer(minLength: 4)
 
-      compactOverviewMetric(
+      CompactHeroMetric(
         title: "Mode",
         value: overviewModeValue,
         systemImage: "waveform"
       )
-      compactOverviewMetric(
+      CompactHeroMetric(
         title: settings.isActiveAssemblyAILiveModel ? "Pre-processing" : "Post-processing",
         value: overviewPostProcessingValue,
         systemImage: "wand.and.stars"
       )
-      compactOverviewMetric(
+      CompactHeroMetric(
         title: "Output",
         value: settings.textOutputMethod.displayName,
         systemImage: "text.alignleft"
       )
-      compactOverviewMetric(
+      CompactHeroMetric(
         title: "OpenRouter Key",
         value: isOpenRouterKeyStored ? "Stored" : "Missing",
         systemImage: isOpenRouterKeyStored ? "checkmark.seal.fill" : "key.fill"
@@ -58,17 +58,6 @@ struct SettingsOverviewHeader: View {
         style: .continuous
       )
     )
-  }
-
-  private func compactOverviewMetric(
-    title: String,
-    value: String,
-    systemImage: String
-  ) -> some View {
-    Label(value, systemImage: systemImage)
-      .font(.caption2.weight(.semibold))
-      .lineLimit(1)
-      .accessibilityLabel("\(title): \(value)")
   }
 
   private var normalOverviewHeader: some View {

@@ -288,7 +288,9 @@ final class PaidAccessManager: NSObject, ObservableObject {
           guard generation == self.flow.generation else { return }
           NSWorkspace.shared.open(url)
         } catch {
-          self.flow.report((error as? PaidAccessError)?.errorDescription ?? "Could not start checkout.")
+          self.flow.report(
+            (error as? PaidAccessError)?.errorDescription ?? "Could not start checkout.", for: generation
+          )
         }
       case .storeKit:
         await self.flow.purchaseThroughStoreKit(term: term, session: session, generation: generation)
@@ -322,7 +324,9 @@ final class PaidAccessManager: NSObject, ObservableObject {
         guard generation == self.flow.generation else { return }
         NSWorkspace.shared.open(url)
       } catch {
-        self.flow.report((error as? PaidAccessError)?.errorDescription ?? "Could not open the billing portal.")
+        self.flow.report(
+          (error as? PaidAccessError)?.errorDescription ?? "Could not open the billing portal.", for: generation
+        )
       }
 
     case .storeKit:

@@ -62,20 +62,20 @@ struct DashboardView: View {
 
         Spacer(minLength: 4)
 
-        compactHeroMetric(
+        CompactHeroMetric(
+          title: "Sessions",
           value: "\(stats.totalSessions)",
-          systemImage: "record.circle",
-          accessibilityLabel: "Sessions"
+          systemImage: "record.circle"
         )
-        compactHeroMetric(
+        CompactHeroMetric(
+          title: "Recording time",
           value: formattedDuration(stats.cumulativeRecordingDuration),
-          systemImage: "timer",
-          accessibilityLabel: "Recording time"
+          systemImage: "timer"
         )
-        compactHeroMetric(
+        CompactHeroMetric(
+          title: "Spend",
           value: formattedCurrency(stats.totalSpend),
-          systemImage: "creditcard",
-          accessibilityLabel: "Spend"
+          systemImage: "creditcard"
         )
 
         Button(action: recording.toggle) {
@@ -172,13 +172,13 @@ struct DashboardView: View {
       }
 
       HStack(spacing: 16) {
-        heroChip(title: "Sessions", value: "\(stats.totalSessions)", systemImage: "record.circle")
-        heroChip(
+        HeroStatChip(title: "Sessions", value: "\(stats.totalSessions)", systemImage: "record.circle")
+        HeroStatChip(
           title: "Recording Time",
           value: formattedDuration(stats.cumulativeRecordingDuration),
           systemImage: "timer"
         )
-        heroChip(
+        HeroStatChip(
           title: "Spend",
           value: formattedCurrency(stats.totalSpend),
           systemImage: "creditcard"
@@ -199,17 +199,6 @@ struct DashboardView: View {
         .stroke(Color.white.opacity(0.1), lineWidth: 1)
     )
     .shadow(color: Color.brandAccent.opacity(0.35), radius: 24, x: 0, y: 16)
-  }
-
-  private func compactHeroMetric(
-    value: String,
-    systemImage: String,
-    accessibilityLabel: String
-  ) -> some View {
-    Label(value, systemImage: systemImage)
-      .font(.caption2.weight(.semibold))
-      .lineLimit(1)
-      .accessibilityLabel("\(accessibilityLabel): \(value)")
   }
 
   @ViewBuilder
@@ -284,28 +273,6 @@ struct DashboardView: View {
 
   private var aggregatesKey: DashboardAggregatesKey {
     DashboardAggregatesKey(revision: history.contentRevision, startOfDay: aggregatesDay)
-  }
-
-  private func heroChip(title: String, value: String, systemImage: String) -> some View {
-    HStack(alignment: .center, spacing: 12) {
-      Image(systemName: systemImage)
-        .imageScale(.large)
-        .foregroundStyle(.white.opacity(0.85))
-      VStack(alignment: .leading, spacing: 4) {
-        Text(title.uppercased())
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.white.opacity(0.7))
-        Text(value)
-          .font(.title3.bold())
-          .foregroundStyle(.white)
-      }
-      Spacer()
-    }
-    .padding(16)
-    .background(
-      RoundedRectangle(cornerRadius: 20, style: .continuous)
-        .fill(Color.white.opacity(0.12))
-    )
   }
 
   private var livePreviewText: String? {

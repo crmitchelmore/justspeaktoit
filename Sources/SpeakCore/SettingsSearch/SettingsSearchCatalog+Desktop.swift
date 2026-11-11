@@ -11,6 +11,17 @@ extension SettingsSearchCatalog {
             settingKeys: ["runAtLogin"], platforms: .linux
         ),
         SettingsSearchEntry(
+            id: "desktop.resourcesInUse", title: "System resources in use", section: .general,
+            systemImage: "gauge.with.dots.needle.33percent",
+            summary: "See what Just Speak to It holds right now (microphone, audio, connections, hotkey) "
+                + "and release it.",
+            keywords: [
+                "status", "microphone in use", "mic indicator", "release microphone", "release everything",
+                "what is using the microphone", "network connections", "background", "pulseaudio", "pipewire"
+            ],
+            platforms: .linux
+        ),
+        SettingsSearchEntry(
             id: "desktop.dataBackup", title: "Data backup", section: .dataMigration, systemImage: "archivebox",
             summary: "Save History, optional audio and app profiles in a ZIP backup, or restore one.",
             keywords: ["backup", "export history", "zip", "restore", "include saved recording audio", "migrate"],

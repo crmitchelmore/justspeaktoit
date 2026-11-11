@@ -561,6 +561,47 @@ typedef struct JSTICloudSyncView {
  * Safe from any thread, like jsti_window_update. */
 int32_t jsti_window_set_cloud_sync(const JSTICloudSyncView *view);
 
+/* ------------------------------------------------ system resources in use */
+
+/* General > "System resources in use" reports these on the GTK main thread. */
+enum {
+    JSTI_EVENT_SYSTEM_RESOURCE_RELEASE = 170,      /* text: the row's id */
+    JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL = 171
+};
+
+typedef struct JSTISystemResourceRow {
+    const char *id;
+    const char *title;
+    const char *reason;
+    const char *caption;
+    /* NULL: the hold has no release button. */
+    const char *release_title;
+    /* Nonzero while its release runs; the button is disabled. */
+    int32_t releasing;
+} JSTISystemResourceRow;
+
+typedef struct JSTISystemResourcesView {
+    const char *headline;
+    /* NULL unless the OS reports a microphone nothing claims. */
+    const char *warning;
+    /* Shown when there are no rows. */
+    const char *empty;
+    /* What the OS reports about the microphone. */
+    const char *microphone;
+    const JSTISystemResourceRow *rows;
+    int32_t row_count;
+    int32_t can_release_everything;
+} JSTISystemResourcesView;
+
+/* Replaces the rows of General > System resources in use. Safe from any
+ * thread, like jsti_window_update; strings are copied before it returns. */
+int32_t jsti_window_set_system_resources(const JSTISystemResourcesView *view);
+
+/* Whether this process records from any PulseAudio/PipeWire source right now:
+ * 1 yes, 0 no, -1 unknown (the device monitor is not running or the server
+ * did not answer). Blocks for at most a few hundred milliseconds. */
+int32_t jsti_audio_process_capturing(void);
+
 /* OpenSSL (libcrypto) primitives for the API-key sync envelope, the same ones
  * CNG provides on Windows: PBKDF2-HMAC-SHA256, and AES-256-GCM with a fresh
  * random 96-bit nonce, no associated data and a 128-bit tag kept apart from

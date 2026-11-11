@@ -3,6 +3,7 @@
 #include <math.h>
 #include <pulse/pulseaudio.h>
 #include <string.h>
+#include <unistd.h>
 
 /*
  * Microphone capture through libpulse's threaded main loop. On current
@@ -494,6 +495,84 @@ void jsti_audio_device_monitor_stop(void) {
     pa_threaded_mainloop_unlock(state->pulse.loop);
     pulse_close(&state->pulse);
     g_free(state);
+}
+
+/* --------------------------------------------- this process's capture */
+
+typedef struct CaptureQuery {
+    pa_threaded_mainloop *loop;
+    /* Source indexes this process records from; monitors are dropped later. */
+    GArray *sources;
+    gboolean outputs_done;
+    gboolean capturing;
+    gboolean sources_done;
+} CaptureQuery;
+
+/* Inside Flatpak the server sees a different pid, so the app id also counts. */
+static gboolean own_stream(const pa_proplist *properties) {
+    const char *pid = pa_proplist_gets(properties, PA_PROP_APPLICATION_PROCESS_ID);
+    if (pid != NULL && g_ascii_strtoll(pid, NULL, 10) == (gint64)getpid()) return TRUE;
+    return g_strcmp0(pa_proplist_gets(properties, PA_PROP_APPLICATION_ID), "com.justspeaktoit.JustSpeakToIt") == 0;
+}
+
+static void source_output_info(pa_context *context, const pa_source_output_info *info, int eol, void *userdata) {
+    (void)context;
+    CaptureQuery *query = userdata;
+    if (eol != 0 || info == NULL) {
+        query->outputs_done = TRUE;
+        pa_threaded_mainloop_signal(query->loop, 0);
+        return;
+    }
+    if (!info->corked && own_stream(info->proplist)) g_array_append_val(query->sources, info->source);
+}
+
+static void capture_source_info(pa_context *context, const pa_source_info *info, int eol, void *userdata) {
+    (void)context;
+    CaptureQuery *query = userdata;
+    if (eol != 0 || info == NULL) {
+        query->sources_done = TRUE;
+        pa_threaded_mainloop_signal(query->loop, 0);
+        return;
+    }
+    /* A sink's monitor is playback being recorded, not a microphone. */
+    if (info->monitor_of_sink != PA_INVALID_INDEX) return;
+    for (guint i = 0; i < query->sources->len; i++) {
+        if (g_array_index(query->sources, uint32_t, i) == info->index) query->capturing = TRUE;
+    }
+}
+
+static gboolean await_query(pa_threaded_mainloop *loop, pa_operation *operation, const gboolean *done) {
+    if (operation == NULL) return FALSE;
+    while (!*done && pa_operation_get_state(operation) == PA_OPERATION_RUNNING) pa_threaded_mainloop_wait(loop);
+    pa_operation_unref(operation);
+    return *done;
+}
+
+int32_t jsti_audio_process_capturing(void) {
+    g_mutex_lock(&monitor_lock);
+    Monitor *state = monitor;
+    if (state == NULL) {
+        g_mutex_unlock(&monitor_lock);
+        return -1;
+    }
+    /* monitor_lock stays held, so a concurrent stop waits for this query. */
+    pa_threaded_mainloop_lock(state->pulse.loop);
+    CaptureQuery query = { .loop = state->pulse.loop, .sources = g_array_new(FALSE, FALSE, sizeof(uint32_t)) };
+    int32_t result = -1;
+    if (pa_context_get_state(state->pulse.context) == PA_CONTEXT_READY &&
+        await_query(query.loop, pa_context_get_source_output_info_list(
+            state->pulse.context, source_output_info, &query), &query.outputs_done)) {
+        if (query.sources->len == 0) {
+            result = 0;
+        } else if (await_query(query.loop, pa_context_get_source_info_list(
+            state->pulse.context, capture_source_info, &query), &query.sources_done)) {
+            result = query.capturing ? 1 : 0;
+        }
+    }
+    pa_threaded_mainloop_unlock(state->pulse.loop);
+    g_mutex_unlock(&monitor_lock);
+    g_array_free(query.sources, TRUE);
+    return result;
 }
 
 int32_t jsti_audio_devices_enumerate(jsti_audio_device_fn callback, void *context, char *error, size_t capacity) {

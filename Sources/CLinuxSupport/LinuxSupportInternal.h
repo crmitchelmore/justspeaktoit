@@ -78,6 +78,10 @@ int32_t jsti_settings_search_self_test(char *error, size_t capacity);
  * iCloud sync page, and exercised by the window self-test. */
 struct _GtkWidget *jsti_cloud_sync_group_new(void);
 int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
+/* General > System resources in use (LinuxSystemResources.c): built once for
+ * the window's lifetime; its self-test runs with the window's. */
+struct _GtkWidget *jsti_system_resources_group_new(void);
+int32_t jsti_system_resources_self_test(char *error, size_t capacity);
 struct _GtkWidget *jsti_history_filters_button_new(void);
 struct _GtkWidget *jsti_profiles_page_new(void);
 int32_t jsti_profiles_self_test(char *error, size_t capacity);

@@ -1741,6 +1741,7 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.automation_row, "notify::active", G_CALLBACK(on_automation), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(automation), GTK_WIDGET(ui.automation_row));
     gtk_box_append(GTK_BOX(column), automation);
+    gtk_box_append(GTK_BOX(column), jsti_system_resources_group_new());
 
     GtkWidget *appearance = group("Appearance");
     const char *schemes[] = { "Follow the system", "Light", "Dark", NULL };
@@ -6385,6 +6386,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (!model_modes_self_test())
         return fail(error, capacity, "Model picker did not isolate and restore all four Source/Mode choices");
     if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
+    if (jsti_system_resources_self_test(error, capacity) != 0) return -1;
     if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
     if (jsti_vocabulary_self_test(error, capacity) != 0) return -1;
     if (jsti_profiles_self_test(error, capacity) != 0) return -1;

@@ -39,3 +39,20 @@ add a small adapter to the platform monitor instead
   keeps the microphone open for up to four hours for the keyboard, and
   restarts each time the app opens. This is the usual reason for an
   unexplained microphone indicator on iOS. Status names it and can turn it off.
+- **Linux** (#1473): Settings › General › *System resources in use*. The
+  shared desktop host (`DesktopHostSystemResources.swift`) registers its
+  holds from the controller state that owns them, so a hold ends when that
+  state changes: dictation, the provider socket, hotkey warm-up, hands-free
+  listening, Compare Models, microphone preparation, cleanup-connection
+  warm-up and speech playback. `LinuxShortcuts` registers the hotkey
+  listener, which has no release button. PulseAudio/PipeWire supplies the OS
+  view: a non-corked source output from this process, excluding monitor
+  sources. `DesktopSystemResourcesMonitor` (SpeakDesktop) polls it every 2
+  seconds and logs an unclaimed microphone once per episode to stderr.
+- **Windows**: the shared host registers the same holds, but there is no
+  Status card, OS microphone probe or hotkey-hook hold yet. Those need
+  Windows testing. Once `NativeCallbackContext<T>` (#1472) lands, a native
+  context's retire point is where a platform-owned hold should end.
+
+On desktop, Release Everything stops recordings, playback, listening and
+warm-ups. The hotkey keeps working.

@@ -95,6 +95,31 @@ final class DesktopHostShortcutPressMicrophoneTests: XCTestCase {
         XCTAssertTrue(effects.captures.isEmpty)
     }
 
+    func testPressHold_ListedUntilReleasedFromStatus() async throws {
+        let registry = SystemResourceRegistry()
+        await controller.useSystemResourceRegistry(registry)
+        XCTAssertTrue(registry.holds.isEmpty)
+        await controller.warmMicrophoneForShortcutPress(deviceID: "mic-a")
+        let hold = try XCTUnwrap(registry.holds.first)
+        XCTAssertEqual(registry.holds.count, 1)
+        XCTAssertEqual(hold.kind, .microphone)
+        XCTAssertEqual(hold.title, "Hotkey warm-up")
+        XCTAssertEqual(hold.releaseTitle, "Close")
+        let released = await DesktopSystemResources.release(hold.id.uuidString, registry: registry)
+        XCTAssertTrue(released)
+        XCTAssertEqual(try XCTUnwrap(effects.captures.first).log, ["start", "stop", "destroy"])
+        XCTAssertTrue(registry.holds.isEmpty, "Closing the capture ends its hold")
+    }
+
+    func testClose_EndsSystemResourceHolds() async throws {
+        let registry = SystemResourceRegistry()
+        await controller.useSystemResourceRegistry(registry)
+        await controller.warmMicrophoneForShortcutPress(deviceID: "mic-a")
+        XCTAssertFalse(registry.holds.isEmpty)
+        await controller.close()
+        XCTAssertTrue(registry.holds.isEmpty, "A closed controller holds nothing")
+    }
+
     func testClose_EndsPressCapture() async throws {
         await controller.warmMicrophoneForShortcutPress(deviceID: "")
         let capture = try XCTUnwrap(effects.captures.first)

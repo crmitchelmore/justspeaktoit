@@ -1,4 +1,5 @@
 #include "LinuxSupportInternal.h"
+#include "LinuxPCMWriter.h"
 
 #include <math.h>
 #include <pulse/pulseaudio.h>
@@ -7,9 +8,11 @@
 /*
  * Microphone capture through libpulse's threaded main loop. On current
  * desktops this reaches PipeWire through pipewire-pulse; in Flatpak it needs
- * --socket=pulseaudio. Audio arrives on the pulse thread, is re-framed to
- * exact frame_ms chunks and handed to Swift, which appends it to the WAV and
- * any live session. Source volume is never changed.
+ * --socket=pulseaudio. Audio arrives on the pulse thread and is re-framed to
+ * exact frame_ms chunks into a bounded ring (LinuxPCMWriter.c). A writer
+ * thread hands each frame, and any failure, to Swift, which appends it to the
+ * WAV and any live session, so no callback runs on the pulse thread or under
+ * its main-loop lock. Source volume is never changed.
  */
 
 typedef struct JSTIPulse {
@@ -90,9 +93,12 @@ struct jsti_capture {
     pa_stream *stream;
     char *device;
     uint32_t rate;
+    uint32_t frame_ms;
     size_t frame_samples;
     int16_t *frame;
     size_t filled;
+    /* Created by start, finished and freed by stop; guarded by the loop lock. */
+    JSTIPCMWriter *writer;
     jsti_capture_audio_fn audio;
     jsti_capture_error_fn failure;
     void *context;
@@ -100,11 +106,11 @@ struct jsti_capture {
     gboolean failed;
 };
 
-/* Pulse thread, loop lock held. */
+/* Pulse thread, loop lock held. The writer thread reports it. */
 static void capture_fail(jsti_capture *capture, const char *message) {
     if (capture->failed || !capture->running) return;
     capture->failed = TRUE;
-    capture->failure(message, capture->context);
+    jsti_pcm_writer_report(capture->writer, message);
 }
 
 static void capture_emit(jsti_capture *capture, const uint8_t *bytes, size_t length) {
@@ -123,7 +129,8 @@ static void capture_emit(jsti_capture *capture, const uint8_t *bytes, size_t len
         count -= take;
         if (capture->filled == capture->frame_samples) {
             jsti_capture_publish_level(capture->frame, capture->filled);
-            capture->audio(capture->frame, capture->filled, capture->context);
+            /* A full ring is reported by the writer; audio is never dropped silently. */
+            if (!jsti_pcm_writer_append(capture->writer, capture->frame, capture->filled)) capture->failed = TRUE;
             capture->filled = 0;
         }
     }
@@ -187,6 +194,7 @@ jsti_capture *jsti_capture_create(
     jsti_capture *capture = g_new0(jsti_capture, 1);
     capture->device = (device != NULL && device[0] != '\0') ? g_strdup(device) : NULL;
     capture->rate = sample_rate;
+    capture->frame_ms = frame_ms;
     capture->frame_samples = sample_rate * frame_ms / 1000;
     capture->frame = g_new0(int16_t, capture->frame_samples);
     capture->audio = audio;
@@ -202,14 +210,36 @@ jsti_capture *jsti_capture_create(
     return capture;
 }
 
+/* Finishes a writer that start created when the stream did not open. */
+static int32_t capture_start_failed(JSTIPCMWriter *writer) {
+    jsti_pcm_writer_free(writer);
+    return -1;
+}
+
 int32_t jsti_capture_start(jsti_capture *capture, char *error, size_t capacity) {
     pa_threaded_mainloop_lock(capture->pulse.loop);
+    if (capture->writer != NULL) {
+        pa_threaded_mainloop_unlock(capture->pulse.loop);
+        jsti_set_error(error, capacity, "The microphone is already started. Stop it before restarting.");
+        return -1;
+    }
+    capture->writer = jsti_pcm_writer_new(
+        capture->frame_samples, capture->frame_ms, capture->audio, capture->failure, capture->context);
+    if (capture->writer == NULL) {
+        pa_threaded_mainloop_unlock(capture->pulse.loop);
+        jsti_set_error(error, capacity, "Could not start the recording writer.");
+        return -1;
+    }
+    capture->failed = FALSE;
+    capture->filled = 0;
     pa_sample_spec spec = { .format = PA_SAMPLE_S16LE, .rate = capture->rate, .channels = 1 };
     capture->stream = pa_stream_new(capture->pulse.context, "Dictation", &spec, NULL);
     if (capture->stream == NULL) {
+        JSTIPCMWriter *writer = capture->writer;
+        capture->writer = NULL;
         pa_threaded_mainloop_unlock(capture->pulse.loop);
         jsti_set_error(error, capacity, "Could not create the recording stream.");
-        return -1;
+        return capture_start_failed(writer);
     }
     pa_stream_set_read_callback(capture->stream, stream_read, capture);
     pa_stream_set_state_callback(capture->stream, stream_state, capture);
@@ -224,9 +254,11 @@ int32_t jsti_capture_start(jsti_capture *capture, char *error, size_t capacity) 
     if (pa_stream_connect_record(capture->stream, capture->device, &attributes, PA_STREAM_ADJUST_LATENCY) < 0) {
         capture->running = FALSE;
         int code = pa_context_errno(capture->pulse.context);
+        JSTIPCMWriter *writer = capture->writer;
+        capture->writer = NULL;
         pa_threaded_mainloop_unlock(capture->pulse.loop);
         jsti_set_error(error, capacity, "Could not open the microphone: %s", pa_strerror(code));
-        return -1;
+        return capture_start_failed(writer);
     }
     for (;;) {
         pa_stream_state_t state = pa_stream_get_state(capture->stream);
@@ -234,11 +266,13 @@ int32_t jsti_capture_start(jsti_capture *capture, char *error, size_t capacity) 
         if (!PA_STREAM_IS_GOOD(state)) {
             capture->running = FALSE;
             int code = pa_context_errno(capture->pulse.context);
+            JSTIPCMWriter *writer = capture->writer;
+            capture->writer = NULL;
             pa_threaded_mainloop_unlock(capture->pulse.loop);
             jsti_set_error(
                 error, capacity, "Could not open the microphone%s%s: %s", capture->device ? " " : "",
                 capture->device ? capture->device : "", pa_strerror(code));
-            return -1;
+            return capture_start_failed(writer);
         }
         pa_threaded_mainloop_wait(capture->pulse.loop);
     }
@@ -247,14 +281,17 @@ int32_t jsti_capture_start(jsti_capture *capture, char *error, size_t capacity) 
 }
 
 int32_t jsti_capture_stop(jsti_capture *capture, char *error, size_t capacity) {
-    (void)error;
-    (void)capacity;
     pa_threaded_mainloop_lock(capture->pulse.loop);
+    if (jsti_pcm_writer_is_current(capture->writer)) {
+        pa_threaded_mainloop_unlock(capture->pulse.loop);
+        jsti_set_error(error, capacity, "Microphone stop must run outside its audio callback.");
+        return -1;
+    }
     if (capture->stream != NULL) {
-        /* Deliver what the server already captured, then the partial frame. */
+        /* Queue what the server already captured, then the partial frame. */
         if (capture->running) stream_read(capture->stream, 0, capture);
         if (capture->running && capture->filled > 0) {
-            capture->audio(capture->frame, capture->filled, capture->context);
+            if (!jsti_pcm_writer_append(capture->writer, capture->frame, capture->filled)) capture->failed = TRUE;
             capture->filled = 0;
         }
         capture->running = FALSE;
@@ -267,12 +304,18 @@ int32_t jsti_capture_stop(jsti_capture *capture, char *error, size_t capacity) {
         capture->stream = NULL;
     }
     capture->running = FALSE;
+    JSTIPCMWriter *writer = capture->writer;
+    capture->writer = NULL;
     pa_threaded_mainloop_unlock(capture->pulse.loop);
+    /* Outside the loop lock: deliver every queued frame and any failure, then join. */
+    jsti_pcm_writer_free(writer);
     return 0;
 }
 
 void jsti_capture_destroy(jsti_capture *capture) {
     if (capture == NULL) return;
+    /* Refuse a self-join/use-after-free from inside a capture callback. */
+    if (jsti_pcm_writer_is_current(capture->writer)) return;
     jsti_capture_stop(capture, NULL, 0);
     pulse_close(&capture->pulse);
     g_free(capture->frame);

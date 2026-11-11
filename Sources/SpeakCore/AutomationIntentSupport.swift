@@ -196,4 +196,23 @@ public enum AutomationIntentSupport {
         }
         return nil
     }
+
+    /// Get Last Transcription's answer: the best transcript of the first
+    /// (newest) history entry that has one. Both apps keep History newest
+    /// first and differ only in where the raw and polished text live.
+    public static func mostRecentTranscript<Items: Sequence>(
+        in items: Items,
+        raw: (Items.Element) -> String?,
+        polished: (Items.Element) -> String?
+    ) -> String? {
+        items.lazy
+            .compactMap { bestTranscript(raw: raw($0), polished: polished($0)) }
+            .first
+    }
+
+    /// Polish Text's output, or nil when the model returned only whitespace
+    /// so the intent can report that instead of returning an empty string.
+    public static func nonBlankPolishOutput(_ output: String) -> String? {
+        output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : output
+    }
 }

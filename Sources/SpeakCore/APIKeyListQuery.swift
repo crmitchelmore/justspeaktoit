@@ -65,7 +65,11 @@ public struct APIKeyListEntry: Identifiable, Equatable, Sendable {
     /// The key's last check failed or its saved value could not be read.
     public let hasError: Bool
 
-    public init(id: String, title: String, category: String, isStored: Bool, hasError: Bool = false) {
+    public init(id: String, title: String, category: String, isStored: Bool) {
+        self.init(id: id, title: title, category: category, isStored: isStored, hasError: false)
+    }
+
+    public init(id: String, title: String, category: String, isStored: Bool, hasError: Bool) {
         self.id = id
         self.title = title
         self.category = category

@@ -72,3 +72,7 @@ API breakage: enumelement GeminiTTSModel.flash38LiteTTS has been added as a new 
 API breakage: enumelement AutomationCommand.speakText has been added as a new enum case
 API breakage: enumelement AutomationCommand.listVoices has been added as a new enum case
 API breakage: enumelement AutomationErrorCode.speechFailed has been added as a new enum case
+# API Keys gains an Errors status filter (#1465). Existing cases, raw values and
+# the original APIKeyListEntry initializer remain; every switch over the filter
+# is in this repository and is rebuilt in the same run.
+API breakage: enumelement APIKeyStatusFilter.errors has been added as a new enum case

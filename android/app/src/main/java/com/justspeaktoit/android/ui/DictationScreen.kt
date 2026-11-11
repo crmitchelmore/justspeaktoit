@@ -122,9 +122,9 @@ fun DictationScreen(
                         contentDescription = stringResource(R.string.history_title),
                     )
                 }
+                // Settings stays open during a session so its microphone and request can be released there.
                 IconButton(
                     onClick = actions.onShowSettings,
-                    enabled = !state.dictation.isActive,
                     modifier = Modifier.testTag(AutomationIds.OPEN_SETTINGS),
                 ) {
                     Icon(

@@ -1992,7 +1992,7 @@ Resource tests assert all eight names and M4A headers in the actual SwiftPM
 bundle; a Windows production-collector test asserts all eight byte-exact files.
 Linux production staging also needs the sibling-resource collector in #1212.
 
-`SpeakDesktop/DesktopRecordingFeedback.swift` provides isolated feedback output
+`SpeakDesktop/Recording/DesktopRecordingFeedback.swift` provides isolated feedback output
 ownership, cancellable preparation, reserved recording IDs, capture-ready/normal
 finish cues, duplicate/stale rejection, explicit disabled previews, volume-only
 reuse and awaited cleanup. Fake-output lifecycle tests do **not** prove native
@@ -2557,7 +2557,7 @@ Windows/Linux surfaces. Earlier baseline notes that called these surfaces
 missing are superseded by the source below; runtime qualification is separate.
 
 - **Shared model** (`SpeakCore/Desktop/DesktopOnboarding.swift`,
-  `SpeakDesktopHost/DesktopHostOnboarding.swift`): ordered steps (welcome,
+  `SpeakDesktopHost/Controller/DesktopHostOnboarding.swift`): ordered steps (welcome,
   microphone, text insertion, transcription route, shortcut practice, optional
   post-processing, done), their actions and plain-language guidance; permission
   items with status, guidance and blocking summary. Completion is stored under
@@ -2649,14 +2649,14 @@ parity. Evidence labels refer to executable surfaces:
 
 | Label | Files |
 |---|---|
-| Config | `SpeakCore/Desktop/DesktopConfiguration.swift`, `SpeakDesktopHost/DesktopHostConfiguration.swift`, `SpeakWindows/WindowsConfiguration.swift`, `SpeakLinux/LinuxConfiguration.swift` (all under `Sources`) |
-| Models | `Sources/SpeakDesktopHost/DesktopHostModels.swift`, `DesktopHostModelDiscovery.swift`, `DesktopHostLocalModels.swift`, `SpeakDesktop/DesktopLiveTranscription.swift` |
+| Config | `SpeakCore/Desktop/DesktopConfiguration.swift`, `SpeakDesktopHost/Settings/DesktopHostConfiguration.swift`, `SpeakWindows/WindowsConfiguration.swift`, `SpeakLinux/LinuxConfiguration.swift` (all under `Sources`) |
+| Models | `Sources/SpeakDesktopHost/Transcription/DesktopHostModels.swift`, `DesktopHostModelDiscovery.swift`, `DesktopHostLocalModels.swift`, `SpeakDesktop/Transcription/DesktopLiveTranscription.swift` |
 | Output | `Sources/SpeakWindows/WindowsTextOutputSettings.swift`, `SpeakLinux/LinuxControllerSettings.swift`, `SpeakLinuxPlatform/LinuxTextOutput.swift` |
-| HUD | `Sources/SpeakDesktopHost/DesktopHostHUD.swift`, `Sources/SpeakDesktop/DesktopHUD.swift` |
-| Keys | `Sources/SpeakDesktopHost/DesktopHostCredentials.swift`, `DesktopHostAPIKeys.swift`, `SpeakCore/APIKeyCatalog.swift`, `SpeakWindows/WindowsNative.swift`, `SpeakWindows/WindowsAPIKeys.swift`, `SpeakLinuxPlatform/LinuxCredentialStore.swift` |
+| HUD | `Sources/SpeakDesktopHost/Output/DesktopHostHUD.swift`, `Sources/SpeakDesktop/Output/DesktopHUD.swift` |
+| Keys | `Sources/SpeakDesktopHost/Credentials/DesktopHostCredentials.swift`, `DesktopHostAPIKeys.swift`, `SpeakCore/APIKeyCatalog.swift`, `SpeakWindows/WindowsNative.swift`, `SpeakWindows/WindowsAPIKeys.swift`, `SpeakLinuxPlatform/LinuxCredentialStore.swift` |
 | Shortcuts | `Sources/SpeakWindows/WindowsHotKey.swift`, `Sources/SpeakLinux/LinuxShortcutGestures.swift`, `SpeakCore/Recording/HotKeyGestureMachine.swift` |
-| Voice | `Sources/SpeakDesktopHost/DesktopHostReadAloud.swift`, `SpeakWindows/WindowsReadAloud.swift`, `SpeakLinux/LinuxReadAloud.swift` |
-| General | `Sources/SpeakDesktopHost/DesktopHostSettings.swift`, `DesktopHostLoginItem.swift`, `SpeakWindows/WindowsLoginItemHost.swift`, `SpeakLinux/LinuxLoginItemHost.swift` |
+| Voice | `Sources/SpeakDesktopHost/ReadAloud/DesktopHostReadAloud.swift`, `SpeakWindows/WindowsReadAloud.swift`, `SpeakLinux/LinuxReadAloud.swift` |
+| General | `Sources/SpeakDesktopHost/Settings/DesktopHostSettings.swift`, `DesktopHostLoginItem.swift`, `SpeakWindows/WindowsLoginItemHost.swift`, `SpeakLinux/LinuxLoginItemHost.swift` |
 | Automation | Windows per-user named pipe, `WindowsAutomation.swift`, `WindowsAutomationSetup.swift` and General › CLI and MCP setup (`CWindowsSupport/WindowsAutomationSettings.cpp`, source-only); Linux `LinuxAutomation.swift`, shared Host commands and `SpeakLinuxAutomation` private Unix socket/`speak` journey (source-only, native qualification pending); `--toggle` remains |
 
 Paths named relative to `Sources` in a cell inherit the preceding `Sources/`

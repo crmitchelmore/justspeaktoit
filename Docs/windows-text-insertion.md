@@ -20,7 +20,7 @@ Automation inspection), `WindowsTextOutputWorker.cpp` (the per-target worker),
 `WindowsTextOutputSettings.cpp` (the native Text output dialog),
 `Sources/SpeakWindowsPlatform/WindowsTextOutput.swift` (ownership, settings
 and status text), `Sources/SpeakWindows/WindowsOutputJob.swift` (the output
-job), `Sources/SpeakDesktopHost/DesktopHostOutput.swift` (the shared
+job), `Sources/SpeakDesktopHost/Output/DesktopHostOutput.swift` (the shared
 actor-owned output task and cancellation) and
 `Sources/SpeakWindows/WindowsTextOutputSettings.swift` (saving the dialog's
 choices).

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './_worker.js';
 
@@ -180,5 +180,82 @@ test('Linux Flatpak descriptors fall back to the Alpha bundle until a repository
     }
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+// A fetch that never answers on its own; it rejects only when its signal aborts.
+const stalledFetch = aborted => (url, init = {}) => new Promise((_, reject) => {
+  init.signal?.addEventListener('abort', () => {
+    aborted.push(url);
+    reject(new DOMException('aborted', 'AbortError'));
+  });
+});
+
+// Runs one request against stalled upstreams, advancing past the deadline.
+const serveStalled = async (path, fetchImpl) => {
+  const originalFetch = globalThis.fetch;
+  mock.timers.enable({apis: ['setTimeout']});
+  try {
+    globalThis.fetch = fetchImpl;
+    const pending = worker.fetch(new Request(`https://justspeaktoit.com${path}`), {});
+    for (let step = 0; step < 4; step += 1) {
+      await new Promise(resolve => setImmediate(resolve));
+      mock.timers.tick(5000);
+    }
+    return await pending;
+  } finally {
+    mock.timers.reset();
+    globalThis.fetch = originalFetch;
+  }
+};
+
+test('a stalled Alpha pointer is aborted at the deadline and answers unavailable', async () => {
+  const aborted = [];
+  const response = await serveStalled('/alpha/download/arm64', stalledFetch(aborted));
+  assert.equal(response.status, 503);
+  assert.equal(await response.text(), 'Alpha build not yet available');
+  assert.deepEqual(aborted, [`${release}/alpha-latest/alpha-pointer.json`]);
+});
+
+test('stalled installer, probe and Flatpak fetches end in their controlled fallbacks', async () => {
+  const installer = await serveStalled('/alpha/windows/installer.json', stalledFetch([]));
+  assert.deepEqual(await installer.json(), {available: false, channel: 'beta'});
+
+  const probe = await serveStalled('/alpha/download/windows-x64', (url, init) =>
+    url.endsWith('/alpha-pointer.json') ? Promise.resolve(Response.json({tag: 'alpha-build-7'}))
+      : stalledFetch([])(url, init));
+  assert.equal(probe.status, 503);
+  assert.equal(await probe.text(), 'Desktop Alpha build not yet available');
+
+  const file = await serveStalled('/alpha/windows/JustSpeakToIt.appinstaller', (url, init) =>
+    url.endsWith('/windows-installer-pointer.json') ? Promise.resolve(Response.json(installerPointer))
+      : stalledFetch([])(url, init));
+  assert.equal(file.status, 503);
+  assert.equal(await file.text(), 'Windows installer not yet available');
+
+  const flatpak = await serveStalled('/linux/flatpak', stalledFetch([]));
+  assert.equal(flatpak.status, 302);
+  assert.equal(flatpak.headers.get('Location'), '/alpha/download/linux-x86_64');
+});
+
+test('pointer schemas are checked separately for the Alpha and installer pointers', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    // The Alpha pointer needs only its tag; installer fields are never imposed on it.
+    globalThis.fetch = async () => Response.json({tag: 'alpha-build-7'});
+    assert.equal((await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {})).status, 302);
+    for (const pointer of [JSON.stringify({tag: 'alpha-build-7', padding: 'x'.repeat(5000)}), 'null', '"alpha-build-7"']) {
+      globalThis.fetch = async () => new Response(pointer);
+      const response = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {});
+      assert.equal(response.status, 503);
+      assert.equal(await response.text(), 'Invalid Alpha pointer');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const {build: _build, ...withoutBuild} = installerPointer;
+  for (const pointer of [withoutBuild, {...installerPointer, build: 7}, {...installerPointer, publisher: ''}]) {
+    const status = await (await serveInstaller('/alpha/windows/installer.json', {pointer})).response.json();
+    assert.deepEqual(status, {available: false, channel: 'beta'});
   }
 });

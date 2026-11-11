@@ -3,23 +3,77 @@
 const release = 'https://github.com/crmitchelmore/justspeaktoit/releases/download';
 const appInstallerPath = '/alpha/windows/JustSpeakToIt.appinstaller';
 const appInstallerAsset = 'JustSpeakToIt.appinstaller';
+const alphaTag = /^alpha-build-[1-9][0-9]*$/;
+// Every upstream fetch and its body read share one deadline, so a stalled
+// GitHub or Pages response becomes a controlled answer instead of holding the
+// request open until the platform's own limit.
+const upstreamTimeoutMs = 5000;
+const pointerMaxBytes = 4096;
+
+/**
+ * Fetches `url` and reads the response with `read` within the upstream deadline.
+ * On timeout the request is aborted and this rejects, like a network failure.
+ */
+async function fetchWithin(url, init, read) {
+  const controller = new AbortController();
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error('Upstream deadline reached'));
+    }, upstreamTimeoutMs);
+  });
+  try {
+    return await Promise.race([fetch(url, {...init, signal: controller.signal}).then(read), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Reads a small JSON pointer from the alpha-latest release. Returns
+ * {unavailable} when it cannot be fetched (missing, network failure or
+ * deadline), {invalid} when it is too large or not JSON, otherwise {value}.
+ */
+async function fetchPointer(name) {
+  let text;
+  try {
+    text = await fetchWithin(`${release}/alpha-latest/${name}`,
+      {cf: {cacheTtl: 30}, headers: {'Accept': 'application/json'}},
+      response => response.ok ? response.text() : null);
+  } catch {
+    return {unavailable: true};
+  }
+  if (text === null) return {unavailable: true};
+  if (text.length > pointerMaxBytes) return {invalid: true};
+  try {
+    return {value: JSON.parse(text)};
+  } catch {
+    return {invalid: true};
+  }
+}
+
+// The Alpha pointer keeps its original format ({tag, build, source}); only
+// the tag routes downloads, so only the tag is required.
+function isAlphaPointer(pointer) {
+  return pointer !== null && typeof pointer === 'object' && alphaTag.test(pointer.tag);
+}
+
+// The Windows installer pointer is versioned, and installer.json echoes its
+// fields, so every field it publishes must be present and well formed.
+function isInstallerPointer(pointer) {
+  return pointer !== null && typeof pointer === 'object' && pointer.schemaVersion === 1
+    && alphaTag.test(pointer.tag) && /^[0-9]{1,5}(\.[0-9]{1,5}){3}$/.test(pointer.version)
+    && typeof pointer.build === 'string' && /^[0-9A-Za-z._-]{1,64}$/.test(pointer.build)
+    && typeof pointer.publisher === 'string' && pointer.publisher.length > 0;
+}
 
 // The signed Windows beta installer advances its own pointer only after the
 // published App Installer file installed on clean x64 and ARM64 runners, so it
 // can lag the Alpha pointer and is absent until a publisher is configured.
 async function windowsInstaller() {
-  try {
-    const response = await fetch(`${release}/alpha-latest/windows-installer-pointer.json`, {
-      cf: {cacheTtl: 30}, headers: {'Accept': 'application/json'},
-    });
-    if (!response.ok) return null;
-    const pointer = await response.json();
-    if (!pointer || pointer.schemaVersion !== 1 || !/^alpha-build-[1-9][0-9]*$/.test(pointer.tag)
-      || !/^[0-9]{1,5}(\.[0-9]{1,5}){3}$/.test(pointer.version) || typeof pointer.publisher !== 'string') return null;
-    return pointer;
-  } catch {
-    return null;
-  }
+  const {value} = await fetchPointer('windows-installer-pointer.json');
+  return isInstallerPointer(value ?? null) ? value : null;
 }
 
 const windowsInstallerRoutes = {
@@ -30,9 +84,11 @@ const windowsInstallerRoutes = {
     if (!installer) return new Response('Windows installer not yet available', {status: 503});
     let body;
     try {
-      const response = await fetch(`${release}/${installer.tag}/${appInstallerAsset}`, {cf: {cacheTtl: 30}});
-      if (!response.ok) throw Error('missing');
-      body = await response.text();
+      body = await fetchWithin(`${release}/${installer.tag}/${appInstallerAsset}`, {cf: {cacheTtl: 30}},
+        response => {
+          if (!response.ok) throw Error('missing');
+          return response.text();
+        });
     } catch {
       return new Response('Windows installer not yet available', {status: 503});
     }
@@ -73,9 +129,9 @@ const flatpakRoutes = {
 
 async function flatpakDescriptor({file, header, type}) {
   try {
-    const response = await fetch(`${flatpakSite}/${file}`, {cf: {cacheTtl: 60}});
-    if (response.ok) {
-      const body = await response.text();
+    const body = await fetchWithin(`${flatpakSite}/${file}`, {cf: {cacheTtl: 60}},
+      response => response.ok ? response.text() : null);
+    if (body !== null) {
       if (body.length <= 16384 && body.startsWith(`${header}\n`) && body.includes('\nGPGKey=')) {
         return new Response(body, {headers: {
           'Content-Type': type,
@@ -95,25 +151,13 @@ async function flatpakDescriptor({file, header, type}) {
 
 // The Alpha every Mac, CLI and desktop download resolves through. Returns the
 // pointer, or the controlled 503 to serve: unavailable when the pointer cannot
-// be fetched (including a network failure), invalid when it does not parse.
+// be fetched in time (including a network failure), invalid when it does not
+// parse or match the Alpha pointer format.
 async function alphaPointer() {
-  let response;
-  try {
-    response = await fetch(`${release}/alpha-latest/alpha-pointer.json`, {
-      cf: {cacheTtl: 30}, headers: {'Accept': 'application/json'},
-    });
-  } catch {
-    return new Response('Alpha build not yet available', {status: 503});
-  }
-  if (!response.ok) return new Response('Alpha build not yet available', {status: 503});
-  let pointer;
-  try { pointer = await response.json(); } catch {
-    return new Response('Invalid Alpha pointer', {status: 503});
-  }
-  if (!pointer || typeof pointer !== 'object' || !/^alpha-build-[1-9][0-9]*$/.test(pointer.tag)) {
-    return new Response('Invalid Alpha pointer', {status: 503});
-  }
-  return pointer;
+  const pointer = await fetchPointer('alpha-pointer.json');
+  if (pointer.unavailable) return new Response('Alpha build not yet available', {status: 503});
+  if (pointer.invalid || !isAlphaPointer(pointer.value)) return new Response('Invalid Alpha pointer', {status: 503});
+  return pointer.value;
 }
 
 export default {
@@ -143,8 +187,9 @@ export default {
     // published them; never redirect to a missing asset.
     if (/^\/alpha\/download\/(windows|linux)-/.test(path)) {
       try {
-        const probe = await fetch(location, {method: 'HEAD', redirect: 'manual', cf: {cacheTtl: 30}});
-        if (probe.status !== 302) return new Response('Desktop Alpha build not yet available', {status: 503});
+        const status = await fetchWithin(location, {method: 'HEAD', redirect: 'manual', cf: {cacheTtl: 30}},
+          probe => probe.status);
+        if (status !== 302) return new Response('Desktop Alpha build not yet available', {status: 503});
       } catch {
         return new Response('Desktop Alpha build not yet available', {status: 503});
       }

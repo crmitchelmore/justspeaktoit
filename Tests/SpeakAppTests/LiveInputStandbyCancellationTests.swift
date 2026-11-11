@@ -81,7 +81,7 @@ final class LiveInputStandbyCancellationTests: XCTestCase {
     func testForegroundStartup_HasNoAwaitOnSpeculativeStandbyWork() throws {
         let appSources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/SpeakApp")
+            .appendingPathComponent("Sources/SpeakApp/Session")
         for name in ["MainManager.swift", "MainManager+PressPrimer.swift"] {
             let source = try String(contentsOf: appSources.appendingPathComponent(name), encoding: .utf8)
             XCTAssertFalse(source.contains("settleStandby"), name)

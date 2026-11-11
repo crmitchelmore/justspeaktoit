@@ -393,7 +393,7 @@ version/baseline authority. `VERSION` is a build hint only.
 
 ### Key files
 - `Sources/SpeakCore/Live/Providers/OpenAIRealtime/OpenAIRealtimeLiveClient.swift` (+ `…LiveConnection`, `…LiveSending`, `…LiveRun`, `…Protocol`, `…TranscriptAssembler`) — the shared portable client: endpoint, GA `session.update`, readiness gating on `session.updated`, bounded PCM admission, ordered single-in-flight sends, commit/finalisation and per-run identity. Transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP on Windows).
-- `Sources/SpeakApp/OpenAIRealtimeTranscriptionProvider.swift` and `Sources/SpeakiOS/Services/OpenAIRealtimeWebSocketClient.swift` — thin platform adapters; keep behaviour changes in the shared client, not here.
+- `Sources/SpeakApp/Transcription/OpenAIRealtimeTranscriptionProvider.swift` and `Sources/SpeakiOS/Services/OpenAIRealtimeWebSocketClient.swift` — thin platform adapters; keep behaviour changes in the shared client, not here.
 - Portable lifecycle tests live in `Tests/SpeakDesktopTests/OpenAIRealtime*Tests.swift` and drive the real client through a fake `StreamingWebSocketConnection`.
 
 ## xAI Dedicated Speech-to-Text Streaming
@@ -463,7 +463,7 @@ Use Sentry below for production crashes and exceptions; PostHog does not capture
 - **Org slug:** `tally-lz`
 - **Project slug:** `justspeaktoit`
 - **Auth token:** stored in `.env` as `SENTRY_AUTH_TOKEN` (do not commit)
-- **DSN:** configured in `Sources/SpeakApp/SentryManager.swift`
+- **DSN:** configured in `Sources/SpeakApp/Analytics/SentryManager.swift`
 - **GitHub CI secret:** `SENTRY_AUTH_TOKEN` lives only in the `sentry` environment, whose deployment branch policy admits only `main`. Only the `sentry-upload` job in `release-mac.yml` reads it; the build job, which holds the signing secrets, hands dSYMs over as an artefact. Rotate with `gh secret set SENTRY_AUTH_TOKEN --env sentry`; never add it as a repository secret.
 
 ### Querying Sentry from CLI

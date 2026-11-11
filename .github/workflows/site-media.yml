@@ -16,7 +16,7 @@ on:
     paths:
       - .github/workflows/site-media.yml
       - scripts/site-media/**
-      - Sources/SpeakApp/CoreJourneySiteMediaFixture.swift
+      - Sources/SpeakApp/CoreJourney/CoreJourneySiteMediaFixture.swift
       - Tests/SpeakAppUITests/SiteMediaCaptureUITests.swift
       - Tests/SpeakiOSUITests/SiteMediaCaptureUITests.swift
       - Tests/Fixtures/CoreJourneyTargetApp/**

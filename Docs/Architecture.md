@@ -159,7 +159,7 @@ Linux in [linux-development.md](linux-development.md).
 | --- | --- |
 | Model catalogue and placement | [ModelCatalog.swift](../Sources/SpeakCore/ModelCatalog.swift), [ModelRouting.swift](../Sources/SpeakCore/Transcription/ModelRouting.swift) and provider-specific shared catalogues. |
 | Live routes and client construction | [LiveTranscriptionSelection.swift](../Sources/SpeakCore/Live/LiveTranscriptionSelection.swift) and [LiveTranscriptionClientFactory.swift](../Sources/SpeakCore/Live/LiveTranscriptionClientFactory.swift). |
-| Batch-provider contract and metadata | [TranscriptionProviderRegistry.swift](../Sources/SpeakCore/Transcription/TranscriptionProviderRegistry.swift) defines `TranscriptionProvider` and metadata. The concrete macOS actor is a different file with the same name under [SpeakApp](../Sources/SpeakApp/TranscriptionProviderRegistry.swift). |
+| Batch-provider contract and metadata | [TranscriptionProviderRegistry.swift](../Sources/SpeakCore/Transcription/TranscriptionProviderRegistry.swift) defines `TranscriptionProvider` and metadata. The concrete macOS actor is a different file with the same name under [SpeakApp](../Sources/SpeakApp/Transcription/TranscriptionProviderRegistry.swift). |
 | Capture start and opening audio | [RecordingStartSequence.swift](../Sources/SpeakCore/Recording/RecordingStartSequence.swift) contains `RecordingStartSequencer`; [StreamingAudioPreroll.swift](../Sources/SpeakCore/Live/StreamingAudioPreroll.swift) retains ordered opening buffers. |
 | Language, results, keychain and privacy-safe types | `SpeakCore`, including [SecureStorage.swift](../Sources/SpeakCore/Credentials/SecureStorage.swift), [SensitiveHeaderRedactor.swift](../Sources/SpeakCore/History/SensitiveHeaderRedactor.swift) and closed analytics dimensions. |
 | Lexicon | [PersonalLexiconService.swift](../Sources/SpeakCore/Vocabulary/PersonalLexiconService.swift) and `PersonalLexiconStore`. |
@@ -194,12 +194,19 @@ cross-cutting utilities stay at the top level.
 
 ## macOS runtime
 
-[SpeakApp.swift](../Sources/SpeakApp/SpeakApp.swift) is the executable entry point. [WireUp.swift](../Sources/SpeakApp/WireUp.swift)
+[SpeakApp.swift](../Sources/SpeakApp/App/SpeakApp.swift) is the executable entry point. [WireUp.swift](../Sources/SpeakApp/App/WireUp.swift)
 constructs the long-lived `AppEnvironment`, injects services, installs optional analytics and sync adapters, and makes
 the environment available to SwiftUI and App Intents. Feature assembly sits beside it in `WireUp+<Feature>.swift`
 (paid access, analytics, TTS, Send to Mac, credential sync, transcription defaults); `AppChrome` owns the status bar,
 menus, Services and Touch Bar. `AppSettings`, `PermissionsManager`, audio devices and capture,
 transcription, post-processing, TTS, history, HUD, hot keys, output delivery and local transports live for the process.
+
+`Sources/SpeakApp` is grouped by feature: `App/` (entry point, `WireUp*`, environment, chrome), `Session/`
+(`MainManager` and its session collaborators), `Live/` (live controllers, `SwitchingLiveTranscriber`, shared-client
+audio processing, live input), `Transcription/` (manager and batch providers), `LocalModels/`, `Settings/`, `HUD/`,
+`History/`, `Output/` (text output and accessibility insertion), `Hotkeys/`, `Audio/`, `PostProcessing/`,
+`Analytics/`, `Permissions/`, `CoreJourney/` (UI-test fixtures), `Views/`, plus the existing `CompareModels/`,
+`DataMigration/`, `PaidAccess/`, `Services/`, `TextToSpeech/`, `Transport/` and `VoiceEdit/` folders.
 
 `MainManager` owns the dictation session lifecycle and coordinates recording, transcription, optional polishing,
 delivery, HUD transitions and history finalisation. The stages after a stop live in `MainManager+SessionPipeline`;
@@ -218,7 +225,7 @@ If hardware startup changed the primer's installed tap format, the analyzer reti
 the tap using the current input format. Idle standby refill is skipped when the selected preferred microphone requires
 a default-device switch, rather than building an engine the next press will discard.
 
-[SwitchingLiveTranscriber.swift](../Sources/SpeakApp/SwitchingLiveTranscriber.swift) is deliberately mixed today:
+[SwitchingLiveTranscriber.swift](../Sources/SpeakApp/Live/SwitchingLiveTranscriber.swift) is deliberately mixed today:
 
 - a dedicated macOS controller handles OpenAI Realtime;
 - `SharedClientLiveController` supplies macOS capture for the shared `SpeakCore` clients used by every other cloud
@@ -366,7 +373,7 @@ behaviour remain separate release checks.
 ## Persistence and sync
 
 macOS `HistoryManager` stores rich `HistoryItem` records and coordinates file IO through the
-[HistoryWALStore](../Sources/SpeakApp/HistoryWALStore.swift) actor. The write-ahead log, snapshot and recovery paths keep
+[HistoryWALStore](../Sources/SpeakApp/History/HistoryWALStore.swift) actor. The write-ahead log, snapshot and recovery paths keep
 pending operations ordered. iOS uses `@MainActor` `iOSHistoryManager` with a primary JSON snapshot plus the synchronous
 [IOSHistoryPersistence](../Sources/SpeakiOS/Views/IOSHistoryPersistence.swift) recovery sidecar. These are different
 local storage implementations.
@@ -408,10 +415,10 @@ iOS exposes App Intents for recording, transcription files and result actions. T
 
 ## Observability and privacy boundaries
 
-`SentryManager` installs [SentryEventScrubber.swift](../Sources/SpeakApp/SentryEventScrubber.swift) before events and
+`SentryManager` installs [SentryEventScrubber.swift](../Sources/SpeakApp/Analytics/SentryEventScrubber.swift) before events and
 breadcrumbs leave the app. It removes/redacts sensitive headers, URL/query credentials, cookies, contexts and extras.
 
-Direct non-App-Store macOS builds may construct the explicit-consent [PostHogAnalytics.swift](../Sources/SpeakApp/PostHogAnalytics.swift)
+Direct non-App-Store macOS builds may construct the explicit-consent [PostHogAnalytics.swift](../Sources/SpeakApp/Analytics/PostHogAnalytics.swift)
 sink. Missing configuration is a no-op; opt-out closes/purges the queue. `SpeakCore` defines typed event properties and
 closed/bounded dimensions in `ProductAnalytics`, while iOS does not initialise the PostHog transport. Definitions and
 call sites are not proof of production coverage or rollout. The [implementation audit](analytics-implementation-audit.md)

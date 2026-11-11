@@ -9,7 +9,7 @@ function repository(): Repository {
 }
 
 async function seedUser(): Promise<string> {
-  const user = await repository().upsertUserByAppleSub(`apple-${crypto.randomUUID()}`, null, NOW);
+  const user = await repository().users.upsertUserByAppleSub(`apple-${crypto.randomUUID()}`, null, NOW);
   return user.id;
 }
 
@@ -17,7 +17,7 @@ describe('usage ledger idempotency', () => {
   it('records a usage row once', async () => {
     const repo = repository();
     const userId = await seedUser();
-    const written = await repo.recordUsage({
+    const written = await repo.usage.recordUsage({
       userId,
       idempotencyKey: 'request-key-0000000000000001',
       operation: 'post_processing',
@@ -31,7 +31,7 @@ describe('usage ledger idempotency', () => {
     });
     expect(written).toBe(true);
 
-    const totals = await repo.usageTotals(userId, '2027-01');
+    const totals = await repo.usage.usageTotals(userId, '2027-01');
     expect(totals.tokens).toBe(120);
   });
 
@@ -51,10 +51,10 @@ describe('usage ledger idempotency', () => {
       nowSeconds: NOW,
     };
 
-    expect(await repo.recordUsage(input)).toBe(true);
-    expect(await repo.recordUsage(input)).toBe(false);
+    expect(await repo.usage.recordUsage(input)).toBe(true);
+    expect(await repo.usage.recordUsage(input)).toBe(false);
 
-    const totals = await repo.usageTotals(userId, '2027-01');
+    const totals = await repo.usage.usageTotals(userId, '2027-01');
     expect(totals.audioSeconds).toBe(45);
   });
 
@@ -65,7 +65,7 @@ describe('usage ledger idempotency', () => {
     const key = 'shared-key-000000000000000003';
 
     expect(
-      await repo.recordUsage({
+      await repo.usage.recordUsage({
         userId: first,
         idempotencyKey: key,
         operation: 'post_processing',
@@ -80,7 +80,7 @@ describe('usage ledger idempotency', () => {
     ).toBe(true);
 
     expect(
-      await repo.recordUsage({
+      await repo.usage.recordUsage({
         userId: second,
         idempotencyKey: key,
         operation: 'post_processing',
@@ -99,7 +99,7 @@ describe('usage ledger idempotency', () => {
     const repo = repository();
     const userId = await seedUser();
     await expect(
-      repo.recordUsage({
+      repo.usage.recordUsage({
         userId,
         idempotencyKey: 'negative-key-00000000000004',
         operation: 'post_processing',
@@ -117,7 +117,7 @@ describe('usage ledger idempotency', () => {
   it('keeps usage totals partitioned by billing period', async () => {
     const repo = repository();
     const userId = await seedUser();
-    await repo.recordUsage({
+    await repo.usage.recordUsage({
       userId,
       idempotencyKey: 'jan-key-000000000000000005',
       operation: 'post_processing',
@@ -129,7 +129,7 @@ describe('usage ledger idempotency', () => {
       correlationId: 'corr-5',
       nowSeconds: NOW,
     });
-    await repo.recordUsage({
+    await repo.usage.recordUsage({
       userId,
       idempotencyKey: 'feb-key-000000000000000006',
       operation: 'post_processing',
@@ -142,8 +142,8 @@ describe('usage ledger idempotency', () => {
       nowSeconds: NOW,
     });
 
-    expect((await repo.usageTotals(userId, '2027-01')).tokens).toBe(100);
-    expect((await repo.usageTotals(userId, '2027-02')).tokens).toBe(7);
+    expect((await repo.usage.usageTotals(userId, '2027-01')).tokens).toBe(100);
+    expect((await repo.usage.usageTotals(userId, '2027-02')).tokens).toBe(7);
   });
 });
 
@@ -151,7 +151,7 @@ describe('append-only enforcement', () => {
   it('rejects an UPDATE to the usage ledger at the database level', async () => {
     const repo = repository();
     const userId = await seedUser();
-    await repo.recordUsage({
+    await repo.usage.recordUsage({
       userId,
       idempotencyKey: 'immutable-key-0000000000007',
       operation: 'post_processing',
@@ -172,7 +172,7 @@ describe('append-only enforcement', () => {
   it('rejects a DELETE from the usage ledger at the database level', async () => {
     const repo = repository();
     const userId = await seedUser();
-    await repo.recordUsage({
+    await repo.usage.recordUsage({
       userId,
       idempotencyKey: 'immutable-key-0000000000008',
       operation: 'post_processing',
@@ -215,10 +215,10 @@ describe('entitlement transition atomicity', () => {
   it('writes no audit row when the optimistic update loses its version race', async () => {
     const repo = repository();
     const userId = await seedUser();
-    const current = await repo.ensureEntitlement(userId, NOW);
+    const current = await repo.entitlements.ensureEntitlement(userId, NOW);
 
     const attempt = (expectedVersion: number, reason: string) =>
-      repo.writeEntitlementTransition({
+      repo.entitlements.writeEntitlementTransition({
         next: {
           ...current,
           status: 'active',
@@ -257,8 +257,8 @@ describe('database constraints', () => {
   it('resolves the same Apple subject to one user across sign-ins', async () => {
     const repo = repository();
     const appleSub = `apple-${crypto.randomUUID()}`;
-    const first = await repo.upsertUserByAppleSub(appleSub, null, NOW);
-    const second = await repo.upsertUserByAppleSub(appleSub, 'person@example.com', NOW + 10);
+    const first = await repo.users.upsertUserByAppleSub(appleSub, null, NOW);
+    const second = await repo.users.upsertUserByAppleSub(appleSub, 'person@example.com', NOW + 10);
     expect(second.id).toBe(first.id);
     expect(second.email).toBe('person@example.com');
   });
@@ -267,8 +267,8 @@ describe('database constraints', () => {
     const repo = repository();
     const first = await seedUser();
     const second = await seedUser();
-    await repo.ensureEntitlement(first, NOW);
-    await repo.ensureEntitlement(second, NOW);
+    await repo.entitlements.ensureEntitlement(first, NOW);
+    await repo.entitlements.ensureEntitlement(second, NOW);
 
     await env.DB.prepare(
       `UPDATE entitlements SET source = 'stripe', source_reference = 'sub_shared' WHERE user_id = ?1`,
@@ -287,7 +287,7 @@ describe('database constraints', () => {
 
   it('refuses an entitlement row with an unknown status', async () => {
     const userId = await seedUser();
-    await repository().ensureEntitlement(userId, NOW);
+    await repository().entitlements.ensureEntitlement(userId, NOW);
     await expect(
       env.DB.prepare('UPDATE entitlements SET status = ?2 WHERE user_id = ?1')
         .bind(userId, 'super_active')
@@ -297,7 +297,7 @@ describe('database constraints', () => {
 
   it('refuses a revoked entitlement with no revocation timestamp', async () => {
     const userId = await seedUser();
-    await repository().ensureEntitlement(userId, NOW);
+    await repository().entitlements.ensureEntitlement(userId, NOW);
     await expect(
       env.DB.prepare('UPDATE entitlements SET status = ?2 WHERE user_id = ?1')
         .bind(userId, 'revoked')
@@ -307,7 +307,7 @@ describe('database constraints', () => {
 
   it('refuses a period that ends before it starts', async () => {
     const userId = await seedUser();
-    await repository().ensureEntitlement(userId, NOW);
+    await repository().entitlements.ensureEntitlement(userId, NOW);
     await expect(
       env.DB.prepare(
         'UPDATE entitlements SET current_period_start = ?2, current_period_end = ?3 WHERE user_id = ?1',
@@ -320,8 +320,8 @@ describe('database constraints', () => {
   it('gives each user at most one entitlement row', async () => {
     const repo = repository();
     const userId = await seedUser();
-    const first = await repo.ensureEntitlement(userId, NOW);
-    const second = await repo.ensureEntitlement(userId, NOW + 5);
+    const first = await repo.entitlements.ensureEntitlement(userId, NOW);
+    const second = await repo.entitlements.ensureEntitlement(userId, NOW + 5);
     expect(second.id).toBe(first.id);
   });
 });
@@ -331,7 +331,7 @@ describe('webhook completion finality', () => {
     const repo = repository();
     const eventId = `evt-${crypto.randomUUID()}`;
     expect(
-      await repo.claimWebhookEvent({
+      await repo.entitlements.claimWebhookEvent({
         provider: 'stripe',
         eventId,
         eventType: 'invoice.paid',
@@ -340,7 +340,7 @@ describe('webhook completion finality', () => {
         nowSeconds: NOW,
       }),
     ).toBe(true);
-    await repo.completeWebhookEvent({
+    await repo.entitlements.completeWebhookEvent({
       provider: 'stripe',
       eventId,
       status: 'processed',
@@ -350,7 +350,7 @@ describe('webhook completion finality', () => {
 
     // A retry that loses the race and reaches completion later must not
     // rewrite the recorded outcome to failed.
-    await repo.completeWebhookEvent({
+    await repo.entitlements.completeWebhookEvent({
       provider: 'stripe',
       eventId,
       status: 'failed',
@@ -381,10 +381,10 @@ describe('request claim expiry', () => {
     const userId = await seedUser();
     const claim = claimFor(userId, 'key-1');
 
-    expect(await repo.claimRequest({ ...claim, nowSeconds: NOW })).toBeNull();
-    await repo.completeRequestClaim({ ...claim, nowSeconds: NOW });
+    expect(await repo.usage.claimRequest({ ...claim, nowSeconds: NOW })).toBeNull();
+    await repo.usage.completeRequestClaim({ ...claim, nowSeconds: NOW });
 
-    const retry = await repo.claimRequest({ ...claim, nowSeconds: NOW + 3_600 });
+    const retry = await repo.usage.claimRequest({ ...claim, nowSeconds: NOW + 3_600 });
     expect(retry?.status).toBe('completed');
   });
 
@@ -395,11 +395,11 @@ describe('request claim expiry', () => {
     const userId = await seedUser();
     const claim = claimFor(userId, 'key-2');
 
-    expect(await repo.claimRequest({ ...claim, nowSeconds: NOW })).toBeNull();
-    await repo.completeRequestClaim({ ...claim, nowSeconds: NOW });
+    expect(await repo.usage.claimRequest({ ...claim, nowSeconds: NOW })).toBeNull();
+    await repo.usage.completeRequestClaim({ ...claim, nowSeconds: NOW });
 
     expect(
-      await repo.claimRequest({ ...claim, nowSeconds: NOW + REQUEST_CLAIM_TTL_SECONDS + 1 }),
+      await repo.usage.claimRequest({ ...claim, nowSeconds: NOW + REQUEST_CLAIM_TTL_SECONDS + 1 }),
     ).toBeNull();
   });
 });
@@ -409,7 +409,7 @@ describe('refresh token rotation', () => {
     const repo = repository();
     const userId = await seedUser();
     const hash = 'a'.repeat(64);
-    await repo.createAuthSession({
+    await repo.users.createAuthSession({
       userId,
       refreshTokenHash: hash,
       deviceLabel: null,
@@ -417,15 +417,15 @@ describe('refresh token rotation', () => {
       expiresAt: NOW + 3_600,
     });
 
-    expect(await repo.consumeRefreshToken(hash, NOW)).not.toBeNull();
-    expect(await repo.consumeRefreshToken(hash, NOW)).toBeNull();
+    expect(await repo.users.consumeRefreshToken(hash, NOW)).not.toBeNull();
+    expect(await repo.users.consumeRefreshToken(hash, NOW)).toBeNull();
   });
 
   it('refuses an expired refresh token', async () => {
     const repo = repository();
     const userId = await seedUser();
     const hash = 'b'.repeat(64);
-    await repo.createAuthSession({
+    await repo.users.createAuthSession({
       userId,
       refreshTokenHash: hash,
       deviceLabel: null,
@@ -433,7 +433,7 @@ describe('refresh token rotation', () => {
       expiresAt: NOW - 60,
     });
 
-    expect(await repo.consumeRefreshToken(hash, NOW)).toBeNull();
+    expect(await repo.users.consumeRefreshToken(hash, NOW)).toBeNull();
   });
 });
 
@@ -444,11 +444,11 @@ describe('request claim retention', () => {
     const userId = await seedUser();
     for (const [idempotencyKey, nowSeconds] of [['expired-key', NOW - REQUEST_CLAIM_TTL_SECONDS],
       ['current-key', NOW]] as const) {
-      await repo.claimRequest({ userId, idempotencyKey, operation: 'post_processing',
+      await repo.usage.claimRequest({ userId, idempotencyKey, operation: 'post_processing',
         correlationId: 'cleanup-test', nowSeconds });
     }
-    expect(await repo.pruneExpiredRequestClaims(NOW)).toBe(1);
-    expect(await repo.claimRequest({ userId, idempotencyKey: 'current-key', operation: 'post_processing',
+    expect(await repo.usage.pruneExpiredRequestClaims(NOW)).toBe(1);
+    expect(await repo.usage.claimRequest({ userId, idempotencyKey: 'current-key', operation: 'post_processing',
       correlationId: 'cleanup-test', nowSeconds: NOW })).not.toBeNull();
   });
 });

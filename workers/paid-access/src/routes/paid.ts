@@ -26,14 +26,22 @@ import {
 import { claimOperation, runOperation, SETTLEMENT_HEADER, SETTLEMENT_VERSION } from './settlement.js';
 import { providerSecretResolver } from '../env.js';
 import { billingPeriod, grantsAccess } from '../entitlement.js';
-import { bestRoute, isPaidOperation, policyDocument, type PaidOperation } from '../policy.js';
+import { bestRoute, policyDocument } from '../policy.js';
+import { wavDurationSeconds } from '../audio/wav.js';
+import {
+  parseBatchTranscriptionRequest,
+  parseLiveFinaliseBody,
+  parseLiveTranscriptionRequest,
+  parsePostProcessingBody,
+  requireIdempotencyKey,
+  type PostProcessingBody,
+} from './paid-requests.js';
 import { DeepgramProxy, OpenRouterProxy } from '../providers/index.js';
 import type { AuthenticatedContext } from '../context.js';
 import type { PaidOperationName } from '../data/repository.js';
 import type { LiveSessionReconciliation } from '../do/live-session.js';
 
 const MAX_POST_PROCESSING_BODY_BYTES = 256 * 1024;
-const MAX_TEXT_CHARACTERS = 100_000;
 // UTF-8 bytes conservatively bound prompt tokens for the routed byte tokenizer;
 // fixed overhead covers message framing. Completion spending is capped upstream.
 const POST_PROCESSING_TOKEN_OVERHEAD = 1_024;
@@ -50,9 +58,9 @@ async function requirePaidAccess(context: AuthenticatedContext): Promise<void> {
   if (context.config.paidRoutingDisabled) {
     throw new ApiError('paid_routing_disabled', 'Paid routing is temporarily disabled');
   }
-  const entitlement = await context.repository.findEntitlement(context.session.userId);
+  const entitlement = await context.repository.entitlements.findEntitlement(context.session.userId);
   if (!grantsAccess(entitlement, context.nowSeconds)) {
-    await context.repository.recordAudit({
+    await context.repository.audit.recordAudit({
       userId: context.session.userId,
       actor: 'user',
       action: 'paid.access_check',
@@ -75,26 +83,8 @@ async function requireNewOperationAccess(request: Request, context: Authenticate
 async function releaseUnstartedClaim(context: AuthenticatedContext, key: string): Promise<void> {
   try {
     const receipt = await context.quota.operationReceipt(context.session.userId, key, Math.floor(Date.now() / 1000));
-    if (receipt === null) await context.repository.releaseRequestClaim({ userId: context.session.userId, idempotencyKey: key });
+    if (receipt === null) await context.repository.usage.releaseRequestClaim({ userId: context.session.userId, idempotencyKey: key });
   } catch { /* Unknown is retained. Operational claim expiry never deletes a DO receipt. */ }
-}
-
-function requireOperation(value: unknown, expected: PaidOperation): PaidOperation {
-  if (typeof value !== 'string' || !isPaidOperation(value) || value !== expected) {
-    throw new ApiError('bad_request', `Field operation must be "${expected}"`);
-  }
-  return value;
-}
-
-function requireIdempotencyKey(request: Request): string {
-  const key = request.headers.get('idempotency-key');
-  if (key === null || !/^[A-Za-z0-9_-]{16,128}$/.test(key)) {
-    throw new ApiError(
-      'bad_request',
-      'An Idempotency-Key header of 16-128 URL-safe characters is required',
-    );
-  }
-  return key;
 }
 
 export function handlePolicy(context: AuthenticatedContext): Response {
@@ -120,7 +110,7 @@ async function recordMeteredUsage(
     billingPeriod: string;
   },
 ): Promise<void> {
-  const recorded = await context.repository.recordUsage({
+  const recorded = await context.repository.usage.recordUsage({
     userId: context.session.userId,
     idempotencyKey: input.idempotencyKey,
     operation: input.operation,
@@ -141,75 +131,6 @@ async function recordMeteredUsage(
   }
 }
 
-/**
- * The exact duration of a linear-PCM WAV payload.
- *
- * Duration is what gets billed, so it is measured from the payload's own header
- * rather than assumed from its size: a fixed bytes-per-second guess is wrong by
- * a factor of six between 16 kHz mono and 48 kHz stereo, and wrong by an order
- * of magnitude for a compressed container. Nothing we route to reports the
- * duration back, so the payload is the only source of truth — which is why the
- * accepted content types are limited to what this can read.
- */
-function wavDurationSeconds(audio: Uint8Array): number {
-  const view = new DataView(audio.buffer, audio.byteOffset, audio.byteLength);
-  const tag = (offset: number): string =>
-    String.fromCharCode(
-      view.getUint8(offset),
-      view.getUint8(offset + 1),
-      view.getUint8(offset + 2),
-      view.getUint8(offset + 3),
-    );
-
-  if (audio.byteLength < 44 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') {
-    throw new ApiError('bad_request', 'Audio body is not a WAV payload');
-  }
-
-  let framesPerSecond: number | null = null;
-  let bytesPerFrame: number | null = null;
-  let dataBytes: number | null = null;
-  let offset = 12;
-  while (offset + 8 <= audio.byteLength) {
-    const chunkId = tag(offset);
-    const chunkSize = view.getUint32(offset + 4, true);
-    if (chunkId === 'fmt ') {
-      if (framesPerSecond !== null || chunkSize < 16 || offset + 8 + chunkSize > audio.byteLength) {
-        throw new ApiError('bad_request', 'Audio body has an invalid WAV format chunk');
-      }
-      const format = view.getUint16(offset + 8, true);
-      const channels = view.getUint16(offset + 10, true);
-      const sampleRate = view.getUint32(offset + 12, true);
-      const byteRate = view.getUint32(offset + 16, true);
-      const blockAlign = view.getUint16(offset + 20, true);
-      const bitsPerSample = view.getUint16(offset + 22, true);
-      const expectedBlockAlign = channels * (bitsPerSample / 8);
-      // byteRate and blockAlign are redundant client-controlled fields, not
-      // independent measurements. Accept integer PCM only and require every
-      // field to agree before using the actual frame count for metering.
-      if (format !== 1 || channels === 0 || sampleRate === 0
-        || ![8, 16, 24, 32].includes(bitsPerSample)
-        || blockAlign !== expectedBlockAlign || byteRate !== sampleRate * expectedBlockAlign) {
-        throw new ApiError('bad_request', 'Audio body has inconsistent PCM geometry');
-      }
-      framesPerSecond = sampleRate;
-      bytesPerFrame = blockAlign;
-    } else if (chunkId === 'data') {
-      // A streamed WAV can declare a zero or overlong size; trust what arrived.
-      const declared = chunkSize === 0 ? Number.MAX_SAFE_INTEGER : chunkSize;
-      dataBytes = Math.min(declared, audio.byteLength - (offset + 8));
-      break;
-    }
-    // Chunks are word-aligned, so an odd size is followed by a pad byte.
-    offset += 8 + chunkSize + (chunkSize % 2);
-  }
-
-  if (framesPerSecond === null || bytesPerFrame === null
-    || dataBytes === null || dataBytes <= 0 || dataBytes % bytesPerFrame !== 0) {
-    throw new ApiError('bad_request', 'Audio body is not a readable WAV payload');
-  }
-  return (dataBytes / bytesPerFrame) / framesPerSecond;
-}
-
 // ---------------------------------------------------------------------------
 // Batch transcription
 // ---------------------------------------------------------------------------
@@ -222,18 +143,7 @@ export async function handleBatchTranscription(
   await claimOperation(request, context, idempotencyKey, 'batch_transcription');
   try {
     await requireNewOperationAccess(request, context);
-    // WAV only. The billed quantity is the audio's duration, and a WAV header is
-    // the one thing in this path that states it — the upstream returns a
-    // transcript, not a duration, and a compressed container's duration cannot be
-    // read from its size. Clients send their own key's way anything else.
-    const contentType = request.headers.get('content-type') ?? '';
-    if (!/^audio\/(wav|x-wav|vnd\.wave)\b/.test(contentType)) {
-      throw new ApiError('bad_request', 'Body must be audio/wav');
-    }
-    const language = new URL(request.url).searchParams.get('language');
-    if (language !== null && !/^[a-z]{2}(-[A-Za-z0-9]{2,8})?$/.test(language)) {
-      throw new ApiError('bad_request', 'Query parameter language is malformed');
-    }
+    const { contentType, language } = parseBatchTranscriptionRequest(request);
 
     const audio = await readBoundedBytes(request, context.config.maxRequestBytes);
     if (audio.byteLength === 0) {
@@ -265,13 +175,6 @@ export async function handleBatchTranscription(
 // Post-processing
 // ---------------------------------------------------------------------------
 
-interface PostProcessingBody {
-  operation?: unknown;
-  text?: unknown;
-  system_prompt?: unknown;
-  temperature?: unknown;
-}
-
 export async function handlePostProcessing(
   request: Request,
   context: AuthenticatedContext,
@@ -280,31 +183,16 @@ export async function handlePostProcessing(
   await claimOperation(request, context, idempotencyKey, 'post_processing');
   try {
     await requireNewOperationAccess(request, context);
-    const body = await readJson<PostProcessingBody>(request, MAX_POST_PROCESSING_BODY_BYTES);
-    requireOperation(body.operation, 'post_processing');
-
-    if (typeof body.text !== 'string' || body.text.length === 0) {
-      throw new ApiError('bad_request', 'Field text is required');
-    }
-    if (body.text.length > MAX_TEXT_CHARACTERS) {
-      throw new ApiError('payload_too_large', 'Field text is too long');
-    }
-    const systemPrompt =
-      typeof body.system_prompt === 'string' && body.system_prompt.length <= 8_000
-        ? body.system_prompt
-        : null;
-    const temperature =
-      typeof body.temperature === 'number' && body.temperature >= 0 && body.temperature <= 2
-        ? body.temperature
-        : 0.2;
+    const { text, systemPrompt, temperature } = parsePostProcessingBody(
+      await readJson<PostProcessingBody>(request, MAX_POST_PROCESSING_BODY_BYTES),
+    );
 
     const route = bestRoute('post_processing');
     const period = billingPeriod(context.nowSeconds);
     const estimatedTokens =
       POST_PROCESSING_TOKEN_OVERHEAD +
-      new TextEncoder().encode(body.text + (systemPrompt ?? "")).byteLength + MAX_OUTPUT_TOKENS;
+      new TextEncoder().encode(text + (systemPrompt ?? "")).byteLength + MAX_OUTPUT_TOKENS;
 
-    const text = body.text;
     return jsonResponse(await runOperation(request, context, {
       idempotencyKey, operation: 'post_processing', provider: route.provider,
       model: route.catalogueModelId, unitKind: 'tokens', period, units: estimatedTokens,
@@ -340,20 +228,7 @@ export async function handleLiveTranscription(
   context: AuthenticatedContext,
 ): Promise<Response> {
   await requirePaidAccess(context);
-
-  if (request.headers.get('upgrade') !== 'websocket') {
-    throw new ApiError('bad_request', 'This endpoint requires a WebSocket upgrade');
-  }
-
-  const url = new URL(request.url);
-  const language = url.searchParams.get('language');
-  if (language !== null && !/^[a-z]{2}(-[A-Za-z0-9]{2,8})?$/.test(language)) {
-    throw new ApiError('bad_request', 'Query parameter language is malformed');
-  }
-  const sampleRate = Number.parseInt(url.searchParams.get('sample_rate') ?? '16000', 10);
-  if (![8_000, 16_000, 24_000, 44_100, 48_000].includes(sampleRate)) {
-    throw new ApiError('bad_request', 'Query parameter sample_rate is not supported');
-  }
+  const { language, sampleRate } = parseLiveTranscriptionRequest(request);
 
   const route = bestRoute('live_transcription');
   if (route.transport !== 'websocket') {
@@ -451,12 +326,9 @@ export async function handleLiveTranscriptionFinalise(
 ): Promise<Response> {
   await requirePaidAccess(context);
   const idempotencyKey = requireIdempotencyKey(request);
-  const body = await readJson<{ session_id?: unknown }>(request, 4_096);
-  if (typeof body.session_id !== 'string' || body.session_id.length > 128) {
-    throw new ApiError('bad_request', 'Field session_id is required');
-  }
+  const clientSessionId = parseLiveFinaliseBody(await readJson<{ session_id?: unknown }>(request, 4_096));
 
-  const sessionId = `${context.session.userId}:${body.session_id}`;
+  const sessionId = `${context.session.userId}:${clientSessionId}`;
   const stub = context.env.LIVE_SESSION.get(context.env.LIVE_SESSION.idFromName(sessionId));
   const claimResponse = await stub.fetch('https://live.invalid/outcome/reconcile', {
     method: 'POST',

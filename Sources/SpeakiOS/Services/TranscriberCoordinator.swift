@@ -102,9 +102,8 @@ final class TranscriberCoordinator: ObservableObject {
     private var offlineIntendedModel: String?
     @Published private(set) var captureStopNotice: String?
     private var startTime: Date?
-    /// Last time the App Group shared state was written for a partial result.
-    private var lastSharedStateWriteAt: Date = .distantPast
-    private static let sharedStateWriteInterval: TimeInterval = 1.0
+    /// Rate limit for App Group writes of live partials.
+    private var sharedStateWrites = SharedTranscriptWriteThrottle()
 
     init(
         sharedState: SharedTranscriptionState = .shared,
@@ -311,9 +310,7 @@ final class TranscriberCoordinator: ObservableObject {
         // App Group writes and word counting are O(n) per partial; throttle
         // them to ~1/s (matching the Live Activity manager's own throttle).
         // The full transcript is committed once more at stop.
-        let now = Date()
-        if now.timeIntervalSince(lastSharedStateWriteAt) >= Self.sharedStateWriteInterval {
-            lastSharedStateWriteAt = now
+        if sharedStateWrites.admit(at: Date()) {
             wordCount = text.split(separator: " ").count
             // Update shared state for copy actions
             sharedState.updateTranscript(text)
@@ -620,7 +617,7 @@ private extension TranscriberCoordinator {
         partialText = ""
         confidence = nil
         wordCount = 0
-        lastSharedStateWriteAt = .distantPast
+        sharedStateWrites.reset()
         startTime = Date()
         sharedState.clear()
 

@@ -68,8 +68,17 @@ public final class PaidAccessFlow {
         state.lastError = message
     }
 
+    /// Reports `message` only while `generation` is still the current account
+    /// session, so work admitted for an account the user has since left cannot
+    /// overwrite what the current account shows.
+    public func report(_ message: String?, for generation: UUID) {
+        guard generation == sessions.generation else { return }
+        state.lastError = message
+    }
+
     /// Runs `body` as a busy operation for the signed-in account, reporting
-    /// "not signed in" when there is no session.
+    /// "not signed in" when there is no session. An operation whose account
+    /// was left while it looked for the session reports nothing.
     public func withSignedInOperation(
         clearingError: Bool,
         _ body: (PaidAccessSession, UUID) async -> Void
@@ -78,7 +87,7 @@ public final class PaidAccessFlow {
         defer { endOperation(operation) }
         let generation = generation
         guard let session = await currentSession() else {
-            state.lastError = PaidAccessError.notSignedIn.errorDescription
+            report(PaidAccessError.notSignedIn.errorDescription, for: generation)
             return
         }
         await body(session, generation)

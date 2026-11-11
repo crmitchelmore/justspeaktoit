@@ -281,7 +281,11 @@ queued until the scene is active before microphone capture begins.
 
 There is no `IOSWireUp` or `IOSAppEnvironment` at this base. UI, intents, keyboard handoff and Watch import converge on
 the `@MainActor` singleton [TranscriptionRecordingService](../Sources/SpeakiOS/Services/TranscriptionRecordingService.swift),
-with injectable seams for tests. `ForegroundRecordingOwnership` prevents a foreground capture and an App Intent from
+with injectable seams for tests. Its responsibilities live in `+Start`, `+Configuration`, `+LiveSession`,
+`+Finalisation`, `+Drain`, `+Delivery`, `+Polish` and `+RunOutcome` extensions; `CaptureRunLedger`,
+`CaptureHealthReporter` and `SharedTranscriptWriteThrottle` own run identity, failure reporting and App Group write
+pacing. The foreground equivalent is `TranscriberCoordinator` (`Services/TranscriberCoordinator.swift`), which shares
+the same `RecordingLifecycleCoordinator` kernel. `ForegroundRecordingOwnership` prevents a foreground capture and an App Intent from
 claiming the process microphone concurrently. `SharedTranscriptionState` publishes bounded App Group state for widgets,
 extensions, Live Activity result actions and background completions.
 

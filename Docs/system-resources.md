@@ -39,3 +39,15 @@ add a small adapter to the platform monitor instead
   keeps the microphone open for up to four hours for the keyboard, and
   restarts each time the app opens. This is the usual reason for an
   unexplained microphone indicator on iOS. Status names it and can turn it off.
+- **Android**: Settings › *System resources in use* (issue #1473). Kotlin
+  can't read the Swift model, so `resources/SystemResources.kt` mirrors the
+  kinds, the release semantics and the summary wording, and
+  `SystemResourceRegistryTest` fails when they drift from SpeakCore. The
+  dictation screen holds the microphone while it captures (and until a Cloud
+  recorder has really stopped), each cloud request holds a provider
+  connection, and the dictation keyboard holds the microphone while it
+  listens. Every one can be released. There is no unattributed-use auditor
+  yet: `AudioManager.getActiveRecordingConfigurations()` reports only this
+  app's own recordings, and the speech-service recognisers record in another
+  process, so it can't see most sessions. The system privacy indicator covers
+  the rest.

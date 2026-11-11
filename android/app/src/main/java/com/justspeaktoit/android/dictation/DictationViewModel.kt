@@ -20,6 +20,10 @@ import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.resources.SystemResourceHold
+import com.justspeaktoit.android.resources.SystemResourceKind
+import com.justspeaktoit.android.resources.SystemResourceRegistry
+import com.justspeaktoit.android.resources.SystemResourceToken
 import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.AppPreferences
@@ -83,6 +87,8 @@ data class DictationUiState(
     val keepAudioOnCancel: Boolean = AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL,
     /** The History entry whose kept audio is being transcribed, if any. */
     val transcribingEntryId: String? = null,
+    /** System resources the app holds now, oldest first (#1473). */
+    val resourcesInUse: List<SystemResourceHold> = emptyList(),
 ) {
     /** The mode a new session would use. */
     val activeMode: RecognitionMode?
@@ -136,7 +142,13 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         ),
     )
 
+    private val resources = SystemResourceRegistry.shared
+    private var microphoneHold: SystemResourceToken? = null
+
     init {
+        viewModelScope.launch {
+            resources.holds.collect { holds -> _state.update { it.copy(resourcesInUse = holds) } }
+        }
         val retention = prefs.retention
         updateHistory {
             history.load(retention).also { entries ->
@@ -256,7 +268,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                     ?: throw CloudException(DictationFailure.MissingKey, "No key")
                 val format = importSharedAudio(resolver, uri, mimeType, file)
                 DictationEvent.Final(
-                    cloudCall(TRANSCRIBE_DEADLINE_MS) { call ->
+                    cloudCall(TRANSCRIBE_DEADLINE_MS, model.provider) { call ->
                         cloud.transcribe(model, key, file, language, call, format)
                     },
                 )
@@ -428,6 +440,16 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         dispatch(DictationEvent.Cancelled)
     }
 
+    /** Asks the owner of a hold shown in Settings to let it go. */
+    fun releaseResource(id: String) {
+        resources.release(id)
+    }
+
+    /** Stops recordings and requests; nothing standing is held on Android, so this frees everything. */
+    fun releaseEverything() {
+        resources.releaseAll()
+    }
+
     fun setRetention(retention: Retention) {
         prefs.retention = retention
         _state.update { it.copy(retention = retention) }
@@ -578,7 +600,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                             DictationEvent.Error(DictationFailure.InvalidKey)
                         } else {
                             DictationEvent.Final(
-                                cloudCall(TRANSCRIBE_DEADLINE_MS) { call ->
+                                cloudCall(TRANSCRIBE_DEADLINE_MS, model.provider) { call ->
                                     cloud.transcribe(model, key, file, language, call)
                                 },
                             )
@@ -690,7 +712,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                 } else {
                     val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
                         ?: throw CloudException(DictationFailure.MissingKey, "No key")
-                    val text = cloudCall(TRANSCRIBE_DEADLINE_MS) { call ->
+                    val text = cloudCall(TRANSCRIBE_DEADLINE_MS, model.provider) { call ->
                         cloud.transcribe(model, key, file, language, call)
                     }.trim()
                     if (text.isEmpty()) {
@@ -729,15 +751,57 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             recorder = null
             recording = null
         }
+        reconcileMicrophoneHold()
+    }
+
+    /** The microphone is held while a session captures, and until a Cloud recorder has really stopped. */
+    private fun reconcileMicrophoneHold() {
+        val dictation = _state.value.dictation
+        val capturing = dictation is DictationState.Starting || dictation is DictationState.Listening
+        if (capturing || recorder != null) {
+            if (microphoneHold != null) return
+            val mode = dictation.modeOrNull()
+            microphoneHold = resources.acquire(
+                kind = SystemResourceKind.Microphone,
+                title = "Dictation recording",
+                reason = when (mode) {
+                    RecognitionMode.Cloud -> "Recording audio to send to your cloud provider"
+                    RecognitionMode.SpeechService -> "Listening through the speech recognition service"
+                    else -> "Listening with on-device recognition"
+                },
+                owner = "DictationViewModel",
+                releaseTitle = "Stop recording",
+                release = { cancel() },
+            )
+        } else {
+            microphoneHold?.end()
+            microphoneHold = null
+        }
     }
 
     /**
      * Runs a blocking request with an overall [deadlineMs]. Cancelling the coroutine or reaching the
      * deadline disconnects the request, so no upload or response read outlives the session.
      */
-    private suspend fun <T> cloudCall(deadlineMs: Long, block: (CallHandle) -> T): T {
+    private suspend fun <T> cloudCall(
+        deadlineMs: Long,
+        provider: CloudProvider,
+        block: (CallHandle) -> T,
+    ): T {
         val call = CallHandle()
-        return bounded(deadlineMs, DictationFailure.NetworkTimeout, abort = call::cancel) { block(call) }
+        val hold = resources.acquire(
+            kind = SystemResourceKind.ProviderConnection,
+            title = "Cloud request",
+            reason = "Waiting for ${provider.displayName} to answer",
+            owner = "DictationViewModel",
+            releaseTitle = "Cancel request",
+            release = call::cancel,
+        )
+        return try {
+            bounded(deadlineMs, DictationFailure.NetworkTimeout, abort = call::cancel) { block(call) }
+        } finally {
+            hold.end()
+        }
     }
 
     /**
@@ -781,7 +845,11 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         work = viewModelScope.launch {
             val cleaned = try {
                 val key = withContext(Dispatchers.IO) { secrets.read(CloudProvider.OpenRouter.credentialId) }
-                key?.let { cloudCall(CLEANUP_DEADLINE_MS) { call -> cloud.cleanup(it, done.transcript, call) } }
+                key?.let {
+                    cloudCall(CLEANUP_DEADLINE_MS, CloudProvider.OpenRouter) { call ->
+                        cloud.cleanup(it, done.transcript, call)
+                    }
+                }
             } catch (e: CloudException) {
                 null
             } catch (e: GeneralSecurityException) {
@@ -814,6 +882,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         _state.update { it.copy(dictation = DictationReducer.reduce(it.dictation, event)) }
         val after = _state.value.dictation
         if (!after.isActive) _level.value = 0f
+        reconcileMicrophoneHold()
         if (!before.isActive || after.isActive) return
         // A session just ended: record it now, so it survives even if optional cleanup never finishes.
         record(after)
@@ -821,6 +890,8 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
 
     override fun onCleared() {
         engine.close()
+        microphoneHold?.end()
+        microphoneHold = null
         val rec = recorder ?: return
         val file = recording
         // Stop before delete, off the main thread: joining the capture thread here could cause an ANR.

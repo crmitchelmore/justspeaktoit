@@ -25,6 +25,9 @@ import com.justspeaktoit.android.dictation.DictationReducer
 import com.justspeaktoit.android.dictation.DictationState
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.RecognizerAvailability
+import com.justspeaktoit.android.resources.SystemResourceKind
+import com.justspeaktoit.android.resources.SystemResourceRegistry
+import com.justspeaktoit.android.resources.SystemResourceToken
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.ui.label
 import com.justspeaktoit.android.ui.message
@@ -64,6 +67,7 @@ class DictationKeyboardService : InputMethodService() {
     private var disclosing = false
 
     private var status: TextView? = null
+    private var microphoneHold: SystemResourceToken? = null
     private var mic: ImageButton? = null
 
     override fun onCreate() {
@@ -73,6 +77,8 @@ class DictationKeyboardService : InputMethodService() {
 
     override fun onDestroy() {
         engine.close()
+        microphoneHold?.end()
+        microphoneHold = null
         super.onDestroy()
     }
 
@@ -263,7 +269,27 @@ class DictationKeyboardService : InputMethodService() {
             is DictationState.Failed -> removeOwnComposingText()
             else -> Unit
         }
+        reconcileMicrophoneHold()
         render()
+    }
+
+    /** Lists the keyboard's capture in Settings > System resources in use, with a way to stop it. */
+    private fun reconcileMicrophoneHold() {
+        val capturing = state is DictationState.Starting || state is DictationState.Listening
+        if (!capturing) {
+            microphoneHold?.end()
+            microphoneHold = null
+            return
+        }
+        if (microphoneHold != null) return
+        microphoneHold = SystemResourceRegistry.shared.acquire(
+            kind = SystemResourceKind.Microphone,
+            title = "Keyboard dictation",
+            reason = "Listening for text to type into the current field",
+            owner = "DictationKeyboardService",
+            releaseTitle = "Stop listening",
+            release = { cancelSession() },
+        )
     }
 
     private fun render() {

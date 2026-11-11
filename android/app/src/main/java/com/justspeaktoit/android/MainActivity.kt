@@ -94,6 +94,8 @@ class MainActivity : ComponentActivity() {
                                 onChooseModel = viewModel::chooseCloudModel,
                                 onCleanupChanged = viewModel::setCleanupEnabled,
                                 onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
+                                onReleaseResource = viewModel::releaseResource,
+                                onReleaseEverything = viewModel::releaseEverything,
                             ),
                         )
                         Screen.History -> HistoryScreen(

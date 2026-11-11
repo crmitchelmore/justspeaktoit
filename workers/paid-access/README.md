@@ -40,7 +40,10 @@ workers/paid-access/
 │   ├── quota.ts                 Typed client for the quota Durable Object
 │   ├── auth/
 │   │   ├── apple-identity.ts    Sign in with Apple identity-token verification (JWKS, nonce)
-│   │   ├── apple-jws.ts         DER/X.509 reader and JWS `x5c` chain verifier, pinned to Apple Root CA G3
+│   │   ├── apple-jws.ts         Compact JWS verification: header, leaf-key signature, payload
+│   │   ├── apple-chain.ts       `x5c` chain trust, pinned to Apple Root CA G3, with Apple marker OIDs
+│   │   ├── certificate.ts       X.509 parsing and signatures for Apple's ECDSA profile only
+│   │   ├── der.ts               Minimal DER reader; malformed input throws `CertificateError`
 │   │   ├── session.ts           HS256 access tokens; refresh tokens stored only as SHA-256 hashes
 │   │   └── storekit.ts          StoreKit 2 signed transactions and App Store Server Notifications V2
 │   ├── billing/stripe.ts        Checkout, Customer Portal and webhook signature verification
@@ -52,7 +55,11 @@ workers/paid-access/
 │   │   ├── usage.ts             Paid request claims and the usage ledger
 │   │   └── audit.ts             Append-only audit events
 │   ├── do/
-│   │   ├── quota.ts             `QuotaDurableObject` — monthly quota + concurrency, leased reservations
+│   │   ├── quota.ts             `QuotaDurableObject` — each method loads, decides, then persists once
+│   │   ├── quota-store.ts       The quota object's storage keys and typed reads/writes
+│   │   ├── quota-accounting.ts  Pure allowance accounting: sweep, admission, lease settlement, snapshot
+│   │   ├── quota-policy.ts      Pure settlement transitions: expiry, operation steps, reconciliation
+│   │   ├── settlement.ts        Settlement receipt and request types
 │   │   └── live-session.ts      `LiveSessionDurableObject` — live WebSocket proxy, alarm-bounded
 │   ├── providers/index.ts       Upstream proxies; receive a credential and nothing else
 │   └── routes/                  auth.ts, billing.ts, paid.ts (+ paid-requests.ts validation), settlement.ts, webhooks.ts

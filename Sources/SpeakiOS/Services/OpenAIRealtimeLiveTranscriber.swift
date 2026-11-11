@@ -492,6 +492,14 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         let client = transcriber
         let signal = firstInputSignal
         let captureID = activeCaptureID
+        // Lost capture audio reaches the owner like a socket failure: once,
+        // with the transcript so far kept as recovery text.
+        let conversionFailure = LivePCMConversionFailureReport { [weak self] error in
+            Task { @MainActor in
+                guard self?.activeCaptureID == captureID else { return }
+                self?.handleError(error)
+            }
+        }
 
         // The safety writer opens before the tap and the engine, so the file
         // covers the very first buffers instead of starting a beat late
@@ -510,10 +518,10 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
                 self.audioRecorder.writeBuffer(copied)
                 self.convertAndSendAudio(
                     buffer: copied,
-                    nativeFormat: nativeFormat,
                     targetFormat: target,
                     converter: conv,
-                    client: client
+                    client: client,
+                    onFailure: conversionFailure
                 )
             }
         }
@@ -558,12 +566,12 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
     private nonisolated func convertAndSendAudio(
         buffer: AVAudioPCMBuffer,
-        nativeFormat: AVAudioFormat,
         targetFormat: AVAudioFormat,
         converter: AVAudioConverter,
-        client: OpenAIRealtimeWebSocketClient?
+        client: OpenAIRealtimeWebSocketClient?,
+        onFailure: LivePCMConversionFailureReport
     ) {
-        let ratio = Self.targetSampleRate / nativeFormat.sampleRate
+        let ratio = Self.targetSampleRate / converter.inputFormat.sampleRate
         let outputFrameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
         guard let outputBuffer = openAIRealtimeOutputBufferPool.buffer(
             format: targetFormat,
@@ -585,8 +593,11 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
             outStatus.pointee = .haveData
             return buffer
         }
-        guard status != .error,
-              let int16Channel = outputBuffer.int16ChannelData?[0] else { return }
+        guard status != .error, error == nil else {
+            onFailure(LivePCMConversionError.conversionFailed(domain: error?.domain, code: error?.code))
+            return
+        }
+        guard let int16Channel = outputBuffer.int16ChannelData?[0] else { return }
         let frameCount = Int(outputBuffer.frameLength)
         guard frameCount > 0 else { return }
         let byteCount = frameCount * MemoryLayout<Int16>.size

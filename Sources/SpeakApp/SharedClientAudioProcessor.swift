@@ -21,10 +21,14 @@ final class SharedClientAudioProcessor: @unchecked Sendable {
   private let logger = SpeakLogger.logger(category: "SharedClientLiveController")
   private var isRunning = false
   private let conversion = LivePCM16Conversion()
+  private var conversionFailure: LivePCMConversionFailureReport?
 
-  func setRunning(_ running: Bool) {
+  /// Starting arms `onConversionFailure` for this run; it is told about the
+  /// run's first conversion failure only, since later buffers fail the same way.
+  func setRunning(_ running: Bool, onConversionFailure: (@Sendable (Error) -> Void)? = nil) {
     queue.sync {
       isRunning = running
+      conversionFailure = running ? onConversionFailure.map(LivePCMConversionFailureReport.init) : nil
       if !running {
         conversion.reset()
         copyBufferPool.removeAll()
@@ -43,7 +47,10 @@ final class SharedClientAudioProcessor: @unchecked Sendable {
 
   /// Installs the capture tap that feeds `client` PCM16 mono at `sampleRate`.
   /// The caller's failed-start path removes the tap and stops the engine.
-  func installTap(on inputNode: AVAudioInputNode, sampleRate: Int, client: StreamingTranscriptionClient) throws {
+  func installTap(
+    on inputNode: AVAudioInputNode, sampleRate: Int, client: StreamingTranscriptionClient,
+    onConversionFailure: @escaping @Sendable (Error) -> Void
+  ) throws {
     inputNode.removeTap(onBus: 0)
     let inputFormat = inputNode.outputFormat(forBus: 0)
     guard audioInputFormatIsUsable(inputFormat) else {
@@ -54,7 +61,7 @@ final class SharedClientAudioProcessor: @unchecked Sendable {
     ), AVAudioConverter(from: inputFormat, to: targetFormat) != nil else {
       throw TranscriptionManagerError.noUsableAudioInput
     }
-    setRunning(true)
+    setRunning(true, onConversionFailure: onConversionFailure)
     try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: inputFormat) { [self] buffer, _ in
       handleAudioTap(buffer, outputFormat: targetFormat, client: client)
     }
@@ -72,7 +79,7 @@ final class SharedClientAudioProcessor: @unchecked Sendable {
     }
   }
 
-  private func convertAndSend(
+  func convertAndSend(
     _ buffer: AVAudioPCMBuffer, to outputFormat: AVAudioFormat, client: StreamingTranscriptionClient
   ) {
     do {
@@ -80,7 +87,10 @@ final class SharedClientAudioProcessor: @unchecked Sendable {
       guard !pcm.isEmpty else { return }
       client.sendAudio(pcm)
     } catch {
+      guard let report = conversionFailure else { return }
+      conversionFailure = nil
       logger.error("Audio conversion failed: \(error.localizedDescription, privacy: .public)")
+      report(error)
     }
   }
 }

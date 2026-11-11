@@ -3,8 +3,6 @@ import Foundation
 import SpeakCore
 import UIKit
 
-// swiftlint:disable file_length
-
 /// Stop and finalisation: claims the stop once, drains the transcriber under
 /// the completion identity, commits History and hands the settled result to
 /// delivery and polish.
@@ -68,32 +66,14 @@ extension TranscriptionRecordingService {
             lifecycle.retireStartRun()
             await lifecycle.awaitStartSettled()
             state = lifecycle.state
-            return TranscriptionResult(
-                text: "",
-                segments: [],
-                confidence: nil,
-                duration: 0,
-                modelIdentifier: currentModel,
-                cost: nil,
-                rawPayload: nil,
-                debugInfo: nil
-            )
+            return syntheticResult()
         }
 
         // Reentrancy guard: a rapid double-stop (e.g. double Action Button
         // press) must not produce a second history entry or clobber the
         // clipboard with stale text. Return an empty no-op result instead.
         guard lifecycle.beginStopping() else {
-            return TranscriptionResult(
-                text: "",
-                segments: [],
-                confidence: nil,
-                duration: 0,
-                modelIdentifier: currentModel,
-                cost: nil,
-                rawPayload: nil,
-                debugInfo: nil
-            )
+            return syntheticResult()
         }
         let selected = selection ?? effectiveDestination
             ?? CaptureDestinationSelection(destination: .clipboard, origin: .legacy)
@@ -166,8 +146,8 @@ extension TranscriptionRecordingService {
         // capture's text — including when that text is empty. The identity is
         // kept for the polish that may follow.
         let completedRunID = currentRunID
-        let completedRequestContext = requestDiagnostics.admission(for: completedRunID)
-        let completedRequestFailure = requestDiagnostics.failure(for: completedRunID)
+        let completedRequestContext = health.requests.admission(for: completedRunID)
+        let completedRequestFailure = health.requests.failure(for: completedRunID)
         completeRun(with: text)
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
@@ -252,9 +232,7 @@ extension TranscriptionRecordingService {
             dependencies.markDelivered(recording)
         }
         if lastSessionError == nil {
-            CaptureOutcomeJournal.record(
-                text.isEmpty ? .cancelled : .delivered, failure: nil, defaults: outcomeJournalDefaults()
-            )
+            health.journal(text.isEmpty ? .cancelled : .delivered, failure: nil)
         }
 
         // The receipt is built from what every lane reported, never from what
@@ -390,82 +368,6 @@ extension TranscriptionRecordingService {
         lifecycle.finishStopping()
         state = lifecycle.state
         return result
-    }
-
-    /// Stops whichever transcriber is currently active and returns its result.
-    /// Falls back to a synthetic `TranscriptionResult` built from `partialText`
-    /// if no transcriber is wired up (defensive — shouldn't happen in practice).
-    ///
-    /// We null out the transcriber property **before** awaiting `stop()` to be
-    /// safe under `@MainActor` reentrancy: a rapid double-press of the Action
-    /// Button can re-enter `stopRecording` while the first stop is suspended,
-    /// and otherwise both calls would see the same non-nil transcriber and try
-    /// to stop it twice.
-    func drainActiveTranscriber(duration: Int) async -> TranscriptionResult {
-        if let session = transcriptionSession {
-            transcriptionSession = nil
-            stoppingSession = session
-            let warningRunID = recordingWarningRunID
-            defer {
-                stoppingSession = nil
-                // The drained writer's final summary replaces the initial notice
-                // unless a newer run already owns the surface (issue #950).
-                if recordingWarningRunID == warningRunID { recordingWarning = session.recordingLossSummary }
-            }
-            do {
-                guard let result = try await boundedStop(of: session) else {
-                    // The stop was abandoned, so nothing here delivers this
-                    // capture: its recording stays on disk to be recovered.
-                    return timedOutFinalisationResult(for: session, duration: duration)
-                }
-                // This transcript is about to be delivered, so this capture's
-                // temporary recording may be discarded once that has happened.
-                deliveringSession = session
-                return result
-            } catch {
-                handleError(error, session: session)
-                return TranscriptionResult(
-                    text: "",
-                    segments: [],
-                    confidence: nil,
-                    duration: TimeInterval(duration),
-                    modelIdentifier: currentModel,
-                    cost: nil,
-                    rawPayload: nil,
-                    debugInfo: nil
-                )
-            }
-        }
-        return TranscriptionResult(
-            text: partialText,
-            segments: [],
-            confidence: nil,
-            duration: TimeInterval(duration),
-            modelIdentifier: currentModel,
-            cost: nil,
-            rawPayload: nil,
-            debugInfo: nil
-        )
-    }
-
-    /// The most complete transcript we can produce at stop time. The transcriber
-    /// result is preferred, but for very short recordings the provider may return
-    /// empty while interim text is still held in `partialText` — falling back
-    /// there keeps the clipboard and dialog honest. We deliberately do NOT fall
-    /// back to the last completed transcript: a silent new session must stay
-    /// empty rather than re-emitting the previous recording's text.
-    func bestAvailableText(from result: TranscriptionResult) -> String {
-        TranscriptionRecordingService.bestTranscript(
-            candidates: [result.text, partialText],
-            fallback: ""
-        )
-    }
-
-    /// Begins a finite-length background assertion so a headless / backgrounded
-    /// process isn't suspended before the clipboard (and any post-processing)
-    /// write commits. The returned object ends the task exactly once.
-    func beginBackgroundAssertion(_ name: String) -> BackgroundTaskAssertion {
-        BackgroundTaskAssertion(name: name)
     }
 }
 #endif

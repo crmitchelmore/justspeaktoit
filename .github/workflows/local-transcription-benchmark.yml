@@ -12,7 +12,7 @@ on:
       - "Package.swift"
       - "Package.resolved"
       - "Sources/SpeakCore/**"
-      - "scripts/verify-checksums.sh"
+      - "scripts/dev/verify-checksums.sh"
   # Pull requests benchmark only benchmark changes; SpeakCore and package
   # changes are benchmarked on every push to main, keeping this macOS job out
   # of the shared hosted macOS queue for ordinary product pull requests.
@@ -47,7 +47,7 @@ jobs:
           restore-keys: benchmark-${{ runner.os }}-${{ runner.arch }}-sources-
 
       - name: Verify package resolution and CTranscribe checksum
-        run: scripts/retry-network.sh make verify-checksums
+        run: scripts/ci/retry-network.sh make verify-checksums
 
       # verify-checksums resolves both graphs, so neither lockfile may change.
       - name: Check root and benchmark Package.resolved drift

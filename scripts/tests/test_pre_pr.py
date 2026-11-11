@@ -121,7 +121,7 @@ class PlanTests(unittest.TestCase):
     def test_no_check_drives_ui_or_launches_the_app(self):
         everything = ['Package.swift', 'Project.swift', 'Sources/SpeakApp/AppDelegate.swift',
                       'Tests/SpeakAppTests/HistoryTests.swift', 'Tests/SpeakAppUITests/X.swift',
-                      'Sources/SpeakWindows/App.swift', 'scripts/run-core-journey-e2e.sh',
+                      'Sources/SpeakWindows/App.swift', 'scripts/core-journey/run-core-journey-e2e.sh',
                       '.github/workflows/ci.yml', 'android/app/x.kt', 'workers/paid-access/a.ts',
                       'landing-page/a.html']
         for full in (False, True):
@@ -188,7 +188,7 @@ class CIParityTests(unittest.TestCase):
         self.assertEqual({c.id: c for c in checks}['api-compatibility'].command[2], 'no-such-ref/main')
 
     def test_api_products_match_the_gate(self):
-        gate = (ROOT / 'scripts' / 'check-api-compatibility.sh').read_text(encoding='utf-8')
+        gate = (ROOT / 'scripts' / 'ci' / 'check-api-compatibility.sh').read_text(encoding='utf-8')
         products = set(re.search(r'PRODUCTS=\(([^)]*)\)', gate).group(1).split()) | {'SpeakWatchCore'}
         dirs = {'SpeakiOSLib': 'SpeakiOS'}
         for product in products:

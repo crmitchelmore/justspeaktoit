@@ -66,8 +66,8 @@ jobs:
           scripts/install-tuist.sh >> "$GITHUB_PATH"
           tuist_dir="$(tail -1 "$GITHUB_PATH")"
           export PATH="$tuist_dir:$PATH"
-          scripts/retry-network.sh tuist generate --no-open
-          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -workspace "Just Speak to It.xcworkspace" \
+          scripts/ci/retry-network.sh tuist generate --no-open
+          scripts/ci/retry-network.sh xcodebuild -resolvePackageDependencies -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakApp -derivedDataPath "$RUNNER_TEMP/DerivedData" -skipPackagePluginValidation
 
       - name: Build app, fixture and capture suite
@@ -172,8 +172,8 @@ jobs:
         timeout-minutes: 35
         run: |
           set -o pipefail
-          scripts/retry-network.sh tuist generate --no-open
-          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -workspace "Just Speak to It.xcworkspace" \
+          scripts/ci/retry-network.sh tuist generate --no-open
+          scripts/ci/retry-network.sh xcodebuild -resolvePackageDependencies -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakiOS -skipPackagePluginValidation
           xcodebuild build-for-testing -workspace "Just Speak to It.xcworkspace" -scheme SpeakiOS \
             -destination "generic/platform=iOS Simulator" -only-testing:SpeakiOSUITests/SiteMediaCaptureUITests \
@@ -184,14 +184,14 @@ jobs:
         env:
           IOS_DEVICE: ${{ inputs.ios_device }}
         run: |
-          python3 scripts/owned-ios-ci-simulator.py create \
+          python3 scripts/ios/owned-ios-ci-simulator.py create \
             --receipt "$RUNNER_TEMP/owned-ios-simulator.json" --github-env "$GITHUB_ENV" \
             --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB" --device "$IOS_DEVICE"
 
       - name: Prepare the Simulator
         timeout-minutes: 12
         run: |
-          python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
+          python3 scripts/ios/prepare-ios-ci.py "$SIMULATOR_ID"
           xcrun simctl ui "$SIMULATOR_ID" appearance ${{ matrix.appearance }}
           xcrun simctl status_bar "$SIMULATOR_ID" override --time 9:41 --dataNetwork wifi --wifiBars 3 \
             --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
@@ -219,7 +219,7 @@ jobs:
         timeout-minutes: 2
         run: |
           if [ -f "$RUNNER_TEMP/owned-ios-simulator.json" ]; then
-            python3 scripts/owned-ios-ci-simulator.py cleanup --receipt "$RUNNER_TEMP/owned-ios-simulator.json" \
+            python3 scripts/ios/owned-ios-ci-simulator.py cleanup --receipt "$RUNNER_TEMP/owned-ios-simulator.json" \
               --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
           fi
 

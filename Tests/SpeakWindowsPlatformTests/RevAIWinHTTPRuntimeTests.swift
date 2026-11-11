@@ -7,7 +7,7 @@ import XCTest
 import SpeakWindowsPlatform
 
 /// Drives the shared Rev.ai client over the production WinHTTP adapter against
-/// the Rev.ai scenarios of `scripts/websocket-loopback-probe.py`. The client's
+/// the Rev.ai scenarios of `scripts/loopback/websocket-loopback-probe.py`. The client's
 /// own path and query, synthetic access token included, reach the peer; only
 /// the origin is redirected to loopback. No credential, microphone, provider
 /// account or external network.

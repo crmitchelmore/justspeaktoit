@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("linux_stage", ROOT / "scripts/stage-linux-desktop.py")
+SPEC = importlib.util.spec_from_file_location("linux_stage", ROOT / "scripts/linux/stage-linux-desktop.py")
 STAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(STAGE)
 

@@ -30,15 +30,15 @@ class PaidPortableBoundaryTests(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory(prefix='paid-portable-boundary-')
         cls.addClassCleanup(cls.temp.cleanup)
         cls.root = Path(cls.temp.name)
-        (cls.root / 'scripts').mkdir()
-        shutil.copy2(ROOT / 'scripts/verify-portable-core-boundary.py', cls.root / 'scripts')
+        (cls.root / 'scripts/ci').mkdir(parents=True)
+        shutil.copy2(ROOT / 'scripts/ci/verify-portable-core-boundary.py', cls.root / 'scripts/ci')
         for target in ['SpeakCore', 'SpeakSync', 'SpeakDesktop', 'SpeakDesktopHost']:
             shutil.copytree(ROOT / 'Sources' / target, cls.root / 'Sources' / target)
         cls.manifest = (ROOT / 'Package.swift').read_text()
 
     def verify(self, manifest):
         (self.root / 'Package.swift').write_text(manifest)
-        return subprocess.run([sys.executable, str(self.root / 'scripts/verify-portable-core-boundary.py')],
+        return subprocess.run([sys.executable, str(self.root / 'scripts/ci/verify-portable-core-boundary.py')],
                               capture_output=True, text=True, timeout=15)
 
     def test_current_boundary_retains_domains_and_excludes_apple_io(self):

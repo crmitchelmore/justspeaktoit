@@ -9,7 +9,7 @@ import SpeakWindowsPlatform
 
 /// Drives the shared Azure Voice Live client, built by the desktop factory as
 /// Windows builds it, over the production WinHTTP adapter against the Azure
-/// scenario of `scripts/websocket-loopback-probe.py`. The client's own path,
+/// scenario of `scripts/loopback/websocket-loopback-probe.py`. The client's own path,
 /// query and api-key header reach the peer; only the origin is redirected to
 /// loopback. No credential, microphone, provider account or external network.
 final class AzureWinHTTPRuntimeTests: XCTestCase {

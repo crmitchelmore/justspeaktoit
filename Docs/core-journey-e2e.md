@@ -3,7 +3,7 @@
 Run the required contract gate with the Apple Swift toolchain on macOS:
 
 ```sh
-scripts/run-core-journey-e2e.sh
+scripts/core-journey/run-core-journey-e2e.sh
 ```
 
 It has an eight-minute test-command budget. CI first compiles the test products
@@ -15,7 +15,7 @@ isolated defaults and pasteboards. Automation tests exchange real frames over
 an owner-only UNIX socket, with a stub command handler. No microphone, provider
 network, API key, or paid service is required.
 
-The suite manifest lives in `scripts/run-core-journey-e2e.py`. Every required
+The suite manifest lives in `scripts/core-journey/run-core-journey-e2e.py`. Every required
 suite must execute at least one passing XCTest case; a missing, renamed,
 all-skipped, or partially skipped suite fails the gate even when `swift test`
 exits successfully. Any test-command failure remains a failure. The runner
@@ -158,7 +158,7 @@ insertion, or native editor delivery on a runner without posting permission.
 The native CI job runs the UI suites as `foundation` and `p0` shards, one after
 the other so the gate holds a single hosted macOS slot (see below), each within the existing 42-minute job limit. The staged command budgets are 300 seconds for setup, 900 seconds for
 build, and 600 seconds for tests, with separately bounded source/product receipts.
-`scripts/verify-core-journey-ui.py` and the active staged runner share the exact
+`scripts/core-journey/verify-core-journey-ui.py` and the active staged runner share the exact
 suite and named-case checks. Missing, skipped, failed, zero-test, or duplicated
 required post-processing cases fail closed, even after a successful xcodebuild
 exit. Both named cases must pass exactly once. `coverage.json`, runtime receipts,
@@ -212,7 +212,7 @@ A hotkey journey spends about a minute in real gesture windows, so the six
 existing suites already used ~485 s of the 600 s UI runtime budget. The
 `Core Journey Fixture UI` job is therefore a matrix: `foundation` runs the
 original six suites and `p0` runs `CoreJourneyP0UITests`. `SHARDS` in
-`scripts/verify-core-journey-ui.py` assigns every required suite to exactly one
+`scripts/core-journey/verify-core-journey-ui.py` assigns every required suite to exactly one
 shard; `CORE_JOURNEY_UI_SHARD` selects it (default: all, for local runs). Each
 shard keeps the unchanged setup/build/test budgets, and a CI test keeps the
 matrix and the verifier's shard list identical.
@@ -222,7 +222,7 @@ the `core-journey-qualification` label to a same-repository pull request, or
 dispatch it on `main`. For each shard it starts five fresh hosted runners, builds
 once, then runs the shard four times in a row: 20 executions per shard, of which
 the first on each runner (5) is cold. Every execution is recorded, nothing is
-retried or discarded, and `scripts/summarise-core-journey-qualification.py`
+retried or discarded, and `scripts/core-journey/summarise-core-journey-qualification.py`
 fails unless all 20 pass with at least five cold passes. The job summary and the
 `core-journey-qualification-record-*` artifact hold the per-run table, p95 and
 maximum test-command time. A `TimeoutExpired` counts only once the measured command time reaches the

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "retry-xctest-crash.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "ci/retry-xctest-crash.py"
 spec = importlib.util.spec_from_file_location("retry_xctest_crash", SCRIPT)
 retry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(retry)

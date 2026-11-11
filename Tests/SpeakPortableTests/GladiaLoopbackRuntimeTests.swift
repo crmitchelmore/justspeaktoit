@@ -5,7 +5,7 @@ import FoundationNetworking
 import XCTest
 @testable import SpeakCore
 
-/// The Gladia routes of `scripts/websocket-loopback-probe.py` over the Apple
+/// The Gladia routes of `scripts/loopback/websocket-loopback-probe.py` over the Apple
 /// default transports: the production session request on `URLSession`, then
 /// `URLSessionStreamingConnection`. `GladiaWinHTTPRuntimeTests` runs the same
 /// scenarios over WinHTTP. Enabled only with the standard-library loopback

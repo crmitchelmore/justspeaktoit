@@ -13,7 +13,7 @@ import time
 import unittest
 from unittest import mock
 
-SCRIPT = Path(__file__).resolve().parents[1] / "run-core-journey-stages.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "core-journey/run-core-journey-stages.py"
 SPEC = importlib.util.spec_from_file_location("journey_stages", SCRIPT)
 stages = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(stages)
@@ -133,8 +133,8 @@ class CommandTests(unittest.TestCase):
             script = command[2]
             self.assertEqual(command[:2], ["bash", "-c"])
             self.assertIn('PATH="$(scripts/install-tuist.sh):$PATH"', script)
-            self.assertIn("scripts/retry-network.sh tuist generate --no-open", script)
-            self.assertIn("scripts/retry-network.sh xcodebuild -resolvePackageDependencies", script)
+            self.assertIn("scripts/ci/retry-network.sh tuist generate --no-open", script)
+            self.assertIn("scripts/ci/retry-network.sh xcodebuild -resolvePackageDependencies", script)
             self.assertIn("-derivedDataPath artifacts/DerivedData", script)
             self.assertLess(script.index("tuist generate"), script.index("-resolvePackageDependencies"))
             # The measured build uses the same DerivedData, so it reuses resolved artefacts.

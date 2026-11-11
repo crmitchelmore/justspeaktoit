@@ -180,7 +180,7 @@ class DesktopIconTests(unittest.TestCase):
                 self.assertRegex(action, r"^[^@]+@[0-9a-f]{40}$")
 
     def test_linux_integration_assertion_includes_high_dpi_tray_pixmaps(self):
-        integration = (ROOT / "scripts/linux-integration-checks.sh").read_text()
+        integration = (ROOT / "scripts/linux/linux-integration-checks.sh").read_text()
         self.assertIn("[22, 22], [32, 32], [48, 48], [64, 64], [96, 96]", integration)
 
     def test_msix_includes_high_dpi_and_light_dark_unplated_start_menu_icons(self):

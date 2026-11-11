@@ -2,14 +2,14 @@
 # Runs the Linux desktop app's self-test and its GTK window smoke test under a
 # private X server and session bus. Used by CI and for local checks.
 #
-#   scripts/linux-desktop-checks.sh [path/to/SpeakLinux]
+#   scripts/linux/linux-desktop-checks.sh [path/to/SpeakLinux]
 #
 # Set JSTI_UI_SNAPSHOT_PATH to also save a PNG of the smoke-test window, and
 # JSTI_UI_SCREENSHOT_DIR to save every page (light, dark and recording) with
 # sample History through --ui-screenshots.
 set -euo pipefail
 
-repo="$(cd "$(dirname "$0")/.." && pwd)"
+repo="$(cd "$(dirname "$0")/../.." && pwd)"
 binary="${1:-}"
 if [ -z "$binary" ]; then
     binary="$(SPEAK_LINUX_TARGET=1 swift build --package-path "$repo" --show-bin-path)/SpeakLinux"

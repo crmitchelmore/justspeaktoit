@@ -4,7 +4,7 @@ import subprocess
 import unittest
 from unittest.mock import MagicMock, patch
 
-SPEC = importlib.util.spec_from_file_location("benchmark", Path(__file__).resolve().parents[1] / "linux-ui-benchmark.py")
+SPEC = importlib.util.spec_from_file_location("benchmark", Path(__file__).resolve().parents[1] / "linux" / "linux-ui-benchmark.py")
 BENCH = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BENCH)
 

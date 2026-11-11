@@ -2,9 +2,9 @@
 # End-to-end checks of the Linux native adapters against real services in a
 # disposable session: a private D-Bus session bus, an unlocked GNOME Keyring,
 # PipeWire with pipewire-pulse and a test tone, Xvfb with Openbox and a Zenity
-# text field, and a fake XDG desktop portal (scripts/linux-fake-portal.py).
+# text field, and a fake XDG desktop portal (scripts/linux/linux-fake-portal.py).
 #
-#   scripts/linux-integration-checks.sh [path/to/SpeakLinux]
+#   scripts/linux/linux-integration-checks.sh [path/to/SpeakLinux]
 #
 # Needs: dbus, gnome-keyring, pipewire, pipewire-pulse, wireplumber,
 # pulseaudio-utils, xvfb, openbox, zenity, xdotool, python3-gi.
@@ -12,7 +12,7 @@
 # Wayland key delivery) is listed in Docs/linux-development.md.
 set -euo pipefail
 
-repo="$(cd "$(dirname "$0")/.." && pwd)"
+repo="$(cd "$(dirname "$0")/../.." && pwd)"
 binary="${1:-}"
 if [ -z "$binary" ]; then
     binary="$(SPEAK_LINUX_TARGET=1 swift build --package-path "$repo" --show-bin-path)/SpeakLinux"
@@ -41,7 +41,7 @@ step() { printf '\n== %s\n' "$1"; }
 
 step "selected-text speech (isolated AT-SPI protocol, no desktop field or provider)"
 for shape in event application unsupported; do
-    dbus-run-session -- bash "$repo/scripts/linux-atspi-selection-checks.sh" "$binary" "$python" "$shape"
+    dbus-run-session -- bash "$repo/scripts/linux/linux-atspi-selection-checks.sh" "$binary" "$python" "$shape"
 done
 
 step "keyring (gnome-keyring, Secret Service)"
@@ -76,7 +76,7 @@ if ! JSTI_TEST_SOURCE=jsti_test.monitor "$binary" --integration-test capture; th
 fi
 
 step "portals (fake GlobalShortcuts, RemoteDesktop, Clipboard and Background)"
-"$python" "$repo/scripts/linux-fake-portal.py" "$work/portal.json" >"$work/portal.out" 2>&1 & pids+=($!)
+"$python" "$repo/scripts/linux/linux-fake-portal.py" "$work/portal.json" >"$work/portal.out" 2>&1 & pids+=($!)
 for _ in $(seq 1 100); do grep -q "fake portal ready" "$work/portal.out" 2>/dev/null && break; sleep 0.1; done
 "$binary" --integration-test portal
 "$python" - "$work/portal.json" <<'PY'
@@ -163,7 +163,7 @@ echo "The Zenity field received the dictated text."
 
 step "X11 profile identity and ordering (two owned executable windows)"
 JSTI_PROFILE_OWNED_DISPLAY="$DISPLAY" JSTI_PROFILE_OWNED_DISPLAY_PID="$xvfb" \
-    "$python" "$repo/scripts/linux-profile-identity-checks.py" "$binary"
+    "$python" "$repo/scripts/linux/linux-profile-identity-checks.py" "$binary"
 
 step "recorded native profile host (owned private bus, existing PipeWire monitor, local tiny)"
 "$python" -B -m unittest discover -s "$repo/scripts/tests" -p test_linux_profile_session_checks.py
@@ -173,7 +173,7 @@ wait "$tone"
 unset 'pids[tone_index]'
 JSTI_PROFILE_OWNED_DISPLAY="$DISPLAY" JSTI_PROFILE_OWNED_DISPLAY_PID="$xvfb" \
     JSTI_PROFILE_OWNED_PULSE_PID="$pulse" \
-    "$python" -B "$repo/scripts/linux-profile-session-checks.py" "$binary"
+    "$python" -B "$repo/scripts/linux/linux-profile-session-checks.py" "$binary"
 
 step "login launch (--background starts minimised)"
 "$binary" --background >"$work/background.out" 2>&1 & background=$!
@@ -191,7 +191,7 @@ wait "$background" 2>/dev/null || true
 echo "A login launch started with its window minimised."
 
 step "status notifier (fake StatusNotifierWatcher)"
-"$python" "$repo/scripts/linux-fake-watcher.py" "$work/watcher.json" >"$work/watcher.out" 2>&1 & watcher=$!
+"$python" "$repo/scripts/linux/linux-fake-watcher.py" "$work/watcher.json" >"$work/watcher.out" 2>&1 & watcher=$!
 pids+=($watcher)
 for _ in $(seq 1 100); do grep -q "fake watcher ready" "$work/watcher.out" 2>/dev/null && break; sleep 0.1; done
 # The app runs until the watcher clicks Quit in its menu.

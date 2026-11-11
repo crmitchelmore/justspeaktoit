@@ -1,0 +1,85 @@
+[
+  {
+    "id": "iphone-clipboard-e2e",
+    "result": "pass",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro), build 59cdc3f5. Debug build, When Recording Stops = Copy & Polish, no polish key. App force-quit, then started from cold with justspeaktoit://start (the simulator has no assignable Action Button control; agent-device's action-button press runs nothing) and the transcript hook seeded with \"raw clipboard, um, test\". The app showed \"Recording via Action Button\". At Stop the clipboard read exactly \"raw clipboard, um, test\" (fillers kept, no placeholder). Wrote USER-MARKER-123, waited 25 s: still USER-MARKER-123, so polish did not overwrite it. History has exactly one item, ORIGINAL \"raw clipboard, um, test\" (Apple Speech). Not verified: polished text (no OpenRouter key, so polish falls back to raw), real Action Button/mic, paste into Notes (not on the simulator; clipboard read via agent-device). Live Activity: after Stop a result row stays for 180 s (resultRowDuration) and then a primed \"Ready for the Action Button\" activity remains, by design (keepPrimed for service captures). Owner to judge whether that counts as 'lingers'. No stuck Recording activity was seen.",
+    "screenshots": [
+      "screenshots/iphone-clipboard-e2e-1.png",
+      "screenshots/iphone-clipboard-e2e-2.png",
+      "screenshots/iphone-clipboard-e2e-3.png",
+      "screenshots/iphone-clipboard-e2e-4.png"
+    ]
+  },
+  {
+    "id": "iphone-clipboard-locked",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro), build 59cdc3f5. The simulator cannot lock: agent-device hardware-button power returns UNSUPPORTED_OPERATION, and the Action Button/Lock Screen Stop can't be driven. Needs a physical iPhone. No screenshots because there is no observable state to capture.",
+    "screenshots": []
+  },
+  {
+    "id": "iphone-clipboard-privacy-mac",
+    "result": "pass",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro), build 59cdc3f5. iPhone half only. Privacy Information > Clipboard: Transcript expiry = 1 minute, Allow Universal Clipboard off. The settings text ends \"Expiry on another device is not guaranteed.\" (the 'Mac copies may not expire' wording). Recorded \"local only\" via deep link plus the transcript hook: the clipboard held \"local only\" at Stop and was empty after 92 s (agent-device clipboard read and simctl pbpaste both empty). Not verifiable: Mac MACMARK paste, Universal Clipboard opt-in, real Action Button. Expiry restored to 5 minutes and Universal Clipboard left off afterwards.",
+    "screenshots": [
+      "screenshots/iphone-clipboard-privacy-mac-1.png",
+      "screenshots/iphone-clipboard-privacy-mac-2.png"
+    ]
+  },
+  {
+    "id": "iphone-focus-filter",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro), build 59cdc3f5. Simulator iOS Settings has no Focus section, so a Capture Overrides filter can't be added and Do Not Disturb can't be toggled. The app's Settings > Recording & Shortcuts > Focus Capture Overrides page renders: \"No stored Focus override\", the 'In Settings > Focus > Add Filter, choose Capture Overrides for Action Button, Siri and Shortcuts...' guidance and Reset Stored Override. Reconciliation reads the native filter, so the behaviour needs a physical iPhone.",
+    "screenshots": [
+      "screenshots/iphone-focus-filter-1.png",
+      "screenshots/iphone-focus-filter-2.png"
+    ]
+  },
+  {
+    "id": "iphone-shortcuts-last-transcript",
+    "result": "pass",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro), build 59cdc3f5. Created a shortcut: Just Speak to It > Get Last Transcript, then Show Content (Raw Text, then Polished Text). The run showed Raw Text \"local only\", the newest History item; Polished Text was empty because there is no polish key. Recorded \"shortcut second run\", force-quit Shortcuts, reopened and ran it again from the Library: it showed \"shortcut second run\". Not verifiable: polished text, and \"Hey Siri\" while locked (no Siri or lock on the simulator).",
+    "screenshots": [
+      "screenshots/iphone-shortcuts-last-transcript-1.png",
+      "screenshots/iphone-shortcuts-last-transcript-2.png",
+      "screenshots/iphone-shortcuts-last-transcript-3.png",
+      "screenshots/iphone-shortcuts-last-transcript-4.png"
+    ]
+  },
+  {
+    "id": "iphone-siri-interruption",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro), build 59cdc3f5. Siri can't be invoked on the simulator, and the app's synthetic transcript hook bypasses AVAudioSession, so there is no interruption to observe. A real-mic in-app recording on this host showed \"Recording\" but produced no text: the host's coreaudiod was saturated (~76% CPU) and later aborted AVAudioEngine init (see the keyboard checks). Observation: after that run the Dynamic Island kept a '... 3w' activity, even across a simulator reboot (not investigated). Needs a physical iPhone.",
+    "screenshots": [
+      "screenshots/iphone-siri-interruption-1.png",
+      "screenshots/iphone-siri-interruption-2.png"
+    ]
+  },
+  {
+    "id": "iphone-keyboard-v2",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro), build 59cdc3f5. Setup verified: Settings > General > Keyboard > Add New Keyboard > Just Speak to It added; Allow Full Access turned on via the system alert; the globe picker lists \"Just Speak, English\"; in Safari's address bar the keyboard shows the last-transcript Insert chip, an engine menu (Via app / Local Apple Speech - On-device) and \"Open Just Speak once to reconnect Instant Dictation, then return here.\" with Speak disabled. No microphone prompt appeared inside the keyboard. Dictation could not be exercised: tapping Enable Instant Dictation in the app aborted the app twice (also after a simulator reboot) with SIGABRT in AudioToolbox _ReportRPCTimeout from AURemoteIO::Initialize under -[AVAudioEngine inputNode] (KeyboardReadinessAudioSession.start). That is a simulator-to-host CoreAudio RPC timeout on this shared Mac, whose coreaudiod sat at ~76% CPU, so it is treated as environmental, not an app bug. Insert-once, leading space and Cancel need a physical iPhone. Notes and WhatsApp are not on the simulator.",
+    "screenshots": [
+      "screenshots/iphone-keyboard-v2-1.png",
+      "screenshots/iphone-keyboard-v2-2.png",
+      "screenshots/iphone-keyboard-v2-3.png",
+      "screenshots/iphone-keyboard-v2-4.png"
+    ]
+  },
+  {
+    "id": "iphone-keyboard-other-apps",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on iOS Simulator iOS 26.3 (iPhone 17 Pro), build 59cdc3f5. Notes is not on the simulator; Safari was used, with Messages/Reminders planned. With the keyboard enabled and Full Access on, Safari's address bar showed \"Open Just Speak once to reconnect Instant Dictation, then return here.\" (Speak disabled) until Instant Dictation is enabled in the app. Enabling it aborted the app with a CoreAudio RPC timeout (AURemoteIO::Initialize, see iphone-keyboard-v2), an environmental host-audio failure. So no attempt reached dictation in any app, and the 'iOS paused Just Speak's microphone' path and music-keeps-playing couldn't be observed. No attempt mentioned checking microphone permission. Needs a physical iPhone.",
+    "screenshots": [
+      "screenshots/iphone-keyboard-other-apps-1.png",
+      "screenshots/iphone-keyboard-other-apps-2.png"
+    ]
+  }
+]

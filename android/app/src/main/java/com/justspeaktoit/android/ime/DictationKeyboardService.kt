@@ -275,8 +275,7 @@ class DictationKeyboardService : InputMethodService() {
 
     /** Lists the keyboard's capture in Settings > System resources in use, with a way to stop it. */
     private fun reconcileMicrophoneHold() {
-        val capturing = state is DictationState.Starting || state is DictationState.Listening
-        if (!capturing) {
+        if (!state.holdsMicrophone) {
             microphoneHold?.end()
             microphoneHold = null
             return

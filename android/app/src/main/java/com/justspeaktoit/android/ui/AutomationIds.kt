@@ -27,6 +27,10 @@ object AutomationIds {
     const val RESOURCES_HEADLINE = "settings.resources.headline"
     const val RESOURCES_RELEASE_EVERYTHING = "settings.resources.releaseEverything"
 
-    /** One per hold row, keyed by the shared kind, e.g. `settings.resources.release.microphone`. */
-    fun resourceRelease(kind: SystemResourceKind): String = "settings.resources.release.${kind.rawValue}"
+    /**
+     * One per hold row, keyed by the shared kind and the owner, so the app's recording and the keyboard's
+     * each get their own, e.g. `settings.resources.release.microphone.DictationViewModel`.
+     */
+    fun resourceRelease(kind: SystemResourceKind, owner: String): String =
+        "settings.resources.release.${kind.rawValue}.$owner"
 }

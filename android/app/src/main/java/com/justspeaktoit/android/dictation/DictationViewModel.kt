@@ -757,8 +757,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     /** The microphone is held while a session captures, and until a Cloud recorder has really stopped. */
     private fun reconcileMicrophoneHold() {
         val dictation = _state.value.dictation
-        val capturing = dictation is DictationState.Starting || dictation is DictationState.Listening
-        if (capturing || recorder != null) {
+        if (dictation.holdsMicrophone || recorder != null) {
             if (microphoneHold != null) return
             val mode = dictation.modeOrNull()
             microphoneHold = resources.acquire(

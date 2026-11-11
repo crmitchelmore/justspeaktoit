@@ -311,7 +311,7 @@ private fun ResourcesInUse(holds: List<SystemResourceHold>, actions: SettingsAct
                     onClick = { actions.onReleaseResource(hold.id) },
                     enabled = !hold.isReleasing,
                     modifier = Modifier
-                        .testTag(AutomationIds.resourceRelease(hold.kind))
+                        .testTag(AutomationIds.resourceRelease(hold.kind, hold.owner))
                         .semantics { contentDescription = description },
                 ) { Text(label) }
             }

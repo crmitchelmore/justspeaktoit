@@ -1,6 +1,7 @@
 package com.justspeaktoit.android.resources
 
 import com.justspeaktoit.android.cloud.RepoSources
+import com.justspeaktoit.android.ui.AutomationIds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,6 +10,14 @@ import org.junit.Test
 class SystemResourceRegistryTest {
     private var clock = 1_000L
     private val registry = SystemResourceRegistry { clock }
+
+    @Test
+    fun testSimultaneousMicrophoneHolds_getDistinctReleaseIds() {
+        registry.acquire(SystemResourceKind.Microphone, "Dictation recording", "why", "DictationViewModel") {}
+        registry.acquire(SystemResourceKind.Microphone, "Keyboard dictation", "why", "DictationKeyboardService") {}
+        val ids = registry.holds.value.map { AutomationIds.resourceRelease(it.kind, it.owner) }
+        assertEquals(2, ids.toSet().size)
+    }
 
     @Test
     fun testReleaseAsksOwnerAndKeepsHoldUntilOwnerEndsIt() {

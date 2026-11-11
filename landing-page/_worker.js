@@ -8,7 +8,13 @@ const alphaTag = /^alpha-build-[1-9][0-9]*$/;
 // GitHub or Pages response becomes a controlled answer instead of holding the
 // request open until the platform's own limit.
 const upstreamTimeoutMs = 5000;
+// Byte caps for upstream bodies, enforced while streaming so an oversized or
+// endless body is cancelled at the cap instead of being buffered first.
 const pointerMaxBytes = 4096;
+const appInstallerMaxBytes = 65536;
+const flatpakDescriptorMaxBytes = 16384;
+/** What `readText` returns when a body exceeds its cap. */
+const tooLarge = Symbol('tooLarge');
 
 /**
  * Fetches `url` and reads the response with `read` within the upstream deadline.
@@ -31,6 +37,41 @@ async function fetchWithin(url, init, read) {
 }
 
 /**
+ * Reads a response body as UTF-8 text, counting bytes as they arrive. Returns
+ * `tooLarge` and cancels the body as soon as it passes `maxBytes`, so the
+ * Worker never holds more than the cap. A declared oversized length is
+ * refused before reading.
+ */
+async function readText(response, maxBytes) {
+  if (Number(response.headers.get('Content-Length')) > maxBytes) {
+    response.body?.cancel().catch(() => {});
+    return tooLarge;
+  }
+  if (response.body === null) return '';
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      reader.cancel().catch(() => {});
+      return tooLarge;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  // Decoding once keeps a multibyte character split across chunks intact.
+  return new TextDecoder().decode(bytes);
+}
+
+/**
  * Reads a small JSON pointer from the alpha-latest release. Returns
  * {unavailable} when it cannot be fetched (missing, network failure or
  * deadline), {invalid} when it is too large or not JSON, otherwise {value}.
@@ -40,12 +81,12 @@ async function fetchPointer(name) {
   try {
     text = await fetchWithin(`${release}/alpha-latest/${name}`,
       {cf: {cacheTtl: 30}, headers: {'Accept': 'application/json'}},
-      response => response.ok ? response.text() : null);
+      response => response.ok ? readText(response, pointerMaxBytes) : null);
   } catch {
     return {unavailable: true};
   }
   if (text === null) return {unavailable: true};
-  if (text.length > pointerMaxBytes) return {invalid: true};
+  if (text === tooLarge) return {invalid: true};
   try {
     return {value: JSON.parse(text)};
   } catch {
@@ -87,12 +128,12 @@ const windowsInstallerRoutes = {
       body = await fetchWithin(`${release}/${installer.tag}/${appInstallerAsset}`, {cf: {cacheTtl: 30}},
         response => {
           if (!response.ok) throw Error('missing');
-          return response.text();
+          return readText(response, appInstallerMaxBytes);
         });
     } catch {
       return new Response('Windows installer not yet available', {status: 503});
     }
-    if (body.length > 65536 || !body.includes(`Uri="https://justspeaktoit.com${appInstallerPath}"`)) {
+    if (body === tooLarge || !body.includes(`Uri="https://justspeaktoit.com${appInstallerPath}"`)) {
       return new Response('Invalid Windows installer', {status: 503});
     }
     return new Response(body, {headers: {
@@ -130,16 +171,14 @@ const flatpakRoutes = {
 async function flatpakDescriptor({file, header, type}) {
   try {
     const body = await fetchWithin(`${flatpakSite}/${file}`, {cf: {cacheTtl: 60}},
-      response => response.ok ? response.text() : null);
-    if (body !== null) {
-      if (body.length <= 16384 && body.startsWith(`${header}\n`) && body.includes('\nGPGKey=')) {
-        return new Response(body, {headers: {
-          'Content-Type': type,
-          'Content-Disposition': `attachment; filename="${file}"`,
-          'Cache-Control': 'public, max-age=60',
-          'X-Content-Type-Options': 'nosniff',
-        }});
-      }
+      response => response.ok ? readText(response, flatpakDescriptorMaxBytes) : null);
+    if (typeof body === 'string' && body.startsWith(`${header}\n`) && body.includes('\nGPGKey=')) {
+      return new Response(body, {headers: {
+        'Content-Type': type,
+        'Content-Disposition': `attachment; filename="${file}"`,
+        'Cache-Control': 'public, max-age=60',
+        'X-Content-Type-Options': 'nosniff',
+      }});
     }
   } catch {
     // Fall through to the bundle.

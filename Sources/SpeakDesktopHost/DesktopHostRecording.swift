@@ -17,8 +17,8 @@ extension DesktopHostController {
     // swiftlint:disable:next function_body_length
     func startRecording(_ request: DesktopHostRecordingStart<Platform>) async throws {
         pauseConnectionPreWarming()
-        connectionWarmCapture = nil
-        let warmGeneration = connectionWarmGeneration
+        connectionWarm.capture = nil
+        let warmGeneration = connectionWarm.generation
         cancelCorrectionObservation()
         let (target, deviceID, capturedProfile, textOutput, trigger, handsFree) = (
             request.target, request.deviceID, request.profile, request.textOutput, request.trigger, request.handsFree

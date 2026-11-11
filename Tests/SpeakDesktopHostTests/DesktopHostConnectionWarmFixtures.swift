@@ -104,33 +104,33 @@ extension DesktopHostController where Platform == FakePlatform {
         ])
         changed.postProcessing = options
         settings = changed
-        connectionWarmApproved = approved
+        connectionWarm.approved = approved
         acknowledgeConnectionWarmCapture(
-            generation: connectionWarmGeneration, recordID: UUID(), model: model, options: options
+            generation: connectionWarm.generation, recordID: UUID(), model: model, options: options
         )
-        connectionWarmCapture?.credentialsReady = true
+        connectionWarm.capture?.credentialsReady = true
     }
 
     // swiftlint:disable:next large_tuple
     func warmStateForTest() -> (approved: Bool, witness: Bool, eligible: Bool, warm: Bool, owned: Bool) {
         (
-            connectionWarmApproved, connectionWarmCapture != nil, connectionWarmEligible,
-            connectionWarmTracker.isWarm(host: OpenRouterConnectionWarmer.origin.host!, now: Date()),
-            connectionWarmTask != nil
+            connectionWarm.approved, connectionWarm.capture != nil, connectionWarmEligible,
+            connectionWarm.tracker.isWarm(host: OpenRouterConnectionWarmer.origin.host!, now: Date()),
+            connectionWarm.task != nil
         )
     }
 
-    func warmTaskForTest() -> Task<Void, Never>? { connectionWarmTask?.task }
+    func warmTaskForTest() -> Task<Void, Never>? { connectionWarm.task?.task }
 
     func renewWarmWitnessForTest() {
-        let captured = connectionWarmCapture
+        let captured = connectionWarm.capture
         invalidateConnectionPreWarming(resetCapture: true)
         if let captured {
             acknowledgeConnectionWarmCapture(
-                generation: connectionWarmGeneration, recordID: captured.recordID,
+                generation: connectionWarm.generation, recordID: captured.recordID,
                 model: captured.model, options: captured.options
             )
-            connectionWarmCapture?.credentialsReady = captured.credentialsReady
+            connectionWarm.capture?.credentialsReady = captured.credentialsReady
         }
     }
 
@@ -139,7 +139,7 @@ extension DesktopHostController where Platform == FakePlatform {
     func warmOperationCycleForTest() { beginBusyOperation(); finishBusyOperation() }
     func warmBeginOperationForTest() { beginBusyOperation() }
     func warmStaleAcknowledgementForTest() {
-        let old = connectionWarmGeneration
+        let old = connectionWarm.generation
         invalidateConnectionPreWarming(resetCapture: true)
         acknowledgeConnectionWarmCapture(
             generation: old, recordID: UUID(), model: ModelCatalog.defaultBatchTranscriptionModel,
@@ -147,8 +147,8 @@ extension DesktopHostController where Platform == FakePlatform {
         )
     }
     func warmCredentialAcknowledgementForTest(matchesRecord: Bool, matchesModel: Bool, available: Bool) {
-        guard let capture = connectionWarmCapture else { return }
-        connectionWarmCapture?.credentialsReady = false
+        guard let capture = connectionWarm.capture else { return }
+        connectionWarm.capture?.credentialsReady = false
         acknowledgeConnectionWarmCleanupCredential(
             recordID: matchesRecord ? capture.recordID : UUID(),
             model: matchesModel ? capture.options.modelIdentifier : "unrelated/model", available: available

@@ -119,7 +119,7 @@ enum OpenRouterBoundedResponseTransport {
 
 /// Collects one response under a lock. The continuation is taken exactly once, by whichever
 /// of header rejection, byte-limit breach, completion or cancellation arrives first.
-private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+private final class OpenRouterBoundedResponseCollector: OpenRouterBoundedResponsePolicy, @unchecked Sendable {
     typealias Outcome = Result<OpenRouterBoundedResponseTransport.Response, Error>
     typealias Continuation = CheckedContinuation<OpenRouterBoundedResponseTransport.Response, Error>
 
@@ -172,27 +172,7 @@ private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionData
         pending?.resume(with: outcome)
     }
 
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void
-    ) {
-        // Bearer keys and audio payloads never follow a redirect; the 3xx itself is delivered.
-        completionHandler(nil)
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        dataTask: URLSessionDataTask,
-        willCacheResponse proposedResponse: CachedURLResponse,
-        completionHandler: @escaping (CachedURLResponse?) -> Void
-    ) {
-        completionHandler(nil)
-    }
-
-    func urlSession(
+    override func urlSession(
         _ session: URLSession,
         dataTask: URLSessionDataTask,
         didReceive response: URLResponse,
@@ -229,7 +209,7 @@ private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionData
         resolve(.failure(rejection))
     }
 
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    override func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         let admitted: Bool = lock.withLock {
             guard failure == nil, !isCancelled, !settled else { return false }
             guard data.count <= limit - receivedBytes else {
@@ -261,7 +241,7 @@ private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionData
         resolve(.failure(reason))
     }
 
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    override func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         let outcome: Outcome = lock.withLock {
             if let failure { return .failure(failure) }
             if let error { return .failure(error) }
@@ -272,6 +252,10 @@ private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionData
     }
 }
 
+/// Refuses redirects and HTTP caching for every bounded read. Apple's `bytes(for:delegate:)`
+/// uses it as is; it never calls a task delegate's response, data or completion callbacks.
+/// The delegate engine's collector overrides those three, and they are declared here
+/// because FoundationNetworking calls them through this class's conformance.
 private class OpenRouterBoundedResponsePolicy: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     func urlSession(
         _ session: URLSession,
@@ -293,4 +277,16 @@ private class OpenRouterBoundedResponsePolicy: NSObject, URLSessionDataDelegate,
         completionHandler(nil)
     }
 
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {}
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {}
 }

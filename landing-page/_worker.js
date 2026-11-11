@@ -93,6 +93,29 @@ async function flatpakDescriptor({file, header, type}) {
   }});
 }
 
+// The Alpha every Mac, CLI and desktop download resolves through. Returns the
+// pointer, or the controlled 503 to serve: unavailable when the pointer cannot
+// be fetched (including a network failure), invalid when it does not parse.
+async function alphaPointer() {
+  let response;
+  try {
+    response = await fetch(`${release}/alpha-latest/alpha-pointer.json`, {
+      cf: {cacheTtl: 30}, headers: {'Accept': 'application/json'},
+    });
+  } catch {
+    return new Response('Alpha build not yet available', {status: 503});
+  }
+  if (!response.ok) return new Response('Alpha build not yet available', {status: 503});
+  let pointer;
+  try { pointer = await response.json(); } catch {
+    return new Response('Invalid Alpha pointer', {status: 503});
+  }
+  if (!pointer || typeof pointer !== 'object' || !/^alpha-build-[1-9][0-9]*$/.test(pointer.tag)) {
+    return new Response('Invalid Alpha pointer', {status: 503});
+  }
+  return pointer;
+}
+
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
@@ -113,15 +136,8 @@ export default {
       return windowsInstallerRoutes[path](installer, new URL(request.url));
     }
     if (!Object.hasOwn(assets, path)) return env.ASSETS.fetch(request);
-    const response = await fetch('https://github.com/crmitchelmore/justspeaktoit/releases/download/alpha-latest/alpha-pointer.json', {
-      cf: {cacheTtl: 30}, headers: {'Accept': 'application/json'},
-    });
-    if (!response.ok) return new Response('Alpha build not yet available', {status: 503});
-    let pointer;
-    try { pointer = await response.json(); } catch {
-      return new Response('Invalid Alpha pointer', {status: 503});
-    }
-    if (!pointer || typeof pointer !== 'object' || !/^alpha-build-[1-9][0-9]*$/.test(pointer.tag)) return new Response('Invalid Alpha pointer', {status: 503});
+    const pointer = await alphaPointer();
+    if (pointer instanceof Response) return pointer;
     const location = `${release}/${pointer.tag}/${assets[path]}`;
     // Windows and Linux downloads exist only on Alphas whose desktop qualification
     // published them; never redirect to a missing asset.

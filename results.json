@@ -1,0 +1,30 @@
+[
+  {
+    "id": "watch-smart-stack-stop",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on watchOS Simulator watchOS 26.2 (Apple Watch Ultra 3 49mm, paired iPhone 17 Pro Max iOS 26.3), build 99caf2a5. TUIST_WATCH_APP=1 Debug simulator builds of JustSpeakWatchApp (with the embedded JustSpeakWatchWidgetExtension complication) and SpeakiOS both succeed. Not exercisable by the agent: the T3 device tools expose no watchOS simulators (device_list lists only ios/android; device_open on the watch returned 'No device A04328D6-... on This machine'), and agent-device supports iOS, Android, macOS, TV and web but not watchOS, so the watch UI cannot be driven or screenshotted. It also needs a Live Activity started from the iPhone; simulator mic capture aborts the iPhone app in CoreAudio (see the iphone-ui batch). Double Tap and a locked iPhone need hardware. Needs a device run.",
+    "screenshots": []
+  },
+  {
+    "id": "watch-app-e2e",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on watchOS Simulator watchOS 26.2 (Apple Watch Ultra 3 49mm, paired iPhone 17 Pro Max iOS 26.3), build 99caf2a5. TUIST_WATCH_APP=1 Debug simulator builds of JustSpeakWatchApp (with the embedded JustSpeakWatchWidgetExtension complication) and SpeakiOS both succeed. Not exercisable by the agent: the T3 device tools expose no watchOS simulators (device_list lists only ios/android; device_open on the watch returned 'No device A04328D6-... on This machine'), and agent-device supports iOS, Android, macOS, TV and web but not watchOS, so the watch UI cannot be driven or screenshotted. The face editor, complication tap, 60 s wrist-down, extended runtime session and battery readings need a real Watch. Needs a device run.",
+    "screenshots": []
+  },
+  {
+    "id": "watch-app-offline",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on watchOS Simulator watchOS 26.2 (Apple Watch Ultra 3 49mm, paired iPhone 17 Pro Max iOS 26.3), build 99caf2a5. TUIST_WATCH_APP=1 Debug simulator builds of JustSpeakWatchApp (with the embedded JustSpeakWatchWidgetExtension complication) and SpeakiOS both succeed. Not exercisable by the agent: the T3 device tools expose no watchOS simulators (device_list lists only ios/android; device_open on the watch returned 'No device A04328D6-... on This machine'), and agent-device supports iOS, Android, macOS, TV and web but not watchOS, so the watch UI cannot be driven or screenshotted. The airplane-mode / WatchConnectivity reconnect and the watch force-quit gesture can't be driven either. Needs a device run.",
+    "screenshots": []
+  },
+  {
+    "id": "watch-voiceover-pass",
+    "result": "skip",
+    "confidence": "review",
+    "note": "Agent-verified on watchOS Simulator watchOS 26.2 (Apple Watch Ultra 3 49mm, paired iPhone 17 Pro Max iOS 26.3), build 99caf2a5. TUIST_WATCH_APP=1 Debug simulator builds of JustSpeakWatchApp (with the embedded JustSpeakWatchWidgetExtension complication) and SpeakiOS both succeed. Not exercisable by the agent: the T3 device tools expose no watchOS simulators (device_list lists only ios/android; device_open on the watch returned 'No device A04328D6-... on This machine'), and agent-device supports iOS, Android, macOS, TV and web but not watchOS, so the watch UI cannot be driven or screenshotted. Source only, not a simulator result: JustSpeakWatch/WatchContentView.swift:51 sets the button label to 'Start recording'/'Stop recording', and lines 118-119 combine each capture row into one accessibility element with its own label (the #1399 fix). An audible VoiceOver run on a Watch is still needed.",
+    "screenshots": []
+  }
+]

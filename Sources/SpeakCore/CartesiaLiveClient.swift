@@ -200,7 +200,7 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
 
     private func join(
         _ active: CartesiaLiveRun, _ continuation: CheckedContinuation<String?, Never>,
-        _ effects: inout CartesiaLiveEffects
+        _ effects: inout LiveDeferredEffects
     ) {
         let transcript = active.transcript
         switch active.phase {

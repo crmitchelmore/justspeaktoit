@@ -5,7 +5,7 @@ import Foundation
 /// generations, deadlines, callbacks and finish waiters all belong to the run,
 /// so a stopped or replaced run cannot be changed by a late transport, timer or
 /// host callback, and a late send completion cannot release a newer run's budget.
-final class CartesiaLiveRun: @unchecked Sendable {
+final class CartesiaLiveRun: LiveSendPumpRun, @unchecked Sendable {
     /// `idle` exists only before the client's first `start()` and holds audio
     /// offered that early; later runs begin at `connecting`.
     enum Phase { case idle, connecting, streaming, finishing, closed }
@@ -118,15 +118,4 @@ final class CartesiaLiveRun: @unchecked Sendable {
             isTerminal: phase == .closed
         )
     }
-}
-
-/// Work decided under the client's lock and performed after it is released:
-/// transport calls, host callbacks, scheduling and continuation resumes never
-/// run while the lock is held, so any of them may re-enter the client.
-struct CartesiaLiveEffects {
-    private var actions: [() -> Void] = []
-
-    mutating func add(_ action: @escaping () -> Void) { actions.append(action) }
-
-    func perform() { actions.forEach { $0() } }
 }

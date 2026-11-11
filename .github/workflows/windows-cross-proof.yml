@@ -23,6 +23,7 @@ on:
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
+      - Sources/CWindowsSelfTest/**
       - Sources/CWindowsAutomation/**
       - Sources/SpeakAutomationKit/**
       - Sources/SpeakCLI/**

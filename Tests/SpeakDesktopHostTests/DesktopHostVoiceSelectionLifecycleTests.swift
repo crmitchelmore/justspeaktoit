@@ -115,7 +115,7 @@ final class DesktopHostVoiceSelectionLifecycleTests: XCTestCase {
     func testFailedImportAndNativeChoice_KeepUnavailableIntentFileEpochAndRevisionAtomic() async throws {
         try await importValues(["defaultTTSVoice": AnyCodable(.string(" Future/Case Voice "))])
         let saved = await controller.voiceOutputSettings()
-        let epoch = await controller.voiceCredentialEpoch
+        let epoch = await controller.voiceCredentials.selectionEpoch
         let revision = await controller.voiceSettingsRevision
         let settingsURL = directory.appendingPathComponent("settings.json")
         let disk = try Data(contentsOf: settingsURL)
@@ -133,7 +133,7 @@ final class DesktopHostVoiceSelectionLifecycleTests: XCTestCase {
         let voice = try XCTUnwrap(DesktopSpeechVoice.voices.first)
         await controller.selectVoiceOutput(voice)
         let unchanged = await controller.voiceOutputSettings()
-        let unchangedEpoch = await controller.voiceCredentialEpoch
+        let unchangedEpoch = await controller.voiceCredentials.selectionEpoch
         let unchangedRevision = await controller.voiceSettingsRevision
         XCTAssertEqual(unchanged, saved)
         XCTAssertEqual(unchangedEpoch, epoch); XCTAssertEqual(unchangedRevision, revision)

@@ -5,7 +5,7 @@ import SpeakCore
 
 // Shortcuts automation surface for iOS, extending the recording intents in
 // `TranscriptionIntents.swift`. The intents are thin: parameter mapping and
-// validation live in `SpeakCore/AutomationIntentSupport.swift` where they are
+// validation live in `SpeakCore/Automation/AutomationIntentSupport.swift` where they are
 // unit-tested, and all real work happens in the existing services. They are
 // internal on purpose — nothing outside SpeakiOSLib references them, and the
 // AppIntents metadata extractor does not need public visibility.
@@ -306,15 +306,11 @@ struct GetLastTranscriptionIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         let history = iOSHistoryManager.shared
         await history.loadIfNeededAndWait()
-        let text = history.items.lazy
-            .compactMap { item in
-                AutomationIntentSupport.bestTranscript(
-                    raw: item.transcription,
-                    polished: item.postProcessedTranscription
-                )
-            }
-            .first
-        guard let text else {
+        guard let text = AutomationIntentSupport.mostRecentTranscript(
+            in: history.items,
+            raw: \.transcription,
+            polished: \.postProcessedTranscription
+        ) else {
             throw AutomationIntentError.noTranscriptionYet
         }
         return .result(value: text)
@@ -362,10 +358,10 @@ struct PolishTextIntent: AppIntent {
             model: model,
             apiKey: settings.postProcessingAPIKey(for: model)
         )
-        guard !polished.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard let output = AutomationIntentSupport.nonBlankPolishOutput(polished) else {
             throw AutomationIntentError.noPolishOutput
         }
-        return .result(value: polished)
+        return .result(value: output)
     }
 }
 #endif

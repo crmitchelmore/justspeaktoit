@@ -112,8 +112,8 @@ once in `SpeakWatchCore`; those package dependencies are module arrows, while th
 
 [Package.swift](../Package.swift) switches to a portable graph on Windows and Linux, and on macOS when
 `SPEAK_PORTABLE_CORE=1` or `SPEAK_WINDOWS_TARGET=1` is set. It compiles the canonical `SpeakCore` sources without
-Apple-only packages; an Apple adapter must be listed in `appleCoreSources` to be left out, so new domain files reach
-every platform. `scripts/verify-portable-core-boundary.py` checks that boundary.
+Apple-only packages; an Apple adapter must live in a folder listed in `appleCoreSources` to be left out, so new
+domain files reach every platform. `scripts/verify-portable-core-boundary.py` checks that boundary.
 Paid-access models, routing, session lifecycle and client/storage protocols remain shared.
 Only its CryptoKit HTTP adapter, AVFoundation WAV converter and StoreKit adapter are
 excluded; the Keychain implementation inside the client contract file is guarded by
@@ -127,9 +127,11 @@ excluded; the Keychain implementation inside the client contract file is guarded
 | `SpeakDesktopSync` | library target | Depends on `SpeakDesktop`, `SpeakSync` and `SpeakCore`; iCloud History sync and key import for desktop hosts. |
 | `SpeakDesktopHost` | library target | Depends on `SpeakCore`, `SpeakDesktop`, `SpeakDesktopSync` and `SpeakSync`; `DesktopHostController<Platform>`, the recording, History, playback, output, settings, Read aloud, on-device model and iCloud sync orchestration shared by the Windows and Linux apps behind `DesktopHostPlatform`. |
 | `CWindowsSupport`, `CWindowsAutomation` | C++ targets | `SPEAK_WINDOWS_TARGET`; Win32, WASAPI, Media Foundation, UI Automation, WinHTTP, CNG, Credential Manager and the run-time whisper.cpp loader. |
+| `CWindowsSelfTest` | C++ target | `SPEAK_WINDOWS_TARGET`; the native `--self-test`/`--ui-smoke-test` checks, outside the product library. `SpeakWindows` links it so CI and the bundle verifier qualify the shipped binary. |
 | `SpeakWindowsPlatform` | library target | `SPEAK_WINDOWS_TARGET`; Swift over the Windows C++ ABI. |
 | `SpeakWindows` | executable target | `SPEAK_WINDOWS_TARGET`; the Windows app, `WindowsHostPlatform` and its self-tests. The product also ships `speak` (`SpeakCLI`) over a named pipe. |
 | `CLinuxSystem/*`, `CLinuxSupport` | system library and C targets | `SPEAK_LINUX_TARGET`; GTK 4/libadwaita, libpulse, libsecret, X11/XTest, GStreamer, OpenSSL libcrypto and the XDG portals behind the `jsti_*` ABI, plus the run-time whisper.cpp loader. |
+| `CLinuxSelfTest` | C target | `SPEAK_LINUX_TARGET`; the window `--ui-smoke-test` checks, outside the product library. `SpeakLinux` links it so CI and the installed-Flatpak checks qualify the shipped binary. |
 | `SpeakLinuxPlatform`, `SpeakLinuxWebSocket` | library targets | `SPEAK_LINUX_TARGET`; Swift over the Linux C ABI, and the SwiftNIO live-transcription transport. |
 | `SpeakLinux` | executable target | `SPEAK_LINUX_TARGET`; the Linux app, `LinuxHostPlatform` and its self-tests. |
 | `SpeakPortableTests`, `SpeakDesktopTests`, `SpeakDesktopHostTests`, `SpeakDesktopSyncTests`, `SpeakSyncTests` | test targets | Shared-core, desktop and host tests run on Linux, Windows and portable macOS. |
@@ -157,29 +159,78 @@ Linux in [linux-development.md](linux-development.md).
 
 | Concern | Current owner |
 | --- | --- |
-| Model catalogue and placement | [ModelCatalog.swift](../Sources/SpeakCore/ModelCatalog.swift), [ModelRouting.swift](../Sources/SpeakCore/ModelRouting.swift) and provider-specific shared catalogues. |
-| Live routes and client construction | [LiveTranscriptionSelection.swift](../Sources/SpeakCore/LiveTranscriptionSelection.swift) and [LiveTranscriptionClientFactory.swift](../Sources/SpeakCore/LiveTranscriptionClientFactory.swift). |
-| Batch-provider contract and metadata | [TranscriptionProviderRegistry.swift](../Sources/SpeakCore/TranscriptionProviderRegistry.swift) defines `TranscriptionProvider` and metadata. The concrete macOS actor is a different file with the same name under [SpeakApp](../Sources/SpeakApp/TranscriptionProviderRegistry.swift). |
-| Capture start and opening audio | [RecordingStartSequence.swift](../Sources/SpeakCore/RecordingStartSequence.swift) contains `RecordingStartSequencer`; [StreamingAudioPreroll.swift](../Sources/SpeakCore/StreamingAudioPreroll.swift) retains ordered opening buffers. |
-| Language, results, keychain and privacy-safe types | `SpeakCore`, including [SecureStorage.swift](../Sources/SpeakCore/SecureStorage.swift), [SensitiveHeaderRedactor.swift](../Sources/SpeakCore/SensitiveHeaderRedactor.swift) and closed analytics dimensions. |
-| Lexicon | [PersonalLexiconService.swift](../Sources/SpeakCore/PersonalLexiconService.swift) and `PersonalLexiconStore`. |
+| Model catalogue and placement | [ModelCatalog.swift](../Sources/SpeakCore/ModelCatalog.swift), [ModelRouting.swift](../Sources/SpeakCore/Transcription/ModelRouting.swift) and provider-specific shared catalogues. |
+| Live routes and client construction | [LiveTranscriptionSelection.swift](../Sources/SpeakCore/Live/LiveTranscriptionSelection.swift) and [LiveTranscriptionClientFactory.swift](../Sources/SpeakCore/Live/Apple/LiveTranscriptionClientFactory.swift). |
+| Batch-provider contract and metadata | [TranscriptionProviderRegistry.swift](../Sources/SpeakCore/Transcription/TranscriptionProviderRegistry.swift) defines `TranscriptionProvider` and metadata. The concrete macOS actor is a different file with the same name under [SpeakApp](../Sources/SpeakApp/Transcription/TranscriptionProviderRegistry.swift). |
+| Capture start and opening audio | [RecordingStartSequence.swift](../Sources/SpeakCore/Recording/RecordingStartSequence.swift) contains `RecordingStartSequencer`; [StreamingAudioPreroll.swift](../Sources/SpeakCore/Live/StreamingAudioPreroll.swift) retains ordered opening buffers. |
+| Language, results, keychain and privacy-safe types | `SpeakCore`, including [SecureStorage.swift](../Sources/SpeakCore/Credentials/Apple/SecureStorage.swift), [SensitiveHeaderRedactor.swift](../Sources/SpeakCore/History/SensitiveHeaderRedactor.swift) and closed analytics dimensions. |
+| Lexicon | [PersonalLexiconService.swift](../Sources/SpeakCore/Vocabulary/Apple/PersonalLexiconService.swift) and `PersonalLexiconStore`. |
 | Extension protocols and stores | Keyboard handoff/delivery, App Group availability, shared recording inbox, Watch capture and complication files in [SpeakCore](../Sources/SpeakCore/). |
-| History presentation | [HistoryPresentation.swift](../Sources/SpeakCore/HistoryPresentation.swift) supplies shared display rules; each platform owns its richer persisted record. |
+| History presentation | [HistoryPresentation.swift](../Sources/SpeakCore/History/HistoryPresentation.swift) supplies shared display rules; each platform owns its richer persisted record. |
 | Release identities | [ReleaseTrains.json](../Sources/SpeakCore/Resources/ReleaseTrains.json) is canonical; generated Swift exposes the selected train. |
 
 Shared catalogue ownership does not make every adapter platform-neutral. A provider addition can require catalogue,
 credential, route, transport, platform registration, settings and tests according to the provider's live/batch and
 platform capabilities.
 
+### SpeakCore source layout
+
+`Sources/SpeakCore` is grouped by feature. The canonical model and provider catalogues (`ModelCatalog*`,
+`*Catalog*.swift`, `ProviderCredentialCatalogue`, retirements and the Android-exported model files) and a few
+cross-cutting utilities stay at the top level.
+
+| Folder | Contents |
+| --- | --- |
+| `Live/` | Shared live-streaming infrastructure: client protocol, routing, factory, sessions/runs, sending, framing, readiness, finalisation and transcript reconciliation. |
+| `Live/Providers/<Provider>/` | One provider's live client family (`…LiveClient`, `…Run`, `…Connection`, `…Sending`, `…Protocol`, events). |
+| `Batch/`, `Batch/Providers/` | Batch jobs, routing and multipart upload staging; one batch client per provider. |
+| `Transcription/`, `Transcription/Providers/` | Provider contract, routing, language and keyword policy; provider configuration and model metadata. |
+| `TTS/`, `TTS/Providers/`, `TTS/Desktop/` | Voice output preferences and segmentation; provider TTS APIs; portable desktop synthesis. |
+| `Capture/`, `Recording/`, `Keyboard/`, `LiveActivity/` | Capture policy and health, recording lifecycle and hot-key gestures, keyboard handoff, Live Activity state. |
+| `AppleSpeech/`, `LocalModels/`, `Audio/` | Apple Speech adapters, downloaded local-model records, PCM/MP3/WAV helpers. |
+| `PostProcessing/`, `Vocabulary/`, `OpenRouter/` | Cleanup/polish policy, lexicon/auto-correction/pronunciation, OpenRouter chat and audio. |
+| `History/`, `Credentials/`, `Balance/`, `Sync/`, `DataMigration/`, `Automation/`, `Analytics/`, `Desktop/`, `App/` | History records and diagnostics, keys and validation, provider balances, settings/key/config transfer, migration, automation protocol, analytics, portable desktop configuration and app information. |
+| `ModelComparison/`, `PaidAccess/`, `SettingsSearch/`, `SpeechInsights/`, `Resources/` | Existing feature folders and bundled resources. |
+| `AppleUI/` | Apple-only SwiftUI views shared by the macOS and iOS apps (skeletons, release notes, credential status, provider fields, balances, OpenRouter audio browser). |
+
+`appleCoreSources` in `Package.swift` lists Apple-only folders only, relative to `Sources/SpeakCore`. Each feature
+keeps its Apple adapters in an `Apple/` subfolder (for example `Keyboard/Apple/`, `Credentials/Apple/`); SwiftUI views
+live in `AppleUI/`, Apple Speech in `AppleSpeech/`, the Apple-only root helpers in `AppleSupport/`, and `SpeechInsights/`
+is Apple-only as a whole. Adding an adapter or a portable file therefore never edits the manifest.
+`scripts/verify-portable-core-boundary.py` rejects a file entry, a stale or nested folder entry, and a SwiftUI view
+declared outside `AppleUI/`. `SpeakSync` follows the same rule: its native CloudKit adapters live in
+`Sources/SpeakSync/AppleCloudKit/` (tests in `Tests/SpeakSyncTests/AppleCloudKit/`), listed as one folder in
+`appleSyncSources` and `appleSyncTestSources`.
+
+### Portable desktop source layout
+
+`Sources/SpeakDesktop` and `Sources/SpeakDesktopHost` are grouped by feature in the same way, so a reader can find one
+capability's files together. SpeakDesktop has `Capture/`, `Comparison/`, `Files/`, `History/`, `LocalModels/`,
+`Migration/`, `Native/`, `Output/`, `Profiles/`, `Recording/`, `Shell/` (settings queue, shortcuts, login item),
+`Transcription/`, `Vocabulary/` and `Voice/`. SpeakDesktopHost has `Controller/` (the host actor, its platform protocol,
+effects, state and shutdown), `Automation/`, `Comparison/`, `Credentials/`, `History/`, `LocalModels/`, `Migration/`,
+`Native/`, `Output/`, `ReadAloud/`, `Recording/`, `Settings/`, `Transcription/` and `Voice/`.
+
 ## macOS runtime
 
-[SpeakApp.swift](../Sources/SpeakApp/SpeakApp.swift) is the executable entry point. [WireUp.swift](../Sources/SpeakApp/WireUp.swift)
+[SpeakApp.swift](../Sources/SpeakApp/App/SpeakApp.swift) is the executable entry point. [WireUp.swift](../Sources/SpeakApp/App/WireUp.swift)
 constructs the long-lived `AppEnvironment`, injects services, installs optional analytics and sync adapters, and makes
-the environment available to SwiftUI and App Intents. `AppSettings`, `PermissionsManager`, audio devices and capture,
+the environment available to SwiftUI and App Intents. Feature assembly sits beside it in `WireUp+<Feature>.swift`
+(paid access, analytics, TTS, Send to Mac, credential sync, transcription defaults); `AppChrome` owns the status bar,
+menus, Services and Touch Bar. `AppSettings`, `PermissionsManager`, audio devices and capture,
 transcription, post-processing, TTS, history, HUD, hot keys, output delivery and local transports live for the process.
 
+`Sources/SpeakApp` is grouped by feature: `App/` (entry point, `WireUp*`, environment, chrome), `Session/`
+(`MainManager` and its session collaborators), `Live/` (live controllers, `SwitchingLiveTranscriber`, shared-client
+audio processing, live input), `Transcription/` (manager and batch providers), `LocalModels/`, `Settings/`, `HUD/`,
+`History/`, `Output/` (text output and accessibility insertion), `Hotkeys/`, `Audio/`, `PostProcessing/`,
+`Analytics/`, `Permissions/`, `CoreJourney/` (UI-test fixtures), `Views/`, plus the existing `CompareModels/`,
+`DataMigration/`, `PaidAccess/`, `Services/`, `TextToSpeech/`, `Transport/` and `VoiceEdit/` folders.
+
 `MainManager` owns the dictation session lifecycle and coordinates recording, transcription, optional polishing,
-delivery, HUD transitions and history finalisation. `SmartTextOutput` chooses accessibility insertion or paste/clipboard
+delivery, HUD transitions and history finalisation. The stages after a stop live in `MainManager+SessionPipeline`;
+`SessionGestureRouter` turns hotkey gestures into starts and stops, and `SilenceAutoStop`, `HUDOcclusionObserver`,
+`PostProcessingRetryStore` and `SessionNetworkExchanges` own their own state and tests. `SmartTextOutput` chooses accessibility insertion or paste/clipboard
 fallback. Cancellation is scoped to the active session/run, and live-controller teardown waits for provider startup
 where necessary so a late start cannot capture for a replacement run.
 
@@ -193,12 +244,11 @@ If hardware startup changed the primer's installed tap format, the analyzer reti
 the tap using the current input format. Idle standby refill is skipped when the selected preferred microphone requires
 a default-device switch, rather than building an engine the next press will discard.
 
-[SwitchingLiveTranscriber.swift](../Sources/SpeakApp/SwitchingLiveTranscriber.swift) is deliberately mixed today:
+[SwitchingLiveTranscriber.swift](../Sources/SpeakApp/Live/SwitchingLiveTranscriber.swift) is deliberately mixed today:
 
-- dedicated macOS controllers handle Deepgram, Modulate, ElevenLabs, Soniox, Cartesia, Gladia and OpenAI
-  Realtime;
-- `SharedClientLiveController` supplies macOS capture for the shared `SpeakCore` clients used by AssemblyAI, Gemini live, xAI,
-  Azure, Meta, Speechmatics, Rev.ai and Mistral;
+- a dedicated macOS controller handles OpenAI Realtime;
+- `SharedClientLiveController` supplies macOS capture for the shared `SpeakCore` clients used by every other cloud
+  provider, including Deepgram, Modulate, ElevenLabs, Soniox, Cartesia, Gladia and AssemblyAI;
 - Apple legacy/analyzer, FluidAudio Parakeet, WhisperKit and the non-App-Store sherpa-onnx runtime have local controllers.
 
 Azure's shared catalogue distinguishes the legacy turn-based `mai-transcribe` alias
@@ -221,12 +271,12 @@ through per-candidate `ComparisonLiveLane` instances, retains the common PCM cap
 `ComparisonRoundStore`. File comparison has its own runner, and `MacComparisonSyncAdapter` bridges rounds to `SpeakSync`.
 
 Windows/Linux comparison is another isolated capture consumer:
-`SpeakDesktop/DesktopComparisonRunner` runs immutable file snapshots through
+`SpeakDesktop/Comparison/DesktopComparisonRunner` runs immutable file snapshots through
 injected raw providers; `DesktopComparisonLive` gates one native capture on
 synchronized shared-client readiness and fans out bounded common PCM with a
 single rate projection. `DesktopComparisonStore` persists the canonical
 SpeakCore revision/round shape and derives its scoreboard; completion preserves
-the initially persisted blind identities/order. `SpeakDesktopHost/DesktopHostComparison`
+the initially persisted blind identities/order. `SpeakDesktopHost/Comparison/DesktopHostComparison`
 owns admission, cancellation, capture, raw provider execution, judging and
 exports without using normal History, post-processing or insertion.
 `DesktopHostComparisonReadiness` projects only qualified, credential/local-ready
@@ -281,7 +331,11 @@ queued until the scene is active before microphone capture begins.
 
 There is no `IOSWireUp` or `IOSAppEnvironment` at this base. UI, intents, keyboard handoff and Watch import converge on
 the `@MainActor` singleton [TranscriptionRecordingService](../Sources/SpeakiOS/Services/TranscriptionRecordingService.swift),
-with injectable seams for tests. `ForegroundRecordingOwnership` prevents a foreground capture and an App Intent from
+with injectable seams for tests. Its responsibilities live in `+Start`, `+Configuration`, `+LiveSession`,
+`+Finalisation`, `+Drain`, `+Delivery`, `+Polish` and `+RunOutcome` extensions; `CaptureRunLedger`,
+`CaptureHealthReporter` and `SharedTranscriptWriteThrottle` own run identity, failure reporting and App Group write
+pacing. The foreground equivalent is `TranscriberCoordinator` (`Services/TranscriberCoordinator.swift`), which shares
+the same `RecordingLifecycleCoordinator` kernel. `ForegroundRecordingOwnership` prevents a foreground capture and an App Intent from
 claiming the process microphone concurrently. `SharedTranscriptionState` publishes bounded App Group state for widgets,
 extensions, Live Activity result actions and background completions.
 
@@ -338,14 +392,14 @@ behaviour remain separate release checks.
 ## Persistence and sync
 
 macOS `HistoryManager` stores rich `HistoryItem` records and coordinates file IO through the
-[HistoryWALStore](../Sources/SpeakApp/HistoryWALStore.swift) actor. The write-ahead log, snapshot and recovery paths keep
+[HistoryWALStore](../Sources/SpeakApp/History/HistoryWALStore.swift) actor. The write-ahead log, snapshot and recovery paths keep
 pending operations ordered. iOS uses `@MainActor` `iOSHistoryManager` with a primary JSON snapshot plus the synchronous
 [IOSHistoryPersistence](../Sources/SpeakiOS/Views/IOSHistoryPersistence.swift) recovery sidecar. These are different
 local storage implementations.
 
 CloudKit history sync projects both records onto exactly nine `SyncableHistoryEntry` fields: `id`, `createdAt`,
 `rawTranscription`, `postProcessedText`, `model`, `duration`, `wordCount`, `originPlatform` and `updatedAt`.
-[SyncRecord.swift](../Sources/SpeakSync/SyncRecord.swift) maps that projection. Local diagnostics, error details, costs,
+[SyncRecord.swift](../Sources/SpeakSync/AppleCloudKit/SyncRecord.swift) maps that projection. Local diagnostics, error details, costs,
 model-usage arrays and audio/file references do not join that projection automatically.
 
 `ProviderCredentialCatalogue` owns persisted API-key identity mapping, including Azure's historical
@@ -380,10 +434,10 @@ iOS exposes App Intents for recording, transcription files and result actions. T
 
 ## Observability and privacy boundaries
 
-`SentryManager` installs [SentryEventScrubber.swift](../Sources/SpeakApp/SentryEventScrubber.swift) before events and
+`SentryManager` installs [SentryEventScrubber.swift](../Sources/SpeakApp/Analytics/SentryEventScrubber.swift) before events and
 breadcrumbs leave the app. It removes/redacts sensitive headers, URL/query credentials, cookies, contexts and extras.
 
-Direct non-App-Store macOS builds may construct the explicit-consent [PostHogAnalytics.swift](../Sources/SpeakApp/PostHogAnalytics.swift)
+Direct non-App-Store macOS builds may construct the explicit-consent [PostHogAnalytics.swift](../Sources/SpeakApp/Analytics/PostHogAnalytics.swift)
 sink. Missing configuration is a no-op; opt-out closes/purges the queue. `SpeakCore` defines typed event properties and
 closed/bounded dimensions in `ProductAnalytics`, while iOS does not initialise the PostHog transport. Definitions and
 call sites are not proof of production coverage or rollout. The [implementation audit](analytics-implementation-audit.md)
@@ -434,8 +488,7 @@ been eliminated.
   A live provider is registered in `ModelCatalog`, `LiveTranscriptionProviderID` and a
   `LiveTranscriptionClientFactory` case. The Mac's `SwitchingLiveTranscriber` chooses a cloud controller with an
   exhaustive switch over `LiveTranscriptionProviderID`, so a new case fails to compile until it is assigned (normally
-  the shared client); Deepgram, Modulate, ElevenLabs, Soniox and Cartesia keep dedicated Mac controllers and OpenAI
-  keeps its platform adapters. `ProviderCatalogueCoverageTests` fails when a catalogued live model has no factory
+  the shared client); only OpenAI keeps its platform adapters. `ProviderCatalogueCoverageTests` fails when a catalogued live model has no factory
   client, and `BatchCatalogueCoverageTests` when a batch model has no route on either platform.
   AssemblyAI's bounded shared-route fold and outstanding provider/device gates are recorded in
   [the parity inventory](assemblyai-shared-live-parity.md).

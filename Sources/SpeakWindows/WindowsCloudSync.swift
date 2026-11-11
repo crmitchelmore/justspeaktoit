@@ -59,7 +59,7 @@ extension DesktopHostCloudSync where Platform == WindowsHostPlatform {
     /// Creates sync for a running (not smoke-test) window and shows the dialog's state.
     static func configure(_ holder: WindowsEventContext) async {
         guard !holder.smokeTest else { return }
-        let context = WindowsSyncContext(pointer: Unmanaged.passUnretained(holder).toOpaque())
+        let context = WindowsSyncContext(pointer: holder.callbackContext)
         do {
             let sync = try WindowsCloudSync(
                 controller: holder.controller,
@@ -124,8 +124,7 @@ func cloudSyncEvent(
     _ action: Int32, _ history: Int32, _ keys: Int32, _ passphrase: UnsafePointer<CChar>?,
     _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     let typed = passphrase.map(String.init(cString:)) ?? ""
     switch action {
     case 1: holder.cloudSync?.handle(.apply(history: history == 1, keys: keys == 1, passphrase: typed))

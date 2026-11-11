@@ -18,6 +18,9 @@ modules and, for ARM64, the machine of each process.
 
 `verify-native-execution.py` records, on Windows, that a host and the programs
 it runs are native for an architecture rather than emulated.
+It owns the command line; each phase is a sibling module (`native_execution_host`,
+`_run`, `_process`, `_runtime`, `_debugger` and `_events`) with a matching
+`test_native_execution_*.py`.
 
 Design, provenance, licences, evidence and remaining gates are documented in
 [Docs/windows-runtime-bundle.md](../../Docs/windows-runtime-bundle.md) and, for

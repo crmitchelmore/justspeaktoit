@@ -1,6 +1,5 @@
 #if os(iOS)
 import AuthenticationServices
-import CryptoKit
 import Foundation
 import SpeakCore
 import StoreKit
@@ -41,15 +40,13 @@ public final class PaidAccessStore: NSObject, ObservableObject {
 
     public static let shared = PaidAccessStore()
 
-    // `internal(set)` rather than `private(set)` on the four below: the StoreKit
-    // half of this type lives in `PaidAccessStore+Purchase.swift` and Swift
-    // scopes `private` to the file. Still read-only to anything outside SpeakiOS.
-    @Published public internal(set) var entitlement: PaidEntitlement = .unentitled
+    // Mirrors of `flow.state`, published for SwiftUI.
+    @Published public private(set) var entitlement: PaidEntitlement = .unentitled
     @Published public private(set) var policy: PaidRoutingPolicy = .unknown
     @Published public private(set) var isSignedIn = false
-    @Published public internal(set) var isBusy = false
-    @Published public internal(set) var lastError: String?
-    @Published public internal(set) var products: [Product] = []
+    @Published public private(set) var isBusy = false
+    @Published public private(set) var lastError: String?
+    @Published public private(set) var products: [Product] = []
 
     /// Mirrors the macOS setting: hides the model pickers and lets the
     /// subscription pick the best model for each task.
@@ -68,9 +65,8 @@ public final class PaidAccessStore: NSObject, ObservableObject {
     /// reachable rather than losing to whichever product loaded first.
     @Published public var selectedTerm: PaidSubscriptionTerm = .monthly
 
-    let client: any PaidAccessClienting
-    let sessions: PaidAccessSessionLifecycle
-    var busyOperation = UUID()
+    /// The session, entitlement, sign-in and StoreKit flow shared with macOS.
+    let flow: PaidAccessFlow
     private var transactionListener: Task<Void, Never>?
     private var signInContinuation: CheckedContinuation<ASAuthorization, Error>?
 
@@ -84,17 +80,18 @@ public final class PaidAccessStore: NSObject, ObservableObject {
     }
 
     init(client: any PaidAccessClienting, sessionStore: any PaidAccessSessionStoring) {
-        self.client = client
-        self.sessions = PaidAccessSessionLifecycle(client: client, store: sessionStore)
+        self.flow = PaidAccessFlow(client: client, sessionStore: sessionStore)
         self.simpleModelChoices = UserDefaults.standard.bool(forKey: "simpleModelChoices")
         self.paidRoutingEnabled = UserDefaults.standard.bool(forKey: "paidAccessRoutingEnabled")
         super.init()
+        self.flow.onChange = { [weak self] state in self?.publish(state) }
 
         if PaidAccessFeature.isAvailableOnIOS {
             self.transactionListener = Task { [weak self] in
                 for await update in Transaction.updates {
                     guard let self else { return }
-                    await self.handleTransactionUpdate(update)
+                    guard PaidAccessFeature.isAvailableOnIOS else { continue }
+                    await self.flow.handleTransactionUpdate(update)
                 }
             }
         }
@@ -102,6 +99,16 @@ public final class PaidAccessStore: NSObject, ObservableObject {
 
     deinit {
         self.transactionListener?.cancel()
+    }
+
+    /// Mirrors the flow's state into the published properties.
+    private func publish(_ state: PaidAccessFlowState) {
+        if self.entitlement != state.entitlement { self.entitlement = state.entitlement }
+        if self.policy != state.policy { self.policy = state.policy }
+        if self.isSignedIn != state.isSignedIn { self.isSignedIn = state.isSignedIn }
+        if self.isBusy != state.isBusy { self.isBusy = state.isBusy }
+        if self.lastError != state.lastError { self.lastError = state.lastError }
+        if self.products != state.products { self.products = state.products }
     }
 
     // MARK: - Derived state
@@ -137,64 +144,10 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         )
     }
 
-    // MARK: - Session
-
-    /// Internal rather than private: `PaidAccessStore+Purchase.swift` needs it,
-    /// and Swift scopes `private` to the file.
-    func currentSession() async -> PaidAccessSession? {
-        let generation = self.sessions.generation
-        do {
-            let session = try await self.sessions.currentSession()
-            guard generation == self.sessions.generation else { return nil }
-            self.isSignedIn = session != nil
-            if session == nil {
-                // An empty store is not another logout: sign-in may be awaiting Apple.
-                self.entitlement = .unentitled
-                self.policy = .unknown
-            }
-            return session
-        } catch {
-            guard generation == self.sessions.generation else { return nil }
-            await self.clearSession()
-            return nil
-        }
-    }
-
-    private func clearSession() async {
-        let clearing = self.sessions.clear()
-        self.isSignedIn = false
-        self.entitlement = .unentitled
-        self.policy = .unknown
-        _ = await clearing.value
-    }
-
     // MARK: - Entitlement
 
     public func refreshEntitlement() async {
-        let generation = self.sessions.generation
-        guard let session = await self.currentSession() else {
-            guard generation == self.sessions.generation else { return }
-            self.entitlement = .unentitled
-            self.policy = .unknown
-            return
-        }
-
-        do {
-            // Entitlement and policy are committed together: a second, separate
-            // policy call could fail and leave an active entitlement with an
-            // empty policy, which routes nothing.
-            let state = try await self.client.entitlement(session: session)
-            guard generation == self.sessions.generation else { return }
-            self.entitlement = state.entitlement
-            self.policy = state.policy
-            self.lastError = nil
-        } catch PaidAccessError.notSignedIn {
-            guard generation == self.sessions.generation else { return }
-            await self.clearSession()
-        } catch {
-            guard generation == self.sessions.generation else { return }
-            self.lastError = (error as? PaidAccessError)?.errorDescription
-        }
+        await self.flow.refreshEntitlement()
     }
 
     // MARK: - Sign in with Apple
@@ -202,73 +155,48 @@ public final class PaidAccessStore: NSObject, ObservableObject {
     public func signIn() async {
         // A second sign-in would overwrite `signInContinuation`, leaking the
         // first continuation and leaving `isBusy` stuck true for the session.
-        guard self.signInContinuation == nil, !self.isBusy else { return }
-        let clearing = self.sessions.clear()
-        let generation = self.sessions.generation
-        self.isSignedIn = false
-        self.entitlement = .unentitled
-        self.policy = .unknown
-        let operation = UUID()
-        self.busyOperation = operation
-        self.isBusy = true
-        self.lastError = nil
-        defer { if operation == self.busyOperation { self.isBusy = false } }
+        guard self.signInContinuation == nil else { return }
+        await self.flow.signIn(
+            deviceLabel: UIDevice.current.name,
+            identityToken: { [weak self] hashedNonce in
+                guard let self else { throw CancellationError() }
+                return try await self.appleIdentityToken(hashedNonce: hashedNonce)
+            },
+            errorMessage: Self.signInErrorMessage
+        )
+    }
 
-        _ = await clearing.value
-        guard generation == self.sessions.generation else { return }
-
-        let rawNonce = Self.makeRawNonce()
-        let request = ASAuthorizationAppleIDProvider().createRequest()
-        request.requestedScopes = [.fullName, .email]
-        request.nonce = Self.sha256Hex(rawNonce)
-
-        do {
-            let authorization = try await self.performAuthorization(for: request)
-            guard generation == self.sessions.generation else { return }
-            guard
-                let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
-                let tokenData = credential.identityToken,
-                let identityToken = String(data: tokenData, encoding: .utf8)
-            else {
-                self.lastError = "Apple did not return an identity token."
-                return
-            }
-
-            let session = try await self.client.signInWithApple(
-                identityToken: identityToken,
-                rawNonce: rawNonce,
-                deviceLabel: UIDevice.current.name
-            )
-            guard let signedInGeneration = try await self.sessions.acceptSignIn(session, generation: generation),
-                signedInGeneration == self.sessions.generation
-            else { return }
-            self.isSignedIn = true
-            await self.refreshEntitlement()
-        } catch let error as ASAuthorizationError where error.code == .canceled {
-            // The user dismissed the sheet.
-        } catch {
-            guard generation == self.sessions.generation else { return }
-            self.lastError =
-                (error as? PaidAccessError)?.errorDescription
-                ?? "Could not sign in with Apple."
+    /// What to show for a failed sign-in; nil when the user dismissed the sheet.
+    static func signInErrorMessage(_ error: Error) -> String? {
+        switch error {
+        case let error as ASAuthorizationError where error.code == .canceled:
+            return nil
+        case SignInError.missingIdentityToken:
+            return "Apple did not return an identity token."
+        default:
+            return (error as? PaidAccessError)?.errorDescription ?? "Could not sign in with Apple."
         }
     }
 
-    public func signOut() async {
-        let clearing = self.sessions.clear()
-        self.isSignedIn = false
-        self.entitlement = .unentitled
-        self.policy = .unknown
-        let operation = UUID()
-        self.busyOperation = operation
-        self.isBusy = true
-        defer { if operation == self.busyOperation { self.isBusy = false } }
+    private enum SignInError: Error {
+        case missingIdentityToken
+    }
 
-        // Clear local credentials first. A slow revocation must never clear a
-        // replacement account or restore state from an earlier refresh.
-        if let session = await clearing.value {
-            await self.client.signOut(session: session)
-        }
+    private func appleIdentityToken(hashedNonce: String) async throws -> String {
+        let request = ASAuthorizationAppleIDProvider().createRequest()
+        request.requestedScopes = [.fullName, .email]
+        request.nonce = hashedNonce
+        let authorization = try await self.performAuthorization(for: request)
+        guard
+            let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+            let tokenData = credential.identityToken,
+            let identityToken = String(data: tokenData, encoding: .utf8)
+        else { throw SignInError.missingIdentityToken }
+        return identityToken
+    }
+
+    public func signOut() async {
+        await self.flow.signOut()
     }
 
     private func performAuthorization(
@@ -290,25 +218,6 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         guard let continuation = self.signInContinuation else { return }
         self.signInContinuation = nil
         continuation.resume(with: result)
-    }
-
-    // MARK: - Nonce
-
-    static func makeRawNonce() -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        if SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) != errSecSuccess {
-            bytes = (0..<32).map { _ in UInt8.random(in: UInt8.min...UInt8.max) }
-        }
-        return Data(bytes).base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
-
-    static func sha256Hex(_ value: String) -> String {
-        SHA256.hash(data: Data(value.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
     }
 }
 

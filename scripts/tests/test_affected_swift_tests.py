@@ -3,7 +3,7 @@ import json
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "affected-swift-tests.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "ci" / "affected-swift-tests.py"
 spec = importlib.util.spec_from_file_location("affected_swift_tests", SCRIPT)
 affected = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(affected)
@@ -46,7 +46,7 @@ class SelectionTests(unittest.TestCase):
 
     def test_manifest_support_and_unmapped_sources_select_everything(self):
         for path in ("Package.swift", "Tests/SpeakTestSupport/Fake.swift", "Sources/Unknown/File.swift",
-                     ".github/workflows/ci.yml"):
+                     ".github/workflows/ci.yml", ".github/workflows/ci-macos-debug.yml"):
             mode, selected = affected.select([path], PACKAGE, {"SpeakDesktopTests"})
             self.assertEqual(mode, "all", path)
             self.assertNotIn("SpeakDesktopTests", selected)

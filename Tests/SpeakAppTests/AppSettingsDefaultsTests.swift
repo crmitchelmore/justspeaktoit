@@ -1,4 +1,5 @@
 // swiftlint:disable file_length
+import Combine
 import XCTest
 import SpeakHotKeys
 import SpeakCore
@@ -37,6 +38,67 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertTrue(defaults.bool(forKey: CleanupModelSelection.preferenceKey))
         settings.postProcessingModel = "openrouter/cleanup/openai/another-model"
         XCTAssertEqual(AppSettings(defaults: defaults).postProcessingModel, settings.postProcessingModel)
+    }
+
+    @MainActor
+    func testSharedPreferences_LoadOldValuesAndPersistEditsUnderExistingKeys() {
+        defaults.set("groq/whisper-large-v3-turbo", forKey: "batchTranscriptionModel")
+        defaults.set("anthropic/claude-haiku-4.5", forKey: "postProcessingModel")
+        defaults.set("fr_FR", forKey: "preferredLocale")
+        defaults.set("compact", forKey: "visualDensity")
+        defaults.set(false, forKey: "postProcessingEnabled")
+        defaults.set(true, forKey: "handsFreeDictationEnabled")
+        defaults.set(false, forKey: "keepAudioOnCancel")
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.batchTranscriptionModel, "groq/whisper-large-v3-turbo")
+        XCTAssertEqual(settings.postProcessingModel, "anthropic/claude-haiku-4.5")
+        XCTAssertEqual(settings.preferredLocaleIdentifier, "fr_FR")
+        XCTAssertEqual(settings.visualDensity, .compact)
+        XCTAssertFalse(settings.postProcessingEnabled)
+        XCTAssertTrue(settings.handsFreeDictationEnabled)
+        XCTAssertFalse(settings.keepAudioOnCancel)
+
+        settings.preferredLocaleIdentifier = "en_GB"
+        settings.keepAudioOnCancel = true
+        XCTAssertEqual(defaults.string(forKey: "preferredLocale"), "en_GB")
+        XCTAssertEqual(defaults.object(forKey: "keepAudioOnCancel") as? Bool, true)
+        XCTAssertEqual(AppSettings(defaults: defaults).preferredLocaleIdentifier, "en_GB")
+    }
+
+    @MainActor
+    func testDomainStorePreferences_PublishThroughAppSettingsAndHonourSuppression() {
+        let settings = AppSettings(defaults: defaults)
+        var changes = 0
+        let subscription = settings.objectWillChange.sink { changes += 1 }
+        defer { subscription.cancel() }
+
+        settings.ttsSpeed = 1.5
+        settings.showCompactHUD.toggle()
+        settings.livePolishDebounceMs = 900
+        settings.localStreamingModelSource = "stub/source"
+        XCTAssertEqual(changes, 4, "Views observing AppSettings must refresh for every domain store edit")
+        XCTAssertEqual(defaults.object(forKey: "ttsSpeed") as? Double, 1.5)
+        XCTAssertEqual(defaults.object(forKey: "livePolishDebounceMs") as? Int, 900)
+
+        settings.suppressesPersistence = true
+        settings.ttsSpeed = 0.5
+        settings.holdThreshold = 0.9
+        settings.suppressesPersistence = false
+        XCTAssertEqual(settings.ttsSpeed, 0.5)
+        XCTAssertEqual(defaults.object(forKey: "ttsSpeed") as? Double, 1.5)
+        XCTAssertNil(defaults.object(forKey: "holdThreshold"))
+    }
+
+    @MainActor
+    func testSharedPreferences_MissingKeysKeepMacDefaults() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertTrue(settings.postProcessingEnabled, "iOS defaults this off; the Mac keeps it on")
+        XCTAssertFalse(settings.handsFreeDictationEnabled)
+        XCTAssertTrue(settings.keepAudioOnCancel)
+        XCTAssertFalse(settings.cleanupModelDiscoveryEnabled)
+        XCTAssertEqual(settings.visualDensity, .normal)
+        XCTAssertEqual(settings.preferredLocaleIdentifier, "automatic")
+        XCTAssertEqual(settings.transcriptionKeywords, "")
     }
 
     @MainActor

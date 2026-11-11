@@ -162,7 +162,7 @@ class IdentityTests(unittest.TestCase):
         # minimised on this argument; a rename on one side must fail here.
         startup = windows_msix.load_identity()["application"]["startupTask"]
         native = (windows_msix.REPOSITORY / "Sources/CWindowsSupport/WindowsLoginItem.hpp").read_text(encoding="utf-8")
-        shared = (windows_msix.REPOSITORY / "Sources/SpeakDesktop/DesktopLoginItem.swift").read_text(encoding="utf-8")
+        shared = (windows_msix.REPOSITORY / "Sources/SpeakDesktop/Shell/DesktopLoginItem.swift").read_text(encoding="utf-8")
         self.assertIn('constexpr wchar_t identifier[] = L"%s";' % startup["id"], native)
         self.assertIn('constexpr wchar_t launchArgument[] = L"%s";' % startup["parameters"], native)
         self.assertIn('public static let launchArgument = "%s"' % startup["parameters"], shared)

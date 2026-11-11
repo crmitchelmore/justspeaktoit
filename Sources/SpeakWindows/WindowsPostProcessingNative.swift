@@ -8,7 +8,9 @@ extension WindowsNative {
     static func configurePostProcessing(
         _ options: DesktopPostProcessing.Options, context: UnsafeMutableRawPointer
     ) throws {
-        let picker = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue().postProcessingPicker
+        guard let picker = NativeCallbackContext<WindowsEventContext>.resolve(context)?.postProcessingPicker else {
+            throw WindowsNativeError(message: "Post-processing settings are no longer available.")
+        }
         picker.publish([])
         let models = DesktopPostProcessing.nativeModels(
             selected: options.modelIdentifier, rememberedRemote: options.lastRemoteModelIdentifier
@@ -51,8 +53,7 @@ func postProcessingEvent(
     _ prompt: UnsafePointer<CChar>?,
     _ newKey: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     guard let model = holder.postProcessingPicker.modelIdentifier(forSelection: Int(index)),
           enabled == 0 || enabled == 1, includeDirectives == 0 || includeDirectives == 1,
           includeTags == 0 || includeTags == 1 else {
@@ -72,7 +73,7 @@ func postProcessingEvent(
             let saved = await holder.controller.postProcessingOptions()
             guard !Task.isCancelled else { return }
             do {
-                try WindowsNative.configurePostProcessing(saved, context: Unmanaged.passUnretained(holder).toOpaque())
+                try WindowsNative.configurePostProcessing(saved, context: holder.callbackContext)
             } catch { await holder.controller.updateProviderCredentialEditor(error.localizedDescription) }
         }
     }

@@ -5,10 +5,6 @@ import SpeakDesktopHost
 import SpeakLinuxPlatform
 import CLinuxSupport
 
-extension LinuxWhisperRuntime: DesktopHostLocalRuntime {
-    package var recognizer: any DesktopLocalRecognizer { LinuxWhisperRecognizer(runtime: self) }
-}
-
 // On-device transcription: the shared host owns downloads, readiness, removal
 // and recognition (DesktopHostLocalModelManagement.swift); Linux supplies
 // GChecksum, the whisper.cpp runtime beside the executable and the GTK group.
@@ -47,7 +43,7 @@ extension LinuxHostPlatform: DesktopHostLocalModelPlatform {
     package static func presentLocalModels(
         _ rows: [DesktopHostLocalModelRow], status: String, useGPU: Bool, presenter: UnsafeMutableRawPointer?
     ) {
-        let strings = LinuxWindow.Strings()
+        let strings = DesktopNativeStrings()
         let native = rows.map { row in
             JSTILocalModelRow(
                 name: strings.add(row.name), detail: strings.add(row.detail), about: strings.add(row.about),
@@ -75,11 +71,13 @@ extension LinuxHostPlatform: DesktopHostLocalModelPlatform {
 }
 
 /// Local models events, applied in settings order. Returns false for others.
-func linuxLocalModelEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+func linuxLocalModelEvent(
+    _ event: DesktopNativeLinuxEvent, value: String, slot: Int, holder: LinuxEventContext
+) -> Bool {
     let controller = holder.controller
     let action: DesktopHostLocalModelAction
     switch event {
-    case Int(JSTI_EVENT_LOCAL_MODEL_IMPORT):
+    case .localModelImport:
         let fields = value.components(separatedBy: "\n")
         guard fields.count == 2 else {
             LinuxHostPlatform.update("Enter an owner/repository and a GGML filename.", transcript: nil, state: -1)
@@ -87,13 +85,13 @@ func linuxLocalModelEvent(_ event: Int, value: String, slot: Int, holder: LinuxE
         }
         holder.enqueueSettings { await controller.importLocalModel(repository: fields[0], filename: fields[1]) }
         return true
-    case Int(JSTI_EVENT_LOCAL_MODEL_IMPORT_CANCEL):
+    case .localModelImportCancel:
         holder.enqueueSettings { await controller.cancelLocalModelImport() }
         return true
-    case Int(JSTI_EVENT_LOCAL_MODEL_DOWNLOAD): action = .download
-    case Int(JSTI_EVENT_LOCAL_MODEL_CANCEL): action = .cancel
-    case Int(JSTI_EVENT_LOCAL_MODEL_REMOVE): action = .remove
-    case Int(JSTI_EVENT_LOCAL_MODEL_GPU):
+    case .localModelDownload: action = .download
+    case .localModelCancel: action = .cancel
+    case .localModelRemove: action = .remove
+    case .localModelGPU:
         holder.enqueueSettings { await controller.setLocalUseGPU(slot == 1) }
         return true
     default: return false

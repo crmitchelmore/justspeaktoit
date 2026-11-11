@@ -19,7 +19,7 @@ final class OpenRouterIOSProgressivePlayback {
     @MainActor
     struct Dependencies {
         var makeOutput: () throws -> Output = { try nativeOutput() }
-        var acquireLease: () throws -> OpenRouterIOSAudioSessionLease? = { try .acquire() }
+        var acquireLease: () throws -> VoiceOutputAudioSessionLease? = { try .acquire() }
         var activate: () throws -> Void = { try AVAudioSession.sharedInstance().setActive(true) }
         var notifications: NotificationCenter = .default
         var now: () -> ContinuousClock.Instant = { ContinuousClock().now }
@@ -35,7 +35,7 @@ final class OpenRouterIOSProgressivePlayback {
     private var failure: (SessionID, OpenRouterIOSVoiceOutputError)?
     private var scheduledFrames = 0
     private var output: Output?
-    private var lease: OpenRouterIOSAudioSessionLease?
+    private var lease: VoiceOutputAudioSessionLease?
     private var observers: [NSObjectProtocol] = []
 
     convenience init() {
@@ -66,6 +66,7 @@ final class OpenRouterIOSProgressivePlayback {
             return identifier
         } catch {
             stop(session: identifier)
+            if let refusal = error as? VoiceOutputPlaybackError { throw OpenRouterIOSVoiceOutputError(refusal) }
             if error is CancellationError || error is OpenRouterIOSVoiceOutputError { throw error }
             throw SetupFailure.unavailable
         }
@@ -167,7 +168,7 @@ final class OpenRouterIOSProgressivePlayback {
 
     /// The same generation fence serves queued notifications and deterministic ownership tests.
     func receiveSessionEvent(_ notice: Notification, session identifier: SessionID) {
-        guard OpenRouterIOSAudioSessionLease.interruptsPlayback(notice), owner == identifier else { return }
+        guard VoiceOutputAudioSessionLease.interruptsPlayback(notice), owner == identifier else { return }
         failure = (identifier, .interrupted)
         // A recorder/system owns the replacement session; never restore over it.
         lease = nil

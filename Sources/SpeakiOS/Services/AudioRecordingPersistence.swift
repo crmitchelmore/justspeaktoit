@@ -23,8 +23,8 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// fails a write, so the owning session can surface the problem while the
     /// recording is still running rather than discovering it at stop.
     nonisolated public var onPersistenceIssue: (@Sendable (RecordingPersistenceDiagnostics) -> Void)? {
-        get { issueLock.withLock { storedIssueHandler } }
-        set { issueLock.withLock { storedIssueHandler = newValue } }
+        get { issueLatch.withLock { $0.handler } }
+        set { issueLatch.withLock { $0.handler = newValue } }
     }
 
     /// The metered microphone level. Everything about it —  the type, the
@@ -37,32 +37,25 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// the close on stop/cancel run here, so the audio pipeline never races
     /// main-actor teardown while `AVAudioFile.write` is in flight.
     let ioQueue = DispatchQueue(label: "com.justspeaktoit.ios.audioPersistence.io")
-    /// Only touched on `ioQueue` after `startRecording` hands the file over.
+    /// nonisolated(unsafe): confined to the serial `ioQueue` once `startRecording`
+    /// hands the file over. Deliberately not in `writerState`: `ioQueue` blocks
+    /// never take that lock, so the close path's contention probe only ever
+    /// sees an admitted write holding it (see `+Writer`).
     nonisolated(unsafe) var ioFile: AVAudioFile?
-    /// Fast-path flag read by `writeBuffer` before copying; guarded by `stateLock`.
-    let stateLock = NSLock()
-    nonisolated(unsafe) var isWriterOpen = false
+    /// The writer's open flag and this session's admission, changed only
+    /// under one lock. `writeBuffer` holds it across the `ioQueue` submit and
+    /// `closeWriter` probes it before blocking (see `WriterState`).
+    let writerState = OSAllocatedUnfairLock(initialState: WriterState())
     /// Pool for buffer copies handed to `ioQueue` so writes never touch the
-    /// caller's (reused) buffer.
-    private let writeBufferPool = PCMBufferPool(maximumBuffers: 8)
-    /// Bounded admission (issue #705): short I/O stalls are absorbed by
-    /// fallback allocations up to a duration budget sized from the sample
-    /// format; sustained overflow drops frames and records the gap instead of
-    /// silently presenting a complete recording. Replaced per session.
-    nonisolated(unsafe) private var admission = RecordingPersistenceAdmissionController()
+    /// caller's (reused) buffer; at most eight in flight before admission falls back.
+    private let writeBufferPool = LivePCMBufferPool(maximumBuffers: 8, maximumOutstanding: 8, label: "ios-writer")
     /// Leaf lock for the once-per-session issue latch and its handler. The
-    /// latch is tested from `writeBuffer` (which holds `stateLock`) and from
-    /// `ioQueue` blocks (which never take `stateLock`), so it needs its own
+    /// latch is tested from `writeBuffer` (which holds `writerState`) and from
+    /// `ioQueue` blocks (which never take `writerState`), so it needs its own
     /// lock: a check-then-set on a bare flag would let both paths fire the
-    /// callback, and `stateLock` cannot be taken on `ioQueue` without
-    /// inverting the order against `closeWriter`'s barrier.
-    let issueLock = NSLock()
-    /// Guarded by `issueLock`.
-    nonisolated(unsafe) var storedIssueHandler: (@Sendable (RecordingPersistenceDiagnostics) -> Void)?
-    /// Set once per session after the first drop/write failure so the
-    /// owning-session callback fires exactly once, off the audio thread.
-    /// Guarded by `issueLock`.
-    nonisolated(unsafe) var didReportIssue = false
+    /// callback, and `writerState` is kept off `ioQueue` so the close path's
+    /// contention probe stays exact.
+    let issueLatch = OSAllocatedUnfairLock(initialState: PersistenceIssueLatch())
     private var startTime: Date?
 
     /// The claim record for the file currently being written, if any
@@ -113,10 +106,11 @@ public final class AudioRecordingPersistence: ObservableObject {
     // deterministically. Set them before recording starts and leave them nil in
     // every non-test build.
 
+    // nonisolated(unsafe): DEBUG test seams below are set before recording starts and only read after.
     nonisolated(unsafe) var beforeFileWrite: (@Sendable () throws -> Void)?
 
     /// Called from `writeBuffer` once admission has been granted and the buffer
-    /// copied, i.e. exactly where the pre-fix code released `stateLock` before
+    /// copied, i.e. exactly where the pre-fix code released the writer lock before
     /// submitting to `ioQueue`. A test blocks here to hold a writer mid-flight
     /// while it stops the session and starts the next one.
     nonisolated(unsafe) public var writeAdmissionStallHook: (@Sendable () -> Void)?
@@ -126,7 +120,7 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// in a later session's file.
     nonisolated(unsafe) public var didWriteBufferHook: (@Sendable (URL) -> Void)?
 
-    /// Called from `closeWriter` only when `stateLock` is genuinely held by an
+    /// Called from `closeWriter` only when `writerState` is genuinely held by an
     /// in-flight admitted write, i.e. the close path is about to block behind
     /// it. A test releases its stalled writer here, so the interleaving it
     /// asserts on is observed rather than guessed at with a sleep.
@@ -171,12 +165,12 @@ public final class AudioRecordingPersistence: ObservableObject {
         )
         // Install the file and open admission under one lock hold, so the
         // install is queued strictly ahead of any write this unlock admits.
-        stateLock.lock()
-        ioQueue.async { [weak self] in self?.ioFile = file }
-        isWriterOpen = true
-        admission = RecordingPersistenceAdmissionController()
-        issueLock.withLock { didReportIssue = false }
-        stateLock.unlock()
+        writerState.withLockUnchecked { state in
+            ioQueue.async { [weak self] in self?.ioFile = file }
+            state.isOpen = true
+            state.admission = RecordingPersistenceAdmissionController()
+            issueLatch.withLock { $0.didReport = false }
+        }
 
         let startedAt = Date()
         startTime = startedAt
@@ -217,10 +211,15 @@ public final class AudioRecordingPersistence: ObservableObject {
         // the next recording. Holding the lock across the submit means every
         // admitted write is already queued ahead of `closeWriter`'s `ioQueue.sync`
         // barrier, so it lands in the file it was admitted for — or not at all.
-        // `ioQueue` blocks never take `stateLock`, so the async submit can't deadlock.
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        guard isWriterOpen else { return nil }
+        // `ioQueue` blocks never take `writerState`, so the async submit can't deadlock.
+        return writerState.withLockUnchecked { state in admitAndEnqueue(buffer, state: state) }
+    }
+
+    /// The admission half of `writeBuffer`, run with `writerState` held.
+    private nonisolated func admitAndEnqueue(
+        _ buffer: AVAudioPCMBuffer, state: WriterState
+    ) -> RecordingPersistenceAdmission? {
+        guard state.isOpen else { return nil }
 
         // Bounded admission (issue #705): the pool absorbs the steady state, a
         // duration budget derived from the actual format absorbs short stalls
@@ -228,8 +227,9 @@ public final class AudioRecordingPersistence: ObservableObject {
         // while recording exactly how much audio was lost.
         let sampleRate = buffer.format.sampleRate
         let frameSeconds = sampleRate > 0 ? Double(buffer.frameLength) / sampleRate : 0
-        let admissionController = admission
-        let pooledCopy = writeBufferPool.copy(buffer)
+        let admissionController = state.admission
+        let pooledCopy = writeBufferPool.buffer(format: buffer.format, frameCapacity: max(buffer.frameLength, 1))
+        if let pooledCopy { LivePCMCopy.copy(buffer, into: pooledCopy) }
         let verdict = admissionController.admit(
             frameSeconds: frameSeconds,
             poolHasCapacity: pooledCopy != nil
@@ -271,7 +271,7 @@ public final class AudioRecordingPersistence: ObservableObject {
     }
 
     /// Submits one admitted copy to the I/O queue. Must be called while
-    /// `stateLock` is held so the submit is ordered ahead of `closeWriter`'s
+    /// `writerState` is held so the submit is ordered ahead of `closeWriter`'s
     /// barrier (see `writeBuffer`).
     private nonisolated func enqueueAdmittedWrite(
         copy: AVAudioPCMBuffer,
@@ -333,7 +333,7 @@ public final class AudioRecordingPersistence: ObservableObject {
         // closeWriter drained the I/O queue, so the diagnostics are final:
         // drops or write failures mark this saved file incomplete instead of
         // presenting it as a healthy recording (issue #705).
-        let diagnostics = admission.diagnostics
+        let diagnostics = writerState.withLock { $0.admission }.diagnostics
         lastDiagnostics = diagnostics
         if !diagnostics.isComplete {
             logger.error(

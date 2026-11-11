@@ -1,4 +1,5 @@
 #include "WindowsWindowChrome.hpp"
+#include "include/CWindowsSupport.h"
 
 #include <commctrl.h>
 #include <dwmapi.h>
@@ -178,6 +179,83 @@ void themeWindow(HWND window) {
         themeControl(control);
         return TRUE;
     }, 0);
+}
+
+int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+
+void minimumTrackSize(HWND window, LPARAM lparam, int clientWidth, int clientHeight, DWORD style, DWORD exStyle) {
+    RECT frame{0, 0, scale(window, clientWidth), scale(window, clientHeight)};
+    AdjustWindowRectExForDpi(&frame, style, FALSE, exStyle, GetDpiForWindow(window));
+    reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {frame.right - frame.left, frame.bottom - frame.top};
+}
+
+void applySuggestedBounds(HWND window, LPARAM lparam) {
+    const RECT *bounds = reinterpret_cast<RECT *>(lparam);
+    SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
+        bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+HFONT dialogFont(HWND window) {
+    return CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+}
+
+void refreshDialogFont(HWND window, const std::vector<HWND> &controls, HFONT &font) {
+    HFONT next = dialogFont(window);
+    if (!next) return;
+    for (HWND control : controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(next), TRUE);
+    if (font) DeleteObject(font);
+    font = next;
+}
+
+bool addControl(HWND parent, const wchar_t *type, const wchar_t *text, DWORD style, int id, DWORD exStyle) {
+    return CreateWindowExW(exStyle, type, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 1, 1, parent,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr) != nullptr;
+}
+
+HWND createOwnedDialog(HWND owner, const wchar_t *className, WNDPROC procedure, const wchar_t *title,
+                       int clientWidth, int clientHeight, DWORD style, DWORD exStyle, void *instance) {
+    const HINSTANCE module = GetModuleHandleW(nullptr);
+    WNDCLASSW type{};
+    type.lpfnWndProc = procedure;
+    type.hInstance = module;
+    type.lpszClassName = className;
+    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
+    RECT frame{0, 0, scale(owner, clientWidth), scale(owner, clientHeight)};
+    AdjustWindowRectExForDpi(&frame, style, FALSE, exStyle, GetDpiForWindow(owner));
+    RECT bounds{};
+    GetWindowRect(owner, &bounds);
+    return CreateWindowExW(exStyle, className, title, style, bounds.left + scale(owner, 40),
+        bounds.top + scale(owner, 40), frame.right - frame.left, frame.bottom - frame.top, owner, nullptr, module,
+        instance);
+}
+
+void rememberFocus(HWND window, WPARAM wparam, HWND &focus, int fallback) {
+    if (LOWORD(wparam) == WA_INACTIVE) { focus = GetFocus(); return; }
+    SetFocus(focus && IsChild(window, focus) ? focus : GetDlgItem(window, fallback));
+}
+
+void runModalDialog(HWND owner, HWND window, int focusID, void (*close)(HWND), const char *what,
+                    void (*shown)(HWND, void *), void *context) {
+    EnableWindow(owner, FALSE);
+    ShowWindow(window, SW_SHOW);
+    SetFocus(GetDlgItem(window, focusID));
+    if (shown) shown(window, context);
+    MSG message{};
+    BOOL result = 1;
+    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
+    }
+    if (IsWindow(window)) close(window);
+    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
+    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
+    else if (result < 0) {
+        const std::string operation = std::string("Reading ") + what + " messages";
+        jsti_window_update(jsti::systemError(operation.c_str()).c_str(), nullptr, -1);
+    }
 }
 
 bool dialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT &result) {

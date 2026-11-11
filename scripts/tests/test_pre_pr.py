@@ -38,6 +38,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(selected, ['ci-lint'])
         self.assertEqual(checks[0].command, ['make', 'ci-lint'])
         self.assertEqual(checks[0].forbid_drift, ('Tooling/Package.resolved',))
+        self.assertEqual(checks[0].env, {'JSTI_LINT_BASELINE_BASE': 'origin/main'})
 
     def test_workflow_change_adds_actionlint(self):
         selected, _, _ = ids(['.github/workflows/ci.yml'])
@@ -65,7 +66,7 @@ class PlanTests(unittest.TestCase):
 
     def test_public_library_change_runs_the_api_compatibility_job(self):
         with mock.patch.object(pre_pr, 'IS_MAC', True), mock.patch.object(pre_pr, 'pr_title_env', lambda: {}):
-            checks, areas = pre_pr.plan(['Sources/SpeakCore/OpenRouterAPIClient.swift'], False)
+            checks, areas = pre_pr.plan(['Sources/SpeakCore/OpenRouter/Apple/OpenRouterAPIClient.swift'], False)
             api = {c.id: c for c in checks}['api-compatibility']
             self.assertEqual(api.command[:2], ['bash', 'scripts/ci-api-compatibility.sh'])
             self.assertEqual(api.command[2], pre_pr.merge_base_or('origin/main'))
@@ -87,7 +88,7 @@ class PlanTests(unittest.TestCase):
         self.assertNotIn('apple-build', selected)
 
     def test_swift_change_runs_every_ci_gate_job_with_linux_first(self):
-        selected, areas, checks = ids(['Sources/SpeakCore/SecureStorage.swift'])
+        selected, areas, checks = ids(['Sources/SpeakCore/Credentials/Apple/SecureStorage.swift'])
         self.assertEqual(set(areas), {'ci-lint', 'swift', 'public-api'})
         self.assertEqual(selected[0], 'portable-linux')
         self.assertTrue(checks[0].background)
@@ -163,41 +164,17 @@ class PlanTests(unittest.TestCase):
 
 
 class CIParityTests(unittest.TestCase):
-    """pre-pr's routing must equal ci.yml's, or a change CI tests could pass pre-pr untested."""
+    """pre-pr must run CI's commands. Path routing is shared through scripts/ci/routing.json (test_ci_routing)."""
 
     ci = (ROOT / '.github' / 'workflows' / 'ci.yml').read_text(encoding='utf-8')
-
-    def filter_list(self, name):
-        block = self.ci.split(f'\n            {name}:\n', 1)[1]
-        items = []
-        for line in block.splitlines():
-            line = line.strip()
-            if not line.startswith('- '):
-                if items:
-                    break
-                continue
-            items.append(line[2:].strip("'\""))
-        return items
-
-    @staticmethod
-    def glob(pattern):
-        return pattern.replace('/**', '/*').replace('**/', '')
-
-    def test_swift_paths_match_ci(self):
-        self.assertEqual(sorted(map(self.glob, self.filter_list('swift'))), sorted(pre_pr.CI_SWIFT))
-
-    def test_lint_exclusions_match_ci(self):
-        ci = [self.glob(p[1:]) for p in self.filter_list('apple') if p.startswith('!')]
-        self.assertEqual(sorted(ci), sorted(pre_pr.CI_NOT_APPLE))
+    # ci.yml's macOS Debug lane, which runs the affected unit tests.
+    macos = (ROOT / '.github' / 'workflows' / 'ci-macos-debug.yml').read_text(encoding='utf-8')
 
     def test_macos_skip_targets_match_ci(self):
-        self.assertEqual(set(re.findall(r'--skip-target (\w+)', self.ci)), pre_pr.CI_MACOS_SKIP_TARGETS)
+        self.assertEqual(set(re.findall(r'--skip-target (\w+)', self.macos)), pre_pr.CI_MACOS_SKIP_TARGETS)
 
-    def test_android_paths_and_command_match_android_yml(self):
+    def test_android_command_matches_android_yml(self):
         android = (ROOT / '.github' / 'workflows' / 'android.yml').read_text(encoding='utf-8')
-        block = android.split('  push:\n', 1)[1].split('\npermissions:', 1)[0]
-        paths = [line.strip()[2:] for line in block.splitlines() if line.strip().startswith('- ')]
-        self.assertEqual(sorted(map(self.glob, paths)), sorted(pre_pr.CI_ANDROID))
         self.assertIn('run: ../scripts/ci-android.sh', android)
         precheck = (ROOT / '.github' / 'workflows' / 'precheck.yml').read_text(encoding='utf-8')
         self.assertIn('run: scripts/ci-android.sh', precheck)
@@ -215,7 +192,8 @@ class CIParityTests(unittest.TestCase):
         products = set(re.search(r'PRODUCTS=\(([^)]*)\)', gate).group(1).split()) | {'SpeakWatchCore'}
         dirs = {'SpeakiOSLib': 'SpeakiOS'}
         for product in products:
-            self.assertIn(f'Sources/{dirs.get(product, product)}/*', pre_pr.CI_API, product)
+            self.assertIn(f'Sources/{dirs.get(product, product)}/**', pre_pr.routing().routes()['api']['paths'],
+                          product)
 
     def test_linux_image_is_the_ci_image(self):
         image = re.search(r'image: (swift:[^\s]+)', self.ci.split('Portable Swift (Linux)', 1)[1]).group(1)
@@ -335,7 +313,7 @@ class SelectionTests(unittest.TestCase):
 
     def test_unreadable_graph_fails_closed(self):
         with mock.patch.object(pre_pr, 'IS_MAC', True), mock.patch.object(pre_pr, 'load_graph', lambda _: None):
-            checks, _ = pre_pr.plan(['Sources/SpeakCore/SecureStorage.swift'], False)
+            checks, _ = pre_pr.plan(['Sources/SpeakCore/Credentials/Apple/SecureStorage.swift'], False)
         self.assertTrue({c.id: c for c in checks}['apple-unit-tests'].failure)
 
 

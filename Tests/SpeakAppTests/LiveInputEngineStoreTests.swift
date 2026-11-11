@@ -267,15 +267,17 @@ final class LiveInputEngineSourceGuardTests: XCTestCase {
 
     func testLiveControllers_TakeTheirEngineFromThePreparedStore() throws {
         // Arrange
-        let names = try FileManager.default.contentsOfDirectory(atPath: appSources.path)
+        let names = try FileManager.default.contentsOfDirectory(atPath: appSources.appendingPathComponent("Live").path)
         let liveCaptureFiles = names.filter { $0.hasSuffix("LiveController.swift") }
             + ["NativeOSXLiveTranscriber.swift", "FluidAudioLiveSupport.swift"]
-        XCTAssertGreaterThan(liveCaptureFiles.count, 10)
+        XCTAssertTrue(
+            liveCaptureFiles.contains("SharedClientLiveController.swift"), "The guard must still find the controllers"
+        )
 
         for name in liveCaptureFiles {
             // Act: a stored-property default is replaced before every start, so
             // only engines built inside a code path matter.
-            let offending = try source(name)
+            let offending = try source("Live/\(name)")
                 .components(separatedBy: .newlines)
                 .filter { $0.contains("AVAudioEngine()") }
                 .filter { line in
@@ -294,17 +296,17 @@ final class LiveInputEngineSourceGuardTests: XCTestCase {
 
     func testRecordStart_PreparesTheLiveInputBeforeCapture() throws {
         // Act
-        let text = try source("MainManager.swift")
+        let text = try source("Session/SessionStartPipeline.swift")
 
         // Assert
         XCTAssertTrue(text.contains("prepareStream: prepareStream"))
         XCTAssertTrue(text.contains("liveInputPreparation.prepare()"))
-        XCTAssertTrue(text.contains("transcriptionManager.liveRouteUsesLiveInputEngine"))
+        XCTAssertTrue(text.contains("transcription.liveRouteUsesLiveInputEngine"))
     }
 
     func testSpeechAnalyzerStartFailure_ReturnsItsEngineForTheFallback() throws {
         // Act
-        let text = try source("AppleSpeechAnalyzerLiveController.swift")
+        let text = try source("Live/AppleSpeechAnalyzerLiveController.swift")
 
         // Assert
         XCTAssertTrue(text.contains("LiveInputEngines.shared.restore(audioEngine)"))

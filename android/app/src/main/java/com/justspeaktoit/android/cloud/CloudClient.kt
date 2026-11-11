@@ -40,14 +40,8 @@ class CallHandle {
 /** A request the user stopped; callers treat it as a cancel, not a failure. */
 class RequestReleasedException(cause: Throwable? = null) : Exception("Request released", cause)
 
-/**
- * Blocking HTTPS client for OpenAI-compatible APIs; call from a background dispatcher. Keys are
- * only sent as bearer tokens and never logged.
- */
-class CloudClient(
-    private val connectTimeoutMs: Int = 15_000,
-    private val readTimeoutMs: Int = 120_000,
-) {
+/** Blocking cloud requests; [CloudClient] in production. [call] lets another thread abort them. */
+interface CloudService {
     fun transcribe(
         model: CloudModel,
         apiKey: String,
@@ -55,6 +49,26 @@ class CloudClient(
         languageTag: String?,
         call: CallHandle,
         format: SharedAudio.Format = SharedAudio.Format("wav", "audio/wav"),
+    ): String
+
+    fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String
+}
+
+/**
+ * Blocking HTTPS client for OpenAI-compatible APIs; call from a background dispatcher. Keys are
+ * only sent as bearer tokens and never logged.
+ */
+class CloudClient(
+    private val connectTimeoutMs: Int = 15_000,
+    private val readTimeoutMs: Int = 120_000,
+) : CloudService {
+    override fun transcribe(
+        model: CloudModel,
+        apiKey: String,
+        audio: File,
+        languageTag: String?,
+        call: CallHandle,
+        format: SharedAudio.Format,
     ): String {
         val multipart = CloudWire.multipart(
             fields = CloudWire.transcriptionFields(model, languageTag),
@@ -76,7 +90,7 @@ class CloudClient(
     }
 
     /** Sends cleanup to the model's own route: its native provider, or OpenRouter. */
-    fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String {
+    override fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String {
         val json = CloudWire.cleanupBody(model.apiName, transcript, CloudWire.cleanupMaxTokens(model)).toByteArray()
         val url = CloudWire.cleanupUrl(model)
         val body = post(url, apiKey, "application/json", call) { conn ->
@@ -109,7 +123,7 @@ class CloudClient(
                 conn.errorStream?.close()
                 throw CloudException(CloudWire.failureForStatus(status), "HTTP $status")
             }
-            return conn.inputStream.bufferedReader().use { it.readText() }
+            return conn.inputStream.use { CloudWire.readBody(it) }
         } catch (e: IOException) {
             if (call.released) throw RequestReleasedException(e)
             throw CloudException(CloudWire.failureForIo(e), "Network error", e)

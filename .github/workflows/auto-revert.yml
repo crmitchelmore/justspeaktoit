@@ -1,7 +1,7 @@
 name: Red main responder
 
 # Pull requests merge on their pre-pr record; main runs every build and test
-# after the merge. When main goes red (scripts/auto-revert.mjs plan):
+# after the merge. When main goes red (scripts/ci/auto-revert.mjs plan):
 #
 # 1. A flake-prone failure (tests, journeys, UI) is re-run once. A
 #    deterministic one (Lint, build, Linux graph, API) is not.
@@ -64,7 +64,7 @@ jobs:
         run: node --test scripts/tests/auto-revert.test.mjs
       - name: Plan
         id: plan
-        run: node scripts/auto-revert.mjs plan ${RUN_ID:+--run "$RUN_ID"}
+        run: node scripts/ci/auto-revert.mjs plan ${RUN_ID:+--run "$RUN_ID"}
       - name: Re-run the failed jobs once (possible flake)
         if: steps.plan.outputs.action == 'rerun'
         env:
@@ -222,5 +222,5 @@ jobs:
         run: |
           git fetch --quiet origin main
           git config user.name ci && git config user.email ci@invalid
-          git show origin/main:scripts/auto-revert.mjs > "$RUNNER_TEMP/auto-revert.mjs"
+          git show origin/main:scripts/ci/auto-revert.mjs > "$RUNNER_TEMP/auto-revert.mjs"
           node "$RUNNER_TEMP/auto-revert.mjs" verify

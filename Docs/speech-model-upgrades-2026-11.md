@@ -57,7 +57,7 @@ code migration.
 
 OpenAI's recommended successor, `gpt-realtime-2.1-mini`, is not accepted by
 `/v1/audio/speech`. The new shared `OpenAIRealtimeSpeechSynthesizer`
-(`Sources/SpeakCore/OpenAIRealtimeSpeech.swift`) speaks through a Realtime
+(`Sources/SpeakCore/TTS/Providers/OpenAIRealtimeSpeech.swift`) speaks through a Realtime
 WebSocket instead and returns 24 kHz PCM16, which each host wraps as WAV, so
 file playback is unchanged.
 

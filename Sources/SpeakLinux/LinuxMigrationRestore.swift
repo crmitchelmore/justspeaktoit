@@ -17,18 +17,20 @@ extension LinuxHostPlatform {
 
 /// Queue admission only. Archive reading, apply and rollback keep their shared
 /// owned workers, so Cancel and window shutdown never wait on the settings queue.
-func linuxMigrationEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+func linuxMigrationEvent(
+    _ event: DesktopNativeWindowEvent, value: String, slot: Int, holder: LinuxEventContext
+) -> Bool {
     let controller = holder.controller
     switch event {
-    case Int(JSTI_EVENT_MIGRATION_INSPECT):
+    case .migrationInspect:
         holder.enqueueSettings { await controller.beginMigrationInspection(URL(fileURLWithPath: value)) }
-    case Int(JSTI_EVENT_MIGRATION_EXPORT):
+    case .migrationExport:
         holder.enqueueSettings {
             await controller.beginMigrationExport(URL(fileURLWithPath: value), nativeFlags: slot)
         }
-    case Int(JSTI_EVENT_MIGRATION_RESTORE):
+    case .migrationRestore:
         holder.enqueueSettings { await controller.beginMigrationRestore(URL(fileURLWithPath: value)) }
-    case Int(JSTI_EVENT_MIGRATION_RESTORE_RESPONSE):
+    case .migrationRestoreResponse:
         holder.enqueueSettings { await controller.answerMigrationRestore(value, choice: slot) }
     default: return false
     }

@@ -13,7 +13,7 @@ The retained components are:
 
 - [`TransportServer`](../Sources/SpeakApp/Transport/TransportServer.swift): the
   user-enabled Mac WebSocket receiver and Bonjour advertiser.
-- [`MacConnection`](../Sources/SpeakCore/MacConnection.swift): the shared protocol
+- [`MacConnection`](../Sources/SpeakCore/Sync/Apple/MacConnection.swift): the shared protocol
   client used by `TransportLoopbackTests`. No shipping transcription flow calls
   its `sendSessionStart`, `sendTranscript` or `sendSessionEnd` methods.
 - [`AutomationServer`](../Sources/SpeakApp/Transport/AutomationServer.swift): a
@@ -31,7 +31,7 @@ starts the listener only when its preference is enabled. Listener failure turns
 that preference off. Automation has its own preference and listener lifecycle.
 
 Both receiver and client use `SpeakTransportWire` in
-[`TransportChannel.swift`](../Sources/SpeakCore/TransportChannel.swift):
+[`TransportChannel.swift`](../Sources/SpeakCore/Sync/Apple/TransportChannel.swift):
 
 | Item | Current contract |
 | --- | --- |

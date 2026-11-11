@@ -3,10 +3,11 @@ name: Android
 on:
   push:
     branches: [main]
+    # The "android" route in scripts/ci/routing.json (the app, this workflow and
+    # the shared Swift definitions the parity tests read); edit it there.
     paths:
       - android/**
       - .github/workflows/android.yml
-      # Parity tests read these shared Swift definitions.
       - Sources/SpeakCore/TranscriptCleanupPolicy.swift
       - Sources/SpeakCore/ModelCatalog.swift
       - Sources/SpeakCore/ModelRetirements.swift

@@ -35,9 +35,9 @@ final class KeepAudioOnCancelTests: XCTestCase {
     func testKeptRecording_RemovesEmptyFiles() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).wav")
         try Data().write(to: url)
-        XCTAssertNil(AudioFileManager.keptRecording(at: url))
+        XCTAssertNil(RecordingFiles.keptRecording(at: url))
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
-        XCTAssertNil(AudioFileManager.keptRecording(at: nil))
+        XCTAssertNil(RecordingFiles.keptRecording(at: nil))
     }
 
     func testSetting_DefaultsToKeepAndPersistsUnderCanonicalKey() {

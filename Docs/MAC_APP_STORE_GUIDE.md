@@ -124,7 +124,7 @@ Fill in the following:
      - Not linked to user identity
      - Not used for tracking
 
-Keep these answers aligned with `Sources/SpeakApp/SentryManager.swift`, Sentry's
+Keep these answers aligned with `Sources/SpeakApp/Analytics/SentryManager.swift`, Sentry's
 bundled privacy manifest, and `Docs/PRIVACY.md`. Re-review the answers whenever
 analytics or diagnostics behaviour changes.
 

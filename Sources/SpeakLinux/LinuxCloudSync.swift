@@ -90,14 +90,16 @@ extension DesktopHostCloudSync where Platform == LinuxHostPlatform {
 }
 
 /// The iCloud sync group's events, on the GTK thread. Returns false for others.
-func linuxCloudSyncEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+func linuxCloudSyncEvent(
+    _ event: DesktopNativeLinuxEvent, value: String, slot: Int, holder: LinuxEventContext
+) -> Bool {
     let action: LinuxCloudSync.Action
     switch event {
-    case Int(JSTI_EVENT_CLOUD_SYNC_APPLY):
+    case .cloudSyncApply:
         action = .apply(history: slot & 1 != 0, keys: slot & 2 != 0, passphrase: value)
-    case Int(JSTI_EVENT_CLOUD_SYNC_SIGN_IN): action = .signIn
-    case Int(JSTI_EVENT_CLOUD_SYNC_SIGN_OUT): action = .signOut
-    case Int(JSTI_EVENT_CLOUD_SYNC_NOW): action = .syncNow
+    case .cloudSyncSignIn: action = .signIn
+    case .cloudSyncSignOut: action = .signOut
+    case .cloudSyncNow: action = .syncNow
     default: return false
     }
     holder.cloudSync?.handle(action)

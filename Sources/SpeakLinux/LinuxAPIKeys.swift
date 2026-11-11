@@ -1,16 +1,17 @@
 import Foundation
+import SpeakDesktop
 import SpeakDesktopHost
 import CLinuxSupport
 
 extension LinuxWindow {
     static func configureAPIKeys(_ holder: LinuxEventContext) throws {
-        guard jsti_api_keys_configure(linuxAPIKeyEvent, Unmanaged.passUnretained(holder).toOpaque()) == 0 else {
+        guard jsti_api_keys_configure(linuxAPIKeyEvent, holder.callbackContext) == 0 else {
             throw DesktopHostError(message: "API Keys could not be configured.")
         }
     }
 
     static func deliverAPIKeys(_ rows: [DesktopAPIKeyRow], request: UUID, status: String) {
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let native = rows.map {
             JSTILinuxAPIKeyRow(
                 identifier: strings.add($0.identifier), label: strings.add($0.label), uses: strings.add($0.uses),
@@ -34,7 +35,7 @@ private func linuxAPIKeyEvent(
     _ key: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
     guard let context, let request, let ticket = UUID(uuidString: String(cString: request)) else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     if action == Int32(JSTI_LINUX_API_KEY_CANCEL) { holder.apiKeys.cancel(ticket); return }
     let name = identifier.map(String.init(cString:)) ?? ""
     let typed = key.map(String.init(cString:)) ?? ""

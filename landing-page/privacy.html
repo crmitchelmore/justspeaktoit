@@ -14,154 +14,11 @@
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&amp;f[]=general-sans@400,500,600&amp;display=swap" rel="stylesheet">
   <style>
-    :root {
-      color-scheme: light dark;
-      --bg: #121417;
-      --surface: #191c21;
-      --text: #f5f3f0;
-      --muted: #adb4bd;
-      --accent: #ff9166;
-      --border: rgba(255, 255, 255, 0.1);
-      --nav-bg: rgba(18, 20, 23, 0.88);
-      --display: 'Cabinet Grotesk', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      --body: 'General Sans', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    }
-
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg: #f7f5f2;
-        --surface: #ffffff;
-        --text: #16181c;
-        --muted: #464d56;
-        --accent: #b23d14;
-        --border: rgba(22, 24, 28, 0.12);
-        --nav-bg: rgba(247, 245, 242, 0.88);
-      }
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      background:
-        radial-gradient(circle at 90% 0%, rgba(255, 107, 61, 0.18), transparent 34rem),
-        var(--bg);
-      color: var(--text);
-      font-family: var(--body);
-      font-size: 17px;
-      line-height: 1.7;
-    }
-
-    a { color: var(--accent); }
-
-    :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-
-    .skip-link {
-      position: absolute;
-      left: 50%;
-      top: 0;
-      transform: translate(-50%, -140%);
-      z-index: 100;
-      background: var(--surface);
-      color: var(--text);
-      font-weight: 600;
-      padding: 0.7rem 1.1rem;
-      border-radius: 0 0 12px 12px;
-    }
-
-    .skip-link:focus { transform: translate(-50%, 0); }
-
-    @media (prefers-reduced-motion: reduce) {
-      * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
-    }
-
-    .nav {
-      border-bottom: 1px solid var(--border);
-      background: var(--nav-bg);
-      backdrop-filter: blur(18px);
-    }
-
-    .nav__inner,
-    main,
-    footer {
-      width: min(100% - 2rem, 860px);
-      margin-inline: auto;
-    }
-
-    .nav__inner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      min-height: 68px;
-    }
-
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      color: var(--text);
-      font-family: var(--display);
-      font-size: 1.1rem;
-      font-weight: 800;
-      text-decoration: none;
-    }
-
-    .back {
-      color: var(--muted);
-      font-size: 0.95rem;
-      text-decoration: none;
-    }
-
-    main { padding: 5rem 0 3rem; }
-
-    .eyebrow {
-      color: var(--accent);
-      font-size: 0.82rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-    }
-
-    h1, h2 { font-family: var(--display); line-height: 1.15; }
-    h1 { margin: 0.4rem 0 1rem; font-size: clamp(2.5rem, 8vw, 4.4rem); }
-    h2 { margin: 2.6rem 0 0.7rem; font-size: 1.55rem; }
-    p, li { color: var(--muted); }
-    strong { color: var(--text); }
-
-    .summary {
-      margin: 2rem 0 3rem;
-      padding: 1.5rem;
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      background: linear-gradient(145deg, rgba(255, 107, 61, 0.09), var(--surface));
-    }
-
-    .summary p { margin: 0; color: var(--text); }
-    ul { padding-left: 1.4rem; }
-    li + li { margin-top: 0.55rem; }
-
-    footer {
-      padding: 2rem 0 4rem;
-      border-top: 1px solid var(--border);
-      color: var(--muted);
-      font-size: 0.92rem;
-    }
-
-    @media (max-width: 540px) {
-      body { font-size: 16px; }
-      main { padding-top: 3.5rem; }
-      .back { font-size: 0.88rem; }
-    }
+    <!-- partial:document-style -->
   </style>
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
-  <nav class="nav" aria-label="Primary navigation">
-    <div class="nav__inner">
-      <a class="brand" href="/"><img src="/favicon.svg?v=20260909" width="32" height="32" alt="">Just Speak to It</a>
-      <a class="back" href="/">Back to the app</a>
-    </div>
-  </nav>
+  <!-- partial:document-header -->
 
   <main id="main">
     <p class="eyebrow">Privacy Policy</p>
@@ -219,8 +76,6 @@
     <p>Questions about privacy can be sent to <a href="mailto:hello@justspeaktoit.com">hello@justspeaktoit.com</a>.</p>
   </main>
 
-  <footer>
-    © 2026 JustSpeakToIt. All rights reserved.
-  </footer>
+  <!-- partial:document-footer:privacy -->
 </body>
 </html>

@@ -144,7 +144,7 @@ final class CaptureHealthSnapshotTests: XCTestCase {
     let source = LocalStreamingModelSource(repoID: "acme/models", modelName: "My_ASR.v2")
     XCTAssertNotEqual(ModelCatalog.friendlyName(for: source.id), "My_ASR.v2")
     XCTAssertEqual(
-      MainManager.customStreamingSourceName(for: source.id, in: [source]),
+      CaptureHealthMonitor.customStreamingSourceName(for: source.id, in: [source]),
       "My_ASR.v2"
     )
   }
@@ -153,7 +153,7 @@ final class CaptureHealthSnapshotTests: XCTestCase {
     let first = LocalStreamingModelSource(repoID: "acme/models", modelName: "Alpha-EN")
     let second = LocalStreamingModelSource(repoID: "acme/models", modelName: "Beta-DE")
     XCTAssertEqual(
-      MainManager.customStreamingSourceName(for: second.id, in: [first, second]),
+      CaptureHealthMonitor.customStreamingSourceName(for: second.id, in: [first, second]),
       "Beta-DE"
     )
   }
@@ -161,19 +161,19 @@ final class CaptureHealthSnapshotTests: XCTestCase {
   func testCustomStreamingSourceName_unknownID_returnsNilForLegacyFallback() {
     let source = LocalStreamingModelSource(repoID: "acme/models", modelName: "Alpha-EN")
     XCTAssertNil(
-      MainManager.customStreamingSourceName(
+      CaptureHealthMonitor.customStreamingSourceName(
         for: "local/streaming/huggingface/other/model",
         in: [source]
       )
     )
-    XCTAssertNil(MainManager.customStreamingSourceName(for: source.id, in: []))
+    XCTAssertNil(CaptureHealthMonitor.customStreamingSourceName(for: source.id, in: []))
   }
 
   func testCustomStreamingSourceName_blankStoredName_returnsNil() {
     // Sources decoded from legacy metadata may carry an empty name; the
     // resolver must decline so callers use the slug-derived fallback.
     let source = LocalStreamingModelSource(repoID: "acme/models", modelName: "   ")
-    XCTAssertNil(MainManager.customStreamingSourceName(for: source.id, in: [source]))
+    XCTAssertNil(CaptureHealthMonitor.customStreamingSourceName(for: source.id, in: [source]))
   }
   #endif
 }

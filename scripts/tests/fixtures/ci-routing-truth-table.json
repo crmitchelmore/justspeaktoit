@@ -1,0 +1,992 @@
+[
+ {
+  "path": "README.md",
+  "pre_pr": [],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": false
+  }
+ },
+ {
+  "path": "Docs/Architecture.md",
+  "pre_pr": [],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": false
+  }
+ },
+ {
+  "path": "Docs/manual-checks.yml",
+  "pre_pr": [],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakApp/README.md",
+  "pre_pr": [
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": false
+  }
+ },
+ {
+  "path": "landing-page/index.html",
+  "pre_pr": [
+   "landing-page"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": false
+  }
+ },
+ {
+  "path": "landing-page/qa/index.html",
+  "pre_pr": [
+   "landing-page"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": false
+  }
+ },
+ {
+  "path": ".github/workflows/deploy-landing-page.yml",
+  "pre_pr": [
+   "workflows"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": false
+  }
+ },
+ {
+  "path": "workers/paid-access/src/index.ts",
+  "pre_pr": [
+   "paid-access-worker"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": false
+  }
+ },
+ {
+  "path": "workers/other/x.ts",
+  "pre_pr": [],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": false
+  }
+ },
+ {
+  "path": "android/app/build.gradle.kts",
+  "pre_pr": [
+   "android"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": true
+  }
+ },
+ {
+  "path": ".github/workflows/android.yml",
+  "pre_pr": [
+   "android",
+   "workflows"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": false,
+   "android": true
+  }
+ },
+ {
+  "path": "Sources/SpeakCore/TranscriptCleanupPolicy.swift",
+  "pre_pr": [
+   "android",
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": true,
+   "apple": true,
+   "android": true
+  }
+ },
+ {
+  "path": "Sources/SpeakCore/ModelCatalog.swift",
+  "pre_pr": [
+   "android",
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": true,
+   "apple": true,
+   "android": true
+  }
+ },
+ {
+  "path": "Sources/SpeakCore/ModelRetirements.swift",
+  "pre_pr": [
+   "android",
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": true,
+   "apple": true,
+   "android": true
+  }
+ },
+ {
+  "path": "Sources/SpeakCore/ProviderCredentialCatalogue.swift",
+  "pre_pr": [
+   "android",
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": true,
+   "apple": true,
+   "android": true
+  }
+ },
+ {
+  "path": "Sources/SpeakCore/OpenAITranscriptionModels.swift",
+  "pre_pr": [
+   "android",
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": true,
+   "apple": true,
+   "android": true
+  }
+ },
+ {
+  "path": "Package.swift",
+  "pre_pr": [
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": true,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Package.resolved",
+  "pre_pr": [
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": true,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Makefile",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Config/AppInfo.plist",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Resources/Sounds/start.caf",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakApp/AppDelegate.swift",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakCore/Recording/Thing.swift",
+  "pre_pr": [
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": true,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakSync/Sync.swift",
+  "pre_pr": [
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": true,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakiOS/Views/Home.swift",
+  "pre_pr": [
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": true,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakHotKeys/HotKey.swift",
+  "pre_pr": [
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakAutomationKit/Kit.swift",
+  "pre_pr": [
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakWatchCore/Watch.swift",
+  "pre_pr": [
+   "ci-lint",
+   "public-api",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": true,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakDesktop/Desktop.swift",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakLinux/main.swift",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Tests/SpeakAppTests/HistoryTests.swift",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Tests/SpeakCoreTests/X.swift",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Tests/SpeakAppUITests/X.swift",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakWindows/App.swift",
+  "pre_pr": [
+   "ci-lint",
+   "swift",
+   "windows"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/SpeakWindowsPlatform/P.swift",
+  "pre_pr": [
+   "ci-lint",
+   "swift",
+   "windows"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Sources/CWindowsSupport/x.cpp",
+  "pre_pr": [
+   "ci-lint",
+   "swift",
+   "windows"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Tests/SpeakWindowsPlatformTests/T.swift",
+  "pre_pr": [
+   "ci-lint",
+   "swift",
+   "windows"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/typecheck-windows-swift.sh",
+  "pre_pr": [
+   "ci-lint",
+   "shell",
+   "windows"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/ci/affected-swift-tests.py",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/retry-network.sh",
+  "pre_pr": [
+   "ci-lint",
+   "shell",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/retry-xctest-crash.py",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/with-test-keychain.py",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/private-test-keychain.py",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/verify-portable-core-boundary.py",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/collect-macos-sample-contract.py",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/collect-macos-xctest-crashes.py",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/prepare-mac-cli-symbols.sh",
+  "pre_pr": [
+   "ci-lint",
+   "shell",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/tests/brand-assets.test.mjs",
+  "pre_pr": [
+   "ci-lint",
+   "swift"
+  ],
+  "workflows": {
+   "swift": true,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/check-api-compatibility.sh",
+  "pre_pr": [
+   "ci-lint",
+   "public-api",
+   "shell"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": true,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/api-breakage-allowlist.txt",
+  "pre_pr": [
+   "ci-lint",
+   "public-api"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": true,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/ci-api-compatibility.sh",
+  "pre_pr": [
+   "ci-lint",
+   "public-api",
+   "shell"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/release-train.mjs",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/pre-pr",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/install-pre-pr-hook",
+  "pre_pr": [
+   "ci-lint",
+   "shell"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/linux-precheck",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/create-dmg.sh",
+  "pre_pr": [
+   "ci-lint",
+   "shell"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/windows-bundle/build-windows-bundle.py",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "scripts/tests/test_pre_pr.py",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": ".githooks/pre-push",
+  "pre_pr": [
+   "ci-lint",
+   "shell"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Tooling/Package.resolved",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": ".swiftlint-baseline.json",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": ".swiftlint.yml",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": ".github/workflows/ci.yml",
+  "pre_pr": [
+   "ci-lint",
+   "workflows"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": ".github/workflows/windows.yml",
+  "pre_pr": [
+   "ci-lint",
+   "workflows"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": ".github/actions/setup/action.yml",
+  "pre_pr": [
+   "ci-lint",
+   "workflows"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": ".github/actionlint.yaml",
+  "pre_pr": [
+   "ci-lint",
+   "workflows"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": ".github/scripts/dependabot-merge.mjs",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "Project.swift",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "packaging/linux/x.desktop",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "SpeakiOSApp/Info.plist",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ },
+ {
+  "path": "JustSpeakKeyboard/KeyboardViewController.swift",
+  "pre_pr": [
+   "ci-lint"
+  ],
+  "workflows": {
+   "swift": false,
+   "api": false,
+   "ios": false,
+   "apple": true,
+   "android": false
+  }
+ }
+]

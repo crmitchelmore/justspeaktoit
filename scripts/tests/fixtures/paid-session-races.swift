@@ -1,5 +1,6 @@
-// Controlled transport/storage boundaries; production lifecycle and manager
-// methods are inserted by test_paid_access_session_boundaries.py.
+// Controlled transport/storage boundaries; the production lifecycle, shared
+// PaidAccessFlow and owner entry points are inserted by
+// test_paid_access_session_boundaries.py.
 import Foundation
 
 enum PaidAccessError: Error { case notSignedIn, invalidResponse, network(String)
@@ -19,8 +20,9 @@ public protocol PaidAccessClienting: Sendable {
     func signOut(session: PaidAccessSession) async
     func entitlement(session: PaidAccessSession) async throws -> EntitlementState
 }
-struct Transaction {}
-struct VerificationResult<T> {}
+struct Product: Equatable, Sendable {}
+struct Transaction: Sendable { func finish() async {} }
+enum VerificationResult<T: Sendable>: Sendable { case verified(T) }
 enum PaidStoreKitSync {
     static func entitlement(for result: VerificationResult<Transaction>, session: PaidAccessSession,
                             client: any PaidAccessClienting) async throws -> PaidEntitlement? {
@@ -163,7 +165,7 @@ let replacement = makeSession("replacement")
             client.entitlementGate.open()
             let manager = Manager(client: client, store: store)
             if storeKit {
-                let accepted = await manager.syncIfSubscription(VerificationResult<Transaction>(),
+                let accepted = await manager.syncIfSubscription(VerificationResult.verified(Transaction()),
                     session: fresh, generation: manager.sessions.generation)
                 require(accepted, "current StoreKit result was discarded")
             } else { await manager.refreshEntitlement() }
@@ -177,7 +179,7 @@ let replacement = makeSession("replacement")
             let generation = manager.sessions.generation
             let pending = Task {
                 if storeKit {
-                    _ = await manager.syncIfSubscription(VerificationResult<Transaction>(),
+                    _ = await manager.syncIfSubscription(VerificationResult.verified(Transaction()),
                         session: fresh, generation: generation)
                 } else { await manager.refreshEntitlement() }
             }

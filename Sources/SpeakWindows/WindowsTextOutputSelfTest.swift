@@ -60,7 +60,7 @@ private final class TextOutputWorkflow {
     private let holder: WindowsEventContext
     private let batchIndex: Int
     private let liveIndex: Int
-    private var context: UnsafeMutableRawPointer { Unmanaged.passUnretained(holder).toOpaque() }
+    private var context: UnsafeMutableRawPointer { holder.callbackContext }
 
     init(directory: URL) throws {
         try WindowsNative.createSyntheticDirectory(directory)
@@ -83,7 +83,10 @@ private final class TextOutputWorkflow {
         try WindowsNative.configureTextOutput(WindowsTextOutputOptions(), context: context)
         // Every step drains its settings refresh, so clearing on the way out
         // leaves no native callback holding this workflow's context.
-        defer { jsti_window_clear_text_output() }
+        defer {
+            jsti_window_clear_text_output()
+            holder.callbacks.unregister()
+        }
         try await checkBatchKeepsItsStartChoice()
         try await checkLiveKeepsItsStartChoice()
         try await checkApplyBeforeRecord()
@@ -107,6 +110,7 @@ private final class TextOutputWorkflow {
         }
         try? await eventually("abandoned workflow closed") { settled.isOpen }
         jsti_window_clear_text_output()
+        holder.callbacks.unregister()
     }
 
     /// Start with Copy to the clipboard, Apply Smart while transcription is

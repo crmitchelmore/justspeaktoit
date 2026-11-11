@@ -108,6 +108,10 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
     private var scheduledBuffers = 0
     private var drainContinuation: CheckedContinuation<Void, Never>?
     private var frameAccumulator = SonioxPCMFrameAccumulator()
+    /// The category this stream installed, if any; restored on stop. The
+    /// session is never deactivated here, so a recorder that started meanwhile
+    /// keeps its audio (the same lease every iOS voice output uses).
+    private var sessionLease: VoiceOutputAudioSessionLease?
 
     func prepare(streamID: String) throws {
         stop(streamID: nil)
@@ -119,16 +123,11 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
         ) else {
             throw SonioxIOSVoiceOutputError.invalidPCMData
         }
-        let session = AVAudioSession.sharedInstance()
         let engine = AVAudioEngine()
         let player = AVAudioPlayerNode()
         do {
-            try session.setCategory(
-                .playAndRecord,
-                mode: .spokenAudio,
-                options: [.allowBluetooth, .defaultToSpeaker, .allowBluetoothA2DP]
-            )
-            try session.setActive(true)
+            sessionLease = try VoiceOutputAudioSessionLease.acquire()
+            try AVAudioSession.sharedInstance().setActive(true)
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: format)
             try engine.start()
@@ -136,7 +135,8 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
         } catch {
             player.stop()
             engine.stop()
-            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            sessionLease?.restoreIfUnchanged()
+            sessionLease = nil
             throw error
         }
 
@@ -195,9 +195,6 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
 
     func stop(streamID: String?) {
         guard streamID == nil || self.streamID == streamID else { return }
-        // Only release the shared session this player activated. An idle stop must not
-        // block the main actor or deactivate audio owned by recording or another voice.
-        let ownedSession = engine != nil
         player?.stop()
         engine?.stop()
         player = nil
@@ -208,8 +205,8 @@ private final class SonioxPCMAudioPlayer: SonioxPCMAudioPlaying {
         frameAccumulator.reset()
         drainContinuation?.resume()
         drainContinuation = nil
-        guard ownedSession else { return }
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        sessionLease?.restoreIfUnchanged()
+        sessionLease = nil
     }
 
     private func didFinishBuffer(streamID: String) {

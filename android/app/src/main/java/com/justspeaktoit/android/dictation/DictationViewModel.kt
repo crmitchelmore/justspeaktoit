@@ -1,25 +1,24 @@
 package com.justspeaktoit.android.dictation
 
 import android.app.Application
-import android.content.ContentResolver
 import android.net.Uri
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
-import com.justspeaktoit.android.cloud.CallHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.CloudService
+import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.RequestReleasedException
-import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
 import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.history.AtomicHistoryFile
-import com.justspeaktoit.android.history.HistoryAudio
 import com.justspeaktoit.android.history.HistoryEntry
-import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceHold
@@ -29,13 +28,13 @@ import com.justspeaktoit.android.resources.SystemResourceToken
 import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.AppPreferences
+import com.justspeaktoit.android.settings.DictationPreferences
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,12 +43,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.io.IOException
-import java.io.InputStream
-import java.util.concurrent.atomic.AtomicReference
-import java.util.UUID
 import java.security.GeneralSecurityException
 import java.security.ProviderException
 import java.util.Locale
@@ -119,21 +114,44 @@ data class DictationUiState(
         get() = cleanupEnabled && cleanupModel.provider in savedKeys
 }
 
-class DictationViewModel(application: Application) : AndroidViewModel(application) {
-    private val engine = AndroidSpeechEngine(application)
-    private val secrets: SecretStore = KeystoreSecretStore.create(application)
-    private val prefs = AppPreferences(application)
-    private val cloud = CloudClient()
-    private val cacheDir = application.cacheDir
-    private val recordingsDir = File(application.filesDir, "recordings")
-    private val history = HistoryStore(
-        AtomicHistoryFile(File(application.filesDir, "history.json")),
-        deleteAudio = { File(it).delete() },
-    )
+/** Deadlines and polling for the session's blocking work; tests shorten them. */
+internal data class DictationTimings(
+    val transcribeMs: Long = 180_000L,
+    val cleanupMs: Long = 60_000L,
+    val importMs: Long = 60_000L,
+    val downloadCheckIntervalMs: Long = 5_000L,
+    val downloadChecks: Int = 60,
+)
 
-    // One thread owns the history file, so writes are ordered without locks.
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val historyDispatcher = Dispatchers.IO.limitedParallelism(1)
+/**
+ * Orchestrates dictation: availability, recognition, Cloud capture and upload, and cleanup. History
+ * writes belong to [DictationHistory], retries of kept audio to [HistoryRetry] and shared-audio
+ * copies to [SharedAudioImporter]. Every collaborator is injected ([Factory] wires the production
+ * ones), and all calls run on the main thread of [scope]; blocking work moves to [io] through
+ * [CloudCapture].
+ */
+class DictationViewModel internal constructor(
+    private val engine: SpeechEngine,
+    recorders: RecorderFactory,
+    private val cloud: CloudService,
+    private val secrets: SecretStore,
+    private val prefs: DictationPreferences,
+    history: HistoryStore,
+    private val sharedAudioSource: SharedAudioSource,
+    private val cacheDir: File,
+    private val recordingsDir: File,
+    // The same context viewModelScope uses; closed with the ViewModel.
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val timings: DictationTimings = DictationTimings(),
+    // Process-wide, so a recreated ViewModel shares the lane that releases its predecessor's microphone.
+    retirement: RecorderRetirement = RecorderRetirement.shared,
+    // Process-wide, so Settings and the keyboard list every hold the app has.
+    private val resources: SystemResourceRegistry = SystemResourceRegistry.shared,
+) : ViewModel(AutoCloseable { scope.cancel() }) {
+    private val capture = CloudCapture(recorders, cacheDir, io, retirement, resources)
+    private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
+    private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs)
 
     private val _state = MutableStateFlow(
         DictationUiState(
@@ -146,21 +164,17 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         ),
     )
 
-    private val resources = SystemResourceRegistry.shared
+    private val historyOwner = DictationHistory(history, recordingsDir, scope, io) { entries, failed ->
+        _state.update { it.copy(history = entries, historyError = failed) }
+    }
+
     private var microphoneHold: SystemResourceToken? = null
 
     init {
-        viewModelScope.launch {
+        scope.launch {
             resources.holds.collect { holds -> _state.update { it.copy(resourcesInUse = holds) } }
         }
-        val retention = prefs.retention
-        updateHistory {
-            history.load(retention).also { entries ->
-                // Audio no entry refers to (for example after a crash mid-save) is never shown, so delete it.
-                val stored = recordingsDir.listFiles().orEmpty().map { it.absolutePath }
-                HistoryAudio.orphans(stored, entries).forEach { File(it).delete() }
-            }
-        }
+        historyOwner.load(prefs.retention)
     }
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
 
@@ -168,8 +182,6 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     private val _level = MutableStateFlow(0f)
     val level: StateFlow<Float> = _level.asStateFlow()
 
-    private var recorder: WavRecorder? = null
-    private var recording: File? = null
     private var work: Job? = null
 
     /** Called whenever the screen starts, so newly installed models, services or keys are noticed. */
@@ -221,23 +233,13 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
      */
     fun offerSharedAudio(uri: Uri, mimeType: String?) {
         if (_state.value.dictation.isActive) return
-        // Only content shared through a provider is accepted. A file:// URI or one of this app's own
-        // providers would be read with this app's privileges, which could upload its private data.
-        if (uri.scheme != ContentResolver.SCHEME_CONTENT || isOwnProvider(uri)) {
+        if (!sharedAudioSource.accepts(uri)) {
             sessionModelId = _state.value.cloudModel.catalogId
             dispatch(DictationEvent.Start(RecognitionMode.Cloud))
             dispatch(DictationEvent.Error(DictationFailure.UnsupportedAudio))
             return
         }
         _state.update { it.copy(sharedAudio = SharedAudioOffer(uri, mimeType)) }
-    }
-
-    private fun isOwnProvider(uri: Uri): Boolean {
-        val app = getApplication<Application>()
-        val authority = uri.authority ?: return true
-        @Suppress("DEPRECATION")
-        val provider = app.packageManager.resolveContentProvider(authority, 0)
-        return provider?.packageName == app.packageName
     }
 
     fun dismissSharedAudio() {
@@ -260,19 +262,23 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         if (current.dictation.isActive || current.cleanup == CleanupStatus.Running) return
         val model = current.cloudModel
         val language = current.languageTag
-        val resolver = getApplication<Application>().contentResolver
         _state.update { it.copy(cleanup = CleanupStatus.None, originalTranscript = null) }
         sessionModelId = model.catalogId
         dispatch(DictationEvent.Start(RecognitionMode.Cloud))
         dispatch(DictationEvent.StopRequested)
-        work = viewModelScope.launch {
+        work = scope.launch {
             val file = File(cacheDir, "shared-${System.nanoTime()}")
             val event = try {
-                val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
+                val key = withContext(io) { secrets.read(model.provider.credentialId) }
                     ?: throw CloudException(DictationFailure.MissingKey, "No key")
-                val format = importSharedAudio(resolver, uri, mimeType, file)
+                val format = sharedAudioImporter.import(
+                    mimeType,
+                    file,
+                    providerType = { sharedAudioSource.type(uri) },
+                    open = { sharedAudioSource.open(uri) },
+                )
                 DictationEvent.Final(
-                    cloudCall(TRANSCRIBE_DEADLINE_MS, model.provider) { call ->
+                    capture.call(timings.transcribeMs, model.provider) { call ->
                         cloud.transcribe(model, key, file, language, call, format)
                     },
                 )
@@ -292,51 +298,10 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
             } catch (e: SecurityException) {
                 DictationEvent.Error(DictationFailure.Audio)
             } finally {
-                withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+                capture.delete(file)
             }
             ensureActive()
             onEngineEvent(event)
-        }
-    }
-
-    /**
-     * Resolves the format and copies at most [SharedAudio.MAX_BYTES] off the main thread, within a
-     * deadline. Cancelling closes the provider stream, so a stalled sender cannot hold a worker.
-     */
-    private suspend fun importSharedAudio(
-        resolver: ContentResolver,
-        uri: Uri,
-        declaredType: String?,
-        target: File,
-    ): SharedAudio.Format {
-        val stream = AtomicReference<InputStream?>(null)
-        return bounded(IMPORT_DEADLINE_MS, DictationFailure.Audio, abort = { runCatching { stream.get()?.close() } }) {
-            // Senders often declare a generic type such as audio/*; the provider's type is more precise.
-            val format = SharedAudio.format(declaredType) ?: SharedAudio.format(resolver.getType(uri))
-                ?: throw CloudException(DictationFailure.UnsupportedAudio, "Unsupported audio")
-            val input = resolver.openInputStream(uri) ?: throw IOException("Unreadable audio")
-            stream.set(input)
-            copyLimited(input, target)
-            format
-        }
-    }
-
-    /** Fails early rather than uploading a file the provider would reject. */
-    private fun copyLimited(input: InputStream, target: File) {
-        input.use { source ->
-            target.outputStream().use { out ->
-                val buffer = ByteArray(64 * 1024)
-                var total = 0L
-                while (true) {
-                    val read = source.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    if (total > SharedAudio.MAX_BYTES) {
-                        throw CloudException(DictationFailure.AudioTooLarge, "Audio too large")
-                    }
-                    out.write(buffer, 0, read)
-                }
-            }
         }
     }
 
@@ -403,9 +368,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     fun downloadOnDeviceModel() {
         engine.requestOnDeviceModel(_state.value.onDeviceLanguageTag)
         downloadWatch?.cancel()
-        downloadWatch = viewModelScope.launch {
-            repeat(DOWNLOAD_CHECKS) {
-                delay(DOWNLOAD_CHECK_INTERVAL_MS)
+        downloadWatch = scope.launch {
+            repeat(timings.downloadChecks) {
+                delay(timings.downloadCheckIntervalMs)
                 refreshAvailability()
                 val status = _state.value.options.firstOrNull { it.mode == RecognitionMode.OnDevice }?.status
                 if (status != ModeStatus.NeedsDownload && status != ModeStatus.Downloading) return@launch
@@ -441,7 +406,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         val capturing = current.dictation is DictationState.Starting || current.dictation is DictationState.Listening
         // Only a user cancel of a Cloud capture keeps audio: other modes never produce a file.
         val keep = current.keepAudioOnCancel && capturing &&
-            current.dictation.modeOrNull() == RecognitionMode.Cloud && recorder != null
+            current.dictation.modeOrNull() == RecognitionMode.Cloud && capture.current != null
         engine.cancel()
         work?.cancel()
         if (keep) keepCancelledRecording() else discardRecording()
@@ -464,71 +429,24 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     fun setRetention(retention: Retention) {
         prefs.retention = retention
         _state.update { it.copy(retention = retention) }
-        updateHistory { history.load(retention) }
+        historyOwner.refresh(retention)
     }
 
     fun deleteHistoryEntry(id: String) {
-        val retention = _state.value.retention
-        updateHistory { history.remove(id, retention) }
+        historyOwner.remove(id, _state.value.retention)
     }
 
-    fun clearHistory() = updateHistory { history.clear() }
+    fun clearHistory() {
+        historyOwner.clear()
+    }
 
     /** Re-reads and prunes history so the retention cutoff holds while the app stays open. */
     fun refreshHistory() {
-        val retention = _state.value.retention
-        updateHistory { history.load(retention) }
+        historyOwner.refresh(_state.value.retention)
     }
-
-    private fun updateHistory(change: () -> List<HistoryEntry>) {
-        viewModelScope.launch { applyHistory(change) }
-    }
-
-    private suspend fun applyHistory(change: () -> List<HistoryEntry>) {
-        val (entries, failed) = withContext(historyDispatcher) {
-            try {
-                change() to false
-            } catch (e: IOException) {
-                history.cached to true
-            }
-        }
-        _state.update { it.copy(history = entries, historyError = failed) }
-    }
-
-    /** The latest session's history entry, so a later cleanup updates it rather than adding another. */
-    private var lastEntry: HistoryEntry? = null
 
     // The model is fixed when the session starts, so later Settings changes cannot relabel it.
     private var sessionModelId: String? = null
-
-    private fun record(state: DictationState) {
-        val entry = when (state) {
-            is DictationState.Done -> entry(state.mode, HistoryStatus.Completed, state.transcript, null)
-            is DictationState.Failed -> entry(state.mode, HistoryStatus.Failed, state.unfinishedText, state.failure)
-            else -> return
-        }
-        lastEntry = entry
-        val retention = _state.value.retention
-        updateHistory { history.add(entry, retention) }
-    }
-
-    private fun recordCleanup(cleaned: String) {
-        val entry = lastEntry?.copy(text = cleaned, cleanedUp = true) ?: return
-        lastEntry = entry
-        val retention = _state.value.retention
-        updateHistory { history.replace(entry, retention) }
-    }
-
-    private fun entry(mode: RecognitionMode, status: HistoryStatus, text: String, failure: DictationFailure?) =
-        HistoryEntry(
-            id = UUID.randomUUID().toString(),
-            createdAtMs = System.currentTimeMillis(),
-            mode = mode.name,
-            model = if (mode == RecognitionMode.Cloud) sessionModelId else null,
-            status = status,
-            text = text,
-            failure = failure?.name,
-        )
 
     /**
      * Android does not let a foreground-only app keep the microphone once it leaves the screen, so
@@ -554,11 +472,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     fun showOriginal() {
         val original = _state.value.originalTranscript ?: return
         val done = _state.value.dictation as? DictationState.Done ?: return
-        lastEntry?.copy(text = original, cleanedUp = false)?.let { entry ->
-            lastEntry = entry
-            val retention = _state.value.retention
-            updateHistory { history.replace(entry, retention) }
-        }
+        historyOwner.replaceSessionText(original, cleanedUp = false, _state.value.retention)
         _state.update {
             it.copy(
                 dictation = done.copy(transcript = original),
@@ -569,22 +483,12 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun startCloud() {
-        val file = File(cacheDir, "dictation-${System.nanoTime()}.wav")
-        lateinit var rec: WavRecorder
-        rec = WavRecorder(
-            file = file,
+        val started = capture.start(
             onLevel = { _level.value = it },
-            onLimitReached = { viewModelScope.launch { if (recorder === rec) stop() } },
-            onCaptureFailed = { viewModelScope.launch { if (recorder === rec) failCapture() } },
+            onLimitReached = { rec -> scope.launch { if (capture.owns(rec)) stop() } },
+            onCaptureFailed = { rec -> scope.launch { if (capture.owns(rec)) failCapture() } },
         )
-        if (!rec.start()) {
-            file.delete()
-            dispatch(DictationEvent.Error(DictationFailure.Audio))
-            return
-        }
-        recorder = rec
-        recording = file
-        dispatch(DictationEvent.Ready)
+        dispatch(if (started) DictationEvent.Ready else DictationEvent.Error(DictationFailure.Audio))
     }
 
     private fun failCapture() {
@@ -593,28 +497,28 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun finishCloud() {
-        val rec = recorder ?: return
-        val file = recording ?: return
+        val rec = capture.current ?: return
+        val file = rec.file
         // Settings stays open during a session, so use the model the recording started with.
         val model = sessionModelId?.let(CloudCatalog::transcriptionModel) ?: _state.value.cloudModel
         val language = _state.value.languageTag
         val modelId = sessionModelId
-        work = viewModelScope.launch {
+        work = scope.launch {
             var kept = false
             val event = try {
                 // The recorder stays owned (and releasable by onCleared) until stop() has finished.
-                val bytes = withContext(NonCancellable + Dispatchers.IO) { rec.stop() }
-                releaseOwnership(rec)
+                val bytes = capture.stop(rec)
+                reconcileMicrophoneHold()
                 when {
                     bytes < 0 -> DictationEvent.Error(DictationFailure.Audio)
                     bytes < MIN_AUDIO_BYTES -> DictationEvent.Error(DictationFailure.NoSpeech)
                     else -> {
-                        val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
+                        val key = withContext(io) { secrets.read(model.provider.credentialId) }
                         if (key == null) {
                             DictationEvent.Error(DictationFailure.InvalidKey)
                         } else {
                             DictationEvent.Final(
-                                cloudCall(TRANSCRIBE_DEADLINE_MS, model.provider) { call ->
+                                capture.call(timings.transcribeMs, model.provider) { call ->
                                     cloud.transcribe(model, key, file, language, call)
                                 },
                             )
@@ -625,7 +529,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                 // Releasing the upload is a cancel, so honour "Keep audio when a recording is cancelled".
                 if (_state.value.keepAudioOnCancel) {
                     kept = true
-                    storeCancelledRecording(file, modelId, _state.value.retention)
+                    historyOwner.keepRecording(file, modelId, _state.value.retention)
                 }
                 DictationEvent.Cancelled
             } catch (e: CloudException) {
@@ -638,8 +542,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                 noteKeyFailure(model.provider, DictationFailure.KeyUnavailable)
                 DictationEvent.Error(DictationFailure.KeyUnavailable)
             } finally {
-                releaseOwnership(rec)
-                if (!kept) withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+                capture.release(rec)
+                reconcileMicrophoneHold()
+                if (!kept) capture.delete(file)
             }
             // A cancelled upload must not deliver a late result into a newer session.
             ensureActive()
@@ -649,71 +554,32 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** Stops capture without a result. Ownership is kept until the recorder has really stopped. */
     private fun discardRecording() {
-        val rec = recorder ?: return
-        val file = recording
+        val rec = capture.current ?: return
         _state.update { it.copy(releasingMicrophone = true) }
-        viewModelScope.launch {
-            withContext(NonCancellable + Dispatchers.IO) {
-                rec.stop()
-                file?.delete()
-            }
-            releaseOwnership(rec)
+        scope.launch {
+            capture.discard(rec)
+            reconcileMicrophoneHold()
             _state.update { it.copy(releasingMicrophone = false) }
         }
     }
 
     /** Stops capture and moves a usable recording into History as a cancelled entry. */
     private fun keepCancelledRecording() {
-        val rec = recorder ?: return
-        val file = recording ?: return
+        val rec = capture.current ?: return
+        val file = rec.file
         val modelId = sessionModelId
         val retention = _state.value.retention
         _state.update { it.copy(releasingMicrophone = true) }
-        viewModelScope.launch {
-            val bytes = withContext(NonCancellable + Dispatchers.IO) { rec.stop() }
-            releaseOwnership(rec)
+        scope.launch {
+            val bytes = capture.stop(rec)
+            reconcileMicrophoneHold()
             _state.update { it.copy(releasingMicrophone = false) }
             if (bytes < MIN_AUDIO_BYTES) {
                 // Too short to contain a word, so there is nothing worth transcribing later.
-                withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+                capture.delete(file)
                 return@launch
             }
-            storeCancelledRecording(file, modelId, retention)
-        }
-    }
-
-    /** Moves a stopped recording into History as a cancelled entry that can be transcribed later. */
-    private fun storeCancelledRecording(file: File, modelId: String?, retention: Retention) {
-        val id = UUID.randomUUID().toString()
-        updateHistory {
-            val kept = File(recordingsDir, "$id.wav")
-            if (!moveRecording(file, kept)) {
-                file.delete()
-                return@updateHistory history.cached
-            }
-            val entry = HistoryEntry(
-                id = id,
-                createdAtMs = System.currentTimeMillis(),
-                mode = RecognitionMode.Cloud.name,
-                model = modelId,
-                status = HistoryStatus.Cancelled,
-                text = "",
-                audioPath = kept.absolutePath,
-            )
-            history.add(entry, retention)
-        }
-    }
-
-    private fun moveRecording(source: File, target: File): Boolean {
-        target.parentFile?.mkdirs()
-        if (source.renameTo(target)) return true
-        return try {
-            source.copyTo(target, overwrite = true)
-            source.delete()
-            true
-        } catch (e: IOException) {
-            target.delete()
-            false
+            historyOwner.keepRecording(file, modelId, retention)
         }
     }
 
@@ -725,68 +591,26 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         val current = _state.value
         if (current.dictation.isActive || current.transcribingEntryId != null) return
         val entry = current.history.firstOrNull { it.id == id } ?: return
-        val path = entry.audioPath ?: return
+        if (entry.audioPath == null) return
         val model = current.cloudModel
         val language = current.languageTag
         _state.update { it.copy(transcribingEntryId = id) }
-        viewModelScope.launch {
-            val file = File(path)
-            val updated = try {
-                if (!withContext(Dispatchers.IO) { file.isFile }) {
-                    // The audio is gone, so the entry can no longer be transcribed.
-                    entry.copy(status = HistoryStatus.Failed, failure = DictationFailure.Audio.name, audioPath = null)
-                } else {
-                    val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
-                        ?: throw CloudException(DictationFailure.MissingKey, "No key")
-                    val text = cloudCall(TRANSCRIBE_DEADLINE_MS, model.provider) { call ->
-                        cloud.transcribe(model, key, file, language, call)
-                    }.trim()
-                    if (text.isEmpty()) {
-                        entry.copy(failure = DictationFailure.NoSpeech.name)
-                    } else {
-                        entry.copy(
-                            status = HistoryStatus.Completed,
-                            model = model.catalogId,
-                            text = text,
-                            failure = null,
-                            audioPath = null,
-                        )
-                    }
-                }
-            } catch (e: RequestReleasedException) {
-                // The user stopped it, so the entry stays as it was.
-                entry
-            } catch (e: CloudException) {
-                entry.copy(failure = e.failure.name)
-            } catch (e: GeneralSecurityException) {
-                entry.copy(failure = DictationFailure.KeyUnavailable.name)
-            } catch (e: ProviderException) {
-                entry.copy(failure = DictationFailure.KeyUnavailable.name)
-            } catch (e: IOException) {
-                entry.copy(failure = DictationFailure.Audio.name)
-            }
+        scope.launch {
+            val updated = historyRetry.transcribe(entry, model, language)
             val retention = _state.value.retention
             // Cleared with the updated entry, so Transcribe never reappears on the stale one.
             try {
-                applyHistory { history.replace(updated, retention) }
+                historyOwner.replace(updated, retention)
             } finally {
                 _state.update { it.copy(transcribingEntryId = null) }
             }
         }
     }
 
-    private fun releaseOwnership(rec: WavRecorder) {
-        if (recorder === rec) {
-            recorder = null
-            recording = null
-        }
-        reconcileMicrophoneHold()
-    }
-
     /** The microphone is held while a session captures, and until a Cloud recorder has really stopped. */
     private fun reconcileMicrophoneHold() {
         val dictation = _state.value.dictation
-        if (dictation.holdsMicrophone || recorder != null) {
+        if (dictation.holdsMicrophone || capture.current != null) {
             if (microphoneHold != null) return
             val mode = dictation.modeOrNull()
             microphoneHold = resources.acquire(
@@ -807,61 +631,6 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /**
-     * Runs a blocking request with an overall [deadlineMs]. Cancelling the coroutine or reaching the
-     * deadline disconnects the request, so no upload or response read outlives the session.
-     */
-    private suspend fun <T> cloudCall(
-        deadlineMs: Long,
-        provider: CloudProvider,
-        block: (CallHandle) -> T,
-    ): T {
-        val call = CallHandle()
-        val hold = resources.acquire(
-            kind = SystemResourceKind.ProviderConnection,
-            title = "Cloud request",
-            reason = "Waiting for ${provider.displayName} to answer",
-            owner = "DictationViewModel",
-            releaseTitle = "Cancel request",
-            release = call::release,
-        )
-        return try {
-            bounded(deadlineMs, DictationFailure.NetworkTimeout, abort = call::cancel) { block(call) }
-        } finally {
-            hold.end()
-        }
-    }
-
-    /**
-     * Runs blocking IO with an overall deadline. On cancellation or timeout [abort] runs from another
-     * coroutine (closing a socket or stream), so the blocked thread is released instead of leaking.
-     */
-    private suspend fun <T> bounded(
-        deadlineMs: Long,
-        timeoutFailure: DictationFailure,
-        abort: () -> Unit,
-        block: () -> T,
-    ): T = try {
-        withTimeout(deadlineMs) {
-            coroutineScope {
-                val watchdog = launch {
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        abort()
-                    }
-                }
-                try {
-                    withContext(Dispatchers.IO) { block() }
-                } finally {
-                    watchdog.cancel()
-                }
-            }
-        }
-    } catch (e: TimeoutCancellationException) {
-        throw CloudException(timeoutFailure, "Deadline reached", e)
-    }
-
     private fun onEngineEvent(event: DictationEvent) {
         dispatch(event)
         val done = _state.value.dictation as? DictationState.Done ?: return
@@ -870,13 +639,13 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun runCleanup(done: DictationState.Done) {
         _state.update { it.copy(cleanup = CleanupStatus.Running) }
-        work = viewModelScope.launch {
+        work = scope.launch {
             var released = false
             val cleaned = try {
                 val model = _state.value.cleanupModel
-                val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
+                val key = withContext(io) { secrets.read(model.provider.credentialId) }
                 key?.let {
-                    cloudCall(CLEANUP_DEADLINE_MS, model.provider) { call ->
+                    capture.call(timings.cleanupMs, model.provider) { call ->
                         cloud.cleanup(model, it, done.transcript, call)
                     }
                 }
@@ -904,7 +673,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
             }
-            if (!cleaned.isNullOrBlank()) recordCleanup(cleaned)
+            if (!cleaned.isNullOrBlank()) {
+                historyOwner.replaceSessionText(cleaned, cleanedUp = true, _state.value.retention)
+            }
         }
     }
 
@@ -920,30 +691,44 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         reconcileMicrophoneHold()
         if (!before.isActive || after.isActive) return
         // A session just ended: record it now, so it survives even if optional cleanup never finishes.
-        record(after)
+        historyOwner.recordSession(after, sessionModelId, _state.value.retention)
     }
 
     override fun onCleared() {
         engine.close()
         microphoneHold?.end()
         microphoneHold = null
-        val rec = recorder ?: return
-        val file = recording
-        // Stop before delete, off the main thread: joining the capture thread here could cause an ANR.
-        Thread({
-            rec.stop()
-            file?.delete()
-        }, "jsti-recorder-teardown").start()
+        capture.close()
     }
 
-    private companion object {
+    companion object {
         /** About a quarter of a second; shorter recordings cannot contain a word. */
-        const val MIN_AUDIO_BYTES = WavFormat.BYTES_PER_SECOND / 4
-        const val TRANSCRIBE_DEADLINE_MS = 180_000L
-        const val CLEANUP_DEADLINE_MS = 60_000L
-        const val IMPORT_DEADLINE_MS = 60_000L
-        const val DOWNLOAD_CHECK_INTERVAL_MS = 5_000L
-        const val DOWNLOAD_CHECKS = 60
+        private const val MIN_AUDIO_BYTES = WavFormat.BYTES_PER_SECOND / 4
+
+        /** Wires the production collaborators. */
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val application = checkNotNull(this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY])
+                create(application)
+            }
+        }
+
+        private fun create(application: Application) = DictationViewModel(
+            engine = AndroidSpeechEngine(application),
+            recorders = { file, onLevel, onLimitReached, onCaptureFailed ->
+                WavRecorder(file, onLevel, onLimitReached, onCaptureFailed)
+            },
+            cloud = CloudClient(),
+            secrets = KeystoreSecretStore.create(application),
+            prefs = AppPreferences(application),
+            history = HistoryStore(
+                AtomicHistoryFile(File(application.filesDir, "history.json")),
+                deleteAudio = { File(it).delete() },
+            ),
+            sharedAudioSource = ContentSharedAudioSource(application),
+            cacheDir = application.cacheDir,
+            recordingsDir = File(application.filesDir, "recordings"),
+        )
     }
 }
 

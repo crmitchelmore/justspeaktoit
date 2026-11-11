@@ -1,0 +1,579 @@
+import Foundation
+import OSLog
+import SpeakCore
+
+// swiftlint:disable file_length
+#if !APP_STORE
+enum LocalPostProcessingModelError: LocalizedError {
+  case pythonUnavailable
+  case runtimeUnavailable(String)
+  case unknownModel(String)
+  case modelNotInstalled(String)
+  case invalidHuggingFaceSource(String)
+  case downloadFailed(String)
+  case processFailed(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .pythonUnavailable:
+      return "Python 3 was not found. Install Python 3 to enable downloaded local post-processing models."
+    case .runtimeUnavailable(let details):
+      return "llama.cpp local post-processing runtime is not installed. \(details)"
+    case .unknownModel(let model):
+      return "Unknown local post-processing model: \(model)"
+    case .modelNotInstalled(let model):
+      return "\(model) has not been downloaded yet. Download it in Settings > Post-processing > Local."
+    case .invalidHuggingFaceSource(let details):
+      return "Enter a valid Hugging Face GGUF model source. \(details)"
+    case .downloadFailed(let details):
+      return "Could not download the local post-processing model from Hugging Face. \(details)"
+    case .processFailed(let details):
+      return "Local post-processing failed. \(details)"
+    }
+  }
+}
+#endif
+
+@MainActor
+// swiftlint:disable:next type_body_length
+final class LocalPostProcessingModelManager: ObservableObject {
+  static let shared = LocalPostProcessingModelManager()
+
+  enum InstallState: Equatable {
+    case notInstalled
+    case installing
+    case installed
+    case failed(String)
+
+    var isInstalled: Bool {
+      if case .installed = self { return true }
+      return false
+    }
+  }
+
+  nonisolated static var builtInRulesModelID: String {
+    LocalPostProcessingModel.builtInRulesModelID
+  }
+
+  #if !APP_STORE
+  /// The canonical GGUF catalogue. It needs the installable llama.cpp runtime,
+  /// so App Store builds do not compile this projection.
+  nonisolated static var recommendedModels: [LocalPostProcessingModel] {
+    ModelCatalog.localPostProcessing
+  }
+
+  @Published private(set) var runtimeState: InstallState = .notInstalled
+  @Published private(set) var modelStates: [String: InstallState] = [:]
+  @Published private(set) var importedModels: [LocalPostProcessingModel] = []
+  #endif
+
+  private let fileManager: FileManager
+  private let logger = SpeakLogger.logger(category: "LocalPostProcessing")
+  #if !APP_STORE
+  private let baseDirectory: URL
+  private let modelsDirectory: URL
+  private let runtimeDirectory: URL
+  private let sidecar: LocalPythonSidecar
+  private let importedModelsURL: URL
+  #endif
+
+  private init(fileManager: FileManager = .default) {
+    self.fileManager = fileManager
+    #if !APP_STORE
+    let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+      ?? fileManager.homeDirectoryForCurrentUser
+    baseDirectory = base
+        .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
+      .appendingPathComponent("LocalModels", isDirectory: true)
+      .appendingPathComponent("LocalPostProcessing", isDirectory: true)
+    modelsDirectory = baseDirectory.appendingPathComponent("Models", isDirectory: true)
+    runtimeDirectory = baseDirectory.appendingPathComponent("runtime", isDirectory: true)
+    sidecar = LocalPythonSidecar(
+      virtualEnvironmentURL: baseDirectory.appendingPathComponent("venv", isDirectory: true),
+      scriptURL: runtimeDirectory.appendingPathComponent("local_post_processing.py"),
+      script: Self.sidecarScript,
+      fileManager: fileManager,
+      pythonUnavailable: { LocalPostProcessingModelError.pythonUnavailable }
+    )
+    importedModelsURL = baseDirectory.appendingPathComponent("imported-hugging-face-gguf-models.json")
+    do {
+      try fileManager.createDirectory(at: modelsDirectory, withIntermediateDirectories: true)
+      try fileManager.createDirectory(at: runtimeDirectory, withIntermediateDirectories: true)
+      try sidecar.writeScriptIfNeeded()
+    } catch {
+      runtimeState = .failed(error.localizedDescription)
+    }
+    loadImportedModels()
+    refresh()
+    #endif
+  }
+
+  var availableModels: [LocalPostProcessingModel] {
+    #if APP_STORE
+    []
+    #else
+    Self.recommendedModels + importedModels
+    #endif
+  }
+
+  var availableModelOptions: [ModelCatalog.Option] {
+    availableModels.map(\.option)
+  }
+
+  func refresh() {
+    #if !APP_STORE
+    Task { await refreshRuntimeState() }
+    for model in availableModels {
+      if modelStates[model.id] == .installing {
+        continue
+      }
+      modelStates[model.id] = modelFileExists(for: model) ? .installed : .notInstalled
+    }
+    #endif
+  }
+
+  func installState(for modelID: String) -> InstallState {
+    #if APP_STORE
+    .notInstalled
+    #else
+    modelStates[modelID] ?? .notInstalled
+    #endif
+  }
+
+  func isInstalled(_ modelID: String) -> Bool {
+    installState(for: modelID).isInstalled
+  }
+
+  func model(for modelID: String) -> LocalPostProcessingModel? {
+    availableModels.first { $0.id == modelID }
+  }
+
+  #if !APP_STORE
+  @discardableResult
+  func addHuggingFaceModel(
+    repoID: String,
+    filename: String,
+    approximateSizeMB: Int?
+  ) throws -> LocalPostProcessingModel {
+    let repoID = repoID.trimmingCharacters(in: .whitespacesAndNewlines)
+    let filename = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard repoID.split(separator: "/").count == 2 else {
+      throw LocalPostProcessingModelError.invalidHuggingFaceSource(
+        "Use owner/repo, for example unsloth/Qwen3-0.6B-GGUF."
+      )
+    }
+    guard LocalPostProcessingModel.isGGUFFilename(filename) else {
+      throw LocalPostProcessingModelError.invalidHuggingFaceSource("The file must be a .gguf model file.")
+    }
+
+    let model = LocalPostProcessingModel.importedModel(
+      repoID: repoID,
+      filename: filename,
+      approximateSizeMB: approximateSizeMB
+    )
+    importedModels.removeAll { $0.id == model.id }
+    importedModels.append(model)
+    try saveImportedModels()
+    modelStates[model.id] = modelFileExists(for: model) ? .installed : .notInstalled
+    return model
+  }
+
+  func installRuntime() async {
+    guard runtimeState != .installing else { return }
+    let previousState = runtimeState
+    runtimeState = .installing
+    do {
+      let python = try await sidecar.prepareVirtualEnvironment { bootstrapPython, arguments in
+        _ = try await Self.runProcess(executableURL: bootstrapPython, arguments: arguments)
+      }
+      _ = try await Self.runProcess(
+        executableURL: python,
+        arguments: ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel", "cmake", "ninja"]
+      )
+      _ = try await Self.runProcess(
+        executableURL: python,
+        arguments: [
+          "-m", "pip", "install",
+          "llama-cpp-python==0.3.23"
+        ],
+        environment: [
+          "CMAKE_ARGS": "-DGGML_METAL=on"
+        ],
+        timeout: LocalProcessRunner.runtimeBuildTimeout
+      )
+      try await ensureRuntimeAvailable()
+      try Task.checkCancellation()
+      runtimeState = .installed
+    } catch is CancellationError {
+      runtimeState = previousState
+    } catch {
+      runtimeState = .failed(Self.readableRuntimeInstallError(from: error))
+    }
+  }
+
+  func installModel(_ model: LocalPostProcessingModel) async {
+    guard modelStates[model.id] != .installing else { return }
+    modelStates[model.id] = .installing
+    let finalURL = modelFileURL(for: model)
+    let tempURL = finalURL.deletingLastPathComponent()
+      .appendingPathComponent(finalURL.lastPathComponent + ".download")
+    defer {
+      if modelStates[model.id] != .installed, fileManager.fileExists(atPath: tempURL.path) {
+        try? fileManager.removeItem(at: tempURL)
+      }
+    }
+    do {
+      if fileManager.fileExists(atPath: tempURL.path) {
+        try fileManager.removeItem(at: tempURL)
+      }
+      try fileManager.createDirectory(at: finalURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try await downloadFile(repoID: model.repoID, filename: model.filename, to: tempURL)
+      if fileManager.fileExists(atPath: finalURL.path) {
+        try fileManager.removeItem(at: finalURL)
+      }
+      try fileManager.moveItem(at: tempURL, to: finalURL)
+      modelStates[model.id] = .installed
+    } catch {
+      modelStates[model.id] = .failed(error.localizedDescription)
+    }
+  }
+
+  func deleteModel(_ model: LocalPostProcessingModel) {
+    do {
+      let url = modelFileURL(for: model)
+      if fileManager.fileExists(atPath: url.path) {
+        try fileManager.removeItem(at: url)
+      }
+      modelStates[model.id] = .notInstalled
+    } catch {
+      modelStates[model.id] = .failed(error.localizedDescription)
+    }
+  }
+
+  func process(
+    modelID: String,
+    rawText: String,
+    systemPrompt: String,
+    temperature: Double
+  ) async throws -> String {
+    try await run(
+      modelID: modelID,
+      systemPrompt: Self.localSystemPrompt(systemPrompt),
+      userPrompt: Self.localUserPrompt(systemPrompt: systemPrompt, rawText: rawText),
+      rawText: rawText,
+      temperature: temperature
+    )
+  }
+
+  /// Runs the model with an explicit prompt pair, preserved verbatim (plus
+  /// the local-engine constraint). Used by the Polish Text App Intent when
+  /// the user supplies a custom prompt: rebuilding the stock cleanup payload
+  /// here would silently perform cleanup instead of honouring the prompt.
+  func processWithExplicitPrompt(
+    modelID: String,
+    systemPrompt: String,
+    userMessage: String,
+    temperature: Double
+  ) async throws -> String {
+    try await run(
+      modelID: modelID,
+      systemPrompt: Self.explicitLocalSystemPrompt(systemPrompt),
+      userPrompt: userMessage,
+      rawText: userMessage,
+      temperature: temperature
+    )
+  }
+
+  private func run(
+    modelID: String,
+    systemPrompt: String,
+    userPrompt: String,
+    rawText: String,
+    temperature: Double
+  ) async throws -> String {
+    guard let model = model(for: modelID) else {
+      throw LocalPostProcessingModelError.unknownModel(modelID)
+    }
+    guard isInstalled(model.id) else {
+      throw LocalPostProcessingModelError.modelNotInstalled(model.displayName)
+    }
+    try await ensureRuntimeAvailable()
+    let python = try pythonExecutable()
+    let script = try sidecarScriptURL()
+    let modelURL = modelFileURL(for: model)
+    let request = LocalPostProcessingRequest(
+      systemPrompt: systemPrompt,
+      userPrompt: userPrompt,
+      rawText: rawText,
+      temperature: temperature
+    )
+    let payload = try JSONEncoder().encode(request)
+    let output = try await Self.runProcess(
+      executableURL: python,
+      arguments: [script.path, "--model", modelURL.path],
+      standardInput: payload,
+      timeout: LocalProcessRunner.inferenceTimeout
+    )
+    try Task.checkCancellation()
+    let response = try JSONDecoder().decode(LocalPostProcessingResponse.self, from: Data(output.utf8))
+    let cleanedResponse = Self.sanitizedModelOutput(response.text)
+    guard !cleanedResponse.isEmpty else {
+      throw LocalPostProcessingModelError.processFailed("The local model returned an empty response.")
+    }
+    if response.truncated == true {
+      logger.warning("Local post-processing output reached the model output limit; returning partial generated text.")
+    }
+    return cleanedResponse
+  }
+
+  func sidecarScriptURL() throws -> URL {
+    try sidecar.currentScriptURL()
+  }
+
+  func pythonExecutable() throws -> URL {
+    try sidecar.pythonExecutable()
+  }
+
+  private func refreshRuntimeState() async {
+    guard runtimeState != .installing else { return }
+    do {
+      try await ensureRuntimeAvailable()
+      try Task.checkCancellation()
+      runtimeState = .installed
+    } catch is CancellationError {
+      return
+    } catch {
+      runtimeState = .notInstalled
+    }
+  }
+
+  private func ensureRuntimeAvailable() async throws {
+    let python = try pythonExecutable()
+    _ = try await Self.runProcess(
+      executableURL: python,
+      arguments: ["-c", "import llama_cpp; print(getattr(llama_cpp, '__version__', 'ok'))"],
+      timeout: LocalProcessRunner.probeTimeout
+    )
+  }
+
+  private func modelFileExists(for model: LocalPostProcessingModel) -> Bool {
+    fileManager.fileExists(atPath: modelFileURL(for: model).path)
+  }
+
+  private func modelFileURL(for model: LocalPostProcessingModel) -> URL {
+    modelsDirectory
+      .appendingPathComponent(model.id.replacingOccurrences(of: "/", with: "_"), isDirectory: true)
+      .appendingPathComponent(model.filename)
+  }
+
+  private func downloadFile(repoID: String, filename: String, to destination: URL) async throws {
+    try await HuggingFaceFileDownload.download(
+      repoID: repoID, filename: filename, to: destination, fileManager: fileManager,
+      failure: LocalPostProcessingModelError.downloadFailed
+    )
+  }
+
+  private func loadImportedModels() {
+    guard fileManager.fileExists(atPath: importedModelsURL.path) else { return }
+    do {
+      let data = try Data(contentsOf: importedModelsURL)
+      importedModels = try JSONDecoder().decode([LocalPostProcessingModel].self, from: data)
+    } catch {
+      logger.error(
+        "Failed to load local post-processing model sources: \(error.localizedDescription, privacy: .public)"
+      )
+    }
+  }
+
+  private func saveImportedModels() throws {
+    let data = try JSONEncoder().encode(importedModels)
+    try data.write(to: importedModelsURL, options: .atomic)
+  }
+
+  #endif
+
+  // Identity rules are canonical in SpeakCore; these forwarders keep existing
+  // macOS call sites unchanged.
+
+  nonisolated static func isDownloadedLocalModelID(_ id: String) -> Bool {
+    LocalPostProcessingModel.isDownloadedModelID(id)
+  }
+
+  nonisolated static func huggingFaceModelID(repoID: String, filename: String) -> String {
+    LocalPostProcessingModel.huggingFaceModelID(repoID: repoID, filename: filename)
+  }
+
+  nonisolated static func approximateSizeMB(from filename: String) -> Int? {
+    LocalPostProcessingModel.approximateSizeMB(fromFilename: filename)
+  }
+
+  nonisolated static func localUserPrompt(systemPrompt _: String, rawText: String) -> String {
+    TranscriptCleanupPolicy.userMessage(transcript: rawText)
+  }
+
+  nonisolated static func localSystemPrompt(_ userSystemPrompt: String = "") -> String {
+    let trimmed = userSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    let cleanupPolicy = trimmed.hasPrefix(TranscriptCleanupPolicy.baseSystemPrompt)
+      ? trimmed
+      : TranscriptCleanupPolicy.systemPrompt()
+    return """
+    \(cleanupPolicy)
+
+    \(localEngineConstraint)
+    """
+  }
+
+  /// System prompt for the explicit-prompt path: the caller's prompt verbatim,
+  /// with only the local-engine constraint appended.
+  nonisolated static func explicitLocalSystemPrompt(_ systemPrompt: String) -> String {
+    """
+    \(systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines))
+
+    \(localEngineConstraint)
+    """
+  }
+
+  nonisolated private static let localEngineConstraint =
+    "Local engine constraint: never enter thinking mode, emit <think> tags, include reasoning, or ask questions."
+
+  nonisolated static func sanitizedModelOutput(_ output: String) -> String {
+    output
+      .replacingOccurrences(
+        of: #"(?is)<think\b[^>]*>.*?</think>"#,
+        with: "",
+        options: .regularExpression
+      )
+      .replacingOccurrences(
+        of: #"(?is)<think\b[^>]*>.*"#,
+        with: "",
+        options: .regularExpression
+      )
+      .replacingOccurrences(
+        of: #"(?i)</think>"#,
+        with: "",
+        options: .regularExpression
+      )
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  #if !APP_STORE
+  private nonisolated static func runProcess(
+    executableURL: URL,
+    arguments: [String],
+    standardInput: Data? = nil,
+    environment: [String: String] = [:],
+    timeout: TimeInterval = LocalProcessRunner.setupTimeout
+  ) async throws -> String {
+    do {
+      return try await LocalProcessRunner.run(
+        executableURL: executableURL,
+        arguments: arguments,
+        standardInput: standardInput,
+        environment: environment,
+        timeout: timeout
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw standardInput == nil
+        ? LocalPostProcessingModelError.runtimeUnavailable(error.localizedDescription)
+        : LocalPostProcessingModelError.processFailed(error.localizedDescription)
+    }
+  }
+
+  private nonisolated static func readableRuntimeInstallError(from error: Error) -> String {
+    let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+    if message.contains("No matching distribution found") || message.contains("Could not find a version") {
+      return """
+      No compatible llama.cpp Python package was available for this Python version. \
+      Try installing Python 3.11 or 3.12, then install the runtime again.
+      """
+    }
+    if message.contains("cmake") || message.contains("CMake") {
+      return """
+      Building the llama.cpp runtime failed while preparing CMake. \
+      Install Xcode Command Line Tools, then try again.
+      """
+    }
+    if message.isEmpty {
+      return "The llama.cpp runtime install failed. Check your Python installation and try again."
+    }
+    return String(message.prefix(500))
+  }
+
+  private nonisolated static let sidecarScript = #"""
+import argparse
+import json
+import sys
+
+from llama_cpp import Llama
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", required=True)
+    args = parser.parse_args()
+    request = json.loads(sys.stdin.read())
+    system_prompt = request["systemPrompt"]
+    raw_text = request.get("rawText") or ""
+    user_prompt = request["userPrompt"]
+    temperature = float(request.get("temperature") or 0.2)
+    max_tokens = min(8192, max(1024, len(raw_text.split()) * 4 + 512))
+
+    llm = Llama(
+        model_path=args.model,
+        n_ctx=8192,
+        n_threads=None,
+        verbose=False,
+    )
+    response = llm.create_chat_completion(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    choice = response["choices"][0]
+    text = choice["message"]["content"]
+    print(json.dumps({"text": text, "truncated": choice.get("finish_reason") == "length"}))
+
+
+if __name__ == "__main__":
+    main()
+"""#
+  #endif
+}
+
+extension LocalPostProcessingModel {
+  var sizeLabel: String {
+    guard let approximateSizeMB, approximateSizeMB > 0 else { return "Size unknown" }
+    if approximateSizeMB >= 1024 {
+      let gigabytes = Double(approximateSizeMB) / 1024
+      return "\(gigabytes.formatted(.number.precision(.fractionLength(1)))) GB"
+    }
+    return "\(approximateSizeMB) MB"
+  }
+}
+
+private struct LocalPostProcessingRequest: Codable {
+  let systemPrompt: String
+  let userPrompt: String
+  let rawText: String
+  let temperature: Double
+}
+
+private struct LocalPostProcessingResponse: Codable {
+  let text: String
+  let truncated: Bool?
+}
+
+extension LocalPostProcessingModelManager {
+    func reloadAfterMigration() {
+        #if !APP_STORE
+        importedModels = []
+        loadImportedModels()
+        #endif
+        refresh()
+    }
+}

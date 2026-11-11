@@ -9,6 +9,13 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
+def windows_main_window_source():
+    """The main window's translation units (WindowsWindow.cpp, its WindowsWindow*.cpp parts and self-test)."""
+    paths = [*(ROOT / "Sources/CWindowsSupport").glob("WindowsWindow*.cpp"),
+             *(ROOT / "Sources/CWindowsSelfTest").glob("WindowsWindow*.cpp")]
+    return "\n".join(path.read_text() for path in sorted(paths) if path.name != "WindowsWindowChrome.cpp")
+
+
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, ROOT / path)
     module = importlib.util.module_from_spec(spec)
@@ -131,7 +138,7 @@ class DesktopIconTests(unittest.TestCase):
         native = (ROOT / "Sources/CWindowsSupport/WindowsAppIcon.cpp").read_text()
         self.assertIn("idleResource = 101, recordingResource = 102", native)
         self.assertIn("GetSystemMetricsForDpi", native)
-        window = (ROOT / "Sources/CWindowsSupport/WindowsWindow.cpp").read_text()
+        window = windows_main_window_source()
         self.assertIn("jsti::appIcon::selfTest(window, failure)", window)
         self.assertIn("jsti::appIcon::refresh(window, HIWORD(wparam)", window)
         self.assertNotIn("IDI_APPLICATION", window)
@@ -146,7 +153,7 @@ class DesktopIconTests(unittest.TestCase):
     def test_windows_accessors_do_not_collide_with_rpc_small_macro(self):
         header = (ROOT / "Sources/CWindowsSupport/WindowsAppIcon.hpp").read_text()
         source = (ROOT / "Sources/CWindowsSupport/WindowsAppIcon.cpp").read_text()
-        window = (ROOT / "Sources/CWindowsSupport/WindowsWindow.cpp").read_text()
+        window = windows_main_window_source()
         self.assertNotRegex(header + source + window, r"\bsmall\s*\(")
         self.assertIn("HICON smallHandle();", header)
         self.assertIn("HICON smallHandle()", source)
@@ -174,7 +181,7 @@ class DesktopIconTests(unittest.TestCase):
                 self.assertRegex(action, r"^[^@]+@[0-9a-f]{40}$")
 
     def test_linux_integration_assertion_includes_high_dpi_tray_pixmaps(self):
-        integration = (ROOT / "scripts/linux-integration-checks.sh").read_text()
+        integration = (ROOT / "scripts/linux/linux-integration-checks.sh").read_text()
         self.assertIn("[22, 22], [32, 32], [48, 48], [64, 64], [96, 96]", integration)
 
     def test_msix_includes_high_dpi_and_light_dark_unplated_start_menu_icons(self):

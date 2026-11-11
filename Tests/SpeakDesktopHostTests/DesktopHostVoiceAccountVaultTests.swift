@@ -32,29 +32,29 @@ final class DesktopHostVoiceAccountVaultTests: XCTestCase {
         FakeLog.shared.installKeyReadHook { _ in gate.wait { entered.fulfill() } }
         await controller.handleVoiceProviderCredential(.open(first, requestID: UUID()))
         await fulfillment(of: [entered], timeout: 3)
-        let pending = await controller.voiceCredentialReadTask
+        let pending = await controller.voiceCredentials.readWorker?.task
         let next = VoiceAccountCredentialContext(provider: .xai, sessionID: first.sessionID, epoch: UUID())
         await controller.selectVoiceAccountProvider(next)
         let nextID = UUID()
         await controller.handleVoiceProviderCredential(.open(next, requestID: nextID))
-        let wanted = await controller.voiceCredentialReadID
+        let wanted = await controller.voiceCredentials.readRequest?.id
         XCTAssertEqual(wanted, nextID)
         let operations = await controller.activeOperations
         XCTAssertEqual(operations, 1)
-        let before = await controller.voiceProviderIssuedSlot
+        let before = await controller.voiceCredentials.issuedProviderSlot
         XCTAssertNil(before)
         XCTAssertTrue(gate.isBlocked)
         gate.release()
         await pending?.value
-        let replacement = await controller.voiceCredentialReadTask
+        let replacement = await controller.voiceCredentials.readWorker?.task
         await replacement?.value
-        let issued = await controller.voiceProviderIssuedSlot
+        let issued = await controller.voiceCredentials.issuedProviderSlot
         XCTAssertEqual(issued?.identifier, XAITTSCatalog.credentialIdentifier)
         let context = await controller.voiceDiscovery.context
         XCTAssertEqual(context, next)
         let settled = await controller.activeOperations
         XCTAssertEqual(settled, 0)
-        let task = await controller.voiceCredentialReadTask
+        let task = await controller.voiceCredentials.readWorker?.task
         XCTAssertNil(task)
     }
 
@@ -67,17 +67,17 @@ final class DesktopHostVoiceAccountVaultTests: XCTestCase {
         FakeLog.shared.installKeyReadHook { _ in gate.wait { entered.fulfill() } }
         await controller.handleVoiceProviderCredential(.open(context, requestID: UUID()))
         await fulfillment(of: [entered], timeout: 3)
-        let pending = await controller.voiceCredentialReadTask
+        let pending = await controller.voiceCredentials.readWorker?.task
         let report = await controller.close()
         XCTAssertTrue(gate.isBlocked)
         XCTAssertEqual(report.unfinishedOperations, 1)
         gate.release()
         await pending?.value
-        let issued = await controller.voiceProviderIssuedSlot
+        let issued = await controller.voiceCredentials.issuedProviderSlot
         XCTAssertNil(issued)
         let after = await controller.activeOperations
         XCTAssertEqual(after, 0)
-        let pendingID = await controller.voiceCredentialReadID
+        let pendingID = await controller.voiceCredentials.readRequest?.id
         XCTAssertNil(pendingID)
     }
 

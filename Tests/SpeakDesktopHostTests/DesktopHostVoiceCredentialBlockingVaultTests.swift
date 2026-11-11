@@ -35,7 +35,7 @@ final class DesktopHostVoiceCredentialVaultTests: XCTestCase {
         await fulfillment(of: [entered], timeout: 3)
         let presentation = try await controller.voiceCredentialPresentation().get()
         XCTAssertFalse(presentation.canSave)
-        let pendingID = await controller.voiceCredentialRequestID
+        let pendingID = await controller.voiceCredentials.write?.id
         let requestID = try XCTUnwrap(pendingID)
         let cancel = await controller.cancelVoiceCredentialSave(requestID)
         XCTAssertTrue(cancel)
@@ -82,10 +82,10 @@ final class DesktopHostVoiceCredentialVaultTests: XCTestCase {
         FakeLog.shared.installKeyReadHook { _ in gate.wait { entered.fulfill() } }
         await controller.handleVoiceCredential(.open(UUID()))
         await fulfillment(of: [entered], timeout: 3)
-        let pending = await controller.voiceCredentialReadTask
+        let pending = await controller.voiceCredentials.readWorker?.task
         let next = UUID()
         await controller.handleVoiceCredential(.open(next))
-        let wanted = await controller.voiceCredentialReadID
+        let wanted = await controller.voiceCredentials.readRequest?.id
         XCTAssertEqual(wanted, next)
         let active = await controller.activeOperations
         XCTAssertEqual(active, 1)
@@ -97,7 +97,7 @@ final class DesktopHostVoiceCredentialVaultTests: XCTestCase {
         await pending?.value
         let finished = await controller.activeOperations
         XCTAssertEqual(finished, 0)
-        let stopped = await controller.voiceCredentialReadTask
+        let stopped = await controller.voiceCredentials.readWorker?.task
         XCTAssertNil(stopped)
         XCTAssertEqual(FakeLog.shared.allStatuses, beforeCompletion)
     }

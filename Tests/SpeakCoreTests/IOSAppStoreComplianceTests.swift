@@ -177,8 +177,8 @@ final class IOSAppStoreComplianceTests: XCTestCase {
     /// scrubber rather than a copy, so the two cannot drift apart.
     func testIOSApp_compilesTheSharedSentryConfigurationAndScrubber() throws {
         let manifest = try contents(of: "Project.swift")
-        XCTAssertTrue(manifest.contains("\"Sources/SpeakApp/SentryManager.swift\""))
-        XCTAssertTrue(manifest.contains("\"Sources/SpeakApp/SentryEventScrubber.swift\""))
+        XCTAssertTrue(manifest.contains("\"Sources/SpeakApp/Analytics/SentryManager.swift\""))
+        XCTAssertTrue(manifest.contains("\"Sources/SpeakApp/Analytics/SentryEventScrubber.swift\""))
         let launch = try contents(of: "SpeakiOSApp/SpeakiOSApp.swift")
         XCTAssertTrue(launch.contains("SentryManager.start()"))
     }

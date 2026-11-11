@@ -1,6 +1,7 @@
 import Foundation
 import CLinuxSupport
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 import SpeakLinuxPlatform
 
@@ -15,7 +16,7 @@ enum LinuxOnboarding {
     }
 
     static func configure(_ holder: LinuxEventContext) throws {
-        guard jsti_setup_configure(linuxSetupEvent, Unmanaged.passUnretained(holder).toOpaque()) == 0 else {
+        guard jsti_setup_configure(linuxSetupEvent, holder.callbackContext) == 0 else {
             throw DesktopHostError(message: "The Linux setup guide could not be configured.")
         }
     }
@@ -145,7 +146,7 @@ enum LinuxOnboarding {
     ) async {
         let message = await status(step, holder: holder)
         guard jsti_setup_revision() == revision else { return }
-        let strings = LinuxWindow.Strings()
+        let strings = DesktopNativeStrings()
         let content = LinuxOnboardingPage(step)
         let actions = content.actions.map {
             JSTILinuxSetupAction(title: strings.add(content.title(for: $0)), action: strings.add($0.rawValue))
@@ -166,8 +167,7 @@ private func linuxSetupEvent(
     _ revision: UInt64, _ command: Int32, _ step: Int32, _ action: UnsafePointer<CChar>?,
     _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     let action = action.map(String.init(cString:)) ?? ""
     holder.enqueueSettings {
         guard jsti_setup_revision() == revision else { return }

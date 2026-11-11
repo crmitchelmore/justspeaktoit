@@ -32,7 +32,7 @@ final class SettingsSearchCoverageTests: XCTestCase {
 
     func testRuntimeTitledMacCardsDeclareASearchEntry() throws {
         // The API-key cards are indexed per provider by MacSettingsSearch.apiKeyEntries.
-        let runtimeIndexed: Set<String> = ["SettingsView+APIKeys.swift"]
+        let runtimeIndexed: Set<String> = ["SettingsView+APIKeys.swift", "APIKeyCard.swift"]
         let files = try swiftFiles(under: "Sources/SpeakApp")
         var undeclared: [String] = []
         let pattern = try NSRegularExpression(pattern: #"SettingsCard\(\s*title:\s*[^"\s]"#)
@@ -72,12 +72,17 @@ final class SettingsSearchCoverageTests: XCTestCase {
     }
 
     func testEveryPersistedMacSettingIsIndexed() throws {
-        let published = publishedProperties(in: try read("Sources/SpeakApp/AppSettings.swift"))
+        // AppSettings and its domain preference stores live in Settings/AppSettings*.swift.
+        let sources = try swiftFiles(under: "Sources/SpeakApp/Settings")
+            .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
+        let published = sources.flatMap { publishedProperties(in: $0.1) }
         assertIndexed(published, platform: .macOS, exemptions: Self.unindexedMacSettings)
     }
 
     func testEveryPersistedIOSSettingIsIndexed() throws {
-        let published = publishedProperties(in: try read("Sources/SpeakiOS/Settings/AppSettings.swift"))
+        let sources = try swiftFiles(under: "Sources/SpeakiOS/Settings")
+            .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
+        let published = sources.flatMap { publishedProperties(in: $0.1) }
             .filter { !$0.hasSuffix("APIKey") }  // Each key is indexed at runtime from the API Keys list.
         assertIndexed(published, platform: .iOS, exemptions: Self.unindexedIOSSettings)
     }

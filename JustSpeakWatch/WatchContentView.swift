@@ -1,3 +1,4 @@
+import SpeakWatchCore
 import SwiftUI
 
 /// Root watch UI: one big record button plus the recent-capture list with
@@ -17,6 +18,9 @@ struct WatchContentView: View {
                             .foregroundStyle(.red)
                             .multilineTextAlignment(.center)
                             .accessibilityIdentifier("watchRecordingError")
+                    }
+                    if let issue = captureStore.storageIssue {
+                        storageNotice(issue)
                     }
                     capturesList
                 }
@@ -51,6 +55,27 @@ struct WatchContentView: View {
         .accessibilityLabel(recorder.isRecording ? "Stop recording" : "Start recording")
         .accessibilityIdentifier("watchRecordButton")
         .primaryActionGestureShortcut()
+    }
+
+    /// A queue that could not be read or saved is said so, with the action that can resolve it.
+    @ViewBuilder
+    private func storageNotice(_ issue: WatchCaptureQueueIssue) -> some View {
+        VStack(spacing: 6) {
+            Text(issue.message)
+                .font(.footnote)
+                .foregroundStyle(.orange)
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("watchQueueStorageIssue")
+            if issue.blocksSaving {
+                Button("Try again") { captureStore.reloadQueue() }
+                    .accessibilityLabel("Read saved recordings again")
+                    .accessibilityIdentifier("watchQueueStorageRetry")
+            } else if case .setAside = issue {
+                Button("OK") { captureStore.dismissStorageNotice() }
+                    .accessibilityLabel("Dismiss saved recordings notice")
+                    .accessibilityIdentifier("watchQueueStorageDismiss")
+            }
+        }
     }
 
     @ViewBuilder

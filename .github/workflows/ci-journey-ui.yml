@@ -1,0 +1,60 @@
+name: CI core journey UI lane
+
+# Called by ci.yml (job journey-ui) on full runs only: the launched-app
+# fixture UI journeys, one shard at a time. ci.yml owns the conditions, the
+# needs and CI Gate.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  core-journey-fixture-ui:
+    name: Core Journey Fixture UI (${{ matrix.shard }})
+    # Hosted ARM has the UI automation entitlement; the native pool does not.
+    runs-on: macos-latest
+    # Each hotkey journey spends ~60s in real gesture windows. Parallel shards
+    # keep every shard inside the unchanged 600s UI runtime budget; the shard
+    # list in scripts/verify-core-journey-ui.py assigns every suite exactly once.
+    strategy:
+      fail-fast: false
+      # One shard at a time, so the UI gate holds a single macOS slot.
+      max-parallel: 1
+      matrix:
+        shard: [foundation, p0]
+    env:
+      CORE_JOURNEY_UI_SHARD: ${{ matrix.shard }}
+    # 2m checkout + 6m setup + 17m build/receipts + 12m UI/receipts + 3m upload.
+    # The former 600s job spent ~505s preparing before UI tests. Setup now has a
+    # separate 300s command budget; build has 900s; actual UI tests keep 600s.
+    # Each product/source receipt is separately bounded to 60s, not hidden setup.
+    # Setup's retried package resolution may take 11 minutes; tests keep 12.
+    timeout-minutes: 47
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
+
+      - name: Prepare Tuist and macOS project
+        timeout-minutes: 11
+        run: python3 scripts/run-core-journey-stages.py ui --phase setup
+
+      - name: Build launched fixture test products
+        timeout-minutes: 17
+        run: python3 scripts/run-core-journey-stages.py ui --phase build
+
+      - name: Test Speak bootstrap, global hotkey, and launched fixture
+        timeout-minutes: 12
+        run: python3 scripts/run-core-journey-stages.py ui --phase test
+
+      - name: Upload launched-app diagnostics
+        if: always()
+        timeout-minutes: 3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: core-journey-fixture-ui-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/core-journey-fixture-ui
+            !.artifacts/core-journey-fixture-ui/DerivedData
+          include-hidden-files: true
+          if-no-files-found: error

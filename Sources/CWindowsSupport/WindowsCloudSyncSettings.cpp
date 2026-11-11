@@ -36,7 +36,7 @@ struct Dialog {
     bool acted = false;
 };
 
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 
 void layout(HWND window) {
     RECT bounds{};
@@ -60,15 +60,7 @@ void layout(HWND window) {
     }
 }
 
-void refreshFont(HWND window, Dialog &dialog) {
-    HFONT font = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    if (!font) return;
-    for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    if (dialog.font) DeleteObject(dialog.font);
-    dialog.font = font;
-}
+void refreshFont(HWND window, Dialog &dialog) { jsti::chrome::refreshDialogFont(window, dialog.controls, dialog.font); }
 
 void updateEnabled(HWND window, const Dialog &dialog) {
     const bool usable = dialog.config.available;
@@ -138,35 +130,17 @@ void act(HWND window, Dialog &dialog, int action) {
     if (!passphrase.empty()) SecureZeroMemory(&passphrase[0], passphrase.size());
 }
 
+constexpr jsti::chrome::DialogFrame dialogFrame{
+    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, IDCANCEL, IDOK};
+
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT themed = 0;
-    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
+    LRESULT handled = 0;
+    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
+                                            handled)) return handled;
     switch (message) {
     case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
-    case WM_GETMINMAXINFO: {
-        RECT frame{0, 0, scale(window, minimumClientWidth), scale(window, minimumClientHeight)};
-        AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {frame.right - frame.left, frame.bottom - frame.top};
-        return 0;
-    }
-    case WM_SIZE: layout(window); return 0;
-    case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
-        refreshFont(window, *dialog); layout(window); return 0;
-    }
-    case WM_ACTIVATE:
-        if (LOWORD(wparam) == WA_INACTIVE) { dialog->focus = GetFocus(); return 0; }
-        SetFocus(dialog->focus && IsChild(window, dialog->focus) ? dialog->focus : GetDlgItem(window, IDCANCEL));
-        return 0;
-    case DM_GETDEFID: return MAKELRESULT(IDOK, DC_HASDEFID);
     case WM_COMMAND:
         if (HIWORD(wparam) != BN_CLICKED) break;
         switch (LOWORD(wparam)) {
@@ -233,18 +207,7 @@ void jsti_show_cloud_sync_settings(HWND owner) {
         jsti_window_update(jsti::systemError("Opening iCloud sync settings").c_str(), nullptr, -1);
         return;
     }
-    EnableWindow(owner, FALSE);
-    ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, IDCANCEL));
-    MSG message{};
-    BOOL result = 1;
-    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    }
-    if (IsWindow(window)) close(window);
-    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
-    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
-    else if (result < 0) jsti_window_update(jsti::systemError("Reading iCloud sync messages").c_str(), nullptr, -1);
+    jsti::chrome::runModalDialog(owner, window, IDCANCEL, close, "iCloud sync");
 }
 
 int jsti_window_set_cloud_sync(const JSTICloudSyncView *view, JSTICloudSyncCallback callback, void *context) {

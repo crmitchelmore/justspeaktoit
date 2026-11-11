@@ -1,9 +1,30 @@
 package com.justspeaktoit.android.cloud
 
+/** A provider row of `assets/cloud_catalog.json`, as written into [GeneratedCloudCatalog]. */
+internal data class CloudProviderSpec(val id: String, val credentialId: String)
+
+/** A cleanup model row of `assets/cloud_catalog.json`, as written into [GeneratedCloudCatalog]. */
+internal data class CleanupModelSpec(
+    val selectionId: String,
+    val displayName: String,
+    val providerId: String,
+    val apiName: String,
+)
+
+/** A transcription model row of `assets/cloud_catalog.json`, as written into [GeneratedCloudCatalog]. */
+internal data class CloudModelSpec(
+    val catalogId: String,
+    val displayName: String,
+    val providerId: String,
+    val apiName: String,
+    val languageField: String,
+)
+
 /**
- * Cloud providers available on Android. Identifiers mirror the Mac app (`Sources/SpeakCore`):
- * credential IDs follow `ProviderCredentialCatalogue.apiKeyIdentifier`, and model IDs come from
- * `ModelCatalog`. `CloudCatalogParityTest` fails if either drifts.
+ * How Android reaches each provider: its display name and base URL are transport details the shared
+ * catalogue does not own. Which providers exist, their order and credential IDs come from
+ * [GeneratedCloudCatalog]; `CloudCatalogParityTest` fails if a generated provider has no transport
+ * here or a transport has no generated provider.
  */
 enum class CloudProvider(val id: String, val displayName: String, val baseUrl: String) {
     OpenAI("openai", "OpenAI", "https://api.openai.com/v1"),
@@ -14,7 +35,13 @@ enum class CloudProvider(val id: String, val displayName: String, val baseUrl: S
     Mistral("mistral", "Mistral", "https://api.mistral.ai/v1"),
     ;
 
-    val credentialId: String get() = "$id.apiKey"
+    val credentialId: String
+        get() = GeneratedCloudCatalog.providers.first { it.id == id }.credentialId
+
+    companion object {
+        internal fun forId(id: String): CloudProvider =
+            entries.firstOrNull { it.id == id } ?: error("No Android transport for cloud provider '$id'")
+    }
 }
 
 data class CloudModel(
@@ -40,28 +67,29 @@ data class CleanupModel(
     val isOpenRouter: Boolean get() = provider == CloudProvider.OpenRouter
 }
 
+/**
+ * Cloud models available on Android. Every value comes from [GeneratedCloudCatalog], which the build
+ * writes from `assets/cloud_catalog.json` (generated from `Sources/SpeakCore` by
+ * `CloudCatalogAndroidExport`, which also decides which models Android offers).
+ */
 object CloudCatalog {
-    val transcriptionModels: List<CloudModel> = listOf(
+    val transcriptionModels: List<CloudModel> = GeneratedCloudCatalog.transcriptionModels.map {
         CloudModel(
-            catalogId = "openai/gpt-transcribe",
-            displayName = "GPT Transcribe (OpenAI)",
-            provider = CloudProvider.OpenAI,
-            apiName = "gpt-transcribe",
-            languageField = "languages[]",
-        ),
-        CloudModel(
-            catalogId = "groq/whisper-large-v3-turbo",
-            displayName = "Whisper Large v3 Turbo (Groq)",
-            provider = CloudProvider.Groq,
-            apiName = "whisper-large-v3-turbo",
-            languageField = "language",
-        ),
-    )
+            catalogId = it.catalogId,
+            displayName = it.displayName,
+            provider = CloudProvider.forId(it.providerId),
+            apiName = it.apiName,
+            languageField = it.languageField,
+        )
+    }
 
     val defaultTranscriptionModel: CloudModel = transcriptionModels.first()
 
     /** Matches `ModelCatalog.defaultPostProcessingModel` on the Mac (an OpenRouter route). */
-    const val CLEANUP_MODEL = "openai/gpt-5.6-luna"
+    const val CLEANUP_MODEL = GeneratedCloudCatalog.CLEANUP_MODEL
+
+    /** The provider the default cleanup model uses. */
+    val cleanupProvider: CloudProvider = CloudProvider.forId(GeneratedCloudCatalog.CLEANUP_PROVIDER)
 
     // Declared before cleanupModels: object properties initialise in order.
     /** Matches `ModelPickerGrouping.vendorNames` on the Mac. */
@@ -70,73 +98,30 @@ object CloudCatalog {
         "mistralai" to "Mistral", "openai" to "OpenAI", "qwen" to "Qwen",
     )
 
-    /**
-     * Cleanup models. Native routes mirror `NativeTextModels.postProcessing` (`native/<provider>/<model>`);
-     * OpenRouter routes mirror the unprefixed entries of `ModelCatalog.postProcessing`. `CloudParityTest`
-     * fails if either drifts.
-     */
-    val cleanupModels: List<CleanupModel> = listOf(
-        native(CloudProvider.Anthropic, "claude-haiku-4-5", "Claude Haiku 4.5"),
-        native(CloudProvider.Anthropic, "claude-sonnet-4-6", "Claude Sonnet 4.6"),
-        native(CloudProvider.OpenAI, "gpt-6-luna", "GPT-6 Luna"),
-        native(CloudProvider.OpenAI, "gpt-5-mini", "GPT-5 Mini"),
-        native(CloudProvider.OpenAI, "gpt-5.4-mini", "GPT-5.4 Mini"),
-        native(CloudProvider.OpenAI, "gpt-6.1-sol", "GPT-6.1 Sol"),
-        native(CloudProvider.Google, "gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite"),
-        native(CloudProvider.Google, "gemini-2.5-flash", "Gemini 2.5 Flash"),
-        native(CloudProvider.Groq, "openai/gpt-oss-120b", "GPT-OSS 120B"),
-        native(CloudProvider.Groq, "openai/gpt-oss-20b", "GPT-OSS 20B"),
-        native(CloudProvider.Groq, "llama-3.1-8b-instant", "Llama 3.1 8B Instant"),
-        native(CloudProvider.Mistral, "mistral-small-latest", "Mistral Small"),
-        openRouter("openai/gpt-6-luna", "GPT-6 Luna"),
-        openRouter("openai/gpt-6.1-sol", "GPT-6.1 Sol"),
-        openRouter("openai/gpt-6-astra", "GPT-6 Astra"),
-        openRouter("openai/gpt-5.4-nano", "GPT-5.4 Nano"),
-        openRouter("openai/gpt-5-mini", "GPT-5 Mini"),
-        openRouter("google/gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite"),
-        openRouter("qwen/qwen3.6-flash", "Qwen3.6 Flash"),
-        openRouter("mistralai/mistral-small-2603", "Mistral Small 4"),
-        openRouter("google/gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"),
-        openRouter("qwen/qwen3.6-35b-a3b", "Qwen3.6 35B A3B"),
-        openRouter("meta-llama/llama-4-scout", "Llama 4 Scout"),
-        openRouter("anthropic/claude-haiku-5.5", "Claude Haiku 5.5"),
-        openRouter("anthropic/claude-sonnet-5.5", "Claude Sonnet 5.5"),
-        openRouter("anthropic/claude-haiku-4.5", "Claude Haiku 4.5"),
-        openRouter("openai/gpt-5.6-luna", "GPT-5.6 Luna"),
-        openRouter("openai/gpt-5.4-mini", "GPT-5.4 Mini"),
-        openRouter("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
-        openRouter("openai/gpt-5.5", "GPT-5.5"),
-        openRouter("openai/gpt-5.6-terra", "GPT-5.6 Terra"),
-        openRouter("openai/gpt-5.6-sol", "GPT-5.6 Sol"),
-        openRouter("anthropic/claude-sonnet-4.6", "Claude Sonnet 4.6"),
-        openRouter("openai/gpt-5.4", "GPT-5.4"),
-    )
+    /** Cleanup models in catalogue order: native provider routes, then OpenRouter slugs. */
+    val cleanupModels: List<CleanupModel> = GeneratedCloudCatalog.cleanupModels.map {
+        val provider = CloudProvider.forId(it.providerId)
+        CleanupModel(
+            selectionId = it.selectionId,
+            displayName = it.displayName,
+            provider = provider,
+            apiName = it.apiName,
+            vendor = if (provider == CloudProvider.OpenRouter) {
+                it.apiName.substringBefore('/').let { prefix -> VENDOR_NAMES[prefix] ?: prefix }
+            } else {
+                provider.displayName
+            },
+        )
+    }
 
     /** A saved choice, or the default when it is missing or no longer offered. */
     fun cleanupModel(selectionId: String?): CleanupModel =
         cleanupModels.firstOrNull { it.selectionId == selectionId }
             ?: cleanupModels.first { it.selectionId == CLEANUP_MODEL }
 
-    private fun native(provider: CloudProvider, apiName: String, displayName: String) = CleanupModel(
-        selectionId = "native/${provider.id}/$apiName",
-        displayName = displayName,
-        provider = provider,
-        apiName = apiName,
-        vendor = provider.displayName,
-    )
-
-    private fun openRouter(slug: String, displayName: String) = CleanupModel(
-        selectionId = slug,
-        displayName = displayName,
-        provider = CloudProvider.OpenRouter,
-        apiName = slug,
-        vendor = VENDOR_NAMES[slug.substringBefore('/')] ?: slug.substringBefore('/'),
-    )
-
-
     fun transcriptionModel(catalogId: String?): CloudModel =
         transcriptionModels.firstOrNull { it.catalogId == catalogId } ?: defaultTranscriptionModel
 
     /** Providers whose keys the app can use, in settings order. */
-    val providers: List<CloudProvider> = CloudProvider.entries
+    val providers: List<CloudProvider> = GeneratedCloudCatalog.providers.map { CloudProvider.forId(it.id) }
 }

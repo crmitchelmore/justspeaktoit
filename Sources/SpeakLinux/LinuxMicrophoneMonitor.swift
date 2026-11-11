@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import SpeakDesktopHost
 import SpeakLinuxPlatform
 import CLinuxSupport
@@ -12,20 +13,34 @@ final class LinuxMicrophoneMonitor: @unchecked Sendable {
     private let lock = NSLock()
     private var scheduled = false
     private var running = false
+    private var callbacks: NativeCallbackContext<LinuxMicrophoneMonitor>?
 
     init(controller: LinuxAppController) { self.controller = controller }
 
     func start() throws {
-        try LinuxNative.call {
-            jsti_audio_device_monitor_start(linuxMicrophonesChanged, Unmanaged.passUnretained(self).toOpaque(), $0, $1)
+        let callbacks = NativeCallbackContext(self)
+        do {
+            try LinuxNative.call { jsti_audio_device_monitor_start(linuxMicrophonesChanged, callbacks.pointer, $0, $1) }
+        } catch {
+            callbacks.release()
+            throw error
         }
-        lock.withLock { running = true }
+        lock.withLock {
+            self.callbacks = callbacks
+            running = true
+        }
     }
 
     /// No refresh is scheduled after this returns.
     func stop() {
+        // No native callback runs once the monitor has stopped.
         jsti_audio_device_monitor_stop()
-        lock.withLock { running = false }
+        let callbacks = lock.withLock {
+            running = false
+            defer { self.callbacks = nil }
+            return self.callbacks
+        }
+        callbacks?.release()
     }
 
     fileprivate func changed() {
@@ -50,6 +65,5 @@ final class LinuxMicrophoneMonitor: @unchecked Sendable {
 }
 
 private func linuxMicrophonesChanged(_ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    Unmanaged<LinuxMicrophoneMonitor>.fromOpaque(context).takeUnretainedValue().changed()
+    NativeCallbackContext<LinuxMicrophoneMonitor>.resolve(context)?.changed()
 }

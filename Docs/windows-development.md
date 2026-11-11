@@ -872,7 +872,7 @@ scales with the monitor's DPI.
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows, Linux and the Mac show the same figures.
-- Colours are the brand tokens in `SpeakCore/BrandColors.swift`
+- Colours are the brand tokens in `SpeakCore/App/Apple/BrandColors.swift`
   (`WindowsWindowChrome.cpp`). The window follows Windows' app mode
   (`AppsUseLightTheme`) with a dark title bar and dark common controls;
   **General › Appearance** overrides it (Follow Windows, Light, Dark), saved as
@@ -953,8 +953,8 @@ flowchart TB
 | Layer | Current responsibility | Source |
 |---|---|---|
 | Canonical domain | Model identifiers, provider routes, transcript semantics, Unicode reconciliation, lifecycle ownership, PCM/WAV, comparison and history projections | `Sources/SpeakCore/` |
-| Shared batch transport | Seventeen provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/DesktopTranscription.swift` |
-| Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/DesktopPostProcessing.swift` |
+| Shared batch transport | Seventeen provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/Transcription/DesktopTranscription.swift` |
+| Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouter/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/Transcription/DesktopPostProcessing.swift` |
 | Desktop behaviour | Implemented-model projection, durable recording records, recovery, export and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
 | Windows services | Event-driven WASAPI capture with a bounded writer queue, native History playback through Media Foundation decoding and event-driven WASAPI rendering, native history/settings UI, hotkey, Credential Manager, clipboard, and captured-field insertion through native controls, UI Automation and a guarded paste | `Sources/CWindowsSupport/` |
@@ -964,10 +964,12 @@ flowchart TB
 
 `Package.swift` selects the portable graph on Windows/Linux and when explicitly
 requested on macOS. New `SpeakCore` source files enter the portable build by
-default. `appleCoreSources` names the existing Apple-bound dependency closure;
-a new exception must be an intentional platform adapter, not a duplicate
-implementation of domain behaviour. The boundary check rejects duplicate,
-missing or stale exclusions and a return to a portable-source allow-list. Native
+default. `appleCoreSources` names the Apple-only folders (each feature's
+`Apple/` subfolder, plus `AppleUI/`, `AppleSpeech/`, `AppleSupport/` and
+`SpeechInsights/`); a file placed there must be an intentional platform
+adapter, not a duplicate implementation of domain behaviour. The boundary check
+rejects duplicate, file, nested, missing or stale entries and a return to a
+portable-source allow-list. Native
 Windows/Linux CI then catches accidental Apple framework dependencies.
 
 The catalogue remains canonical. Metadata formerly inside Meta, Cartesia,

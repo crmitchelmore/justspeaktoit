@@ -9,13 +9,18 @@ fallback whenever the target cannot be verified. The Windows mechanisms differ
 because the platform APIs differ; this document records what is implemented,
 what each method can and cannot do, and which acceptance gates remain open.
 
-Source: `Sources/CWindowsSupport/WindowsTextOutput.cpp` (adapter),
-`WindowsTextOutputSelfTest.cpp` (deterministic checks),
+Source: `Sources/CWindowsSupport/WindowsTextOutput.cpp` (adapter C ABI and
+target lifecycle) with its parts `WindowsTextOutputTarget.cpp` (identity,
+integrity and native Edit insertion), `WindowsTextOutputAutomation.cpp` (UI
+Automation inspection), `WindowsTextOutputWorker.cpp` (the per-target worker),
+`WindowsTextOutputClipboard.cpp` (snapshot and restore) and
+`WindowsTextOutputInsertion.cpp` (insert, copy and learning entry points),
+`Sources/CWindowsSelfTest/WindowsTextOutputSelfTest.cpp` (deterministic checks),
 `WindowsClipboardOutput.cpp` (clipboard-only output without a captured field),
 `WindowsTextOutputSettings.cpp` (the native Text output dialog),
 `Sources/SpeakWindowsPlatform/WindowsTextOutput.swift` (ownership, settings
 and status text), `Sources/SpeakWindows/WindowsOutputJob.swift` (the output
-job), `Sources/SpeakDesktopHost/DesktopHostOutput.swift` (the shared
+job), `Sources/SpeakDesktopHost/Output/DesktopHostOutput.swift` (the shared
 actor-owned output task and cancellation) and
 `Sources/SpeakWindows/WindowsTextOutputSettings.swift` (saving the dialog's
 choices).

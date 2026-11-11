@@ -1,0 +1,393 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(os) && !SPEAK_PORTABLE_CORE
+import os.log
+#endif
+
+/// Cross-platform realtime client for the Speechmatics `v2` WebSocket API.
+///
+/// `StartRecognition` opens the session, `AddAudio` binary frames carry PCM16,
+/// `AddPartialTranscript` and `AddTranscript` come back, and `EndOfStream`
+/// commits the tail before `EndOfTranscript` closes it. Speechmatics rejects
+/// audio before `RecognitionStarted`, so leading capture is queued and drained
+/// only once that frame arrives (issue #641).
+///
+/// The transport is injected through `StreamingWebSocketConnection`: Apple
+/// platforms reuse the caller's `URLSession`, and Windows supplies its native
+/// WinHTTP socket. Provider framing, bounded PCM admission, send ordering,
+/// restart identity and finalisation stay here so the platforms cannot drift.
+///
+/// Contract: https://docs.speechmatics.com/api-ref/realtime-transcription-websocket
+/// (read 2026-09-22).
+public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    /// `AddTranscript` finalises a new span of audio that is never restated,
+    /// so each one is its own segment.
+    public let finalShape: TranscriptFinalShape = .standaloneSegments
+    /// `EndOfStream` commits audio Speechmatics has received but not yet
+    /// transcribed, so a caller must always finish gracefully.
+    public let finishFlushesBufferedAudio = true
+
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+
+    /// A single `AddAudio` or control send that has not completed by then means
+    /// the transport stalled.
+    static let sendDeadline: TimeInterval = 5
+    /// How long a finish waits for `RecognitionStarted` before failing with
+    /// `recognitionNotStarted`; the text received so far is still returned.
+    static let finishReadyBudget: TimeInterval = StreamingSessionReadiness.defaultBudget
+    /// One deadline armed when a finish begins that bounds readiness, the audio
+    /// drain, `EndOfStream` and `EndOfTranscript` together.
+    static let finishBudget: TimeInterval = SpeechmaticsRealtime.finishBudget
+    /// A backstop on queued frames; the five-second byte budget is the tighter
+    /// bound in practice because every frame is at least `minimumChunkBytes`.
+    static let maximumQueuedFrames = 256
+
+    let apiKey: String
+    let accuracyModel: String
+    let language: String?
+    let keywords: [String]
+    let sampleRate: Int
+    let makeConnection: ConnectionFactory
+    let schedule: Scheduler
+    let stateQueue = LiveClientStateQueue(label: "SpeechmaticsLiveClient.state")
+    var run: SpeechmaticsLiveRun
+
+    /// The pre-start priming buffer the earlier client exposed. Audio handed
+    /// over before `start` is parked here and, exactly as before, cleared when
+    /// a session starts or stops; it is not replayed into the session. A
+    /// started session holds its opening capture in the run's bounded send
+    /// queue until `RecognitionStarted` instead.
+    let preroll: StreamingAudioPreroll
+
+    public convenience init(
+        apiKey: String,
+        model: String = SpeechmaticsRealtime.defaultModel,
+        language: String? = nil,
+        sampleRate: Int = 16_000,
+        session: URLSession = .shared
+    ) {
+        self.init(
+            apiKey: apiKey, model: model, language: language, sampleRate: sampleRate,
+            makeConnection: { URLSessionStreamingConnection(session: session, request: $0) }
+        )
+    }
+
+    public init(
+        apiKey: String,
+        model: String = SpeechmaticsRealtime.defaultModel,
+        language: String? = nil,
+        sampleRate: Int = 16_000,
+        keywords: [String],
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.accuracyModel = SpeechmaticsRealtime.accuracyModel(from: model)
+        self.language = language
+        self.keywords = keywords
+        self.sampleRate = sampleRate
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        self.run = SpeechmaticsLiveRun(sampleRate: sampleRate)
+    }
+
+    /// Source-compatible overload preserved for callers predating keyword hints.
+    public init(
+        apiKey: String,
+        model: String = SpeechmaticsRealtime.defaultModel,
+        language: String? = nil,
+        sampleRate: Int = 16_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.accuracyModel = SpeechmaticsRealtime.accuracyModel(from: model)
+        self.language = language
+        self.keywords = []
+        self.sampleRate = sampleRate
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        self.run = SpeechmaticsLiveRun(sampleRate: sampleRate)
+    }
+
+    deinit { run.connection?.cancel() }
+
+    // MARK: - StreamingTranscriptionClient
+
+    public func start(
+        onTranscript: @escaping (String, Bool) -> Void,
+        onError: @escaping (Error) -> Void
+    ) {
+        synchronized {
+            let active = arm(onTranscript: onTranscript, onError: onError)
+            guard !apiKey.isEmpty else {
+                fail(StreamingClientError.missingAPIKey(provider: "Speechmatics"), active)
+                return
+            }
+            connect(active)
+        }
+    }
+
+    /// Speechmatics rejects an `AddAudio` frame below its minimum size, and it
+    /// rejects any audio before `RecognitionStarted`, so capture is coalesced
+    /// into legal frames and queued until the session is both open and ready.
+    public func sendAudio(_ audioData: Data) {
+        guard !audioData.isEmpty else { return }
+        synchronized {
+            let active = run
+            if active.phase == .idle {
+                // No session yet: keep the established pre-start behaviour
+                // (parked, bounded, cleared on start). The opening capture of a
+                // started session is held by the run's queue below (issue #641).
+                preroll.append(audioData)
+                return
+            }
+            guard active.phase == .connecting || active.phase == .active else { return }
+            guard active.outgoing.count + (active.sending ? 1 : 0) < Self.maximumQueuedFrames else {
+                fail(stalledError, active)
+                return
+            }
+            // Admit the whole chunk before any framing so an oversized chunk is
+            // rejected before the queue grows. Coalescing conserves bytes, so
+            // the net admitted amount is exactly the chunk it accepted.
+            guard active.budget.admit(audioData.count) else {
+                fail(stalledError, active)
+                return
+            }
+            let (frames, remainder) = Self.outboundFrames(appending: audioData, to: active.outboundBuffer)
+            active.outboundBuffer = remainder
+            for frame in frames { active.outgoing.append(.audio(frame)) }
+            pump(active)
+        }
+    }
+
+    /// Immediate abort. Text received so far stays available to `finishAndWait`.
+    public func stop() { synchronized { close(run) } }
+
+    public func finishAndWait() async -> String? {
+        // No live socket: `EndOfStream` would be rejected, so close rather
+        // than burning the budget, and hand back what was transcribed.
+        await awaitFinish(
+            canFinish: { $0.connection != nil }, transcript: \.transcript,
+            register: { active, continuation in
+                active.finishWaiters.append(continuation)
+                beginFinish(active)
+            }
+        )
+    }
+
+    // MARK: - Socket-free test helpers
+
+    /// Arms the callbacks and clears per-recording state without opening a
+    /// socket. `start` is this plus `connect`; tests pair it with `ingest`.
+    func beginSession(
+        onTranscript: @escaping (String, Bool) -> Void,
+        onError: @escaping (Error) -> Void
+    ) {
+        synchronized { _ = arm(onTranscript: onTranscript, onError: onError) }
+    }
+
+    /// Feeds one raw server frame through the receive path. The transport's
+    /// receive loop is the only production caller; tests drive the client with it.
+    func ingest(_ text: String) {
+        synchronized { parse(.text(text), run) }
+    }
+
+    /// The bounded wait for `EndOfTranscript`, resolved by that frame (the
+    /// common case) or failed by the budget. `whenArmed` runs once the waiter
+    /// is installed, so tests can deliver frames into an armed finish without a
+    /// socket. The helper stands in for the production `EndOfStream` hand-off,
+    /// so it marks that state explicitly: an ingested `EndOfTranscript` is then
+    /// the authoritative terminal frame rather than an unexpected one.
+    func awaitFinalTranscript(
+        budget: TimeInterval = SpeechmaticsRealtime.finishBudget,
+        whenArmed: () -> Void = {}
+    ) async -> String? {
+        let active = synchronized { run }
+        return await withCheckedContinuation { continuation in
+            synchronized {
+                guard active.phase != .closed else {
+                    continuation.resume(returning: active.transcript)
+                    return
+                }
+                active.endOfStreamHandedOff = true
+                active.finishWaiters.append(continuation)
+            }
+            whenArmed()
+            after(budget, active) { client, active in
+                client.fail(SpeechmaticsRealtimeError.transcriptNotFinalised, active)
+            }
+        }
+    }
+
+    // MARK: - Run lifecycle
+
+    private func arm(
+        onTranscript: @escaping (String, Bool) -> Void,
+        onError: @escaping (Error) -> Void
+    ) -> SpeechmaticsLiveRun {
+        close(run)
+        let active = SpeechmaticsLiveRun(sampleRate: sampleRate)
+        run = active
+        active.onTranscript = onTranscript
+        active.onError = onError
+        return active
+    }
+
+    func fail(_ error: Error, _ active: SpeechmaticsLiveRun) {
+        guard isCurrent(active) else { return }
+        let callback = active.onError
+        let waiters = active.finishWaiters
+        active.finishWaiters.removeAll()
+        let transcript = active.transcript
+        close(active)
+        log("Speechmatics session failed")
+        // Publish the failure before finish returns. The run is already
+        // detached, so the callback may start a replacement session safely.
+        callback?(error)
+        waiters.forEach { $0.resume(returning: transcript) }
+    }
+
+    func close(_ active: SpeechmaticsLiveRun) {
+        guard active.phase != .closed else { return }
+        active.phase = .closed
+        let connection = active.connection
+        active.connection = nil
+        active.outgoing.removeAll()
+        active.outboundBuffer.removeAll(keepingCapacity: false)
+        active.budget.reset()
+        active.sending = false
+        if active === run { preroll.reset() }
+        let waiters = active.finishWaiters
+        active.finishWaiters.removeAll()
+        let transcript = active.transcript
+        connection?.cancel()
+        waiters.forEach { $0.resume(returning: transcript) }
+        active.onTranscript = nil
+        active.onError = nil
+    }
+
+    var stalledError: Error { StreamingClientError.transportStalled(provider: "Speechmatics") }
+
+    func isCurrent(_ active: SpeechmaticsLiveRun) -> Bool { active === run && active.phase != .closed }
+
+    var isSessionReady: Bool { synchronized { isCurrent(run) && run.ready } }
+    /// Whether a graceful finish has begun on the current run.
+    var isFinishing: Bool { synchronized { isCurrent(run) && run.phase == .finishing } }
+    var audioFrameCount: Int { synchronized { run.sentAudioFrameCount } }
+
+    @discardableResult
+
+    func log(_ event: String) {
+        #if canImport(os) && !SPEAK_PORTABLE_CORE
+        SpeakLogger.logger(category: "SpeechmaticsLiveClient").info("\(event, privacy: .public)")
+        #endif
+    }
+}
+
+// MARK: - Protocol frames
+
+extension SpeechmaticsLiveClient {
+    static func webSocketURL() -> URL? {
+        var components = URLComponents()
+        components.scheme = "wss"
+        components.host = SpeechmaticsRealtime.webSocketHost
+        components.path = SpeechmaticsRealtime.webSocketPath
+        return components.url
+    }
+
+    /// The `StartRecognition` frame. `enable_partials` is what produces the
+    /// interim captions; `max_delay` is the documented latency/accuracy dial.
+    static func startRecognitionPayload(
+        language: String?,
+        accuracyModel: String,
+        sampleRate: Int,
+        systemLocaleIdentifier: String = Locale.current.identifier,
+        keywords: [String] = []
+    ) -> String? {
+        var config: [String: Any] = [
+            "language": SpeechmaticsRealtime.languageCode(
+                for: language, systemLocaleIdentifier: systemLocaleIdentifier
+            ),
+            "model": accuracyModel, "max_delay": 0.7, "enable_partials": true
+        ]
+        let terms = TranscriptionKeywordPolicy.bounded(keywords, count: 100, length: 100)
+        if !terms.isEmpty { config["additional_vocab"] = terms.map { ["content": $0] } }
+        let payload: [String: Any] = [
+            "message": "StartRecognition",
+            "audio_format": [
+                "type": "raw",
+                "encoding": "pcm_s16le",
+                "sample_rate": sampleRate
+            ],
+            "transcription_config": config
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// `EndOfStream.last_seq_no` is the number of `AddAudio` frames sent. The
+    /// server's own `AudioAdded` acknowledgements are taken as a floor so a
+    /// send that completed out of order cannot under-report the tail.
+    static func endOfStreamLastSequenceNumber(lastAcknowledged: Int, sentFrameCount: Int) -> Int {
+        max(lastAcknowledged, sentFrameCount, 0)
+    }
+
+    /// The `EndOfStream` frame, written directly (an integer and a fixed name
+    /// need no serialiser) in the same sorted-key form the other frames use.
+    static func endOfStreamPayload(lastSeqNo: Int) -> String {
+        "{\"last_seq_no\":\(lastSeqNo),\"message\":\"EndOfStream\"}"
+    }
+
+    /// Speechmatics rejects an `AddAudio` frame below its minimum size, so the
+    /// trailing partial chunk is zero-padded rather than dropped — otherwise
+    /// the last words of a recording never reach the service (issues #849, #949).
+    static func paddedFinalChunk(_ chunk: Data) -> Data {
+        guard chunk.count < SpeechmaticsRealtime.minimumChunkBytes else { return chunk }
+        var padded = chunk
+        padded.append(
+            contentsOf: repeatElement(UInt8(0), count: SpeechmaticsRealtime.minimumChunkBytes - chunk.count)
+        )
+        return padded
+    }
+
+    /// Splits a running buffer into frames Speechmatics will accept.
+    ///
+    /// The shared capture path converts one 4,096-frame tap buffer at a time,
+    /// which at a 44.1 kHz or 48 kHz input rate becomes well under 3,200 bytes
+    /// of 16 kHz PCM — under the service's minimum, so *every* ordinary frame
+    /// was being rejected, not just the tail. Chunks are therefore accumulated
+    /// and emitted only once they reach the minimum, in capture order; what is
+    /// left over stays buffered for the next chunk, and the terminal remainder
+    /// is padded and sent by `flushOutboundTail`.
+    ///
+    /// - Returns: The frames to send now, and the remainder to keep.
+    static func outboundFrames(appending chunk: Data, to buffer: Data) -> (frames: [Data], remainder: Data) {
+        var pending = buffer
+        pending.append(chunk)
+        guard pending.count >= SpeechmaticsRealtime.minimumChunkBytes else {
+            return ([], pending)
+        }
+        // One frame per flush keeps the send count — and so `last_seq_no` —
+        // proportional to the audio, and every frame is at or above the
+        // minimum by construction.
+        return ([pending], Data())
+    }
+}
+
+extension SpeechmaticsLiveClient: StreamingAudioReadyProviding {
+    public var isReadyForAudio: Bool { isSessionReady }
+}
+
+extension SpeechmaticsLiveClient: QueueConfinedLiveClient {}

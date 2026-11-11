@@ -31,136 +31,44 @@ let portableCoreBuild = true
 // no shipped binary contains the redirect's environment names.
 let testKeychainRedirect = ProcessInfo.processInfo.environment["JSTI_TEST_KEYCHAIN_REDIRECT"] == "1"
 
-// New SpeakCore files are portable by default. An Apple adapter must be
-// explicitly classified here, so future domain work reaches every platform.
+// New SpeakCore files are portable by default. Apple adapters are classified by
+// folder only: each feature keeps its Apple-only adapters in an `Apple/`
+// subfolder (SwiftUI views in AppleUI/, root helpers in AppleSupport/), so
+// adding an adapter or a portable file never edits this manifest.
 let appleCoreSources: [String] = [
-    "AlibabaSpeechConfigurationFields.swift",
-    "APIKeyGuideDisclosure.swift",
-    "AppGroupAvailability.swift",
-    "AppleSpeechAnalyzerLiveSession.swift",
-    "AppleSpeechAnalyzerTranscriber.swift",
-    "AppleSpeechAnalyzerWarmup.swift",
-    "AppleSpeechAssets.swift",
-    "AppleSpeechDependencyWait.swift",
-    "AppleSpeechDetector.swift",
-    "AppleSpeechModelPreparation.swift",
-    "AppleSpeechPreparationOperations.swift",
-    "AudioTapInstallation.swift",
-    "AutoCorrectionEngine.swift",
-    "AutomationIntentSupport.swift",
-    "AzureSpeechEndpointField.swift",
-    "BrandColors.swift",
-    "CaptureDisruptionObserver.swift",
-    "CaptureEndPointing.swift",
-    "CaptureHealth.swift",
-    "CaptureHealthReportBuilder.swift",
-    "CaptureOnboarding.swift",
-    "CaptureOnboardingStore.swift",
-    "CaptureSafetyClaim.swift",
-    "CaptureSelfTest.swift",
-    "CaptureWatchdogs.swift",
-    "CleanupModelDiscoveryView.swift",
-    "DeepgramBalanceClient.swift",
-    "DeprecatedCompatibility.swift",
-    "DeviceIdentityStore.swift",
-    "ElevenLabsBalanceClient.swift",
-    "FileProductAnalyticsStateStore.swift",
-    "HandsFreeAudioPreRollBuffer.swift",
-    "HandsFreeDictationApple.swift",
-    "KeyDerivation.swift",
-    "KeyboardDelivery.swift",
-    "KeyboardDeliveryPolicies.swift",
-    "KeyboardDeliveryStore.swift",
-    "KeyboardDictationMachine.swift",
-    "KeyboardDictationPreferences.swift",
-    "KeyboardDictationProfile.swift",
-    "KeyboardHandoff.swift",
-    "KeyboardHandoffModels.swift",
-    "KeyboardHandoffStartDiagnosis.swift",
-    "KeyboardHandoffStorage.swift",
-    "KeyboardHandoffTransitions.swift",
-    "KeyboardInstantDictation.swift",
-    "KeyboardTranscriptStreamer.swift",
-    "KeychainAccessibilityMigration.swift",
-    "KeychainSync.swift",
-    "LiveAudioConverterDrain.swift",
-    "LiveTranscriptionClientFactory.swift",
-    "Logging.swift",
-    "MacConnection.swift",
-    "OpenRouterAPIClient.swift",
-    "OpenRouterAudioBrowser.swift",
-    "OpenRouterAudioClient+Download.swift",
-    "OpenRouterAudioClient+Speech.swift",
-    "OpenRouterAudioFilter.swift",
-    "OpenRouterAudioModelDetail.swift",
-    "OpenRouterAudioPreview.swift",
-    "OpenRouterBalanceClient.swift",
-    "PaidAccess/PaidAccessHTTPClient.swift",
-    "PaidAccess/PaidAudioPayload.swift",
-    "PaidAccess/PaidStoreKitSync.swift",
-    "PersonalLexiconService.swift",
-    "ProductAnalytics.swift",
-    "ProductAnalyticsDimensions.swift",
-    "PronunciationManager.swift",
-    "ProviderBalanceStore.swift",
-    "ProviderBalanceTransport.swift",
-    "RecordingSoundPlayer.swift",
-    "ReleaseNotes.swift",
-    "ReleaseNotesContentView.swift",
-    "ReleaseTrainCompatibility.swift",
-    "RevAIBalanceClient.swift",
-    "SecureStorage.swift",
-    "SettingsSync.swift",
-    "SharedAudioImport.swift",
-    "SharedRecordingInbox.swift",
-    "SonioxTTSRealtime.swift",
-    "SpeakCLIManifest.swift",
-    "SpeechInsights/SpeechInsightsAggregate.swift",
-    "SpeechInsights/SpeechInsightsConfiguration.swift",
-    "SpeechInsights/SpeechInsightsEngine.swift",
-    "SpeechInsights/SpeechInsightsSummary.swift",
-    "SpeechInsights/SpeechInsightsSummaryBuilder.swift",
-    "SpeechInsights/SpeechSessionRecord.swift",
-    "SpeechInsights/SpeechTokenizer.swift",
-    "StartupDiagnostics.swift",
-    "TranscriptHandoffActivity.swift",
-    "TranscriptionActivityHandle.swift",
-    "TranscriptionActivityManager+ResultRow.swift",
-    "TranscriptionActivityManager.swift",
-    "TransportChannel.swift",
-    "TransportProtocol.swift",
-    "WatchCaptureImportJournal.swift",
-    "XAITTSRealtime.swift"
+    "Analytics/Apple",
+    "App/Apple",
+    "AppleSpeech",
+    "AppleSupport",
+    "AppleUI",
+    "Audio/Apple",
+    "Automation/Apple",
+    "Balance/Apple",
+    "Capture/Apple",
+    "Credentials/Apple",
+    "History/Apple",
+    "Keyboard/Apple",
+    "Live/Apple",
+    "LiveActivity/Apple",
+    "OpenRouter/Apple",
+    "PaidAccess/Apple",
+    "Recording/Apple",
+    "SpeechInsights",
+    "Sync/Apple",
+    "TTS/Apple",
+    "Vocabulary/Apple"
 ]
 
 // SpeakSync's schema, reconciliation and CloudKit Web Services transport are
-// portable by default. These files adapt the native CloudKit framework (and its
-// CryptoKit/Combine surfaces) and stay on Apple platforms.
+// portable by default. The AppleCloudKit folder adapts the native CloudKit
+// framework (and its CryptoKit/Combine surfaces) and stays on Apple platforms.
 let appleSyncSources: [String] = [
-    "CloudKitComparisonSyncTransport.swift",
-    "CloudKitHistorySyncTransport.swift",
-    "CloudKitKeySync.swift",
-    "CloudKitRecordFields.swift",
-    "ComparisonSyncEngine.swift",
-    "ComparisonSyncRecord.swift",
-    "CryptoKitSyncEnvelopeCryptography.swift",
-    "HistorySyncEngine.swift",
-    "HistorySyncPushRouting.swift",
-    "SyncConfiguration.swift",
-    "SyncContainerTransition.swift",
-    "SyncRecord.swift",
-    "SyncState.swift"
+    "AppleCloudKit"
 ]
 
 // Tests of those native adapters. Every other SpeakSync test runs on all platforms.
 let appleSyncTestSources: [String] = [
-    "CloudKitKeySyncTests.swift",
-    "ComparisonSyncTests.swift",
-    "HistorySyncEngineGuardTests.swift",
-    "HistorySyncSwitchTests.swift",
-    "HistorySyncEngineTests.swift",
-    "NativeRecordParityTests.swift",
-    "SyncContainerTransitionTests.swift"
+    "AppleCloudKit"
 ]
 
 let migrationArchiveTarget = Target.target(
@@ -207,7 +115,8 @@ let portablePackage = Package(
         // Release-train identity moved with WatchCore. Keep the native Watch
         // surfaces excluded from the portable graph as they were before the move.
         .target(name: "SpeakWatchCore", path: "Sources/SpeakWatchCore", exclude: [
-            "WatchCaptureProtocol.swift", "WatchComplicationState.swift", "WatchRecordingLifecycle.swift",
+            "WatchCaptureProtocol.swift", "WatchCaptureQueue.swift", "WatchCaptureQueueFile.swift", "WatchComplicationState.swift",
+            "WatchRecordingController.swift", "WatchRecordingLifecycle.swift",
             "WatchRecordingToggleSerialiser.swift", "WatchSharedContainer.swift"
         ]),
         .target(
@@ -315,6 +224,15 @@ if windowsTargetBuild {
                     .appendingPathComponent("Resources/Desktop/AppIcon.res").path])
             ]
         ),
+        // Native --self-test / --ui-smoke-test checks, kept out of the product
+        // library. SpeakWindows links them so the shipped binary is what CI and
+        // the bundle verifier qualify.
+        .target(
+            name: "CWindowsSelfTest",
+            dependencies: ["CWindowsSupport"],
+            publicHeadersPath: "include",
+            cxxSettings: windowsCxxSettings
+        ),
         // Same-user named pipes for `speak` and the app; kept apart so the CLI
         // links only kernel32 and advapi32.
         .target(
@@ -337,14 +255,19 @@ if windowsTargetBuild {
         .target(
             name: "SpeakWindowsPlatform",
             dependencies: [
-                "SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakFeedbackResources", "CWindowsSupport",
-                "CWindowsAutomation"
+                "SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakDesktopSync", "SpeakFeedbackResources",
+                "CWindowsSupport", "CWindowsAutomation"
             ]
+        ),
+        // The window bindings shared with Linux, compiled against CWindowsSupport.
+        .target(
+            name: "SpeakDesktopNativeBindings",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "CWindowsSupport"]
         ),
         .executableTarget(
             name: "SpeakWindows", dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakDesktopSync", "SpeakSync",
-                "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsAutomation"
+                "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsSelfTest", "CWindowsAutomation", "SpeakDesktopNativeBindings"
             ],
             // A windowed app: Start menu and startup launches open no console.
             // Swift emits `main`, so the CRT entry is mainCRTStartup, not WinMain.
@@ -355,14 +278,14 @@ if windowsTargetBuild {
         ),
         .testTarget(
             name: "SpeakAutomationKitTests",
-            dependencies: ["SpeakAutomationKit", "SpeakCore"],
+            dependencies: ["SpeakAutomationKit", "SpeakCore", "SpeakTestSupport"],
             path: "Tests/SpeakAutomationKitTests"
         ),
         .testTarget(
             name: "SpeakWindowsPlatformTests",
             dependencies: [
-                "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport",
-                "SpeakAutomationKit"
+                "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsSelfTest",
+                "SpeakTestSupport", "SpeakAutomationKit", "SpeakDesktopHost"
             ],
             resources: [.copy("Fixtures")]
         )
@@ -381,10 +304,14 @@ if !windowsTargetBuild {
         .target(name: "SpeakAutomationKit", dependencies: ["SpeakCore", "CLinuxAutomation"]),
         .target(name: "SpeakLinuxAutomation", dependencies: ["SpeakCore", "SpeakAutomationKit", "CLinuxAutomation"]),
         .executableTarget(name: "SpeakCLI", dependencies: ["SpeakCore", "SpeakAutomationKit"]),
-        .testTarget(name: "SpeakAutomationKitTests", dependencies: ["SpeakAutomationKit", "SpeakCore"]),
+        .testTarget(
+            name: "SpeakAutomationKitTests", dependencies: ["SpeakAutomationKit", "SpeakCore", "SpeakTestSupport"]
+        ),
         .testTarget(
             name: "SpeakLinuxAutomationTests",
-            dependencies: ["SpeakLinuxAutomation", "SpeakAutomationKit", "SpeakCore", "CLinuxAutomation"]
+            dependencies: [
+                "SpeakLinuxAutomation", "SpeakAutomationKit", "SpeakCore", "CLinuxAutomation", "SpeakTestSupport"
+            ]
         )
     ])
 }
@@ -427,6 +354,14 @@ if linuxTargetBuild {
             // libdl opens the whisper.cpp runtime (part of libc since glibc 2.34).
             linkerSettings: [.linkedLibrary("X11"), .linkedLibrary("dl"), .linkedLibrary("m")]
         ),
+        // The window --ui-smoke-test checks, kept out of the product library.
+        // SpeakLinux links them so the shipped binary is what CI qualifies.
+        .target(
+            name: "CLinuxSelfTest",
+            dependencies: ["CLinuxSupport", "CLinuxAdwaita", "CLinuxGio"],
+            publicHeadersPath: "include",
+            cSettings: [.define("_GNU_SOURCE")]
+        ),
         .target(
             name: "SpeakLinuxPlatform",
             dependencies: [
@@ -444,11 +379,16 @@ if linuxTargetBuild {
                 .product(name: "NIOSSL", package: "swift-nio-ssl")
             ]
         ),
+        // The window bindings shared with Windows, compiled against CLinuxSupport.
+        .target(
+            name: "SpeakDesktopNativeBindings",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "CLinuxSupport"]
+        ),
         .executableTarget(
             name: "SpeakLinux",
             dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
-                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync", "SpeakLinuxAutomation"
+                "CLinuxSupport", "CLinuxSelfTest", "SpeakDesktopSync", "SpeakSync", "SpeakLinuxAutomation", "SpeakDesktopNativeBindings"
             ],
             resources: [.copy("Resources/hicolor")]
         ),
@@ -456,7 +396,7 @@ if linuxTargetBuild {
             name: "SpeakLinuxPlatformTests",
             dependencies: [
                 "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakDesktopSync", "SpeakLinuxPlatform", "CLinuxSupport",
-                "SpeakTestSupport"
+                "CLinuxSelfTest", "SpeakTestSupport", "SpeakDesktopHost"
             ]
         ),
         .testTarget(
@@ -659,7 +599,7 @@ let package = portableCoreBuild ? portablePackage : Package(
         ),
         .testTarget(
             name: "SpeakAutomationKitTests",
-            dependencies: ["SpeakAutomationKit", "SpeakCore"]
+            dependencies: ["SpeakAutomationKit", "SpeakCore", "SpeakTestSupport"]
         )
     ]
 )

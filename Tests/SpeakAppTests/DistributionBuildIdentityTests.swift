@@ -112,7 +112,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
         // Besides its own sources, iOS compiles only the Mac's two non-UI Sentry
         // files, so both platforms share one crash-reporting contract.
         let sharedSentryFiles = [
-            "\"Sources/SpeakApp/SentryManager.swift\"", "\"Sources/SpeakApp/SentryEventScrubber.swift\""
+            "\"Sources/SpeakApp/Analytics/SentryManager.swift\"",
+            "\"Sources/SpeakApp/Analytics/SentryEventScrubber.swift\""
         ]
         XCTAssertTrue(iosTarget.contains("\"SpeakiOSApp/**\""))
         XCTAssertTrue(iosTarget.contains("dependencies: iosAppDependencies"))
@@ -368,12 +369,15 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/KeyboardRootView.swift"),
             encoding: .utf8
         )
-        let instantCoordinator = try String(
-            contentsOf: repositoryRoot.appendingPathComponent(
-                "Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift"
-            ),
-            encoding: .utf8
-        )
+        // Instant Dictation: readiness session, idle-audio engine, hand-off recording and profile support.
+        let instantCoordinator = try [
+            "Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift",
+            "Sources/SpeakiOS/Services/KeyboardReadinessAudioSession.swift",
+            "Sources/SpeakiOS/Services/KeyboardHandoffRecording.swift",
+            "Sources/SpeakiOS/Services/KeyboardHandoffProfileSupport.swift"
+        ].map {
+            try String(contentsOf: repositoryRoot.appendingPathComponent($0), encoding: .utf8)
+        }.joined(separator: "\n")
         let engine = try String(
             contentsOf: repositoryRoot.appendingPathComponent(
                 "JustSpeakKeyboard/KeyboardDictationEngine.swift"

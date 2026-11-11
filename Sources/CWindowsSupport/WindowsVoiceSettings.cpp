@@ -40,7 +40,7 @@ struct Dialog {
     std::vector<int> favoriteIndices;
 };
 
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 
 void layout(HWND window) {
     RECT bounds{};
@@ -93,15 +93,7 @@ void refreshFavorites(HWND window, Dialog &dialog) {
     EnableWindow(GetDlgItem(window, IDOK), dialog.config.pickerCallback ? executable : selected >= 0);
 }
 
-void refreshFont(HWND window, Dialog &dialog) {
-    HFONT font = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    if (!font) return;
-    for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    if (dialog.font) DeleteObject(dialog.font);
-    dialog.font = font;
-}
+void refreshFont(HWND window, Dialog &dialog) { jsti::chrome::refreshDialogFont(window, dialog.controls, dialog.font); }
 
 bool createControls(HWND window, Dialog &dialog) {
     auto add = [&](const wchar_t *kind, const wchar_t *text, DWORD style, int id) {
@@ -162,35 +154,17 @@ void apply(HWND window, Dialog &dialog) {
     close(window);
 }
 
+constexpr jsti::chrome::DialogFrame dialogFrame{
+    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, voiceID, IDOK};
+
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT themed = 0;
-    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
+    LRESULT handled = 0;
+    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
+                                            handled)) return handled;
     switch (message) {
     case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
-    case WM_GETMINMAXINFO: {
-        RECT frame{0, 0, scale(window, minimumClientWidth), scale(window, minimumClientHeight)};
-        AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {frame.right - frame.left, frame.bottom - frame.top};
-        return 0;
-    }
-    case WM_SIZE: layout(window); return 0;
-    case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
-        refreshFont(window, *dialog); layout(window); return 0;
-    }
-    case WM_ACTIVATE:
-        if (LOWORD(wparam) == WA_INACTIVE) { dialog->focus = GetFocus(); return 0; }
-        SetFocus(dialog->focus && IsChild(window, dialog->focus) ? dialog->focus : GetDlgItem(window, voiceID));
-        return 0;
-    case DM_GETDEFID: return MAKELRESULT(IDOK, DC_HASDEFID);
     case refreshPickerMessage: {
         Configuration updated;
         { std::lock_guard<std::mutex> lock(configurationMutex); updated = configuration; }
@@ -287,18 +261,7 @@ void jsti_show_voice_settings(HWND owner) {
         return;
     }
     { std::lock_guard<std::mutex> lock(configurationMutex); activeDialog = window; }
-    EnableWindow(owner, FALSE);
-    ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, voiceID));
-    MSG message{};
-    BOOL result = 1;
-    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    }
-    if (IsWindow(window)) close(window);
-    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
-    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
-    else if (result < 0) jsti_window_update(jsti::systemError("Reading voice output messages").c_str(), nullptr, -1);
+    jsti::chrome::runModalDialog(owner, window, voiceID, close, "voice output");
 }
 
 int32_t jsti_window_set_voice_picker(const char *const *names, const char *const *ids,

@@ -27,6 +27,15 @@ final class AutomationTransportTests: XCTestCase {
         XCTAssertLessThanOrEqual(AutomationClientTiming.responseGracePeriod, 2)
     }
 
+    func testTransportTimeout_isTheCommandDeadlinePlusGraceInEveryUnit() {
+        let request = AutomationRequest(command: .status, timeout: 2.0004)
+        XCTAssertEqual(AutomationClientTiming.transportTimeout(for: request), 3.0004, accuracy: 1e-9)
+        // Rounded up: a native transport must never give up before the app does.
+        XCTAssertEqual(AutomationClientTiming.transportTimeoutMilliseconds(for: request), 3_001)
+        let whole = AutomationRequest(command: .status, timeout: 30)
+        XCTAssertEqual(AutomationClientTiming.transportTimeoutMilliseconds(for: whole), 31_000)
+    }
+
     func testResponse_roundTripsWithISO8601Dates() throws {
         let entry = AutomationHistoryEntry(
             id: "H1",

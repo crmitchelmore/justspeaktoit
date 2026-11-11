@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { canAffect, classifyFailure, prNumber, redEpisode, revertedShas, selectCulprits, shouldRevert, TRAILER } from '../auto-revert.mjs';
+import { canAffect, classifyFailure, prNumber, redEpisode, revertedShas, selectCulprits, shouldRevert, TRAILER } from '../ci/auto-revert.mjs';
+import { routeMatches } from '../ci/routing.mjs';
 
-const script = fileURLToPath(new URL('../auto-revert.mjs', import.meta.url));
+const script = fileURLToPath(new URL('../ci/auto-revert.mjs', import.meta.url));
 const workflow = readFileSync(new URL('../../.github/workflows/auto-revert.yml', import.meta.url), 'utf8');
 const sha = n => String(n).repeat(40).slice(0, 40);
 
@@ -22,13 +23,25 @@ test('test and journey failures are re-run once; lint, build and API failures ar
     assert.equal(classifyFailure([job('Build & Test (macOS Debug)', [{ name: 'Test (Debug)', conclusion: 'failure' }])]).deterministic, false);
     assert.deepEqual(classifyFailure([gate, { name: 'Build & Test (macOS)', conclusion: 'failure' }]).failed, [],
         'aggregates name no cause');
+    // ci.yml's lanes are reusable workflows, so their jobs carry the lane's name first.
+    assert.equal(classifyFailure([job('macOS Release / Public API compatibility')]).deterministic, true);
+    assert.deepEqual(classifyFailure([job('iOS / Build iOS Library', [{ name: 'Test iOS App', conclusion: 'failure' }])]),
+        { failed: ['iOS / Build iOS Library'], deterministic: false });
 });
 
+const apple = file => routeMatches('apple', file);
+
 test('a commit can only be blamed by a job that reads its files', () => {
-    assert.equal(canAffect(['Docs/x.md', 'android/a.kt'], ['Build iOS']), false);
-    assert.equal(canAffect(['Sources/SpeakCore/A.swift'], ['Build iOS']), true);
-    assert.equal(canAffect(['Sources/SpeakCore/A.swift'], ['Paid Access Worker']), false);
-    assert.equal(canAffect(['workers/paid-access/src/a.ts'], ['Paid Access Worker']), true);
+    assert.equal(canAffect(['Docs/x.md', 'android/a.kt'], ['Build iOS'], apple), false);
+    assert.equal(canAffect(['README.md', 'landing-page/a.html', '.github/workflows/android.yml'], ['Lint'], apple), false);
+    assert.equal(canAffect(['Sources/SpeakCore/A.swift'], ['Build iOS'], apple), true);
+    assert.equal(canAffect(['Sources/SpeakCore/A.swift'], ['Paid Access Worker'], apple), false);
+    assert.equal(canAffect(['workers/paid-access/src/a.ts'], ['Paid Access Worker'], apple), true);
+});
+
+test('verify runs from a lone copy of the script, so it imports no sibling module statically', () => {
+    const source = readFileSync(new URL('../ci/auto-revert.mjs', import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /^import .* from '\.\.?\//m);
 });
 
 test('suspects narrow to relevant commits, fall back to all, and skip earlier reverts', () => {
@@ -38,9 +51,9 @@ test('suspects narrow to relevant commits, fall back to all, and skip earlier re
         { sha: sha(3), message: `revert: auto-revert #1\n\n${TRAILER} ${sha(4)}`, files: ['Sources/B.swift'] },
         { sha: sha(4), message: 'feat: z (#1)', files: ['Sources/B.swift'] },
     ];
-    assert.deepEqual(selectCulprits(commits, ['Build iOS']), [sha(2)]);
-    assert.deepEqual(selectCulprits(commits.slice(0, 1), ['Build iOS']), [sha(1)], 'nothing relevant: blame every suspect');
-    assert.deepEqual(selectCulprits(commits.slice(1, 2), ['Lint'], new Set([sha(2)])), [], 'already reverted later on main');
+    assert.deepEqual(selectCulprits(commits, ['Build iOS'], apple), [sha(2)]);
+    assert.deepEqual(selectCulprits(commits.slice(0, 1), ['Build iOS'], apple), [sha(1)], 'nothing relevant: blame every suspect');
+    assert.deepEqual(selectCulprits(commits.slice(1, 2), ['Lint'], apple, new Set([sha(2)])), [], 'already reverted later on main');
     assert.deepEqual(revertedShas(`x\n\n${TRAILER} ${sha(5)} ${sha(6)}\n`), [sha(5), sha(6)]);
     assert.equal(prNumber('feat: y (#1234)'), '1234');
     assert.equal(prNumber('feat: y'), null);
@@ -109,7 +122,7 @@ test('the gate rejects any extra change, a missing trailer or a non-main commit'
 
 test('the workflow keeps its trust boundary', () => {
     assert.match(workflow, /^  gate:\n    name: CI Gate\n    if: github\.event_name == 'workflow_dispatch' && startsWith\(github\.ref, 'refs\/heads\/auto-revert\/'\)$/m);
-    assert.match(workflow, /git show origin\/main:scripts\/auto-revert\.mjs/, 'the verifier comes from main');
+    assert.match(workflow, /git show origin\/main:scripts\/ci\/auto-revert\.mjs/, 'the verifier comes from main');
     const gate = workflow.split('\n  gate:\n')[1];
     assert.doesNotMatch(gate, /permissions:\s*\n\s+contents: write|secrets\./);
     assert.match(workflow, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);

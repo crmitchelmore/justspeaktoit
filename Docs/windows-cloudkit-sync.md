@@ -197,13 +197,15 @@ What remains:
   resolves the build-time token; `DesktopLoopbackListener` and
   `DesktopCloudSyncSignIn.awaitCallback` wait for the sign-in callback on a
   host's listener, and `evaluateCallback` decides which request it is.
-- `Sources/SpeakDesktopHost/DesktopHostCloudSync.swift` (portable): the flow
+- `Sources/SpeakDesktopHost/History/DesktopHostCloudSync.swift` (portable): the flow
   both hosts run, generic over the host platform: the settings' actions
   (Apply, Sign in, Sign out, Sync now), the loopback sign-in, the periodic
   pass, `DesktopCloudSyncWork` ownership for shutdown, status lines and the
   controller's synced-History presentation. A host supplies only
   `DesktopHostCloudSyncNative`: how the settings show state, the listener,
   the browser launch, its origin platform and where its choices live.
+- `Sources/SpeakDesktopSync/DesktopNativeEnvelopeCryptography.swift`: the
+  envelope adapter both desktop hosts share over their identical crypto C ABI.
 - `Sources/SpeakWindowsPlatform/WindowsCloudKitNative.swift` with
   `Sources/CWindowsSupport/WindowsHTTP.cpp`, `WindowsLoopback.cpp` and
   `WindowsCrypto.cpp`: the WinHTTP transport, the 127.0.0.1 listener and the

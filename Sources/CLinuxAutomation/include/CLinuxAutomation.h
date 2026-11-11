@@ -24,6 +24,16 @@ int jsti_automation_listener_status(JSTIAutomationListener *listener);
 /* Call only after accept and every connection worker have joined. */
 void jsti_automation_release(JSTIAutomationListener *listener);
 int jsti_automation_connect(const char *path, uint64_t deadline, JSTIAutomationConnection **output);
+/* One client request's cancellation. Signalling interrupts that request's
+ * connect, read and write with JSTI_AUTOMATION_CANCELLED; it is nonblocking,
+ * idempotent and never touches the connection's descriptor. */
+typedef struct JSTIAutomationCancel JSTIAutomationCancel;
+JSTIAutomationCancel *jsti_automation_cancel_create(void);
+void jsti_automation_cancel_signal(JSTIAutomationCancel *cancel);
+/* Call only after every connection using it is closed and no signal can follow. */
+void jsti_automation_cancel_release(JSTIAutomationCancel *cancel);
+int jsti_automation_connect_cancellable(
+    const char *path, uint64_t deadline, JSTIAutomationCancel *cancel, JSTIAutomationConnection **output);
 int jsti_automation_read(JSTIAutomationConnection *connection, void *bytes, size_t count, uint64_t deadline);
 int jsti_automation_write(JSTIAutomationConnection *connection, const void *bytes, size_t count, uint64_t deadline);
 void jsti_automation_close(JSTIAutomationConnection *connection);

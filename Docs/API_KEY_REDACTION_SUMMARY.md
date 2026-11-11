@@ -17,7 +17,7 @@ Implemented automatic header redaction at the point where debug snapshots are cr
 
 ## Changes Made
 
-### 1. New File: `Sources/SpeakCore/SensitiveHeaderRedactor.swift`
+### 1. New File: `Sources/SpeakCore/History/SensitiveHeaderRedactor.swift`
 
 Created a utility enum with three key functions:
 
@@ -36,7 +36,7 @@ Created a utility enum with three key functions:
 - Special handling for Bearer tokens: `Bearer sk-...xyz9`
 - Full redaction for short values (<10 chars): `[REDACTED]`
 
-### 2. Modified: `Sources/SpeakCore/APIKeyValidationResult.swift`
+### 2. Modified: `Sources/SpeakCore/Credentials/APIKeyValidationResult.swift`
 
 Updated `APIKeyValidationDebugSnapshot.init()` to automatically redact headers:
 
@@ -57,7 +57,7 @@ public init(
 
 **Impact**: All existing code creating debug snapshots now gets automatic redaction with zero code changes required.
 
-### 3. Modified: `Sources/SpeakApp/SettingsView.swift`
+### 3. Modified: `Sources/SpeakApp/Views/Settings/SettingsView.swift`
 
 Enhanced `headersSection()` view to show visual indicators for redacted values:
 
@@ -199,8 +199,8 @@ Potential improvements for future PRs:
 **Commit message**: `fix: redact API keys in debug request/response display`
 
 **Files changed**:
-- `Sources/SpeakCore/SensitiveHeaderRedactor.swift` (new)
-- `Sources/SpeakCore/APIKeyValidationResult.swift` (modified)
-- `Sources/SpeakApp/SettingsView.swift` (modified)
+- `Sources/SpeakCore/History/SensitiveHeaderRedactor.swift` (new)
+- `Sources/SpeakCore/Credentials/APIKeyValidationResult.swift` (modified)
+- `Sources/SpeakApp/Views/Settings/SettingsView.swift` (modified)
 - `Tests/SpeakAppTests/SensitiveHeaderRedactorTests.swift` (new)
 - `SECURITY.md` (modified)

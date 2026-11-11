@@ -1,0 +1,239 @@
+{
+  "_comment": "Paid settlement wire contract v1, shared by the Worker (test/settlement-wire.test.ts) and SpeakCore (PaidSettlementWireFixtureTests). Add a new file for a new contract version; never edit a released version's meaning.",
+  "contract": "paid-settlement",
+  "version": 1,
+  "requestHeader": {
+    "name": "X-Paid-Settlement-Contract",
+    "value": "1"
+  },
+  "errors": [
+    {
+      "name": "an operation whose outcome is unknown",
+      "status": 409,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "outcome_unknown",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "operationOutcome.unknown",
+      "permitsFallback": false
+    },
+    {
+      "name": "an operation still settling",
+      "status": 409,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "settlement_pending",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "operationOutcome.settlementPending",
+      "permitsFallback": false
+    },
+    {
+      "name": "an operation still running",
+      "status": 409,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "request_in_progress",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "operationOutcome.inProgress",
+      "permitsFallback": false
+    },
+    {
+      "name": "an operation proven never dispatched",
+      "status": 409,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "request_not_started",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "requestNotStarted",
+      "permitsFallback": true
+    },
+    {
+      "name": "an operation already retained",
+      "status": 409,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "already_processed",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "alreadyProcessed",
+      "permitsFallback": false
+    },
+    {
+      "name": "a key reused for another operation",
+      "status": 409,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "conflict",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "operationOutcome.unknown",
+      "permitsFallback": false
+    },
+    {
+      "name": "a submitted request that lost its session",
+      "status": 401,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "unauthorized",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "operationOutcome.unknown",
+      "permitsFallback": false
+    },
+    {
+      "name": "a submitted request whose upstream timed out",
+      "status": 504,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "upstream_timeout",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "operationOutcome.unknown",
+      "permitsFallback": false
+    },
+    {
+      "name": "allowance exhausted before dispatch",
+      "status": 429,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "quota_exceeded",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "quotaExceeded",
+      "permitsFallback": true
+    },
+    {
+      "name": "no active subscription",
+      "status": 402,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "entitlement_required",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "entitlementRequired",
+      "permitsFallback": true
+    },
+    {
+      "name": "paid routing switched off, or a client without the contract header",
+      "status": 503,
+      "submitted": true,
+      "body": {
+        "error": {
+          "code": "paid_routing_disabled",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "paidRoutingDisabled",
+      "permitsFallback": true
+    },
+    {
+      "name": "an unsigned request",
+      "status": 401,
+      "submitted": false,
+      "body": {
+        "error": {
+          "code": "unauthorized",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "notSignedIn",
+      "permitsFallback": true
+    },
+    {
+      "name": "too many live sessions",
+      "status": 429,
+      "submitted": false,
+      "body": {
+        "error": {
+          "code": "too_many_sessions",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "tooManySessions",
+      "permitsFallback": false
+    },
+    {
+      "name": "an unexpected server failure",
+      "status": 500,
+      "submitted": false,
+      "body": {
+        "error": {
+          "code": "internal_error",
+          "message": "Synthetic fixture message.",
+          "correlation_id": "fixture-correlation"
+        }
+      },
+      "client": "serviceUnavailable",
+      "permitsFallback": true
+    }
+  ],
+  "retainedPhases": [
+    {
+      "phase": "reserved",
+      "code": "request_in_progress",
+      "legacyCode": "already_processed"
+    },
+    {
+      "phase": "provider_started",
+      "code": "request_in_progress",
+      "legacyCode": "already_processed"
+    },
+    {
+      "phase": "outcome_unknown",
+      "code": "outcome_unknown",
+      "legacyCode": "already_processed"
+    },
+    {
+      "phase": "ledger_pending",
+      "code": "settlement_pending",
+      "legacyCode": "already_processed"
+    },
+    {
+      "phase": "settled",
+      "code": "already_processed",
+      "legacyCode": "already_processed"
+    },
+    {
+      "phase": "not_started",
+      "code": "request_not_started",
+      "legacyCode": "request_not_started"
+    }
+  ]
+}

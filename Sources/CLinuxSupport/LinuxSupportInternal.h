@@ -93,7 +93,6 @@ void jsti_troubleshooting_open(struct _GtkWindow *owner);
 void jsti_troubleshooting_close(void);
 int32_t jsti_troubleshooting_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 void jsti_show_voice_sources(struct _GtkWindow *owner, const char *record, const char *history);
-int32_t jsti_voice_sources_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 void jsti_voice_sources_close(void);
 guint64 jsti_voice_provider_generation(void);
 gboolean jsti_voice_provider_enter(guint64 generation);
@@ -184,7 +183,7 @@ int32_t jsti_hud_self_test(char *error, size_t capacity);
  * Main thread. `state` is JSTI_STATE_*; `summary` the Sessions, Recording
  * Time and Spend line. */
 void jsti_tray_start(void);
-/* LinuxWindow.c: 1 Start or Stop Recording (Cancel while working), 2 Open,
+/* LinuxWindowActions.c: 1 Start or Stop Recording (Cancel while working), 2 Open,
  * 3 Settings, 4 Quit. */
 void jsti_window_tray_command(int command);
 void jsti_tray_set_state(int32_t state, const char *summary);

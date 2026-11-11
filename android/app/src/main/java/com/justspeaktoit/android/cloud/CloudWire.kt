@@ -4,7 +4,9 @@ import com.justspeaktoit.android.dictation.DictationFailure
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.SocketTimeoutException
 import java.util.Locale
 
@@ -87,6 +89,27 @@ object CloudWire {
         block().trim()
     } catch (e: JSONException) {
         throw CloudException(DictationFailure.Server, "Unexpected response", e)
+    }
+
+    /** Transcripts and cleanups are small; a larger body is not a response this app asked for. */
+    const val MAX_RESPONSE_BYTES = 1024 * 1024
+
+    /**
+     * Reads a UTF-8 response body of at most [limit] bytes, so a misbehaving or hostile endpoint
+     * cannot exhaust memory. @throws CloudException when the body is larger.
+     */
+    fun readBody(input: InputStream, limit: Int = MAX_RESPONSE_BYTES): String {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(8 * 1024)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            if (out.size() + read > limit) {
+                throw CloudException(DictationFailure.Server, "Response larger than $limit bytes")
+            }
+            out.write(buffer, 0, read)
+        }
+        return out.toString(Charsets.UTF_8.name())
     }
 
     fun failureForStatus(status: Int): DictationFailure = when (status) {

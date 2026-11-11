@@ -1,16 +1,19 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
+import SpeakDesktopHost
 import CLinuxSupport
 
 /// General > "System resources in use" (issue #1473): reports the registry's
 /// holds to the GTK group and audits the microphone against the sound server.
 /// Returns false for other events.
-func linuxSystemResourcesEvent(_ event: Int, value: String, holder: LinuxEventContext) -> Bool {
+func linuxSystemResourcesEvent(
+    _ event: DesktopNativeWindowEvent, value: String, holder: LinuxEventContext
+) -> Bool {
     switch event {
-    case Int(JSTI_EVENT_SYSTEM_RESOURCE_RELEASE):
+    case .systemResourceRelease:
         Task { await DesktopSystemResources.release(value) }
-    case Int(JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL):
+    case .systemResourcesReleaseAll:
         Task {
             let count = await DesktopSystemResources.releaseEverything()
             LinuxSystemResources.log("User released everything: \(count) holds")
@@ -42,7 +45,7 @@ enum LinuxSystemResources {
     }
 
     static func show(_ presentation: DesktopSystemResources.Presentation) {
-        let strings = LinuxWindow.Strings()
+        let strings = DesktopNativeStrings()
         let rows = presentation.rows.map { row in
             JSTISystemResourceRow(
                 id: strings.add(row.id), title: strings.add(row.title), reason: strings.add(row.reason),

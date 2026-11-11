@@ -139,7 +139,7 @@ extension AppleModelStartupTests {
         transcriber.permissionCheck = { true }
         transcriber.modelID = AppleLocalModels.legacySpeechModelID
         transcriber.requiresStrictOnDeviceRecognition = true
-        transcriber.injectedLegacyCapability = { .unavailable }
+        transcriber.legacyRecognition.injectedCapability = { .unavailable }
         transcriber.legacyStart = { XCTFail("Strict capture must not begin an unsupported recognizer") }
 
         do {
@@ -165,7 +165,7 @@ extension AppleModelStartupTests {
         transcriber.modelID = AppleLocalModels.speechTranscriberModelID
         transcriber.requiresStrictOnDeviceRecognition = true
         transcriber.analyzerStart = { throw AppleLocalModelError.modelAssetsUnavailable }
-        transcriber.injectedLegacyCapability = { .unavailable }
+        transcriber.legacyRecognition.injectedCapability = { .unavailable }
         transcriber.legacyStart = { XCTFail("Unsupported legacy recognition must not start") }
 
         do {
@@ -190,12 +190,12 @@ extension AppleModelStartupTests {
         transcriber.requiresStrictOnDeviceRecognition = true
         var capability: AppleLocalRecognitionCapability = .available
         var capabilityChecks = 0
-        transcriber.injectedLegacyCapability = {
+        transcriber.legacyRecognition.injectedCapability = {
             capabilityChecks += 1
             return capability
         }
         var callbacks: [(LegacyAppleRecognitionUpdate?, Error?) -> Void] = []
-        transcriber.legacyRecognitionStart = { callback in
+        transcriber.legacyRecognition.recognitionStart = { callback in
             callbacks.append(callback)
             return LegacyAppleRecognitionTask(endAudio: {}, finish: {}, cancel: {})
         }
@@ -217,7 +217,7 @@ extension AppleModelStartupTests {
         guard case iOSTranscriptionError.offlineLocalRecognitionUnavailable = error else {
             return XCTFail("Unexpected error: \(error)")
         }
-        XCTAssertTrue(TranscriberCoordinator.requiresControlledStop(error))
+        XCTAssertTrue(ForegroundCaptureFinalisation.requiresControlledStop(error))
         transcriber.cancel()
     }
 

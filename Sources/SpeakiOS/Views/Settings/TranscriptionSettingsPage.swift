@@ -224,7 +224,7 @@ struct TranscriptionSettingsPage: View {
         HStack {
             Text(name)
             Spacer()
-            IOSModelCredentialStatusView(
+            ModelCredentialStatusView(
                 availability: ModelCredentialResolver.availability(
                     for: id,
                     purpose: purpose,

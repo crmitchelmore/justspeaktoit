@@ -599,7 +599,7 @@ describe('metering boundary regressions', () => {
         await env.DB.prepare('DELETE FROM request_claims WHERE user_id = ?1').bind(userId).run();
       } else {
         await env.DB.prepare('UPDATE request_claims SET expires_at = 1 WHERE user_id = ?1').bind(userId).run();
-        if (condition === 'pruned') await new Repository(env.DB).pruneExpiredRequestClaims(2);
+        if (condition === 'pruned') await new Repository(env.DB).usage.pruneExpiredRequestClaims(2);
       }
       const response = await postProcess(token, { operation: 'post_processing', text: 'same' });
       expect(response.status).toBe(409);

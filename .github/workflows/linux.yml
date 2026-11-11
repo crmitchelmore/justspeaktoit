@@ -31,6 +31,7 @@ on:
       - Sources/SpeakLinuxPlatform/**
       - Sources/SpeakLinuxWebSocket/**
       - Sources/CLinuxSupport/**
+      - Sources/CLinuxSelfTest/**
       - Sources/CLinuxSystem/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
@@ -43,9 +44,15 @@ on:
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakPortableTests/**
       - scripts/linux-*
+      - scripts/linux/**
       - scripts/linux-local-runtime/**
       - scripts/windows-local-runtime/**
       - Sources/CWindowsSupport/whisper-cpp/**
+      # Desktop ABI headers CLinuxSupport includes from CWindowsSupport.
+      - Sources/CWindowsSupport/include/VoiceSources.h
+      - Sources/CWindowsSupport/include/VoiceAudioCodec.h
+      - Sources/CWindowsSupport/include/VoiceCredentials.h
+      - Sources/CWindowsSupport/include/LocalCleanup.h
       - scripts/typecheck-windows-swift.sh
       - scripts/verify-portable-core-boundary.py
       - packaging/linux/**
@@ -168,7 +175,7 @@ jobs:
         env:
           JSTI_UI_SNAPSHOT_PATH: ${{ runner.temp }}/linux-window.png
           JSTI_UI_SCREENSHOT_DIR: ${{ runner.temp }}/linux-ui-screenshots
-        run: scripts/linux-desktop-checks.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
+        run: scripts/linux/linux-desktop-checks.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
 
       - name: Transcribe the JFK sample on-device with the pinned tiny model
         timeout-minutes: 8
@@ -177,10 +184,10 @@ jobs:
             "$JSTI_WHISPER_TEST_AUDIO" --expect 'ask not what your country can do for you'
 
       - name: GTK window smoke test on headless Wayland (Weston)
-        run: scripts/linux-wayland-smoke.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
+        run: scripts/linux/linux-wayland-smoke.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
 
       - name: Keyring, PipeWire capture, portal and X11 paste integration
-        run: scripts/linux-integration-checks.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
+        run: scripts/linux/linux-integration-checks.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
 
       - name: Type-check the Windows Swift targets against the shared host
         env:

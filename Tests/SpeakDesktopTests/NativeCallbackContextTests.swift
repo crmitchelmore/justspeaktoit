@@ -141,3 +141,80 @@ private final class AttachLog: @unchecked Sendable {
         return !refuse
     }
 }
+
+final class NativeCallbackSlotReclamationTests: XCTestCase {
+    private final class Target {}
+
+    func testQuiescentDetachFreesEachRegistrationAtOnce() {
+        let slot = NativeCallbackSlot<Target>(retiredLimit: 1, attach: { _ in true }, detach: { .quiescent })
+        let target = Target()
+        weak var firstBox: NativeCallbackContext<Target>?
+        for _ in 0..<10 {
+            do {
+                let registration = slot.begin(target)
+                XCTAssertNotNil(registration, "quiescent detaches never accumulate retired boxes")
+                firstBox = firstBox ?? registration
+                if let registration { XCTAssertTrue(slot.end(registration)) }
+            }
+        }
+        XCTAssertEqual(slot.retiredCount, 0)
+        XCTAssertNil(firstBox, "the native retain was balanced once native code was quiescent")
+    }
+
+    func testStoppedDetachKeepsBoundedTombstonesUntilReclaimed() throws {
+        let slot = NativeCallbackSlot<Target>(retiredLimit: 2, attach: { _ in true }, detach: { .stopped })
+        weak var weakTarget: Target?
+        weak var retiredBox: NativeCallbackContext<Target>?
+        var pointer: UnsafeMutableRawPointer?
+        do {
+            let target = Target()
+            weakTarget = target
+            let first = try XCTUnwrap(slot.begin(target))
+            retiredBox = first
+            pointer = first.pointer
+            XCTAssertNotNil(slot.begin(target), "replacing retires the previous registration")
+        }
+        XCTAssertEqual(slot.retiredCount, 1)
+        XCTAssertNotNil(retiredBox, "a late callback may still read a stopped box")
+        XCTAssertNil(NativeCallbackContext<Target>.resolve(pointer), "and finds nothing")
+
+        XCTAssertNil(slot.begin(Target()), "at the bound a new registration is refused, not leaked")
+        XCTAssertEqual(slot.retiredCount, 2)
+        XCTAssertNil(weakTarget, "retired boxes hold no value")
+
+        slot.reclaimRetired()
+        XCTAssertEqual(slot.retiredCount, 0)
+        XCTAssertNil(retiredBox, "reclaiming frees the boxes once native code confirms quiescence")
+        XCTAssertNotNil(slot.begin(Target()))
+    }
+
+    func testRefusedDetachKeepsTheRegistrationCurrent() throws {
+        var outcome = NativeCallbackDetach.refused
+        let slot = NativeCallbackSlot<Target>(attach: { _ in true }, detach: { outcome })
+        let target = Target()
+        let registration = try XCTUnwrap(slot.begin(target))
+        XCTAssertFalse(slot.end(registration))
+        XCTAssertTrue(NativeCallbackContext<Target>.resolve(registration.pointer) === target)
+        XCTAssertNil(slot.begin(Target()), "a registration that cannot be detached is not replaced")
+        outcome = .quiescent
+        XCTAssertTrue(slot.end(registration))
+        XCTAssertEqual(slot.retiredCount, 0)
+    }
+
+    func testRetireFreesOnlyAQuiescentRegistration() {
+        weak var stoppedBox: NativeCallbackContext<Target>?
+        weak var quiescentBox: NativeCallbackContext<Target>?
+        let stopped = NativeCallbackContext(Target())
+        do {
+            stoppedBox = stopped
+            XCTAssertFalse(stopped.retire(nativeQuiescent: false))
+            let quiescent = NativeCallbackContext(Target())
+            quiescentBox = quiescent
+            XCTAssertTrue(quiescent.retire(nativeQuiescent: true))
+        }
+        XCTAssertNil(quiescentBox)
+        XCTAssertNotNil(stoppedBox)
+        XCTAssertNil(stopped.value)
+        stopped.release()
+    }
+}

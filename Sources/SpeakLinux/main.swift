@@ -74,19 +74,20 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
         _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
         LinuxWindow.voiceOutput(await controller.voiceOutputSettings())
-        LinuxWindow.voiceSources(context: Unmanaged.passUnretained(holder).toOpaque())
+        LinuxWindow.voiceSources(context: holder.callbackContext)
         _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
         await controller.configureLocalModels()
-        await controller.configureLocalCleanup(presenter: Unmanaged.passUnretained(holder).toOpaque())
+        await controller.configureLocalCleanup(presenter: holder.callbackContext)
         try LinuxWindow.configureModelPreferences(await controller.preferredModelIDs())
         return await controller.selectedIndex()
     }
     LinuxCloudSync.configure(holder)
-    let context = Unmanaged.passUnretained(holder).toOpaque()
+    let context = holder.callbackContext
     let windowFailure = runGTKEventLoop(selected: selected, context: context, holder: holder)
     LinuxWindow.endVoiceProviderCallbacks(providerCallbacks)
     try shutDownWindow(controller: controller, holder: holder)
-    withExtendedLifetime(holder) {}
+    // Every native registration is cleared; a late callback finds nothing.
+    holder.callbacks.unregister()
     if let windowFailure { throw windowFailure }
     if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
 }
@@ -120,7 +121,7 @@ private func shutDownWindow(controller: LinuxAppController, holder: LinuxEventCo
 /// raised while marshalling arguments or running `jsti_window_run` instead
 /// of throwing, so the caller can still perform its own cleanup first.
 private func runGTKEventLoop(selected: Int, context: UnsafeMutableRawPointer, holder: LinuxEventContext) -> Error? {
-    let strings = LinuxWindow.Strings()
+    let strings = DesktopNativeStrings()
     let rows = LinuxWindow.modelRows(strings)
     var arguments = CommandLine.arguments.map { strdup($0) }
     defer { arguments.forEach { free($0) } }

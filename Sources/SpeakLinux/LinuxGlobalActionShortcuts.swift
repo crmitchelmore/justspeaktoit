@@ -137,30 +137,41 @@ final class LinuxGlobalActionShortcuts: @unchecked Sendable {
 
 private final class LinuxNativeActionGroup: @unchecked Sendable {
     private let handle: OpaquePointer
-    private let callback: LinuxGlobalActionCallback
+    private let callbacks: NativeCallbackContext<LinuxGlobalActionCallback>
 
     init(_ entries: [DesktopLinuxGlobalShortcutPlan.Entry], callback: LinuxGlobalActionCallback) throws {
-        self.callback = callback
+        let callbacks = NativeCallbackContext(callback)
         let rows = entries.map {
             JSTIX11ActionShortcut(keysym: $0.chord.keysym, modifiers: $0.chord.modifiers, identifier: $0.identifier)
         }
         var handle: OpaquePointer?
-        try LinuxNative.call { error, capacity in
-            handle = rows.withUnsafeBufferPointer {
-                jsti_x11_action_shortcuts_start(
-                    $0.baseAddress, $0.count, linuxGlobalActionPressed,
-                    Unmanaged.passUnretained(callback).toOpaque(), error, capacity
-                )
+        do {
+            try LinuxNative.call { error, capacity in
+                handle = rows.withUnsafeBufferPointer {
+                    jsti_x11_action_shortcuts_start(
+                        $0.baseAddress, $0.count, linuxGlobalActionPressed, callbacks.pointer, error, capacity
+                    )
+                }
+                return handle == nil ? -1 : 0
             }
-            return handle == nil ? -1 : 0
+        } catch {
+            callbacks.release()
+            throw error
         }
-        guard let handle else { throw DesktopHostError(message: "X11 returned no action shortcut listener.") }
+        guard let handle else {
+            callbacks.release()
+            throw DesktopHostError(message: "X11 returned no action shortcut listener.")
+        }
         self.handle = handle
+        self.callbacks = callbacks
     }
 
     func result(_ row: Int) throws {
         try LinuxNative.call { jsti_x11_action_shortcuts_result(handle, row, $0, $1) }
     }
 
-    func close() { withExtendedLifetime(callback) { jsti_x11_action_shortcuts_stop(handle) } }
+    func close() {
+        jsti_x11_action_shortcuts_stop(handle)
+        callbacks.unregister()
+    }
 }

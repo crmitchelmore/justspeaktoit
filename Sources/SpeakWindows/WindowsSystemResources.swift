@@ -2,16 +2,19 @@ import Foundation
 import CWindowsSupport
 import SpeakCore
 import SpeakDesktop
+import SpeakDesktopHost
 
 /// General > App behaviour > "System resources in use" (issue #1473): reports
 /// the registry's holds to the native window, audits the microphone against
 /// WASAPI's audio sessions and holds the dictation shortcut's registration.
 /// Returns false for other events.
-func windowsSystemResourcesEvent(_ event: Int32, value: String, holder: WindowsEventContext) -> Bool {
+func windowsSystemResourcesEvent(
+    _ event: DesktopNativeWindowEvent, value: String, holder: WindowsEventContext
+) -> Bool {
     switch event {
-    case Int32(JSTI_EVENT_SYSTEM_RESOURCE_RELEASE):
+    case .systemResourceRelease:
         Task { await DesktopSystemResources.release(value) }
-    case Int32(JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL):
+    case .systemResourcesReleaseAll:
         Task {
             let count = await DesktopSystemResources.releaseEverything()
             WindowsSystemResources.log("User released everything: \(count) holds")
@@ -43,7 +46,7 @@ enum WindowsSystemResources {
     }
 
     static func show(_ presentation: DesktopSystemResources.Presentation) {
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let rows = presentation.rows.map { row in
             JSTISystemResourceRow(
                 id: strings.add(row.id), title: strings.add(row.title), reason: strings.add(row.reason),
@@ -62,19 +65,6 @@ enum WindowsSystemResources {
                 _ = jsti_window_set_system_resources(&view)
             }
         }
-    }
-
-    /// Owns C strings for the duration of one call.
-    private final class Strings {
-        private var owned: [UnsafeMutablePointer<CChar>] = []
-        func add(_ value: String) -> UnsafePointer<CChar> {
-            let bytes = Array(value.utf8CString)
-            let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)
-            pointer.initialize(from: bytes, count: bytes.count)
-            owned.append(pointer)
-            return UnsafePointer(pointer)
-        }
-        deinit { owned.forEach { $0.deallocate() } }
     }
 }
 

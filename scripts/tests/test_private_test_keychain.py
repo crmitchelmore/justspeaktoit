@@ -26,7 +26,7 @@ class PrivateKeychainIntegrationTests(unittest.TestCase):
         cls.root = Path(cls.temp.name).resolve()
         cls.probe = cls.root / 'scope-probe'
         subprocess.run(['xcrun', 'swiftc', '-DJSTI_TEST_KEYCHAIN_REDIRECT',
-                        str(ROOT / 'Sources/SpeakCore/KeychainAccess.swift'),
+                        str(ROOT / 'Sources/SpeakCore/Credentials/KeychainAccess.swift'),
                         str(ROOT / 'scripts/tests/keychain-scope-probe.swift'), '-o', str(cls.probe)],
                        check=True, capture_output=True, text=True, timeout=120)
 

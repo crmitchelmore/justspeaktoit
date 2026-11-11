@@ -80,8 +80,10 @@ app/src/main/java/com/justspeaktoit/android/
 ├── dictation/
 │   ├── DictationState.kt    # pure state machine, events and error mapping
 │   ├── RecognizerAvailability.kt  # pure availability and language resolution
-│   ├── AndroidSpeechEngine.kt     # SpeechRecognizer adapter (main thread)
-│   └── DictationViewModel.kt
+│   ├── AndroidSpeechEngine.kt     # SpeechEngine: SpeechRecognizer adapter (main thread)
+│   ├── CloudCapture.kt      # owns the Cloud recording and deadline-bounded, abortable blocking IO
+│   ├── SharedAudioSource.kt # reads audio shared by other apps (content:// only)
+│   └── DictationViewModel.kt      # orchestration; collaborators injected, production wiring in Factory
 ├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
 ├── history/                 # transcript history, retention and atomic storage
 ├── settings/                # non-secret preferences
@@ -91,8 +93,18 @@ app/src/main/java/com/justspeaktoit/android/
 ```
 
 Policy lives in plain Kotlin so it is unit-tested on the JVM; Android classes stay in the
-adapter, ViewModel and UI. `CloudParityTest` reads `Sources/SpeakCore` to keep model IDs,
-credential IDs and the cleanup prompt identical to the Mac app.
+adapters and UI. The ViewModel takes its engine, recorder factory, cloud client, history,
+preferences and secret store as interfaces, so `DictationViewModelTest` drives the real
+ViewModel with fakes.
+
+Shared catalogues are generated from `Sources/SpeakCore`, never parsed from Swift:
+`assets/settings_search.json` (settings search) and `assets/cloud_catalog.json` (cloud providers,
+credential IDs, the models Android offers with their wire fields, the cleanup model and prompt).
+Regenerate both with `scripts/update-android-assets`; the Swift export tests fail when an asset is
+stale. The build's `generateCloudCatalog` task writes `GeneratedCloudCatalog.kt` from the cloud asset,
+so `CloudCatalog` and `CleanupPolicy` hold no hand-typed copy; only each provider's base URL and
+display name (Android transport) are authored, and `CloudCatalogParityTest` checks the generated
+values against the asset and that every provider has a transport.
 
 ## Privacy
 

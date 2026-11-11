@@ -96,8 +96,7 @@ bool controls(HWND window, Dialog &dialog) {
     if (!okay) return false;
     SendDlgItemMessageW(window, repoID, EM_SETLIMITTEXT, 193, 0);
     SendDlgItemMessageW(window, fileID, EM_SETLIMITTEXT, 128, 0);
-    dialog.font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
-        FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    dialog.font = jsti::chrome::dialogFont(window);
     if (dialog.font) EnumChildWindows(window, [](HWND child, LPARAM font) -> BOOL {
         SendMessageW(child, WM_SETFONT, static_cast<WPARAM>(font), TRUE); return TRUE;
     }, reinterpret_cast<LPARAM>(dialog.font));

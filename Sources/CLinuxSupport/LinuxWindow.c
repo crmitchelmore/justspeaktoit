@@ -1537,6 +1537,7 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     gtk_box_prepend(GTK_BOX(trailing), ui.history_filters);
     ui.search = GTK_SEARCH_ENTRY(gtk_search_entry_new());
     gtk_search_entry_set_placeholder_text(ui.search, "Search transcripts, models and profiles");
+    gtk_accessible_update_property(GTK_ACCESSIBLE(ui.search), GTK_ACCESSIBLE_PROPERTY_LABEL, "Search History", -1);
     g_signal_connect(ui.search, "search-changed", G_CALLBACK(on_search), NULL);
     gtk_box_insert_child_after(GTK_BOX(hero), GTK_WIDGET(ui.search), gtk_widget_get_first_child(hero));
     gtk_flow_box_append(GTK_FLOW_BOX(chips), jsti_chip_new("Sessions", &ui.history_sessions));
@@ -1568,6 +1569,7 @@ static GtkWidget *build_history(GtkTextBuffer *buffer) {
     const char *versions[] = { "Processed", "Original", NULL };
     ui.version = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(versions));
     gtk_widget_set_tooltip_text(GTK_WIDGET(ui.version), "Transcript version");
+    jsti_accessible_set_name(GTK_WIDGET(ui.version), "Transcript version");
     g_signal_connect(ui.version, "notify::selected", G_CALLBACK(on_version), NULL);
     gtk_box_append(GTK_BOX(heading), GTK_WIDGET(ui.version));
     gtk_box_append(GTK_BOX(ui.detail), heading);

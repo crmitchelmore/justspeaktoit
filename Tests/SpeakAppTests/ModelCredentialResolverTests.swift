@@ -19,7 +19,7 @@ final class ModelCredentialResolverTests: XCTestCase {
         )
         XCTAssertEqual(
             ModelCredentialResolver.requirement(
-                for: XAIVoiceModels.thinkFast2CatalogID,
+                for: XAIVoiceModels.voice3CatalogID,
                 purpose: .liveTranscription
             ),
             .apiKey(identifier: "xai.apiKey", providerName: "xAI")

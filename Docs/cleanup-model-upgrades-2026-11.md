@@ -77,3 +77,11 @@ and normalization preserving both new and existing selections. Existing GPT-5.6
 metadata assertions in `ModelCatalogTests` remain intact. The exact cloud projection test continues to
 protect a single shared catalogue. No scheduler, release-notes generation model,
 transcription model or runtime audio-discovery catalogue is changed.
+
+## Update: 11 November 2026
+
+`defaultPostProcessingModel` is now GPT-5.6 Luna, because OpenAI shuts down GPT-5
+Mini on 11 December 2026. Saved GPT-5 Mini and GPT-5.4 Nano selections move on
+their shutdown days through `ModelRetirements` (`.postProcessing`). Full details,
+including the GPT-5.6 repricing and the new Claude 5.5 entries, are in
+[speech model upgrades](speech-model-upgrades-2026-11.md#weekly-check-11-november-2026).

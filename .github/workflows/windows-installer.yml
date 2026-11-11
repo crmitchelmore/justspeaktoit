@@ -24,7 +24,7 @@ on:
         description: Manifest tag to sign and publish (blank rehearses the current Alpha)
         type: string
   push:
-    branches-ignore: ['merge-batch/**', 'precheck/**']
+    branches: [main]
     paths:
       - scripts/windows-package/**
       - scripts/windows-bundle/BundleCLI.ps1
@@ -126,8 +126,10 @@ jobs:
         run: |
           $base = $env:VERSION
           $upgrade = $base -replace '\.0$', '.1'
+          # Reused Alpha bundles keep the commit they were built and qualified at.
+          $built = (Get-Content -Raw sources/sources.json | ConvertFrom-Json).bundles
           ./scripts/windows-package/rehearse-windows-installer.ps1 -X64Bundle sources/x64 -Arm64Bundle sources/arm64 `
-            -ExpectedCommit $env:SOURCE -BaseVersion $base -UpgradeVersion $upgrade `
+            -ExpectedCommit $env:SOURCE -X64Commit $built.x64.commit -Arm64Commit $built.arm64.commit -BaseVersion $base -UpgradeVersion $upgrade `
             -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools') -Workspace (Join-Path $env:RUNNER_TEMP 'rehearsal')
       - name: Upload rehearsal evidence
         if: always()
@@ -214,8 +216,9 @@ jobs:
         run: |
           $root = Join-Path $env:RUNNER_TEMP 'installer'
           $tools = Join-Path $env:RUNNER_TEMP 'packaging-tools'
+          $built = (Get-Content -Raw sources/sources.json | ConvertFrom-Json).bundles
           ./scripts/windows-package/build-windows-installer-bundle.ps1 -X64Bundle sources/x64 -Arm64Bundle sources/arm64 `
-            -ExpectedCommit $env:SOURCE -Version $env:VERSION -Publisher $env:PUBLISHER -Output $root -ToolCache $tools
+            -ExpectedCommit $env:SOURCE -X64Commit $built.x64.commit -Arm64Commit $built.arm64.commit -Version $env:VERSION -Publisher $env:PUBLISHER -Output $root -ToolCache $tools
           New-Item -ItemType Directory -Force -Path signed | Out-Null
           $signing = @{
             Bundle = (Join-Path $root "JustSpeakToIt-windows_$($env:VERSION)_unsigned.msixbundle")

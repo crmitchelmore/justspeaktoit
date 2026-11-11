@@ -17,6 +17,10 @@ param(
     [Parameter(Mandatory = $true)] [string] $X64Bundle,
     [Parameter(Mandatory = $true)] [string] $Arm64Bundle,
     [Parameter(Mandatory = $true)] [string] $ExpectedCommit,
+    # An Alpha may reuse an equivalent runtime bundle built from an earlier
+    # commit; each bundle is then checked against the commit it was built from.
+    [string] $X64Commit = $ExpectedCommit,
+    [string] $Arm64Commit = $ExpectedCommit,
     [Parameter(Mandatory = $true)] [string] $Version,
     [Parameter(Mandatory = $true)] [string] $Publisher,
     [Parameter(Mandatory = $true)] [string] $Output,
@@ -36,11 +40,12 @@ $log = Join-Path $output 'installer-bundle.log'
 $packages = Join-Path $output 'packages'
 New-Item -ItemType Directory -Force -Path $packages | Out-Null
 $arguments = @()
-foreach ($target in @(@{ Architecture = 'x64'; Bundle = $X64Bundle }, @{ Architecture = 'arm64'; Bundle = $Arm64Bundle })) {
+foreach ($target in @(@{ Architecture = 'x64'; Bundle = $X64Bundle; Commit = $X64Commit },
+        @{ Architecture = 'arm64'; Bundle = $Arm64Bundle; Commit = $Arm64Commit })) {
     $root = Join-Path $output ("layout-" + $target.Architecture)
     Invoke-JstiPython -Python $Python -LogPath $log -Arguments @(
         (Join-Path $PSScriptRoot 'build-windows-package-layout.py'), '--channel', 'beta', '--bundle', $target.Bundle,
-        '--expected-commit', $ExpectedCommit, '--version', $Version, '--publisher', $Publisher, '--output', $root) | Out-Null
+        '--expected-commit', $target.Commit, '--version', $Version, '--publisher', $Publisher, '--output', $root) | Out-Null
     $evidence = Read-JstiJson (Join-Path $root 'package-layout-evidence.json')
     if ($evidence.package.architecture -ne $target.Architecture) {
         throw "The $($target.Architecture) input is a $($evidence.package.architecture) runtime bundle."
@@ -67,6 +72,7 @@ Write-JstiJson (Join-Path $output 'installer-bundle.json') ([ordered]@{
     schemaVersion = 1
     bundle = Read-JstiJson $evidencePath
     sourceCommit = $ExpectedCommit
+    bundleCommits = [ordered]@{ x64 = $X64Commit; arm64 = $Arm64Commit }
     makeAppx = $tools.Evidence
     status = 'Unsigned bundle. Publication requires a publicly trusted, timestamped signature.'
 })

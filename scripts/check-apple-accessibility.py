@@ -19,6 +19,11 @@ Rules (each finding names the rule):
                       icon-only control (labelled) with no
                       .accessibilityIdentifier, so agents cannot target it
                       stably.
+  unlabelled-segmented-picker
+                      iOS Picker with .pickerStyle(.segmented) and no
+                      .accessibilityLabel or .accessibilityIdentifier: UIKit's
+                      segmented control drops the Picker title, so the control
+                      itself has no name.
 
 Suppress a deliberate exception with `// a11y-ignore: <reason>` on the line of
 the control or the line above it.
@@ -255,6 +260,11 @@ def ignored(lines: list[str], line_no: int) -> bool:
     return False
 
 
+# macOS draws and exposes a segmented Picker's title; iOS does not.
+SEGMENTED_UNNAMED_DIRS = tuple(d for d in SCAN_DIRS if d != "Sources/SpeakApp")
+PICKER = re.compile(r"(?<![\w.])Picker\s*\(")
+
+
 CONTROL = re.compile(r"(?<![\w.])(Button|Menu|Link|ShareLink)\s*[({]")
 
 
@@ -292,6 +302,18 @@ def scan_source(path: str, source: str) -> list[Finding]:
             continue
         findings.append(Finding(path, ln, "empty-control-label",
                                 f'{m.group(1)}("") has no accessible name; add .accessibilityLabel'))
+
+    if path.startswith(SEGMENTED_UNNAMED_DIRS):
+        for m in PICKER.finditer(text):
+            end, _ = control_extent(text, m.start())
+            chain = modifier_chain(text, end)
+            ln = line_of(m.start())
+            if ".pickerStyle(.segmented)" not in chain or ignored(lines, ln):
+                continue
+            missing = [mod for mod in (".accessibilityLabel(", ID_MODIFIER) if mod not in chain]
+            if missing:
+                findings.append(Finding(path, ln, "unlabelled-segmented-picker",
+                                        "segmented Picker needs " + " and ".join(m[1:-1] for m in missing)))
 
     for m in re.finditer(r"\.(onTapGesture|onLongPressGesture)\b", text):
         chain = enclosing_chain(text, m.start())

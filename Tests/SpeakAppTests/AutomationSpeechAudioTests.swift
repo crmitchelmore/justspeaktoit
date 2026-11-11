@@ -69,7 +69,7 @@ final class AutomationSpeechAudioTests: XCTestCase {
         let result = try await withThrowingTaskGroup(of: TTSResult.self) { group in
             group.addTask {
                 try await client.synthesize(
-                    text: "Just Speak To It.", voice: TextToSpeechManager.onDeviceVoiceID,
+                    text: Self.multiSentenceText, voice: TextToSpeechManager.onDeviceVoiceID,
                     settings: TTSSettings(format: .wav)
                 )
             }
@@ -86,8 +86,14 @@ final class AutomationSpeechAudioTests: XCTestCase {
         let data = try Data(contentsOf: result.audioURL)
         XCTAssertEqual(String(data: data.prefix(4), encoding: .ascii), "RIFF")
         XCTAssertGreaterThan(try AVAudioFile(forReading: result.audioURL).length, 0)
-        XCTAssertGreaterThan(result.duration, 0)
+        // Each sentence takes about a second, so a first-sentence prefix fails (#1464).
+        XCTAssertGreaterThan(result.duration, 4)
     }
+
+    private static let multiSentenceText = """
+        Just Speak To It. This second sentence must reach the file. \
+        So must this third one. And the fourth, which ends the text.
+        """
 }
 
 /// The Mac's `speak voices` list comes from the app's own settings and keys.

@@ -5,7 +5,8 @@ import XCTest
 /// catalogue hides them. Saved selections move only to a verified equivalent;
 /// otherwise requests fail with an actionable error until the user chooses.
 final class ModelRetirementTests: XCTestCase {
-    private let transcription = ModelRetirements.all.filter { $0.mode != .speech }
+    private let transcription = ModelRetirements.all.filter { $0.mode == .batch || $0.mode == .live }
+    private let cleanup = ModelRetirements.all.filter { $0.mode == .postProcessing }
     private let beforeAll = ModelRetirement.utcDate("2026-11-01")!
 
     private func catalogue(for mode: ModelRetirement.Mode) -> [ModelCatalog.Option] {
@@ -79,6 +80,32 @@ final class ModelRetirementTests: XCTestCase {
                 XCTAssertTrue(error.localizedDescription.contains("Choose another model in Settings"), id)
             }
         }
+    }
+
+    func testCleanupRetirements_moveSavedAndInFlightSelectionsOnTheirDay() throws {
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: cleanup.map { ($0.id, $0.successorID) }), [
+            "openai/gpt-5-mini": "openai/gpt-5.6-luna",
+            "openai/gpt-5.4-nano": "openai/gpt-6-luna",
+            "native/openai/gpt-5-mini": "native/openai/gpt-6-luna",
+            "native/groq/llama-3.1-8b-instant": "native/groq/openai/gpt-oss-20b"
+        ])
+        for retirement in cleanup {
+            let day = retirement.shutdownDate
+            let eve = day.addingTimeInterval(-1)
+            let successor = try XCTUnwrap(retirement.successorID)
+            // `postProcessing` already hides models shut down before today, so add the raw native list.
+            let before = ModelRetirements.current(
+                NativeTextModels.postProcessing + ModelCatalog.postProcessing, at: eve)
+            XCTAssertTrue(before.first { $0.id == retirement.id }?.description?.contains(retirement.notice) == true)
+            XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(retirement.id, at: eve), retirement.id)
+            let after = Set(ModelRetirements.current(ModelCatalog.postProcessing, at: day).map(\.id))
+            XCTAssertFalse(after.contains(retirement.id), retirement.id)
+            XCTAssertTrue(after.contains(successor), retirement.id)
+            XCTAssertNil(ModelRetirements.retirement(for: successor), "successor must not chain: \(successor)")
+            XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(retirement.id, at: day), successor)
+            XCTAssertNil(ModelRetirements.successor(for: retirement.id, mode: .batch, at: day))
+        }
+        XCTAssertNil(ModelRetirements.retirement(for: ModelCatalog.defaultPostProcessingModel))
     }
 
     func testDiarizeRetirement_pointsAtSpeakerLabellingModels() throws {

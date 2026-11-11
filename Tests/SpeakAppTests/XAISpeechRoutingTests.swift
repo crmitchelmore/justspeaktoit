@@ -13,7 +13,7 @@ final class XAISpeechRoutingTests: XCTestCase {
     // MARK: - Transcription pickers
 
     func testProviderRegistry_ownsBothTheStreamingAndTheBatchIdentifier() async {
-        for model in [XAIVoiceModels.thinkFast2CatalogID, XAISpeechToText.batchCatalogID,
+        for model in [XAIVoiceModels.voice3CatalogID, XAISpeechToText.batchCatalogID,
                                     XAISpeechToText.liveCatalogID] {
             let provider = await TranscriptionProviderRegistry.shared.provider(forModel: model)
             XCTAssertEqual(provider?.metadata.id, "xai", "\(model) must route to the xAI provider")
@@ -26,7 +26,7 @@ final class XAISpeechRoutingTests: XCTestCase {
         XCTAssertEqual(
             provider?.supportedModels().map(\.id),
             [
-                XAIVoiceModels.thinkFast2CatalogID,
+                XAIVoiceModels.voice3CatalogID,
                 XAISpeechToText.liveCatalogID,
                 XAISpeechToText.batchCatalogID
             ]
@@ -46,7 +46,7 @@ final class XAISpeechRoutingTests: XCTestCase {
             _ = try await XAITranscriptionProvider().transcribeFile(
                 at: url,
                 apiKey: "fixture",
-                model: XAIVoiceModels.thinkFast2CatalogID,
+                model: XAIVoiceModels.voice3CatalogID,
                 language: nil
             )
             XCTFail("expected the streaming-only model to be refused")

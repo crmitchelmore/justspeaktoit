@@ -19,7 +19,7 @@ public final class XAILiveClient: FinalizingStreamingTranscriptionClient, @unche
     var lastFinishOutcome: FinishOutcome? { outcomeLock.withLock { self.storedFinishOutcome } }
 
     public convenience init(
-        apiKey: String, model: String = XAIVoiceModels.thinkFast2APIName,
+        apiKey: String, model: String = XAIVoiceModels.voice3APIName,
         language: String? = nil, sampleRate: Int = 24_000, session: URLSession = .shared
     ) {
         self.init(
@@ -29,7 +29,7 @@ public final class XAILiveClient: FinalizingStreamingTranscriptionClient, @unche
     }
 
     public init(
-        apiKey: String, model: String = XAIVoiceModels.thinkFast2APIName,
+        apiKey: String, model: String = XAIVoiceModels.voice3APIName,
         language: String? = nil, sampleRate: Int = 24_000,
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in

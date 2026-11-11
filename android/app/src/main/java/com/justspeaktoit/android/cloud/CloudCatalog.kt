@@ -44,7 +44,7 @@ object CloudCatalog {
     val defaultTranscriptionModel: CloudModel = transcriptionModels.first()
 
     /** Matches `ModelCatalog.defaultPostProcessingModel` on the Mac. */
-    const val CLEANUP_MODEL = "openai/gpt-5-mini"
+    const val CLEANUP_MODEL = "openai/gpt-5.6-luna"
 
     fun transcriptionModel(catalogId: String?): CloudModel =
         transcriptionModels.firstOrNull { it.catalogId == catalogId } ?: defaultTranscriptionModel

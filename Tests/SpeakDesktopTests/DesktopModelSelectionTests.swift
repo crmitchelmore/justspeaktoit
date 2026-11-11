@@ -45,7 +45,8 @@ final class DesktopModelSelectionTests: XCTestCase {
     /// Every identifier the shared catalogue retires, including ones retired
     /// later, resumes as its successor in the active slot and its mode's slot.
     func testEveryRetiredIdentifierResumesAsItsSharedSuccessor() {
-        for (retired, successor) in ModelCatalog.liveTranscriptionSuccessors {
+        // Grok Voice is never a desktop live route, so its migration is Apple-only.
+        for (retired, successor) in ModelCatalog.liveTranscriptionSuccessors where liveIDs.contains(successor) {
             XCTAssertEqual(migrate(retired, live: retired),
                            DesktopModelSelection(model: successor, batchModel: nil, liveModel: successor), retired)
         }

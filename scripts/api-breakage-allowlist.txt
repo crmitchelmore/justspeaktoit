@@ -76,3 +76,6 @@ API breakage: enumelement AutomationErrorCode.speechFailed has been added as a n
 # the original APIKeyListEntry initializer remain; every switch over the filter
 # is in this repository and is rebuilt in the same run.
 API breakage: enumelement APIKeyStatusFilter.errors has been added as a new enum case
+# Model retirements gain a cleanup (post-processing) mode so retired chat models
+# such as GPT-5 Mini move to their successor. Existing cases are retained.
+API breakage: enumelement ModelRetirement.Mode.postProcessing has been added as a new enum case

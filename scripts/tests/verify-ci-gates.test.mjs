@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { assessCIGates as assessOracle, gateJobs } from '../verify-ci-gates.mjs';
@@ -31,13 +29,16 @@ test('product checks cover stacked pull requests without broadening push or cred
     // A batch runs ci.yml once, through its pull request, not again on push.
     const pushes = name === 'ci' ? /^  push:\n    branches: \[main\]$/m : /^  push:\n    branches: \[main, 'merge-batch\/\*\*'\]$/m;
     assert.match(source, pushes, `${name}: pushes must stay limited to main (and merge batches outside ci.yml)`);
-    const pullRequest = source.match(/^  pull_request:[ \t]*\n((?: {4}[^\n]*\n|\n)*)/m);
-    assert.ok(pullRequest, `${name}: ordinary pull-request checks must exist`);
-    assert.doesNotMatch(pullRequest[1], /^\s+branches(?:-ignore)?:/m,
-      `${name}: non-main target branches must receive product checks`);
     assert.doesNotMatch(source, /^  pull_request_target:/m, `${name}: no privileged PR event`);
-    if (name !== 'ci') {
-      assert.match(pullRequest[1], /^    paths:$/m, `${name}: retain product path gates`);
+    const pullRequest = source.match(/^  pull_request:[ \t]*\n((?: {4}[^\n]*\n|\n)*)/m);
+    if (name === 'ci') {
+      assert.ok(pullRequest, 'ci: the CI Gate must run on pull requests');
+      assert.doesNotMatch(pullRequest[1], /^\s+branches(?:-ignore)?:/m,
+        'ci: non-main target branches must receive the gate');
+    } else {
+      // Merge first: auxiliary workflows verify on main, not on pull requests.
+      assert.equal(pullRequest, null, `${name}: no pull_request trigger`);
+      assert.match(source.match(/^  push:\n((?: {4}[^\n]*\n|\n)*)/m)[1], /^    paths:$/m, `${name}: retain product path gates`);
     }
   }
 });
@@ -45,7 +46,8 @@ test('product checks cover stacked pull requests without broadening push or cred
 test('desktop native dependency changes select every native and cross-build workflow', () => {
   for (const name of ['linux', 'windows-arm64', 'windows-cross-proof']) {
     const source = readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), 'utf8');
-    for (const event of ['push', 'pull_request']) {
+    assert.doesNotMatch(source, /^  pull_request:/m, `${name}: verifies on main, not on pull requests`);
+    for (const event of ['push']) {
       const trigger = source.match(new RegExp(`^  ${event}:\\n((?: {4}[^\\n]*\\n|\\n)*)`, 'm'));
       assert.ok(trigger, `${name}: ${event} must exist`);
       for (const target of ['CLlamaCpp', 'CMigrationArchive', 'CRecordingFileSupport']) {
@@ -363,10 +365,12 @@ assert.ok(predicate, 'must test the actual workflow rejection predicate');
 // GitHub property names permit hyphens; adapt those paths for local evaluation.
 // The predicate uses only boolean/string comparisons, with no Actions-specific
 // coercions. This tests the shipped predicate against the diagnostic oracle.
-const evaluatePredicate = new Function('needs', 'github', 'always', 'startsWith', `return (${
+const evaluateWithEnv = new Function('needs', 'github', 'always', 'startsWith', 'env', `return (${
   predicate.replace(/\bneeds((?:\.[a-zA-Z0-9_-]+)+)/g, (_, path) =>
     'needs' + path.split('.').slice(1).map(key => `?.[${JSON.stringify(key)}]`).join(''))
 });`);
+const evaluatePredicate = (needs, github, always, startsWith, env = { TRUSTED_PR: 'false' }) =>
+  evaluateWithEnv(needs, github, always, startsWith, env);
 
 function assessCIGates(needs, event) {
   const errors = assessOracle(needs, event);
@@ -389,7 +393,7 @@ test('a merge-batch pull request must run every gate', () => {
 test('aggregate never checks out or executes repository helper code', () => {
   assert.doesNotMatch(aggregate, /uses:|run:.*scripts\/|checkout/);
   // The gate may only cancel its own run; the legacy mirror needs nothing.
-  assert.match(aggregate, /    permissions:\n      actions: write\n    steps:/);
+  assert.match(aggregate, /    permissions:\n      actions: write\n      contents: read\n      pull-requests: read\n    steps:/);
   assert.match(aggregate, /\/actions\/runs\/\$\{\{ github\.run_id \}\}\/force-cancel/);
   assert.match(aggregate, /Could not cancel this run; failing closed\.'\n\s+exit 1/);
   assert.match(aggregate, /exit 1/);
@@ -541,7 +545,7 @@ test('docs, website, Android and Workers-only pull requests skip every gate but 
   assert.deepEqual(assessCIGates(pullRequest({ apple: 'false', swift: 'false' }), 'pull_request'), []);
 });
 
-test('a trusted pull request merges on its pre-pr record alone', () => {
+test('workers-only untrusted pull requests may skip everything but Workers and the record', () => {
   const needs = pullRequest({ apple: 'false', swift: 'false', workers: 'false' });
   assert.deepEqual(assessCIGates(needs, 'pull_request'), []);
   needs['pre-pr-evidence'].result = 'failure';
@@ -609,7 +613,7 @@ test('macOS lanes start only after the cheap Ubuntu gates pass', () => {
 
 test('pre-PR evidence is strict, exact-head and blocks the gate on pull requests', () => {
   const body = jobBodies['pre-pr-evidence'];
-  assert.doesNotMatch(body, /^    if:/m, 'it always reports, passing straight through on pushes');
+  assert.match(body, /^    if: \$\{\{ !\(/m, 'it reports unless CI Gate checks the record itself');
   assert.match(body, /JSTI_PRE_PR_STRICT: "true"/);
   assert.match(body, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   assert.match(body, /git rev-parse 'HEAD\^\{tree\}'/);
@@ -731,31 +735,32 @@ test('network-bound package resolution and Tuist generation retry before Apple b
   }
 });
 
-function selectGateOutputs(env) {
-  const script = jobBodies['release-paths'].split('- name: Select gate outputs')[1].split('        run: |\n')[1]
-    .split('\n').map(line => line.replace(/^ {10}/, '')).join('\n');
-  const dir = mkdtempSync(join(tmpdir(), 'gate-select-'));
-  const output = join(dir, 'out');
-  writeFileSync(output, '');
-  execFileSync('bash', ['-c', script], { env: { PATH: process.env.PATH, GITHUB_OUTPUT: output, ...env } });
-  return Object.fromEntries(readFileSync(output, 'utf8').trim().split('\n').map(line => line.split('=')));
-}
-
-test('a trusted pre-pr record replaces every build and test on pull requests only', () => {
-  const swiftPR = { EVENT_NAME: 'pull_request', FULL: 'false', APPLE: 'true', SWIFT: 'true', IOS: 'true', API: 'true' };
-  assert.deepEqual(selectGateOutputs({ ...swiftPR, PRE_PR_TRUSTED: 'true' }),
-    { apple: 'false', swift: 'false', ios: 'false', api: 'false', full: 'false', workers: 'false' });
-  assert.deepEqual(selectGateOutputs({ ...swiftPR, PRE_PR_TRUSTED: 'false' }),
-    { apple: 'true', swift: 'true', ios: 'true', api: 'true', full: 'false', workers: 'true' }, 'forks and Dependabot keep the CI jobs');
-  assert.deepEqual(selectGateOutputs({ ...swiftPR, FULL: 'true', PRE_PR_TRUSTED: 'true' }),
-    { apple: 'true', swift: 'true', ios: 'true', api: 'true', full: 'true', workers: 'true' }, 'ci:full and merge batches run everything');
-  for (const event of ['push', 'workflow_dispatch']) {
-    assert.equal(selectGateOutputs({ EVENT_NAME: event, PRE_PR_TRUSTED: 'false' }).full, 'true', event);
+test('a trusted pull request is one queue wait: CI Gate checks its record and every other job skips', () => {
+  const trusted = jobBodies['gate'].match(/^      TRUSTED_PR: \$\{\{ (.*) \}\}$/m)[1];
+  for (const part of ["github.event_name == 'pull_request'",
+    'github.event.pull_request.head.repo.full_name == github.repository',
+    "!startsWith(github.event.pull_request.user.login, 'dependabot')",
+    "!contains(github.event.pull_request.labels.*.name, 'ci:full')", "!startsWith(github.head_ref, 'merge-batch/')"]) {
+    assert.ok(trusted.includes(part), part);
   }
-  const trust = jobBodies['release-paths'].match(/PRE_PR_TRUSTED: (.*)/)[1];
-  assert.match(trust, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
-  assert.match(trust, /!startsWith\(github\.event\.pull_request\.user\.login, 'dependabot'\)/);
-  assert.match(aggregate, /needs\.pre-pr-evidence\.result != 'success'/, 'the record itself stays required');
+  for (const id of ['release-paths', 'pre-pr-evidence']) {
+    assert.ok(jobBodies[id].includes(`    if: \${{ !(${trusted}) }}`), `${id} skips for trusted pull requests`);
+  }
+  for (const id of Object.keys(gateFlags)) {
+    assert.match(jobBodies[id], /^    needs: .*release-paths/m, `${id} is skipped with release-paths`);
+  }
+  const step = jobBodies['gate'].split('- name: Require a passing scripts/pre-pr record for this head (trusted pull request)')[1]
+    .split('\n      - name:')[0];
+  assert.match(step, /^        if: env\.TRUSTED_PR == 'true'$/m);
+  assert.match(step, /JSTI_PRE_PR_STRICT: "true"/);
+  assert.match(step, /contents\/scripts\/check-pre-pr-evidence\.py\?ref=\$BASE_SHA/, 'the checker comes from the base commit');
+  assert.match(step, /git\/commits\/\$PR_HEAD_SHA" --jq \.tree\.sha/);
+  assert.doesNotMatch(step, /continue-on-error/);
+  // Trusted: the job results are all skipped, and only the record decides.
+  const skipped = Object.fromEntries(Object.keys(passing()).map(id => [id, { result: 'skipped' }]));
+  assert.equal(evaluatePredicate(skipped, { event_name: 'pull_request', head_ref: '' }, () => true,
+    (v, p) => String(v ?? '').startsWith(p), { TRUSTED_PR: 'true' }), false);
+  assert.ok(assessCIGates(skipped, 'pull_request').length > 0, 'untrusted: skipped jobs are rejected');
 });
 
 test('main can be re-verified by dispatch, as the auto-revert bot does', () => {

@@ -73,6 +73,15 @@ cancelled result cannot land in a later request or a different target. Interim
 text may appear in the keyboard strip, while the completed transcript is inserted
 once through the document proxy.
 
+When the keyboard is used in another app, the containing app is in the
+background. iOS lets a background app keep recording but not start recording
+(`cannotStartRecording`, `'!rec'`), so a background hand-off keeps the readiness
+engine running and the audio session active through the dictation, and uses the
+same mixable category readiness holds. Only a foreground hand-off hands the
+engine over. Start failures are classified by
+`KeyboardHandoffStartDiagnosis` and logged with the stage and decoded audio
+code; none of them blames the microphone permission (issue #1469).
+
 The App Group also carries language selection and a schema-versioned, non-secret
 profile projection. It never carries audio, credentials, custom prompts, or
 surrounding host text. Credentials remain in the containing app's Keychain.

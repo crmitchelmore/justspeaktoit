@@ -195,7 +195,7 @@ class CIParityTests(unittest.TestCase):
 
     def test_android_paths_and_command_match_android_yml(self):
         android = (ROOT / '.github' / 'workflows' / 'android.yml').read_text(encoding='utf-8')
-        block = android.split('  pull_request:\n', 1)[1].split('\npermissions:', 1)[0]
+        block = android.split('  push:\n', 1)[1].split('\npermissions:', 1)[0]
         paths = [line.strip()[2:] for line in block.splitlines() if line.strip().startswith('- ')]
         self.assertEqual(sorted(map(self.glob, paths)), sorted(pre_pr.CI_ANDROID))
         self.assertIn('run: ../scripts/ci-android.sh', android)
@@ -420,6 +420,34 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(evidence.evaluate('', self.head, 'dependabot[bot]')[0], 'ok')
         for agent in ('devin-ai-integration[bot]', 'Copilot[bot]', 'renovate[bot]'):
             self.assertEqual(evidence.evaluate('', self.head, agent)[0], 'error', agent)
+
+
+
+@unittest.skipIf(sys.platform == 'win32', 'flock is POSIX-only')
+class MachineLockTests(unittest.TestCase):
+    def test_a_second_run_waits_until_the_first_releases_the_lock(self):
+        import threading
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / 'nested' / 'pre-pr.lock')
+            order, entered = [], threading.Event()
+
+            def second():
+                with pre_pr.machine_lock(path):
+                    order.append('second')
+                entered.set()
+
+            with pre_pr.machine_lock(path):
+                waiter = threading.Thread(target=second)
+                waiter.start()
+                self.assertFalse(entered.wait(0.5), 'the second run must wait for the lock')
+                order.append('first')
+            self.assertTrue(entered.wait(10))
+            waiter.join(10)
+            self.assertEqual(order, ['first', 'second'])
+
+    def test_off_disables_the_lock(self):
+        with pre_pr.machine_lock('off'), pre_pr.machine_lock('off'):
+            pass
 
 
 if __name__ == '__main__':

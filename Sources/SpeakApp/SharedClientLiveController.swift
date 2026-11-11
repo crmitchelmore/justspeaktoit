@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import AVFoundation
 import Foundation
 import SpeakCore
@@ -21,6 +22,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   private var startedAt: Date?
   private var run: SharedClientControllerRun?
   private var boundaryDeliveryOwner: DeliveryOwner?
+  var connectionHold: SystemResourceToken?
   private var displayedRevision: UInt64 = 0
   private var displayedTranscriptRevision: UInt64 = 0
   var stopCompletionTimeout: TimeInterval {
@@ -89,6 +91,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     displayedTranscriptRevision = 0
     isStopping = false
     self.client = client
+    replaceConnectionHold(for: route)
 
     do {
       // A preferred-input session may have been acquired while cancellation
@@ -297,6 +300,7 @@ private extension SharedClientLiveController {
   }
 
   func releaseRunOwnership() {
+    replaceConnectionHold(for: nil)
     client = nil
     run = nil
     boundaryDeliveryOwner = nil

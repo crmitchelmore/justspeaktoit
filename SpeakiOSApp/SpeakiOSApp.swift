@@ -45,6 +45,9 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         // A new app process cannot own the previous process's recording. Reset
         // before launch actions can start a session, never on foreground entry.
         SharedTranscriptionState.shared.clearRecordingState()
+        // Next, so a crash anywhere else in launch is reported. Test runs and
+        // DEBUG builds start the SDK disabled.
+        SentryManager.start()
         if HostedUnitTestLaunch.isActive { return true }
         iOSHistoryManager.resetSyncStateIfContainerChanged()
         UNUserNotificationCenter.current().delegate = self
@@ -191,6 +194,7 @@ struct SpeakiOSApp: App {
                 // A link that cold-launched the app is queued before the
                 // scene is active; drain it once the view is up.
                 runPendingCaptureAction()
+                IOSSystemResourceMonitor.shared.start()
                 guard FeatureFlags.iOSKeyboardEnabled else {
                     KeyboardInstantDictationStore.shared.setEnabled(false)
                     return

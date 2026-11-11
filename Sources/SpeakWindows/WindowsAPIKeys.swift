@@ -15,7 +15,7 @@ extension WindowsNative {
                 JSTIAPIKeyRow(
                     identifier: pointers[index * 6], label: pointers[index * 6 + 1], uses: pointers[index * 6 + 2],
                     status: pointers[index * 6 + 3], url: pointers[index * 6 + 4], hint: pointers[index * 6 + 5],
-                    saved: rows[index].isSaved ? 1 : 0
+                    saved: rows[index].isSaved ? 1 : 0, filters: rows[index].filterMask
                 )
             }
             return native.withUnsafeBufferPointer {

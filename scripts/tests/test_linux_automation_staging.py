@@ -127,7 +127,8 @@ class LinuxAutomationStagingTests(unittest.TestCase):
             "Tests/SpeakLinuxAutomationTests/**", "Tests/SpeakAutomationKitTests/**",
             "scripts/tests/test_linux_automation_staging.py",
         )
-        for event in ("push", "pull_request"):
+        self.assertNotIn("  pull_request:", lines)
+        for event in ("push",):
             start = lines.index(f"  {event}:") + 1
             end = next((index for index in range(start, len(lines))
                         if lines[index].strip() and not lines[index].startswith("    ")

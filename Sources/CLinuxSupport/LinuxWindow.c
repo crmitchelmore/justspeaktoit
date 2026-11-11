@@ -1510,8 +1510,18 @@ static void on_history_delete(GtkButton *button, gpointer data) {
     gtk_window_present(GTK_WINDOW(history_delete_dialog(identifiers, clear)));
 }
 
+/* Scrolling to the end of History asks the host for its next page of matches. */
+static void on_history_edge(GtkScrolledWindow *scroller, GtkPositionType position, gpointer data) {
+    (void)scroller;
+    (void)data;
+    if (position == GTK_POS_BOTTOM && ui.history_ids != NULL && ui.history_ids->len > 0) {
+        emit(JSTI_EVENT_HISTORY_LOAD_MORE, "", 0);
+    }
+}
+
 static GtkWidget *build_history(GtkTextBuffer *buffer) {
     GtkWidget *column, *page = jsti_page_new(&column);
+    g_signal_connect(page, "edge-reached", G_CALLBACK(on_history_edge), NULL);
     GtkWidget *chips, *trailing;
     GtkWidget *hero = jsti_hero_new(
         NULL, "Session History", "Search, replay and reuse past recordings and their transcripts.", &chips,
@@ -1931,7 +1941,7 @@ static GtkWidget *build_post_processing(void) {
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(prompt_scroll), GTK_WIDGET(ui.polish_prompt_row));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), prompt_scroll);
     ui.polish_key_row = ADW_PASSWORD_ENTRY_ROW(adw_password_entry_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_key_row), "New OpenRouter key (leave empty to keep)");
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_key_row), "New key for the selected model's provider (leave empty to keep)");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_key_row));
     g_signal_connect(ui.polish_location_row, "notify::selected", G_CALLBACK(on_polish_location), NULL);
     g_signal_connect(ui.polish_model_row, "notify::selected", G_CALLBACK(on_polish_model), NULL);

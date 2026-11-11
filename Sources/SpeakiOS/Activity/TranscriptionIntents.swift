@@ -478,7 +478,7 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
         // Explicit beats the override the start carried, which beats the
         // global setting.
         let resolved = await service.resolvedStopSelection(explicit: destination?.destination)
-        let canPostProcess = await AppSettings.shared.hasOpenRouterKey
+        let canPostProcess = await AppSettings.shared.hasPostProcessingKey
         let result = await service.stopRecording(
             selection: resolved,
             keyboardDeliverySource: .hardwareTrigger

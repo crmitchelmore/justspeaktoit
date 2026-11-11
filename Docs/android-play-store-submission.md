@@ -12,7 +12,7 @@ re-check them whenever the Android app gains a network call, SDK or permission.
 | Target API level 36 (required for new apps and updates from 31 August 2026) | `android/app/build.gradle.kts` (`targetSdk = 36`) |
 | Release build with R8 and resource shrinking | `bundleRelease`, run on every Android PR by `scripts/ci-android.sh` |
 | Signed release AAB in CI | `release` job in `.github/workflows/android.yml` (main pushes and manual dispatch, after the build job passes) |
-| Monotonic version code | `JSTI_ANDROID_VERSION_CODE` = run number × 10 + attempt, set by the release job |
+| Monotonic version code | `JSTI_ANDROID_VERSION_CODE` = seconds since 2026-01-01 UTC at build time, set by the release job |
 | Upload to the internal testing track | Same job, through `r0adkll/upload-google-play`, when the Play service account is configured |
 | Privacy policy inside the app | Settings › Privacy policy opens `https://justspeaktoit.com/privacy` |
 | Privacy policy covering Android | The Android section of `landing-page/privacy.html` |
@@ -36,8 +36,9 @@ The track release is created as a `draft` until the repository variable
 releases while the app itself is still a draft, so flip the variable only after
 the first manual release has gone through.
 
-Each upload needs a new version code. A re-run of the same workflow run uses the
-next attempt number, so it is accepted too.
+Each upload needs a higher version code. Deriving it from build time keeps a
+re-run of an older workflow run above every earlier upload; main runs are
+serialised, so two builds never share a code.
 
 ## Store listing
 

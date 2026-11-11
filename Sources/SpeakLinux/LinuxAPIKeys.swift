@@ -15,7 +15,7 @@ extension LinuxWindow {
             JSTILinuxAPIKeyRow(
                 identifier: strings.add($0.identifier), label: strings.add($0.label), uses: strings.add($0.uses),
                 status: strings.add($0.status), url: strings.add($0.keyPageURL), hint: strings.add($0.entryHint),
-                saved: $0.isSaved ? 1 : 0
+                saved: $0.isSaved ? 1 : 0, filters: $0.filterMask
             )
         }
         let result = withExtendedLifetime(strings) {

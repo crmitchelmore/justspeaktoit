@@ -50,6 +50,9 @@ struct APIKeysView: View {
     @State private var searchText = ""
     @State private var statusFilter: APIKeyStatusFilter = .all
     @State private var sortOrder: APIKeySortOrder = .name
+    /// Entries whose last save was rejected by the provider's check, for the
+    /// Errors filter. Cleared when the key is saved or cleared.
+    @State private var failedEntryIDs: Set<String> = []
     /// Account balances shown beside the saved keys, deduplicated per account
     /// by `ProviderBalanceDirectory`.
     @StateObject private var balances = ProviderBalanceStore()
@@ -61,14 +64,22 @@ struct APIKeysView: View {
     }
 
     private var allEntries: [APIKeyListEntry] {
-        Self.entries(for: settings)
+        Self.entries(for: settings, failedEntryIDs: failedEntryIDs)
     }
 
-    static func entries(for settings: AppSettings) -> [APIKeyListEntry] {
-        coreEntries(for: settings) + streamingProviderEntries(for: settings) + FileSpeechProvider.allCases.map {
+    static func entries(for settings: AppSettings, failedEntryIDs: Set<String> = []) -> [APIKeyListEntry] {
+        let entries = coreEntries(for: settings) + streamingProviderEntries(for: settings)
+            + FileSpeechProvider.allCases.map {
+                APIKeyListEntry(
+                    id: $0.rawValue, title: $0.metadata.displayName, category: "Transcription",
+                    isStored: settings.storedAPIKeyIdentifiers.contains($0.metadata.apiKeyIdentifier)
+                )
+            }
+        guard !failedEntryIDs.isEmpty else { return entries }
+        return entries.map { entry in
             APIKeyListEntry(
-                id: $0.rawValue, title: $0.metadata.displayName, category: "Transcription",
-                isStored: settings.storedAPIKeyIdentifiers.contains($0.metadata.apiKeyIdentifier)
+                id: entry.id, title: entry.title, category: entry.category, isStored: entry.isStored,
+                hasError: failedEntryIDs.contains(entry.id)
             )
         }
     }
@@ -155,11 +166,9 @@ struct APIKeysView: View {
             Section("Alibaba workspace for new keys") { AlibabaSpeechConfigurationFields() }
             Section("Azure Speech resource") { AzureSpeechEndpointField() }
             if visibleEntries.isEmpty {
-                ContentUnavailableView(
-                    "No API Keys",
-                    systemImage: "key.slash",
-                    description: Text("Try another search or status filter.")
-                )
+                let empty = APIKeyListQuery.emptyState(status: statusFilter, searchText: searchText)
+                ContentUnavailableView(empty.title, systemImage: empty.systemImage, description: Text(empty.message))
+                    .accessibilityIdentifier("apiKeysEmptyState")
             } else {
                 ForEach(visibleEntries) { entry in
                     apiKeySection(for: entry)
@@ -184,6 +193,7 @@ struct APIKeysView: View {
                             Text(filter.displayName).tag(filter)
                         }
                     }
+                    .accessibilityIdentifier("apiKeysStatusFilter")
                     Picker("Sort", selection: $sortOrder) {
                         ForEach(APIKeySortOrder.allCases) { order in
                             Text(order.displayName).tag(order)
@@ -267,9 +277,9 @@ struct APIKeysView: View {
             HStack {
                 Label(presentation.title, systemImage: presentation.systemImage)
                 Spacer()
-                Text(entry.isStored ? "Stored" : "Missing")
+                Text(entry.hasError ? "Error" : entry.isStored ? "Set" : "Unset")
                     .font(.caption)
-                    .foregroundStyle(entry.isStored ? .green : .secondary)
+                    .foregroundStyle(entry.hasError ? .red : entry.isStored ? .green : .secondary)
             }
         } footer: {
             Text(presentation.help)
@@ -412,6 +422,7 @@ struct APIKeysView: View {
 
     private func clearStoredKey(for id: String) {
         self.store("", for: id)
+        failedEntryIDs.remove(id)
         reloadBalancesAfterCredentialChange()
     }
 
@@ -463,6 +474,7 @@ struct APIKeysView: View {
                     switch alibabaCredential {
                     case .success(let value): credential = value
                     case .failure(let error):
+                        failedEntryIDs.insert(id)
                         messages.append(error.localizedDescription)
                         continue
                     }
@@ -482,8 +494,10 @@ struct APIKeysView: View {
     private func save(_ key: String, for id: String, credential: String? = nil) async -> String {
         let savedValue = credential ?? key
         if let failure = await self.validationFailure(of: savedValue, for: id) {
+            failedEntryIDs.insert(id)
             return failure
         }
+        failedEntryIDs.remove(id)
         self.store(savedValue, for: id)
         self.drafts.clear(id, ifStill: key)
         if id == "deepgram" {

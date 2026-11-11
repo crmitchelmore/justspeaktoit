@@ -113,5 +113,12 @@ class PushRetryTests(unittest.TestCase):
             precheck.push(Path('.'), 'a' * 40, 'precheck/x', attempts=3)
         self.assertEqual(git.call_count, 3)
 
+    def test_cancellation_during_push_is_not_retried(self):
+        with mock.patch.object(precheck, 'git', side_effect=SystemExit(143)) as git, \
+                mock.patch.object(precheck.time, 'sleep'), self.assertRaises(SystemExit) as raised:
+            precheck.push(Path('.'), 'a' * 40, 'precheck/x', attempts=3)
+        self.assertEqual(raised.exception.code, 143)
+        self.assertEqual(git.call_count, 1)
+
 if __name__ == '__main__':
     unittest.main()

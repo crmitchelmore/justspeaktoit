@@ -85,8 +85,9 @@ def push(tree: Path, sha: str, branch: str, attempts: int = 4, pause: float = 10
         try:
             git(tree, 'push', '--quiet', '--force', REMOTE, f'{sha}:refs/heads/{branch}')
             return
-        except SystemExit:
-            if attempt == attempts:
+        except SystemExit as error:
+            # An integer code is the SIGTERM handler's exit (pre-pr cancelling us), not a push failure.
+            if isinstance(error.code, int) or attempt == attempts:
                 raise
             print(f'linux-precheck: push to {branch} failed (attempt {attempt}); retrying', flush=True)
             time.sleep(pause * attempt)

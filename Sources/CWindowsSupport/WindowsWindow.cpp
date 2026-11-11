@@ -455,6 +455,8 @@ struct WindowState {
     std::vector<HWND> controls;
     // Only accessed by the UI thread. Pending snapshots above use mutex.
     std::vector<HistoryRow> displayedHistory;
+    // UI thread only: the last row was drawn and the next page was asked for.
+    bool historyMoreRequested = false;
     int displayedVariant = -1;
     bool variantSwitchable = false;
     bool historyPresentationReady = false;
@@ -1917,6 +1919,14 @@ void drawHistoryItem(HWND window, const DRAWITEMSTRUCT &item) {
     FillRect(dc, &area, background);
     DeleteObject(background);
     if (item.itemID == static_cast<UINT>(-1) || item.itemID >= state.displayedHistory.size()) return;
+    // Drawing the last row of a scrolled list means it scrolled into view: ask
+    // the host for the next page of matches once per list. The host ignores it
+    // when none remain; a list that fits without scrolling was never cut short.
+    if (item.itemID + 1 == state.displayedHistory.size() && !state.historyMoreRequested &&
+        SendMessageW(item.hwndItem, LB_GETTOPINDEX, 0, 0) > 0) {
+        state.historyMoreRequested = true;
+        emit(window, JSTI_EVENT_HISTORY_LOAD_MORE);
+    }
     const HistoryRow &row = state.displayedHistory[item.itemID];
     RECT card{area.left + s(2), area.top + s(5), area.right - s(4), area.bottom - s(5)};
     const bool selected = (item.itemState & ODS_SELECTED) != 0;
@@ -2743,6 +2753,7 @@ void applyUpdate(HWND window) {
         SendMessageW(list, WM_SETREDRAW, FALSE, 0);
         SendMessageW(list, LB_RESETCONTENT, 0, 0);
         state.displayedHistory = std::move(history);
+        state.historyMoreRequested = false;
         LRESULT selectedIndex = LB_ERR;
         bool failed = false;
         for (size_t i = 0; i < state.displayedHistory.size(); ++i) {

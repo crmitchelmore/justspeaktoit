@@ -97,24 +97,29 @@ tracking domains. `NSPrivacyTracking` is false.
 **Data linked to you: none.** Nothing collected is tied to an identity the app
 holds.
 
-**Data not linked to you: two types.**
+**Data not linked to you: four types.**
 
 | Type | Purpose | Basis in the code |
 | --- | --- | --- |
 | Audio Data | App Functionality | Recordings go to the transcription provider chosen in Settings |
 | Other User Content | App Functionality | Post-processing sends transcript text to a language model; voice output sends it to a speech provider |
+| Crash Data | App Functionality | `SentryManager` reports crashes to Sentry, without a user identity and with credentials scrubbed |
+| Performance Data | App Functionality | Sentry samples 20% of launch and network timings and records release-health sessions |
 
 Answer **No** to every other category, including Contact Info, Health, Financial
 Info, Location, Contacts, Browsing History, Search History, Identifiers, Usage
-Data, Diagnostics, Purchases and Sensitive Info. Three of those deserve the
+Data, Purchases and Sensitive Info. Under Diagnostics, answer **Other
+Diagnostic Data: No**. Three of those deserve the
 reasoning written down, because they look like yes and are not:
 
 - **Identifiers.** `DeviceIdentityStore` keeps a device id, but it lives in the
   Keychain and is only sent to a paired Mac over the local network. It never
   reaches a server of ours.
-- **Usage Data and Diagnostics.** The iOS app initialises no analytics or crash
-  SDK. Sentry is linked by the macOS target only. This answer changes the day
-  issue #776 ships opt-in PostHog to iOS.
+- **Usage Data and Diagnostics.** The iOS app initialises no analytics SDK, so
+  Usage Data stays No until issue #776 ships opt-in PostHog to iOS. The app
+  (not its extensions) does run Sentry, sharing the Mac's `SentryManager`
+  configuration and credential scrubber, so Diagnostics declares Crash Data and
+  Performance Data as above. Other Diagnostic Data stays No.
 - **History and API keys in iCloud.** History, including transcript text,
   syncs to the user's own private CloudKit database automatically when the
   device is signed in to iCloud, unless the user turns off iCloud History Sync

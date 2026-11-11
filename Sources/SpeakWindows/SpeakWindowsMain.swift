@@ -250,6 +250,7 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
     switch event {
     case Int32(JSTI_EVENT_HISTORY_ISSUE_REPORT.rawValue):
         holder.issueReportTasks.submit(ticket: UUID()) { await controller.beginIssueReport(value) }
+    case Int32(JSTI_EVENT_HISTORY_LOAD_MORE.rawValue): Task { await controller.loadMoreHistory() }
     case 17: holder.openProfiles()
     case 9: holder.selectHistory(value)
     case 10: Task { await controller.retryHistory(value) }

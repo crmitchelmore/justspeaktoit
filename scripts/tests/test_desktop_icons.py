@@ -156,7 +156,8 @@ class DesktopIconTests(unittest.TestCase):
         for workflow in ("desktop-icons.yml", "windows-arm64.yml",
                          "windows-cross-proof.yml", "linux.yml"):
             lines = (ROOT / ".github/workflows" / workflow).read_text().splitlines()
-            for event in ("push", "pull_request"):
+            self.assertNotIn("  pull_request:", lines, workflow)
+            for event in ("push",):
                 with self.subTest(workflow=workflow, event=event):
                     start = lines.index(f"  {event}:") + 1
                     end = next((index for index in range(start, len(lines))

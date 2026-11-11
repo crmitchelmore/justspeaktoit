@@ -18,7 +18,10 @@ on:
           "iPad Pro 13-inch (M5)". Skips the Mac capture and clip rendering.
         required: false
         default: ""
-  pull_request:
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
+  push:
+    branches: [main]
     paths:
       - .github/workflows/site-media.yml
       - scripts/site-media/**
@@ -26,7 +29,6 @@ on:
       - Tests/SpeakAppUITests/SiteMediaCaptureUITests.swift
       - Tests/SpeakiOSUITests/SiteMediaCaptureUITests.swift
       - Tests/Fixtures/CoreJourneyTargetApp/**
-
 permissions:
   contents: read
   actions: read

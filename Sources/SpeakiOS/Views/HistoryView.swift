@@ -22,6 +22,8 @@ public struct HistoryView: View {
     @State private var startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var endDate = Date()
     @State private var filteredItems: [iOSHistoryItem] = []
+    /// Rows are built a page at a time; filtering still covers all history.
+    @State private var pageWindow = HistoryPageWindow()
     @State private var statistics = HistoryPresentationStatistics(items: [])
     @State private var availableModels: [String] = []
     @State private var derivedStateReady = false
@@ -113,6 +115,7 @@ public struct HistoryView: View {
             refreshDerivedState(items: items)
         }
         .onChange(of: filterKey) { _, _ in
+            pageWindow.reset()
             refreshDerivedState(items: historyManager.items)
         }
         .confirmationDialog(
@@ -197,7 +200,7 @@ public struct HistoryView: View {
                 statsHeader
             }
             Section {
-                ForEach(filteredItems) { item in
+                ForEach(displayedItems) { item in
                     HistoryItemRow(
                         item: item,
                         isSynced: historyManager.isSynced(item),
@@ -230,9 +233,19 @@ public struct HistoryView: View {
                         .tint(.blue)
                     }
                 }
+                if pageWindow.hasMore(total: filteredItems.count) {
+                    HistoryLoadMoreFooter(shown: displayedItems.count, total: filteredItems.count) {
+                        pageWindow.loadMore(total: filteredItems.count)
+                    }
+                    .id("history-load-more-\(pageWindow.limit)")
+                }
             }
         }
         .listSectionSpacing(density.listSectionSpacing)
+    }
+
+    private var displayedItems: ArraySlice<iOSHistoryItem> {
+        filteredItems.prefix(pageWindow.visibleCount(of: filteredItems.count))
     }
 
     private var statsHeader: some View {

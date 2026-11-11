@@ -8,12 +8,14 @@ final class StatusBarController {
   private let statusItem: NSStatusItem
   private let openMainWindow: () -> Void
   private let openSettings: () -> Void
+  let openStatus: () -> Void
+  let resources: SystemResourceMonitor
   private let appSettings: AppSettings
   private let historyManager: HistoryManager
   private let mainManager: MainManager
   private let hotKeyManager: HotKeyManager
 
-  private var cancellables: Set<AnyCancellable> = []
+  var cancellables: Set<AnyCancellable> = []
 
   init(
     appSettings: AppSettings,
@@ -21,8 +23,12 @@ final class StatusBarController {
     mainManager: MainManager,
     hotKeyManager: HotKeyManager,
     openMainWindow: @escaping () -> Void,
-    openSettings: @escaping () -> Void
+    openSettings: @escaping () -> Void,
+    openStatus: @escaping () -> Void = {},
+    resources: SystemResourceMonitor = .shared
   ) {
+    self.openStatus = openStatus
+    self.resources = resources
     self.appSettings = appSettings
     self.historyManager = historyManager
     self.mainManager = mainManager
@@ -37,6 +43,7 @@ final class StatusBarController {
     statusItem.menu = buildMenu()
 
     observeChanges()
+    observeSystemResources()
   }
 
   deinit {
@@ -122,7 +129,7 @@ final class StatusBarController {
       .store(in: &cancellables)
   }
 
-  private func refresh() {
+  func refresh() {
     statusItem.menu = buildMenu()
   }
 
@@ -171,6 +178,8 @@ final class StatusBarController {
     outputItem.isEnabled = false
     menu.addItem(outputItem)
 
+    menu.addItem(.separator())
+    addSystemResourceItems(to: menu)
     menu.addItem(.separator())
 
     let stats = historyManager.statistics

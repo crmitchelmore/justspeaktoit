@@ -82,6 +82,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_ISSUE_REPORT_SAVE = 153,
     JSTI_EVENT_ISSUE_REPORT_OPEN = 154,
     JSTI_EVENT_ISSUE_REPORT_CLOSE = 155,
+    /* The History list's last row scrolled into view; no text. */
+    JSTI_EVENT_HISTORY_LOAD_MORE = 156,
     /* Settings search box (160-161 were unused): SETTINGS_SEARCH carries the whole
      * query on every edit and when the empty box gains focus (answer with recent
      * destinations); reply with jsti_window_set_settings_search_results.

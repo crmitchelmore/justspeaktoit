@@ -28,6 +28,7 @@ public struct SettingsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showingAPIKeys = false
     @State private var revealTarget: IOSSettingsRevealTarget?
+    @State private var rootHighlightID: String?
     @State private var searchQuery = ""
     @State private var searchIndex = SettingsSearchIndex(
         entries: IOSSettingsSearch.catalogEntries(keyboardEnabled: false)
@@ -37,16 +38,25 @@ public struct SettingsView: View {
     public init() {}
 
     public var body: some View {
-        settingsList
-            .overlay {
-                if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                    IOSSettingsSearchResults(query: searchQuery, index: searchIndex) { entry in
-                        reveal(entry)
+        ScrollViewReader { proxy in
+            settingsList
+                .environment(\.settingsSearchHighlightID, rootHighlightID)
+                .overlay {
+                    if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                        IOSSettingsSearchResults(query: searchQuery, index: searchIndex) { entry in
+                            reveal(entry, using: proxy)
+                        }
                     }
                 }
-            }
+        }
             .searchable(text: $searchQuery, prompt: "Search settings")
             .searchSuggestions { searchSuggestions }
+            .task(id: rootHighlightID) {
+                guard rootHighlightID != nil else { return }
+                try? await Task.sleep(for: .seconds(2.5))
+                guard !Task.isCancelled else { return }
+                rootHighlightID = nil
+            }
             .onAppear {
                 searchIndex = SettingsSearchIndex(
                     entries: IOSSettingsSearch.catalogEntries(keyboardEnabled: iOSKeyboardEnabled)
@@ -57,6 +67,12 @@ public struct SettingsView: View {
 
     private var settingsList: some View {
         List {
+            ForEach(IOSSettingsPage.rootSectionTitles, id: \.self) { title in
+                SearchableSettingsSection(title) {
+                    SystemResourcesStatusRows(monitor: IOSSystemResourceMonitor.shared)
+                }
+            }
+
             if !settings.visualDensity.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize) {
                 Section {
                     RecommendedSetupCard()
@@ -135,13 +151,18 @@ public struct SettingsView: View {
         }
     }
 
-    private func reveal(_ entry: SettingsSearchEntry) {
+    private func reveal(_ entry: SettingsSearchEntry, using proxy: ScrollViewProxy) {
         storedSearchRecents = SettingsSearchRecents.encode(
             SettingsSearchRecents.recording(entry.id, in: SettingsSearchRecents.decode(storedSearchRecents))
         )
         searchQuery = ""
         if IOSSettingsSearch.opensAPIKeys(entry) {
             showingAPIKeys = true
+            return
+        }
+        if IOSSettingsPage.rootSectionTitles.contains(entry.title) {
+            withAnimation { proxy.scrollTo(entry.id, anchor: .top) }
+            rootHighlightID = entry.id
             return
         }
         guard let page = IOSSettingsPage.page(for: entry) else { return }

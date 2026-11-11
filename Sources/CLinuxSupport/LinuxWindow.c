@@ -1510,8 +1510,18 @@ static void on_history_delete(GtkButton *button, gpointer data) {
     gtk_window_present(GTK_WINDOW(history_delete_dialog(identifiers, clear)));
 }
 
+/* Scrolling to the end of History asks the host for its next page of matches. */
+static void on_history_edge(GtkScrolledWindow *scroller, GtkPositionType position, gpointer data) {
+    (void)scroller;
+    (void)data;
+    if (position == GTK_POS_BOTTOM && ui.history_ids != NULL && ui.history_ids->len > 0) {
+        emit(JSTI_EVENT_HISTORY_LOAD_MORE, "", 0);
+    }
+}
+
 static GtkWidget *build_history(GtkTextBuffer *buffer) {
     GtkWidget *column, *page = jsti_page_new(&column);
+    g_signal_connect(page, "edge-reached", G_CALLBACK(on_history_edge), NULL);
     GtkWidget *chips, *trailing;
     GtkWidget *hero = jsti_hero_new(
         NULL, "Session History", "Search, replay and reuse past recordings and their transcripts.", &chips,

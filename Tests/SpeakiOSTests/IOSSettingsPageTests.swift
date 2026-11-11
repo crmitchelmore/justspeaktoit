@@ -10,6 +10,7 @@ final class IOSSettingsPageTests: XCTestCase {
         let entries = IOSSettingsSearch.catalogEntries(keyboardEnabled: true)
         let unreachable = entries.filter {
             IOSSettingsPage.page(for: $0) == nil && !IOSSettingsSearch.opensAPIKeys($0)
+                && !IOSSettingsPage.rootSectionTitles.contains($0.title)
         }
         XCTAssertEqual(unreachable.map(\.id), [], "Add these section titles to an IOSSettingsPage")
     }

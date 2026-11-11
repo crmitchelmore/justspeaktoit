@@ -121,6 +121,16 @@ extension SettingsSearchCatalog {
             platforms: .macOS
         ),
         SettingsSearchEntry(
+            id: "permissions.resourcesInUse", title: "System resources in use", section: .permissions,
+            systemImage: "gauge.with.dots.needle.33percent",
+            summary: "See what Speak holds right now (microphone, audio, connections, hotkey) and release it.",
+            keywords: [
+                "status", "microphone in use", "mic indicator", "orange dot", "release microphone",
+                "release everything", "what is using the microphone", "network connections", "background"
+            ],
+            platforms: .apple
+        ),
+        SettingsSearchEntry(
             id: "profiles.perApp", title: "Per-App Profiles", section: .profiles,
             systemImage: "person.crop.rectangle.stack",
             summary: "Use different models, prompts or delivery for specific apps.",

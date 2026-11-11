@@ -76,6 +76,10 @@ enum IOSSettingsPage: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// Sections shown on the Settings root itself, above the pages. The held
+    /// microphone status (#1471) stays visible without opening a page.
+    static let rootSectionTitles = ["System resources in use"]
+
     /// Root list groups, in order.
     static let groups: [[IOSSettingsPage]] = [
         [.general, .transcription, .postProcessing, .apiKeys],

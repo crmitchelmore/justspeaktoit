@@ -44,6 +44,22 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
 
     private var finalisingRequestIDs: Set<UUID> = []
 
+    /// Readiness keeps the microphone open for up to four hours and restarts
+    /// whenever the app opens, which is the iPhone's usual "why is the
+    /// microphone on?" (issue #1471). Status names it and turns it off.
+    private var readinessHold: SystemResourceToken?
+
+    private func holdReadinessMicrophone() {
+        guard readinessHold == nil else { return }
+        readinessHold = SystemResourceRegistry.shared.acquire(
+            kind: .microphone, title: "Instant Dictation",
+            reason: "Keeps the microphone ready for the Just Speak keyboard. Idle audio is discarded, "
+                + "never saved or sent. Ends after 4 hours; restarts when you open the app.",
+            owner: "KeyboardInstantDictationCoordinator", releaseTitle: "Turn off",
+            release: { [weak self] in await MainActor.run { self?.endSession(disable: true) } }
+        )
+    }
+
     /// Injectable effects keep coordinator ordering tests independent of microphones and providers.
     struct FinalisationOperations {
         var isRunning: @MainActor () -> Bool
@@ -147,6 +163,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
                 armReadinessBounds(startedAt: active.startedAt)
                 startHeartbeat()
             }
+            holdReadinessMicrophone()
             return
         }
 
@@ -180,6 +197,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
                 return
             }
             session = started
+            holdReadinessMicrophone()
             armReadinessBounds(startedAt: started.startedAt)
             startHeartbeat()
             handleRequestChange()
@@ -235,6 +253,8 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         bounds.retire()
         boundsStartedAt = nil
         session = nil
+        readinessHold?.end()
+        readinessHold = nil
     }
 
     private func armReadinessBounds(startedAt: Date) {

@@ -91,6 +91,7 @@ enum {
     JSTI_EVENT_ISSUE_REPORT_SAVE = 153,
     JSTI_EVENT_ISSUE_REPORT_OPEN = 154,
     JSTI_EVENT_ISSUE_REPORT_CLOSE = 155,
+    JSTI_EVENT_HISTORY_LOAD_MORE = 156, /* the History page scrolled to its end; no text */
     JSTI_EVENT_PROFILES = 140
 };
 

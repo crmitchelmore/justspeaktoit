@@ -31,9 +31,9 @@ struct DesktopHostResourceClaim: Equatable, Sendable {
 /// reconciles when it changes. Windows and Linux share this; the hotkey
 /// listener is registered by each platform, which owns it.
 ///
-/// Native callback contexts (capture, hotkey hooks) are retained by their
-/// owners here; once `NativeCallbackContext<T>` (#1472) lands, a context's
-/// retire point is the natural place to end a platform-owned hold too.
+/// Native callback contexts (capture, hotkey registration) are
+/// `NativeCallbackContext` boxes owned by the platform; the platform ends its
+/// own hold where it unregisters the context.
 extension DesktopHostController {
     package static var systemResourceOwner: String { "DesktopHostController" }
 

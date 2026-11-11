@@ -49,10 +49,16 @@ add a small adapter to the platform monitor instead
   view: a non-corked source output from this process, excluding monitor
   sources. `DesktopSystemResourcesMonitor` (SpeakDesktop) polls it every 2
   seconds and logs an unclaimed microphone once per episode to stderr.
-- **Windows**: the shared host registers the same holds, but there is no
-  Status card, OS microphone probe or hotkey-hook hold yet. Those need
-  Windows testing. Once `NativeCallbackContext<T>` (#1472) lands, a native
-  context's retire point is where a platform-owned hold should end.
+- **Windows** (#1473): Settings › General › App behaviour › *System resources
+  in use…*, a native window with the same rows, per-item release and Release
+  everything. The shared host registers the same holds as on Linux.
+  WindowsHotKey.cpp reports every `RegisterHotKey` change through
+  `jsti_hotkey_set_registration_observer`; `WindowsHotKeyResource` holds the
+  shortcut while one is registered, through a `NativeCallbackContext` that
+  stops resolving when the window closes. WASAPI supplies the OS view: an
+  active `IAudioSessionManager2` session owned by this process on any active
+  capture endpoint (`jsti_audio_process_capturing`). The same monitor polls it
+  every 2 seconds.
 
 On desktop, Release Everything stops recordings, playback, listening and
 warm-ups. The hotkey keeps working.

@@ -89,4 +89,27 @@ final class DesktopSystemResourcesTests: XCTestCase {
         XCTAssertEqual(published.value.count, count, "An unchanged view is not republished")
         withExtendedLifetime(mic) {}
     }
+
+    func testRegistrationHold_FollowsTheReportedRegistration() {
+        let registry = SystemResourceRegistry()
+        let acquired = Box(0)
+        let hold = DesktopRegistrationHold { name in
+            acquired.value += 1
+            return registry.acquire(kind: .hotKey, title: "Dictation hotkey", reason: "Listens.", owner: "test",
+                                    detail: name)
+        }
+        hold.update(nil)
+        XCTAssertTrue(registry.holds.isEmpty, "Nothing registered holds nothing")
+        hold.update("Ctrl+Alt+Space")
+        hold.update("Ctrl+Alt+Space")
+        hold.update("Ctrl+Alt+J")
+        XCTAssertEqual(acquired.value, 1, "A changed or repeated report keeps the one hold")
+        XCTAssertEqual(registry.holds.map(\.detail), ["Ctrl+Alt+J"])
+        hold.update(nil)
+        XCTAssertTrue(registry.holds.isEmpty, "Unregistering ends the hold")
+        hold.update("Ctrl+Alt+Space")
+        XCTAssertEqual(acquired.value, 2)
+        XCTAssertEqual(registry.holds.count, 1)
+        hold.update(nil)
+    }
 }

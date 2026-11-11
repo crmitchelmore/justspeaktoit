@@ -180,3 +180,31 @@ package final class DesktopSystemResourcesMonitor: @unchecked Sendable {
         if let presentation { publish(presentation) }
     }
 }
+
+/// Follows a native registration that reports its current name, or nil once
+/// nothing is registered (the Windows dictation shortcut). One hold lasts while
+/// something is registered; a changed combination updates its detail.
+package final class DesktopRegistrationHold: @unchecked Sendable {
+    private let lock = NSLock()
+    private var token: SystemResourceToken?
+    private var name: String?
+    private let acquire: (String) -> SystemResourceToken
+
+    package init(acquire: @escaping (String) -> SystemResourceToken) {
+        self.acquire = acquire
+    }
+
+    package func update(_ next: String?) {
+        let ended: SystemResourceToken? = lock.withLock {
+            guard next != name else { return nil }
+            name = next
+            guard let next else {
+                defer { token = nil }
+                return token
+            }
+            if let token { token.update(detail: next) } else { token = acquire(next) }
+            return nil
+        }
+        ended?.end()
+    }
+}

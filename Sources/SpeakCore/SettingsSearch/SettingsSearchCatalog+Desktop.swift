@@ -17,9 +17,10 @@ extension SettingsSearchCatalog {
                 + "and release it.",
             keywords: [
                 "status", "microphone in use", "mic indicator", "release microphone", "release everything",
-                "what is using the microphone", "network connections", "background", "pulseaudio", "pipewire"
+                "what is using the microphone", "network connections", "background", "pulseaudio", "pipewire",
+                "wasapi"
             ],
-            platforms: .linux
+            platforms: [.linux, .windows]
         ),
         SettingsSearchEntry(
             id: "desktop.dataBackup", title: "Data backup", section: .dataMigration, systemImage: "archivebox",

@@ -68,7 +68,10 @@ final class SettingsSearchCoverageTests: XCTestCase {
     }
 
     func testEveryPersistedMacSettingIsIndexed() throws {
-        let published = publishedProperties(in: try read("Sources/SpeakApp/Settings/AppSettings.swift"))
+        // AppSettings and its domain preference stores live in Settings/AppSettings*.swift.
+        let sources = try swiftFiles(under: "Sources/SpeakApp/Settings")
+            .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
+        let published = sources.flatMap { publishedProperties(in: $0.1) }
         assertIndexed(published, platform: .macOS, exemptions: Self.unindexedMacSettings)
     }
 

@@ -324,8 +324,9 @@ extension DataMigrationIntegrationTests {
     func testSettingsReload_CoversEveryPublishedPreference() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let source = try String(contentsOf: root.appendingPathComponent("Sources/SpeakApp/Settings/AppSettings.swift"),
-                                encoding: .utf8)
+        let dir = root.appendingPathComponent("Sources/SpeakApp/Settings")  // AppSettings and its domain stores
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasPrefix("AppSettings") }
+        let source = try files.map { try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8) }.joined()
         let pattern = #"@Published\s+(?:private\(set\)\s+)?var\s+(\w+)"#
         let regex = try NSRegularExpression(pattern: pattern)
         let names = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))

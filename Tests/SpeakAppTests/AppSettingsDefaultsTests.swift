@@ -1,4 +1,5 @@
 // swiftlint:disable file_length
+import Combine
 import XCTest
 import SpeakHotKeys
 import SpeakCore
@@ -62,6 +63,30 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "preferredLocale"), "en_GB")
         XCTAssertEqual(defaults.object(forKey: "keepAudioOnCancel") as? Bool, true)
         XCTAssertEqual(AppSettings(defaults: defaults).preferredLocaleIdentifier, "en_GB")
+    }
+
+    @MainActor
+    func testDomainStorePreferences_PublishThroughAppSettingsAndHonourSuppression() {
+        let settings = AppSettings(defaults: defaults)
+        var changes = 0
+        let subscription = settings.objectWillChange.sink { changes += 1 }
+        defer { subscription.cancel() }
+
+        settings.ttsSpeed = 1.5
+        settings.showCompactHUD.toggle()
+        settings.livePolishDebounceMs = 900
+        settings.localStreamingModelSource = "stub/source"
+        XCTAssertEqual(changes, 4, "Views observing AppSettings must refresh for every domain store edit")
+        XCTAssertEqual(defaults.object(forKey: "ttsSpeed") as? Double, 1.5)
+        XCTAssertEqual(defaults.object(forKey: "livePolishDebounceMs") as? Int, 900)
+
+        settings.suppressesPersistence = true
+        settings.ttsSpeed = 0.5
+        settings.holdThreshold = 0.9
+        settings.suppressesPersistence = false
+        XCTAssertEqual(settings.ttsSpeed, 0.5)
+        XCTAssertEqual(defaults.object(forKey: "ttsSpeed") as? Double, 1.5)
+        XCTAssertNil(defaults.object(forKey: "holdThreshold"))
     }
 
     @MainActor

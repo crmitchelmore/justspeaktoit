@@ -64,7 +64,7 @@ final class DesktopLiveCatalogueTests: XCTestCase {
     /// qualified native transcription-only receipt, so admitting the provider
     /// wholesale would expose an unqualified conversation engine.
     func testGrokVoiceRouteStaysUnavailableInTheDesktopFactory() {
-        let grokVoice = XAIVoiceModels.thinkFast2CatalogID
+        let grokVoice = XAIVoiceModels.voice3CatalogID
         XCTAssertEqual(LiveTranscriptionRouting.route(for: grokVoice)?.provider, .xai)
         XCTAssertFalse(DesktopLiveTranscription.liveModels.contains { $0.id == grokVoice })
         XCTAssertNil(DesktopLiveTranscription.route(forID: grokVoice))

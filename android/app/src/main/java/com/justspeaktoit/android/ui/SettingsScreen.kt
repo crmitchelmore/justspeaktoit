@@ -13,29 +13,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -53,17 +44,12 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -74,9 +60,6 @@ import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.dictation.DictationUiState
-import com.justspeaktoit.android.resources.SystemResourceHold
-import com.justspeaktoit.android.resources.SystemResourceRegistry
-import com.justspeaktoit.android.resources.SystemResourceSummary
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
 import com.justspeaktoit.android.settings.SettingsSearchEntry
 import com.justspeaktoit.android.settings.SettingsSearchIndex
@@ -291,68 +274,6 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
     }
 }
 
-/** Mirrors the desktop Status card: each hold with why and since when, and a way to release it. */
-@Composable
-private fun ResourcesInUse(holds: List<SystemResourceHold>, actions: SettingsActions) {
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(holds.isEmpty()) {
-        while (holds.isNotEmpty()) {
-            now = System.currentTimeMillis()
-            delay(1_000)
-        }
-    }
-    Text(stringResource(R.string.settings_resources_note), style = MaterialTheme.typography.bodyMedium)
-    Text(
-        SystemResourceSummary.headline(holds),
-        style = MaterialTheme.typography.bodyLarge,
-        modifier = Modifier
-            .testTag(AutomationIds.RESOURCES_HEADLINE)
-            .semantics { liveRegion = LiveRegionMode.Polite },
-    )
-    holds.forEach { hold ->
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(hold.title, style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "${hold.kind.displayName} · ${SystemResourceSummary.duration(hold.sinceMs, now)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(hold.reason, style = MaterialTheme.typography.bodySmall)
-            }
-            val releaseTitle = hold.releaseTitle
-            if (releaseTitle != null) {
-                val label = if (hold.isReleasing) {
-                    stringResource(R.string.settings_resources_releasing)
-                } else {
-                    releaseTitle
-                }
-                val description = stringResource(R.string.settings_resources_release_label, label, hold.title)
-                TextButton(
-                    onClick = { actions.onReleaseResource(hold.id) },
-                    enabled = !hold.isReleasing,
-                    modifier = Modifier
-                        .testTag(AutomationIds.resourceRelease(hold.kind, hold.owner))
-                        .semantics { contentDescription = description },
-                ) { Text(label) }
-            }
-        }
-    }
-    val canReleaseEverything = holds.any {
-        it.isReleasable && !it.isReleasing && it.kind in SystemResourceRegistry.RELEASE_EVERYTHING_KINDS
-    }
-    Button(
-        onClick = actions.onReleaseEverything,
-        enabled = canReleaseEverything,
-        modifier = Modifier.testTag(AutomationIds.RESOURCES_RELEASE_EVERYTHING),
-    ) { Text(stringResource(R.string.settings_resources_release_everything)) }
-    Text(
-        stringResource(R.string.settings_resources_release_everything_hint),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
-
 @Composable
 private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions) {
     var picking by remember { mutableStateOf(false) }
@@ -398,157 +319,4 @@ private fun SectionTitle(@StringRes title: Int, modifier: Modifier = Modifier) {
         style = MaterialTheme.typography.titleMedium,
         modifier = modifier.semantics { heading() },
     )
-}
-
-@Composable
-private fun SettingsSearchField(query: String, onQueryChange: (String) -> Unit) {
-    OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChange,
-        label = { Text(stringResource(R.string.settings_search_hint)) },
-        leadingIcon = {
-            // Decorative: the field's label already says "Search settings".
-            Icon(painterResource(R.drawable.ic_search), contentDescription = null)
-        },
-        trailingIcon = {
-            if (query.isNotEmpty()) {
-                IconButton(
-                    onClick = { onQueryChange("") },
-                    modifier = Modifier.testTag(AutomationIds.SETTINGS_SEARCH_CLEAR),
-                ) {
-                    Icon(painterResource(R.drawable.ic_close), stringResource(R.string.settings_search_clear))
-                }
-            }
-        },
-        singleLine = true,
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(AutomationIds.SETTINGS_SEARCH),
-    )
-}
-
-@Composable
-private fun SettingsSearchResults(
-    results: List<SettingsSearchResult>,
-    completions: List<String>,
-    onComplete: (String) -> Unit,
-    onOpen: (SettingsSearchEntry) -> Unit,
-) {
-    if (completions.isNotEmpty()) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(completions) { completion ->
-                SuggestionChip(
-                    onClick = { onComplete(completion) },
-                    label = { Text(completion) },
-                    modifier = Modifier.testTag("settingsSearchCompletion.$completion"),
-                )
-            }
-        }
-    }
-    val summary = if (results.isEmpty()) {
-        stringResource(R.string.settings_search_no_results)
-    } else {
-        pluralStringResource(R.plurals.settings_search_count, results.size, results.size)
-    }
-    Text(
-        summary,
-        style = MaterialTheme.typography.labelLarge,
-        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-    )
-    results.forEach { result -> SearchResultRow(result, onOpen) }
-}
-
-@Composable
-private fun SearchResultRow(result: SettingsSearchResult, onOpen: (SettingsSearchEntry) -> Unit) {
-    val entry = result.entry
-    val detail = result.matchedKeyword?.let { stringResource(R.string.settings_search_matches, it, entry.summary) }
-        ?: entry.summary
-    val description = stringResource(R.string.settings_search_result_description, entry.title, entry.sectionTitle)
-    Column(
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(role = Role.Button, onClick = { onOpen(entry) })
-            .padding(vertical = 8.dp)
-            .testTag(entry.resultTag)
-            .semantics(mergeDescendants = true) { contentDescription = "$description. $detail" },
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(entry.title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            Text(entry.sectionTitle, style = MaterialTheme.typography.labelMedium)
-        }
-        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun KeyFilterPicker(filter: ApiKeyStatusFilter, onFilter: (ApiKeyStatusFilter) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.settings_keys_filter), style = MaterialTheme.typography.labelLarge)
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().testTag(AutomationIds.API_KEYS_FILTER)) {
-            ApiKeyStatusFilter.entries.forEachIndexed { index, option ->
-                SegmentedButton(
-                    selected = option == filter,
-                    onClick = { onFilter(option) },
-                    shape = SegmentedButtonDefaults.itemShape(index, ApiKeyStatusFilter.entries.size),
-                ) {
-                    Text(stringResource(option.label))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun KeyRow(
-    provider: CloudProvider,
-    saved: Boolean,
-    failed: Boolean,
-    actions: SettingsActions,
-    modifier: Modifier = Modifier,
-) {
-    // The entered key is held only in this composable until saved; saved keys are never read back.
-    var draft by remember(provider, saved) { mutableStateOf("") }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(provider.displayName, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            Text(
-                stringResource(
-                    when {
-                        failed -> R.string.settings_key_failed
-                        saved -> R.string.settings_key_saved
-                        else -> R.string.settings_key_not_set
-                    },
-                ),
-                color = when {
-                    failed -> MaterialTheme.colorScheme.error
-                    saved -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
-        OutlinedTextField(
-            value = draft,
-            onValueChange = { draft = it },
-            label = { Text(stringResource(R.string.settings_key_label, provider.displayName)) },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = {
-                    actions.onSaveKey(provider, draft)
-                    draft = ""
-                },
-                enabled = draft.isNotBlank()) {
-                Text(stringResource(R.string.action_save))
-            }
-            if (saved) {
-                TextButton(onClick = { actions.onRemoveKey(provider) }) { Text(stringResource(R.string.action_remove)) }
-            }
-        }
-    }
 }

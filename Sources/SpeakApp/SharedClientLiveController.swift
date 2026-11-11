@@ -42,6 +42,8 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   var configuredClientFactory: (@MainActor (LiveTranscriptionRoute, String?, LiveClientOptions) async throws
     -> StreamingTranscriptionClient)?
   var startCaptureAudio: (() async throws -> Void)?
+  /// Receives the conversion-failure reporter a stubbed capture would use.
+  var observeConversionFailureReporter: ((@escaping @Sendable (Error) -> Void) -> Void)?
   var enqueueClientUpdate: @Sendable (@escaping @MainActor @Sendable () -> Void) -> Void = { update in
     Task { @MainActor in update() }
   }
@@ -64,10 +66,10 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   }
 
   func start() async throws {
-        guard !isRunning, !isStarting, !isStopping else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
-        isStarting = true
-        defer { isStarting = false }
-        try Task.checkCancellation()
+    guard !isRunning, !isStarting, !isStopping else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
+    isStarting = true
+    defer { isStarting = false }
+    try Task.checkCancellation()
     guard let model = currentModel,
           let route = LiveTranscriptionRouting.route(for: model),
           let keyIdentifier = route.apiKeyIdentifier else {
@@ -103,12 +105,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       try Task.checkCancellation()
       startClient(client, for: active)
       if let failure = active.snapshot.error { throw failure }
-      if let startCaptureAudio {
-        try await startCaptureAudio()
-      } else {
-        try audioProcessor.installTap(on: audioEngine.inputNode, sampleRate: route.sampleRate, client: client)
-        try await startAudioEngineAfterInputDeviceSettles(audioEngine)
-      }
+      try await startCapture(sampleRate: route.sampleRate, client: client, for: active)
       try Task.checkCancellation()
       if let failure = active.snapshot.error { throw failure }
       startedAt = Date()
@@ -178,11 +175,8 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     let apiKey: String
     do {
       apiKey = try await secureStorage.secret(identifier: identifier)
-    } catch let error as SecureAppStorageError {
-      if case .valueNotFound = error {
-        throw TranscriptionProviderError.apiKeyMissing
-      }
-      throw error
+    } catch SecureAppStorageError.valueNotFound {
+      throw TranscriptionProviderError.apiKeyMissing
     }
     guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw TranscriptionProviderError.apiKeyMissing
@@ -359,11 +353,32 @@ extension SharedClientLiveController {
         guard let snapshot = active.receive(text, isFinal: isFinal, projection: projection) else { return }
         enqueue { [weak self] in self?.apply(snapshot, from: active, owner: owner) }
       },
-      onError: { [weak self] error in
-        guard let snapshot = active.fail(error) else { return }
-        enqueue { [weak self] in self?.apply(snapshot, from: active, owner: owner) }
-      }
+      onError: failureReporter(for: active)
     )
+  }
+
+  private func startCapture(
+    sampleRate: Int, client: StreamingTranscriptionClient, for active: SharedClientControllerRun
+  ) async throws {
+    let reportFailure = failureReporter(for: active)
+    if let startCaptureAudio {
+      observeConversionFailureReporter?(reportFailure)
+      return try await startCaptureAudio()
+    }
+    try audioProcessor.installTap(
+      on: audioEngine.inputNode, sampleRate: sampleRate, client: client, onConversionFailure: reportFailure
+    )
+    try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+  }
+
+  /// Provider errors and lost capture audio fail the run once; text so far stays as recovery text.
+  private func failureReporter(for active: SharedClientControllerRun) -> @Sendable (Error) -> Void {
+    let enqueue = enqueueClientUpdate
+    let owner = boundaryDeliveryOwner
+    return { [weak self] error in
+      guard let snapshot = active.fail(error) else { return }
+      enqueue { [weak self] in self?.apply(snapshot, from: active, owner: owner) }
+    }
   }
 
   /// A client that reports its own utterance boundaries is listened to

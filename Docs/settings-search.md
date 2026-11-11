@@ -28,8 +28,12 @@ Hosts render from the catalogue. They don't keep their own lists:
   computed heading pass `searchEntryID:`. API-key cards are indexed at runtime
   from the provider lists the API Keys page renders
   (`MacSettingsSearch.apiKeyEntries`).
-- iOS top-level sections use `SearchableSettingsSection("Title")`, and API-key
-  rows are indexed at runtime from `APIKeysView.entries(for:)`.
+- iOS Settings is a root list of sub-pages (`IOSSettingsPage`). Each page's
+  sections use `SearchableSettingsSection("Title")` and are listed in that
+  page's `sectionTitles`, which is how a search result opens the right page
+  before scrolling to the section. API-key rows are indexed at runtime from
+  `APIKeysView.entries(for:)`. `IOSSettingsPageTests` fails when a catalogue
+  entry has no page.
 - `SettingsTab.searchSection` and `MacSettingsSearch.sidebarItem(for:)` are
   exhaustive switches, so a new settings page doesn't compile until it is mapped.
 

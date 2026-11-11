@@ -76,11 +76,15 @@ final class SiteMediaCaptureUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: Self.elementTimeout))
         mark("settings")
         pause(2)
+        save("ios-settings")
+        openSettingsPage("transcription")
         if scrollUpUntilExists(app.segmentedControls["transcriptionLocationPicker"]) {
             mark("models")
             pause(3)
             save("ios-models")
         }
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        openSettingsPage("recording")
         let trigger = app.buttons["hardwareTriggerSettingsLink"]
         if scrollUpUntilExists(trigger) {
             trigger.tap()
@@ -91,6 +95,11 @@ final class SiteMediaCaptureUITests: XCTestCase {
             pause(4)
             save("ios-action-button")
         }
+    }
+
+    private func openSettingsPage(_ page: String) {
+        let link = app.buttons["settingsPage.\(page)"]
+        if scrollUpUntilExists(link) { link.tap() }
     }
 
     private func scrollUpUntilExists(_ element: XCUIElement, maxSwipes: Int = 6) -> Bool {

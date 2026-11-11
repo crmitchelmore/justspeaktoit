@@ -1,7 +1,8 @@
 import Foundation
 
-/// iOS Settings is one scrolling list; these entries are its sections. Settings on
-/// pages opened from a section are indexed as keywords of that section.
+/// iOS Settings is a root list of sub-pages (`IOSSettingsPage`); these entries are
+/// the sections on those pages. Settings on screens opened from a section are
+/// indexed as keywords of that section.
 extension SettingsSearchCatalog {
     static let iOSEntries: [SettingsSearchEntry] = [
         SettingsSearchEntry(

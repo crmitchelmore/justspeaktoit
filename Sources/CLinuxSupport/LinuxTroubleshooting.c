@@ -114,14 +114,6 @@ static void navigate_clicked(GtkButton *button, gpointer data) {
         (void)jsti_window_update("The requested settings page could not be opened.", NULL, -1);
 }
 
-static gboolean key_pressed(GtkEventControllerKey *controller, guint key, guint code,
-                             GdkModifierType modifiers, gpointer data) {
-    (void)controller; (void)code; (void)modifiers; (void)data;
-    if (key != GDK_KEY_Escape) return FALSE;
-    if (ui.window != NULL) gtk_window_close(ui.window);
-    return TRUE;
-}
-
 static GtkWidget *text_label(const char *text) {
     GtkWidget *label = gtk_label_new(text);
     gtk_label_set_xalign(GTK_LABEL(label), 0);
@@ -133,22 +125,10 @@ static GtkWidget *text_label(const char *text) {
 
 void jsti_troubleshooting_open(GtkWindow *owner) {
     if (ui.window != NULL) { gtk_window_present(ui.window); return; }
-    ui.window = GTK_WINDOW(adw_window_new());
-    gtk_window_set_title(ui.window, "Troubleshooting");
-    gtk_window_set_default_size(ui.window, 620, 600);
-    gtk_window_set_transient_for(ui.window, owner);
-    gtk_window_set_destroy_with_parent(ui.window, TRUE);
-    gtk_window_set_application(ui.window, gtk_window_get_application(owner));
+    GtkWidget *column;
+    ui.window = jsti_tool_window_new(owner, "Troubleshooting", 600, &column);
     g_signal_connect(ui.window, "close-request", G_CALLBACK(closing), NULL);
     g_object_weak_ref(G_OBJECT(ui.window), finalized, NULL);
-    GtkEventController *keys = gtk_event_controller_key_new();
-    g_signal_connect(keys, "key-pressed", G_CALLBACK(key_pressed), NULL);
-    gtk_widget_add_controller(GTK_WIDGET(ui.window), keys);
-    GtkWidget *toolbar = adw_toolbar_view_new();
-    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), adw_header_bar_new());
-    GtkWidget *column = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
-    gtk_widget_set_margin_start(column, 20); gtk_widget_set_margin_end(column, 20);
-    gtk_widget_set_margin_top(column, 16); gtk_widget_set_margin_bottom(column, 20);
     ui.summary = GTK_LABEL(text_label("Checking saved settings..."));
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.summary));
     GtkWidget *scrolled = gtk_scrolled_window_new();
@@ -162,8 +142,6 @@ void jsti_troubleshooting_open(GtkWindow *owner) {
     g_signal_connect(ui.check, "clicked", G_CALLBACK(command_clicked),
                      GINT_TO_POINTER(JSTI_LINUX_TROUBLESHOOTING_CHECK));
     gtk_box_append(GTK_BOX(column), ui.check);
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), column);
-    adw_window_set_content(ADW_WINDOW(ui.window), toolbar);
     gtk_window_present(ui.window);
     request(JSTI_LINUX_TROUBLESHOOTING_CHECK);
 }
@@ -291,6 +269,7 @@ int32_t jsti_troubleshooting_self_test(GtkWindow *owner, char *error, size_t cap
     GtkWidget *details = heading == NULL ? NULL : gtk_widget_get_next_sibling(heading);
     gboolean valid = fixture.calls == 1 && fixture.command == JSTI_LINUX_TROUBLESHOOTING_CHECK &&
         ui.first_fix != NULL && !ui.pending && !gtk_window_get_modal(ui.window) &&
+        gtk_window_get_transient_for(ui.window) == owner && gtk_window_get_destroy_with_parent(ui.window) &&
         GTK_IS_LABEL(details) && gtk_label_get_selectable(GTK_LABEL(details)) && gtk_label_get_wrap(GTK_LABEL(details));
     if (valid) {
         guint64 old = fixture.ticket;

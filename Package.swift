@@ -91,6 +91,7 @@ let appleCoreSources: [String] = [
     "Keyboard/KeyboardInstantDictation.swift",
     "Keyboard/KeyboardTranscriptStreamer.swift",
     "Live/LiveAudioConverterDrain.swift",
+    "Live/LivePCMBufferPool.swift",
     "Live/LiveTranscriptionClientFactory.swift",
     "LiveActivity/TranscriptHandoffActivity.swift",
     "LiveActivity/TranscriptionActivityHandle.swift",

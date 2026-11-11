@@ -1,6 +1,5 @@
 import AVFoundation
 import Foundation
-import SpeakCore
 
 /// Pool of reusable copy buffers so the audio tap never allocates on the
 /// real-time audio thread.
@@ -29,15 +28,15 @@ import SpeakCore
 /// thread), and a drop counter is incremented. The counter is summarised in a
 /// single log line at session teardown — never per drop, never from the render
 /// thread, and never with any audio content.
-final class LivePCMBufferPool: @unchecked Sendable {
+public final class LivePCMBufferPool: @unchecked Sendable {
   /// Fallback outstanding cap for callers that do not know their tap size.
   /// 96 buffers is ~2 s of audio at the common 1024-frame, 48 kHz tap.
-  static let defaultMaximumOutstanding = 96
+  public static let defaultMaximumOutstanding = 96
 
   /// Roughly two seconds of tap callbacks at `tapBufferSize`, assuming a
   /// 48 kHz input. Past two seconds of backlog a live consumer is not going to
   /// catch up, so holding the audio only costs memory and latency.
-  static func outstandingLimit(tapBufferSize: AVAudioFrameCount) -> Int {
+  public static func outstandingLimit(tapBufferSize: AVAudioFrameCount) -> Int {
     let framesPerSecond = 48_000.0
     let bufferedSeconds = 2.0
     let frames = Double(max(tapBufferSize, 1))
@@ -52,7 +51,7 @@ final class LivePCMBufferPool: @unchecked Sendable {
   private var outstanding = 0
   private var droppedChunks = 0
 
-  init(
+  public init(
     maximumBuffers: Int,
     maximumOutstanding: Int = LivePCMBufferPool.defaultMaximumOutstanding,
     label: String = "live-audio"
@@ -62,7 +61,7 @@ final class LivePCMBufferPool: @unchecked Sendable {
     self.label = label
   }
 
-  convenience init(maximumBuffers: Int, tapBufferSize: AVAudioFrameCount, label: String) {
+  public convenience init(maximumBuffers: Int, tapBufferSize: AVAudioFrameCount, label: String) {
     self.init(
       maximumBuffers: maximumBuffers,
       maximumOutstanding: LivePCMBufferPool.outstandingLimit(tapBufferSize: tapBufferSize),
@@ -71,7 +70,7 @@ final class LivePCMBufferPool: @unchecked Sendable {
   }
 
   /// Buffers currently checked out and not yet recycled.
-  var outstandingCount: Int {
+  public var outstandingCount: Int {
     lock.lock()
     defer { lock.unlock() }
     return outstanding
@@ -79,7 +78,7 @@ final class LivePCMBufferPool: @unchecked Sendable {
 
   /// Tap chunks dropped since the last `removeAll()` because the outstanding
   /// cap was reached.
-  var droppedChunkCount: Int {
+  public var droppedChunkCount: Int {
     lock.lock()
     defer { lock.unlock() }
     return droppedChunks
@@ -89,7 +88,7 @@ final class LivePCMBufferPool: @unchecked Sendable {
   /// far behind that admitting more audio would just grow the backlog. A `nil`
   /// return means "drop this chunk"; it is never an error the caller must
   /// handle beyond skipping the buffer.
-  func buffer(format: AVAudioFormat, frameCapacity: AVAudioFrameCount) -> AVAudioPCMBuffer? {
+  public func buffer(format: AVAudioFormat, frameCapacity: AVAudioFrameCount) -> AVAudioPCMBuffer? {
     lock.lock()
     defer { lock.unlock() }
 
@@ -114,14 +113,14 @@ final class LivePCMBufferPool: @unchecked Sendable {
 
   /// Copies a tap buffer into a pooled buffer for the processing queue, or
   /// returns `nil` (dropping the chunk) when it is empty or the pool is full.
-  func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+  public func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
     guard buffer.frameLength > 0,
           let copy = self.buffer(format: buffer.format, frameCapacity: buffer.frameLength) else { return nil }
     LivePCMCopy.copy(buffer, into: copy)
     return copy
   }
 
-  func recycle(_ buffer: AVAudioPCMBuffer) {
+  public func recycle(_ buffer: AVAudioPCMBuffer) {
     lock.lock()
     defer { lock.unlock() }
 
@@ -133,7 +132,7 @@ final class LivePCMBufferPool: @unchecked Sendable {
 
   /// Clears the free list at session teardown and emits the one-and-only
   /// overload summary for the session that just ended.
-  func removeAll() {
+  public func removeAll() {
     lock.lock()
     let dropped = droppedChunks
     droppedChunks = 0

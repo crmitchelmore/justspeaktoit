@@ -1,7 +1,7 @@
 import AVFoundation
 import XCTest
 
-@testable import SpeakApp
+@testable import SpeakCore
 
 final class LivePCMBufferPoolTests: XCTestCase {
 

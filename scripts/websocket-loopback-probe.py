@@ -557,7 +557,7 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             require(setup["audioEncoding"] == "PCM_24KHZ" and setup["partialMode"] == "CUMULATIVE")
             ready = {"sessionId": "synthetic"}
         elif provider == "grok":
-            require(query.get("model") == ["grok-voice-think-fast-2.0"])
+            require(query.get("model") == ["grok-voice-3.0"])
             require(headers.get("authorization") == "Bearer " + key)
             setup = read_json()
             require(setup["type"] == "session.update")

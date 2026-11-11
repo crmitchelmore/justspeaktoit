@@ -22,7 +22,7 @@ class AdditionalProviderPeerTests(unittest.TestCase):
         handler.additional_scenario = scenario
         handler.additional_query = {
             "key": ["synthetic-loopback-key"], "api_key": ["synthetic-loopback-key"],
-            "sessionId": ["synthetic"], "model": ["grok-voice-think-fast-2.0"],
+            "sessionId": ["synthetic"], "model": ["grok-voice-3.0"],
         }
         handler.additional_headers = {"authorization": "Bearer synthetic-loopback-key"}
         handler.pending = bytearray()

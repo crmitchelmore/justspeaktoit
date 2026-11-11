@@ -70,8 +70,9 @@ jobs:
     env:
       # Space-separated XCTest identifiers that flake on hosted simulators.
       # They are skipped by the gated run and re-run below without gating.
-      # Fix tracked in the issue labelled ci-flaky-test.
-      IOS_UI_QUARANTINE: SpeakiOSUITests/ActionButtonSettingsUITests/testActionButtonDestinationCanBeConfigured
+      # Fix tracked in the issue labelled ci-flaky-test. The list is empty ("")
+      # when nothing is quarantined, which skips the non-gating step.
+      IOS_UI_QUARANTINE: ""
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -107,7 +107,7 @@ sessions:
         title: "SpeechTranscriber shows first words no later than Apple Dictation"
         minutes: 5
         core: false
-        build: "Just Speak to It for Mac, Alpha build 64 or later with the SpeechTranscriber warm-up fix, macOS 26 or later"
+        build: "Just Speak to It for Mac, an Alpha build that includes PR #1507 (SpeechTranscriber starts alongside the microphone), macOS 26 or later"
         steps:
           - "Settings \u203a Transcription \u203a Local \u203a Streaming: choose Apple SpeechTranscriber (On-device)."
           - "In TextEdit, read the same short paragraph three times, one recording each. About 6 seconds per recording is enough."

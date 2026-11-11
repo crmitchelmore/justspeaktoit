@@ -58,29 +58,8 @@ final class RevAILiveRun: LiveSendPumpRun, LiveFinishableRun, @unchecked Sendabl
     /// open segment has none. Only a final confirms them.
     var openPartial: String?
     var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
-    /// Deliveries held back while a finish runs. A healthy finish returns them
-    /// in its whole transcript; a failed one releases them before its error,
-    /// so the host's visible draft keeps every word the server sent.
-    var withheldFinals: [String] = []
-    var withheldPartial: String?
-
-    var waiters: [CheckedContinuation<String?, Never>] = []
-    var onTranscript: ((String, Bool) -> Void)?
-    var onError: ((Error) -> Void)?
-
-    // MARK: Terminal delivery
-
-    /// Transcript callbacks decided under the lock that have not returned yet.
-    /// A failure report waits for them, so the host has every word the run
-    /// handed over before it learns that the run failed.
-    var transcriptsInFlight = 0
-    /// The failure report, held until the last in-flight transcript returns.
-    var deferredFailureReport: (() -> Void)?
-    /// A failure is being published outside the lock: in-flight transcripts,
-    /// withheld words, then the error. Finish callers that join meanwhile wait
-    /// in `lateWaiters`, so no caller can return before the error is delivered.
-    var deliveringFailure = false
-    var lateWaiters: [CheckedContinuation<String?, Never>] = []
+    /// Host callbacks, finish callers and the order a failure is published in.
+    var delivery = LiveRunDelivery()
 
     init(sampleRate: Int) {
         maximumBytes = max(Int(Double(max(sampleRate, 1) * 2) * RevAILiveClient.bufferedAudioSeconds), 1)

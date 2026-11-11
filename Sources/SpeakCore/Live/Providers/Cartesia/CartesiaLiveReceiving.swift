@@ -89,7 +89,7 @@ extension CartesiaLiveClient {
             if recordOpen(active) { effects.add { [weak self] in self?.pump(active) } }
         case .turnStart:
             active.openTurnDraft = nil
-            active.withheldDraft = nil
+            active.delivery.withheldInterim = nil
         case .turnResume:
             break
         case .turnUpdate(let text), .turnEagerEnd(let text):
@@ -107,10 +107,10 @@ extension CartesiaLiveClient {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         active.openTurnDraft = text
         guard active.phase != .finishing else {
-            active.withheldDraft = text
+            active.delivery.withheldInterim = text
             return
         }
-        deliver(text, isFinal: false, active, &effects)
+        deliverTranscript(text, isFinal: false, active, &effects)
     }
 
     /// A completed turn is confirmed once, by order: `request_id` names the
@@ -118,28 +118,15 @@ extension CartesiaLiveClient {
     /// folds turns that end during it into its return instead of delivering them.
     private func confirm(_ text: String, _ active: CartesiaLiveRun, _ effects: inout LiveDeferredEffects) {
         active.openTurnDraft = nil
-        active.withheldDraft = nil
+        active.delivery.withheldInterim = nil
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         active.accumulated.append(final: text)
         active.confirmedSegments.append(text.trimmingCharacters(in: .whitespacesAndNewlines))
         guard active.phase != .finishing else {
-            active.withheldFinals.append(text)
+            active.delivery.withheldFinals.append(text)
             return
         }
-        deliver(text, isFinal: true, active, &effects)
-    }
-
-    /// Hands a transcript to the host outside the lock and counts it until the
-    /// callback returns, so a failure decided meanwhile is reported after it.
-    private func deliver(
-        _ text: String, isFinal: Bool, _ active: CartesiaLiveRun, _ effects: inout LiveDeferredEffects
-    ) {
-        guard let callback = active.onTranscript else { return }
-        active.transcriptsInFlight += 1
-        effects.add {
-            callback(text, isFinal)
-            self.withState { effects in self.transcriptReturned(active, &effects) }
-        }
+        deliverTranscript(text, isFinal: true, active, &effects)
     }
 
     /// The receive failed: the server closed the stream or the transport

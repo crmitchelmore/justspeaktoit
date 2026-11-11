@@ -11,11 +11,8 @@ protocol LiveFinishableRun: AnyObject {
     var connection: (any StreamingWebSocketConnection)? { get set }
     /// What a finish caller receives: the run's confirmed text, or nil.
     var transcript: String? { get }
-    var waiters: [CheckedContinuation<String?, Never>] { get set }
-    /// Callers that joined while a failure was being published; they resume
-    /// only after its error is out.
-    var lateWaiters: [CheckedContinuation<String?, Never>] { get set }
-    var deliveringFailure: Bool { get }
+    /// Host callbacks, finish callers and the failure-delivery bookkeeping.
+    var delivery: LiveRunDelivery { get set }
 }
 
 /// How lock-guarded clients whose run owns its socket and finish waiters
@@ -67,7 +64,7 @@ extension LiveRunFinishing {
                 effects.add { continuation.resume(returning: transcript) }
                 return
             }
-            active.waiters.append(continuation)
+            active.delivery.waiters.append(continuation)
             beginFinish(active, &effects)
         case .idle:
             // Never started, so nothing was sent and nothing can be finished.
@@ -76,8 +73,8 @@ extension LiveRunFinishing {
         case .closed:
             // A failure still being published keeps late callers until its
             // error is out, exactly like callers that were already waiting.
-            guard !active.deliveringFailure else {
-                active.lateWaiters.append(continuation)
+            guard !active.delivery.deliveringFailure else {
+                active.delivery.lateWaiters.append(continuation)
                 return
             }
             effects.add { continuation.resume(returning: transcript) }

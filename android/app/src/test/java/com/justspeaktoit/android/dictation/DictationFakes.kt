@@ -97,7 +97,10 @@ internal class FakeRecorder(
     val onCaptureFailed: () -> Unit,
     private val bytes: Long,
     private val opens: Boolean,
+    /** When set, stop blocks until it opens, like a recorder whose capture thread is stuck. */
+    private val stopGate: CountDownLatch? = null,
 ) : AudioRecorder {
+    val stopEntered = CountDownLatch(1)
     val stopped = CountDownLatch(1)
     @Volatile var stops = 0
     @Volatile var startedCapture = false
@@ -111,6 +114,8 @@ internal class FakeRecorder(
 
     override fun stop(): Long {
         stops++
+        stopEntered.countDown()
+        stopGate?.await()
         stopped.countDown()
         return bytes
     }
@@ -120,6 +125,7 @@ internal class FakeRecorders : RecorderFactory {
     /** One second of audio: long enough to transcribe. */
     var bytes: Long = WavFormat.BYTES_PER_SECOND.toLong()
     var opens = true
+    var stopGate: CountDownLatch? = null
     val created = CopyOnWriteArrayList<FakeRecorder>()
 
     override fun create(
@@ -127,7 +133,7 @@ internal class FakeRecorders : RecorderFactory {
         onLevel: (Float) -> Unit,
         onLimitReached: () -> Unit,
         onCaptureFailed: () -> Unit,
-    ): AudioRecorder = FakeRecorder(file, onLimitReached, onCaptureFailed, bytes, opens).also { created += it }
+    ): AudioRecorder = FakeRecorder(file, onLimitReached, onCaptureFailed, bytes, opens, stopGate).also { created += it }
 
     val last: FakeRecorder get() = created.last()
 }

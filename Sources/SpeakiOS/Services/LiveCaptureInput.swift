@@ -94,6 +94,18 @@ final class LiveCaptureInput {
         }
     }
 
+    /// Watches only for an engine-configuration change that leaves the engine
+    /// stopped, for an owner that keeps its own interruption handling and
+    /// stop sequence (hands-free arms that observer before the engine exists).
+    /// ``disarmDisruptionHandling()`` retires it.
+    func observeConfigurationChanges(onDisruption: @escaping @MainActor () -> Void) {
+        configurationObserver.observe(.AVAudioEngineConfigurationChange, object: engine) { [weak self] in
+            self?.engine.isRunning == true
+        } onDisruption: {
+            onDisruption()
+        }
+    }
+
     func disarmDisruptionHandling() {
         configurationObserver.stop()
         interruptionObserver.stop()

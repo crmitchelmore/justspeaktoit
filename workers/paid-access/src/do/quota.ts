@@ -18,6 +18,7 @@ import {
   PENDING_PREFIX, receiptKey, pendingKey,
   type SettlementReceipt, type SettlementRequest, type SettlementResponse,
 } from './settlement.js';
+import { expiryDecision, isExpiredOperation, operationStep, reconcileStep, type ReconcileResult } from './quota-policy.js';
 
 export interface QuotaLimits {
   readonly monthlyAudioSeconds: number;
@@ -194,22 +195,13 @@ export class QuotaDurableObject implements DurableObject {
     const expired: Reservation[] = [];
     const receiptUpdates: Record<string, SettlementReceipt> = {};
     for (const reservation of stored) {
-      if (reservation.operationKey !== undefined && reservation.expiresAt <= nowSeconds) {
-        const key = receiptKey(reservation.operationKey);
-        const receipt = await this.state.storage.get<SettlementReceipt>(key);
-        if (receipt?.phase === 'reserved') {
-          receiptUpdates[key] = { ...receipt, phase: 'not_started', revision: receipt.revision + 1,
-            updatedAt: nowSeconds };
-          continue;
-        }
-        if (receipt?.phase === 'provider_started') {
-          receiptUpdates[key] = { ...receipt, phase: 'outcome_unknown', revision: receipt.revision + 1,
-            updatedAt: nowSeconds };
-        }
-        // A missing receipt is not proof of unused quota: keep the hold fail-closed.
-        live.push(reservation);
-      } else {
-        (reservation.expiresAt > nowSeconds ? live : expired).push(reservation);
+      const receipt = isExpiredOperation(reservation, nowSeconds) && reservation.operationKey !== undefined
+        ? await this.state.storage.get<SettlementReceipt>(receiptKey(reservation.operationKey)) : undefined;
+      const decision = expiryDecision(reservation, nowSeconds, receipt);
+      if (decision.kind === 'charge') expired.push(reservation);
+      else if (decision.kind !== 'revoke') live.push(reservation);
+      if ((decision.kind === 'revoke' || decision.kind === 'retain') && decision.receipt !== undefined) {
+        receiptUpdates[receiptKey(decision.receipt.idempotencyKey)] = decision.receipt;
       }
     }
     if (Object.keys(receiptUpdates).length > 0) {
@@ -401,46 +393,28 @@ export class QuotaDurableObject implements DurableObject {
       });
       return { ok: true, receipt: next };
     }
-    if (receipt === null || receipt.ownerId !== request.ownerId) return { ok: false, receipt, reason: 'conflict' };
-    if (request.kind === 'operation_measure' && (receipt.phase === 'ledger_pending' || receipt.phase === 'settled')) {
-      return { ok: receipt.actualUnits === request.actualUnits && receipt.measuredAt === request.measuredAt,
-        receipt, reason: 'conflict' };
+    const decision = operationStep(receipt, request);
+    if (decision.kind === 'refuse') return { ok: decision.ok, receipt, reason: 'conflict' };
+    const next = decision.receipt;
+    if (decision.effect === 'none') {
+      await this.state.storage.put(receiptKey(next.idempotencyKey), next);
+      return { ok: true, receipt: next };
     }
-    if (receipt.revision !== request.revision) return { ok: false, receipt, reason: 'conflict' };
-    const next: SettlementReceipt = { ...receipt, revision: receipt.revision + 1, updatedAt: request.nowSeconds };
-    if (request.kind === 'operation_start' && receipt.phase === 'reserved') {
-      next.phase = 'provider_started';
-    } else if (request.kind === 'operation_unknown' && (receipt.phase === 'provider_started'
-      || receipt.phase === 'outcome_unknown')) {
-      next.phase = 'outcome_unknown';
-    } else if (request.kind === 'operation_cancel' && receipt.phase === 'reserved') {
-      next.phase = 'not_started';
-      const reservations = await this.loadReservations(request.nowSeconds);
-      await this.state.storage.put({ [receiptKey(next.idempotencyKey)]: next,
-        [RESERVATIONS_KEY]: reservations.filter((entry) => entry.id !== next.reservationId) });
+    const reservations = await this.loadReservations(request.nowSeconds);
+    const remaining = reservations.filter((entry) => entry.id !== next.reservationId);
+    if (decision.effect === 'release_hold') {
+      await this.state.storage.put({ [receiptKey(next.idempotencyKey)]: next, [RESERVATIONS_KEY]: remaining });
       return { ok: true, receipt: next };
-    } else if (request.kind === 'operation_measure' && (receipt.phase === 'provider_started'
-      || receipt.phase === 'outcome_unknown')) {
-      if (!Number.isSafeInteger(request.actualUnits) || request.actualUnits < 0
-        || !Number.isSafeInteger(request.measuredAt) || request.measuredAt < receipt.createdAt
-        || (receipt.unitKind === 'audio_seconds' && request.actualUnits > receipt.reservedUnits)) {
-        return { ok: false, receipt, reason: 'conflict' };
-      }
-      const reservations = await this.loadReservations(request.nowSeconds);
-      const period = await this.loadPeriod(receipt.billingPeriod);
-      if (receipt.unitKind === 'tokens') period.tokensCommitted += request.actualUnits;
-      else period.audioSecondsCommitted += request.actualUnits;
-      next.phase = 'ledger_pending'; next.actualUnits = request.actualUnits;
-      next.measuredAt = request.measuredAt; next.nextReconcileAt = request.nowSeconds + 30;
-      // Retry is installed before the durable measurement; an extra empty alarm is harmless.
-      await this.ensureAlarm(next.nextReconcileAt);
-      await this.state.storage.put({ [receiptKey(next.idempotencyKey)]: next,
-        [pendingKey(next)]: next.idempotencyKey,
-        [QuotaDurableObject.periodKey(period.period)]: period,
-        [RESERVATIONS_KEY]: reservations.filter((entry) => entry.id !== next.reservationId) });
-      return { ok: true, receipt: next };
-    } else return { ok: false, receipt, reason: 'conflict' };
-    await this.state.storage.put(receiptKey(next.idempotencyKey), next);
+    }
+    const period = await this.loadPeriod(next.billingPeriod);
+    if (next.unitKind === 'tokens') period.tokensCommitted += next.actualUnits!;
+    else period.audioSecondsCommitted += next.actualUnits!;
+    // Retry is installed before the durable measurement; an extra empty alarm is harmless.
+    await this.ensureAlarm(next.nextReconcileAt!);
+    await this.state.storage.put({ [receiptKey(next.idempotencyKey)]: next,
+      [pendingKey(next)]: next.idempotencyKey,
+      [QuotaDurableObject.periodKey(period.period)]: period,
+      [RESERVATIONS_KEY]: remaining });
     return { ok: true, receipt: next };
   }
 
@@ -454,7 +428,7 @@ export class QuotaDurableObject implements DurableObject {
     const receipt = await this.state.blockConcurrencyWhile(() =>
       this.state.storage.get<SettlementReceipt>(receiptKey(key)));
     if (receipt?.phase !== 'ledger_pending' || receipt.lastFailure === 'ledger_conflict') return;
-    let result: 'matched' | 'conflict' | 'unavailable';
+    let result: ReconcileResult;
     try {
       result = await new Repository(this.env.DB).usage.reconcileUsage({ ledgerEntryId: receipt.ledgerEntryId,
         userId: receipt.userId, idempotencyKey: receipt.idempotencyKey, operation: receipt.operation,
@@ -465,18 +439,8 @@ export class QuotaDurableObject implements DurableObject {
     await this.state.blockConcurrencyWhile(async () => {
       const current = await this.state.storage.get<SettlementReceipt>(receiptKey(key));
       if (current?.phase !== 'ledger_pending' || current.revision !== receipt.revision) return;
-      const now = Math.floor(Date.now() / 1000);
-      const next: SettlementReceipt = { ...current, revision: current.revision + 1, updatedAt: now,
-        reconcileAttempts: current.reconcileAttempts + 1 };
-      if (result === 'matched') {
-        next.phase = 'settled'; delete next.lastFailure; delete next.nextReconcileAt;
-      } else if (result === 'conflict') {
-        next.lastFailure = 'ledger_conflict'; delete next.nextReconcileAt;
-      } else {
-        next.lastFailure = 'ledger_unavailable';
-        next.nextReconcileAt = now + Math.min(900, 30 * 2 ** Math.min(5, next.reconcileAttempts - 1));
-        await this.ensureAlarm(next.nextReconcileAt);
-      }
+      const next = reconcileStep(current, result, Math.floor(Date.now() / 1000));
+      if (next.nextReconcileAt !== undefined) await this.ensureAlarm(next.nextReconcileAt);
       await this.state.storage.put({ [receiptKey(key)]: next,
         ...(next.nextReconcileAt === undefined ? {} : { [pendingKey(next)]: key }) });
       if (pendingKey(receipt) !== pendingKey(next)) await this.state.storage.delete(pendingKey(receipt));

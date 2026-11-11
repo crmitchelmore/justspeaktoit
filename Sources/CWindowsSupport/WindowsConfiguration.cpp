@@ -211,8 +211,7 @@ bool controls(HWND window, Dialog &dialog) {
         !add(L"BUTTON", L"&Export...", BS_PUSHBUTTON | WS_TABSTOP, exportID) ||
         !add(L"BUTTON", L"&Apply", BS_DEFPUSHBUTTON | WS_TABSTOP, IDOK) ||
         !add(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, IDCANCEL)) return false;
-    dialog.font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    dialog.font = jsti::chrome::dialogFont(window);
     if (dialog.font)
         for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(dialog.font), TRUE);
     layout(window, dialog);
@@ -317,8 +316,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case WM_DPICHANGED: {
         jsti::chrome::applySuggestedBounds(window, lparam);
         if (dialog->font) DeleteObject(dialog->font);
-        dialog->font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        dialog->font = jsti::chrome::dialogFont(window);
         if (dialog->font)
             for (HWND control : dialog->controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(dialog->font), TRUE);
         layout(window, *dialog);

@@ -109,8 +109,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             if (child) SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(dialog->font), TRUE);
             return child != nullptr;
         };
-        dialog->font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        dialog->font = jsti::chrome::dialogFont(window);
         if (!add(L"STATIC", dialog->options.voice.c_str(), SS_LEFT, 980, 20, 18, 450, 36) ||
             !add(L"STATIC", speedCaption(dialog->options).c_str(), 0, speedLabel, 20, 65, 250, 24) ||
             !add(L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, speedID, 300, 60, 150, 34) ||

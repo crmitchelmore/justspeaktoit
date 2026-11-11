@@ -60,15 +60,7 @@ void layout(HWND window) {
     }
 }
 
-void refreshFont(HWND window, Dialog &dialog) {
-    HFONT font = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    if (!font) return;
-    for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    if (dialog.font) DeleteObject(dialog.font);
-    dialog.font = font;
-}
+void refreshFont(HWND window, Dialog &dialog) { jsti::chrome::refreshDialogFont(window, dialog.controls, dialog.font); }
 
 void updateEnabled(HWND window, const Dialog &dialog) {
     const bool usable = dialog.config.available;

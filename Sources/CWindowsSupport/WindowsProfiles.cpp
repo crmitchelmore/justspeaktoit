@@ -88,9 +88,7 @@ void populate(HWND window, Dialog &dialog) {
     dialog.loading = false;
 }
 void font(HWND window, Dialog &dialog) {
-    HFONT replacement = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72),
-        0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    HFONT replacement = jsti::chrome::dialogFont(window);
     if (!replacement) return;
     for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), TRUE);
     if (dialog.font) DeleteObject(dialog.font);

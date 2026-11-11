@@ -107,15 +107,7 @@ void layout(HWND window) {
     move(IDCANCEL, static_cast<int>(bounds.right) - margin - at(100), closeTop, at(100), button);
 }
 
-void refreshFont(HWND window, Dialog &dialog) {
-    HFONT font = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    if (!font) return;
-    for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    if (dialog.font) DeleteObject(dialog.font);
-    dialog.font = font;
-}
+void refreshFont(HWND window, Dialog &dialog) { jsti::chrome::refreshDialogFont(window, dialog.controls, dialog.font); }
 
 const Row *selectedRow(const Dialog &dialog) {
     if (dialog.selected < 0 || static_cast<size_t>(dialog.selected) >= dialog.config.rows.size()) return nullptr;
@@ -315,21 +307,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
 }
 
 HWND createDialog(HWND owner, Dialog &dialog) {
-    const HINSTANCE instance = GetModuleHandleW(nullptr);
-    WNDCLASSW type{};
-    type.lpfnWndProc = procedure;
-    type.hInstance = instance;
-    type.lpszClassName = L"JustSpeakToItAPIKeys";
-    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT frame{0, 0, scale(owner, 640), scale(owner, 600)};
-    AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(owner));
-    RECT bounds{};
-    GetWindowRect(owner, &bounds);
-    HWND window = CreateWindowExW(windowExStyle, type.lpszClassName, L"API keys — Just Speak to It", windowStyle,
-        bounds.left + scale(owner, 40), bounds.top + scale(owner, 40), frame.right - frame.left,
-        frame.bottom - frame.top, owner, nullptr, instance, &dialog);
+    HWND window = jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItAPIKeys", procedure, L"API keys — Just Speak to It",
+        640, 600, windowStyle, windowExStyle, &dialog);
     if (window) {
         std::lock_guard<std::mutex> lock(configurationMutex);
         openDialog = window;

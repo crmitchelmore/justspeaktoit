@@ -224,15 +224,7 @@ bool routeDialogKey(HWND window, MSG &message) {
     return handled;
 }
 
-void refreshFont(HWND window, Dialog &dialog) {
-    HFONT font = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    if (!font) return;
-    for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    if (dialog.font) DeleteObject(dialog.font);
-    dialog.font = font;
-}
+void refreshFont(HWND window, Dialog &dialog) { jsti::chrome::refreshDialogFont(window, dialog.controls, dialog.font); }
 
 bool createControls(HWND window, Dialog &dialog) {
     auto add = [&](const wchar_t *kind, const wchar_t *text, DWORD style, int id) {

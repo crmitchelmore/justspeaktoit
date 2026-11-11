@@ -117,8 +117,7 @@ void layout(HWND window) {
         bottom, scale(window, 120), height, TRUE);
 }
 void font(HWND window, Dialog &dialog) {
-    HFONT next = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    HFONT next = jsti::chrome::dialogFont(window);
     if (!next) return;
     for (int id : {headingID, providerID, keyID, voicesID, statusID, refreshID, chooseID, closeID})
         SendDlgItemMessageW(window, id, WM_SETFONT, reinterpret_cast<WPARAM>(next), TRUE);
@@ -172,8 +171,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     switch (message) {
     case WM_CREATE: {
         auto add = [&](const wchar_t *type, const wchar_t *text, DWORD style, int id, DWORD extended = 0) {
-            return CreateWindowExW(extended, type, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 1, 1, window,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr) != nullptr;
+            return jsti::chrome::addControl(window, type, text, style, id, extended);
         };
         if (!add(L"STATIC", L"Account Voice &provider: presets and explicitly refreshed account voices", 0, headingID) ||
             !add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, providerID) ||
@@ -284,16 +282,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         break;
     case WM_SIZE: layout(window); return 0;
-    case WM_GETMINMAXINFO: {
-        RECT size{0, 0, scale(window, 600), scale(window, 460)};
-        AdjustWindowRectExForDpi(&size, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_CONTROLPARENT, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {size.right - size.left, size.bottom - size.top};
+    case WM_GETMINMAXINFO:
+        jsti::chrome::minimumTrackSize(window, lparam, 600, 460, WS_OVERLAPPEDWINDOW, WS_EX_CONTROLPARENT);
         return 0;
-    }
     case WM_DPICHANGED: {
-        const auto bounds = reinterpret_cast<const RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        jsti::chrome::applySuggestedBounds(window, lparam);
         font(window, *dialog); layout(window); return 0;
     }
     case WM_CLOSE: DestroyWindow(window); return 0;

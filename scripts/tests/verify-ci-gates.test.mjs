@@ -659,7 +659,8 @@ test('flaky iOS UI tests are quarantined to a bounded, non-gating step', () => {
   const body = jobBodies['build-ios'];
   const quarantine = body.match(/^      IOS_UI_QUARANTINE: (.+)$/m)?.[1];
   assert.ok(quarantine, 'the quarantine list is declared once on the job');
-  for (const id of quarantine.split(' ')) {
+  const ids = quarantine.replace(/^"(.*)"$/, '$1');
+  for (const id of ids ? ids.split(' ') : []) {
     assert.match(id, /^SpeakiOSUITests\/[A-Za-z]+UITests\/test\w+$/, 'only individual UI tests are quarantined');
     assert.doesNotMatch(id, /SettingsCredentialUITests/, 'required evidence suites cannot be quarantined');
   }

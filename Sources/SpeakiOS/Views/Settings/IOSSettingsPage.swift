@@ -179,6 +179,29 @@ struct IOSSettingsPageRow: View {
     }
 }
 
+/// A navigation row label whose value must stay readable in full, such as a
+/// selected model. The value sits on its own line under the title and wraps,
+/// rather than truncating beside it to "OpenRouter › GPT-…".
+struct SettingsValueLabel: View {
+    let title: String
+    let systemImage: String
+    let value: String
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(value)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } icon: {
+            Image(systemName: systemImage)
+        }
+    }
+}
+
 /// Secondary guidance under a setting. Markdown `**bold**` marks the action or
 /// choice that matters. Hidden in the Compact layout unless `alwaysShown`.
 struct SettingsFootnote: View {

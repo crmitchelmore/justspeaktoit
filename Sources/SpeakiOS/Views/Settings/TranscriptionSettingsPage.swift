@@ -13,6 +13,8 @@ struct GeneralSettingsPage: View {
                 }
             }
             .pickerStyle(.segmented)
+            .accessibilityLabel("Layout Density")
+            .accessibilityIdentifier("layoutDensityPicker")
 
             SettingsFootnote("**Compact** fits more on screen with inline controls and shorter cards.")
         }
@@ -54,6 +56,7 @@ struct TranscriptionSettingsPage: View {
                 }
             }
             .pickerStyle(.segmented)
+            .accessibilityLabel("Where transcription runs")
             .accessibilityIdentifier("transcriptionLocationPicker")
 
             SettingsFootnote(
@@ -120,6 +123,7 @@ struct TranscriptionSettingsPage: View {
             }
         }
         .pickerStyle(.segmented)
+        .accessibilityLabel("Remote Mode")
         .accessibilityIdentifier("remoteTranscriptionModePicker")
 
         // Never hidden either: streaming dictation does not go through

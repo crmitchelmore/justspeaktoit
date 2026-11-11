@@ -151,6 +151,7 @@ public struct PaidAccessSettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .accessibilityLabel("Billing")
                 .accessibilityIdentifier("paidAccessTermPicker")
 
                 Button(self.store.billingChannel.purchaseActionTitle) {

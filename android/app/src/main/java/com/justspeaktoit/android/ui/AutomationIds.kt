@@ -34,4 +34,12 @@ object AutomationIds {
      */
     fun resourceRelease(kind: SystemResourceKind, owner: String): String =
         "settings.resources.release.${kind.rawValue}.$owner"
+
+    const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
+    const val CLEANUP_PICKER_BACK = "cleanupPicker.back"
+    const val CLEANUP_PICKER_SEARCH = "cleanupPicker.search"
+    const val CLEANUP_PICKER_OPENROUTER = "cleanupPicker.openRouter"
+
+    /** One per cleanup model, keyed by its stable selection ID (for example `native/openai/gpt-6-luna`). */
+    fun cleanupPickerModel(selectionId: String) = "cleanupPicker.model.$selectionId"
 }

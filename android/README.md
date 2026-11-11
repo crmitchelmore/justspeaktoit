@@ -114,7 +114,8 @@ credential IDs and the cleanup prompt identical to the Mac app.
   a quarter of a second are discarded. Off restores the old behaviour (the audio is deleted and
   nothing is recorded). On-device and speech-service modes never give the app audio, so the
   setting does not apply to them. Leaving the app or a capture failure still discards the audio.
-- Optional cleanup sends the final transcript text (not audio) to OpenRouter.
+- Optional cleanup sends the final transcript text (not audio) to the chosen model's provider:
+  a native provider (Anthropic, OpenAI, Google Gemini, Groq or Mistral) or OpenRouter.
 - History is stored only in app-private storage (excluded from backup) and follows the
   retention chosen in History; Off saves nothing and deletes existing entries.
 - Secrets are encrypted with a non-exportable Android Keystore key. App data is excluded

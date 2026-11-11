@@ -1061,6 +1061,7 @@ extension ConfigTransferManager {
     /// is defined here. Dynamically registered identifiers are never exported.
     public static let transferableSecretIdentifiers: [String] = [
         "alibaba.apiKey",
+        "anthropic.apiKey",
         "assemblyai.apiKey",
         "azure.speech.apiKey",
         "cartesia.apiKey",

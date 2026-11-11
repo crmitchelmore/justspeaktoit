@@ -170,6 +170,13 @@ public enum ProviderBalanceDirectory {
             billingURL: "https://www.assemblyai.com/app/account"
         ),
         ProviderBalanceAccount(
+            id: "anthropic",
+            displayName: "Anthropic",
+            credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "anthropic")],
+            support: .billingLinkOnly(reason: Self.noDocumentedContract),
+            billingURL: "https://platform.claude.com/settings/billing"
+        ),
+        ProviderBalanceAccount(
             id: "gladia",
             displayName: "Gladia",
             credentialIdentifiers: [ProviderCredentialCatalogue.apiKeyIdentifier(for: "gladia")],

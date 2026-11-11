@@ -52,6 +52,40 @@ test('desktop Alpha routes return unavailable when the asset HEAD request reject
   }
 });
 
+test('Alpha routes return unavailable when the Alpha pointer fetch rejects', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => { throw new TypeError('synthetic pointer network failure'); };
+    for (const path of ['/alpha/download/arm64', '/alpha/appcast.xml', '/alpha/download/windows-x64']) {
+      const response = await worker.fetch(new Request(`https://justspeaktoit.com${path}`), {});
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('Location'), null);
+      assert.equal(await response.text(), 'Alpha build not yet available');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Alpha routes distinguish a missing pointer from an invalid one', async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    [new Response('nope', {status: 404}), 'Alpha build not yet available'],
+    [new Response('not json'), 'Invalid Alpha pointer'],
+    [Response.json({tag: 'alpha-build-0'}), 'Invalid Alpha pointer'],
+  ];
+  try {
+    for (const [pointer, message] of cases) {
+      globalThis.fetch = async () => pointer;
+      const response = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {});
+      assert.equal(response.status, 503);
+      assert.equal(await response.text(), message);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 const installerPointer = {schemaVersion: 1, tag: 'alpha-build-9', build: '202610301641', version: '2026.1030.1641.0',
   publisher: 'CN=Example Ltd, O=Example Ltd, C=GB'};
 const appInstaller = `<?xml version="1.0" encoding="utf-8"?>

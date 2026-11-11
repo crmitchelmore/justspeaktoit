@@ -64,6 +64,26 @@ class PaidPortableBoundaryTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('Apple paid adapters admitted to portable builds: ' + path, result.stderr)
 
+    def test_folder_entries_exclude_whole_folders_and_reject_stale_or_redundant_entries(self):
+        marker = 'let appleCoreSources: [String] = [\n'
+        result = self.verify(self.manifest.replace(marker, marker + '    "NoSuchFolder",\n'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Invalid or stale Apple source exclusion: NoSuchFolder', result.stderr)
+        redundant = marker + '    "AppleUI/SkeletonLoadingViews.swift",\n'
+        result = self.verify(self.manifest.replace(marker, redundant))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('already covered by the AppleUI folder', result.stderr)
+
+    def test_swiftui_view_outside_apple_ui_folder_is_rejected(self):
+        stray = self.root / 'Sources' / 'SpeakCore' / 'App' / 'StrayView.swift'
+        stray.write_text('import SwiftUI\n\npublic struct StrayView: View {\n    public var body: some View { EmptyView() }\n}\n')
+        try:
+            result = self.verify(self.manifest)
+        finally:
+            stray.unlink()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('SwiftUI view outside Sources/SpeakCore/AppleUI: App/StrayView.swift', result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

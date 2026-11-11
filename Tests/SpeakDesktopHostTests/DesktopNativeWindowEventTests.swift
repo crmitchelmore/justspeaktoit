@@ -39,13 +39,23 @@ final class DesktopNativeWindowEventTests: XCTestCase {
         for event in DesktopNativeWindowsEvent.allCases { XCTAssertEqual(WindowsCode(event.rawValue), .host(event)) }
     }
 
-    /// Linux's recordings-location constant shares 98 with Restore; the shared
-    /// event wins, matching the window's dispatch before the enum existed.
-    func testDecode_linuxRecordingsLocationIsShadowedByRestore() {
-        XCTAssertEqual(
-            DesktopNativeLinuxEvent.recordingsLocation.rawValue, DesktopNativeWindowEvent.migrationRestore.rawValue
-        )
-        XCTAssertEqual(LinuxCode(98), .shared(.migrationRestore))
+    /// Every host-only event decodes as itself: no host number may collide
+    /// with a shared event or a forwarded comparison event.
+    func testDecode_hostEventsAreDistinctFromSharedAndComparisonEvents() {
+        let shared = Set(DesktopNativeWindowEvent.allCases.map(\.rawValue))
+        for event in DesktopNativeLinuxEvent.allCases {
+            XCTAssertFalse(shared.contains(event.rawValue), "\(event)")
+            XCTAssertEqual(LinuxCode(event.rawValue), .host(event))
+        }
+        for event in DesktopNativeWindowsEvent.allCases {
+            XCTAssertFalse(shared.contains(event.rawValue), "\(event)")
+            XCTAssertEqual(WindowsCode(event.rawValue), .host(event))
+        }
+    }
+
+    func testDecode_linuxRecordingsLocationAndRestoreDispatchSeparately() {
+        XCTAssertEqual(LinuxCode(DesktopNativeLinuxEvent.recordingsLocation.rawValue), .host(.recordingsLocation))
+        XCTAssertEqual(LinuxCode(DesktopNativeWindowEvent.migrationRestore.rawValue), .shared(.migrationRestore))
     }
 
     func testIssueReportActions_areTheTicketCarryingEvents() {

@@ -1,6 +1,9 @@
 /* General > Recordings and backup: folder choice, migration backup, audio cleanup, export and import. */
 #include "LinuxWindowInternal.h"
 
+_Static_assert(JSTI_EVENT_RECORDINGS_LOCATION != JSTI_EVENT_MIGRATION_RESTORE,
+               "the recordings location choice must not decode as Migration restore");
+
 void on_recordings_folder(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     emit(JSTI_EVENT_RECORDINGS_FOLDER, "", 0);

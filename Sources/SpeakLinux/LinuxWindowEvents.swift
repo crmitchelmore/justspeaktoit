@@ -248,7 +248,6 @@ private func linuxHostSettingsEvent(
         holder.gestures.configure(style: hotKey.activation)
         holder.enqueueSettings { await controller.saveHotKey(hotKey) }
     case .recordingsLocation:
-        // Unreachable until the native constant stops sharing 98 with Restore.
         holder.enqueueSettings { await controller.chooseRecordingsDirectory(value) }
     default: return false
     }

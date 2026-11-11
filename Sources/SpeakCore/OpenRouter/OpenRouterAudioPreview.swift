@@ -90,7 +90,7 @@ final class OpenRouterAudioPreview: NSObject, ObservableObject {
                 #if os(iOS)
                 self.audioSessionLease = try OpenRouterPreviewAudioSessionLease.acquire()
                 #endif
-                guard player.play() else { throw URLError(.cannotDecodeContentData) }
+                guard self.playback.play() else { throw URLError(.cannotDecodeContentData) }
                 self.isPlaying = true
                 self.isBusy = false
                 self.operation = nil

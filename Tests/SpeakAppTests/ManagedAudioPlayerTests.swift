@@ -30,7 +30,11 @@ final class ManagedAudioPlayerTests: XCTestCase {
     }
 
     private func makeOwner() -> ManagedAudioPlayer {
-        ManagedAudioPlayer { [unowned self] player, ending in self.endings.append((player, ending)) }
+        // `play()` re-arms without starting native output.
+        ManagedAudioPlayer(
+            startPlayback: { _ in true },
+            onEnd: { [unowned self] player, ending in self.endings.append((player, ending)) }
+        )
     }
 
     /// Lets the forwarder's main-actor hop run.
@@ -44,11 +48,61 @@ final class ManagedAudioPlayerTests: XCTestCase {
         owner.adopt(player)
 
         player.delegate?.audioPlayerDidFinishPlaying?(player, successfully: true)
-        player.delegate?.audioPlayerDecodeErrorDidOccur?(player, error: nil)
         await drainMainActor()
 
-        XCTAssertEqual(endings.map(\.1), [.finished(successfully: true), .decodeFailed])
+        XCTAssertEqual(endings.map(\.1), [.finished(successfully: true)])
         XCTAssertTrue(endings.allSatisfy { $0.0 === player })
+    }
+
+    func testEnd_isReportedOncePerPlay() async throws {
+        let owner = makeOwner()
+        let player = try makePlayer()
+        owner.adopt(player)
+        let delegate = try XCTUnwrap(player.delegate)
+
+        delegate.audioPlayerDecodeErrorDidOccur?(player, error: nil)
+        delegate.audioPlayerDidFinishPlaying?(player, successfully: false)
+        delegate.audioPlayerDidFinishPlaying?(player, successfully: false)
+        await drainMainActor()
+
+        XCTAssertEqual(endings.map(\.1), [.decodeFailed], "Decode then finish, and a duplicate finish, end one play")
+    }
+
+    func testPlay_replayingTheSamePlayerReportsItsEndAgain() async throws {
+        let owner = makeOwner()
+        let player = try makePlayer()
+        owner.adopt(player)
+        let delegate = try XCTUnwrap(player.delegate)
+        delegate.audioPlayerDidFinishPlaying?(player, successfully: true)
+        await drainMainActor()
+
+        XCTAssertTrue(owner.play())
+        delegate.audioPlayerDidFinishPlaying?(player, successfully: true)
+        await drainMainActor()
+
+        XCTAssertEqual(endings.count, 2, "Each play of the same History player completes")
+        XCTAssertTrue(endings.allSatisfy { $0.0 === player })
+    }
+
+    func testPlay_dropsAnEndQueuedForThePreviousPlay() async throws {
+        let owner = makeOwner()
+        let player = try makePlayer()
+        owner.adopt(player)
+        let delegate = try XCTUnwrap(player.delegate)
+
+        // The first play ends, and the user replays before the hop runs.
+        delegate.audioPlayerDidFinishPlaying?(player, successfully: true)
+        owner.play()
+        await drainMainActor()
+        XCTAssertTrue(endings.isEmpty, "The earlier play's end must not stand in for the replay's")
+
+        delegate.audioPlayerDidFinishPlaying?(player, successfully: true)
+        await drainMainActor()
+        XCTAssertEqual(endings.count, 1)
+    }
+
+    func testPlay_withoutAPlayerDoesNothing() {
+        XCTAssertFalse(makeOwner().play())
     }
 
     func testAdopt_detachesTheReplacedPlayerAndDropsItsQueuedCallback() async throws {

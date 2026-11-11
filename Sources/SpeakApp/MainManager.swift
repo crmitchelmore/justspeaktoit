@@ -27,8 +27,10 @@ final class MainManager: ObservableObject {
   /// The setting change that would have let the last delivery reach the app the
   /// user expected. Offered as a one-click action in the menu bar until the next
   /// session starts or the user applies it.
-  @Published private(set) var pendingDeliveryRemedy: DeliverySettingsRemedy?
-  @Published private(set) var canRetryPostProcessing: Bool = false
+  @Published var pendingDeliveryRemedy: DeliverySettingsRemedy?
+  /// The last failed post-processing, offered for retry.
+  @Published var retryStore = PostProcessingRetryStore()
+  var canRetryPostProcessing: Bool { retryStore.canRetry }
 
   /// Runtime state of hands-free dictation. Published so the menu bar can show
   /// that the microphone is armed while the HUD is hidden or behind a window.
@@ -57,8 +59,6 @@ final class MainManager: ObservableObject {
     appSettings.transcriptionMode == .liveNative
       || (appSettings.transcriptionMode == .localModel && appSettings.localTranscriptionMode == .streaming)
   }
-
-  private var cachedRetryData: RetryData?
 
   let appSettings: AppSettings
   let permissionsManager: PermissionsManager
@@ -130,30 +130,17 @@ final class MainManager: ObservableObject {
   var isEndingSession = false
   let recordingStopTimeout: TimeInterval = 8
   var cancellables: Set<AnyCancellable> = []
-  private var hotKeyTokens: [HotKeyListenerToken] = []
-  private var shortcutTokens: [ShortcutListenerToken] = []
-  private var lastDoubleTapEventUptime: TimeInterval = 0
+  /// Routes hotkey gestures and shortcuts to session starts and stops.
+  private lazy var gestureRouter = SessionGestureRouter(handler: self)
   var audioLevelTimer: Timer?
-  var silenceStartTime: Date?
-  // Cached silence settings for timer callback (avoids @Published access in hot path)
-  var cachedSilenceEnabled: Bool = false
-  var cachedSilenceThreshold: Float = 0
-  var cachedSilenceDuration: TimeInterval = 0
-  /// Tracks whether the HUD window is visible to skip unnecessary UI updates
-  var isHUDOccluded: Bool = false
-  var occlusionObserver: NSObjectProtocol?
+  /// Level-based silence auto-stop for the current recording.
+  var silenceAutoStop = SilenceAutoStop()
+  /// Tracks whether the HUD window is visible to skip unnecessary UI updates.
+  let hudOcclusion = HUDOcclusionObserver()
   /// Holds the HUD clock and start cue until real audio arrives (see
   /// `MainManager+AudioArrival`).
   var audioArrivalGate: RecordingAudioArrivalGate?
   weak var audioArrivalSession: ActiveSession?
-
-  struct RetryData {
-    let transcriptionResult: TranscriptionResult
-    let recordingSummary: RecordingSummary?
-    let personalCorrections: PersonalLexiconHistorySummary?
-    let lexiconContext: PersonalLexiconContext
-    let originalHistoryItemID: UUID?
-  }
 
   enum SessionStopError: LocalizedError {
     case recordingStopTimedOut(seconds: TimeInterval)
@@ -167,7 +154,6 @@ final class MainManager: ObservableObject {
     }
   }
 
-  // swiftlint:disable:next function_body_length
   init(
     appSettings: AppSettings,
     permissionsManager: PermissionsManager,
@@ -203,6 +189,40 @@ final class MainManager: ObservableObject {
     self.autoCorrectionTracker = autoCorrectionTracker
     self.profileStore = profileStore
 
+    bindSettings()
+    bindLiveUpdates()
+
+    recordingSoundPlayer.preload()
+    configureHotKeys()
+    keyPressPrimer.start()
+    setupCaptureHealthBindings()
+
+    Publishers.CombineLatest(
+      appSettings.$connectionPreWarmingEnabled,
+      permissionsManager.$statuses.map { $0[.microphone]?.isGranted == true }
+    )
+    .removeDuplicates { lhs, rhs in lhs.0 == rhs.0 && lhs.1 == rhs.1 }
+    .dropFirst()
+    .receive(on: RunLoop.main)
+    .sink { [weak self] enabled, permissionGranted in
+      guard enabled, permissionGranted else { return }
+      self?.warmUpConnectionIfEnabled()
+    }
+    .store(in: &cancellables)
+
+    let warmer = CaptureWarmCoordinator(
+      appSettings: appSettings,
+      permissionsManager: permissionsManager,
+      audioInputDeviceManager: audioInputDeviceManager,
+      audioFileManager: audioFileManager
+    )
+    captureWarmer = warmer
+    warmer.start()
+  }
+
+  /// Keeps the sound profile, hands-free arming and the offered delivery
+  /// remedy in step with settings and permissions.
+  private func bindSettings() {
     recordingSoundPlayer.profile = appSettings.recordingSoundProfile
     appSettings.$recordingSoundProfile
       .receive(on: RunLoop.main)
@@ -237,7 +257,11 @@ final class MainManager: ObservableObject {
         self?.reconcilePendingDeliveryRemedy()
       }
       .store(in: &cancellables)
+  }
 
+  /// Feeds live transcript and live polish updates to the previews and the
+  /// live text inserter.
+  private func bindLiveUpdates() {
     transcriptionManager.$liveTranscript
       .receive(on: RunLoop.main)
       .sink { [weak self] snapshot in
@@ -283,33 +307,6 @@ final class MainManager: ObservableObject {
         }
       }
       .store(in: &cancellables)
-
-    recordingSoundPlayer.preload()
-    configureHotKeys()
-    keyPressPrimer.start()
-    setupCaptureHealthBindings()
-
-    Publishers.CombineLatest(
-      appSettings.$connectionPreWarmingEnabled,
-      permissionsManager.$statuses.map { $0[.microphone]?.isGranted == true }
-    )
-    .removeDuplicates { lhs, rhs in lhs.0 == rhs.0 && lhs.1 == rhs.1 }
-    .dropFirst()
-    .receive(on: RunLoop.main)
-    .sink { [weak self] enabled, permissionGranted in
-      guard enabled, permissionGranted else { return }
-      self?.warmUpConnectionIfEnabled()
-    }
-    .store(in: &cancellables)
-
-    let warmer = CaptureWarmCoordinator(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioInputDeviceManager: audioInputDeviceManager,
-      audioFileManager: audioFileManager
-    )
-    captureWarmer = warmer
-    warmer.start()
   }
 
   /// Completes asynchronous warm-resource teardown before AppKit permits the
@@ -417,14 +414,8 @@ final class MainManager: ObservableObject {
   }
 
   func retryPostProcessing() {
-    guard canRetryPostProcessing, let retryData = cachedRetryData else { return }
-    guard activeSession == nil else { return }
+    guard let retryData = retryStore.entryToRetry(sessionActive: activeSession != nil) else { return }
     Task { await performRetryPostProcessing(with: retryData) }
-  }
-
-  private func clearRetryData() {
-    cachedRetryData = nil
-    canRetryPostProcessing = false
   }
 
   func userRequestedStopDueToError() {
@@ -448,127 +439,11 @@ final class MainManager: ObservableObject {
     )
   }
 
-  /// Hands-free replaces press-to-talk with press-to-arm.
-  private func handleHoldStartGesture(
-    triggerTiming: SessionTriggerTiming,
-    primedInput: PrimedLiveInputReservation?
-  ) async {
-    guard appSettings.hotKeyActivationStyle.allowsHold, !(await handleHandsFreeHotKey()) else {
-      keyPressPrimer.release(primedInput)
-      return
-    }
-    await startSession(trigger: .hold, triggerTiming: triggerTiming, primedInput: primedInput)
-  }
-
-  /// The arming press already consumed the gesture, so releasing the key must
-  /// not stop a hands-free capture the detector is still driving.
-  private func handleHoldEndGesture() async {
-    guard appSettings.hotKeyActivationStyle.allowsHold else { return }
-    guard !handsFreeArmsHotKey else { return }
-    await endSession(trigger: .hold)
-  }
-
-  private func handleSingleTapGesture() async {
-    guard appSettings.hotKeyActivationStyle.allowsDoubleTap else { return }
-    guard !handsFreeArmsHotKey else { return }
-    guard let session = activeSession, session.gesture == .doubleTap else { return }
-    await endSession(trigger: .singleTap)
-  }
-
-  /// Double-tap toggles: it arms hands-free dictation when that mode is on,
-  /// otherwise it starts a session or ends the one it started.
-  private func handleDoubleTapGesture(
-    triggerTiming: SessionTriggerTiming,
-    primedInput: PrimedLiveInputReservation?
-  ) async {
-    let now = ProcessInfo.processInfo.systemUptime
-    guard appSettings.hotKeyActivationStyle.allowsDoubleTap, now - lastDoubleTapEventUptime >= 0.25 else {
-      keyPressPrimer.release(primedInput)
-      return
-    }
-    lastDoubleTapEventUptime = now
-
-    if await handleHandsFreeHotKey() {
-      keyPressPrimer.release(primedInput)
-      return
-    }
-
-    if let session = activeSession {
-      keyPressPrimer.release(primedInput)
-      guard session.gesture == .doubleTap else { return }
-      await endSession(trigger: .doubleTap)
-    } else {
-      await startSession(trigger: .doubleTap, triggerTiming: triggerTiming, primedInput: primedInput)
-    }
-  }
-  // swiftlint:disable:next function_body_length
   private func configureHotKeys() {
     #if DEBUG
     if CoreJourneyLaunchProfile.isRequested, CoreJourneyLaunchProfile.current?.runsBatchJourney != true { return }
     #endif
-    hotKeyTokens.append(
-      hotKeyManager.register(gesture: .holdStart) { [weak self] in
-        // Stamped here, before the actor hop, so the latency dashboard measures
-        // from the key press rather than from where `startSession` gets to run.
-        // The key-down primer's microphone is claimed here too, synchronously,
-        // so its release timers cannot close it while the session starts.
-        let (triggerTiming, primedInput) = MainActor.assumeIsolated {
-          self?.recognisedSessionGesture(.holdStart) ?? (.recognisedHotKey(), nil)
-        }
-        Task { @MainActor in
-          guard let self else { return }
-          await self.handleHoldStartGesture(triggerTiming: triggerTiming, primedInput: primedInput)
-        }
-      }
-    )
-
-    hotKeyTokens.append(
-      hotKeyManager.register(gesture: .holdEnd) { [weak self] in
-        Task { @MainActor in
-          await self?.handleHoldEndGesture()
-        }
-      }
-    )
-
-    hotKeyTokens.append(
-      hotKeyManager.register(gesture: .doubleTap) { [weak self] in
-        let (triggerTiming, primedInput) = MainActor.assumeIsolated {
-          self?.recognisedSessionGesture(.doubleTap) ?? (.recognisedHotKey(), nil)
-        }
-        Task { @MainActor in
-          guard let self else { return }
-          await self.handleDoubleTapGesture(triggerTiming: triggerTiming, primedInput: primedInput)
-        }
-      }
-    )
-
-    hotKeyTokens.append(
-      hotKeyManager.register(gesture: .singleTap) { [weak self] in
-        Task { @MainActor in
-          await self?.handleSingleTapGesture()
-        }
-      }
-    )
-
-    // ⌘R only retries a finished session, so it stays on the app-local monitor and never
-    // reaches Safari's reload or Xcode's run.
-    shortcutTokens.append(
-      hotKeyManager.register(shortcut: .commandR) { [weak self] in
-        Task { @MainActor in
-          guard let self else { return }
-          self.retryPostProcessing()
-        }
-      }
-    )
-
-    shortcutTokens.append(
-      hotKeyManager.register(shortcut: .escape) { [weak self] in
-        Task { @MainActor in
-          guard let self else { return }
-          self.cancelRecordingWithEscape()
-        }
-      }
-    )
+    gestureRouter.register(on: hotKeyManager)
 
     // Escape has to arrive from whichever app is being dictated into, but only while there
     // is a recording to cancel — outside that window Speak reads no system-wide key presses.
@@ -612,7 +487,7 @@ final class MainManager: ObservableObject {
     return true
   }
 
-  private func rawTranscriptionSubheadline() -> String {
+  func rawTranscriptionSubheadline() -> String {
     guard appSettings.transcriptionMode == .localModel else {
       return "Preparing raw transcript"
     }
@@ -622,106 +497,69 @@ final class MainManager: ObservableObject {
     return "Loading local model and transcribing. First run can take a minute."
   }
 
-  // Internal rather than private so the hands-free coordinator can start the
-  // same session the hotkey would have.
-  @discardableResult
-  // swiftlint:disable:next cyclomatic_complexity function_body_length
-  func startSession(
-    trigger: SessionTriggerSource,
-    preRollBuffers: [AVAudioPCMBuffer] = [],
-    triggerTiming: SessionTriggerTiming = .nonHotKey(),
-    primedInput: PrimedLiveInputReservation? = nil
-  ) async -> HandsFreeCaptureStartOutcome {
-    // Every exit closes a primed microphone this start did not take over.
-    defer { keyPressPrimer.release(primedInput) }
-    guard !migrationInProgress, !captureStarting, activeSession == nil else { return .rejected(.captureFailed) }
-    captureStarting = true
-    defer { captureStarting = false }
-    keyPressPrimer.sessionWillBegin()
-    captureWarmer?.sessionWillBegin()
-
-    // Per-app dictation profile: resolve the frontmost app and apply its
-    // overrides for this session only. Applied before the API-key check so the
-    // check sees the profile's provider. Reverted whenever `activeSession`
-    // returns to nil; the early-exit paths below revert explicitly because no
-    // session was created yet.
-    profileApplier.begin(
-      settings: appSettings,
-      postProcessing: postProcessingManager,
-      profiles: profileStore.profiles,
-      frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-    )
-
-    if trigger == .handsFree {
-      guard HandsFreeDictationPolicy.supportsCapture(
+  /// Checks that must pass before a session exists. Returns the rejection
+  /// after undoing the profile and warm-capture hand-off, or nil when the
+  /// start may proceed with `.dictation` capture reserved.
+  private func rejectionBeforeStart(trigger: SessionTriggerSource) async -> HandsFreeCaptureStartOutcome? {
+    if trigger == .handsFree,
+      !HandsFreeDictationPolicy.supportsCapture(
         modelID: appSettings.liveTranscriptionModel,
         isStreaming: appSettings.transcriptionMode == .liveNative
-      )
-      else {
-        profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
-        captureWarmer?.sessionDidEnd()
-        return .rejected(.unsupportedConfiguration)
-      }
+      ) {
+      return abandonStart(.rejected(.unsupportedConfiguration))
     }
 
     if await presentMissingLiveAPIKeyAlertIfNeeded() {
-      profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
-      captureWarmer?.sessionDidEnd()
-      return .rejected(.captureFailed)
+      return abandonStart(.rejected(.captureFailed))
     }
 
     if audioFileManager.requiresPhysicalInput && audioInputDeviceManager.devices.isEmpty {
-      profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
-      captureWarmer?.sessionDidEnd()
-      let message = "No microphone connected. Plug in a USB or Bluetooth microphone and try again."
-      state = .failed(message)
-      lastErrorMessage = message
-      hudManager.finishFailure(
+      let rejection = abandonStart(.rejected(.audioUnavailable))
+      showStartFailure(
+        "No microphone connected. Plug in a USB or Bluetooth microphone and try again.",
         headline: "No microphone connected",
         message: "Plug in a USB or Bluetooth microphone and try again."
       )
-      return .rejected(.audioUnavailable)
+      return rejection
     }
 
     // Voice Edit may own the shared recorder and live stream right now. Starting
     // on top of it would hit `alreadyRecording` and the failure path would then
     // cancel Voice Edit's capture, so refuse before touching either (issue #673).
     guard captureOwnership.reserve(.dictation) else {
-      profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
-      captureWarmer?.sessionDidEnd()
-      let message = "Voice edit is in progress. Finish or cancel it first."
-      state = .failed(message)
-      lastErrorMessage = message
-      hudManager.finishFailure(
+      let rejection = abandonStart(.rejected(.captureFailed))
+      showStartFailure(
+        "Voice edit is in progress. Finish or cancel it first.",
         headline: "Voice edit in progress",
         message: "Finish or cancel the voice edit, then start dictation.",
         displayDuration: 3
       )
-      return .rejected(.captureFailed)
+      return rejection
     }
+    return nil
+  }
 
-    // Failsafe: if live transcription is still running but we have no activeSession,
-    // cancel it so the app can always recover without requiring a restart.
-    //
-    // The switcher serialises this teardown with a replacement start and guards
-    // ownership by run, including when both runs reuse the same controller.
-    if transcriptionManager.isLiveTranscribing {
-      logger.warning("Live transcription still running without an active session; cancelling to recover")
-      transcriptionManager.cancelLiveTranscription()
-    }
+  /// No session was created, so `activeSession`'s teardown will not run:
+  /// revert the profile and let capture pre-warming resume here.
+  private func abandonStart(_ rejection: HandsFreeCaptureStartOutcome) -> HandsFreeCaptureStartOutcome {
+    profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
+    captureWarmer?.sessionDidEnd()
+    return rejection
+  }
 
-    clearRetryData()
+  private func showStartFailure(
+    _ stateMessage: String,
+    headline: String,
+    message: String,
+    displayDuration: TimeInterval? = nil
+  ) {
+    state = .failed(stateMessage)
+    lastErrorMessage = stateMessage
+    hudManager.finishFailure(headline: headline, message: message, displayDuration: displayDuration)
+  }
 
-    let gesture = trigger.historyGesture
-    let session = ActiveSession(
-      gesture: gesture,
-      hotKeyDescription: appSettings.selectedHotKey.displayString,
-      trigger: trigger,
-      triggerTiming: triggerTiming
-    )
-    session.outputTarget = TextOutputTarget.capture()
-    session.diagnosticContext = makeHistoryDiagnosticContext(includeRequestedContext: true)
-    session.isLocalAutomationCapture = true
+  /// Makes `session` current and resets the live preview, polish and insertion.
+  private func activate(_ session: ActiveSession) {
     activeSession = session
     lastErrorMessage = nil
     pendingDeliveryRemedy = nil
@@ -748,7 +586,77 @@ final class MainManager: ObservableObject {
         logger.warning("Live text insertion failed to start - will use standard delivery")
       }
     }
+  }
 
+  // Internal rather than private so the hands-free coordinator can start the
+  // same session the hotkey would have.
+  @discardableResult
+  func startSession(
+    trigger: SessionTriggerSource,
+    preRollBuffers: [AVAudioPCMBuffer] = [],
+    triggerTiming: SessionTriggerTiming = .nonHotKey(),
+    primedInput: PrimedLiveInputReservation? = nil
+  ) async -> HandsFreeCaptureStartOutcome {
+    // Every exit closes a primed microphone this start did not take over.
+    defer { keyPressPrimer.release(primedInput) }
+    guard !migrationInProgress, !captureStarting, activeSession == nil else { return .rejected(.captureFailed) }
+    captureStarting = true
+    defer { captureStarting = false }
+    keyPressPrimer.sessionWillBegin()
+    captureWarmer?.sessionWillBegin()
+
+    // Per-app dictation profile: resolve the frontmost app and apply its
+    // overrides for this session only. Applied before the API-key check so the
+    // check sees the profile's provider. Reverted whenever `activeSession`
+    // returns to nil; the early-exit paths below revert explicitly because no
+    // session was created yet.
+    profileApplier.begin(
+      settings: appSettings,
+      postProcessing: postProcessingManager,
+      profiles: profileStore.profiles,
+      frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    )
+
+    if let rejection = await rejectionBeforeStart(trigger: trigger) {
+      return rejection
+    }
+
+    // Failsafe: if live transcription is still running but we have no activeSession,
+    // cancel it so the app can always recover without requiring a restart.
+    //
+    // The switcher serialises this teardown with a replacement start and guards
+    // ownership by run, including when both runs reuse the same controller.
+    if transcriptionManager.isLiveTranscribing {
+      logger.warning("Live transcription still running without an active session; cancelling to recover")
+      transcriptionManager.cancelLiveTranscription()
+    }
+
+    retryStore.clear()
+
+    let session = ActiveSession(
+      gesture: trigger.historyGesture,
+      hotKeyDescription: appSettings.selectedHotKey.displayString,
+      trigger: trigger,
+      triggerTiming: triggerTiming
+    )
+    session.outputTarget = TextOutputTarget.capture()
+    session.diagnosticContext = makeHistoryDiagnosticContext(includeRequestedContext: true)
+    session.isLocalAutomationCapture = true
+    activate(session)
+
+    return await runStartSequence(
+      for: session, trigger: trigger, preRollBuffers: preRollBuffers, primedInput: primedInput
+    )
+  }
+
+  /// Brings up capture (and the live stream) for a session that now exists,
+  /// then plays the start cue. Abandons quietly if the session ended meanwhile.
+  private func runStartSequence(
+    for session: ActiveSession,
+    trigger: SessionTriggerSource,
+    preRollBuffers: [AVAudioPCMBuffer],
+    primedInput: PrimedLiveInputReservation?
+  ) async -> HandsFreeCaptureStartOutcome {
     // Claim the recorder staged while idle. Returns nil — and the cold path
     // runs — whenever the environment moved since it was staged.
     let warmContext = captureWarmer?.claimWarmContext()
@@ -764,21 +672,9 @@ final class MainManager: ObservableObject {
       // so the user is never invited to speak into a microphone that isn't
       // listening yet. The pre-warm path (issue #663) runs inside the same
       // step — a claimed staged recorder still has to prove it is capturing.
-      let startStream: RecordingStartSequencer.Step? = isStreamingTranscriptionMode
-        ? { [weak self, transcriptionManager, preRollBuffers, trigger, primedInput] in
-          let primedCapture = await primedInput?.value
-          try await transcriptionManager.startLiveTranscription(
-            preRollBuffers: preRollBuffers,
-            analyzerFallbackAllowed: trigger != .handsFree,
-            primedInput: primedCapture,
-            onDiagnostic: { [weak self] receipt in
-              Self.retainBatchDiagnostic(receipt, for: session, activeSession: self?.activeSession)
-            }
-          )
-          guard self?.activeSession === session else { return }
-          session.liveTranscriptSessionID = transcriptionManager.liveTranscript.sessionID
-        }
-        : nil
+      let startStream = makeStartStreamStep(
+        for: session, trigger: trigger, preRollBuffers: preRollBuffers, primedInput: primedInput
+      )
       // The live engine's input node is built before the recorder opens the
       // microphone; built afterwards it stalled stream start (and the cue) by
       // ~3 s on Bluetooth inputs. See `LiveInputEngineStore`. Routes that
@@ -792,51 +688,12 @@ final class MainManager: ObservableObject {
         // beside the primer's open microphone.
         await keyPressPrimer.closeBeforeStart(primedInput)
       }
-      // A hands-free capture always moves the HUD to the recording pane, even
-      // when the user hides the HUD for their own sessions: the armed pane
-      // otherwise claims the app only listens while it in fact records.
-      // Showing that the microphone captures is a privacy duty, not a taste.
-      let showsHUD = appSettings.showHUDDuringSessions || trigger == .handsFree
-      if showsHUD {
-        // Up straight away as "Getting ready"; its clock starts only when the
-        // microphone delivers real audio, never while words can't be heard.
-        // Uses the cached microphone status: each TCC query costs 13-35 ms
-        // before capture (#611), and `startRecording` makes the authoritative
-        // check moments later; the HUD health is refreshed once capture is live.
-        hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
-        hudManager.beginRecording(profileName: profileApplier.activeProfileName, awaitingAudio: true)
-      }
+      let showsHUD = showRecordingHUDIfNeeded(for: trigger)
       let sequencer = RecordingStartSequencer(
         isSessionCurrent: { [weak self] in self?.activeSession === session },
         prepareStream: prepareStream,
         discardPreparedStream: { await liveInputPreparation.finish(startFailed: true) },
-        startCapture: { [weak self] in
-          guard let self else { return }
-          let recording = try await self.audioFileManager.startRecording(
-            warmContext: warmContext,
-            owner: .dictation
-          )
-          // The stop could have landed while `startRecording()` was suspended.
-          // Publish nothing for a session that is already over — throw away the
-          // capture that just came up instead.
-          guard self.activeSession === session else {
-            await self.discardStartedCapture()
-            throw RecordingStartAbort.sessionEnded
-          }
-          self.recordCaptureStart(for: session, wasWarm: recording.usedWarmRecorder)
-          self.state = .recording
-          session.events.append(
-            HistoryEvent(
-              kind: .recordingStarted,
-              description: "Recording started via \(gesture.rawValue)"
-            )
-          )
-          if showsHUD {
-            self.hudManager.updateCaptureHealth(self.buildCaptureHealthSnapshot())
-          }
-          self.beginAwaitingAudio(for: session)
-          self.startAudioLevelMonitoring()
-        },
+        startCapture: makeStartCaptureStep(for: session, warmContext: warmContext, showsHUD: showsHUD),
         discardCapture: { [weak self] in await self?.discardStartedCapture() },
         startStream: startStream,
         discardStream: { [weak self] in self?.transcriptionManager.cancelLiveTranscription() },
@@ -857,16 +714,97 @@ final class MainManager: ObservableObject {
       return .rejected(.captureFailed)
     } catch {
       await liveInputPreparation.finish(startFailed: true)
-      guard sessionProcessingShouldContinue(session) else { return .rejected(.captureFailed) }
-      session.errors.append(
-        HistoryError(
-          phase: .recording,
-          message: "Failed to start recording",
-          debugDescription: error.localizedDescription
+      return failStart(of: session, error: error)
+    }
+  }
+
+  private func failStart(of session: ActiveSession, error: Error) -> HandsFreeCaptureStartOutcome {
+    guard sessionProcessingShouldContinue(session) else { return .rejected(.captureFailed) }
+    session.errors.append(
+      HistoryError(
+        phase: .recording,
+        message: "Failed to start recording",
+        debugDescription: error.localizedDescription
+      )
+    )
+    cleanupAfterFailure(message: error.localizedDescription, preserveFile: false)
+    return .rejected(HandsFreeDictationMachine.Failure(error))
+  }
+
+  /// Shows the HUD as "Getting ready" when this session shows one. Returns
+  /// whether it does.
+  private func showRecordingHUDIfNeeded(for trigger: SessionTriggerSource) -> Bool {
+    // A hands-free capture always moves the HUD to the recording pane, even
+    // when the user hides the HUD for their own sessions: the armed pane
+    // otherwise claims the app only listens while it in fact records.
+    // Showing that the microphone captures is a privacy duty, not a taste.
+    let showsHUD = appSettings.showHUDDuringSessions || trigger == .handsFree
+    guard showsHUD else { return false }
+    // Up straight away as "Getting ready"; its clock starts only when the
+    // microphone delivers real audio, never while words can't be heard.
+    // Uses the cached microphone status: each TCC query costs 13-35 ms
+    // before capture (#611), and `startRecording` makes the authoritative
+    // check moments later; the HUD health is refreshed once capture is live.
+    hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
+    hudManager.beginRecording(profileName: profileApplier.activeProfileName, awaitingAudio: true)
+    return true
+  }
+
+  /// The sequencer step that opens the live stream, nil for batch modes.
+  private func makeStartStreamStep(
+    for session: ActiveSession,
+    trigger: SessionTriggerSource,
+    preRollBuffers: [AVAudioPCMBuffer],
+    primedInput: PrimedLiveInputReservation?
+  ) -> RecordingStartSequencer.Step? {
+    guard isStreamingTranscriptionMode else { return nil }
+    return { [weak self, transcriptionManager, preRollBuffers, trigger, primedInput] in
+      let primedCapture = await primedInput?.value
+      try await transcriptionManager.startLiveTranscription(
+        preRollBuffers: preRollBuffers,
+        analyzerFallbackAllowed: trigger != .handsFree,
+        primedInput: primedCapture,
+        onDiagnostic: { [weak self] receipt in
+          Self.retainBatchDiagnostic(receipt, for: session, activeSession: self?.activeSession)
+        }
+      )
+      guard self?.activeSession === session else { return }
+      session.liveTranscriptSessionID = transcriptionManager.liveTranscript.sessionID
+    }
+  }
+
+  /// The sequencer step that starts the recorder and publishes the recording.
+  private func makeStartCaptureStep(
+    for session: ActiveSession,
+    warmContext: CaptureWarmContext?,
+    showsHUD: Bool
+  ) -> RecordingStartSequencer.Step {
+    { [weak self] in
+      guard let self else { return }
+      let recording = try await self.audioFileManager.startRecording(
+        warmContext: warmContext,
+        owner: .dictation
+      )
+      // The stop could have landed while `startRecording()` was suspended.
+      // Publish nothing for a session that is already over — throw away the
+      // capture that just came up instead.
+      guard self.activeSession === session else {
+        await self.discardStartedCapture()
+        throw RecordingStartAbort.sessionEnded
+      }
+      self.recordCaptureStart(for: session, wasWarm: recording.usedWarmRecorder)
+      self.state = .recording
+      session.events.append(
+        HistoryEvent(
+          kind: .recordingStarted,
+          description: "Recording started via \(session.gesture.rawValue)"
         )
       )
-      cleanupAfterFailure(message: error.localizedDescription, preserveFile: false)
-      return .rejected(HandsFreeDictationMachine.Failure(error))
+      if showsHUD {
+        self.hudManager.updateCaptureHealth(self.buildCaptureHealthSnapshot())
+      }
+      self.beginAwaitingAudio(for: session)
+      self.startAudioLevelMonitoring()
     }
   }
 
@@ -925,7 +863,39 @@ final class MainManager: ObservableObject {
     )
   }
 
-  // swiftlint:disable cyclomatic_complexity function_body_length
+  /// Plays the stop cue, moves to processing and records the stop in History.
+  private func markRecordingStopped(
+    _ session: ActiveSession,
+    trigger: SessionTriggerSource,
+    tailDuration: TimeInterval
+  ) {
+    if appSettings.recordingSoundsEnabled {
+      recordingSoundPlayer.play(.stop, volume: appSettings.recordingSoundVolume)
+    }
+
+    state = .processing
+    session.recordingEnded = Date()
+    if isStreamingTranscriptionMode {
+      // Move the HUD off the "Recording" timer immediately. Otherwise the
+      // user sees the recording timer frozen at the release time while we
+      // close the audio file and drain the live provider's finalisation
+      // budget — which on AssemblyAI can be ~2s and reads as a hang for
+      // very short presses where the WebSocket `Begin` never arrived.
+      hudManager.beginTranscribing(subheadline: "Finalising transcript")
+    }
+    var stopDescription = "Recording stopped via \(trigger.historyGesture.rawValue)"
+    if tailDuration > 0 {
+      stopDescription += " (tail +\(String(format: "%.1f", tailDuration))s)"
+    }
+    session.events.append(
+      HistoryEvent(
+        kind: .recordingStopped,
+        timestamp: Date(),
+        description: stopDescription
+      )
+    )
+  }
+
   func endSession(trigger: SessionTriggerSource) async {
     guard !isEndingSession else { return }
     guard let session = activeSession else { return }
@@ -947,35 +917,7 @@ final class MainManager: ObservableObject {
     }
     guard sessionProcessingShouldContinue(session) else { return }
 
-    if appSettings.recordingSoundsEnabled {
-      recordingSoundPlayer.play(.stop, volume: appSettings.recordingSoundVolume)
-    }
-
-    state = .processing
-    session.recordingEnded = Date()
-    if isStreamingTranscriptionMode {
-      // Move the HUD off the "Recording" timer immediately. Otherwise the
-      // user sees the recording timer frozen at the release time while we
-      // close the audio file and drain the live provider's finalisation
-      // budget — which on AssemblyAI can be ~2s and reads as a hang for
-      // very short presses where the WebSocket `Begin` never arrived.
-      hudManager.beginTranscribing(subheadline: "Finalising transcript")
-    }
-    let stopDescription: String
-    if tailDuration > 0 {
-      let tailText = String(format: "%.1f", tailDuration)
-      stopDescription =
-        "Recording stopped via \(trigger.historyGesture.rawValue) (tail +\(tailText)s)"
-    } else {
-      stopDescription = "Recording stopped via \(trigger.historyGesture.rawValue)"
-    }
-    session.events.append(
-      HistoryEvent(
-        kind: .recordingStopped,
-        timestamp: Date(),
-        description: stopDescription
-      )
-    )
+    markRecordingStopped(session, trigger: trigger, tailDuration: tailDuration)
 
     do {
       let summary = try await stopRecordingWithTimeout()
@@ -983,428 +925,13 @@ final class MainManager: ObservableObject {
       session.recordingSummary = summary
       session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
 
-      if isStreamingTranscriptionMode {
-        session.transcriptionStarted = Date()
-        let result = try await transcriptionManager.stopLiveTranscription()
-        guard sessionProcessingShouldContinue(session) else { return }
-        session.transcriptionEnded = Date()
-        session.transcriptionResult = result
-        session.modelsUsed.insert(result.modelIdentifier)
-        session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: .transcriptionLive))
-        session.events.append(
-          HistoryEvent(kind: .transcriptionReceived, description: "Live transcription complete")
-        )
-        if let cost = result.cost {
-          session.recordCostFragment(cost)
-        }
-        // Log network exchange for live transcription
-        let durationStr = String(format: "%.1f", result.duration)
-        var didRecordLiveExchange = false
-        if result.modelIdentifier.hasPrefix("local/streaming/") {
-          let localRuntime: String
-          if FluidAudioParakeetModel.matches(result.modelIdentifier) {
-            localRuntime = "fluidaudio"
-          } else if WhisperKitStreamingModel.matches(result.modelIdentifier) {
-            localRuntime = "whisperkit"
-          } else {
-            #if APP_STORE
-            localRuntime = "unknown-local"
-            #else
-            localRuntime = "sherpa-onnx"
-            #endif
-          }
-          let localURL = URL(string: "local://\(localRuntime)")!
-            .appendingPathComponent(result.modelIdentifier)
-          session.networkExchanges.append(
-            HistoryNetworkExchange(
-              url: localURL,
-              method: "On-Device",
-              requestHeaders: [
-                "Model": result.modelIdentifier,
-                "Duration": "\(durationStr)s"
-              ],
-              requestBodyPreview: "Local streaming audio (\(durationStr) seconds)",
-              responseCode: 200,
-              responseHeaders: [:],
-              responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
-            )
-          )
-          didRecordLiveExchange = true
-        }
-        if !didRecordLiveExchange, result.modelIdentifier.contains("deepgram") {
-          session.networkExchanges.append(
-            HistoryNetworkExchange(
-              url: URL(string: "wss://api.deepgram.com/v1/listen")!,
-              method: "WebSocket",
-              requestHeaders: [
-                "Model": result.modelIdentifier,
-                "Duration": "\(durationStr)s",
-              ],
-              requestBodyPreview: "Streaming audio (\(durationStr) seconds)",
-              responseCode: 200,
-              responseHeaders: [:],
-              responseBodyPreview: result.rawPayload ?? "Transcript: \(String(result.text.prefix(500)))"
-            )
-          )
-        } else if !didRecordLiveExchange, result.modelIdentifier.contains("apple") {
-          session.networkExchanges.append(
-            HistoryNetworkExchange(
-              url: URL(string: "local://SFSpeechRecognizer")!,
-              method: "On-Device",
-              requestHeaders: [
-                "Model": result.modelIdentifier,
-                "Duration": "\(durationStr)s",
-              ],
-              requestBodyPreview: "On-device speech recognition (\(durationStr) seconds)",
-              responseCode: 200,
-              responseHeaders: [:],
-              responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
-            )
-          )
-        }
-      } else {
-        hudManager.beginTranscribing(subheadline: rawTranscriptionSubheadline())
-        session.transcriptionStarted = Date()
-        if appSettings.transcriptionMode == .batchRemote {
-          guard
-            await ensureBatchAPIKeyAvailable(
-              for: session,
-              message:
-                "Batch transcription requires an OpenRouter API key. Add one in Settings › API Keys."
-            )
-          else {
-            return
-          }
-        }
-        let result = try await transcriptionManager.transcribeFile(at: summary.url) { [weak self] receipt in
-          Self.retainBatchDiagnostic(receipt, for: session, activeSession: self?.activeSession)
-        }
-        guard sessionProcessingShouldContinue(session) else { return }
-        session.transcriptionEnded = Date()
-        session.transcriptionResult = result
-        session.modelsUsed.insert(result.modelIdentifier)
-        let usagePhase: ModelUsagePhase = appSettings.transcriptionMode == .localModel
-          ? .transcriptionLocal
-          : .transcriptionBatch
-        session.modelUsages.append(ModelUsage(modelIdentifier: result.modelIdentifier, phase: usagePhase))
-        session.events.append(
-          HistoryEvent(
-            kind: .transcriptionReceived,
-            description: appSettings.transcriptionMode == .localModel
-              ? "Local model transcription complete"
-              : "Batch transcription complete"
-          )
-        )
-        if appSettings.transcriptionMode == .localModel {
-          session.networkExchanges.append(
-            HistoryNetworkExchange(
-              url: URL(string: "local://whisperkit")!,
-              method: "On-Device",
-              requestHeaders: [
-                "Model": result.modelIdentifier,
-                "Duration": String(format: "%.1fs", result.duration)
-              ],
-              requestBodyPreview: "Local audio file: \(summary.url.lastPathComponent)",
-              responseCode: 200,
-              responseHeaders: [:],
-              responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
-            )
-          )
-        } else if let payload = result.rawPayload {
-          session.networkExchanges.append(
-            HistoryNetworkExchange(
-              url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
-              method: "POST",
-              requestHeaders: [
-                "Model": result.modelIdentifier,
-                "Content-Type": "application/json",
-              ],
-              requestBodyPreview: "JSON payload with \(summary.url.lastPathComponent) audio",
-              responseCode: 200,
-              responseHeaders: [:],
-              responseBodyPreview: String(payload.prefix(800))
-            )
-          )
-        }
-        if let cost = result.cost {
-          session.recordCostFragment(cost)
-        }
-      }
-
-      // Process voice commands (e.g., "copy pasta" → clipboard content)
-      let baseText = textProcessor.process(session.transcriptionResult?.text ?? "")
-      let lexiconContext = makeLexiconContext(for: baseText, destination: nil)
-      let corrections = personalLexicon.apply(to: baseText, context: lexiconContext)
-      session.personalCorrections = PersonalLexiconHistorySummary(
-        applied: corrections.applied,
-        suggestions: corrections.suggestions,
-        contextTags: Array(lexiconContext.tags).sorted(),
-        destinationApplication: lexiconContext.destinationApplication
-      )
-      session.lexiconContext = lexiconContext
-      var finalText = corrections.transformedText
-      var postProcessingFailureNotice: (headline: String, message: String)?
-
-      if shouldRunPostProcessing() {
-        hudManager.beginPostProcessing()
-        session.postProcessingStarted = Date()
-        guard
-          await ensurePostProcessingAPIKeyAvailable(
-            for: session,
-            message:
-              "Post-processing requires an OpenRouter API key. Add one in Settings › API Keys."
-          )
-        else {
-          return
-        }
-        let resolvedPostProcessingModel =
-          ModelCatalog.resolvedPostProcessingModel(appSettings.postProcessingModel)
-        let postProcessingInput = finalText
-        let outcomeResult = await postProcessingManager.process(
-          rawText: postProcessingInput,
-          context: session.lexiconContext,
-          corrections: session.personalCorrections,
-          onStreamingUpdate: { [weak self] accumulatedText in
-            Task { @MainActor in
-              self?.hudManager.updateStreamingText(accumulatedText)
-            }
-          },
-          onDiagnostic: { [weak self] in
-            Self.retainPostProcessingDiagnostic($0, for: session, activeSession: self?.activeSession)
-          }
-        )
-        guard sessionProcessingShouldContinue(session) else { return }
-        switch outcomeResult {
-        case .success(let outcome):
-          session.postProcessingEnded = Date()
-          session.postProcessingOutcome = outcome
-          finalText = outcome.processed
-          if let response = outcome.response {
-            session.events.append(
-              HistoryEvent(kind: .postProcessingReceived, description: "Post-processing complete")
-            )
-            if let payload = response.rawPayload {
-              session.networkExchanges.append(
-                HistoryNetworkExchange(
-                  url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
-                  method: "POST",
-                  requestHeaders: ["Model": resolvedPostProcessingModel],
-                  requestBodyPreview: postProcessingRequestPreview(
-                    systemPrompt: outcome.systemPrompt,
-                    rawText: postProcessingInput
-                  ),
-                  responseCode: 200,
-                  responseHeaders: [:],
-                  responseBodyPreview: String(payload.prefix(800))
-                )
-              )
-            }
-            session.modelsUsed.insert(resolvedPostProcessingModel)
-            session.modelUsages.append(ModelUsage(modelIdentifier: resolvedPostProcessingModel, phase: .postProcessing))
-            if let cost = response.cost {
-              session.recordCostFragment(cost)
-            }
-          } else {
-            // Streaming completed without ChatResponse, still mark completion
-            session.events.append(
-              HistoryEvent(kind: .postProcessingReceived, description: "Post-processing complete (streamed)")
-            )
-            session.modelsUsed.insert(resolvedPostProcessingModel)
-            session.modelUsages.append(ModelUsage(modelIdentifier: resolvedPostProcessingModel, phase: .postProcessing))
-          }
-        case .failure(let error):
-          session.postProcessingEnded = Date()
-          let friendly = Self.friendlyPostProcessingMessage(
-            for: error,
-            modelIdentifier: resolvedPostProcessingModel
-          )
-          session.errors.append(
-            HistoryError(
-              phase: .postProcessing,
-              message: friendly,
-              debugDescription: error.localizedDescription
-            )
-          )
-          session.events.append(HistoryEvent(kind: .error, description: friendly))
-          attachFailureDiagnostics(to: session)
-          postProcessingFailureNotice = (headline: "Post-processing failed", message: friendly)
-
-          if let transcriptionResult = session.transcriptionResult {
-            cachedRetryData = RetryData(
-              transcriptionResult: transcriptionResult,
-              recordingSummary: session.recordingSummary,
-              personalCorrections: session.personalCorrections,
-              lexiconContext: session.lexiconContext,
-              originalHistoryItemID: session.id
-            )
-            canRetryPostProcessing = true
-            hudManager.finishFailure(headline: "Post-processing failed", message: friendly, showRetryHint: true)
-          } else {
-            hudManager.finishFailure(headline: "Post-processing failed", message: friendly)
-          }
-        }
-      }
-
-      state = .delivering
-      if postProcessingFailureNotice == nil {
-        hudManager.beginDelivering()
-      }
-
-      // Handle live text insertion finalization
-      var liveFinalizationResult: LiveTextInserter.FinalizationResult = .deferred
-      var outputWarning: Error?
-      var deliveryTarget = session.outputTarget
-      var deliveryRemedy: DeliverySettingsRemedy?
-      var focusMovedToOtherApplication = false
-      let usedStreamingInsertion = liveTextInserter.isActive && liveTextInserter.strategy == .rangedStreaming
-      if liveTextInserter.isActive {
-        liveFinalizationResult = liveTextInserter.applyPolishedFinal(finalText)
-        liveTextInserter.end()
-      }
-      // Latency checkpoint: when the first character actually reached the target
-      // app via live insertion (nil when the session never streamed text).
-      session.firstInsertion = self.liveTextInserter.firstInsertionAt
-
-      switch liveFinalizationResult {
-      case .applied:
-        session.outputMethod = .accessibility
-        recordInsertion(
-          of: liveTextInserter.insertedText,
-          range: liveTextInserter.lastInsertedRange,
-          target: session.outputTarget
-        )
-      case .deferred, .redirected, .clipboard:
-        let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
-        let outputResult: TextOutputResult
-        switch liveFinalizationResult {
-        case .redirected(let target): outputResult = output.output(text: finalText, target: target)
-        case .clipboard(let error): outputResult = SmartTextOutput.keepOnClipboard(text: finalText, error: error)
-        default: outputResult = output.output(text: finalText, target: session.outputTarget)
-        }
-        outputWarning = outputResult.warning
-        focusMovedToOtherApplication = outputResult.focusMovedToOtherApplication
-        deliveryTarget = outputResult.redirectedTarget ?? session.outputTarget
-        deliveryRemedy = remedy(forDelivery: outputResult)
-        session.outputMethod = outputResult.method
-        if outputResult.error == nil {
-          recordInsertion(of: finalText, range: outputResult.insertedRange, target: deliveryTarget)
-        }
-
-        if let error = outputResult.error {
-          let message = deliveryRemedy.annotate(error.localizedDescription)
-          session.errors.append(
-            HistoryError(
-              phase: .output,
-              message: "Failed to deliver text",
-              debugDescription: deliveryRemedy.annotate(Self.historySafeDescription(of: error))
-            )
-          )
-          hudManager.finishFailure(headline: Self.deliveryFailureHeadline(for: error), message: message)
-          state = .failed(message)
-          lastErrorMessage = message
-          pendingDeliveryRemedy = deliveryRemedy
-          attachFailureDiagnostics(to: session)
-          let historyItem = session.buildHistoryItem(finalText: finalText)
-          await historyManager.append(historyItem)
-          livePolishManager.reset()
-          liveTextInserter.reset()
-          activeSession = nil
-          return
-        }
-      case .failed(let error):
-        let remedy = DeliverySettingsRemedy.forLiveInsertionFailure(
-          error,
-          usedStreamingInsertion: usedStreamingInsertion,
-          configuration: DeliverySettingsRemedy.Configuration(settings: appSettings)
-        )
-        let message = remedy.annotate(error.localizedDescription)
-        session.errors.append(
-          HistoryError(
-            phase: .output,
-            message: "Failed to deliver text",
-            debugDescription: remedy.annotate(Self.historySafeDescription(of: error))
-          )
-        )
-        hudManager.finishFailure(headline: "Delivery failed", message: message)
-        state = .failed(message)
-        lastErrorMessage = message
-        pendingDeliveryRemedy = remedy
-        attachFailureDiagnostics(to: session)
-        let historyItem = session.buildHistoryItem(finalText: finalText)
-        await historyManager.append(historyItem)
-        livePolishManager.reset()
-        liveTextInserter.reset()
-        activeSession = nil
-        return
-      }
-
-      let focusedElement = deliveryTarget?.focusedElement ?? getFocusedElement()
-      let appName = deliveryTarget?.applicationName
-        ?? NSWorkspace.shared.frontmostApplication?.localizedName
-      // A warning means delivery proceeded without proving the current field.
-      // Do not associate Voice Edit/correction tracking with the stale capture.
-      if outputWarning == nil {
-        autoCorrectionTracker.startMonitoring(
-          insertedText: finalText,
-          element: focusedElement,
-          app: appName
-        )
-      }
-
-      session.outputDelivered = Date()
-
-      session.events.append(
-        HistoryEvent(kind: .outputDelivered, description: "Output delivered successfully")
-      )
-      let deliveryNote = Self.deliveryNote(
-        warning: outputWarning,
-        focusMovedToOtherApplication: focusMovedToOtherApplication,
-        destination: appName,
-        remedy: deliveryRemedy
-      )
-      // History can be exported to a public issue, so its copy names no app.
-      recordDeliveryWarning(
-        Self.deliveryNote(
-          warning: outputWarning,
-          focusMovedToOtherApplication: focusMovedToOtherApplication,
-          destination: nil,
-          remedy: deliveryRemedy
-        ),
-        on: session
-      )
-      session.destination = appName
-      session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
-      if let summary = session.personalCorrections {
-        session.personalCorrections = summary.updatingContext(
-          tags: Array(session.lexiconContext.tags).sorted(),
-          destination: appName
-        )
-      }
-      let historyItem = session.buildHistoryItem(finalText: finalText)
-      await historyManager.append(historyItem)
-      if let notice = postProcessingFailureNotice {
-        lastErrorMessage = notice.message
-        state = .failed(notice.message)
-      } else {
-        pendingDeliveryRemedy = deliveryRemedy
-        hudManager.finishSuccess(
-          message: Self.deliverySuccessMessage(
-            note: deliveryNote,
-            stopRequested: session.stopRequested,
-            delivered: session.outputDelivered
-          ),
-          displayDuration: deliveryNote == nil ? nil : hudManager.failureDisplayDuration
-        )
-        state = .completed(historyItem)
-        if session.isLocalAutomationCapture {
-          historyManager.finishAutomationCapture(id: session.id, item: historyItem)
-        }
-        captureFirstTranscriptionSucceededIfNeeded(session: session)
-      }
-
-      livePolishManager.reset()
-      liveTextInserter.reset()
-      activeSession = nil
+      let transcribed = isStreamingTranscriptionMode
+        ? try await finishLiveTranscription(for: session)
+        : try await transcribeRecording(summary, for: session)
+      guard transcribed else { return }
+      let correctedText = applyVoiceCommandsAndLexicon(to: session.transcriptionResult?.text ?? "", for: session)
+      guard let processed = await postProcessIfNeeded(correctedText, for: session) else { return }
+      await deliver(processed.text, postProcessingFailure: processed.failureMessage, for: session)
     } catch {
       guard sessionProcessingShouldContinue(session) else { return }
       session.errors.append(
@@ -1418,538 +945,6 @@ final class MainManager: ObservableObject {
     }
   }
 
-  /// HUD headline for a one-shot delivery that did not insert text. Holding
-  /// the transcript back because the user left the app it was going to is a
-  /// safety choice, not a failure.
-  static func deliveryFailureHeadline(for error: Error) -> String {
-    switch error as? TextOutputError {
-    case .originalApplicationNotInFront, .destinationApplicationChanged:
-      return "Not inserted"
-    default:
-      return "Delivery failed"
-    }
-  }
-
-  /// Error text for History. History can be exported to a public GitHub
-  /// issue, so it must not name the user's apps.
-  static func historySafeDescription(of error: Error) -> String {
-    (error as? TextOutputError)?.historySafeDescription ?? error.localizedDescription
-  }
-
-  /// The remedy, if any, for a one-shot delivery outcome under the current settings.
-  private func remedy(forDelivery outputResult: TextOutputResult) -> DeliverySettingsRemedy? {
-    DeliverySettingsRemedy.forOutput(
-      error: outputResult.error,
-      warning: outputResult.warning,
-      focusMovedToOtherApplication: outputResult.focusMovedToOtherApplication,
-      configuration: DeliverySettingsRemedy.Configuration(settings: appSettings)
-    )
-  }
-
-  /// What to tell the user about a delivery that succeeded but not quite as
-  /// they may have expected, with the setting that would change it. Nil when
-  /// there is nothing to say.
-  static func deliveryNote(
-    warning: Error?,
-    focusMovedToOtherApplication: Bool,
-    destination: String?,
-    remedy: DeliverySettingsRemedy?
-  ) -> String? {
-    let base: String
-    if focusMovedToOtherApplication {
-      base = destination.map { "Sent to \($0), where recording started." }
-        ?? "Sent to the app where recording started."
-    } else if let warning {
-      base = warning.localizedDescription
-    } else {
-      return nil
-    }
-    return remedy.annotate(base)
-  }
-
-  private static func deliverySuccessMessage(
-    note: String?,
-    stopRequested: Date?,
-    delivered: Date?
-  ) -> String {
-    if let note {
-      return "Delivered — \(note)"
-    }
-    guard let stopToFinalMs = SessionLatencyMetrics.milliseconds(
-      from: stopRequested,
-      to: delivered
-    ) else {
-      return "Delivered"
-    }
-    return "Delivered in \(SessionLatencyMetrics.formattedMilliseconds(stopToFinalMs))"
-  }
-
-  private func captureFirstTranscriptionSucceededIfNeeded(session: ActiveSession) {
-    guard appSettings.analyticsEnabled, analyticsCapture != nil else { return }
-    let defaults = UserDefaults.standard
-    let emittedKey = "analytics.firstTranscriptionSucceeded.emitted"
-    guard !defaults.bool(forKey: emittedKey) else { return }
-    guard let modelIdentifier = session.transcriptionResult?.modelIdentifier.lowercased() else { return }
-
-    let provider: AnalyticsProviderType
-    if modelIdentifier.contains("deepgram") {
-      provider = .deepgram
-    } else if modelIdentifier.contains("soniox") {
-      provider = .soniox
-    } else if modelIdentifier.contains("openai") {
-      provider = .openAI
-    } else if modelIdentifier.contains("apple") {
-      provider = .apple
-    } else if modelIdentifier.contains("whisper") || modelIdentifier.contains("fluid") {
-      provider = .local
-    } else {
-      provider = .other
-    }
-
-    let engine: AnalyticsEngineType = appSettings.transcriptionMode == .localModel ? .onDevice : .cloud
-    let installDateKey = "analytics.installDate"
-    let installDate = defaults.object(forKey: installDateKey) as? Date ?? Date()
-    if defaults.object(forKey: installDateKey) == nil { defaults.set(installDate, forKey: installDateKey) }
-    let days = max(0, Calendar.current.dateComponents([.day], from: installDate, to: Date()).day ?? 0)
-    let bucket: AnalyticsDaysSinceInstallBucket
-    switch days {
-    case 0: bucket = .zero
-    case 1: bucket = .one
-    case 2 ... 7: bucket = .twoToSeven
-    case 8 ... 30: bucket = .eightToThirty
-    default: bucket = .overThirty
-    }
-    defaults.set(true, forKey: emittedKey)
-    analyticsCapture?(.firstTranscriptionSucceeded(provider: provider, engine: engine, daysSinceInstall: bucket))
-  }
-  // swiftlint:enable cyclomatic_complexity function_body_length
-
-  // swiftlint:disable:next function_body_length
-  private func performRetryPostProcessing(with retryData: RetryData) async {
-    state = .processing
-    lastErrorMessage = nil
-    pendingDeliveryRemedy = nil
-    hudManager.beginPostProcessing()
-
-    let session = ActiveSession(gesture: .uiButton, hotKeyDescription: appSettings.selectedHotKey.displayString)
-    session.outputTarget = TextOutputTarget.capture()
-    session.diagnosticContext = makeHistoryDiagnosticContext()
-    activeSession = session
-    session.transcriptionResult = retryData.transcriptionResult
-    session.recordingSummary = retryData.recordingSummary
-    session.personalCorrections = retryData.personalCorrections
-    session.lexiconContext = retryData.lexiconContext
-    session.events.append(
-      HistoryEvent(kind: .postProcessingSubmitted, description: "Retry post-processing requested")
-    )
-
-    let baseText = retryData.transcriptionResult.text
-    var finalText = baseText
-    if retryData.personalCorrections != nil {
-      finalText = personalLexicon.apply(to: baseText, context: retryData.lexiconContext).transformedText
-    }
-
-    guard
-      await ensurePostProcessingAPIKeyAvailable(
-        for: session,
-        message: "Post-processing requires an OpenRouter API key. Add one in Settings › API Keys."
-      )
-    else {
-      return
-    }
-
-    let resolvedPostProcessingModel =
-      ModelCatalog.resolvedPostProcessingModel(appSettings.postProcessingModel)
-    let postProcessingInput = finalText
-
-    session.postProcessingStarted = Date()
-    let outcomeResult = await postProcessingManager.process(
-      rawText: postProcessingInput,
-      context: retryData.lexiconContext,
-      corrections: retryData.personalCorrections,
-      onDiagnostic: { [weak self] in
-        Self.retainPostProcessingDiagnostic($0, for: session, activeSession: self?.activeSession)
-      }
-    )
-
-    switch outcomeResult {
-    case .success(let outcome):
-      session.postProcessingEnded = Date()
-      session.postProcessingOutcome = outcome
-      finalText = outcome.processed
-
-      session.events.append(
-        HistoryEvent(kind: .postProcessingReceived, description: "Retry post-processing complete")
-      )
-      session.modelsUsed.insert(resolvedPostProcessingModel)
-      session.modelUsages.append(ModelUsage(modelIdentifier: resolvedPostProcessingModel, phase: .postProcessing))
-
-      if let response = outcome.response {
-        if let payload = response.rawPayload {
-          session.networkExchanges.append(
-            HistoryNetworkExchange(
-              url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
-              method: "POST",
-              requestHeaders: ["Model": resolvedPostProcessingModel],
-              requestBodyPreview: postProcessingRequestPreview(
-                systemPrompt: outcome.systemPrompt,
-                rawText: postProcessingInput
-              ),
-              responseCode: 200,
-              responseHeaders: [:],
-              responseBodyPreview: String(payload.prefix(800))
-            )
-          )
-        }
-        if let cost = response.cost {
-          session.recordCostFragment(cost)
-        }
-      }
-
-      state = .delivering
-      hudManager.beginDelivering()
-      let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
-      let outputResult = output.output(text: finalText, target: session.outputTarget)
-      let deliveryTarget = outputResult.redirectedTarget ?? session.outputTarget
-      let deliveryRemedy = remedy(forDelivery: outputResult)
-      session.outputMethod = outputResult.method
-      session.outputDelivered = Date()
-      if outputResult.error == nil {
-        recordInsertion(of: finalText, range: outputResult.insertedRange, target: deliveryTarget)
-      }
-
-      if let error = outputResult.error {
-        let message = deliveryRemedy.annotate(error.localizedDescription)
-        session.errors.append(
-          HistoryError(
-            phase: .output,
-            message: "Failed to deliver text",
-            debugDescription: deliveryRemedy.annotate(Self.historySafeDescription(of: error))
-          )
-        )
-        hudManager.finishFailure(headline: Self.deliveryFailureHeadline(for: error), message: message)
-        state = .failed(message)
-        lastErrorMessage = message
-        pendingDeliveryRemedy = deliveryRemedy
-        attachFailureDiagnostics(to: session)
-        let historyItem = session.buildHistoryItem(finalText: finalText)
-        await historyManager.append(historyItem)
-      } else {
-        let appName = deliveryTarget?.applicationName
-          ?? NSWorkspace.shared.frontmostApplication?.localizedName
-        let deliveryNote = Self.deliveryNote(
-          warning: outputResult.warning,
-          focusMovedToOtherApplication: outputResult.focusMovedToOtherApplication,
-          destination: appName,
-          remedy: deliveryRemedy
-        )
-        recordDeliveryWarning(
-          Self.deliveryNote(
-            warning: outputResult.warning,
-            focusMovedToOtherApplication: outputResult.focusMovedToOtherApplication,
-            destination: nil,
-            remedy: deliveryRemedy
-          ),
-          on: session
-        )
-        session.events.append(
-          HistoryEvent(kind: .outputDelivered, description: "Retry output delivered successfully")
-        )
-        session.destination = appName
-        let historyItem = session.buildHistoryItem(finalText: finalText)
-        await historyManager.append(historyItem)
-        clearRetryData()
-        pendingDeliveryRemedy = deliveryRemedy
-        hudManager.finishSuccess(
-          message: Self.retryDeliverySuccessMessage(note: deliveryNote),
-          displayDuration: deliveryNote == nil ? nil : hudManager.failureDisplayDuration
-        )
-        state = .completed(historyItem)
-      }
-
-    case .failure(let error):
-      session.postProcessingEnded = Date()
-      let friendly = Self.friendlyPostProcessingMessage(
-        for: error,
-        modelIdentifier: resolvedPostProcessingModel
-      )
-      session.errors.append(
-        HistoryError(
-          phase: .postProcessing,
-          message: friendly,
-          debugDescription: error.localizedDescription
-        )
-      )
-      session.events.append(HistoryEvent(kind: .error, description: friendly))
-      hudManager.finishFailure(headline: "Retry post-processing failed", message: friendly, showRetryHint: true)
-      state = .failed(friendly)
-      lastErrorMessage = friendly
-      attachFailureDiagnostics(to: session)
-      let historyItem = session.buildHistoryItem(finalText: finalText)
-      await historyManager.append(historyItem)
-    }
-
-    activeSession = nil
-  }
-
-  private func recordDeliveryWarning(_ note: String?, on session: ActiveSession) {
-    guard let note else { return }
-    session.events.append(
-      HistoryEvent(kind: .outputDelivered, description: "Delivery warning: \(note)")
-    )
-  }
-
-  private static func retryDeliverySuccessMessage(note: String?) -> String {
-    note.map { "Retry delivered — \($0)" } ?? "Retry Delivered"
-  }
-
-  /// Offers a remedy for a delivery made outside a recording session, such as
-  /// pasting the last transcript.
-  func offerDeliveryRemedy(_ remedy: DeliverySettingsRemedy?) {
-    pendingDeliveryRemedy = remedy
-  }
-
-  /// Drops the offered remedy once the user has made that change some other
-  /// way (Settings, System Settings), so the menu never offers a no-op.
-  func reconcilePendingDeliveryRemedy() {
-    guard let remedy = pendingDeliveryRemedy else { return }
-    let satisfied = remedy.isSatisfied(
-      configuration: DeliverySettingsRemedy.Configuration(settings: appSettings),
-      accessibilityGranted: permissionsManager.status(for: .accessibility).isGranted
-    )
-    if satisfied {
-      pendingDeliveryRemedy = nil
-    }
-  }
-
-  /// Applies the setting change offered after the last delivery, then forgets it.
-  func applyPendingDeliveryRemedy() {
-    guard let remedy = pendingDeliveryRemedy else { return }
-    remedy.apply(settings: appSettings, permissions: permissionsManager)
-    pendingDeliveryRemedy = nil
-  }
-
-  // swiftlint:disable:next cyclomatic_complexity function_body_length
-  func reprocessHistoryItem(_ item: HistoryItem) async {
-    guard activeSession == nil else { return }
-    guard let url = item.audioFileURL else { return }
-
-    state = .processing
-    hudManager.beginTranscribing(subheadline: rawTranscriptionSubheadline())
-
-    let session = ActiveSession(
-      gesture: .uiButton, hotKeyDescription: item.trigger.hotKeyDescription)
-    session.diagnosticContext = makeHistoryDiagnosticContext()
-    activeSession = session
-
-    let summary = makeRecordingSummary(from: url, fallbackDuration: item.recordingDuration)
-    session.recordingSummary = summary
-    session.recordingStarted = summary.startedAt
-    session.recordingEnded = summary.startedAt.addingTimeInterval(summary.duration)
-    let reprocessDescription: String
-    if item.source == .importedFile {
-      reprocessDescription = "Import requested: \(url.lastPathComponent)"
-    } else {
-      reprocessDescription = "Reprocess requested"
-    }
-
-    session.events.append(
-      HistoryEvent(kind: .recordingStarted, description: reprocessDescription)
-    )
-
-    do {
-      session.transcriptionStarted = Date()
-      let isLocalTranscription = appSettings.transcriptionMode == .localModel
-      session.events.append(
-        HistoryEvent(
-          kind: .transcriptionSubmitted,
-          description: isLocalTranscription ? "Submitting to local model" : "Submitting to batch model"
-        )
-      )
-      let result = try await transcriptionManager.transcribeFile(at: url) { [weak self] receipt in
-        Self.retainBatchDiagnostic(receipt, for: session, activeSession: self?.activeSession)
-      }
-      session.transcriptionEnded = Date()
-      session.transcriptionResult = result
-      session.modelsUsed.insert(result.modelIdentifier)
-      session.modelUsages.append(
-        ModelUsage(
-          modelIdentifier: result.modelIdentifier,
-          phase: isLocalTranscription ? .transcriptionLocal : .transcriptionBatch
-        )
-      )
-      session.events.append(
-        HistoryEvent(
-          kind: .transcriptionReceived,
-          description: isLocalTranscription ? "Local model transcription complete" : "Batch transcription complete"
-        )
-      )
-
-      if isLocalTranscription {
-        session.networkExchanges.append(
-          HistoryNetworkExchange(
-            url: URL(string: "local://whisperkit")!,
-            method: "On-Device",
-            requestHeaders: [
-              "Model": result.modelIdentifier,
-              "Duration": String(format: "%.1fs", result.duration)
-            ],
-            requestBodyPreview: "Local audio file: \(url.lastPathComponent)",
-            responseCode: 200,
-            responseHeaders: [:],
-            responseBodyPreview: "Transcript: \(String(result.text.prefix(500)))"
-          )
-        )
-      } else if let payload = result.rawPayload {
-        session.networkExchanges.append(
-          HistoryNetworkExchange(
-            url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
-            method: "POST",
-            requestHeaders: [
-              "Model": result.modelIdentifier,
-              "Content-Type": "application/json",
-            ],
-            requestBodyPreview: "JSON payload with \(url.lastPathComponent) audio",
-            responseCode: 200,
-            responseHeaders: [:],
-            responseBodyPreview: String(payload.prefix(800))
-          )
-        )
-      }
-      if let cost = result.cost {
-        session.recordCostFragment(cost)
-      }
-
-      // Process voice commands (e.g., "copy pasta" → clipboard content)
-      let baseText = textProcessor.process(result.text)
-      let lexiconContext = makeLexiconContext(for: baseText, destination: nil)
-      let corrections = personalLexicon.apply(to: baseText, context: lexiconContext)
-      session.personalCorrections = PersonalLexiconHistorySummary(
-        applied: corrections.applied,
-        suggestions: corrections.suggestions,
-        contextTags: Array(lexiconContext.tags).sorted(),
-        destinationApplication: lexiconContext.destinationApplication
-      )
-      session.lexiconContext = lexiconContext
-      var finalText = corrections.transformedText
-
-      if shouldRunPostProcessing() {
-        hudManager.beginPostProcessing()
-        session.postProcessingStarted = Date()
-        guard
-          await ensurePostProcessingAPIKeyAvailable(
-            for: session,
-            message:
-              "Post-processing requires an OpenRouter API key. Add one in Settings › API Keys."
-          )
-        else {
-          return
-        }
-        session.events.append(
-          HistoryEvent(kind: .postProcessingSubmitted, description: "Sending to post-processor")
-        )
-        let postProcessingInput = finalText
-        let outcomeResult = await postProcessingManager.process(
-          rawText: postProcessingInput,
-          context: session.lexiconContext,
-          corrections: session.personalCorrections,
-          onStreamingUpdate: { [weak self] accumulatedText in
-            Task { @MainActor in
-              self?.hudManager.updateStreamingText(accumulatedText)
-            }
-          },
-          onDiagnostic: { [weak self] in
-            Self.retainPostProcessingDiagnostic($0, for: session, activeSession: self?.activeSession)
-          }
-        )
-        switch outcomeResult {
-        case .success(let outcome):
-          session.postProcessingEnded = Date()
-          session.postProcessingOutcome = outcome
-          finalText = outcome.processed
-          if let response = outcome.response {
-            session.events.append(
-              HistoryEvent(kind: .postProcessingReceived, description: "Post-processing complete")
-            )
-            if let payload = response.rawPayload {
-              session.networkExchanges.append(
-                HistoryNetworkExchange(
-                  url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!,
-                  method: "POST",
-                  requestHeaders: ["Model": appSettings.postProcessingModel],
-                  requestBodyPreview: postProcessingRequestPreview(
-                    systemPrompt: outcome.systemPrompt,
-                    rawText: postProcessingInput
-                  ),
-                  responseCode: 200,
-                  responseHeaders: [:],
-                  responseBodyPreview: String(payload.prefix(800))
-                )
-              )
-            }
-            if let cost = response.cost {
-              session.recordCostFragment(cost)
-            }
-            if !appSettings.postProcessingModel.isEmpty {
-              session.modelsUsed.insert(appSettings.postProcessingModel)
-              session.modelUsages.append(ModelUsage(modelIdentifier: appSettings.postProcessingModel, phase: .postProcessing))
-            }
-          } else {
-            // Streaming completed without ChatResponse
-            session.events.append(
-              HistoryEvent(kind: .postProcessingReceived, description: "Post-processing complete (streamed)")
-            )
-            if !appSettings.postProcessingModel.isEmpty {
-              session.modelsUsed.insert(appSettings.postProcessingModel)
-              session.modelUsages.append(ModelUsage(modelIdentifier: appSettings.postProcessingModel, phase: .postProcessing))
-            }
-          }
-        case .failure(let error):
-          let friendly = Self.friendlyPostProcessingMessage(
-            for: error,
-            modelIdentifier: appSettings.postProcessingModel
-          )
-          session.errors.append(
-            HistoryError(
-              phase: .postProcessing,
-              message: friendly,
-              debugDescription: error.localizedDescription
-            )
-          )
-          session.events.append(HistoryEvent(kind: .error, description: friendly))
-        }
-      }
-
-      hudManager.beginDelivering()
-      hudManager.finishSuccess(message: "Reprocessed")
-      session.events.append(
-        HistoryEvent(kind: .outputDelivered, description: "Reprocess stored in history")
-      )
-      session.outputMethod = .none
-      let historyItem = session.buildHistoryItem(finalText: finalText, source: item.source)
-      state = .completed(historyItem)
-      await historyManager.append(historyItem)
-
-      activeSession = nil
-    } catch {
-      session.errors.append(
-        HistoryError(
-          phase: .transcription,
-          message: "Reprocess failed",
-          debugDescription: error.localizedDescription
-        )
-      )
-      hudManager.finishFailure(message: error.localizedDescription)
-      state = .failed(error.localizedDescription)
-      attachFailureDiagnostics(to: session)
-      let historyItem = session.buildHistoryItem(
-        finalText: session.transcriptionResult?.text,
-        source: item.source
-      )
-      await historyManager.append(historyItem)
-      activeSession = nil
-    }
-  }
 }
 // swiftlint:enable type_body_length
 extension MainManager {

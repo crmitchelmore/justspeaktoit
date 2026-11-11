@@ -6,29 +6,17 @@ import os.log
 extension MainManager {
   func startAudioLevelMonitoring() {
     audioLevelTimer?.invalidate()
-    silenceStartTime = nil
-    
     // Cache silence detection settings to avoid repeated @Published property access
     // during high-frequency timer callbacks (30Hz)
-    cachedSilenceEnabled = appSettings.silenceDetectionEnabled
-    cachedSilenceThreshold = appSettings.silenceThreshold
-    cachedSilenceDuration = appSettings.silenceDuration
-    
+    silenceAutoStop.begin(
+      SilenceAutoStop.Settings(
+        enabled: appSettings.silenceDetectionEnabled,
+        threshold: appSettings.silenceThreshold,
+        duration: appSettings.silenceDuration
+      )
+    )
     // Track HUD visibility to skip UI updates when app is occluded
-    isHUDOccluded = !(NSApp.occlusionState.contains(.visible))
-    // Drop any registration left over from a previous monitoring session so
-    // repeated starts don't stack up observers on the same notification.
-    if let existingObserver = occlusionObserver {
-      NotificationCenter.default.removeObserver(existingObserver)
-      occlusionObserver = nil
-    }
-    occlusionObserver = NotificationCenter.default.addObserver(
-      forName: NSApplication.didChangeOcclusionStateNotification,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      self?.isHUDOccluded = !(NSApp.occlusionState.contains(.visible))
-    }
+    hudOcclusion.start()
 
     // Use target-selector Timer pattern to completely bypass Swift concurrency runtime.
     // Block-based timers with [weak self] can crash in swift_getObjectType during
@@ -54,69 +42,31 @@ extension MainManager {
       observeAudioArrival(peakDecibels: reading?.peakDecibels)
     }
     // Only push UI updates when the HUD is likely visible
-    if !isHUDOccluded {
+    if !hudOcclusion.isOccluded {
       hudManager.updateAudioLevel(level)
-    }
-    checkSilenceDetection(
-      level: level,
-      enabled: cachedSilenceEnabled,
-      threshold: cachedSilenceThreshold,
-      duration: cachedSilenceDuration
-    )
-  }
-
-  private func checkSilenceDetection(level: Float, enabled: Bool, threshold: Float, duration: TimeInterval) {
-    guard enabled else {
-      silenceStartTime = nil
-      return
-    }
-    guard state == .recording, let session = activeSession else {
-      silenceStartTime = nil
-      return
     }
     // Hands-free captures end on the speech detector's own silence hold. Two
     // owners of the same stop race each other, and the loser then reports a
     // failed session after every utterance, so level-based auto-stop stays out.
-    guard session.trigger != .handsFree else {
-      silenceStartTime = nil
-      return
-    }
-
-    let isSilent = level < threshold
-
-    if isSilent {
-      if silenceStartTime == nil {
-        silenceStartTime = Date()
-      } else if let startTime = silenceStartTime {
-        let silentDuration = Date().timeIntervalSince(startTime)
-        if silentDuration >= duration {
-          logger.info("Auto-stopping recording after \(silentDuration, privacy: .public)s of silence")
-          SentryManager.addBreadcrumb(
-            category: "recording",
-            message: "Silence auto-stop after \(String(format: "%.1f", silentDuration))s"
-          )
-          silenceStartTime = nil
-          Task {
-            await endSession(trigger: .silenceDetection)
-          }
-        }
+    let eligible = activeSession.map { $0.trigger != .handsFree } ?? false
+    if let silentDuration = silenceAutoStop.observe(level: level, eligible: eligible) {
+      logger.info("Auto-stopping recording after \(silentDuration, privacy: .public)s of silence")
+      SentryManager.addBreadcrumb(
+        category: "recording",
+        message: "Silence auto-stop after \(String(format: "%.1f", silentDuration))s"
+      )
+      Task {
+        await endSession(trigger: .silenceDetection)
       }
-    } else {
-      // Reset silence timer when audio is detected
-      silenceStartTime = nil
     }
   }
 
   func stopAudioLevelMonitoring() {
     audioLevelTimer?.invalidate()
     audioLevelTimer = nil
-    silenceStartTime = nil
+    silenceAutoStop.reset()
     endAwaitingAudio()
-    isHUDOccluded = false
-    if let observer = occlusionObserver {
-      NotificationCenter.default.removeObserver(observer)
-      occlusionObserver = nil
-    }
+    hudOcclusion.stop()
     hudManager.updateAudioLevel(0)
   }
 }

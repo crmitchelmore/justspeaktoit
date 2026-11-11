@@ -54,15 +54,15 @@ actor ElevenLabsClient: TextToSpeechClient {
 
     do {
       let (data, _) = try await session.data(for: request)
-      let response = try JSONDecoder().decode(VoicesResponse.self, from: data)
+      let response = try JSONDecoder().decode(ElevenLabsVoicesResponse.self, from: data)
 
       return response.voices.map { voice in
         TTSVoice(
-          id: "elevenlabs/\(voice.voice_id)",
+          id: "elevenlabs/\(voice.voiceID)",
           name: voice.name,
           provider: .elevenlabs,
           traits: detectTraits(from: voice.labels),
-          previewURL: voice.preview_url
+          previewURL: voice.previewURL
         )
       }
     } catch {
@@ -201,17 +201,24 @@ actor ElevenLabsClient: TextToSpeechClient {
 
     return traits
   }
+}
 
-  // MARK: - Response Models
+// MARK: - Response Models
 
-  private struct VoicesResponse: Codable {
-    let voices: [Voice]
-  }
+private struct ElevenLabsVoicesResponse: Codable {
+  let voices: [ElevenLabsVoice]
+}
 
-  private struct Voice: Codable {
-    let voice_id: String
-    let name: String
-    let preview_url: URL?
-    let labels: [String: String]?
+private struct ElevenLabsVoice: Codable {
+  let voiceID: String
+  let name: String
+  let previewURL: URL?
+  let labels: [String: String]?
+
+  private enum CodingKeys: String, CodingKey {
+    case voiceID = "voice_id"
+    case name
+    case previewURL = "preview_url"
+    case labels
   }
 }

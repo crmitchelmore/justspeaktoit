@@ -23,8 +23,8 @@ public final class TipStore: ObservableObject {
             switch (lhs, rhs) {
             case (.ready, .ready), (.purchasing, .purchasing), (.purchased, .purchased):
                 return true
-            case let (.failed(l), .failed(r)):
-                return l == r
+            case let (.failed(lhsMessage), .failed(rhsMessage)):
+                return lhsMessage == rhsMessage
             default:
                 return false
             }

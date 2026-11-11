@@ -32,16 +32,16 @@ public final class RecordingSoundPlayer {
   }
 
   public func play(_ sound: RecordingSound, volume: Float = 1.0) {
-    guard let p = player(for: sound) else {
+    guard let player = player(for: sound) else {
       logger.debug("Recording sound missing: \(self.resourceName(for: sound)).\(sound.fileExtension)")
       return
     }
 
     // Restart from the beginning for reliable feedback.
-    p.currentTime = 0
-    p.volume = RecordingFeedbackDefaults.gain(for: volume)
-    p.prepareToPlay()
-    p.play()
+    player.currentTime = 0
+    player.volume = RecordingFeedbackDefaults.gain(for: volume)
+    player.prepareToPlay()
+    player.play()
   }
 
   private func player(for sound: RecordingSound) -> AVAudioPlayer? {
@@ -60,7 +60,9 @@ public final class RecordingSoundPlayer {
       players[sound] = player
       return player
     } catch {
-      logger.warning("Failed to init AVAudioPlayer for \(sound.resourceName).\(sound.fileExtension): \(error.localizedDescription)")
+      logger.warning(
+        "Failed to init AVAudioPlayer for \(sound.resourceName).\(sound.fileExtension): \(error.localizedDescription)"
+      )
       return nil
     }
   }

@@ -64,7 +64,7 @@ final class AutoCorrectionTracker: ObservableObject {
     let duration = AutoCorrectionLearningPolicy.observationSeconds(for: insertedText)
 
     log.info(
-      "Starting auto-correction monitoring for \(duration, privacy: .public)s (\(sentenceCount, privacy: .public) sentences)"
+      "Monitoring auto-corrections for \(duration, privacy: .public)s (\(sentenceCount, privacy: .public) sentences)"
     )
 
     monitoringTask = Task { [weak self] in

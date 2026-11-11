@@ -99,20 +99,22 @@ enum ModelPhase {
 }
 
 extension HistoryItem {
+  private static let chatModelMarkers = ["gpt", "claude", "llama", "inception", "mercury"]
+
+  private static func isChatModel(_ model: String) -> Bool {
+    chatModelMarkers.contains { model.contains($0) }
+  }
+
   func modelForPhase(_ phase: ModelPhase) -> String? {
     // This is a simplified approach - we'll try to infer from model names
     // In a real scenario, you might want to track this explicitly
     switch phase {
     case .transcription:
       // Look for transcription models (non-chat models)
-      return modelsUsed.first { model in
-        !model.contains("gpt") && !model.contains("claude") && !model.contains("llama") && !model.contains("inception") && !model.contains("mercury")
-      } ?? modelsUsed.first
+      return modelsUsed.first { !Self.isChatModel($0) } ?? modelsUsed.first
     case .postProcessing:
       // Look for chat/LLM models
-      return modelsUsed.first { model in
-        model.contains("gpt") || model.contains("claude") || model.contains("llama") || model.contains("inception") || model.contains("mercury")
-      }
+      return modelsUsed.first { Self.isChatModel($0) }
     }
   }
 
@@ -241,7 +243,10 @@ struct ModelUsageChart: View {
       } else {
         Chart(data) { item in
           BarMark(
-            x: .value(showSpend ? "Spend" : "Count", showSpend ? (item.spend as NSDecimalNumber).doubleValue : Double(item.count)),
+            x: .value(
+              showSpend ? "Spend" : "Count",
+              showSpend ? (item.spend as NSDecimalNumber).doubleValue : Double(item.count)
+            ),
             y: .value("Model", item.modelName)
           )
           .foregroundStyle(color.gradient)

@@ -27,7 +27,7 @@ actor DeepgramTTSClient: TextToSpeechClient {
 
         var queryItems = [
             URLQueryItem(name: "model", value: voiceID),
-            URLQueryItem(name: "encoding", value: encodingFormat(for: settings.format)),
+            URLQueryItem(name: "encoding", value: encodingFormat(for: settings.format))
         ]
 
         // `container` and `sample_rate` are not applicable for MP3 (and can
@@ -80,7 +80,7 @@ actor DeepgramTTSClient: TextToSpeechClient {
     }
 
     func listVoices() async throws -> [TTSVoice] {
-        return VoiceCatalog.deepgramVoices
+        VoiceCatalog.deepgramVoices
     }
 
     func validateAPIKey(_ key: String) async -> APIKeyValidationResult {

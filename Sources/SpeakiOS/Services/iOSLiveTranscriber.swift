@@ -19,7 +19,7 @@ private let logger = SpeakLogger.logger(category: "iOSLiveTranscriber")
 /// - ``LegacyAppleRecognitionController``: the `SFSpeechRecognizer` task,
 ///   its restarts, its bounded Stop wait and the transcript assembly.
 @MainActor
-public final class iOSLiveTranscriber: ObservableObject {
+public final class iOSLiveTranscriber: ObservableObject { // swiftlint:disable:this type_name
     // MARK: - Published State
 
     @Published private(set) public var isRunning = false

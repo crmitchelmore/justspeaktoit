@@ -94,7 +94,8 @@ final class IOSHistoryPersistenceState {
         let retained = recovery.items.filter { !primaryMatchesRecoveryBase($0.id) }
         var merged = Self.merging(Self.merging(retained, primary), uncommitted)
         merged.removeAll { recovery.deletedIDs.contains($0.id)
-            && (!primaryLoaded || primaryMatchesRecoveryBase($0.id)) }
+            && (!primaryLoaded || primaryMatchesRecoveryBase($0.id))
+        }
         merged = Self.merging(merged, Array(pending.values))
         merged.removeAll { pendingDeletedIDs.contains($0.id) }
         recoveredIDs.formUnion(recovery.items.map(\.id))

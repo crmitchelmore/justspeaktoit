@@ -29,7 +29,7 @@ extension HistoryItem {
     events: [
       .init(kind: .recordingStarted, description: "Recording began"),
       .init(kind: .recordingStopped, description: "Recording finished"),
-      .init(kind: .transcriptionReceived, description: "Transcription succeeded"),
+      .init(kind: .transcriptionReceived, description: "Transcription succeeded")
     ],
     phaseTimestamps: .init(
       recordingStarted: Date().addingTimeInterval(-40),

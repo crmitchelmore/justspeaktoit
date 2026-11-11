@@ -37,12 +37,11 @@ final class FnKeyBackend {
   func start() -> Bool {
     guard globalMonitor == nil else { return true }
 
-    globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) {
-      [weak self] event in
+    let events: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .keyUp]
+    globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: events) { [weak self] event in
       self?.handleNSEvent(event: event)
     }
-    localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) {
-      [weak self] event in
+    localMonitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
       self?.handleNSEvent(event: event)
       return event
     }

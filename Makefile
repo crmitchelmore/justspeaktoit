@@ -88,15 +88,15 @@ install-verify: release ## Build release, install to /Applications, launch and v
 preflight: test-all verify ## Full pre-release check (tests + launch verification)
 
 .PHONY: lint
-lint: ## Run strict SwiftLint (isolated Tooling graph) against the checked-in debt baseline
-	./scripts/swiftlint.sh lint --strict --baseline .swiftlint-baseline.json
+lint: ## Run strict SwiftLint (isolated Tooling graph) with zero violations and no baseline
+	./scripts/swiftlint.sh lint --strict
 	python3 scripts/accessibility/check-apple-accessibility.py
 
 # CI parity: ci.yml's Lint job and scripts/pre-pr both run exactly this target.
 .PHONY: ci-lint
-ci-lint: ## Run the CI Lint job: whole-repo strict SwiftLint, accessibility, baseline ratchet, tooling pins and tests
+ci-lint: ## Run the CI Lint job: whole-repo strict SwiftLint, accessibility, suppression ratchet, tooling pins and tests
 	$(MAKE) lint
-	python3 scripts/ci/lint-baseline-ratchet.py
+	python3 scripts/ci/lint-suppression-ratchet.py
 	git diff --exit-code Tooling/Package.resolved
 	$(MAKE) test-tooling
 

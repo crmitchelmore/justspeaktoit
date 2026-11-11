@@ -42,10 +42,6 @@ private final class PassthroughTooltipView: NSView {
     applyToolTip()
   }
 
-  override func viewWillMove(toWindow newWindow: NSWindow?) {
-    super.viewWillMove(toWindow: newWindow)
-  }
-
   override func setFrameSize(_ newSize: NSSize) {
     super.setFrameSize(newSize)
     applyToolTip()

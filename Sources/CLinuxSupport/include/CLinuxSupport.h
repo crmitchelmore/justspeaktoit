@@ -403,6 +403,9 @@ enum {
 typedef struct {
     const char *identifier, *label, *uses, *status, *url, *hint;
     int32_t saved;
+    /* Bit i set when the row passes SpeakCore APIKeyStatusFilter case i
+     * (All, Errors, Set, Unset). */
+    uint32_t filters;
 } JSTILinuxAPIKeyRow;
 /* Keys exist only during this callback and are erased from the native form.
  * Rows returned to GTK contain masked metadata only. */

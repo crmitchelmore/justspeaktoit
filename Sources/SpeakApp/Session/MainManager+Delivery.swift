@@ -24,12 +24,12 @@ extension MainManager {
   }
 
   /// The remedy, if any, for a one-shot delivery outcome under the current settings.
-  func remedy(forDelivery outputResult: TextOutputResult) -> DeliverySettingsRemedy? {
+  static func remedy(forDelivery outputResult: TextOutputResult, settings: AppSettings) -> DeliverySettingsRemedy? {
     DeliverySettingsRemedy.forOutput(
       error: outputResult.error,
       warning: outputResult.warning,
       focusMovedToOtherApplication: outputResult.focusMovedToOtherApplication,
-      configuration: DeliverySettingsRemedy.Configuration(settings: appSettings)
+      configuration: DeliverySettingsRemedy.Configuration(settings: settings)
     )
   }
 
@@ -105,7 +105,7 @@ extension MainManager {
     await historyManager.append(session.buildHistoryItem(finalText: finalText))
   }
 
-  func recordDeliveryWarning(_ note: String?, on session: ActiveSession) {
+  static func recordDeliveryWarning(_ note: String?, on session: ActiveSession) {
     guard let note else { return }
     session.events.append(
       HistoryEvent(kind: .outputDelivered, description: "Delivery warning: \(note)")
@@ -128,7 +128,7 @@ extension MainManager {
     guard let remedy = pendingDeliveryRemedy else { return }
     let satisfied = remedy.isSatisfied(
       configuration: DeliverySettingsRemedy.Configuration(settings: appSettings),
-      accessibilityGranted: permissionsManager.status(for: .accessibility).isGranted
+      accessibilityGranted: capture.permissions.status(for: .accessibility).isGranted
     )
     if satisfied {
       pendingDeliveryRemedy = nil
@@ -138,7 +138,7 @@ extension MainManager {
   /// Applies the setting change offered after the last delivery, then forgets it.
   func applyPendingDeliveryRemedy() {
     guard let remedy = pendingDeliveryRemedy else { return }
-    remedy.apply(settings: appSettings, permissions: permissionsManager)
+    remedy.apply(settings: appSettings, permissions: capture.permissions)
     pendingDeliveryRemedy = nil
   }
 }

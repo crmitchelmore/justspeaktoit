@@ -23,7 +23,7 @@ extension MainManager {
     }
 
     func ensurePostProcessingAPIKeyAvailable(for session: ActiveSession, message: String) async -> Bool {
-        guard await postProcessingManager.hasRequiredAPIKey() else {
+        guard await text.postProcessing.hasRequiredAPIKey() else {
             await handleMissingAPIKey(session, phase: .postProcessing, message: message)
             return false
         }
@@ -52,9 +52,9 @@ extension MainManager {
         lastErrorMessage = message
         hudManager.finishFailure(message: message)
         state = .failed(message)
-        stopAudioLevelMonitoring()
-        livePolishManager.reset()
-        liveTextInserter.reset()
+        captureRuntime.stop()
+        text.livePolish.reset()
+        text.liveTextInserter.reset()
         // The recorder and live stream are shared with Voice Edit: only cancel
         // them while dictation owns capture, and never a recording another
         // flow started (issue #673).
@@ -70,11 +70,11 @@ extension MainManager {
         Task { [failedSession = activeSession] in
             var keptURL: URL?
             if mayTearDownCapture {
-                keptURL = await audioFileManager.cancelRecording(deleteFile: !preserveFile, ifOwnedBy: .dictation)
+                keptURL = await capture.audioFiles.cancelRecording(deleteFile: !preserveFile, ifOwnedBy: .dictation)
             }
             if let session = failedSession, let keptURL, session.recordingSummary == nil {
                 let elapsed = Date().timeIntervalSince(session.recordingStarted)
-                session.recordingSummary = makeRecordingSummary(from: keptURL, fallbackDuration: max(0, elapsed))
+                session.recordingSummary = RecordingSummary.inspecting(keptURL, fallbackDuration: max(0, elapsed))
             }
             if historyRequiresAudio, failedSession?.recordingSummary == nil { return }
             if let session = failedSession {
@@ -87,7 +87,7 @@ extension MainManager {
 
     func stopRecordingWithTimeout() async throws -> RecordingSummary {
         let timeout = recordingStopTimeout
-        let audioFileManager = self.audioFileManager
+        let audioFileManager = capture.audioFiles
         return try await withThrowingTaskGroup(of: RecordingSummary.self) { group in
             group.addTask { try await audioFileManager.stopRecording() }
             group.addTask {

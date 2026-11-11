@@ -37,7 +37,7 @@ extension MainManager {
 
   /// Transcribes the recorded file with the batch or local model.
   func transcribeRecording(_ summary: RecordingSummary, for session: ActiveSession) async throws -> Bool {
-    hudManager.beginTranscribing(subheadline: rawTranscriptionSubheadline())
+    hudManager.beginTranscribing(subheadline: Self.rawTranscriptionSubheadline(settings: appSettings))
     session.transcriptionStarted = Date()
     if appSettings.transcriptionMode == .batchRemote {
       guard
@@ -54,63 +54,18 @@ extension MainManager {
       Self.retainBatchDiagnostic(receipt, for: session, activeSession: self?.activeSession)
     }
     guard sessionProcessingShouldContinue(session) else { return false }
-    recordFileTranscription(
+    session.recordFileTranscription(
       result,
       fileName: summary.url.lastPathComponent,
-      isLocal: appSettings.transcriptionMode == .localModel,
-      on: session
+      isLocal: appSettings.transcriptionMode == .localModel
     )
     return true
   }
 
-  /// Records a batch or local file transcription: result, model usage, its
-  /// network row and cost.
-  func recordFileTranscription(
-    _ result: TranscriptionResult,
-    fileName: String,
-    isLocal: Bool,
-    on session: ActiveSession
-  ) {
-    session.transcriptionEnded = Date()
-    session.transcriptionResult = result
-    session.modelsUsed.insert(result.modelIdentifier)
-    session.modelUsages.append(
-      ModelUsage(modelIdentifier: result.modelIdentifier, phase: isLocal ? .transcriptionLocal : .transcriptionBatch)
-    )
-    session.events.append(
-      HistoryEvent(
-        kind: .transcriptionReceived,
-        description: isLocal ? "Local model transcription complete" : "Batch transcription complete"
-      )
-    )
-    if let exchange = SessionNetworkExchanges.fileTranscription(result, fileName: fileName, isLocal: isLocal) {
-      session.networkExchanges.append(exchange)
-    }
-    if let cost = result.cost {
-      session.recordCostFragment(cost)
-    }
-  }
-
-  /// Runs voice commands (e.g., "copy pasta" → clipboard content) and the
-  /// personal lexicon over the raw transcript, recording what changed.
-  func applyVoiceCommandsAndLexicon(to rawText: String, for session: ActiveSession) -> String {
-    let baseText = textProcessor.process(rawText)
-    let lexiconContext = makeLexiconContext(for: baseText, destination: nil)
-    let corrections = personalLexicon.apply(to: baseText, context: lexiconContext)
-    session.personalCorrections = PersonalLexiconHistorySummary(
-      applied: corrections.applied,
-      suggestions: corrections.suggestions,
-      contextTags: Array(lexiconContext.tags).sorted(),
-      destinationApplication: lexiconContext.destinationApplication
-    )
-    session.lexiconContext = lexiconContext
-    return corrections.transformedText
-  }
-
   /// Polishes the text when the speed mode asks for it. A model failure still
   /// delivers the unpolished text and offers a retry.
-  func postProcessIfNeeded(_ text: String, for session: ActiveSession) async -> PostProcessingStep? {
-    guard shouldRunPostProcessing() else { return PostProcessingStep(text: text) }
+  func postProcessIfNeeded(_ input: String, for session: ActiveSession) async -> PostProcessingStep? {
+    guard Self.shouldRunPostProcessing(settings: appSettings) else { return PostProcessingStep(text: input) }
     hudManager.beginPostProcessing()
     session.postProcessingStarted = Date()
     guard
@@ -124,8 +79,8 @@ extension MainManager {
     }
     let resolvedPostProcessingModel =
       ModelCatalog.resolvedPostProcessingModel(appSettings.postProcessingModel)
-    let outcomeResult = await postProcessingManager.process(
-      rawText: text,
+    let outcomeResult = await text.postProcessing.process(
+      rawText: input,
       context: session.lexiconContext,
       corrections: session.personalCorrections,
       onStreamingUpdate: { [weak self] accumulatedText in
@@ -140,20 +95,19 @@ extension MainManager {
     guard sessionProcessingShouldContinue(session) else { return nil }
     switch outcomeResult {
     case .success(let outcome):
-      recordPostProcessingSuccess(
+      session.recordPostProcessingSuccess(
         outcome,
         model: resolvedPostProcessingModel,
-        input: text,
-        description: outcome.response == nil ? "Post-processing complete (streamed)" : "Post-processing complete",
-        on: session
+        input: input,
+        description: outcome.response == nil ? "Post-processing complete (streamed)" : "Post-processing complete"
       )
       return PostProcessingStep(text: outcome.processed)
     case .failure(let error):
-      let friendly = recordPostProcessingFailure(error, model: resolvedPostProcessingModel, on: session)
+      let friendly = session.recordPostProcessingFailure(error, model: resolvedPostProcessingModel)
       attachFailureDiagnostics(to: session)
       let offersRetry = retryStore.offer(for: session)
       hudManager.finishFailure(headline: "Post-processing failed", message: friendly, showRetryHint: offersRetry)
-      return PostProcessingStep(text: text, failureMessage: friendly)
+      return PostProcessingStep(text: input, failureMessage: friendly)
     }
   }
 
@@ -184,6 +138,7 @@ extension MainManager {
   /// after recording a failed delivery.
   private func insertFinalText(_ finalText: String, for session: ActiveSession) async -> DeliveryOutcome? {
     var liveFinalizationResult: LiveTextInserter.FinalizationResult = .deferred
+    let liveTextInserter = text.liveTextInserter
     let usedStreamingInsertion = liveTextInserter.isActive && liveTextInserter.strategy == .rangedStreaming
     if liveTextInserter.isActive {
       liveFinalizationResult = liveTextInserter.applyPolishedFinal(finalText)
@@ -191,7 +146,7 @@ extension MainManager {
     }
     // Latency checkpoint: when the first character actually reached the target
     // app via live insertion (nil when the session never streamed text).
-    session.firstInsertion = self.liveTextInserter.firstInsertionAt
+    session.firstInsertion = liveTextInserter.firstInsertionAt
 
     switch liveFinalizationResult {
     case .applied:
@@ -224,7 +179,7 @@ extension MainManager {
     after liveFinalizationResult: LiveTextInserter.FinalizationResult,
     for session: ActiveSession
   ) async -> DeliveryOutcome? {
-    let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
+    let output = SmartTextOutput(permissionsManager: capture.permissions, appSettings: appSettings)
     let outputResult: TextOutputResult
     switch liveFinalizationResult {
     case .redirected(let target): outputResult = output.output(text: finalText, target: target)
@@ -232,7 +187,7 @@ extension MainManager {
     default: outputResult = output.output(text: finalText, target: session.outputTarget)
     }
     let deliveryTarget = outputResult.redirectedTarget ?? session.outputTarget
-    let deliveryRemedy = remedy(forDelivery: outputResult)
+    let deliveryRemedy = Self.remedy(forDelivery: outputResult, settings: appSettings)
     session.outputMethod = outputResult.method
     if let error = outputResult.error {
       await recordDeliveryFailure(
@@ -262,7 +217,7 @@ extension MainManager {
     // A warning means delivery proceeded without proving the current field.
     // Do not associate Voice Edit/correction tracking with the stale capture.
     if outcome.warning == nil {
-      autoCorrectionTracker.startMonitoring(
+      text.autoCorrectionTracker.startMonitoring(
         insertedText: finalText,
         element: focusedElement,
         app: appName
@@ -276,7 +231,7 @@ extension MainManager {
     )
     let deliveryNote = deliveryNote(for: outcome, destination: appName, on: session)
     session.destination = appName
-    session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
+    session.lexiconContext = PersonalLexiconContext.inferred(for: finalText, destination: appName)
     if let summary = session.personalCorrections {
       session.personalCorrections = summary.updatingContext(
         tags: Array(session.lexiconContext.tags).sorted(),
@@ -297,7 +252,7 @@ extension MainManager {
   /// also recorded on the session without naming the app: History can be
   /// exported to a public issue.
   private func deliveryNote(for outcome: DeliveryOutcome, destination: String?, on session: ActiveSession) -> String? {
-    recordDeliveryWarning(
+    Self.recordDeliveryWarning(
       Self.deliveryNote(
         warning: outcome.warning,
         focusMovedToOtherApplication: outcome.focusMovedToOtherApplication,
@@ -336,53 +291,20 @@ extension MainManager {
     captureFirstTranscriptionSucceededIfNeeded(session: session)
   }
 
-  /// Records a successful polish: timings, model usage, its network row and cost.
-  func recordPostProcessingSuccess(
-    _ outcome: PostProcessingOutcome,
-    model: String,
-    input: String,
-    description: String,
-    on session: ActiveSession
-  ) {
-    session.postProcessingEnded = Date()
-    session.postProcessingOutcome = outcome
-    session.events.append(HistoryEvent(kind: .postProcessingReceived, description: description))
-    session.modelsUsed.insert(model)
-    session.modelUsages.append(ModelUsage(modelIdentifier: model, phase: .postProcessing))
-    guard let response = outcome.response else { return }
-    if let payload = response.rawPayload {
-      session.networkExchanges.append(
-        SessionNetworkExchanges.postProcessing(
-          model: model,
-          requestPreview: postProcessingRequestPreview(systemPrompt: outcome.systemPrompt, rawText: input),
-          payload: payload
-        )
-      )
-    }
-    if let cost = response.cost {
-      session.recordCostFragment(cost)
-    }
-  }
-
-  /// Records a failed polish in History and returns the message to show.
-  func recordPostProcessingFailure(_ error: Error, model: String, on session: ActiveSession) -> String {
-    session.postProcessingEnded = Date()
-    let friendly = Self.friendlyPostProcessingMessage(for: error, modelIdentifier: model)
-    session.errors.append(
-      HistoryError(
-        phase: .postProcessing,
-        message: friendly,
-        debugDescription: error.localizedDescription
-      )
-    )
-    session.events.append(HistoryEvent(kind: .error, description: friendly))
-    return friendly
-  }
-
   /// Resets live polish and insertion and releases the session.
   func finishSessionTeardown() {
-    livePolishManager.reset()
-    liveTextInserter.reset()
+    text.livePolish.reset()
+    text.liveTextInserter.reset()
     activeSession = nil
+  }
+
+  static func rawTranscriptionSubheadline(settings: AppSettings) -> String {
+    guard settings.transcriptionMode == .localModel else {
+      return "Preparing raw transcript"
+    }
+    if LocalModelManager.shared.isModelLoaded(settings.localTranscriptionModel) {
+      return "Transcribing locally on this Mac"
+    }
+    return "Loading local model and transcribing. First run can take a minute."
   }
 }

@@ -6,13 +6,26 @@ import Combine
 import Foundation
 import os.log
 
-/// Owns the dictation session lifecycle. A hotkey, the UI or Shortcuts calls
-/// `startSession` (admission in `+SessionStart`, capture in `+StartSteps`);
-/// `endSession` (`+SessionStop`) hands the recording to transcription and
-/// post-processing (`+SessionPipeline`) and delivery (`+Delivery`). Every path
-/// ends by clearing `activeSession`, which retires the session through
-/// `SessionRetirement`, and every start leaves a History item, failures
-/// included (`+SessionDiagnostics`).
+/// Owns the dictation session lifecycle and publishes its state. In order, a
+/// session passes through these owners:
+///
+/// 1. `SessionGestureRouter` turns hotkey gestures (and `KeyPressPrimerRuntime`
+///    the key-down microphone) into `startSession`/`endSession` calls; the UI,
+///    Shortcuts and `HandsFreeDictationCoordinator` call the same two methods.
+/// 2. `SessionStartPipeline` admits the start (profile, API key, microphone,
+///    capture reservation) and brings capture up through
+///    `RecordingStartSequencer`, claiming `CaptureWarmCoordinator`'s staged
+///    recorder when it can.
+/// 3. `SessionCaptureRuntime` owns the recording while it captures: level
+///    metering, silence auto-stop, the audio-arrival gate for the HUD clock and
+///    start cue, and the one stop in progress.
+/// 4. `endSession` (`+SessionStop`) stops the recorder, then transcribes,
+///    post-processes (`+SessionPipeline`) and delivers (`+Delivery`).
+/// 5. Clearing `activeSession` retires the session through `SessionRetirement`.
+///
+/// `ReprocessingCoordinator` runs the two flows without a recording
+/// (reprocessing a History item, retrying post-processing). Every start leaves a
+/// History item, failures included (`+SessionDiagnostics`).
 @MainActor
 final class MainManager: ObservableObject {
   enum State: Equatable {
@@ -66,21 +79,12 @@ final class MainManager: ObservableObject {
   }
 
   let appSettings: AppSettings
-  let permissionsManager: PermissionsManager
-  let audioInputDeviceManager: AudioInputDeviceManager
-  let hotKeyManager: HotKeyManager
-  let audioFileManager: AudioFileManager
+  let capture: SessionCaptureServices
   let transcriptionManager: TranscriptionManager
-  let postProcessingManager: PostProcessingManager
+  let text: SessionTextServices
   let historyManager: HistoryManager
   let hudManager: HUDManager
-  let personalLexicon: PersonalLexiconService
-  let openRouterClient: OpenRouterAPIClient
-  let livePolishManager: LivePolishManager
-  let liveTextInserter: LiveTextInserter
-  let textProcessor: TranscriptionTextProcessor
-  let autoCorrectionTracker: AutoCorrectionTracker
-  let profileStore: DictationProfileStore
+  private let connectionPrewarmer: ConnectionPrewarmer
   /// Installed by AppEnvironment only for the consent-gated direct analytics transport.
   var analyticsCapture: ((ProductAnalyticsEvent) -> Void)?
   let logger = SpeakLogger.logger(category: "MainManager")
@@ -107,6 +111,9 @@ final class MainManager: ObservableObject {
     }
   }
 
+  /// Keeps the audio recorder and the streaming provider's network path warm
+  /// while idle so hotkey→capture does not pay setup cost (issue #663).
+  let captureWarmer: CaptureWarmCoordinator
   /// Reverts the profile, resumes warming and gives capture back whenever a
   /// session ends or a start is abandoned.
   private(set) lazy var sessionRetirement = SessionRetirement(steps: makeRetirementSteps())
@@ -116,6 +123,12 @@ final class MainManager: ObservableObject {
   private(set) lazy var captureHealth = makeCaptureHealthMonitor()
   /// Feeds live transcript and polish updates to the previews and the inserter.
   private lazy var liveTranscriptRelay = makeLiveTranscriptRelay()
+  /// Metering, silence auto-stop, the audio-arrival gate and the stop in progress.
+  private(set) lazy var captureRuntime = makeCaptureRuntime()
+  /// Admission and capture bring-up for every start.
+  private(set) lazy var startPipeline = makeStartPipeline()
+  /// Reprocessing History items and retrying post-processing.
+  private(set) lazy var reprocessing = makeReprocessingCoordinator()
 
   /// Hands-free ("armed") dictation. Created eagerly but inert until the user
   /// arms it, which only the hands-free setting allows.
@@ -128,59 +141,37 @@ final class MainManager: ObservableObject {
     handsFreeState = state
   }
 
-  /// Keeps the audio recorder and the streaming provider's network path warm
-  /// while idle so hotkey→capture does not pay setup cost (issue #663).
-  private(set) var captureWarmer: CaptureWarmCoordinator?
   /// Guards against re-entrant calls to endSession (e.g. silence detection + user hotkey racing).
-  var isEndingSession = false
+  var isEndingSession: Bool { captureRuntime.isEnding }
+  /// Whether a start is between admission and capture.
+  var captureStarting: Bool { startPipeline.isStarting }
   let recordingStopTimeout: TimeInterval = 8
   var cancellables: Set<AnyCancellable> = []
   /// Routes hotkey gestures and shortcuts to session starts and stops.
   private lazy var gestureRouter = SessionGestureRouter(handler: self)
-  var audioLevelTimer: Timer?
-  /// Level-based silence auto-stop for the current recording.
-  var silenceAutoStop = SilenceAutoStop()
-  /// Tracks whether the HUD window is visible to skip unnecessary UI updates.
-  let hudOcclusion = HUDOcclusionObserver()
-  /// Holds the HUD clock and start cue until real audio arrives (see
-  /// `MainManager+AudioArrival`).
-  var audioArrivalGate: RecordingAudioArrivalGate?
-  weak var audioArrivalSession: ActiveSession?
 
   init(
     appSettings: AppSettings,
-    permissionsManager: PermissionsManager,
-    audioInputDeviceManager: AudioInputDeviceManager,
-    hotKeyManager: HotKeyManager,
-    audioFileManager: AudioFileManager,
+    capture: SessionCaptureServices,
     transcriptionManager: TranscriptionManager,
-    postProcessingManager: PostProcessingManager,
+    text: SessionTextServices,
     historyManager: HistoryManager,
     hudManager: HUDManager,
-    personalLexicon: PersonalLexiconService,
-    openRouterClient: OpenRouterAPIClient,
-    livePolishManager: LivePolishManager,
-    liveTextInserter: LiveTextInserter,
-    textProcessor: TranscriptionTextProcessor,
-    autoCorrectionTracker: AutoCorrectionTracker,
-    profileStore: DictationProfileStore
+    connectionPrewarmer: ConnectionPrewarmer
   ) {
     self.appSettings = appSettings
-    self.permissionsManager = permissionsManager
-    self.audioInputDeviceManager = audioInputDeviceManager
-    self.hotKeyManager = hotKeyManager
-    self.audioFileManager = audioFileManager
+    self.capture = capture
     self.transcriptionManager = transcriptionManager
-    self.postProcessingManager = postProcessingManager
+    self.text = text
     self.historyManager = historyManager
     self.hudManager = hudManager
-    self.personalLexicon = personalLexicon
-    self.openRouterClient = openRouterClient
-    self.livePolishManager = livePolishManager
-    self.liveTextInserter = liveTextInserter
-    self.textProcessor = textProcessor
-    self.autoCorrectionTracker = autoCorrectionTracker
-    self.profileStore = profileStore
+    self.connectionPrewarmer = connectionPrewarmer
+    self.captureWarmer = CaptureWarmCoordinator(
+      appSettings: appSettings,
+      permissionsManager: capture.permissions,
+      audioInputDeviceManager: capture.devices,
+      audioFileManager: capture.audioFiles
+    )
 
     bindSettings()
     liveTranscriptRelay.start()
@@ -189,35 +180,15 @@ final class MainManager: ObservableObject {
     configureHotKeys()
     keyPressPrimer.start()
     captureHealth.start()
-
-    Publishers.CombineLatest(
-      appSettings.$connectionPreWarmingEnabled,
-      permissionsManager.$statuses.map { $0[.microphone]?.isGranted == true }
-    )
-    .removeDuplicates { lhs, rhs in lhs.0 == rhs.0 && lhs.1 == rhs.1 }
-    .dropFirst()
-    .receive(on: RunLoop.main)
-    .sink { [weak self] enabled, permissionGranted in
-      guard enabled, permissionGranted else { return }
-      self?.warmUpConnectionIfEnabled()
-    }
-    .store(in: &cancellables)
-
-    let warmer = CaptureWarmCoordinator(
-      appSettings: appSettings,
-      permissionsManager: permissionsManager,
-      audioInputDeviceManager: audioInputDeviceManager,
-      audioFileManager: audioFileManager
-    )
-    captureWarmer = warmer
-    warmer.start()
+    connectionPrewarmer.observeChanges()
+    captureWarmer.start()
   }
 
   private func makeLiveTranscriptRelay() -> LiveTranscriptRelay {
     LiveTranscriptRelay(
       transcription: transcriptionManager,
-      polish: livePolishManager,
-      inserter: liveTextInserter,
+      polish: text.livePolish,
+      inserter: text.liveTextInserter,
       hud: hudManager,
       settings: appSettings,
       session: LiveTranscriptRelay.Session(
@@ -234,12 +205,11 @@ final class MainManager: ObservableObject {
   /// Completes asynchronous warm-resource teardown before AppKit permits the
   /// process to exit, so the prepared recorder cannot leave an empty file.
   func prepareForTermination() async {
-    self.stopAudioLevelMonitoring()
-    await self.captureWarmer?.invalidate()
+    captureRuntime.stop()
+    await captureWarmer.invalidate()
   }
 
   var migrationInProgress = false
-  private(set) var captureStarting = false
 
   var isBusy: Bool {
     switch state {
@@ -254,39 +224,31 @@ final class MainManager: ObservableObject {
     #if DEBUG
     if CoreJourneyLaunchProfile.isRequested, CoreJourneyLaunchProfile.current?.runsBatchJourney != true { return }
     #endif
-    gestureRouter.register(on: hotKeyManager)
+    gestureRouter.register(on: capture.hotKeys)
 
     // Escape has to arrive from whichever app is being dictated into, but only while there
     // is a recording to cancel — outside that window Speak reads no system-wide key presses.
-    hotKeyManager.trackRecordingState($state.map { $0 == .recording })
+    capture.hotKeys.trackRecordingState($state.map { $0 == .recording })
 
     #if DEBUG
-    hotKeyManager.startMonitoring(requestPermission: !CoreJourneyLaunchProfile.isRequested)
+    capture.hotKeys.startMonitoring(requestPermission: !CoreJourneyLaunchProfile.isRequested)
     #else
-    hotKeyManager.startMonitoring()
+    capture.hotKeys.startMonitoring()
     #endif
 
     // Pre-warm LLM connection at app launch
-    warmUpConnectionIfEnabled()
-  }
-
-  /// Pre-warms the OpenRouter connection in the background if enabled.
-  /// This is called at app launch and when recording starts.
-  private func warmUpConnectionIfEnabled() {
-    guard appSettings.connectionPreWarmingEnabled else { return }
-    guard permissionsManager.status(for: .microphone).isGranted else { return }
-    let client = openRouterClient
-    Task.detached {
-      await client.warmUp()
-    }
+    connectionPrewarmer.warmUpIfEnabled()
   }
 }
 
 // MARK: - Session start
 
-extension MainManager {
+extension MainManager: SessionStartHost {
+  var mayStartSession: Bool { !migrationInProgress && activeSession == nil }
+
   /// Makes `session` current and resets the live preview, polish and insertion.
-  private func activate(_ session: ActiveSession) {
+  func activate(_ session: ActiveSession) {
+    retryStore.clear()
     activeSession = session
     lastErrorMessage = nil
     pendingDeliveryRemedy = nil
@@ -297,7 +259,7 @@ extension MainManager {
     transcriptionManager.resetLiveTranscriptDisplay()
 
     // Reset live polish for new session
-    livePolishManager.reset()
+    text.livePolish.reset()
 
     // Start live text insertion if enabled. The experimental streaming mode
     // patches partials into allowlisted apps via ranged AX replacement; other
@@ -305,14 +267,35 @@ extension MainManager {
     let useRangedStreaming = streamingInsertionEligible
       && StreamingInsertionAllowlist.allows(session.outputTarget)
     if liveInsertionEnabled || useRangedStreaming {
-      liveTextInserter.begin(
+      text.liveTextInserter.begin(
         target: session.outputTarget,
         strategy: useRangedStreaming ? .rangedStreaming : .fullValue
       )
-      if !liveTextInserter.isActive {
+      if !text.liveTextInserter.isActive {
         logger.warning("Live text insertion failed to start - will use standard delivery")
       }
     }
+  }
+
+  func captureDidStart(for session: ActiveSession) {
+    state = .recording
+  }
+
+  func publishStartRejection(_ message: String) {
+    state = .failed(message)
+    lastErrorMessage = message
+  }
+
+  func publishMissingLiveAPIKey(_ alert: MissingLiveAPIKeyAlert) {
+    missingLiveAPIKeyAlert = alert
+  }
+
+  func makeAdmissionDiagnosticContext() -> HistoryDiagnosticContext {
+    makeHistoryDiagnosticContext(includeRequestedContext: true)
+  }
+
+  func failStartedSession(message: String) {
+    cleanupAfterFailure(message: message, preserveFile: false)
   }
 
   // Internal rather than private so the hands-free coordinator can start the
@@ -324,55 +307,52 @@ extension MainManager {
     triggerTiming: SessionTriggerTiming = .nonHotKey(),
     primedInput: PrimedLiveInputReservation? = nil
   ) async -> HandsFreeCaptureStartOutcome {
-    // Every exit closes a primed microphone this start did not take over.
-    defer { keyPressPrimer.release(primedInput) }
-    guard !migrationInProgress, !captureStarting, activeSession == nil else { return .rejected(.captureFailed) }
-    captureStarting = true
-    defer { captureStarting = false }
-    keyPressPrimer.sessionWillBegin()
-    captureWarmer?.sessionWillBegin()
-
-    // Per-app dictation profile: resolve the frontmost app and apply its
-    // overrides for this session only. Applied before the API-key check so the
-    // check sees the profile's provider. Reverted whenever `activeSession`
-    // returns to nil; the early-exit paths below revert explicitly because no
-    // session was created yet.
-    profileApplier.begin(
-      settings: appSettings,
-      postProcessing: postProcessingManager,
-      profiles: profileStore.profiles,
-      frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    await startPipeline.start(
+      SessionStartPipeline.Request(
+        trigger: trigger,
+        preRollBuffers: preRollBuffers,
+        triggerTiming: triggerTiming,
+        primedInput: primedInput
+      )
     )
+  }
+}
 
-    if let rejection = await rejectionBeforeStart(trigger: trigger) {
-      return rejection
-    }
+// MARK: - Reprocessing
 
-    // Failsafe: if live transcription is still running but we have no activeSession,
-    // cancel it so the app can always recover without requiring a restart.
-    //
-    // The switcher serialises this teardown with a replacement start and guards
-    // ownership by run, including when both runs reuse the same controller.
-    if transcriptionManager.isLiveTranscribing {
-      logger.warning("Live transcription still running without an active session; cancelling to recover")
-      transcriptionManager.cancelLiveTranscription()
-    }
+extension MainManager: ReprocessingHost {
+  func adopt(_ session: ActiveSession) {
+    activeSession = session
+  }
 
+  func releaseActiveSession() {
+    activeSession = nil
+  }
+
+  func publish(_ state: State) {
+    self.state = state
+  }
+
+  func publishFailure(_ message: String) {
+    state = .failed(message)
+    lastErrorMessage = message
+  }
+
+  func clearDeliveryFeedback() {
+    lastErrorMessage = nil
+    pendingDeliveryRemedy = nil
+  }
+
+  func makeDiagnosticContext() -> HistoryDiagnosticContext {
+    makeHistoryDiagnosticContext()
+  }
+
+  func failForMissingAPIKey(_ session: ActiveSession, phase: HistoryError.Phase, message: String) async {
+    await handleMissingAPIKey(session, phase: phase, message: message)
+  }
+
+  func completeRetryDelivery(remedy: DeliverySettingsRemedy?) {
     retryStore.clear()
-
-    let session = ActiveSession(
-      gesture: trigger.historyGesture,
-      hotKeyDescription: appSettings.selectedHotKey.displayString,
-      trigger: trigger,
-      triggerTiming: triggerTiming
-    )
-    session.outputTarget = TextOutputTarget.capture()
-    session.diagnosticContext = makeHistoryDiagnosticContext(includeRequestedContext: true)
-    session.isLocalAutomationCapture = true
-    activate(session)
-
-    return await runStartSequence(
-      for: session, trigger: trigger, preRollBuffers: preRollBuffers, primedInput: primedInput
-    )
+    pendingDeliveryRemedy = remedy
   }
 }

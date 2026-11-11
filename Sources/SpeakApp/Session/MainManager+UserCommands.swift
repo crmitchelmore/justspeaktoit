@@ -41,9 +41,15 @@ extension MainManager {
     return nil
   }
 
+  /// Re-transcribes a History item's audio (or an imported file) into a new
+  /// History entry without delivering it.
+  func reprocessHistoryItem(_ item: HistoryItem) async {
+    await reprocessing.reprocess(item)
+  }
+
   func retryPostProcessing() {
     guard let retryData = retryStore.entryToRetry(sessionActive: activeSession != nil) else { return }
-    Task { await performRetryPostProcessing(with: retryData) }
+    Task { await reprocessing.retryPostProcessing(with: retryData) }
   }
 
   func userRequestedStopDueToError() {

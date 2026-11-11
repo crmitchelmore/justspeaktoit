@@ -431,21 +431,17 @@ enum WireUp {
     let profiles = DictationProfileStore(defaults: defaults)
     let main = MainManager(
       appSettings: settings,
-      permissionsManager: permissions,
-      audioInputDeviceManager: audioDevices,
-      hotKeyManager: hotKeys,
-      audioFileManager: audio,
+      capture: SessionCaptureServices(
+        permissions: permissions, devices: audioDevices, hotKeys: hotKeys, audioFiles: audio, profiles: profiles
+      ),
       transcriptionManager: transcription,
-      postProcessingManager: postProcessing,
+      text: SessionTextServices(
+        textProcessor: textProcessor, personalLexicon: personalLexicon, postProcessing: postProcessing,
+        livePolish: livePolish, liveTextInserter: liveTextInserter, autoCorrectionTracker: autoCorrectionTracker
+      ),
       historyManager: history,
       hudManager: hud,
-      personalLexicon: personalLexicon,
-      openRouterClient: openRouter,
-      livePolishManager: livePolish,
-      liveTextInserter: liveTextInserter,
-      textProcessor: textProcessor,
-      autoCorrectionTracker: autoCorrectionTracker,
-      profileStore: profiles
+      connectionPrewarmer: ConnectionPrewarmer(settings: settings, permissions: permissions, client: openRouter)
     )
     let hudPresenter = HUDWindowPresenter(manager: hud, settings: settings)
     let shortcuts = ShortcutManager(permissionsManager: permissions, defaults: defaults)

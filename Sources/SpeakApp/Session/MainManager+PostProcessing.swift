@@ -4,15 +4,15 @@ import Foundation
 // MARK: - Post-processing helpers (extracted from MainManager 1474-line God class)
 
 extension MainManager {
-    func shouldRunPostProcessing() -> Bool {
-        let shouldSkipForLivePolish = appSettings.speedMode.usesLivePolish
-            && appSettings.skipPostProcessingWithLivePolish
+    static func shouldRunPostProcessing(settings: AppSettings) -> Bool {
+        let shouldSkipForLivePolish = settings.speedMode.usesLivePolish
+            && settings.skipPostProcessingWithLivePolish
         guard !shouldSkipForLivePolish else { return false }
-        let hasAssemblyAIPrompt = false && appSettings.liveTranscriptionModel.contains("assemblyai")
-        return appSettings.postProcessingEnabled || hasAssemblyAIPrompt
+        let hasAssemblyAIPrompt = false && settings.liveTranscriptionModel.contains("assemblyai")
+        return settings.postProcessingEnabled || hasAssemblyAIPrompt
     }
 
-    func postProcessingRequestPreview(systemPrompt: String, rawText: String) -> String {
+    static func postProcessingRequestPreview(systemPrompt: String, rawText: String) -> String {
         let trimmedPrompt = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let promptSection = trimmedPrompt.isEmpty ? "<default prompt>" : trimmedPrompt
         let truncatedRaw = rawText.prefix(600)
@@ -58,28 +58,5 @@ extension MainManager {
         guard !trimmed.isEmpty else { return nil }
         if trimmed.count > 200 { return String(trimmed.prefix(200)) + "…" }
         return trimmed
-    }
-
-    func makeLexiconContext(for text: String, destination: String?) -> PersonalLexiconContext {
-        var tags: Set<String> = []
-        let lowered = text.lowercased()
-        if lowered.contains("dear ") || lowered.contains("regards") || lowered.contains("sincerely") {
-            tags.insert("formal")
-        }
-        if lowered.contains("meeting") || lowered.contains("agenda")
-            || lowered.contains("project") || lowered.contains("quarterly") {
-            tags.insert("work")
-        }
-        if lowered.contains("love") || lowered.contains("babe") || lowered.contains("sweetheart") {
-            tags.insert("intimate")
-        }
-        if let destination, !destination.isEmpty {
-            let lowerDest = destination.lowercased()
-            if lowerDest.contains("mail") || lowerDest.contains("outlook") { tags.insert("formal") }
-            if lowerDest.contains("messages") || lowerDest.contains("imessage") { tags.insert("casual") }
-            if lowerDest.contains("slack") || lowerDest.contains("teams") { tags.insert("work") }
-        }
-        let window = String(text.suffix(400))
-        return PersonalLexiconContext(tags: tags, destinationApplication: destination, recentTranscriptWindow: window)
     }
 }

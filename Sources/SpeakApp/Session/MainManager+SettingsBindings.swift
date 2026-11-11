@@ -33,7 +33,7 @@ extension MainManager {
       appSettings.$appSwitchDelivery,
       appSettings.$textOutputMethod,
       appSettings.$streamingInsertionEnabled,
-      permissionsManager.$statuses
+      capture.permissions.$statuses
     )
       .receive(on: RunLoop.main)
       .sink { [weak self] _ in

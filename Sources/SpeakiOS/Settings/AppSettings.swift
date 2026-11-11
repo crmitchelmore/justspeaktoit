@@ -2,118 +2,18 @@
 import Combine
 import Foundation
 import OSLog
-import Security
 import SpeakCore
 import SpeakSync
 import UIKit
 
-// swiftlint:disable file_length
-
-// MARK: - Hardware Trigger Destination
-
-/// What happens to the transcript after a hardware-triggered recording stops.
-///
-/// Used by every "headless" entry point: Action Button (iPhone 15 Pro+),
-/// Siri voice commands, the Shortcuts app, Lock Screen / Home Screen widget,
-/// Control Center, Back Tap. The main in-app record-and-stop flow is
-/// unaffected — it always shows the result on screen.
-public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Sendable {
-    /// Resolve the destination at stop time (issue #1008): the field the Just
-    /// Speak keyboard is open in when there is one, otherwise the clipboard.
-    /// Every capture also goes to History, and to iCloud while iCloud History
-    /// Sync is on, whichever lane runs.
-    ///
-    /// There is no "Mac" branch: see `AutoDestinationPolicy` for why the phone
-    /// cannot tell a reachable Mac from a configured one.
-    case auto
-
-    /// Copy the transcript to the clipboard. Default — matches behaviour
-    /// prior to the destination setting being added.
-    case clipboard
-
-    /// Copy to clipboard and run the configured post-processor (OpenRouter)
-    /// asynchronously. Raw text is copied once and polished text is saved in
-    /// History. Without a key, the raw copy remains available.
-    case clipboardAndPostProcess
-
-    /// Save to history only — don't touch the clipboard, don't post-process.
-    /// Useful if the user wants to capture a thought without polluting the
-    /// pasteboard with something they didn't choose to paste.
-    case historyOnly
-
-    public var id: String { rawValue }
-
-    public var displayName: String {
-        switch self {
-        case .auto: return "Auto"
-        case .clipboard: return "Copy to Clipboard"
-        case .clipboardAndPostProcess: return "Copy & Polish"
-        case .historyOnly: return "Save to History Only"
-        }
-    }
-
-    public var summary: String {
-        switch self {
-        case .auto:
-            return "Decided when recording stops: straight into the field if the Just Speak keyboard is open "
-                + "there, otherwise the clipboard. Either way it is saved to History (and iCloud, when iCloud "
-                + "History Sync is on), and the Live Activity says which one happened."
-        case .clipboard:
-            return "Transcript is copied to the clipboard immediately when recording stops."
-        case .clipboardAndPostProcess:
-            return "Raw transcript is copied immediately. Polished text is saved in History."
-        case .historyOnly:
-            return "Transcript is saved to history. Clipboard and post-processing are skipped."
-        }
-    }
-}
-
-// MARK: - Settings Storage
-
-public enum IOSTranscriptionMode: String, CaseIterable, Identifiable, Sendable {
-    case streaming
-    case batch
-
-    public var id: String { rawValue }
-
-    public var displayName: String {
-        switch self {
-        case .streaming: return "Streaming"
-        case .batch: return "Batch"
-        }
-    }
-}
-
 /// Simple UserDefaults-based settings for iOS app.
+///
+/// API keys are published here and written through `AppSettingsSecrets`;
+/// identifiers and lookups live in `AppSettings+Credentials`, launch-time
+/// loaders in `AppSettings+LaunchValues` and supported models in
+/// `AppSettings+Models`.
 @MainActor
 public final class AppSettings: ObservableObject {
-    // swiftlint:disable:previous type_body_length
-    enum DefaultsKey: String, CaseIterable {
-        case selectedModel
-        case transcriptionMode
-        case rememberedRemoteTranscriptionMode
-        case batchTranscriptionModel
-        case transcriptionKeywords
-        case liveActivitiesEnabled
-        case transcriptReadyNotificationsEnabled
-        case visualDensity
-        case autoStartRecording
-        case handsFreeDictationEnabled
-        case preferredLocale
-        case hardwareTriggerDestination
-        case autoStopOnSilenceEnabled
-        case autoStopSilenceSeconds
-        case postProcessingEnabled
-        case postProcessingModel
-        case autoPostProcess
-        case hasLaunchedBefore
-        case transcriptClipboardLifetimeSeconds
-        case transcriptUniversalClipboard = "transcriptClipboardAllowsUniversalClipboard"
-        case transcriptClipboardNoticeVersion
-        case upgradeOfflineTranscriptsWhenOnline
-        case keepAudioOnCancel
-    }
-
     public static let shared = AppSettings()
     /// Keys, defaults and value domains shared with the macOS store.
     typealias Shared = SharedApplicationPreferences
@@ -151,53 +51,6 @@ public final class AppSettings: ObservableObject {
         }
     }
 
-    /// Identifiers this build can actually select for live transcription.
-    static var selectableLiveModelIDs: Set<String> {
-        Set((ModelCatalog.onDeviceLiveTranscription + supportedLiveModels).map(\.id))
-    }
-
-    /// Where transcription currently runs, derived from the active model.
-    var transcriptionLocation: IOSTranscriptionLocation {
-        ModelCatalog.isOnDeviceLiveTranscriptionModel(selectedModel) && transcriptionMode == .streaming
-            ? .local
-            : .remote
-    }
-
-    /// The remote sub-mode to show: the live value when remote is active,
-    /// otherwise the remembered one.
-    var remoteTranscriptionMode: IOSTranscriptionMode {
-        transcriptionLocation == .local ? rememberedRemoteTranscriptionMode : transcriptionMode
-    }
-
-    /// Switches between local and remote transcription, restoring the model and
-    /// sub-mode the user last chose on the side they return to. Defaults apply
-    /// only when that side has no remembered selection.
-    func selectTranscriptionLocation(_ location: IOSTranscriptionLocation) {
-        switch location {
-        case .local:
-            selectedModel = liveTranscriptionSelection.model(
-                for: .onDevice,
-                activeModel: selectedModel,
-                selectableModelIDs: Self.selectableLiveModelIDs
-            )
-            transcriptionMode = .streaming
-        case .remote:
-            selectRemoteTranscriptionMode(rememberedRemoteTranscriptionMode)
-        }
-    }
-
-    func selectRemoteTranscriptionMode(_ mode: IOSTranscriptionMode) {
-        rememberedRemoteTranscriptionMode = mode
-        if mode == .streaming {
-            selectedModel = liveTranscriptionSelection.model(
-                for: .remote,
-                activeModel: selectedModel,
-                selectableModelIDs: Self.selectableLiveModelIDs
-            )
-        }
-        transcriptionMode = mode
-    }
-
     @Published public var batchTranscriptionModel: String {
         didSet {
             let normalized = ModelCatalog.normalizedBatchTranscriptionModel(batchTranscriptionModel)
@@ -210,198 +63,78 @@ public final class AppSettings: ObservableObject {
         }
     }
 
-    @Published public var deepgramAPIKey: String {
-        didSet { persistSecret(deepgramAPIKey, identifier: Self.deepgramKeyID) }
+    @Published public var deepgramAPIKey: String = "" {
+        didSet { secrets.persist(deepgramAPIKey, identifier: Self.deepgramKeyID) }
     }
-
-    @Published public var openRouterAPIKey: String {
-        didSet { persistSecret(openRouterAPIKey, identifier: Self.openRouterKeyID) }
+    @Published public var openRouterAPIKey: String = "" {
+        didSet { secrets.persist(openRouterAPIKey, identifier: Self.openRouterKeyID) }
     }
-
-    @Published public var openAIAPIKey: String {
-        didSet { persistSecret(openAIAPIKey, identifier: Self.openAIKeyID) }
+    @Published public var openAIAPIKey: String = "" {
+        didSet { secrets.persist(openAIAPIKey, identifier: Self.openAIKeyID) }
     }
-
-    @Published public var elevenLabsAPIKey: String {
-        didSet { persistSecret(elevenLabsAPIKey, identifier: Self.elevenLabsKeyID) }
+    @Published public var elevenLabsAPIKey: String = "" {
+        didSet { secrets.persist(elevenLabsAPIKey, identifier: Self.elevenLabsKeyID) }
     }
 
     /// API keys for providers that use the shared `StreamingTranscriptionClient`
     /// path (Cartesia today; Gladia/Modulate/AssemblyAI/Soniox as they are
     /// ported). Keyed by the provider's `apiKeyIdentifier`.
-    @Published public var cartesiaAPIKey: String {
-        didSet { persistSecret(cartesiaAPIKey, identifier: Self.cartesiaKeyID) }
+    @Published public var cartesiaAPIKey: String = "" {
+        didSet { secrets.persist(cartesiaAPIKey, identifier: Self.cartesiaKeyID) }
     }
-
-    @Published public var sonioxAPIKey: String {
-        didSet { persistSecret(sonioxAPIKey, identifier: Self.sonioxKeyID) }
+    @Published public var sonioxAPIKey: String = "" {
+        didSet { secrets.persist(sonioxAPIKey, identifier: Self.sonioxKeyID) }
     }
-
-    @Published public var modulateAPIKey: String {
-        didSet { persistSecret(modulateAPIKey, identifier: Self.modulateKeyID) }
+    @Published public var modulateAPIKey: String = "" {
+        didSet { secrets.persist(modulateAPIKey, identifier: Self.modulateKeyID) }
     }
-
-    @Published public var assemblyAIAPIKey: String {
-        didSet { persistSecret(assemblyAIAPIKey, identifier: Self.assemblyAIKeyID) }
+    @Published public var assemblyAIAPIKey: String = "" {
+        didSet { secrets.persist(assemblyAIAPIKey, identifier: Self.assemblyAIKeyID) }
     }
-
-    @Published public var gladiaAPIKey: String {
-        didSet { persistSecret(gladiaAPIKey, identifier: Self.gladiaKeyID) }
+    @Published public var gladiaAPIKey: String = "" {
+        didSet { secrets.persist(gladiaAPIKey, identifier: Self.gladiaKeyID) }
     }
-
-    @Published public var googleAPIKey: String {
-        didSet { persistSecret(googleAPIKey, identifier: Self.googleKeyID) }
+    @Published public var googleAPIKey: String = "" {
+        didSet { secrets.persist(googleAPIKey, identifier: Self.googleKeyID) }
     }
-
-    @Published public var xAIAPIKey: String {
-        didSet { persistSecret(xAIAPIKey, identifier: Self.xAIKeyID) }
+    @Published public var xAIAPIKey: String = "" {
+        didSet { secrets.persist(xAIAPIKey, identifier: Self.xAIKeyID) }
     }
-
-    @Published public var smallestAPIKey: String {
-        didSet { persistSecret(smallestAPIKey, identifier: Self.smallestKeyID) }
+    @Published public var smallestAPIKey: String = "" {
+        didSet { secrets.persist(smallestAPIKey, identifier: Self.smallestKeyID) }
     }
-
-    @Published public var reson8APIKey: String {
-        didSet { persistSecret(reson8APIKey, identifier: Self.reson8KeyID) }
+    @Published public var reson8APIKey: String = "" {
+        didSet { secrets.persist(reson8APIKey, identifier: Self.reson8KeyID) }
     }
-
-    @Published public var stepfunAPIKey: String {
-        didSet { persistSecret(stepfunAPIKey, identifier: Self.stepfunKeyID) }
+    @Published public var stepfunAPIKey: String = "" {
+        didSet { secrets.persist(stepfunAPIKey, identifier: Self.stepfunKeyID) }
     }
-
-    @Published public var speechmaticsAPIKey: String {
-        didSet { persistSecret(speechmaticsAPIKey, identifier: Self.speechmaticsKeyID) }
+    @Published public var speechmaticsAPIKey: String = "" {
+        didSet { secrets.persist(speechmaticsAPIKey, identifier: Self.speechmaticsKeyID) }
     }
-
-    @Published public var revAIAPIKey: String {
-        didSet { persistSecret(revAIAPIKey, identifier: Self.revAIKeyID) }
+    @Published public var revAIAPIKey: String = "" {
+        didSet { secrets.persist(revAIAPIKey, identifier: Self.revAIKeyID) }
     }
-
-    @Published public var mistralAPIKey: String {
-        didSet { persistSecret(mistralAPIKey, identifier: Self.mistralKeyID) }
+    @Published public var mistralAPIKey: String = "" {
+        didSet { secrets.persist(mistralAPIKey, identifier: Self.mistralKeyID) }
     }
-
-    @Published public var azureAPIKey: String {
-        didSet { persistSecret(azureAPIKey, identifier: Self.azureKeyID) }
+    @Published public var azureAPIKey: String = "" {
+        didSet { secrets.persist(azureAPIKey, identifier: Self.azureKeyID) }
     }
-
-    @Published public var alibabaAPIKey: String {
-        didSet { persistSecret(alibabaAPIKey, identifier: Self.alibabaKeyID) }
+    @Published public var alibabaAPIKey: String = "" {
+        didSet { secrets.persist(alibabaAPIKey, identifier: Self.alibabaKeyID) }
     }
-
-    @Published public var metaAPIKey: String {
-        didSet { persistSecret(metaAPIKey, identifier: Self.metaKeyID) }
+    @Published public var metaAPIKey: String = "" {
+        didSet { secrets.persist(metaAPIKey, identifier: Self.metaKeyID) }
     }
 
     @Published public var transcriptionKeywords: String {
         didSet { defaults.set(transcriptionKeywords, forKey: DefaultsKey.transcriptionKeywords.storageKey) }
     }
 
-    // MARK: - Canonical secure storage for API keys (SpeakCore)
-    //
-    // Every API key is stored locally through SpeakCore's SecureStorage using the
-    // same service/account as the macOS app. Cross-device transfer is handled only
-    // by the explicit passphrase-encrypted CloudKit sync feature below; the base
-    // Keychain item is deliberately not kSecAttrSynchronizable.
-    static let deepgramKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "deepgram")
-    static let openRouterKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "openrouter")
-    static let openAIKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai")
-    static let elevenLabsKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "elevenlabs")
-    static let cartesiaKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "cartesia")
-    static let sonioxKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "soniox")
-    static let modulateKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "modulate")
-    static let assemblyAIKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "assemblyai")
-    static let gladiaKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "gladia")
-    static let googleKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "google")
-    static let xAIKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "xai")
-    static let azureKeyID = AzureSpeechConfiguration.credentialIdentifier
-    static let alibabaKeyID = AlibabaSpeechConfiguration.credentialIdentifier
-    static let metaKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "meta")
-    static let speechmaticsKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "speechmatics")
-    static let revAIKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "revai")
-    static let mistralKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "mistral")
-    static let stepfunKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "stepfun")
-    static let reson8KeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "reson8")
-    static let smallestKeyID = ProviderCredentialCatalogue.apiKeyIdentifier(for: "smallest")
-
-    private static let credentialStorage = SecureStorage(
-        configuration: SecureStorageConfiguration(
-            service: "com.github.speakapp.credentials",
-            masterAccount: "speak-app-secrets",
-            legacyServices: ["com.justspeaktoit.credentials"],
-            accessibility: .afterFirstUnlock
-        )
-    )
-
-    /// The canonical API-key store, exposed so QR config transfer reads and
-    /// writes the same keychain items the rest of the app uses. Exporting or
-    /// importing against any other service silently produces keys the app
-    /// never sees.
-    static var canonicalCredentialStorage: SecureStorage { credentialStorage }
-
-    private static let logger = SpeakLogger.logger(category: "AppSettings")
-    private var keyChangeObserver: NSObjectProtocol?
-    private var syncedKeyReloadDepth = 0
-    /// Latest-edit-wins bookkeeping per credential identifier. Each write waits
-    /// for the previous one, so an older value can never land after a newer one;
-    /// a reload publishes a stored value only once every local edit is settled.
-    private var secretWriteTails: [String: Task<Void, Never>] = [:]
-    private var secretEditGenerations: [String: UInt64] = [:]
-    private var settledSecretGenerations: [String: UInt64] = [:]
-    private let credentials: SecureStorage
-    private let migratesLegacyCredentials: Bool
-    private var protectedDataObserver: NSObjectProtocol?
-    private var keyLoadTask: Task<Bool, Never>?
+    let defaults: UserDefaults
+    let secrets: AppSettingsSecrets
     @Published public private(set) var credentialsAvailable = false
-
-    enum CredentialLoadingError: LocalizedError {
-        case unavailable
-
-        var errorDescription: String? {
-            "API keys could not be loaded. Retry when Keychain access is available."
-        }
-    }
-
-    var credentialFallbackReason: String {
-        credentialsAvailable ? "no API key" : "API keys unavailable — retry when access is restored"
-    }
-
-    /// Persists (or clears when empty) an API key on the canonical secure store.
-    /// Keychain failures are logged rather than silently dropped so a key that
-    /// appears saved but didn't persist is diagnosable from logs.
-    ///
-    /// Writes for one identifier run strictly in edit order: each waits for the
-    /// previous write, and a write already superseded by a newer edit is skipped
-    /// because that newer write is queued behind it.
-    private func persistSecret(_ value: String, identifier: String) {
-        guard syncedKeyReloadDepth == 0 else { return }
-        let generation = secretEditGenerations[identifier, default: 0] &+ 1
-        secretEditGenerations[identifier] = generation
-        let previousWrite = secretWriteTails[identifier]
-        secretWriteTails[identifier] = Task {
-            if let previousWrite { await previousWrite.value }
-            guard self.secretEditGenerations[identifier] == generation else { return }
-            do {
-                if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    try await self.credentials.removeSecret(identifier: identifier)
-                } else {
-                    try await self.credentials.storeSecret(value, identifier: identifier)
-                }
-            } catch {
-                Self.logger.error(
-                    "Failed to persist secret \(identifier, privacy: .public): \(error.localizedDescription)"
-                )
-            }
-            self.settledSecretGenerations[identifier] = generation
-        }
-    }
-
-    /// Waits until every queued API-key write has finished.
-    func awaitPendingSecretWrites() async {
-        for write in Array(secretWriteTails.values) {
-            await write.value
-        }
-    }
 
     /// Opt-in (issue #999): re-transcribe offline on-device captures with the
     /// selected cloud batch model once the network returns. Off by default
@@ -420,61 +153,28 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(keepAudioOnCancel, forKey: DefaultsKey.keepAudioOnCancel.storageKey) }
     }
 
-    /// Read where no settings object is in reach, such as the recorder's cancel path.
-    nonisolated public static func storedKeepAudioOnCancel(in defaults: UserDefaults = .standard) -> Bool {
-        Shared.keepAudioOnCancel.iOS.value(in: defaults)
-    }
-
     @Published public var liveActivitiesEnabled: Bool {
         didSet { defaults.set(liveActivitiesEnabled, forKey: DefaultsKey.liveActivitiesEnabled.rawValue) }
     }
 
     var transcriptReadyNotificationsDidDisable: (() -> Void)?
+
     @Published public var transcriptReadyNotificationsEnabled: Bool {
         didSet {
-            self.defaults.set(
-                self.transcriptReadyNotificationsEnabled,
-                forKey: DefaultsKey.transcriptReadyNotificationsEnabled.storageKey
-            )
+            save(transcriptReadyNotificationsEnabled, .transcriptReadyNotificationsEnabled)
             if !self.transcriptReadyNotificationsEnabled { self.transcriptReadyNotificationsDidDisable?() }
         }
     }
 
     @Published var transcriptClipboardLifetime: TranscriptClipboardLifetime {
-        didSet {
-            self.defaults.set(
-                self.transcriptClipboardLifetime.rawValue,
-                forKey: DefaultsKey.transcriptClipboardLifetimeSeconds.rawValue
-            )
-        }
+        didSet { save(transcriptClipboardLifetime.rawValue, .transcriptClipboardLifetimeSeconds) }
     }
 
     @Published var transcriptAllowsUniversalClipboard: Bool {
-        didSet {
-            self.defaults.set(
-                self.transcriptAllowsUniversalClipboard,
-                forKey: DefaultsKey.transcriptUniversalClipboard.rawValue
-            )
-        }
+        didSet { save(transcriptAllowsUniversalClipboard, .transcriptUniversalClipboard) }
     }
 
     @Published private(set) var transcriptClipboardNoticeVersion: Int
-
-    var transcriptClipboardPolicy: TranscriptClipboardPolicy {
-        TranscriptClipboardPolicy(
-            lifetime: self.transcriptClipboardLifetime,
-            allowsUniversalClipboard: self.transcriptAllowsUniversalClipboard
-        )
-    }
-
-    var isTranscriptClipboardNoticePending: Bool {
-        self.transcriptClipboardNoticeVersion < 1
-    }
-
-    func acknowledgeTranscriptClipboardNotice() {
-        self.transcriptClipboardNoticeVersion = 1
-        self.defaults.set(1, forKey: DefaultsKey.transcriptClipboardNoticeVersion.rawValue)
-    }
 
     @Published public var visualDensity: AppVisualDensity {
         didSet { defaults.set(visualDensity.rawValue, forKey: DefaultsKey.visualDensity.storageKey) }
@@ -494,17 +194,6 @@ public final class AppSettings: ObservableObject {
         }
     }
 
-    /// Whether hands-free dictation can actually run on this device.
-    public var handsFreeDictationSupported: Bool {
-        AppleLocalModels.supportsSpeechDetector
-    }
-
-    /// The setting only takes effect where the detector exists, so a value
-    /// synced from a newer OS cannot change behaviour on an older one.
-    public var handsFreeDictationActive: Bool {
-        handsFreeDictationEnabled && handsFreeDictationSupported
-    }
-
     @Published public var preferredLocaleIdentifier: String {
         didSet {
             defaults.set(preferredLocaleIdentifier, forKey: DefaultsKey.preferredLocale.storageKey)
@@ -513,10 +202,6 @@ public final class AppSettings: ObservableObject {
             )
             publishKeyboardProfileSelection()
         }
-    }
-
-    public var preferredModelLanguage: String? {
-        TranscriptionLanguageCatalog.providerLanguage(for: preferredLocaleIdentifier)
     }
 
     /// What happens to the transcript when a hardware-triggered recording (Action Button,
@@ -576,112 +261,25 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(autoPostProcess, forKey: DefaultsKey.autoPostProcess.rawValue) }
     }
 
-    public static let defaultPostProcessingPrompt = TranscriptCleanupPolicy.baseSystemPrompt
-
-    /// Native text providers whose key this app stores. Groq has no iOS key slot,
-    /// so its native cleanup routes stay macOS/desktop-only.
-    static let nativeTextProviderIDs: Set<String> = ["openai", "google", "mistral"]
-
-    public static let postProcessingModels = ModelCatalog.postProcessing.filter {
-        !$0.id.hasPrefix("local/post-processing/")
-            && (NativeTextModels.route(for: $0.id).map { nativeTextProviderIDs.contains($0.provider.id) } ?? true)
-    }
-
     /// - Parameters:
     ///   - defaults: Backing store. Injectable so persistence behaviour (including
     ///     relaunch restoration) is testable without touching the user's defaults.
     ///   - loadsSecureStorage: When false, the keychain bootstrap and default-provider
     ///     selection are skipped. Tests use this to exercise persistence in isolation.
-    init( // swiftlint:disable:this function_body_length
+    init(
         defaults: UserDefaults = .standard,
         loadsSecureStorage: Bool = true,
         credentialStorage: SecureStorage? = nil
     ) {
         self.defaults = defaults
-        self.credentials = credentialStorage ?? Self.credentialStorage
-        self.migratesLegacyCredentials = credentialStorage == nil
-        let selectedRaw = Shared.liveTranscriptionModel.iOS.value(in: defaults)
-        // Normalise to canonical catalogue ids. Keep only models that this iOS
-        // target can actually run; a previously stored macOS-only model falls
-        // back to Apple Speech instead of leaking into the iPhone picker.
-        let selectableLiveIDs = Set(
-            (ModelCatalog.onDeviceLiveTranscription + Self.supportedLiveModels).map(\.id)
+        self.secrets = AppSettingsSecrets(
+            storage: credentialStorage ?? Self.canonicalCredentialStorage,
+            migratesLegacyCredentials: credentialStorage == nil
         )
-        let selected: String
-        if AppleLocalModels.isAppleSpeechModel(selectedRaw) {
-            selected = selectedRaw
-        } else if selectableLiveIDs.contains(selectedRaw) {
-            selected = selectedRaw
-        } else if selectedRaw.hasPrefix("apple/") {
-            selected = selectedRaw
-        } else if selectedRaw.hasPrefix("deepgram/") {
-            selected = "deepgram/nova-3-streaming"
-        } else if selectedRaw.hasPrefix("elevenlabs/") {
-            selected = "elevenlabs/scribe-v2-streaming"
-        } else if selectedRaw.hasPrefix("openai/") {
-            selected = "openai/gpt-realtime-whisper-streaming"
-        } else {
-            selected = AppleLocalModels.preferredSpeechModelID
-        }
-        // API keys load asynchronously from the canonical secure storage (with
-        // legacy migration) in the Task below.
-
-        // Default Live Activities to true if not set
-        let liveActivities = defaults.object(forKey: DefaultsKey.liveActivitiesEnabled.rawValue) as? Bool ?? true
-        let clipboardPolicy = TranscriptClipboardPolicy(
-            storedLifetime: defaults.object(forKey: DefaultsKey.transcriptClipboardLifetimeSeconds.rawValue),
-            storedAllowsUniversalClipboard: defaults.object(
-                forKey: DefaultsKey.transcriptUniversalClipboard.rawValue
-            )
-        )
-        let storedClipboardNotice = defaults.object(forKey: DefaultsKey.transcriptClipboardNoticeVersion.rawValue)
-        let clipboardNoticeVersion: Int
-        if let number = storedClipboardNotice as? NSNumber,
-           CFGetTypeID(number) != CFBooleanGetTypeID(),
-           number.intValue == 1,
-           number.doubleValue == 1 {
-            clipboardNoticeVersion = 1
-        } else {
-            clipboardNoticeVersion = 0
-        }
-        let density = Shared.visualDensity.iOS.value(in: defaults)
-        let autoStart = defaults.bool(forKey: DefaultsKey.autoStartRecording.rawValue)
-        let handsFree = Shared.handsFreeDictationEnabled.iOS.value(in: defaults)
-        let preferredLocale = Shared.preferredLocale.iOS.value(in: defaults)
-
-        // Hardware trigger destination (Action Button, Siri, Shortcuts).
-        // `.auto` is the default only for users who never made a choice: an
-        // explicitly stored value is always honoured (issue #1008). Auto is a
-        // superset of the old default — it copies to the clipboard except when
-        // the Just Speak keyboard is demonstrably open in a text field, where
-        // the words go into that field instead.
-        //
-        // A stored value this build cannot parse is *not* the same thing as no
-        // stored value: it means a malformed, downgraded or migrated
-        // preference, and defaulting it to Auto would silently opt that user
-        // into suppressing the clipboard whenever a targeted keyboard offer
-        // exists. Missing keeps the new default; unrecognised keeps the
-        // pre-Auto behaviour it was last known to have.
-        let hardwareDest: HardwareTriggerDestination
-        if let hardwareDestRaw = defaults.string(forKey: DefaultsKey.hardwareTriggerDestination.rawValue) {
-            hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw) ?? .clipboard
-        } else {
-            hardwareDest = .auto
-        }
-
-        // Post-processing settings
-        let postEnabled = Shared.postProcessingEnabled.iOS.value(in: defaults)
-        let normalizedPostModel = Shared.postProcessingModel.iOS.value(in: defaults)
-        let postModel = (Self.postProcessingModels.contains { $0.id == normalizedPostModel }
-            || CleanupModelSelection.modelID(from: normalizedPostModel) != nil)
-            ? normalizedPostModel
-            : ModelCatalog.defaultPostProcessingModel
-        let autoPost = defaults.bool(forKey: DefaultsKey.autoPostProcess.rawValue)
-        let batchModel = Shared.batchTranscriptionModel.iOS.value(in: defaults)
+        let selected = Self.storedSelectedModel(in: defaults)
         let mode = IOSTranscriptionMode(
             rawValue: defaults.string(forKey: DefaultsKey.transcriptionMode.rawValue) ?? ""
         ) ?? .streaming
-
         var selection = LiveTranscriptionSelection(defaults: defaults)
         // Existing installs upgrade with their active model remembered for the
         // placement it belongs to; the other placement stays empty until chosen.
@@ -692,27 +290,9 @@ public final class AppSettings: ObservableObject {
         ) ?? mode
         self.selectedModel = selected
         self.transcriptionMode = mode
-        self.batchTranscriptionModel = batchModel
-        self.deepgramAPIKey = ""
-        self.openRouterAPIKey = ""
-        self.openAIAPIKey = ""
-        self.elevenLabsAPIKey = ""
-        self.cartesiaAPIKey = ""
-        self.sonioxAPIKey = ""
-        self.modulateAPIKey = ""
-        self.assemblyAIAPIKey = ""
-        self.gladiaAPIKey = ""
-        self.googleAPIKey = ""
-        self.xAIAPIKey = ""
-        self.smallestAPIKey = ""
-        self.reson8APIKey = ""
-        self.stepfunAPIKey = ""
-        self.azureAPIKey = ""
-        self.alibabaAPIKey = ""
-        self.metaAPIKey = ""
-        self.speechmaticsAPIKey = ""
-        self.revAIAPIKey = ""
-        self.mistralAPIKey = ""
+        self.batchTranscriptionModel = Shared.batchTranscriptionModel.iOS.value(in: defaults)
+        // API keys load asynchronously from the canonical secure storage (with
+        // legacy migration) once `startLoadingCredentials()` runs.
         self.transcriptionKeywords = Shared.transcriptionKeywords.iOS.value(in: defaults)
         self.transcriptReadyNotificationsEnabled = defaults.bool(
             forKey: DefaultsKey.transcriptReadyNotificationsEnabled.storageKey
@@ -720,138 +300,50 @@ public final class AppSettings: ObservableObject {
         self.upgradeOfflineTranscriptsWhenOnline = defaults.bool(
             forKey: DefaultsKey.upgradeOfflineTranscriptsWhenOnline.storageKey
         )
-        self.liveActivitiesEnabled = liveActivities
+        // Default Live Activities to true if not set
+        self.liveActivitiesEnabled = defaults.object(forKey: DefaultsKey.liveActivitiesEnabled.rawValue) as? Bool
+            ?? true
         self.keepAudioOnCancel = Self.storedKeepAudioOnCancel(in: defaults)
+        let clipboardPolicy = Self.storedClipboardPolicy(in: defaults)
         self.transcriptClipboardLifetime = clipboardPolicy.lifetime
         self.transcriptAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard
-        self.transcriptClipboardNoticeVersion = clipboardNoticeVersion
-        self.visualDensity = density
-        self.autoStartRecording = autoStart
-        self.handsFreeDictationEnabled = handsFree
-        self.preferredLocaleIdentifier = preferredLocale
-        self.hardwareTriggerDestination = hardwareDest
-        // An install that has never seen this setting gets the default window,
-        // not the zero `double(forKey:)` returns for a missing key — which the
-        // clamp would raise to the floor anyway, but reading it explicitly
-        // keeps the stored value and the default from ever disagreeing.
+        self.transcriptClipboardNoticeVersion = Self.storedClipboardNoticeVersion(in: defaults)
+        self.visualDensity = Shared.visualDensity.iOS.value(in: defaults)
+        self.autoStartRecording = defaults.bool(forKey: DefaultsKey.autoStartRecording.rawValue)
+        self.handsFreeDictationEnabled = Shared.handsFreeDictationEnabled.iOS.value(in: defaults)
+        self.preferredLocaleIdentifier = Shared.preferredLocale.iOS.value(in: defaults)
+        self.hardwareTriggerDestination = Self.storedHardwareTriggerDestination(in: defaults)
         self.autoStopOnSilenceEnabled = defaults.bool(forKey: DefaultsKey.autoStopOnSilenceEnabled.rawValue)
-        self.autoStopSilenceSeconds = CaptureEndPointingPolicy.silenceWindow(
-            configured: defaults.object(forKey: DefaultsKey.autoStopSilenceSeconds.rawValue) as? TimeInterval
-                ?? CaptureEndPointingPolicy.defaultSilenceWindowSeconds
-        )
-        self.postProcessingEnabled = postEnabled
+        self.autoStopSilenceSeconds = Self.storedAutoStopSilenceSeconds(in: defaults)
+        self.postProcessingEnabled = Shared.postProcessingEnabled.iOS.value(in: defaults)
         self.cleanupModelDiscoveryEnabled = Shared.cleanupModelDiscoveryEnabled.iOS.value(in: defaults)
-        self.postProcessingModel = postModel
-        self.autoPostProcess = autoPost
-
-        // Load all API keys from the canonical secure storage, migrating any
-        // values from legacy iOS keychain locations first. Default-provider
-        // selection runs afterwards so it sees the loaded keys. Assigning each
-        // @Published value re-persists it via didSet, which is harmless.
+        self.postProcessingModel = Self.storedPostProcessingModel(in: defaults)
+        self.autoPostProcess = defaults.bool(forKey: DefaultsKey.autoPostProcess.rawValue)
         // `didSet` never fires during init, so persist the seeded memory explicitly.
         selection.persist(to: defaults)
         defaults.set(
             self.rememberedRemoteTranscriptionMode.rawValue,
             forKey: DefaultsKey.rememberedRemoteTranscriptionMode.rawValue
         )
-
-        guard loadsSecureStorage else { return }
-        observeSecureStorageChanges()
-        protectedDataObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.ensureKeysLoaded()
-            }
-        }
-        Task { @MainActor [weak self] in
-            await self?.ensureKeysLoaded()
-        }
+        if loadsSecureStorage { startLoadingCredentials() }
     }
 
-    private let defaults: UserDefaults
+}
 
-    /// Coalesces bootstrap and recording callers; a failed read remains retryable.
-    /// Never use placeholder empty keys to make persistent provider decisions.
+extension AppSettings {
+    private func save(_ value: Any, _ key: DefaultsKey) {
+        defaults.set(value, forKey: key.storageKey)
+    }
+
+    // Each credential is reloaded without overwriting a locked Keychain entry.
     @discardableResult
-    public func ensureKeysLoaded() async -> Bool {
-        if let keyLoadTask { return await keyLoadTask.value }
-        if credentialsAvailable { return true }
-        let task = Task { @MainActor in
-            guard await self.credentials.preloadAndReportSuccess() else { return false }
-            if self.migratesLegacyCredentials { await Self.migrateLegacyKeysIfNeeded() }
-            guard await self.reloadSyncedAPIKeys() else { return false }
-            self.configureDefaultProviderIfNeeded()
-            return true
+    public func reloadSyncedAPIKeys() async -> Bool {
+        guard await secrets.storage.preloadAndReportSuccess() else { return false }
+        for key in Self.syncedAPIKeys {
+            await secrets.reload(identifier: key.identifier) { self[keyPath: key.keyPath] = $0 }
         }
-        keyLoadTask = task
-        let success = await task.value
-        keyLoadTask = nil
-        return success
-    }
-
-    /// Remote consumers must not interpret a failed load as a missing key.
-    /// Local models can continue without Keychain access.
-    func requireAvailableCredentials(for model: String, purpose: ModelCredentialPurpose) throws {
-        guard !credentialsAvailable,
-              ModelCredentialResolver.requirement(for: model, purpose: purpose) != .notRequired else { return }
-        throw CredentialLoadingError.unavailable
-    }
-
-    /// Publishes one coherent, non-secret keyboard capability snapshot whenever
-    /// any owning setting changes. App activation calls this too as reconciliation.
-    public func publishKeyboardProfileSelection() {
-        let mode: KeyboardDictationTranscriptionMode = transcriptionMode == .batch ? .batch : .streaming
-        let model = transcriptionMode == .batch ? batchTranscriptionModel : selectedModel
-        KeyboardDictationPreferencesStore.shared.publishAppProfileSelection(
-            configuration: KeyboardAppProfileConfiguration(
-                transcriptionMode: mode,
-                transcriptionModelIdentifier: model,
-                languageIdentifier: preferredLocaleIdentifier,
-                postProcessingEnabled: postProcessingEnabled,
-                postProcessingModelIdentifier: postProcessingModel
-            )
-        )
-    }
-
-    deinit {
-        if let protectedDataObserver {
-            NotificationCenter.default.removeObserver(protectedDataObserver)
-        }
-        if let keyChangeObserver {
-            NotificationCenter.default.removeObserver(keyChangeObserver)
-        }
-    }
-
-    /// Configure default transcription provider based on available API keys.
-    /// Prefers Deepgram if API key is available, otherwise falls back to Apple Speech.
-    private func configureDefaultProviderIfNeeded() {
-        let isFirstLaunch = !defaults.bool(forKey: DefaultsKey.hasLaunchedBefore.rawValue)
-        let needsDeepgramKey = selectedModel.hasPrefix("deepgram") && !hasDeepgramKey
-
-        // Note: ElevenLabs key is loaded async; its fallback is handled at recording time.
-        if isFirstLaunch || needsDeepgramKey {
-            if hasDeepgramKey {
-                selectedModel = "deepgram/nova-3-streaming"
-            } else {
-                selectedModel = AppleLocalModels.preferredSpeechModelID
-            }
-            defaults.set(true, forKey: DefaultsKey.hasLaunchedBefore.rawValue)
-        }
-    }
-
-    /// Re-configure provider after onboarding or API key changes.
-    ///
-    /// Only fills a gap: once the user has picked a remote streaming model, a
-    /// newly saved key must not silently move them onto another provider.
-    public func reconfigureDefaultProvider() {
-        if hasDeepgramKey {
-            applyDefaultRemoteProviderIfNeeded("deepgram/nova-3-streaming")
-        } else if hasElevenLabsKey {
-            applyDefaultRemoteProviderIfNeeded("elevenlabs/scribe-v2-streaming")
-        }
+        credentialsAvailable = true
+        return true
     }
 
     func applyDefaultRemoteProviderIfNeeded(_ modelID: String) {
@@ -866,338 +358,10 @@ public final class AppSettings: ObservableObject {
         }
     }
 
-    public var hasDeepgramKey: Bool { !deepgramAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasOpenRouterKey: Bool { !openRouterAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasOpenAIKey: Bool { !openAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasElevenLabsKey: Bool { !elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasCartesiaKey: Bool { !cartesiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasSonioxKey: Bool { !sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasModulateKey: Bool { !modulateAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasAssemblyAIKey: Bool { !assemblyAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasGoogleKey: Bool { !googleAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasXAIKey: Bool { !xAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasAzureKey: Bool { !azureAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasAlibabaKey: Bool { !alibabaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasMetaKey: Bool { !metaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasSpeechmaticsKey: Bool {
-        !speechmaticsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-    public var hasRevAIKey: Bool { !revAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    public var hasMistralKey: Bool { !mistralAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-    /// Identifiers currently available to model pickers. Because this is
-    /// derived from the published key values, readiness badges refresh as soon
-    /// as a key is saved, synced, or removed.
-    public var storedAPIKeyIdentifiers: Set<String> {
-        var identifiers: Set<String> = []
-        if hasDeepgramKey { identifiers.insert(Self.deepgramKeyID) }
-        if hasOpenRouterKey { identifiers.insert(Self.openRouterKeyID) }
-        if hasOpenAIKey { identifiers.insert(Self.openAIKeyID) }
-        if hasElevenLabsKey { identifiers.insert(Self.elevenLabsKeyID) }
-        if hasCartesiaKey { identifiers.insert(Self.cartesiaKeyID) }
-        if hasSonioxKey { identifiers.insert(Self.sonioxKeyID) }
-        if hasModulateKey { identifiers.insert(Self.modulateKeyID) }
-        if hasAssemblyAIKey { identifiers.insert(Self.assemblyAIKeyID) }
-        if hasGladiaKey { identifiers.insert(Self.gladiaKeyID) }
-        if hasGoogleKey { identifiers.insert(Self.googleKeyID) }
-        if hasXAIKey { identifiers.insert(Self.xAIKeyID) }
-        for provider in FileSpeechProvider.allCases {
-            if let key = apiKeysByIdentifier[provider.metadata.apiKeyIdentifier],
-               !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                identifiers.insert(provider.metadata.apiKeyIdentifier)
-            }
-        }
-        if hasAzureKey { identifiers.insert(Self.azureKeyID) }
-        if hasAlibabaKey { identifiers.insert(Self.alibabaKeyID) }
-        if hasMetaKey { identifiers.insert(Self.metaKeyID) }
-        if hasSpeechmaticsKey { identifiers.insert(Self.speechmaticsKeyID) }
-        if hasRevAIKey { identifiers.insert(Self.revAIKeyID) }
-        if hasMistralKey { identifiers.insert(Self.mistralKeyID) }
-        return identifiers
+    func acknowledgeTranscriptClipboardNotice() {
+        self.transcriptClipboardNoticeVersion = 1
+        self.defaults.set(1, forKey: DefaultsKey.transcriptClipboardNoticeVersion.rawValue)
     }
 
-    // Each credential is reloaded without overwriting a locked Keychain entry.
-    @discardableResult
-    public func reloadSyncedAPIKeys() async -> Bool {
-        guard await credentials.preloadAndReportSuccess() else { return false }
-        await reloadCoreAPIKeys()
-        await reloadStreamingProviderAPIKeys()
-        credentialsAvailable = true
-        return true
-    }
-
-    private func reloadCoreAPIKeys() async {
-        await reloadSyncedAPIKey(\.deepgramAPIKey, identifier: Self.deepgramKeyID)
-        await reloadSyncedAPIKey(\.openRouterAPIKey, identifier: Self.openRouterKeyID)
-        await reloadSyncedAPIKey(\.openAIAPIKey, identifier: Self.openAIKeyID)
-        await reloadSyncedAPIKey(\.elevenLabsAPIKey, identifier: Self.elevenLabsKeyID)
-        await reloadSyncedAPIKey(\.cartesiaAPIKey, identifier: Self.cartesiaKeyID)
-        await reloadSyncedAPIKey(\.sonioxAPIKey, identifier: Self.sonioxKeyID)
-        await reloadSyncedAPIKey(\.modulateAPIKey, identifier: Self.modulateKeyID)
-        await reloadSyncedAPIKey(\.assemblyAIAPIKey, identifier: Self.assemblyAIKeyID)
-        await reloadSyncedAPIKey(\.gladiaAPIKey, identifier: Self.gladiaKeyID)
-        await reloadSyncedAPIKey(\.googleAPIKey, identifier: Self.googleKeyID)
-    }
-
-    private func reloadStreamingProviderAPIKeys() async {
-        await reloadSyncedAPIKey(\.xAIAPIKey, identifier: Self.xAIKeyID)
-        await reloadSyncedAPIKey(\.smallestAPIKey, identifier: Self.smallestKeyID)
-        await reloadSyncedAPIKey(\.reson8APIKey, identifier: Self.reson8KeyID)
-        await reloadSyncedAPIKey(\.stepfunAPIKey, identifier: Self.stepfunKeyID)
-        await reloadSyncedAPIKey(\.azureAPIKey, identifier: Self.azureKeyID)
-        await reloadSyncedAPIKey(\.alibabaAPIKey, identifier: Self.alibabaKeyID)
-        await reloadSyncedAPIKey(\.metaAPIKey, identifier: Self.metaKeyID)
-        await reloadSyncedAPIKey(\.speechmaticsAPIKey, identifier: Self.speechmaticsKeyID)
-        await reloadSyncedAPIKey(\.revAIAPIKey, identifier: Self.revAIKeyID)
-        await reloadSyncedAPIKey(\.mistralAPIKey, identifier: Self.mistralKeyID)
-    }
-
-    @discardableResult
-    public func syncCloudKitKeys() async -> Bool {
-        let keySync = CloudKitKeySync.shared
-        await keySync.configure(secureStorage: Self.credentialStorage)
-        guard await keySync.isAvailable() else { return false }
-
-        do {
-            try await keySync.syncNow()
-            await reloadSyncedAPIKeys()
-            return true
-        } catch {
-            Self.logger.error("CloudKit API-key sync failed: \(error.localizedDescription, privacy: .public)")
-            return false
-        }
-    }
-
-    /// Publishes one stored credential without persisting it back. The value is
-    /// skipped when the store cannot be read, when a local edit is still being
-    /// written, or when the user edited the key while it was being read, so a
-    /// reload can never replace a newer local edit with an older stored value.
-    private func reloadSyncedAPIKey(
-        _ keyPath: ReferenceWritableKeyPath<AppSettings, String>,
-        identifier: String
-    ) async {
-        let generation = secretEditGenerations[identifier, default: 0]
-        let stored: String
-        do {
-            stored = try await credentials.secret(identifier: identifier)
-        } catch SecureStorageError.valueNotFound {
-            stored = ""
-        } catch {
-            return
-        }
-        guard secretEditGenerations[identifier, default: 0] == generation,
-              settledSecretGenerations[identifier, default: 0] == generation else { return }
-        // Held only around the synchronous assignment, so an edit made while
-        // the reload awaits the store is still persisted.
-        syncedKeyReloadDepth += 1
-        defer { syncedKeyReloadDepth -= 1 }
-        self[keyPath: keyPath] = stored
-    }
-
-    private func observeSecureStorageChanges() {
-        guard keyChangeObserver == nil else { return }
-        keyChangeObserver = NotificationCenter.default.addObserver(
-            forName: SecureStorage.didChangeSecretNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let identifier = notification.userInfo?[SecureStorage.NotificationUserInfoKey.identifier] as? String,
-                  CloudKitKeySync.syncableIdentifiers.contains(identifier) else {
-                return
-            }
-            Task { @MainActor [weak self] in
-                await self?.reloadSyncedAPIKeys()
-            }
-        }
-    }
-
-    /// Returns the stored API key for a resolved live-transcription route, used
-    /// by the generic shared-client recording path.
-    public func liveAPIKey(for route: LiveTranscriptionRoute) -> String {
-        guard let identifier = route.apiKeyIdentifier else { return "" }
-        return liveAPIKeysByIdentifier[identifier] ?? ""
-    }
-
-    /// Every cloud live-transcription credential this app stores, keyed by the
-    /// identifier `LiveTranscriptionRoute` resolves to. A table rather than a
-    /// switch so adding a provider is one line and the lookup stays flat.
-    private var liveAPIKeysByIdentifier: [String: String] {
-        [
-            Self.deepgramKeyID: deepgramAPIKey,
-            Self.openAIKeyID: openAIAPIKey,
-            Self.elevenLabsKeyID: elevenLabsAPIKey,
-            Self.cartesiaKeyID: cartesiaAPIKey,
-            Self.sonioxKeyID: sonioxAPIKey,
-            Self.modulateKeyID: modulateAPIKey,
-            Self.assemblyAIKeyID: assemblyAIAPIKey,
-            Self.gladiaKeyID: gladiaAPIKey,
-            Self.googleKeyID: googleAPIKey,
-            Self.xAIKeyID: xAIAPIKey,
-            Self.reson8KeyID: reson8APIKey,
-            Self.metaKeyID: metaAPIKey,
-            Self.speechmaticsKeyID: speechmaticsAPIKey,
-            Self.revAIKeyID: revAIAPIKey,
-            Self.mistralKeyID: mistralAPIKey,
-            Self.azureKeyID: azureAPIKey,
-            Self.alibabaKeyID: alibabaAPIKey
-        ]
-    }
-
-    public var batchAPIKey: String {
-        batchAPIKey(for: batchTranscriptionModel)
-    }
-
-    /// Batch credentials resolve through the same canonical mapping the
-    /// pickers and macOS use, so a directly-served model (OpenAI, Meta Muse,
-    /// Gemini 3.5 Transcribe) never silently falls back to the OpenRouter key.
-    /// Identifiers this app does not store keep the OpenRouter fallback, which
-    /// is the route `IOSBatchTranscriber` takes for those models.
-    public func batchAPIKey(for modelIdentifier: String) -> String {
-        switch ModelCredentialResolver.requirement(
-            for: modelIdentifier, purpose: .batchTranscription
-        ) {
-        case .notRequired:
-            return ""
-        case .apiKey(let identifier, _):
-            return apiKeysByIdentifier[identifier] ?? openRouterAPIKey
-        }
-    }
-
-    /// The key the post-processing model's route needs: the provider's own key
-    /// for a native model, the OpenRouter key otherwise, and "" on device.
-    public func postProcessingAPIKey(for modelIdentifier: String) -> String {
-        switch ModelCredentialResolver.requirement(for: modelIdentifier, purpose: .postProcessing) {
-        case .notRequired:
-            return ""
-        case .apiKey(let identifier, _):
-            return apiKeysByIdentifier[identifier] ?? ""
-        }
-    }
-
-    public func hasPostProcessingKey(for modelIdentifier: String) -> Bool {
-        if case .notRequired = ModelCredentialResolver.requirement(for: modelIdentifier, purpose: .postProcessing) {
-            return true
-        }
-        return !postProcessingAPIKey(for: modelIdentifier).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    /// Whether the selected post-processing model can run with the stored keys.
-    public var hasPostProcessingKey: Bool { hasPostProcessingKey(for: postProcessingModel) }
-
-    /// The provider name the selected post-processing model needs a key for.
-    public var postProcessingKeyProviderName: String {
-        if case .apiKey(_, let providerName) = ModelCredentialResolver.requirement(
-            for: postProcessingModel, purpose: .postProcessing
-        ) { return providerName }
-        return "OpenRouter"
-    }
-
-    /// Every stored transcription credential keyed by its canonical
-    /// identifier, so credential lookups stay a table rather than a switch.
-    private var apiKeysByIdentifier: [String: String] {
-        var keys = liveAPIKeysByIdentifier
-        keys[Self.openRouterKeyID] = openRouterAPIKey
-        keys[Self.smallestKeyID] = smallestAPIKey
-        keys[Self.stepfunKeyID] = stepfunAPIKey
-        return keys
-    }
-
-    public static let openAIBatchModelIDs = OpenAITranscriptionModels.directBatchModelIDs
-
-    /// Remote streaming models with an implemented iOS recording path. Shared
-    /// catalogue entries that remain macOS-only are omitted rather than shown
-    /// disabled or silently routed to a different provider.
-    public static let supportedLiveModels: [ModelCatalog.Option] =
-        ModelCatalog.remoteLiveTranscription.filter { option in
-            LiveTranscriptionRouting.route(for: option.id)?.isSupportedOnIOS == true
-        }
-
-    /// iOS currently supports OpenAI's transcription endpoint and OpenRouter's
-    /// audio-capable batch models. Other catalogue entries remain shared with
-    /// Mac but are hidden until their upload clients are available on iPhone.
-    public static let supportedBatchModels: [ModelCatalog.Option] =
-        ModelCatalog.batchTranscription.filter { option in
-            AppleLocalModels.isSpeechAnalyzerModel(option.id)
-                || openAIBatchModelIDs.contains(option.id)
-                || AzureTranscriptionModels.batchIDs.contains(option.id)
-                || AlibabaSpeechModels.batchIDs.contains(option.id)
-                // OpenRouter-routed Gemini batch models upload through the
-                // OpenRouter client; Gemini 3.5 Transcribe uploads through the
-                // shared `GeminiInteractionsClient` with the Google key
-                // (issue #862). Both are listed, and `batchAPIKey(for:)` and
-                // `IOSBatchTranscriptionRoute` keep them on separate paths.
-                || GeminiTranscribeModels.directBatchModelIDs.contains(option.id)
-                || OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.contains(option.id)
-                || option.id == MetaMuseVoiceTranscribe.batchCatalogID
-                || option.id == CartesiaBatchClient.catalogID
-                // xAI's dedicated speech-to-text endpoint uploads through the
-                // shared `XAIBatchTranscriptionClient` with the xAI key.
-                || option.id == XAISpeechToText.batchCatalogID
-                || FileSpeechProvider.provider(for: option.id) != nil
-                // Gladia's pre-recorded job API uploads through the shared
-                // `GladiaBatchClient` with the `gladia.apiKey` this app already
-                // stores for live Solaria. Speechmatics batch stays macOS-only
-                // for now: iOS has no Speechmatics credential field, and a
-                // model that can never resolve a key is hidden rather than
-                // shown failing (see Docs/batch-transcription-providers.md).
-                || option.id == GladiaBatchClient.catalogID
-        }
-
-    // MARK: - Legacy migration
-
-    /// One-time migration of API keys from the pre-unification iOS keychain
-    /// locations (raw per-account items and the old ElevenLabs SecureStorage,
-    /// both under service `com.speak.ios.credentials`) into the canonical,
-    /// iCloud-syncable store. Additive and idempotent: legacy items are read but
-    /// never deleted, and each key is only migrated when the new store lacks it.
-    private static func migrateLegacyKeysIfNeeded() async {
-        guard ReleaseTrain.current == .stable else { return }
-        let existing = Set(await credentialStorage.knownIdentifiers())
-
-        for identifier in [deepgramKeyID, openRouterKeyID, openAIKeyID] where !existing.contains(identifier) {
-            if let legacy = legacyRawSecret(account: identifier), !legacy.isEmpty {
-                try? await credentialStorage.storeSecret(legacy, identifier: identifier)
-            }
-        }
-
-        if !existing.contains(elevenLabsKeyID) {
-            let legacyStore = SecureStorage(
-                configuration: SecureStorageConfiguration(service: "com.speak.ios.credentials")
-            )
-            if let key = try? await legacyStore.secret(identifier: elevenLabsKeyID), !key.isEmpty {
-                try? await credentialStorage.storeSecret(key, identifier: elevenLabsKeyID)
-            }
-        }
-    }
-
-    /// Reads a value from the legacy raw per-account keychain items.
-    private static func legacyRawSecret(account: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.speak.ios.credentials",
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var result: AnyObject?
-        guard KeychainAccess.copyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
-              let string = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-
-        return string
-    }
 }
-
-enum IOSTranscriptionLocation: String, CaseIterable, Identifiable {
-    case local
-    case remote
-
-    var id: String { rawValue }
-    var displayName: String { rawValue.capitalized }
-}
-
 #endif

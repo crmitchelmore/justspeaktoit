@@ -1,11 +1,8 @@
 import AppKit
 import AuthenticationServices
-import CryptoKit
 import Foundation
 import SpeakCore
 import StoreKit
-
-// swiftlint:disable file_length
 
 /// Build-time gate for the subscription surface and paid routing.
 ///
@@ -33,6 +30,9 @@ enum PaidAccessFeature {
 }
 
 /// Owns the paid-access session, entitlement and purchase flows on macOS.
+/// The shared state machine is SpeakCore's `PaidAccessFlow`; this type adds
+/// the Mac's billing channels (StoreKit or Stripe checkout), Apple's web
+/// sign-in for direct-download builds, and the launch-time restore.
 ///
 /// Two rules shape this type:
 ///
@@ -43,7 +43,7 @@ enum PaidAccessFeature {
 ///     the user's own API keys or local models, which is what the subscription
 ///     is an alternative to — not a prerequisite for.
 @MainActor
-final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable:this type_body_length
+final class PaidAccessManager: NSObject, ObservableObject {
 
   @Published private(set) var entitlement: PaidEntitlement = .unentitled
   @Published private(set) var policy: PaidRoutingPolicy = .unknown
@@ -59,14 +59,13 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   @Published var selectedTerm: PaidSubscriptionTerm = .monthly
 
   private let client: any PaidAccessClienting
-  private let sessions: PaidAccessSessionLifecycle
-  private var busyOperation = UUID()
+  private let flow: PaidAccessFlow
   private let settings: AppSettings
   private var transactionListener: Task<Void, Never>?
   private var launchRestore: Task<Void, Never>?
   private var hasFinishedLaunchRestore = false
   private var launchRestoreWaiters: [CheckedContinuation<Void, Never>] = []
-  private var signInContinuation: CheckedContinuation<ASAuthorization, Error>?
+  private let appleIDAuthorization = AppleIDAuthorization()
 
   /// Direct-download (Developer ID) builds cannot use native Sign in with
   /// Apple, so they use Apple's web flow; App Store builds stay native.
@@ -92,9 +91,10 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     settings: AppSettings
   ) {
     self.client = client
-    self.sessions = PaidAccessSessionLifecycle(client: client, store: sessionStore)
+    self.flow = PaidAccessFlow(client: client, sessionStore: sessionStore)
     self.settings = settings
     super.init()
+    self.flow.onChange = { [weak self] state in self?.publish(state) }
 
     if PaidAccessFeature.isEnabled && self.billingChannel == .storeKit {
       // Renewals, refunds and family-sharing changes arrive here without any
@@ -102,7 +102,8 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
       self.transactionListener = Task { [weak self] in
         for await update in Transaction.updates {
           guard let self else { return }
-          await self.handleTransactionUpdate(update)
+          guard PaidAccessFeature.isEnabled else { continue }
+          await self.flow.handleTransactionUpdate(update)
         }
       }
     }
@@ -110,6 +111,16 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
 
   deinit {
     self.transactionListener?.cancel()
+  }
+
+  /// Mirrors the flow's state into the published properties.
+  private func publish(_ state: PaidAccessFlowState) {
+    if self.entitlement != state.entitlement { self.entitlement = state.entitlement }
+    if self.policy != state.policy { self.policy = state.policy }
+    if self.isSignedIn != state.isSignedIn { self.isSignedIn = state.isSignedIn }
+    if self.isBusy != state.isBusy { self.isBusy = state.isBusy }
+    if self.lastError != state.lastError { self.lastError = state.lastError }
+    if self.products != state.products { self.products = state.products }
   }
 
   // MARK: - Derived state
@@ -142,41 +153,12 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
 
   // MARK: - Session handling
 
-  /// Returns a usable session, rotating the refresh token when the access token
-  /// is close to expiry. Returns `nil` when the user is not signed in.
-  private func currentSession() async -> PaidAccessSession? {
-    let generation = self.sessions.generation
-    do {
-      let session = try await self.sessions.currentSession()
-      guard generation == self.sessions.generation else { return nil }
-      self.isSignedIn = session != nil
-      if session == nil {
-        // An empty store is not another logout: sign-in may be awaiting Apple.
-        self.entitlement = .unentitled
-        self.policy = .unknown
-      }
-      return session
-    } catch {
-      guard generation == self.sessions.generation else { return nil }
-      await self.clearSession()
-      return nil
-    }
-  }
-
-  private func clearSession() async {
-    let clearing = self.sessions.clear()
-    self.isSignedIn = false
-    self.entitlement = .unentitled
-    self.policy = .unknown
-    _ = await clearing.value
-  }
-
   /// Session accessor for the proxy client. Never surfaces errors — an absent
   /// session simply means "use the user's own configuration".
   nonisolated func sessionProvider() -> @Sendable () async -> PaidAccessSession? {
     { [weak self] in
       guard let self else { return nil }
-      return await self.currentSession()
+      return await self.flow.currentSession()
     }
   }
 
@@ -241,76 +223,22 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   // MARK: - Entitlement
 
   func refreshEntitlement() async {
-    let generation = self.sessions.generation
-    guard let session = await self.currentSession() else {
-      guard generation == self.sessions.generation else { return }
-      self.entitlement = .unentitled
-      self.policy = .unknown
-      return
-    }
-
-    do {
-      // One call, one commit. Fetching the policy separately could leave an
-      // active entitlement paired with an empty policy — entitled, with
-      // nowhere to send the request — if the second call failed.
-      let state = try await self.client.entitlement(session: session)
-      guard generation == self.sessions.generation else { return }
-      self.entitlement = state.entitlement
-      self.policy = state.policy
-      self.lastError = nil
-    } catch PaidAccessError.notSignedIn {
-      guard generation == self.sessions.generation else { return }
-      await self.clearSession()
-    } catch {
-      guard generation == self.sessions.generation else { return }
-      // Keep the last known entitlement so a brief outage does not flip the UI
-      // to "not subscribed"; routing still re-checks expiry locally.
-      self.lastError = (error as? PaidAccessError)?.errorDescription
-    }
+    await self.flow.refreshEntitlement()
   }
 
   // MARK: - Sign in with Apple
 
   func signIn() async {
-    // A second sign-in would overwrite `signInContinuation`, leaking the first
-    // continuation and leaving `isBusy` stuck true for the rest of the launch.
-    guard self.signInContinuation == nil, !self.isBusy else { return }
-    let clearing = self.sessions.clear()
-    let generation = self.sessions.generation
-    self.isSignedIn = false
-    self.entitlement = .unentitled
-    self.policy = .unknown
-    let operation = UUID()
-    self.busyOperation = operation
-    self.isBusy = true
-    self.lastError = nil
-    defer { if operation == self.busyOperation { self.isBusy = false } }
-
-    _ = await clearing.value
-    guard generation == self.sessions.generation else { return }
-
-    let rawNonce = Self.makeRawNonce()
-    do {
-      // Apple echoes the hashed nonce back in the identity token; the server is
-      // given the raw nonce and re-derives the digest, which is what binds the
-      // token to this specific request.
-      let identityToken = try await self.appleIdentityToken(hashedNonce: Self.sha256Hex(rawNonce))
-      guard generation == self.sessions.generation else { return }
-
-      let session = try await self.client.signInWithApple(
-        identityToken: identityToken,
-        rawNonce: rawNonce,
-        deviceLabel: Host.current().localizedName
-      )
-      guard let signedInGeneration = try await self.sessions.acceptSignIn(session, generation: generation),
-        signedInGeneration == self.sessions.generation
-      else { return }
-      self.isSignedIn = true
-      await self.refreshEntitlement()
-    } catch {
-      guard generation == self.sessions.generation else { return }
-      self.lastError = Self.signInErrorMessage(error)
-    }
+    // A second sign-in would leave `isBusy` stuck true for the rest of the launch.
+    guard !self.appleIDAuthorization.isInProgress else { return }
+    await self.flow.signIn(
+      deviceLabel: Host.current().localizedName,
+      identityToken: { [weak self] hashedNonce in
+        guard let self else { throw CancellationError() }
+        return try await self.appleIdentityToken(hashedNonce: hashedNonce)
+      },
+      errorMessage: Self.signInErrorMessage
+    )
   }
 
   /// What to show for a failed sign-in; nil when the user simply dismissed it.
@@ -328,20 +256,7 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   }
 
   func signOut() async {
-    let clearing = self.sessions.clear()
-    self.isSignedIn = false
-    self.entitlement = .unentitled
-    self.policy = .unknown
-    let operation = UUID()
-    self.busyOperation = operation
-    self.isBusy = true
-    defer { if operation == self.busyOperation { self.isBusy = false } }
-
-    // Clear local credentials first. A slow revocation must never clear a
-    // replacement account or restore state from an earlier refresh.
-    if let session = await clearing.value {
-      await self.client.signOut(session: session)
-    }
+    await self.flow.signOut()
   }
 
   /// One Apple identity token for `hashedNonce`, from the native sheet or,
@@ -349,42 +264,12 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   private func appleIdentityToken(hashedNonce: String) async throws -> String {
     if self.usesWebSignIn {
       // `state` ties the relayed callback to this attempt.
-      let state = Self.makeRawNonce()
+      let state = PaidAccessNonce.makeRaw()
       let url = AppleWebSignIn.authorizationURL(state: state, hashedNonce: hashedNonce)
       let callback = try await self.webAuthenticator(url, AppleWebSignIn.callbackScheme)
       return try AppleWebSignIn.identityToken(from: callback, expectedState: state)
     }
-    let request = ASAuthorizationAppleIDProvider().createRequest()
-    request.requestedScopes = [.fullName, .email]
-    request.nonce = hashedNonce
-    let authorization = try await self.performAuthorization(for: request)
-    guard
-      let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
-      let tokenData = credential.identityToken,
-      let identityToken = String(data: tokenData, encoding: .utf8)
-    else { throw AppleWebSignIn.CallbackError.failed }
-    return identityToken
-  }
-
-  private func performAuthorization(
-    for request: ASAuthorizationAppleIDRequest
-  ) async throws -> ASAuthorization {
-    guard self.signInContinuation == nil else {
-      throw PaidAccessError.network("A sign-in is already in progress.")
-    }
-    return try await withCheckedThrowingContinuation { continuation in
-      self.signInContinuation = continuation
-      let controller = ASAuthorizationController(authorizationRequests: [request])
-      controller.delegate = self
-      controller.presentationContextProvider = self
-      controller.performRequests()
-    }
-  }
-
-  private func resumeSignIn(with result: Result<ASAuthorization, Error>) {
-    guard let continuation = self.signInContinuation else { return }
-    self.signInContinuation = nil
-    continuation.resume(with: result)
+    return try await self.appleIDAuthorization.identityToken(hashedNonce: hashedNonce)
   }
 
   // MARK: - Purchase
@@ -395,64 +280,49 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   ///   current choice rather than to whichever product loaded first.
   func purchase(term: PaidSubscriptionTerm? = nil) async {
     let term = term ?? self.selectedTerm
-    let operation = UUID()
-    self.busyOperation = operation
-    self.isBusy = true
-    self.lastError = nil
-    defer { if operation == self.busyOperation { self.isBusy = false } }
-
-    let generation = self.sessions.generation
-    guard let session = await self.currentSession() else {
-      self.lastError = PaidAccessError.notSignedIn.errorDescription
-      return
-    }
-
-    switch self.billingChannel {
-    case .stripeCheckout:
-      do {
-        let url = try await self.client.createCheckoutURL(session: session)
-        guard generation == self.sessions.generation else { return }
-        NSWorkspace.shared.open(url)
-      } catch {
-        self.lastError =
-          (error as? PaidAccessError)?.errorDescription
-          ?? "Could not start checkout."
+    await self.flow.withSignedInOperation(clearingError: true) { session, generation in
+      switch self.billingChannel {
+      case .stripeCheckout:
+        do {
+          let url = try await self.client.createCheckoutURL(session: session)
+          guard generation == self.flow.generation else { return }
+          NSWorkspace.shared.open(url)
+        } catch {
+          self.flow.report((error as? PaidAccessError)?.errorDescription ?? "Could not start checkout.")
+        }
+      case .storeKit:
+        await self.flow.purchaseThroughStoreKit(term: term, session: session, generation: generation)
       }
-
-    case .storeKit:
-      await self.purchaseThroughStoreKit(term: term, session: session, generation: generation)
     }
   }
 
   func manageSubscription() async {
-    let operation = UUID()
-    self.busyOperation = operation
-    self.isBusy = true
-    defer { if operation == self.busyOperation { self.isBusy = false } }
+    let operation = self.flow.beginOperation(clearingError: false)
+    defer { self.flow.endOperation(operation) }
 
     if self.entitlement.provider == .manual {
-      self.lastError = "This access was granted manually and has no subscription to manage."
+      self.flow.report("This access was granted manually and has no subscription to manage.")
       return
     }
     if self.entitlement.provider == .stripe && self.billingChannel == .storeKit {
-      self.lastError = "This subscription was purchased on the website. Manage it in your Just Speak to It web account."
+      self.flow.report(
+        "This subscription was purchased on the website. Manage it in your Just Speak to It web account."
+      )
       return
     }
     switch self.entitlement.provider == .storeKit ? PaidBillingChannel.storeKit : .stripeCheckout {
     case .stripeCheckout:
-      let generation = self.sessions.generation
-      guard let session = await self.currentSession() else {
-        self.lastError = PaidAccessError.notSignedIn.errorDescription
+      let generation = self.flow.generation
+      guard let session = await self.flow.currentSession() else {
+        self.flow.report(PaidAccessError.notSignedIn.errorDescription)
         return
       }
       do {
         let url = try await self.client.createBillingPortalURL(session: session)
-        guard generation == self.sessions.generation else { return }
+        guard generation == self.flow.generation else { return }
         NSWorkspace.shared.open(url)
       } catch {
-        self.lastError =
-          (error as? PaidAccessError)?.errorDescription
-          ?? "Could not open the billing portal."
+        self.flow.report((error as? PaidAccessError)?.errorDescription ?? "Could not open the billing portal.")
       }
 
     case .storeKit:
@@ -465,187 +335,24 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   }
 
   func restorePurchases() async {
-    let operation = UUID()
-    self.busyOperation = operation
-    self.isBusy = true
-    defer { if operation == self.busyOperation { self.isBusy = false } }
-
     guard self.billingChannel == .storeKit else {
-      await self.refreshEntitlement()
+      let operation = self.flow.beginOperation(clearingError: false)
+      defer { self.flow.endOperation(operation) }
+      await self.flow.refreshEntitlement()
       return
     }
-    let generation = self.sessions.generation
-    guard let session = await self.currentSession() else {
-      self.lastError = PaidAccessError.notSignedIn.errorDescription
-      return
+    await self.flow.withSignedInOperation(clearingError: false) { session, generation in
+      await self.flow.restoreStoreKitPurchases(session: session, generation: generation)
     }
-
-    for await result in Transaction.currentEntitlements {
-      guard generation == self.sessions.generation else { return }
-      await self.syncIfSubscription(result, session: session, generation: generation)
-    }
-    guard generation == self.sessions.generation else { return }
-    await self.refreshEntitlement()
   }
 
   func loadProducts() async {
     guard self.billingChannel == .storeKit else { return }
-    let loaded = try? await Product.products(for: Self.subscriptionProductIDs)
-    self.products = (loaded ?? []).sorted { $0.price < $1.price }
+    await self.flow.loadProducts()
   }
 
   /// The loaded StoreKit product for a term, if the App Store returned it.
   func product(for term: PaidSubscriptionTerm) -> Product? {
-    self.products.first { $0.id == term.productID }
-  }
-
-  private func purchaseThroughStoreKit(
-    term: PaidSubscriptionTerm,
-    session: PaidAccessSession,
-    generation: UUID
-  ) async {
-    guard generation == self.sessions.generation else { return }
-    if self.products.isEmpty {
-      await self.loadProducts()
-    }
-    guard generation == self.sessions.generation else { return }
-    // Matched by product id, never by position: `products.first` bought the
-    // cheapest loaded product whatever the user had chosen.
-    guard let product = self.product(for: term) else {
-      self.lastError = "The \(term.displayName.lowercased()) subscription is not available in this build yet."
-      return
-    }
-
-    // Bind the purchase to this account before it happens. The server rejects a
-    // signed transaction whose `appAccountToken` is not the caller's, so a
-    // purchase made without one produces a receipt nobody can redeem.
-    guard let accountToken = session.storeKitAccountToken else {
-      self.lastError = "This account cannot be linked to an App Store purchase. Sign out, sign back in and try again."
-      return
-    }
-
-    do {
-      let result = try await product.purchase(options: [.appAccountToken(accountToken)])
-      guard generation == self.sessions.generation else { return }
-      await self.handlePurchaseResult(result, session: session, generation: generation)
-    } catch {
-      guard generation == self.sessions.generation else { return }
-      self.lastError = "The purchase could not be completed."
-    }
-  }
-
-  private func handlePurchaseResult(
-    _ result: Product.PurchaseResult,
-    session: PaidAccessSession,
-    generation: UUID
-  ) async {
-    guard generation == self.sessions.generation else { return }
-    switch result {
-    case .success(let verification):
-      let didSync = await self.syncIfSubscription(verification, session: session, generation: generation)
-      if didSync, case .verified(let transaction) = verification {
-        await transaction.finish()
-      }
-      guard generation == self.sessions.generation else { return }
-      await self.refreshEntitlement()
-    case .pending:
-      self.lastError = """
-        The purchase is awaiting approval (for example Ask to Buy). \
-        Access activates automatically once it is approved.
-        """
-    case .userCancelled:
-      break
-    @unknown default:
-      break
-    }
-  }
-
-  private func handleTransactionUpdate(_ result: VerificationResult<Transaction>) async {
-    guard PaidAccessFeature.isEnabled else { return }
-    let generation = self.sessions.generation
-    guard let session = await self.currentSession() else { return }
-    let didSync = await self.syncIfSubscription(result, session: session, generation: generation)
-    if didSync, case .verified(let transaction) = result {
-      await transaction.finish()
-    }
-    guard generation == self.sessions.generation else { return }
-    await self.refreshEntitlement()
-  }
-
-  /// Sends a signed transaction to the server for verification.
-  ///
-  /// Only locally verified subscription transactions are forwarded, and the
-  /// server verifies the signature again regardless — the device's verdict is
-  /// never trusted on its own.
-  private func syncIfSubscription(
-    _ result: VerificationResult<Transaction>,
-    session: PaidAccessSession,
-    generation: UUID
-  ) async -> Bool {
-    guard generation == self.sessions.generation else { return false }
-    do {
-      guard
-        let entitlement = try await PaidStoreKitSync.entitlement(
-          for: result, session: session, client: self.client
-        )
-      else { return false }
-      guard generation == self.sessions.generation else { return false }
-      self.entitlement = entitlement
-      return true
-    } catch {
-      guard generation == self.sessions.generation else { return false }
-      self.lastError =
-        (error as? PaidAccessError)?.errorDescription
-        ?? "Could not confirm the subscription."
-      return false
-    }
-  }
-
-  // MARK: - Nonce
-
-  /// 32 bytes of entropy, URL-safe. Sign in with Apple replays this back to us
-  /// so a captured identity token cannot be replayed against a different request.
-  static func makeRawNonce() -> String {
-    var bytes = [UInt8](repeating: 0, count: 32)
-    let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-    if status != errSecSuccess {
-      bytes = (0..<32).map { _ in UInt8.random(in: UInt8.min...UInt8.max) }
-    }
-    return Data(bytes).base64EncodedString()
-      .replacingOccurrences(of: "+", with: "-")
-      .replacingOccurrences(of: "/", with: "_")
-      .replacingOccurrences(of: "=", with: "")
-  }
-
-  static func sha256Hex(_ value: String) -> String {
-    SHA256.hash(data: Data(value.utf8))
-      .map { String(format: "%02x", $0) }
-      .joined()
-  }
-}
-
-// MARK: - Sign in with Apple delegates
-
-extension PaidAccessManager: ASAuthorizationControllerDelegate {
-  func authorizationController(
-    controller: ASAuthorizationController,
-    didCompleteWithAuthorization authorization: ASAuthorization
-  ) {
-    self.resumeSignIn(with: .success(authorization))
-  }
-
-  func authorizationController(
-    controller: ASAuthorizationController,
-    didCompleteWithError error: Error
-  ) {
-    self.resumeSignIn(with: .failure(error))
-  }
-}
-
-extension PaidAccessManager: ASAuthorizationControllerPresentationContextProviding {
-  func presentationAnchor(
-    for controller: ASAuthorizationController
-  ) -> ASPresentationAnchor {
-    NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? NSWindow()
+    self.flow.product(for: term)
   }
 }

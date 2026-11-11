@@ -54,7 +54,7 @@ public enum DesktopLocalStreaming {
 /// remains and returns the whole session. Silence never reaches the model, so
 /// a silent recording stays empty. At most three windows wait behind recognition;
 /// overflowing that backlog terminates live recognition with an explicit error.
-public final class DesktopLocalStreamingClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable { // swiftlint:disable:this type_body_length line_length
+public final class DesktopLocalStreamingClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     public struct Tuning: Sendable, Equatable {
         public var sampleRate: Int
         /// Audio after speech starts between interim passes.
@@ -82,11 +82,6 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
         }
     }
 
-    private enum Work {
-        case interim([Float])
-        case commit([Float])
-    }
-
     private struct CloseAction {
         let task: Task<Void, Never>?
         let signal: AsyncStream<Void>.Continuation?
@@ -100,20 +95,10 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
     private let modelFile: URL
     private let language: String?
     private let tuning: Tuning
-    private let interimSamples: Int
-    private let commitSamples: Int
-    private let maximumSamples: Int
     private let maximumPendingSamples: Int
-    private let preRollSamples: Int
 
     private let lock = NSLock()
-    private var pending: [Float] = []
-    private var hasSpeech = false
-    private var trailingSilence = 0
-    private var frameEnergy: Float = 0
-    private var frameCount = 0
-    private var noiseFloor: Float = 0.001
-    private var samplesSinceInterim = 0
+    private var window: DesktopLocalSpeechWindow
     private var showingInterim = false
     private var finals: [String] = []
     private var onTranscript: ((String, Bool) -> Void)?
@@ -134,13 +119,8 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
         self.modelFile = modelFile
         self.language = DesktopLocalTranscription.whisperLanguage(language)
         self.tuning = tuning
-        let rate = Double(max(tuning.sampleRate, 1))
-        interimSamples = max(1, Int(tuning.interimInterval * rate))
-        commitSamples = max(1, Int(tuning.commitSilence * rate))
-        let windowSamples = max(tuning.sampleRate, Int(tuning.maximumWindow * rate))
-        maximumSamples = windowSamples
-        maximumPendingSamples = windowSamples * 3
-        preRollSamples = max(0, Int(tuning.preRoll * rate))
+        maximumPendingSamples = DesktopLocalSpeechWindow.windowSamples(for: tuning) * 3
+        window = DesktopLocalSpeechWindow(tuning: tuning, maximumPendingSamples: maximumPendingSamples)
     }
 
     deinit {
@@ -178,45 +158,13 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
         }
         let admission: (signal: AsyncStream<Void>.Continuation?, overflow: Bool) = lock.withLock {
             guard worker != nil, !closed, !finishing else { return (nil, false) }
-            guard count <= maximumPendingSamples - pending.count else { return (nil, true) }
-            pending.append(contentsOf: samples)
-            detectSpeech(in: samples)
-            guard hasSpeech else {
-                if pending.count > preRollSamples { pending.removeFirst(pending.count - preRollSamples) }
-                return (nil, false)
-            }
-            samplesSinceInterim += count
-            let due = trailingSilence >= commitSamples || pending.count >= maximumSamples
-                || samplesSinceInterim >= interimSamples
+            guard let due = window.admit(samples) else { return (nil, true) }
             return (due ? wake : nil, false)
         }
         if admission.overflow {
             close(error: DesktopLocalTranscriptionError.streamingBacklogExceeded)
         } else {
             admission.signal?.yield(())
-        }
-    }
-
-    /// Caller holds the lock. A 20 ms frame is speech when its RMS clears both
-    /// the absolute threshold and a noise floor that falls at once to quiet
-    /// frames and rises over about ten seconds, so steady room noise does not
-    /// hold a window open.
-    private func detectSpeech(in samples: [Float]) {
-        let frameSize = max(1, tuning.sampleRate / 50)
-        for sample in samples {
-            frameEnergy += sample * sample
-            frameCount += 1
-            guard frameCount == frameSize else { continue }
-            let rms = (frameEnergy / Float(frameSize)).squareRoot()
-            frameEnergy = 0
-            frameCount = 0
-            if rms >= max(tuning.speechThreshold, noiseFloor * 3) {
-                hasSpeech = true
-                trailingSilence = 0
-            } else {
-                trailingSilence += frameSize
-            }
-            noiseFloor = rms < noiseFloor ? rms : noiseFloor + (rms - noiseFloor) * 0.002
         }
     }
 
@@ -242,7 +190,7 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
         let completion: CloseAction? = lock.withLock {
             guard !closed else { return nil }
             closed = true
-            pending.removeAll()
+            window.discard()
             var report = onError
             // Terminal failure must not overtake a transcript callback already admitted by the worker.
             if let error, callbackInFlight, let handler = report {
@@ -281,52 +229,12 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
     }
 
     /// Caller holds the lock.
-    private func nextWork() -> Work? {
-        guard hasSpeech, !closed, !finishing else { return nil }
-        if trailingSilence >= commitSamples || pending.count >= maximumSamples {
-            return .commit(takeWindow())
-        }
-        guard samplesSinceInterim >= interimSamples else { return nil }
-        samplesSinceInterim = 0
-        return .interim(pending)
+    private func nextWork() -> DesktopLocalSpeechWindow.Work? {
+        guard !closed, !finishing else { return nil }
+        return window.nextWork()
     }
 
-    /// Caller holds the lock. Removes the next window to commit, splitting a
-    /// window that reached its limit at its quietest recent moment.
-    private func takeWindow() -> [Float] {
-        let count = pending.count > maximumSamples ? quietSplit(before: maximumSamples) : pending.count
-        let window = Array(pending.prefix(count))
-        pending.removeFirst(count)
-        if pending.isEmpty {
-            hasSpeech = false
-            trailingSilence = 0
-        } else {
-            trailingSilence = min(trailingSilence, pending.count)
-        }
-        samplesSinceInterim = pending.count
-        return window
-    }
-
-    /// Caller holds the lock. The end of the quietest 100 ms frame in the last
-    /// quarter of the window, so a word is rarely cut in two.
-    private func quietSplit(before limit: Int) -> Int {
-        let frame = max(1, tuning.sampleRate / 10)
-        var best = limit
-        var bestPeak = Float.greatestFiniteMagnitude
-        var end = limit
-        while end - frame >= limit * 3 / 4 {
-            var peak: Float = 0
-            for index in (end - frame)..<end { peak = max(peak, abs(pending[index])) }
-            if peak < bestPeak {
-                bestPeak = peak
-                best = end
-            }
-            end -= frame
-        }
-        return best
-    }
-
-    private func perform(_ work: Work) async throws {
+    private func perform(_ work: DesktopLocalSpeechWindow.Work) async throws {
         switch work {
         case .interim(let samples):
             let text = try await recognise(samples)
@@ -368,16 +276,16 @@ public final class DesktopLocalStreamingClient: FinalizingStreamingTranscription
     /// `finishAndWait()` rather than delivered as callbacks.
     private func drain() async throws {
         while true {
-            let window: [Float]? = lock.withLock {
-                guard !closed, !pending.isEmpty, hasSpeech else {
-                    pending.removeAll()
+            let samples: [Float]? = lock.withLock {
+                guard !closed, !window.pending.isEmpty, window.hasSpeech else {
+                    window.discard()
                     return nil
                 }
-                return takeWindow()
+                return window.takeWindow()
             }
-            guard let window else { return }
+            guard let samples else { return }
             try Task.checkCancellation()
-            let text = try await recognise(window)
+            let text = try await recognise(samples)
             lock.withLock {
                 if !closed, !text.isEmpty { finals.append(text) }
             }

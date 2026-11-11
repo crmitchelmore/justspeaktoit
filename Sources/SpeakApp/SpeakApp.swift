@@ -21,6 +21,7 @@ struct SpeakApp: App {
     @Environment(\.openWindow) private var openWindow
 
     init() {
+        Self.skipWindowRestorationAfterCrashes()
         // A Sparkle smoke run (scripts/sparkle-update-smoke.sh) is headless and
         // throw-away: no crash reporting, no windows, no onboarding. Bail out
         // before anything else initialises.
@@ -138,6 +139,17 @@ struct SpeakApp: App {
                         }
                 }
             }
+    }
+}
+
+extension SpeakApp {
+    /// After the app crashes, AppKit's window restoration asks with a modal
+    /// alert whether to reopen windows. It blocks the main thread before the
+    /// automation service starts, so `speak` gets no reply until someone clicks
+    /// it (#1464). Ignoring saved window state skips that prompt; the main
+    /// window opens fresh. Registered, not set, so an explicit default still wins.
+    static func skipWindowRestorationAfterCrashes(in defaults: UserDefaults = .standard) {
+        defaults.register(defaults: ["ApplePersistenceIgnoreState": true])
     }
 }
 

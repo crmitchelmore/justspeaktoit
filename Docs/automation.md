@@ -356,6 +356,8 @@ speak --help | --version
 `speak say` speaks text with the running app's own voices, keys,
 pronunciation dictionary and speed/pitch settings. The CLI still holds no
 credentials and no provider code; it sends the text and the app synthesizes it.
+`say` and `voices` first shipped in Alpha 3.2.0 (alpha-build-77); a Stable app
+or Homebrew CLI without them answers `Unknown command "say"`.
 
 - **Text** comes from the arguments, from `-f <file>` (UTF-8), or from standard
   input when neither is given (or with `-`). Use `--` before text that starts
@@ -370,7 +372,8 @@ credentials and no provider code; it sends the text and the app synthesizes it.
     the selected voice if it offers that model, else the first voice that does.
   - `--voice <id|name>` — a voice ID or display name (`openai/alloy`, `Daniel`).
     `--voice system` forces the on-device voice.
-  - `--speed <n>` (1 is normal), `--pitch <semitones>` (whole numbers, −12 to
+  - `--speed <n>` (1 is normal; on the system voice the scale is not linear,
+    so 1.25 is roughly 1.7× and 2 roughly 3.5× normal), `--pitch <semitones>` (whole numbers, −12 to
     12), `--quality standard|high|highest` and `--language <id>` (`automatic`
     or an ID such as `en_US`; `en-US` also works).
 
@@ -393,7 +396,9 @@ credentials and no provider code; it sends the text and the app synthesizes it.
 - **Output**: with no `-o`, the speech plays aloud and the command returns when
   it finishes. `-o <file>` writes `.wav`, `.mp3` or `.m4a` (chosen by the
   extension) without playing; add `--play` to do both. An existing file is
-  replaced only once the new audio is complete.
+  replaced only once the new audio is complete. The file holds the whole text:
+  if the system voice stops early, `say` fails with `speech_failed` rather
+  than returning a partial file.
 - **Platforms**: the Windows and Linux apps have no on-device voice yet, so
   with no configured voice `speak say` fails with `unsupported_command` there
   rather than guessing a paid voice; `--voice system` fails the same way. They encode MP3

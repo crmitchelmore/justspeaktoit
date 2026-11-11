@@ -1,5 +1,6 @@
 #ifndef JSTI_VOICE_SOURCES_H
 #define JSTI_VOICE_SOURCES_H
+/* Shared desktop ABI: CLinuxSupport includes this same file by path, so keep it platform-neutral. */
 #include <stddef.h>
 #include <stdint.h>
 #ifdef __cplusplus

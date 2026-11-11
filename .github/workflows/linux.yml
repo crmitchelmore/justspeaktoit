@@ -46,6 +46,11 @@ on:
       - scripts/linux-local-runtime/**
       - scripts/windows-local-runtime/**
       - Sources/CWindowsSupport/whisper-cpp/**
+      # Desktop ABI headers CLinuxSupport includes from CWindowsSupport.
+      - Sources/CWindowsSupport/include/VoiceSources.h
+      - Sources/CWindowsSupport/include/VoiceAudioCodec.h
+      - Sources/CWindowsSupport/include/VoiceCredentials.h
+      - Sources/CWindowsSupport/include/LocalCleanup.h
       - scripts/typecheck-windows-swift.sh
       - scripts/verify-portable-core-boundary.py
       - packaging/linux/**

@@ -103,7 +103,7 @@ void update_apply(gpointer pointer) {
         ui.state_announcement = g_idle_add_full(G_PRIORITY_LOW, announce_state, NULL, NULL);
     if (update->status != NULL) gtk_label_set_text(ui.status, update->status);
     if (update->has_transcript) {
-        cleanup_visible = FALSE;
+        cleanup_preview.visible = FALSE;
         set_transcript(update->transcript);
         /* Global text is not bound to a record. */
         g_clear_pointer(&ui.presented_id, g_free);
@@ -115,39 +115,39 @@ void update_apply(gpointer pointer) {
 
 void cleanup_preview_apply(gpointer pointer) {
     (void)pointer;
-    g_mutex_lock(&cleanup_lock);
-    cleanup_posted = FALSE;
-    if (cleanup_active && cleanup_text != NULL && !ui.closing && ui.state == JSTI_STATE_WORKING &&
+    g_mutex_lock(&cleanup_preview.lock);
+    cleanup_preview.posted = FALSE;
+    if (cleanup_preview.active && cleanup_preview.text != NULL && !ui.closing && ui.state == JSTI_STATE_WORKING &&
         (ui.page == JSTI_PAGE_DASHBOARD || ui.page == JSTI_PAGE_HISTORY)) {
-        set_transcript(cleanup_text);
-        cleanup_visible = TRUE;
+        set_transcript(cleanup_preview.text);
+        cleanup_preview.visible = TRUE;
         gtk_label_set_text(ui.status, "Streaming cleanup preview. The original is saved in History.");
         g_clear_pointer(&ui.presented_id, g_free);
         gtk_widget_set_sensitive(GTK_WIDGET(ui.copy), FALSE);
         gtk_widget_set_sensitive(GTK_WIDGET(ui.dashboard_copy), FALSE);
     }
-    g_clear_pointer(&cleanup_text, g_free);
-    g_mutex_unlock(&cleanup_lock);
+    g_clear_pointer(&cleanup_preview.text, g_free);
+    g_mutex_unlock(&cleanup_preview.lock);
 }
 
 uint64_t jsti_window_begin_cleanup_preview(void) {
-    g_mutex_lock(&cleanup_lock);
-    if (++cleanup_ticket == 0) ++cleanup_ticket;
-    cleanup_active = TRUE;
-    g_clear_pointer(&cleanup_text, g_free);
-    guint64 ticket = cleanup_ticket;
-    g_mutex_unlock(&cleanup_lock);
+    g_mutex_lock(&cleanup_preview.lock);
+    if (++cleanup_preview.ticket == 0) ++cleanup_preview.ticket;
+    cleanup_preview.active = TRUE;
+    g_clear_pointer(&cleanup_preview.text, g_free);
+    guint64 ticket = cleanup_preview.ticket;
+    g_mutex_unlock(&cleanup_preview.lock);
     return ticket;
 }
 
 void jsti_window_end_cleanup_preview(uint64_t ticket) {
-    g_mutex_lock(&cleanup_lock);
-    if (ticket == cleanup_ticket) {
-        ++cleanup_ticket;
-        cleanup_active = FALSE;
-        g_clear_pointer(&cleanup_text, g_free);
+    g_mutex_lock(&cleanup_preview.lock);
+    if (ticket == cleanup_preview.ticket) {
+        ++cleanup_preview.ticket;
+        cleanup_preview.active = FALSE;
+        g_clear_pointer(&cleanup_preview.text, g_free);
     }
-    g_mutex_unlock(&cleanup_lock);
+    g_mutex_unlock(&cleanup_preview.lock);
 }
 
 int32_t jsti_window_cleanup_preview(const char *text, uint64_t ticket) {
@@ -156,23 +156,23 @@ int32_t jsti_window_cleanup_preview(const char *text, uint64_t ticket) {
     gboolean closed = window_closed;
     g_mutex_unlock(&post_lock);
     if (closed) return 1;
-    g_mutex_lock(&cleanup_lock);
-    if (!cleanup_active || ticket != cleanup_ticket) {
-        g_mutex_unlock(&cleanup_lock);
+    g_mutex_lock(&cleanup_preview.lock);
+    if (!cleanup_preview.active || ticket != cleanup_preview.ticket) {
+        g_mutex_unlock(&cleanup_preview.lock);
         return 1;
     }
-    g_free(cleanup_text);
-    cleanup_text = g_strdup(text);
-    gboolean submit = !cleanup_posted;
-    cleanup_posted = TRUE;
-    g_mutex_unlock(&cleanup_lock);
+    g_free(cleanup_preview.text);
+    cleanup_preview.text = g_strdup(text);
+    gboolean submit = !cleanup_preview.posted;
+    cleanup_preview.posted = TRUE;
+    g_mutex_unlock(&cleanup_preview.lock);
     if (!submit) return 0;
     int32_t result = post(cleanup_preview_apply, NULL, NULL);
     if (result != 0) {
-        g_mutex_lock(&cleanup_lock);
-        cleanup_posted = FALSE;
-        g_clear_pointer(&cleanup_text, g_free);
-        g_mutex_unlock(&cleanup_lock);
+        g_mutex_lock(&cleanup_preview.lock);
+        cleanup_preview.posted = FALSE;
+        g_clear_pointer(&cleanup_preview.text, g_free);
+        g_mutex_unlock(&cleanup_preview.lock);
     }
     return result;
 }

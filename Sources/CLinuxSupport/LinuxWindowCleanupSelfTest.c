@@ -225,7 +225,7 @@ gboolean cleanup_preview_self_test(void) {
     gchar *status = g_strdup(gtk_label_get_text(ui.status));
     gchar *presented = g_strdup(ui.presented_id);
     gint32 state = ui.state, page = ui.page;
-    gboolean visible = cleanup_visible;
+    gboolean visible = cleanup_preview.visible;
     jsti_window_event_fn callback = ui.callback;
     ui.callback = NULL;
     ui.state = JSTI_STATE_WORKING;
@@ -266,7 +266,7 @@ gboolean cleanup_preview_self_test(void) {
     g_free(ui.presented_id);
     ui.presented_id = presented;
     ui.state = state;
-    cleanup_visible = visible;
+    cleanup_preview.visible = visible;
     show_page(page);
     ui.callback = callback;
     refresh_actions();

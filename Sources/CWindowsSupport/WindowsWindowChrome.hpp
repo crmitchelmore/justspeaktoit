@@ -72,6 +72,48 @@ HWND createOwnedDialog(HWND owner, const wchar_t *className, WNDPROC procedure, 
 // or the control `fallback`, on activation.
 void rememberFocus(HWND window, WPARAM wparam, HWND &focus, int fallback);
 
+// A native settings dialog's window frame: its smallest logical client size,
+// window styles, the control focused when nothing else was, and the button
+// Enter presses (IDOK or IDCANCEL).
+struct DialogFrame {
+    int minimumClientWidth, minimumClientHeight;
+    DWORD style, exStyle;
+    int focusFallback;
+    int defaultButton;
+};
+// The window messages every settings dialog answers the same way: appearance
+// theming, the minimum size, resizing, DPI moves, remembered focus and the
+// default button. Call it after binding the instance; when it returns true,
+// return `result`. `dialog` needs `focus`; `layout(window)` places the controls
+// and `refreshFont(window, dialog)` replaces the font after a DPI change.
+template<typename Dialog, typename Layout, typename RefreshFont>
+bool standardDialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, const DialogFrame &frame,
+                           Dialog &dialog, Layout layout, RefreshFont refreshFont, LRESULT &result) {
+    if (dialogMessage(window, message, wparam, lparam, result)) return true;
+    result = 0;
+    switch (message) {
+    case WM_GETMINMAXINFO:
+        minimumTrackSize(window, lparam, frame.minimumClientWidth, frame.minimumClientHeight, frame.style,
+                         frame.exStyle);
+        return true;
+    case WM_SIZE: layout(window); return true;
+    case WM_DPICHANGED:
+        applySuggestedBounds(window, lparam);
+        refreshFont(window, dialog);
+        layout(window);
+        return true;
+    case WM_ACTIVATE: rememberFocus(window, wparam, dialog.focus, frame.focusFallback); return true;
+    case DM_GETDEFID: result = MAKELRESULT(frame.defaultButton, DC_HASDEFID); return true;
+    default: return false;
+    }
+}
+// Shows `window` modally over `owner`, focuses `focusID`, runs `shown` and
+// pumps messages until the dialog is gone; then closes it if needed with
+// `close`, re-enables the owner and forwards WM_QUIT. A failed message read is
+// reported as "Reading <what> messages".
+void runModalDialog(HWND owner, HWND window, int focusID, void (*close)(HWND), const char *what,
+                    void (*shown)(HWND, void *) = nullptr, void *context = nullptr);
+
 // GDI+ for the process; idempotent.
 bool startup();
 

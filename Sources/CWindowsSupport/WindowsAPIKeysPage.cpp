@@ -240,23 +240,17 @@ void openKeyPage(HWND window, const Dialog &dialog) {
     }
 }
 
+constexpr jsti::chrome::DialogFrame dialogFrame{
+    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, listID, IDCANCEL};
+
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT themed = 0;
-    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
+    LRESULT handled = 0;
+    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
+                                            handled)) return handled;
     switch (message) {
     case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
-    case WM_GETMINMAXINFO:
-        jsti::chrome::minimumTrackSize(window, lparam, minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle);
-        return 0;
-    case WM_SIZE: layout(window); return 0;
-    case WM_DPICHANGED: {
-        jsti::chrome::applySuggestedBounds(window, lparam);
-        refreshFont(window, *dialog); layout(window); return 0;
-    }
-    case WM_ACTIVATE: jsti::chrome::rememberFocus(window, wparam, dialog->focus, listID); return 0;
-    case DM_GETDEFID: return MAKELRESULT(IDCANCEL, DC_HASDEFID);
     case refreshMessage: {
         Configuration latest = snapshot();
         if (latest.revision != dialog->config.revision) {
@@ -342,22 +336,14 @@ void jsti_show_api_keys(HWND owner) {
         jsti_window_update(jsti::systemError("Opening API keys").c_str(), nullptr, -1);
         return;
     }
-    EnableWindow(owner, FALSE);
-    ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, listID));
-    dialog.busy = true;
-    SetDlgItemTextW(window, statusID, L"Reading saved keys…");
-    updateActions(window, dialog);
-    dialog.config.callback(JSTI_API_KEY_REFRESH, "", nullptr, dialog.config.context);
-    MSG message{};
-    BOOL result = 1;
-    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    }
-    if (IsWindow(window)) close(window);
-    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
-    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
-    else if (result < 0) jsti_window_update(jsti::systemError("Reading API key messages").c_str(), nullptr, -1);
+    // The saved keys are read once the dialog shows; until then it is busy.
+    jsti::chrome::runModalDialog(owner, window, listID, close, "API key", [](HWND shown, void *context) {
+        auto &opened = *static_cast<Dialog *>(context);
+        opened.busy = true;
+        SetDlgItemTextW(shown, statusID, L"Reading saved keys…");
+        updateActions(shown, opened);
+        opened.config.callback(JSTI_API_KEY_REFRESH, "", nullptr, opened.config.context);
+    }, &dialog);
 }
 
 int jsti_window_set_api_keys(const JSTIAPIKeyRow *rows, size_t count, const char *status,

@@ -121,23 +121,17 @@ void apply(HWND window, Dialog &dialog) {
     close(window);
 }
 
+constexpr jsti::chrome::DialogFrame dialogFrame{
+    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, endpointID, IDOK};
+
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT themed = 0;
-    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
+    LRESULT handled = 0;
+    if (jsti::chrome::standardDialogMessage(window, message, wparam, lparam, dialogFrame, *dialog, layout, refreshFont,
+                                            handled)) return handled;
     switch (message) {
     case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
-    case WM_GETMINMAXINFO:
-        jsti::chrome::minimumTrackSize(window, lparam, minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle);
-        return 0;
-    case WM_SIZE: layout(window); return 0;
-    case WM_DPICHANGED: {
-        jsti::chrome::applySuggestedBounds(window, lparam);
-        refreshFont(window, *dialog); layout(window); return 0;
-    }
-    case WM_ACTIVATE: jsti::chrome::rememberFocus(window, wparam, dialog->focus, endpointID); return 0;
-    case DM_GETDEFID: return MAKELRESULT(IDOK, DC_HASDEFID);
     case WM_COMMAND:
         if (HIWORD(wparam) != BN_CLICKED) break;
         if (LOWORD(wparam) == IDOK) { apply(window, *dialog); return 0; }
@@ -189,18 +183,7 @@ void jsti_show_azure_resource_settings(HWND owner) {
         jsti_window_update(jsti::systemError("Opening Azure Speech resource settings").c_str(), nullptr, -1);
         return;
     }
-    EnableWindow(owner, FALSE);
-    ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, endpointID));
-    MSG message{};
-    BOOL result = 1;
-    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    }
-    if (IsWindow(window)) close(window);
-    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
-    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
-    else if (result < 0) jsti_window_update(jsti::systemError("Reading Azure Speech resource messages").c_str(), nullptr, -1);
+    jsti::chrome::runModalDialog(owner, window, endpointID, close, "Azure Speech resource");
 }
 
 int jsti_window_set_azure_resource(const char *endpoint, JSTIAzureResourceCallback callback, void *context) {

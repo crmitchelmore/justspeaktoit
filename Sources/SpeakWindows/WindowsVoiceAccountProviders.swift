@@ -1,56 +1,29 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 import CWindowsSupport
 
-final class WindowsVoiceProviderRegistration: @unchecked Sendable {
-    fileprivate var holder: WindowsEventContext?
-    fileprivate init(_ holder: WindowsEventContext) { self.holder = holder }
-}
+typealias WindowsVoiceProviderRegistration = NativeCallbackContext<WindowsEventContext>
 
-private final class WindowsVoiceProviderLifecycle: @unchecked Sendable {
-    private let lock = NSLock()
-    private var active: WindowsVoiceProviderRegistration?
+extension WindowsNative {
+    private static let providerCallbacks = NativeCallbackSlot<WindowsEventContext> { context in
+        guard let context else { return jsti_window_set_voice_provider_credential_handler(nil, nil) == 0 }
+        return jsti_window_set_voice_provider_credential_handler(windowsVoiceProviderCredentialEvent, context) == 0
+    }
 
-    func begin(_ holder: WindowsEventContext) throws -> WindowsVoiceProviderRegistration {
-        lock.lock()
-        defer { lock.unlock() }
-        if let active { try endLocked(active) }
-        let registration = WindowsVoiceProviderRegistration(holder)
-        guard jsti_window_set_voice_provider_credential_handler(
-            windowsVoiceProviderCredentialEvent, Unmanaged.passUnretained(registration).toOpaque()) == 0 else {
+    static func beginVoiceProviderCallbacks(_ holder: WindowsEventContext) throws -> WindowsVoiceProviderRegistration {
+        guard let registration = providerCallbacks.begin(holder) else {
             throw DesktopHostError(message: "The account Voice key callback could not be configured.")
         }
-        active = registration
         return registration
     }
 
-    func end(_ registration: WindowsVoiceProviderRegistration) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        try endLocked(registration)
-    }
-
-    private func endLocked(_ registration: WindowsVoiceProviderRegistration) throws {
-        guard active === registration else { return }
-        // Callback forwarding never takes this lifecycle lock or awaits work.
-        guard jsti_window_set_voice_provider_credential_handler(nil, nil) == 0 else {
-            throw DesktopHostError(message: "The account Voice key callback could not be detached safely.")
-        }
-        active = nil
-        registration.holder = nil
-    }
-}
-
-extension WindowsNative {
-    private static let providerLifecycle = WindowsVoiceProviderLifecycle()
-
-    static func beginVoiceProviderCallbacks(_ holder: WindowsEventContext) throws -> WindowsVoiceProviderRegistration {
-        try providerLifecycle.begin(holder)
-    }
-
     static func endVoiceProviderCallbacks(_ registration: WindowsVoiceProviderRegistration) {
-        do { try providerLifecycle.end(registration) } catch { update(error.localizedDescription) }
+        // Callback forwarding never takes the slot's lock or awaits work.
+        if !providerCallbacks.end(registration) {
+            update("The account Voice key callback could not be detached safely.")
+        }
     }
 }
 
@@ -73,9 +46,7 @@ func windowsVoiceProviderCredentialEvent(
     _ identifier: UnsafePointer<CChar>?, _ session: UnsafePointer<CChar>?, _ epoch: UnsafePointer<CChar>?,
     _ requestID: UnsafePointer<CChar>?, _ secret: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let registration = Unmanaged<WindowsVoiceProviderRegistration>.fromOpaque(context).takeUnretainedValue()
-    guard let holder = registration.holder else { return }
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     do {
         let message = try VoiceProviderCredentialMessage(
             operation: operation.map(String.init(cString:)) ?? "",

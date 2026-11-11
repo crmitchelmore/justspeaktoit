@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import CWindowsSupport
 
 private final class MicrophoneList {
@@ -9,8 +10,7 @@ private func microphoneFound(
     _ identifier: UnsafePointer<CChar>?, _ name: UnsafePointer<CChar>?,
     _ isDefault: Int32, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let identifier, let name, let context else { return }
-    let list = Unmanaged<MicrophoneList>.fromOpaque(context).takeUnretainedValue()
+    guard let identifier, let name, let list = NativeCallbackContext<MicrophoneList>.resolve(context) else { return }
     let label = String(cString: name) + (isDefault != 0 ? " (system default)" : "")
     list.devices.append((String(cString: identifier), label))
 }
@@ -57,7 +57,7 @@ private func microphonesChanged(
 
 extension WindowsNative {
     static func createCapture(
-        context: WindowsCaptureContext, deviceID: String, sampleRate: Int = 16_000,
+        callbacks: UnsafeMutableRawPointer, deviceID: String, sampleRate: Int = 16_000,
         frameMilliseconds: Int = 100
     ) throws -> OpaquePointer {
         guard sampleRate == 16_000 || sampleRate == 24_000 else {
@@ -70,7 +70,7 @@ extension WindowsNative {
         let native = deviceID.withCString { device in
             jsti_capture_create_with_options(
                 device, UInt32(sampleRate), UInt32(frameMilliseconds), captureAudio, captureError,
-                Unmanaged.passUnretained(context).toOpaque(), &error, error.count
+                callbacks, &error, error.count
             )
         }
         guard let native else { throw WindowsNativeError(message: String(cString: error)) }
@@ -84,8 +84,8 @@ extension WindowsNative {
             list.devices.append(("jsti-synthetic-smoke-input", "Synthetic test microphone"))
         } else {
             do {
-                try checked {
-                    jsti_audio_devices_enumerate(microphoneFound, Unmanaged.passUnretained(list).toOpaque(), $0, $1)
+                try NativeCallbackContext.withScoped(list) { context in
+                    try checked { jsti_audio_devices_enumerate(microphoneFound, context, $0, $1) }
                 }
             } catch { warning = "Microphone list unavailable: \(error.localizedDescription)" }
         }

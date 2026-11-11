@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import SpeakDesktopHost
 import CWindowsSupport
 
@@ -35,7 +36,7 @@ extension WindowsEventContext {
     /// Reads every row again and hands the dialog the latest status line.
     func refreshAPIKeys(status: String) async {
         let rows = await controller.apiKeyRows()
-        if !WindowsNative.presentAPIKeys(rows, status: status, context: Unmanaged.passUnretained(self).toOpaque()) {
+        if !WindowsNative.presentAPIKeys(rows, status: status, context: callbackContext) {
             WindowsNative.update("The API keys page could not be shown. Reopen it and try again.")
         }
     }
@@ -57,8 +58,7 @@ func apiKeyEvent(
     _ action: Int32, _ identifier: UnsafePointer<CChar>?, _ key: UnsafePointer<CChar>?,
     _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     let name = identifier.map { String(cString: $0) } ?? ""
     let typed = key.map { String(cString: $0) } ?? ""
     holder.enqueueSettings {

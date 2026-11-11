@@ -192,7 +192,7 @@ private final class PostProcessingBench: @unchecked Sendable {
         "".withCString { prompt in
             key.withCString { key in
                 postProcessingEvent(
-                    enabled ? 1 : 0, Int32(index), 0, 1, prompt, key, Unmanaged.passUnretained(holder).toOpaque()
+                    enabled ? 1 : 0, Int32(index), 0, 1, prompt, key, holder.callbackContext
                 )
             }
         }
@@ -216,6 +216,7 @@ private final class PostProcessingBench: @unchecked Sendable {
         await holder.finishSettings()
         await controller.stopProviderCredentialEdits()
         await controller.close()
+        holder.callbacks.unregister()
     }
 
     /// The choices on disk, as a relaunch reads them.

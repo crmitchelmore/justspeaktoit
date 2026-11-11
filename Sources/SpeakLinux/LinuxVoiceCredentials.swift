@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import SpeakCore
 import SpeakDesktopHost
 import CLinuxSupport
@@ -55,8 +56,7 @@ func linuxVoiceCredentialEvent(
     _ requestID: UnsafePointer<CChar>?, _ selectionEpoch: UnsafePointer<CChar>?,
     _ secret: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     do {
         let message = try VoiceOutputCredentialMessage(
             operation: operation.map(String.init(cString:)) ?? "",

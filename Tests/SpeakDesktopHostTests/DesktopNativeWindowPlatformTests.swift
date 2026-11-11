@@ -267,6 +267,19 @@ final class DesktopNativeWindowPlatformTests: XCTestCase {
         registration.unregister()
     }
 
+    func testHandlerSlot_freesADetachedRegistrationBecauseTheNativeSetterIsQuiescent() throws {
+        let holder = NativeTestHolder(controller: try makeController())
+        let slot = DesktopNativeHandlerSlot<NativeTestHolder>("The test callback") { _ in true }
+        weak var box: NativeCallbackContext<NativeTestHolder>?
+        do {
+            let registration = try slot.begin(holder)
+            box = registration
+            slot.end(registration)
+        }
+        XCTAssertNil(box, "No empty box is left behind for a quiescent native slot")
+        XCTAssertEqual(NativeWindowLog.shared.statusLines, [])
+    }
+
     // MARK: Helpers
 
     private func fakeConfigurationCalls(

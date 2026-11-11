@@ -5,6 +5,8 @@ import CWindowsSupport
 typealias WindowsVoiceProviderRegistration = NativeCallbackContext<WindowsEventContext>
 
 extension WindowsNative {
+    // The native setter waits for admitted callbacks before it clears the
+    // handler, so a detached registration is freed at once.
     private static let providerCallbacks = DesktopNativeHandlerSlot<WindowsEventContext>(
         "The account Voice key callback"
     ) { context in

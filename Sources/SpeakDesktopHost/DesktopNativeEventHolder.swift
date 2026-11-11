@@ -190,15 +190,18 @@ package extension String {
 /// One native handler slot for a window's event holder, such as the account
 /// Voice key editor's callback: it attaches at most one registration and
 /// reports a slot that could not be configured or detached on the status line.
+/// Both windows' handler setters wait for admitted callbacks to finish before
+/// clearing, so a detached registration's box is freed at once.
 package final class DesktopNativeHandlerSlot<Holder: DesktopNativeEventHolder>: @unchecked Sendable {
     private let slot: NativeCallbackSlot<Holder>
     private let name: String
 
     /// `name` reads as the subject of the status line, e.g. "The account Voice key callback".
-    /// `attach` sets the C handler with the context, or clears it when passed nil.
-    package init(_ name: String, attach: @escaping (UnsafeMutableRawPointer?) -> Bool) {
+    /// `set` installs the C handler with a context, or clears it when passed nil;
+    /// clearing must return only after every running callback has finished.
+    package init(_ name: String, quiescentSet set: @escaping (UnsafeMutableRawPointer?) -> Bool) {
         self.name = name
-        slot = NativeCallbackSlot(attach: attach)
+        slot = NativeCallbackSlot(attach: { set($0) }, detach: { set(nil) ? .quiescent : .refused })
     }
 
     package func begin(_ holder: Holder) throws -> NativeCallbackContext<Holder> {

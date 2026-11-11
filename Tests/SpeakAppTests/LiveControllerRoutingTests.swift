@@ -29,7 +29,6 @@ final class LiveControllerRoutingTests: XCTestCase {
             switch route.provider {
             case .openai: XCTAssertTrue(controller is OpenAIRealtimeLiveController, route.modelID)
             case .modulate: XCTAssertTrue(controller is ModulateLiveController, route.modelID)
-            case .elevenlabs: XCTAssertTrue(controller is ElevenLabsLiveController, route.modelID)
             default: XCTAssertTrue(controller is SharedClientLiveController, route.modelID)
             }
         }

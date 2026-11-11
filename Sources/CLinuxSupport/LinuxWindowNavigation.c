@@ -1,0 +1,186 @@
+/* Navigation: page switching, the sidebar, its shortcuts and cancel keys. */
+#include "LinuxWindowInternal.h"
+
+const PageInfo page_info[JSTI_PAGE_COUNT] = {
+    [JSTI_PAGE_DASHBOARD] = { "dashboard", "Dashboard", "view-grid-symbolic", "jsti-tint-lagoon" },
+    [JSTI_PAGE_HISTORY] = { "history", "History", "document-open-recent-symbolic", "jsti-tint-accent" },
+    [JSTI_PAGE_VOICE_OUTPUT] = { "voice-output", "Voice Output", "audio-speakers-symbolic", "jsti-tint-green" },
+    [JSTI_PAGE_GENERAL] = { "general", "General", "emblem-system-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_TRANSCRIPTION] = { "transcription", "Transcription", "audio-input-microphone-symbolic",
+                                  "jsti-tint-warm" },
+    [JSTI_PAGE_POST_PROCESSING] = { "post-processing", "Post-processing", "starred-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_CORRECTIONS] = { "corrections", "Corrections", "document-edit-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_PRONUNCIATION] = { "pronunciation", "Pronunciation", "accessories-dictionary-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_PROFILES] = { "profiles", "Profiles", "system-users-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_KEYBOARD] = { "keyboard", "Keyboard", "input-keyboard-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_CLOUD_SYNC] = { "icloud-sync", "iCloud Sync", "emblem-synchronizing-symbolic", "jsti-tint-warm" },
+    [JSTI_PAGE_ABOUT] = { "about", "About", "help-about-symbolic", "jsti-tint-warm" },
+};
+SidebarShortcuts sidebar_shortcuts;
+
+void show_page(gint32 page) {
+    if (page < 0 || page >= JSTI_PAGE_COUNT) return;
+    if (ui.page != page) retire_cleanup_preview();
+    ui.page = page;
+    if (page == JSTI_PAGE_CORRECTIONS || page == JSTI_PAGE_PRONUNCIATION)
+        emit(71, "", page == JSTI_PAGE_CORRECTIONS ? 0 : 1);
+    if (page == JSTI_PAGE_PROFILES) emit(JSTI_EVENT_PROFILES, "refresh", 0);
+    gtk_stack_set_visible_child_name(ui.pages, page_info[page].name);
+    adw_window_title_set_title(ui.title, page_info[page].title);
+    GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.sidebar, page);
+    if (row != NULL && gtk_list_box_get_selected_row(ui.sidebar) != row) gtk_list_box_select_row(ui.sidebar, row);
+    adw_navigation_split_view_set_show_content(ui.split, TRUE);
+}
+
+static void on_sidebar(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
+    (void)box; (void)data;
+    if (row != NULL) show_page(gtk_list_box_row_get_index(row));
+}
+
+gboolean sidebar_navigate(guint keyval, GdkModifierType modifiers, GtkWidget *focused) {
+    GdkModifierType relevant = modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK |
+                                            GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK);
+    if (relevant != GDK_CONTROL_MASK || keyval < GDK_KEY_0 || keyval > GDK_KEY_9 ||
+        !sidebar_shortcuts.configured || !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
+    for (GtkWidget *focus = focused; focus != NULL; focus = gtk_widget_get_parent(focus)) {
+        if (GTK_IS_EDITABLE(focus) || GTK_IS_TEXT_VIEW(focus) || GTK_IS_DROP_DOWN(focus)) return FALSE;
+    }
+    for (gint page = 0; page < JSTI_PAGE_COUNT; ++page) {
+        GtkWidget *row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, page));
+        if (sidebar_shortcuts.digits[page] == (gint)(keyval - GDK_KEY_0) &&
+            gtk_widget_is_sensitive(row) && gtk_widget_get_visible(row)) {
+            show_page(page);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+/* Ctrl+F and Ctrl+K focus settings search from anywhere in the window. No page
+ * binds either (History filters as you type in its own entry), and they run
+ * after configured action shortcuts, so a user's own binding still wins. */
+static gboolean settings_search_key(guint keyval, GdkModifierType modifiers) {
+    GdkModifierType relevant = modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK |
+                                            GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK);
+    guint key = gdk_keyval_to_lower(keyval);
+    if (relevant != GDK_CONTROL_MASK || (key != GDK_KEY_f && key != GDK_KEY_k)) return FALSE;
+    if (adw_navigation_split_view_get_collapsed(ui.split)) adw_navigation_split_view_set_show_content(ui.split, FALSE);
+    jsti_settings_search_focus();
+    return TRUE;
+}
+
+gboolean cancel_key(guint keyval, GdkModifierType modifiers, GtkWidget *focused, gboolean active) {
+    if (keyval != GDK_KEY_Escape || !active || ui.closing || ui.suppress ||
+        !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
+    for (GtkWidget *focus = focused; focus != NULL; focus = gtk_widget_get_parent(focus)) {
+        if (GTK_IS_POPOVER(focus) || (GTK_IS_WINDOW(focus) && focus != GTK_WIDGET(ui.window))) return FALSE;
+#if ADW_CHECK_VERSION(1, 5, 0)
+        if (ADW_IS_DIALOG(focus)) return FALSE;
+#endif
+    }
+    GdkModifierType relevant = modifiers & (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK |
+                                            GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK);
+    if (!escape_enabled()) {
+        if (relevant == 0) ui.cancel_key_held = TRUE;
+        return FALSE;
+    }
+    if (ui.cancel_key_held) return TRUE;
+    if (relevant != 0 || (ui.state != JSTI_STATE_RECORDING && ui.state != JSTI_STATE_WORKING)) return FALSE;
+    guint64 token = escape_token(&escape_policy);
+    if (token == 0) return FALSE;
+    ui.cancel_key_held = TRUE;
+    gchar value[32];
+    g_snprintf(value, sizeof(value), "%" G_GUINT64_FORMAT, token);
+    retire_cleanup_preview();
+    emit(JSTI_EVENT_CANCEL, value, 0);
+    return TRUE;
+}
+
+gboolean cancel_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode,
+                                   GdkModifierType modifiers, gpointer data) {
+    (void)controller; (void)keycode; (void)data;
+    return cancel_key(keyval, modifiers, gtk_window_get_focus(ui.window), gtk_window_is_active(ui.window));
+}
+
+gboolean sidebar_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode,
+                                    GdkModifierType modifiers, gpointer data) {
+    (void)data;
+    GtkWidget *focused = gtk_window_get_focus(ui.window);
+    if (sidebar_navigate(keyval, modifiers, focused)) return TRUE;
+    if (ui.closing || !gtk_window_is_active(ui.window) ||
+        !gtk_widget_is_sensitive(GTK_WIDGET(ui.window))) return FALSE;
+    if (jsti_action_shortcuts_key(controller, keyval, keycode, modifiers, focused, action_shortcut_run)) return TRUE;
+    return settings_search_key(keyval, modifiers);
+}
+
+void action_key_released(GtkEventControllerKey *controller, guint keyval, guint keycode,
+                                GdkModifierType modifiers, gpointer data) {
+    (void)controller; (void)modifiers; (void)data;
+    if (keyval == GDK_KEY_Escape) ui.cancel_key_held = FALSE;
+    jsti_action_shortcuts_release(keycode);
+}
+
+void action_window_active(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)spec; (void)data;
+    if (!gtk_window_is_active(GTK_WINDOW(object))) {
+        ui.cancel_key_held = FALSE;
+        jsti_action_shortcuts_reset();
+    }
+}
+
+static void sidebar_header(GtkListBoxRow *row, GtkListBoxRow *before, gpointer data) {
+    (void)before; (void)data;
+    gint index = gtk_list_box_row_get_index(row);
+    const char *heading = index == JSTI_PAGE_DASHBOARD ? "Speak" : index == JSTI_PAGE_GENERAL ? "Settings" : NULL;
+    if (heading == NULL) {
+        gtk_list_box_row_set_header(row, NULL);
+        return;
+    }
+    GtkWidget *label = gtk_label_new(heading);
+    gtk_label_set_xalign(GTK_LABEL(label), 0);
+    gtk_widget_add_css_class(label, "jsti-sidebar-heading");
+    gtk_list_box_row_set_header(row, label);
+}
+
+GtkWidget *build_sidebar(void) {
+    ui.sidebar = GTK_LIST_BOX(gtk_list_box_new());
+    gtk_widget_add_css_class(GTK_WIDGET(ui.sidebar), "navigation-sidebar");
+    gtk_widget_add_css_class(GTK_WIDGET(ui.sidebar), "jsti-sidebar");
+    gtk_list_box_set_header_func(ui.sidebar, sidebar_header, NULL, NULL);
+    for (gint32 page = 0; page < JSTI_PAGE_COUNT; page++) {
+        GtkWidget *line = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+        GtkWidget *image = gtk_image_new_from_icon_name(page_info[page].icon);
+        gtk_widget_add_css_class(image, page_info[page].tint);
+        gtk_box_append(GTK_BOX(line), image);
+        GtkWidget *label = gtk_label_new(page_info[page].title);
+        gtk_label_set_xalign(GTK_LABEL(label), 0);
+        gtk_widget_set_hexpand(label, TRUE);
+        gtk_box_append(GTK_BOX(line), label);
+        GtkWidget *hint = gtk_label_new("");
+        gtk_widget_add_css_class(hint, "dim-label");
+        gtk_accessible_update_state(GTK_ACCESSIBLE(hint), GTK_ACCESSIBLE_STATE_HIDDEN, TRUE, -1);
+        sidebar_shortcuts.hints[page] = hint;
+        gtk_widget_set_visible(hint, FALSE);
+        gtk_box_append(GTK_BOX(line), hint);
+        GtkWidget *row = gtk_list_box_row_new();
+        gtk_accessible_update_property(GTK_ACCESSIBLE(row), GTK_ACCESSIBLE_PROPERTY_LABEL, page_info[page].title, -1);
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), line);
+        if (page >= JSTI_PAGE_GENERAL) gtk_widget_add_css_class(row, "jsti-settings-row");
+        gtk_list_box_append(ui.sidebar, row);
+    }
+    g_signal_connect(ui.sidebar, "row-selected", G_CALLBACK(on_sidebar), NULL);
+    GtkWidget *scroller = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), GTK_WIDGET(ui.sidebar));
+    GtkWidget *toolbar = adw_toolbar_view_new();
+    GtkWidget *header = adw_header_bar_new();
+    GtkWidget *brand = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append(GTK_BOX(brand), jsti_brand_icon_new(22));
+    GtkWidget *name = gtk_label_new("Just Speak to It");
+    gtk_widget_add_css_class(name, "heading");
+    gtk_box_append(GTK_BOX(brand), name);
+    adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), brand);
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), jsti_settings_search_new(scroller));
+    return toolbar;
+}

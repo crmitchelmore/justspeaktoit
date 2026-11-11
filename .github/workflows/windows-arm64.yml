@@ -38,7 +38,7 @@ on:
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/ci/verify-portable-core-boundary.py
-      - scripts/loopback/websocket-loopback-probe.py
+      - scripts/loopback/**
       - scripts/windows-bundle/**
       - scripts/windows-cross/**
       - scripts/windows-local-runtime/**

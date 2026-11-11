@@ -217,8 +217,7 @@ static MarkupHelper *make_markup_helper(Dialog *dialog) {
     gtk_box_append(GTK_BOX(box), label("Common tags"));
     helper->examples = GTK_DROP_DOWN(gtk_drop_down_new_from_strings(
         (const char *const *)helper->config.descriptions));
-    gtk_accessible_update_property(GTK_ACCESSIBLE(helper->examples),
-        GTK_ACCESSIBLE_PROPERTY_LABEL, "Common SSML tags", -1);
+    jsti_accessible_set_name(GTK_WIDGET(helper->examples), "Common SSML tags");
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(helper->examples));
     helper->example = GTK_TEXT_VIEW(gtk_text_view_new());
     gtk_text_view_set_editable(helper->example, FALSE);
@@ -661,7 +660,7 @@ static Dialog *make_dialog(GtkWindow *owner, const char *record, const char *his
     gtk_window_set_child(dialog->window, box);
     gtk_box_append(GTK_BOX(box), label("Source"));
     dialog->source = GTK_DROP_DOWN(gtk_drop_down_new_from_strings((const char *const *)configuration.names));
-    gtk_accessible_update_property(GTK_ACCESSIBLE(dialog->source), GTK_ACCESSIBLE_PROPERTY_LABEL, "Voice text source", -1);
+    jsti_accessible_set_name(GTK_WIDGET(dialog->source), "Voice text source");
     GtkWidget *source_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_set_hexpand(GTK_WIDGET(dialog->source), TRUE);
     gtk_box_append(GTK_BOX(source_row), GTK_WIDGET(dialog->source));

@@ -253,6 +253,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         }
     }
     var operationWaiters: [CheckedContinuation<Void, Never>] = []
+    /// API key identifiers whose last provider check failed, for the API Keys Errors filter.
+    var apiKeyCheckFailures: Set<String> = []
     var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     package var transcript = ""
     package var hotKeySession = DesktopHostHotKeySessionState()

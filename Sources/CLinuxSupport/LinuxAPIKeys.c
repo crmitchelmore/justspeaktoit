@@ -4,12 +4,13 @@
 
 typedef struct {
     GtkWindow *window;
-    AdwComboRow *provider;
+    AdwComboRow *provider, *filter;
     AdwPasswordEntryRow *key;
     AdwActionRow *details;
     GtkLabel *message;
     GtkWidget *save, *check, *remove, *refresh, *website;
     GPtrArray *rows;
+    GArray *visible; /* Provider combo position -> row index for the current filter. */
     gchar *identity, *selection_epoch, *request;
     gboolean pending, suppress;
 } Form;
@@ -23,6 +24,13 @@ static gpointer context;
 static gchar *current_request;
 static gboolean opened;
 
+/* SpeakCore's APIKeyStatusFilter cases in order. Rows carry a host-computed
+ * mask with bit i set when they pass case i, so the predicate stays shared. */
+static const char *const filter_names[] = { "All", "Errors", "Set", "Unset", NULL };
+static const char *const empty_messages[] = {
+    "No provider keys are available.", "No key failed its last check.", "No API key is saved yet.",
+    "Every provider has a saved key."
+};
 static gboolean same(const char *first, const char *second) {
     return first != NULL && second != NULL && g_ascii_strcasecmp(first, second) == 0;
 }
@@ -62,12 +70,38 @@ static void row_free(gpointer data) {
 }
 static const JSTILinuxAPIKeyRow *selected(Form *form) {
     guint index = adw_combo_row_get_selected(form->provider);
-    return form->rows != NULL && index < form->rows->len ? g_ptr_array_index(form->rows, index) : NULL;
+    if (form->rows == NULL || form->visible == NULL || index >= form->visible->len) return NULL;
+    guint row = g_array_index(form->visible, guint, index);
+    return row < form->rows->len ? g_ptr_array_index(form->rows, row) : NULL;
+}
+static guint filter_index(Form *form) {
+    guint index = adw_combo_row_get_selected(form->filter);
+    return index < G_N_ELEMENTS(empty_messages) ? index : 0;
+}
+/* Lists the rows passing the chosen filter, keeping `keep` selected if visible. */
+static void rebuild(Form *form, const char *keep) {
+    guint filter = filter_index(form), selection = 0;
+    GtkStringList *names = gtk_string_list_new(NULL);
+    if (form->visible != NULL) g_array_set_size(form->visible, 0);
+    else form->visible = g_array_new(FALSE, FALSE, sizeof(guint));
+    for (guint index = 0; form->rows != NULL && index < form->rows->len; ++index) {
+        const JSTILinuxAPIKeyRow *row = g_ptr_array_index(form->rows, index);
+        if ((row->filters & (1u << filter)) == 0) continue;
+        if (g_strcmp0(keep, row->identifier) == 0) selection = form->visible->len;
+        gtk_string_list_append(names, row->label);
+        g_array_append_val(form->visible, index);
+    }
+    form->suppress = TRUE;
+    adw_combo_row_set_model(form->provider, G_LIST_MODEL(names));
+    if (form->visible->len > 0) adw_combo_row_set_selected(form->provider, selection);
+    g_object_unref(names);
+    form->suppress = FALSE;
 }
 static void enable(Form *form) {
     const JSTILinuxAPIKeyRow *row = selected(form);
     gboolean available = idle && !form->pending;
     gtk_widget_set_sensitive(GTK_WIDGET(form->provider), available);
+    gtk_widget_set_sensitive(GTK_WIDGET(form->filter), available);
     gtk_widget_set_sensitive(GTK_WIDGET(form->key), available && row != NULL);
     gtk_widget_set_sensitive(form->save, available && row != NULL);
     gtk_widget_set_sensitive(form->check, available && row != NULL);
@@ -79,8 +113,9 @@ static void show_selection(Form *form) {
     gtk_editable_set_text(GTK_EDITABLE(form->key), "");
     g_free(form->selection_epoch); form->selection_epoch = g_uuid_string_random();
     const JSTILinuxAPIKeyRow *row = selected(form);
-    gchar *detail = row == NULL ? g_strdup("Refresh to load the shared provider catalogue.")
-        : g_strdup_printf("%s\n%s\n%s", row->uses, row->status, row->hint);
+    gchar *detail = row != NULL ? g_strdup_printf("%s\n%s\n%s", row->uses, row->status, row->hint)
+        : form->rows != NULL && form->rows->len > 0 ? g_strdup(empty_messages[filter_index(form)])
+        : g_strdup("Refresh to load the shared provider catalogue.");
     adw_action_row_set_subtitle(form->details, detail);
     g_free(detail);
     enable(form);
@@ -88,6 +123,14 @@ static void show_selection(Form *form) {
 static void selection_changed(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; Form *form = data;
     if (!form->suppress) show_selection(form);
+}
+static void filter_changed(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; Form *form = data;
+    const JSTILinuxAPIKeyRow *row = selected(form);
+    gchar *keep = row == NULL ? NULL : g_strdup(row->identifier);
+    rebuild(form, keep);
+    g_free(keep);
+    show_selection(form);
 }
 static void request(Form *form, gint action) {
     if (form->pending || !idle) return;
@@ -189,6 +232,7 @@ static void form_free(gpointer data) {
     Form *form = data;
     retire(form);
     g_clear_pointer(&form->rows, g_ptr_array_unref);
+    if (form->visible != NULL) g_array_unref(form->visible);
     g_free(form->identity); g_free(form->selection_epoch); g_free(form->request); g_free(form);
 }
 void jsti_api_keys_close(void) {
@@ -243,6 +287,12 @@ void jsti_api_keys_open(GtkWindow *owner) {
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(group),
         "Opening and refreshing read your desktop keyring, not the provider. Save validates before storing; "
         "Check key also contacts the selected provider. Stored keys are never shown or prefilled.");
+    form->filter = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(form->filter), "Show");
+    GtkStringList *filters = gtk_string_list_new(filter_names);
+    adw_combo_row_set_model(form->filter, G_LIST_MODEL(filters));
+    g_object_unref(filters);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), GTK_WIDGET(form->filter));
     form->provider = ADW_COMBO_ROW(adw_combo_row_new());
     adw_combo_row_set_enable_search(form->provider, TRUE);
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(form->provider), "Provider");
@@ -288,6 +338,7 @@ void jsti_api_keys_open(GtkWindow *owner) {
     gtk_box_append(GTK_BOX(secondary), form->refresh); gtk_box_append(GTK_BOX(secondary), form->website);
     gtk_box_append(GTK_BOX(column), secondary);
     g_signal_connect(form->provider, "notify::selected", G_CALLBACK(selection_changed), form);
+    g_signal_connect(form->filter, "notify::selected", G_CALLBACK(filter_changed), form);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), column);
     adw_window_set_content(ADW_WINDOW(form->window), toolbar);
     g_mutex_lock(&lock); opened = TRUE; g_mutex_unlock(&lock);
@@ -330,19 +381,9 @@ static void delivery_apply(gpointer data) {
     gchar *identifier = before == NULL ? NULL : g_strdup(before->identifier);
     g_clear_pointer(&form->rows, g_ptr_array_unref);
     form->rows = g_ptr_array_ref(value->rows);
-    GtkStringList *names = gtk_string_list_new(NULL);
-    guint selection = 0;
-    for (guint index = 0; index < form->rows->len; ++index) {
-        const JSTILinuxAPIKeyRow *row = g_ptr_array_index(form->rows, index);
-        gtk_string_list_append(names, row->label);
-        if (g_strcmp0(identifier, row->identifier) == 0) selection = index;
-    }
+    rebuild(form, identifier);
     g_free(identifier);
-    form->suppress = TRUE;
-    adw_combo_row_set_model(form->provider, G_LIST_MODEL(names));
-    adw_combo_row_set_selected(form->provider, selection);
-    g_object_unref(names);
-    form->suppress = FALSE; form->pending = FALSE;
+    form->pending = FALSE;
     gtk_label_set_text(form->message, value->message);
     show_selection(form);
 }
@@ -357,7 +398,8 @@ static Delivery *delivery_copy(const JSTILinuxAPIKeyRow *rows, gsize count, cons
         gboolean valid = text_valid(row->identifier, 128) && row->identifier[0] != '\0' &&
             text_valid(row->label, 512) && row->label[0] != '\0' && text_valid(row->uses, 1024) &&
             text_valid(row->status, 2048) && text_valid(row->hint, 4096) && text_valid(row->url, 2048) &&
-            (row->url[0] == '\0' || g_str_has_prefix(row->url, "https://")) && (row->saved == 0 || row->saved == 1);
+            (row->url[0] == '\0' || g_str_has_prefix(row->url, "https://")) && (row->saved == 0 || row->saved == 1) &&
+            row->filters < (1u << G_N_ELEMENTS(empty_messages));
         for (gsize previous = 0; valid && previous < index; ++previous)
             valid = g_strcmp0(rows[previous].identifier, row->identifier) != 0;
         if (!valid) { delivery_free(value); return NULL; }
@@ -365,6 +407,7 @@ static Delivery *delivery_copy(const JSTILinuxAPIKeyRow *rows, gsize count, cons
         copy->identifier = g_strdup(row->identifier); copy->label = g_strdup(row->label);
         copy->uses = g_strdup(row->uses); copy->status = g_strdup(row->status);
         copy->hint = g_strdup(row->hint); copy->url = g_strdup(row->url); copy->saved = row->saved;
+        copy->filters = row->filters;
         g_ptr_array_add(value->rows, copy);
     }
     return value;
@@ -402,13 +445,23 @@ int32_t jsti_api_keys_self_test(GtkWindow *owner, char *error, size_t capacity) 
     jsti_api_keys_set_idle(TRUE);
     jsti_api_keys_open(owner);
     JSTILinuxAPIKeyRow rows[] = {
-        { "first.apiKey", "First", "Transcription", "Not set", "https://example.invalid/keys", "Paste a key", 0 },
-        { "second.apiKey", "Second", "Voice Output", "Saved suffix", "", "Paste a key", 1 }
+        { "first.apiKey", "First", "Transcription", "Not set", "https://example.invalid/keys", "Paste a key", 0, 0x9 },
+        { "second.apiKey", "Second", "Voice Output", "Saved suffix", "", "Paste a key", 1, 0x5 }
     };
     gboolean valid = fixture.calls == 1 && fixture.action == JSTI_LINUX_API_KEY_REFRESH && active->pending;
     gchar *uppercase = g_ascii_strup(fixture.request, -1);
     Delivery *value = delivery_copy(rows, 2, uppercase, "Synthetic key states");
     delivery_apply(value); delivery_free(value); g_free(uppercase);
+    adw_combo_row_set_selected(active->filter, 2);
+    const JSTILinuxAPIKeyRow *shown = selected(active);
+    valid = valid && active->visible->len == 1 && shown != NULL && g_strcmp0(shown->identifier, "second.apiKey") == 0;
+    adw_combo_row_set_selected(active->filter, 1);
+    valid = valid && active->visible->len == 0 && selected(active) == NULL && !gtk_widget_get_sensitive(active->save);
+    adw_combo_row_set_selected(active->filter, 3);
+    shown = selected(active);
+    valid = valid && active->visible->len == 1 && shown != NULL && g_strcmp0(shown->identifier, "first.apiKey") == 0;
+    adw_combo_row_set_selected(active->filter, 0);
+    valid = valid && active->visible->len == 2 && adw_combo_row_get_selected(active->provider) == 0;
     valid = valid && !active->pending && gtk_window_get_modal(active->window) &&
         !gtk_widget_get_sensitive(active->remove);
     gtk_editable_set_text(GTK_EDITABLE(active->key), "discard-on-selection");

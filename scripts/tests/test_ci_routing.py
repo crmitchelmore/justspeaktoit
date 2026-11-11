@@ -49,7 +49,7 @@ PATHS = [
     'Sources/SpeakWindows/App.swift', 'Sources/SpeakWindowsPlatform/P.swift', 'Sources/CWindowsSupport/x.cpp',
     'Tests/SpeakWindowsPlatformTests/T.swift', 'scripts/typecheck-windows-swift.sh',
     # Scripts the Swift jobs run, the API gate and other tooling.
-    'scripts/affected-swift-tests.py', 'scripts/retry-network.sh', 'scripts/retry-xctest-crash.py',
+    'scripts/ci/affected-swift-tests.py', 'scripts/retry-network.sh', 'scripts/retry-xctest-crash.py',
     'scripts/with-test-keychain.py', 'scripts/private-test-keychain.py', 'scripts/verify-portable-core-boundary.py',
     'scripts/collect-macos-sample-contract.py', 'scripts/collect-macos-xctest-crashes.py',
     'scripts/prepare-mac-cli-symbols.sh', 'scripts/tests/brand-assets.test.mjs',

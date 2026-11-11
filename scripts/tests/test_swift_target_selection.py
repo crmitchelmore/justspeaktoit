@@ -1,6 +1,6 @@
 """Characterises the SwiftPM test-target selection shared by pre-pr and CI.
 
-scripts/affected-swift-tests.py (ci.yml's macOS job) and scripts/pre-pr walk the
+scripts/ci/affected-swift-tests.py (ci.yml's macOS job) and scripts/pre-pr walk the
 same target graph. This truth table pins what both select for representative
 changes over a snapshot of the real package graph, so refactoring the shared
 graph code cannot quietly change which tests CI or pre-pr runs.

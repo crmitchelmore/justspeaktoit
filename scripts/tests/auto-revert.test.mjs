@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { canAffect, classifyFailure, prNumber, redEpisode, revertedShas, selectCulprits, shouldRevert, TRAILER } from '../auto-revert.mjs';
+import { canAffect, classifyFailure, prNumber, redEpisode, revertedShas, selectCulprits, shouldRevert, TRAILER } from '../ci/auto-revert.mjs';
 
-const script = fileURLToPath(new URL('../auto-revert.mjs', import.meta.url));
+const script = fileURLToPath(new URL('../ci/auto-revert.mjs', import.meta.url));
 const workflow = readFileSync(new URL('../../.github/workflows/auto-revert.yml', import.meta.url), 'utf8');
 const sha = n => String(n).repeat(40).slice(0, 40);
 
@@ -109,7 +109,7 @@ test('the gate rejects any extra change, a missing trailer or a non-main commit'
 
 test('the workflow keeps its trust boundary', () => {
     assert.match(workflow, /^  gate:\n    name: CI Gate\n    if: github\.event_name == 'workflow_dispatch' && startsWith\(github\.ref, 'refs\/heads\/auto-revert\/'\)$/m);
-    assert.match(workflow, /git show origin\/main:scripts\/auto-revert\.mjs/, 'the verifier comes from main');
+    assert.match(workflow, /git show origin\/main:scripts\/ci\/auto-revert\.mjs/, 'the verifier comes from main');
     const gate = workflow.split('\n  gate:\n')[1];
     assert.doesNotMatch(gate, /permissions:\s*\n\s+contents: write|secrets\./);
     assert.match(workflow, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);

@@ -537,7 +537,7 @@
   }
  },
  {
-  "path": "scripts/affected-swift-tests.py",
+  "path": "scripts/ci/affected-swift-tests.py",
   "pre_pr": [
    "ci-lint",
    "swift"

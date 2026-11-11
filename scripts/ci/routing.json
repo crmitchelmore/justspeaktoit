@@ -26,7 +26,7 @@
         "Tests/**",
         "Config/**",
         "Resources/**",
-        "scripts/affected-swift-tests.py",
+        "scripts/ci/affected-swift-tests.py",
         "scripts/retry-network.sh",
         "scripts/retry-xctest-crash.py",
         "scripts/with-test-keychain.py",

@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { assessCIGates as assessOracle, gateJobs } from '../verify-ci-gates.mjs';
+import { assessCIGates as assessOracle, gateJobs } from '../ci/verify-ci-gates.mjs';
 
 const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const tesslWorkflow = readFileSync(

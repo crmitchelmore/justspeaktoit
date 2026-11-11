@@ -44,6 +44,25 @@ final class SharedClientAudioProcessor: @unchecked Sendable {
     }
   }
 
+  /// Installs the capture tap that feeds `client` PCM16 mono at `sampleRate`.
+  /// The caller's failed-start path removes the tap and stops the engine.
+  func installTap(on inputNode: AVAudioInputNode, sampleRate: Int, client: StreamingTranscriptionClient) throws {
+    inputNode.removeTap(onBus: 0)
+    let inputFormat = inputNode.outputFormat(forBus: 0)
+    guard audioInputFormatIsUsable(inputFormat) else {
+      throw TranscriptionManagerError.noUsableAudioInput
+    }
+    guard let targetFormat = AVAudioFormat(
+      commonFormat: .pcmFormatInt16, sampleRate: Double(sampleRate), channels: 1, interleaved: true
+    ), AVAudioConverter(from: inputFormat, to: targetFormat) != nil else {
+      throw TranscriptionManagerError.noUsableAudioInput
+    }
+    setRunning(true)
+    try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: inputFormat) { [self] buffer, _ in
+      handleAudioTap(buffer, inputFormat: inputFormat, outputFormat: targetFormat, client: client)
+    }
+  }
+
   func handleAudioTap(
     _ buffer: AVAudioPCMBuffer,
     inputFormat: AVAudioFormat,

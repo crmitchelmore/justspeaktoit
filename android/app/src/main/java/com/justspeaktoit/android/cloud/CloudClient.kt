@@ -109,7 +109,7 @@ class CloudClient(
                 conn.errorStream?.close()
                 throw CloudException(CloudWire.failureForStatus(status), "HTTP $status")
             }
-            return conn.inputStream.bufferedReader().use { it.readText() }
+            return conn.inputStream.use { CloudWire.readBody(it) }
         } catch (e: IOException) {
             throw CloudException(CloudWire.failureForIo(e), "Network error", e)
         } finally {

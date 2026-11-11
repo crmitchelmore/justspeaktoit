@@ -34,6 +34,8 @@ final class LinuxEventContext: DesktopNativeEventHolder, @unchecked Sendable {
     let historyPaste = DesktopHistoryPasteAdmission()
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
+    /// General > System resources in use; started with the microphone monitor it probes through.
+    lazy var systemResources = LinuxSystemResources.makeMonitor()
     /// Set before the window opens, when iCloud sync is configured.
     var cloudSync: LinuxCloudSync?
     /// Sidebar settings search; read and written on the GTK main thread only.

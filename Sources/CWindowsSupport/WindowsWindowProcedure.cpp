@@ -304,6 +304,13 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 jsti_show_automation_settings(window, automationShownEnabled, requestAutomationToggle);
             }
             return 0;
+        case systemResourcesID:
+            if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(window)) {
+                jsti_show_system_resources(window, [](HWND owner, int event, const char *text) {
+                    emit(owner, event, text ? text : "");
+                });
+            }
+            return 0;
         case automationID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             emit(window, JSTI_EVENT_AUTOMATION_TOGGLED, automationShownEnabled() ? "0" : "1");

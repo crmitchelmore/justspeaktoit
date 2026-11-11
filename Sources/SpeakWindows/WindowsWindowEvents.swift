@@ -35,6 +35,7 @@ private func sharedWindowEvent(
     if issueReportWindowEvent(event, value: value, included: index == 1, holder: holder) { return }
     if actionWindowEvent(event, value: value, holder: holder) { return }
     if holder.settingsSearch.handle(event, query: value, row: index) { return }
+    if windowsSystemResourcesEvent(event, value: value, holder: holder) { return }
     if inputWindowEvent(event, value: value, index: index, holder: holder) { return }
     // Otherwise a shared event this window never sends, such as Linux's closing window.
 }
@@ -246,6 +247,7 @@ private func ready(_ holder: WindowsEventContext) {
         }
         let controller = holder.controller
         holder.enqueueSettings { await controller.refreshLoginItem() }
+        holder.systemResources.start()
         return
     }
     do {

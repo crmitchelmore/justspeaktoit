@@ -22,6 +22,8 @@ final class WindowsEventContext: DesktopNativeEventHolder {
     let postProcessingPicker = DesktopPostProcessingPicker()
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
     lazy var automation = WindowsAutomationSwitch(controller: controller)
+    lazy var systemResources = WindowsSystemResources.makeMonitor()
+    let hotKeyResource = WindowsHotKeyResource()
     lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
         guard let self else { return }
         self.enqueueSettings { await self.controller.saveProfiles(profiles) }
@@ -186,6 +188,8 @@ enum SpeakWindowsMain {
         )
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: holder.callbackContext)
+        // Before the window registers the shortcut, so its first registration is held.
+        holder.hotKeyResource.start()
         try await configureHotKey(holder)
         guard await WindowsNative.configureActionShortcuts(holder) else {
             throw WindowsNativeError(message: "Could not configure action shortcuts.")
@@ -207,6 +211,7 @@ enum SpeakWindowsMain {
     // swiftlint:disable:next function_body_length
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
         defer { holder.cancelIssueReports() }
+        defer { holder.hotKeyResource.stop() }
         try WindowsNative.configureAbout()
         let providerCallbacks = try WindowsNative.beginVoiceProviderCallbacks(holder)
         defer { WindowsNative.endVoiceProviderCallbacks(providerCallbacks) }
@@ -232,6 +237,7 @@ enum SpeakWindowsMain {
             }
         } catch { windowFailure = error }
         holder.cancelIssueReports()
+        holder.systemResources.stop()
         let monitor = holder.microphoneMonitor
         await Task.detached { monitor?.stop() }.value
         holder.microphoneMonitor = nil

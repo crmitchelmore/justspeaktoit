@@ -100,9 +100,8 @@ final class LinuxShortcuts: @unchecked Sendable {
             name: "Ctrl+Alt+Space",
             hint: "Ctrl+Alt+Space starts or stops dictation in any app. "
                 + "You can also bind `\(toggleCommand) --toggle` in your keyboard settings.",
-            cleanup: {
+            cleanup: Self.holding("Ctrl+Alt+Space", through: "an X11 key grab", callbacks) {
                 jsti_x11_hotkey_stop()
-                callbacks.unregister()
             }
         )
     }
@@ -126,11 +125,24 @@ final class LinuxShortcuts: @unchecked Sendable {
             name: bound.isEmpty ? "the dictation shortcut" : bound,
             hint: (bound.isEmpty ? "Your desktop's dictation shortcut" : bound)
                 + " starts or stops dictation. Change it in your desktop's keyboard settings.",
-            cleanup: {
+            cleanup: Self.holding(bound, through: "the desktop's GlobalShortcuts portal", callbacks) {
                 jsti_shortcuts_stop()
-                callbacks.unregister()
             }
         )
+    }
+
+    /// Lists the listener in System resources in use until its native
+    /// registration retires: `stop` detaches it, then its callbacks become no-ops.
+    private static func holding(
+        _ name: String, through mechanism: String, _ callbacks: NativeCallbackContext<LinuxShortcutCallback>,
+        stop: @escaping @Sendable () -> Void
+    ) -> @Sendable () -> Void {
+        let hold = LinuxSystemResources.acquireHotKey(name: name, mechanism: mechanism)
+        return {
+            stop()
+            callbacks.unregister()
+            hold.end()
+        }
     }
 }
 

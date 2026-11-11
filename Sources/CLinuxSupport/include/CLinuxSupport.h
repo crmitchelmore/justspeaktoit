@@ -23,6 +23,7 @@
 #include "LinuxClipboard.h"
 #include "LinuxCredentials.h"
 #include "LinuxCloudSync.h"
+#include "LinuxSystemResources.h"
 #include "LinuxAudioCapture.h"
 #include "LinuxAudioPlayback.h"
 #include "LinuxPrivateFiles.h"

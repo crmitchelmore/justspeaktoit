@@ -87,7 +87,6 @@ final class KeyboardHandoffRecording {
 
     private func clearActiveRequest() {
         activeRequestID = nil
-        AudioSessionManager.activeSessionHold = nil
         activeProfile = nil
     }
 

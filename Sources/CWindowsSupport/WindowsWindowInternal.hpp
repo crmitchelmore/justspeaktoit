@@ -97,6 +97,8 @@ void jsti_show_vocabulary_result(HWND owner, const char *record, void (*emit)(in
 bool jsti_vocabulary_self_test(HWND owner, std::string &error);
 void jsti_show_automation_settings(HWND owner, bool (*enabled)(), void (*toggle)(HWND owner));
 bool jsti_automation_settings_self_test(HWND owner, std::string &error);
+void jsti_show_system_resources(HWND owner, void (*emit)(HWND owner, int event, const char *text));
+bool jsti_system_resources_self_test(HWND owner, std::string &error);
 
 int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity);
 // WindowsWindowBridge.cpp; also called by the action shortcuts and the self-test.
@@ -154,6 +156,9 @@ constexpr int backupInspectID = 468;
 constexpr int backupRestoreID = 476;
 constexpr int backupProfilesID = 469;
 constexpr int automationSettingsID = 489;
+// Opens System resources in use. It stays enabled while recording: releasing
+// the microphone mid-recording is what it is for.
+constexpr int systemResourcesID = 498;
 constexpr int sourceID = 175;
 constexpr int comparisonID = 183;
 // Model modes: bit 0 is live, bit 1 is local (on-device).

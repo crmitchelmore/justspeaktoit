@@ -35,6 +35,14 @@ public struct DeepgramTTSAPI: Sendable {
     /// Aura-1 pay-as-you-go: $0.015 per 1,000 characters.
     public static let aura1CostPerThousandCharacters = Decimal(string: "0.015")!
 
+    /// The Aura rate for a catalogue or provider voice ID; nil for Flux voices.
+    public static func costPerThousandCharacters(forVoiceID voiceID: String) -> Decimal? {
+        let bare = voiceID.hasPrefix("deepgram/") ? String(voiceID.dropFirst("deepgram/".count)) : voiceID
+        if bare.hasPrefix("flux-") { return nil }
+        return DeepgramTTSCatalog.voice(forID: bare)?.model == .aura1
+            ? aura1CostPerThousandCharacters : costPerThousandCharacters
+    }
+
     private let session: URLSession
 
     public init(session: URLSession = .shared) {

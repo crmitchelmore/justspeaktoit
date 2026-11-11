@@ -63,7 +63,7 @@ unsigned pagesOf(int identifier) {
     case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
     case backupAudioID: case backupProfilesID: case backupExportID: case backupInspectID:
     case backupRestoreID:
-    case automationSettingsID:
+    case automationSettingsID: case systemResourcesID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
@@ -454,6 +454,7 @@ void layoutSettings(HWND window, const RECT &content) {
         top = y + 2 * row + scale(window, 12) + densitySpace(window, 20, visualDensity.card_padding) + gap;
         // The Mac's App Behaviour card. The note appears only when the system
         // decides Launch at login, so the page still fits the minimum height.
+        const int appBehaviourTop = top;
         y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", loginItemNote(),
                                3 * row + scale(window, 24));
         label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
@@ -462,6 +463,8 @@ void layoutSettings(HWND window, const RECT &content) {
                                          y + 2 * row + scale(window, 12)});
         place(window, automationSettingsID, box(right - scale(window, 220), y + row + scale(window, 12),
                                                 scale(window, 220), row));
+        place(window, systemResourcesID, box(right - scale(window, 220),
+            appBehaviourTop + densitySpace(window, 16, visualDensity.card_padding), scale(window, 220), row));
         label(recordingsFolderLabelID, y + 2 * row + scale(window, 24));
         control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 110));
         place(window, audioCleanupID, RECT{

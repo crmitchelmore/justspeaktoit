@@ -192,6 +192,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Launch at &login", BS_PUSHBUTTON | WS_TABSTOP, loginItemID) &&
         add(L"BUTTON", L"Allow &automation (speak command and MCP)", BS_PUSHBUTTON | WS_TABSTOP, automationID) &&
         add(L"BUTTON", L"CLI and MCP s&etup…", BS_PUSHBUTTON | WS_TABSTOP, automationSettingsID) &&
+        add(L"BUTTON", L"System resources in &use…", BS_PUSHBUTTON | WS_TABSTOP, systemResourcesID) &&
         add(L"STATIC", L"Recording storage", 0, recordingsFolderLabelID) &&
         add(L"BUTTON", L"Open &folder", BS_PUSHBUTTON | WS_TABSTOP, recordingsFolderID) &&
         add(L"BUTTON", L"Delete all a&udio...", BS_PUSHBUTTON | WS_TABSTOP, audioCleanupID) &&

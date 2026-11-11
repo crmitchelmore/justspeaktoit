@@ -85,7 +85,11 @@ enum JSTIWindowEvent {
      * SETTINGS_SEARCH_OPEN: model_index is the chosen row of the last results and
      * text its identifier; the box has already been cleared and closed. */
     JSTI_EVENT_SETTINGS_SEARCH = 160,
-    JSTI_EVENT_SETTINGS_SEARCH_OPEN = 161
+    JSTI_EVENT_SETTINGS_SEARCH_OPEN = 161,
+    /* General > App behaviour > "System resources in use" (WindowsSystemResources.h):
+     * RELEASE's text is the row's id. */
+    JSTI_EVENT_SYSTEM_RESOURCE_RELEASE = 170,
+    JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL = 171
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index

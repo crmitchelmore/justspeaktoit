@@ -137,6 +137,7 @@ GtkWidget *build_general(void) {
     g_signal_connect(general_page()->automation_row, "notify::active", G_CALLBACK(on_automation), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(automation), GTK_WIDGET(general_page()->automation_row));
     gtk_box_append(GTK_BOX(column), automation);
+    gtk_box_append(GTK_BOX(column), jsti_system_resources_group_new());
 
     GtkWidget *appearance = group("Appearance");
     const char *schemes[] = { "Follow the system", "Light", "Dark", NULL };

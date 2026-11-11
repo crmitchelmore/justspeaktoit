@@ -51,6 +51,8 @@ package enum DesktopNativeWindowEvent: Int32, CaseIterable, Sendable {
     case historyLoadMore = 156
     case settingsSearch = 160            // text: query
     case settingsSearchOpen = 161        // index: chosen row
+    case systemResourceRelease = 170     // text: the row's id
+    case systemResourcesReleaseAll = 171
 
     /// Issue report preview actions that carry a preview ticket.
     package var isIssueReportAction: Bool { (151...155).contains(rawValue) }

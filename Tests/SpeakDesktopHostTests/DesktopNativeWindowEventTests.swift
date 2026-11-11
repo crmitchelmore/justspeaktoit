@@ -19,6 +19,8 @@ final class DesktopNativeWindowEventTests: XCTestCase {
         XCTAssertEqual(LinuxCode(1), .shared(.toggleRecording))
         XCTAssertEqual(WindowsCode(24), .host(.readAloud))
         XCTAssertEqual(LinuxCode(40), .host(.readAloud))
+        XCTAssertEqual(WindowsCode(170), .shared(.systemResourceRelease))
+        XCTAssertEqual(LinuxCode(171), .shared(.systemResourcesReleaseAll))
         // Each host's own numbers mean nothing to the other.
         XCTAssertEqual(LinuxCode(24), .unknown(24))
         XCTAssertEqual(WindowsCode(40), .unknown(40))

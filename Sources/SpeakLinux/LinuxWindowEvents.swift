@@ -34,6 +34,7 @@ private func linuxSharedEvent(
     if linuxIssueReportEvent(event, value: value, index: index, holder: holder) { return }
     if linuxActionEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxSettingsSearchEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxSystemResourcesEvent(event, value: value, holder: holder) { return }
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryManagementEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }
@@ -299,6 +300,7 @@ private func linuxReady(_ holder: LinuxEventContext) { // swiftlint:disable:this
         do { try holder.microphones.start() } catch {
             LinuxHostPlatform.update("Microphone changes will not be noticed: \(error.localizedDescription)")
         }
+        holder.systemResources.start()
         return
     }
     do {

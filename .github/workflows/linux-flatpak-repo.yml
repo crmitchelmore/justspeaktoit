@@ -22,7 +22,10 @@ on:
       manifest:
         description: Alpha tag to publish (blank rehearses the newest Alpha with a Linux bundle)
         type: string
-  pull_request:
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
+  push:
+    branches: [main]
     paths:
       - scripts/linux-flatpak-repo.py
       - scripts/tests/test_linux_flatpak_repo.py

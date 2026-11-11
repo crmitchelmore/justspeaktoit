@@ -1,6 +1,9 @@
 name: Audit or repair Mac review notes
 on:
-  pull_request:
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
+  push:
+    branches: [main]
     paths:
       - .github/workflows/mac-review-notes.yml
       - scripts/mac-review-notes.rb

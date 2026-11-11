@@ -1,24 +1,8 @@
 name: Desktop Icon Resources
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - .gitattributes
-      - Resources/AppIcon.iconset/**
-      - Resources/Desktop/**
-      - Sources/CWindowsSupport/**
-      - Sources/CLinuxSupport/**
-      - Sources/SpeakLinux/**
-      - Package.swift
-      - packaging/linux/**
-      - scripts/generate-icon.swift
-      - scripts/generate-desktop-icons.py
-      - scripts/stage-linux-desktop.py
-      - scripts/tests/test_desktop_icons.py
-      - scripts/windows-package/**
-      - scripts/windows-bundle/**
-      - .github/workflows/desktop-icons.yml
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
   push:
     branches: [main]
     paths:

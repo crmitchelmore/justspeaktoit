@@ -45,35 +45,8 @@ on:
       - Resources/AppIcon.iconset/**
       - .github/workflows/windows-arm64.yml
       - .github/workflows/windows-local-runtime.yml
-  pull_request:
-    branches: [main]
-    # Pull requests build this platform only when its own sources, native
-    # dependencies, packaging or workflow change. Shared Swift is proven on
-    # pull requests by ci.yml's required Portable Swift (Linux) gate; the full
-    # path set below runs on merge-batch heads and main.
-    paths:
-      - .gitattributes
-      - Package.swift
-      - Resources/Desktop/**
-      - scripts/generate-desktop-icons.py
-      - scripts/tests/test_desktop_icons.py
-      - Sources/CLlamaCpp/**
-      - Sources/CMigrationArchive/**
-      - Sources/CRecordingFileSupport/**
-      - Sources/SpeakWindows/**
-      - Sources/SpeakWindowsPlatform/**
-      - Sources/CWindowsSupport/**
-      - Sources/CWindowsAutomation/**
-      - Tests/SpeakWindowsPlatformTests/**
-      - scripts/verify-portable-core-boundary.py
-      - scripts/websocket-loopback-probe.py
-      - scripts/windows-bundle/**
-      - scripts/windows-cross/**
-      - scripts/windows-local-runtime/**
-      - scripts/windows-package/**
-      - Resources/AppIcon.iconset/**
-      - .github/workflows/windows-arm64.yml
-      - .github/workflows/windows-local-runtime.yml
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
   workflow_dispatch:
 
 permissions:

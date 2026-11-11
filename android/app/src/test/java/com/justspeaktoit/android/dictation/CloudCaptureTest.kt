@@ -115,13 +115,32 @@ class CloudCaptureTest {
     fun testCall_pastTheDeadline_failsAsNetworkTimeoutEvenIfTheBlockIgnoresTheAbort() {
         val error = assertThrows(CloudException::class.java) {
             runBlocking {
-                capture.call(20) {
-                    Thread.sleep(200)
-                    "late"
+                capture.call(20) { Thread.sleep(200) }
+            }
+        }
+        assertEquals(DictationFailure.NetworkTimeout, error.failure)
+    }
+
+    @Test
+    fun testCall_whenTheDeadlineAbortsTheRequest_failsAsNetworkTimeoutNotAsTheAbortError() {
+        val error = assertThrows(CloudException::class.java) {
+            runBlocking {
+                capture.call(20) { call ->
+                    while (!call.cancelled) Thread.sleep(5)
+                    // What a disconnected HttpURLConnection reports.
+                    throw CloudException(DictationFailure.Network, "Socket closed")
                 }
             }
         }
         assertEquals(DictationFailure.NetworkTimeout, error.failure)
+    }
+
+    @Test
+    fun testCall_blockFailureBeforeTheDeadline_isReportedAsIs() {
+        val error = assertThrows(CloudException::class.java) {
+            runBlocking { capture.call(1_000) { throw CloudException(DictationFailure.InvalidKey, "401") } }
+        }
+        assertEquals(DictationFailure.InvalidKey, error.failure)
     }
 
     @Test

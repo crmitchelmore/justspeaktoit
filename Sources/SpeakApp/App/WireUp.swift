@@ -375,7 +375,7 @@ enum WireUp {
       captureSource: captureSourceForLaunch()
     )
     if options.sweepsStagedLeftovers {
-      AudioFileManager.scheduleStagedLeftoverSweep(in: settings.recordingsDirectory)
+      RecordingFiles.scheduleStagedLeftoverSweep(in: settings.recordingsDirectory)
     }
     let secureStorage = buildSecureStorage(options: options, settings: settings, permissions: permissions)
     #if DEBUG

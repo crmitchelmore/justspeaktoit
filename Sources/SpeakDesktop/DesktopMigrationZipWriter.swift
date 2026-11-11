@@ -28,6 +28,9 @@ private final class MigrationZipSource {
 
 final class DesktopMigrationZipWriter {
     private let destination: MigrationZipDestination
+    /// Lent to the writer for its whole life. It calls `write` only inside its
+    /// own synchronous calls, so the box is freed once `jsti_zip_writer_close` returns.
+    private let destinationContext: NativeCallbackContext<MigrationZipDestination>
     private let writer: OpaquePointer
     private var budget = DataMigrationArchivePolicy.EntryBudget()
     private var finalized = false
@@ -42,18 +45,23 @@ final class DesktopMigrationZipWriter {
             file: file, limit: DataMigrationArchivePolicy.maximumArchiveBytes + overhead
         )
         var error = [CChar](repeating: 0, count: 512)
+        let context = NativeCallbackContext(destination)
         guard let opened = jsti_zip_writer_open(
-            Self.write, Unmanaged.passUnretained(destination).toOpaque(), indexMemoryBudget,
-            maximumEntries, &error, error.count
+            Self.write, context.pointer, indexMemoryBudget, maximumEntries, &error, error.count
         ) else {
+            context.release()
             if let failure = destination.failure { throw failure }
             throw DataMigrationError.invalid("Cannot create the ZIP export: \(String(cString: error))")
         }
         self.destination = destination
+        destinationContext = context
         writer = opened
     }
 
-    deinit { jsti_zip_writer_close(writer) }
+    deinit {
+        jsti_zip_writer_close(writer)
+        destinationContext.release()
+    }
 
     func add(_ data: Data, path: String) throws {
         guard UInt64(data.count) <= DataMigrationArchivePolicy.maximumJSONBytes else {
@@ -78,9 +86,10 @@ final class DesktopMigrationZipWriter {
         do {
             source.size = try handle.seekToEnd()
             try admit(path: path, bytes: source.size)
-            let result = jsti_zip_writer_add_file(
-                writer, path, source.size, Self.read, Unmanaged.passUnretained(source).toOpaque()
-            )
+            // Adding a file calls `read` only before it returns.
+            let result = NativeCallbackContext.withScoped(source) {
+                jsti_zip_writer_add_file(writer, path, source.size, Self.read, $0)
+            }
             if let failure = source.failure { throw failure }
             try check(result)
             guard source.count == source.size, try hasher.finish() == digest else {
@@ -125,8 +134,9 @@ final class DesktopMigrationZipWriter {
     }
 
     private static let write: jsti_zip_consume = { opaque, offset, buffer, count in
-        guard let opaque, let buffer else { return 0 }
-        let destination = Unmanaged<MigrationZipDestination>.fromOpaque(opaque).takeUnretainedValue()
+        guard let buffer, let destination = NativeCallbackContext<MigrationZipDestination>.resolve(opaque) else {
+            return 0
+        }
         do {
             try Task.checkCancellation()
             guard offset <= destination.limit, UInt64(count) <= destination.limit - offset else {
@@ -142,8 +152,7 @@ final class DesktopMigrationZipWriter {
     }
 
     private static let read: jsti_zip_read = { opaque, offset, buffer, count in
-        guard let opaque, let buffer else { return 0 }
-        let source = Unmanaged<MigrationZipSource>.fromOpaque(opaque).takeUnretainedValue()
+        guard let buffer, let source = NativeCallbackContext<MigrationZipSource>.resolve(opaque) else { return 0 }
         do {
             try Task.checkCancellation()
             guard offset == source.count, offset <= source.size else {

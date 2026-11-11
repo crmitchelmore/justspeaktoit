@@ -17,6 +17,9 @@ package final class WindowsOwnedCaptureDriver: DesktopOwnedCaptureDriver {
     private let fixtureFaults: UInt32?
     private var owner: OpaquePointer?
     private var bridge: DesktopOwnedCaptureCallbackBridge?
+    /// The context native capture calls back with. Freed only once retirement
+    /// confirms callbacks drained; otherwise kept empty for a late callback.
+    private var callbacks: NativeCallbackContext<DesktopOwnedCaptureCallbackBridge>?
     private var acquiredOwner = false
 
     init(fixtureFaults: UInt32?) { self.fixtureFaults = fixtureFaults }
@@ -26,15 +29,14 @@ package final class WindowsOwnedCaptureDriver: DesktopOwnedCaptureDriver {
         self.bridge = bridge
         var receipt = makeReceipt()
         var error = [CChar](repeating: 0, count: 1024)
-        let context = Unmanaged.passUnretained(bridge).toOpaque()
+        let callbacks = NativeCallbackContext(bridge)
+        self.callbacks = callbacks
+        let context = callbacks.pointer
         let audio: JSTIAudioCallback = { samples, count, value in
-            guard let value else { return }
-            Unmanaged<DesktopOwnedCaptureCallbackBridge>.fromOpaque(value).takeUnretainedValue()
-                .receivePCM(samples, count: count)
+            NativeCallbackContext<DesktopOwnedCaptureCallbackBridge>.resolve(value)?.receivePCM(samples, count: count)
         }
         let failed: JSTIAudioErrorCallback = { message, value in
-            guard let value else { return }
-            let bridge = Unmanaged<DesktopOwnedCaptureCallbackBridge>.fromOpaque(value).takeUnretainedValue()
+            guard let bridge = NativeCallbackContext<DesktopOwnedCaptureCallbackBridge>.resolve(value) else { return }
             bridge.fail(message.map { String(cString: $0) } ?? "Native capture failed without a diagnostic.")
         }
         let result: Int32 = bridge.id.uuidString.withCString { id in
@@ -52,6 +54,8 @@ package final class WindowsOwnedCaptureDriver: DesktopOwnedCaptureDriver {
             }
         }
         acquiredOwner = owner != nil
+        // Without an owner native capture never started, so nothing can call back.
+        if !acquiredOwner { releaseCallbacks(drained: true) }
         if result != 0 { throw DesktopPressCaptureError.openFailed(String(cString: error)) }
         guard owner != nil else { throw DesktopPressCaptureError.openFailed("Native open returned no owned handle.") }
     }
@@ -77,6 +81,7 @@ package final class WindowsOwnedCaptureDriver: DesktopOwnedCaptureDriver {
                 throw DesktopPressCaptureError.cleanupFailed("Native retirement returned no valid ownership receipt.")
             }
             self.bridge = nil
+            releaseCallbacks(drained: true)
             return .init(producerQuiesced: true, callbacksDrained: true, resourcesRetired: true)
         }
         var receipt = makeReceipt()
@@ -92,7 +97,15 @@ package final class WindowsOwnedCaptureDriver: DesktopOwnedCaptureDriver {
         }
         acquiredOwner = false
         self.bridge = nil
+        releaseCallbacks(drained: value.callbacksDrained)
         return value
+    }
+
+    /// Frees the callback box when native retirement confirmed callbacks
+    /// drained; otherwise only the bridge is released and the empty box stays.
+    private func releaseCallbacks(drained: Bool) {
+        callbacks?.retire(nativeQuiescent: drained)
+        callbacks = nil
     }
 
     private func makeReceipt() -> JSTIOwnedCaptureReceipt {

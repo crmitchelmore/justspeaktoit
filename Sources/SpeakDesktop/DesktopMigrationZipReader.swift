@@ -34,6 +34,9 @@ final class DesktopMigrationZipReader {
     }
 
     private let input: DesktopMigrationZipInput
+    /// Lent to the reader for its whole life. It calls `read` only inside its
+    /// own synchronous calls, so the box is freed once `jsti_zip_close` returns.
+    private let inputContext: NativeCallbackContext<DesktopMigrationZipInput>
     private let reader: OpaquePointer
     let entries: [Entry]
     private let entriesByPath: [String: Entry]
@@ -43,11 +46,13 @@ final class DesktopMigrationZipReader {
         let input = try DesktopMigrationZipInput(source)
         let size = try input.file.seekToEnd()
         var error = [CChar](repeating: 0, count: 512)
+        let context = NativeCallbackContext(input)
         let opened = jsti_zip_open(
-            size, Self.read, Unmanaged.passUnretained(input).toOpaque(), indexMemoryBudget,
+            size, Self.read, context.pointer, indexMemoryBudget,
             UInt32(DataMigrationArchivePolicy.maximumEntries), &error, error.count
         )
         guard let opened else {
+            context.release()
             if let failure = input.failure { throw failure }
             throw DataMigrationError.invalid("Cannot read the ZIP archive: \(String(cString: error))")
         }
@@ -55,14 +60,19 @@ final class DesktopMigrationZipReader {
             entries = try Self.list(opened)
         } catch {
             jsti_zip_close(opened)
+            context.release()
             throw error
         }
         self.input = input
+        inputContext = context
         reader = opened
         entriesByPath = Dictionary(uniqueKeysWithValues: entries.map { ($0.path, $0) })
     }
 
-    deinit { jsti_zip_close(reader) }
+    deinit {
+        jsti_zip_close(reader)
+        inputContext.release()
+    }
 
     func entry(named path: String) -> Entry? { entriesByPath[path] }
 
@@ -72,7 +82,10 @@ final class DesktopMigrationZipReader {
             throw DataMigrationError.invalid("Invalid or oversized archive entry.")
         }
         let output = DesktopMigrationZipOutput(limit: limit, consume: consume)
-        let succeeded = jsti_zip_extract(reader, entry.index, Self.write, Unmanaged.passUnretained(output).toOpaque())
+        // Extraction calls `write` only before it returns.
+        let succeeded = NativeCallbackContext.withScoped(output) {
+            jsti_zip_extract(reader, entry.index, Self.write, $0)
+        }
         if let failure = output.failure { throw failure }
         if let failure = input.failure { throw failure }
         guard succeeded != 0, output.count == entry.bytes else {
@@ -114,8 +127,7 @@ final class DesktopMigrationZipReader {
     }
 
     private static let read: jsti_zip_read = { opaque, offset, buffer, count in
-        guard let opaque, let buffer else { return 0 }
-        let input = Unmanaged<DesktopMigrationZipInput>.fromOpaque(opaque).takeUnretainedValue()
+        guard let buffer, let input = NativeCallbackContext<DesktopMigrationZipInput>.resolve(opaque) else { return 0 }
         do {
             try Task.checkCancellation()
             try input.file.seek(toOffset: offset)
@@ -131,8 +143,9 @@ final class DesktopMigrationZipReader {
     }
 
     private static let write: jsti_zip_consume = { opaque, offset, buffer, count in
-        guard let opaque, let buffer else { return 0 }
-        let output = Unmanaged<DesktopMigrationZipOutput>.fromOpaque(opaque).takeUnretainedValue()
+        guard let buffer, let output = NativeCallbackContext<DesktopMigrationZipOutput>.resolve(opaque) else {
+            return 0
+        }
         do {
             try Task.checkCancellation()
             guard offset == output.count, UInt64(count) <= output.limit - output.count else {

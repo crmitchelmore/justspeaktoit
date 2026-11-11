@@ -152,7 +152,14 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
 
       guard let transcriber else { throw OpenAIRealtimeError.encodingFailed }
 
-      audioProcessor.setRunning(true)
+      // Lost capture audio reaches the owner like a socket failure: once, with
+      // the transcript so far left on screen as recovery text.
+      audioProcessor.setRunning(true) { [weak self, weak transcriber] error in
+        Task { @MainActor [weak self, weak transcriber] in
+          guard let self, LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
+          self.delegate?.liveTranscriber(self, didFail: error)
+        }
+      }
       let processor = audioProcessor
       let log = logger
       try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
@@ -387,6 +394,7 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
 
   private var isRunning: Bool = false
   private let conversion = LivePCM16Conversion()
+  private var conversionFailure: LivePCMConversionFailureReport?
   private var pendingPCMData = Data()
 
   init(targetSampleRate: Int) {
@@ -395,9 +403,11 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
     self.preferredChunkBytes = (targetSampleRate / 1000) * 100 * 2
   }
 
-  func setRunning(_ running: Bool) {
+  /// Starting arms `onConversionFailure` for the run's first conversion failure.
+  func setRunning(_ running: Bool, onConversionFailure: (@Sendable (Error) -> Void)? = nil) {
     queue.sync {
       isRunning = running
+      conversionFailure = running ? onConversionFailure.map(LivePCMConversionFailureReport.init) : nil
       if !running {
         conversion.reset()
         copyBufferPool.removeAll()
@@ -469,7 +479,10 @@ private final class OpenAIRealtimeAudioProcessor: @unchecked Sendable {
     do {
       pendingPCMData.append(try conversion.pcm16(from: buffer, to: outputFormat))
     } catch {
+      guard let report = conversionFailure else { return }
+      conversionFailure = nil
       logger.error("Audio conversion failed: \(error.localizedDescription, privacy: .public)")
+      report(error)
       return
     }
 

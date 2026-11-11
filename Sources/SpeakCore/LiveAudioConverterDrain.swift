@@ -223,6 +223,23 @@ public enum LivePCMConversionError: LocalizedError, Equatable, Sendable {
     }
 }
 
+/// Hands one run's first ``LivePCMConversionError`` to its owner and drops the
+/// rest, from whichever audio queue the conversion runs on.
+public final class LivePCMConversionFailureReport: @unchecked Sendable {
+    private let lock = NSLock()
+    private var report: (@Sendable (Error) -> Void)?
+
+    public init(_ report: @escaping @Sendable (Error) -> Void) { self.report = report }
+
+    public func callAsFunction(_ error: Error) {
+        let pending = lock.withLock { () -> (@Sendable (Error) -> Void)? in
+            defer { report = nil }
+            return report
+        }
+        pending?(error)
+    }
+}
+
 /// Copies one tap buffer's samples into a same-format buffer, so the render
 /// thread hands work off without converting or allocating.
 public enum LivePCMCopy {

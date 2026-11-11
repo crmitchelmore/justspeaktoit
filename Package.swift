@@ -206,7 +206,8 @@ let portablePackage = Package(
         // Release-train identity moved with WatchCore. Keep the native Watch
         // surfaces excluded from the portable graph as they were before the move.
         .target(name: "SpeakWatchCore", path: "Sources/SpeakWatchCore", exclude: [
-            "WatchCaptureProtocol.swift", "WatchComplicationState.swift", "WatchRecordingLifecycle.swift",
+            "WatchCaptureProtocol.swift", "WatchCaptureQueue.swift", "WatchComplicationState.swift",
+            "WatchRecordingLifecycle.swift",
             "WatchRecordingToggleSerialiser.swift", "WatchSharedContainer.swift"
         ]),
         .target(

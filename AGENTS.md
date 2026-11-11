@@ -232,7 +232,7 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
   `--remote-linux` or `--container-linux`. `--no-linux` makes the result
   `incomplete`, which the evidence check rejects.
 - **macOS job:** the SwiftPM build, then the unit-test targets that
-  `scripts/affected-swift-tests.py` selects, minus the targets Linux runs,
+  `scripts/ci/affected-swift-tests.py` selects, minus the targets Linux runs,
   exactly as CI selects them. `--quick` narrows this to type-level matches,
   which is faster but no longer CI's selection. A build that changes
   `Package.resolved` fails, as in CI.

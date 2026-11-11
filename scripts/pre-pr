@@ -307,14 +307,14 @@ def routing():
 @functools.cache
 def affected_selector():
     spec = importlib.util.spec_from_file_location('affected_swift_tests',
-                                                  Path(__file__).resolve().parent / 'affected-swift-tests.py')
+                                                  Path(__file__).resolve().parent / 'ci' / 'affected-swift-tests.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 def ci_macos_tests(files: list[str], graph: Graph) -> Selection:
-    """The macOS job's pull-request selection: scripts/affected-swift-tests.py over the same changed files."""
+    """The macOS job's pull-request selection: scripts/ci/affected-swift-tests.py over the same changed files."""
     _, selected = affected_selector().select(files, graph.dump, CI_MACOS_SKIP_TARGETS)
     selected = [t for t in selected if t not in UI_TEST_TARGETS]
     return Selection([f'^({"|".join(map(re.escape, selected))})\\.'], set(selected)) if selected else Selection()

@@ -3,7 +3,7 @@ import json
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "affected-swift-tests.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "ci" / "affected-swift-tests.py"
 spec = importlib.util.spec_from_file_location("affected_swift_tests", SCRIPT)
 affected = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(affected)

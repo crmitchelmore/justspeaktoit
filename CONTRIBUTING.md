@@ -133,7 +133,7 @@ A pull request runs a cheap gate (see `release-paths` in
 `.github/workflows/ci.yml`): `Lint` (SwiftLint, accessibility and tooling
 tests) and `Portable Swift (Linux)` on Ubuntu, plus one macOS job that builds
 incrementally and runs only the unit tests your change can affect
-(`scripts/affected-swift-tests.py`). Docs, website, Android and Workers-only
+(`scripts/ci/affected-swift-tests.py`). Docs, website, Android and Workers-only
 changes skip all of them. Full macOS Debug and Release tests, iOS builds and
 simulator tests, keyboard and watch builds, the core journeys and public API
 compatibility run on each `merge-batch/*` head and on `main`; a failure opens

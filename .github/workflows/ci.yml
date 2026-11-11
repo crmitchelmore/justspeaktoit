@@ -170,7 +170,7 @@ jobs:
           # The checkout is the shallow PR merge commit; fetching only the base
           # commit lets the script diff BASE..HEAD, which is exactly the PR.
           git fetch --no-tags --depth=1 origin "$BASE" || true
-          python3 scripts/affected-swift-tests.py "$BASE" \
+          python3 scripts/ci/affected-swift-tests.py "$BASE" \
             --skip-target SpeakDesktopTests --skip-target SpeakAutomationKitTests >> "$GITHUB_OUTPUT"
 
       # One segfaulting test kills the whole xctest process; a crash with no
@@ -343,7 +343,7 @@ jobs:
               - 'Tests/**'
               - 'Config/**'
               - 'Resources/**'
-              - 'scripts/affected-swift-tests.py'
+              - 'scripts/ci/affected-swift-tests.py'
               - 'scripts/retry-network.sh'
               - 'scripts/retry-xctest-crash.py'
               - 'scripts/with-test-keychain.py'

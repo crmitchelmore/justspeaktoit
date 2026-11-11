@@ -21,13 +21,13 @@ extension TranscriptionRecordingService {
         let historyManager = self.historyManager
         let polish = self.polish
         let operation = AutomaticPolishOperation(
-            isCurrent: { [weak self] in self?.latestCompletionID == completionID },
+            isCurrent: { [weak self] in self?.polishLedger.isCurrent(completionID) == true },
             successAndWait: { [weak self] polished, current in
                 if current {
                     self?.sharedState.lastCompletedTranscript = polished
                     // Only the current run's polish may be waited on; an
                     // superseded one must not hand back the run before last.
-                    self?.lastPolishedTranscript = polished
+                    self?.polishLedger.recordPolished(polished, completion: completionID)
                 }
                 if let historyItemID {
                     // A loss notice recorded at stop survives the polish (issue #950).
@@ -52,9 +52,7 @@ extension TranscriptionRecordingService {
                 // waiter. A superseded polish clearing the flag would let a
                 // newer stop's `awaitPolishedTranscript` return before its own
                 // polish had landed.
-                if self?.polishingRunID == runID {
-                    self?.isPostProcessing = false
-                }
+                self?.polishLedger.finishPolish(run: runID)
                 assertion.end()
             }
         )
@@ -98,10 +96,10 @@ extension TranscriptionRecordingService {
     /// polish runs in a detached `Task` whose completion this actor sees only
     /// through `isPostProcessing`.
     func awaitPolishedTranscript(timeout: TimeInterval, forRun runID: UUID?) async -> String? {
-        guard timeout > 0, let runID, polishingRunID == runID else { return nil }
+        guard timeout > 0, let runID, polishLedger.polishingRunID == runID else { return nil }
         // Monotonic: a wall-clock correction must not extend an intent's wait.
         let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
-        while isPostProcessing, polishingRunID == runID, ContinuousClock.now < deadline {
+        while polishLedger.isPolishing(run: runID), ContinuousClock.now < deadline {
             do {
                 try await Task.sleep(nanoseconds: 100_000_000)
             } catch {
@@ -113,8 +111,7 @@ extension TranscriptionRecordingService {
         }
         // A newer stop took ownership of the polish state: whatever is in
         // `lastPolishedTranscript` is not this run's.
-        guard polishingRunID == runID, !isPostProcessing else { return nil }
-        return lastPolishedTranscript
+        return polishLedger.polishedTranscript(forRun: runID)
     }
 }
 #endif

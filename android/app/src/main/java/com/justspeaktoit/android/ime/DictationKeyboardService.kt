@@ -17,6 +17,8 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.justspeaktoit.android.MainActivity
 import com.justspeaktoit.android.R
 import com.justspeaktoit.android.dictation.AndroidSpeechEngine
@@ -125,9 +127,24 @@ class DictationKeyboardService : InputMethodService() {
         render()
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            // The IME window is transparent, so without this the app behind shows through the keys.
+            setBackgroundColor(themeColor(android.R.attr.colorBackground, Color.BLACK))
             addView(statusView)
             addView(row)
+            // Android 15 draws the keyboard edge to edge: keep the keys clear of the navigation bar.
+            ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
+                val bottom = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+                view.setPadding(0, 0, 0, bottom)
+                insets
+            }
         }
+    }
+
+    private fun themeColor(attr: Int, fallback: Int): Int {
+        val value = TypedValue()
+        val isColor = theme.resolveAttribute(attr, value, true) &&
+            value.type in TypedValue.TYPE_FIRST_COLOR_INT..TypedValue.TYPE_LAST_COLOR_INT
+        return if (isColor) value.data else fallback
     }
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {

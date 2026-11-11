@@ -32,7 +32,7 @@ final class SettingsSearchCoverageTests: XCTestCase {
 
     func testRuntimeTitledMacCardsDeclareASearchEntry() throws {
         // The API-key cards are indexed per provider by MacSettingsSearch.apiKeyEntries.
-        let runtimeIndexed: Set<String> = ["SettingsView+APIKeys.swift"]
+        let runtimeIndexed: Set<String> = ["SettingsView+APIKeys.swift", "APIKeyCard.swift"]
         let files = try swiftFiles(under: "Sources/SpeakApp")
         var undeclared: [String] = []
         let pattern = try NSRegularExpression(pattern: #"SettingsCard\(\s*title:\s*[^"\s]"#)

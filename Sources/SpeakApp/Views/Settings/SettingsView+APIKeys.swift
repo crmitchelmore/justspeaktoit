@@ -1,4 +1,3 @@
-// swiftlint:disable file_length
 import SpeakCore
 import SpeakHotKeys
 import SpeakSync
@@ -67,15 +66,26 @@ extension SettingsView {
       // line says — the rest of the screen is unaffected.
       .task {
         let secureStorage = environment.secureStorage
-        providerBalances.configure { identifier in
+        apiKeyForm.balances.configure { identifier in
           try? await secureStorage.secret(identifier: identifier)
         }
-        providerBalances.refreshAll(
+        apiKeyForm.balances.refreshAll(
           storedCredentialIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
         )
       }
-      .onDisappear { providerBalances.cancelAll() }
+      .onDisappear { apiKeyForm.balances.cancelAll() }
     }
+  }
+
+  var visibleMacAPIKeyItems: [MacAPIKeyItem] {
+    let orderedEntries = APIKeyListQuery.apply(
+      to: allMacAPIKeyItems.map(\.entry),
+      searchText: apiKeySearchText,
+      status: apiKeyStatusFilter,
+      sortOrder: apiKeySortOrder
+    )
+    let itemsByID = Dictionary(uniqueKeysWithValues: allMacAPIKeyItems.map { ($0.id, $0) })
+    return orderedEntries.compactMap { itemsByID[$0.id] }
   }
 
   private var apiKeySearchField: some View {
@@ -146,7 +156,7 @@ extension SettingsView {
   private func macAPIKeyView(for item: MacAPIKeyItem) -> some View {
     switch item.source {
     case .openRouter:
-      apiKeyCard(
+      apiKeyCard(APIKeyCardConfiguration(
         title: "OpenRouter",
         systemImage: "network",
         tint: .green,
@@ -156,16 +166,16 @@ extension SettingsView {
         descriptionText: "Stored securely in your macOS Keychain. Shared by OpenRouter transcription, "
           + "voice output and post-processing.",
         keyFieldLabel: "OpenRouter API Key",
-        keyBinding: $newAPIKeyValue,
-        onSave: saveAPIKey,
-        onValidate: isOpenRouterKeyStored ? checkOpenRouterKeyValidity : nil,
-        onRemove: isOpenRouterKeyStored ? removeOpenRouterKey : nil,
-        isSaveDisabled: isValidatingKey
-          || newAPIKeyValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-        isValidateDisabled: isValidatingKey,
-        isRemoveDisabled: isValidatingKey,
-        validationState: apiKeyValidationState,
-        credentialIdentifier: openRouterKeyIdentifier,
+        keyBinding: $apiKeyForm.openRouterDraft,
+        onSave: { apiKeyForm.saveOpenRouterKey(in: environment) },
+        onValidate: isOpenRouterKeyStored ? { apiKeyForm.checkOpenRouterKey(in: environment) } : nil,
+        onRemove: isOpenRouterKeyStored ? { apiKeyForm.removeOpenRouterKey(in: environment) } : nil,
+        isSaveDisabled: apiKeyForm.isValidatingOpenRouterKey
+          || apiKeyForm.openRouterDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        isValidateDisabled: apiKeyForm.isValidatingOpenRouterKey,
+        isRemoveDisabled: apiKeyForm.isValidatingOpenRouterKey,
+        validationState: apiKeyForm.openRouterState,
+        credentialIdentifier: APIKeyFormModel.openRouterKeyIdentifier,
         tooltip: "Securely store and validate the OpenRouter key Speak uses for advanced models.",
         saveButtonTitle: isOpenRouterKeyStored ? "Replace Key" : "Save Key",
         saveTooltip: "Store this OpenRouter key safely in your macOS Keychain for Speak to use when needed.",
@@ -176,7 +186,7 @@ extension SettingsView {
         link: OpenRouterService.apiKeysURL,
         linkLabel: "Get API Key",
         guideUses: [.transcription, .postProcessing, .voiceOutput]
-      )
+      ))
     case .transcription(let provider):
       providerAPIKeyCard(for: provider)
     case .textToSpeech(let provider):
@@ -192,14 +202,14 @@ extension SettingsView {
   private func providerAPIKeyCard(for provider: TranscriptionProviderMetadata) -> some View {
     let isStored = isAPIKeyStored(provider.apiKeyIdentifier)
     let tintColor = colorFromString(provider.tintColor)
-    let validationState = providerValidationStates[provider.id] ?? .idle
-    let inFlight = isValidationInFlight(validationState)
+    let validationState = apiKeyForm.providerStates[provider.id] ?? .idle
+    let inFlight = validationState.isInFlight
     let saveDisabled = inFlight
-      || (providerAPIKeys[provider.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      || (apiKeyForm.providerDrafts[provider.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     let validateDisabled = inFlight || !isStored
     let removeDisabled = inFlight
 
-    return apiKeyCard(
+    return apiKeyCard(APIKeyCardConfiguration(
       title: "\(provider.displayName) (Transcription)",
       systemImage: provider.systemImage,
       tint: tintColor,
@@ -208,10 +218,10 @@ extension SettingsView {
       isStored: isStored,
       descriptionText: "Stored securely in your macOS Keychain. Used only for \(provider.displayName) transcription.",
       keyFieldLabel: provider.apiKeyLabel,
-      keyBinding: binding(for: provider.id),
-      onSave: { saveProviderAPIKey(provider) },
-      onValidate: isStored ? { checkProviderKeyValidity(provider) } : nil,
-      onRemove: isStored ? { removeProviderAPIKey(provider) } : nil,
+      keyBinding: apiKeyForm.providerDraft(for: provider.id),
+      onSave: { apiKeyForm.saveProviderKey(provider, in: environment) },
+      onValidate: isStored ? { apiKeyForm.checkProviderKey(provider, in: environment) } : nil,
+      onRemove: isStored ? { apiKeyForm.removeProviderKey(provider, in: environment) } : nil,
       isSaveDisabled: saveDisabled,
       isValidateDisabled: validateDisabled,
       isRemoveDisabled: removeDisabled,
@@ -228,111 +238,28 @@ extension SettingsView {
         ?? (provider.website.isEmpty ? nil : URL(string: provider.website)),
       linkLabel: "Get API Key",
       guideUses: .transcription
-    )
+    ))
   }
 
-  // swiftlint:disable:next cyclomatic_complexity function_body_length
+  // swiftlint:disable:next function_body_length
   private func ttsProviderAPIKeyCard(for provider: TTSProvider) -> some View {
     let isStored = isAPIKeyStored(provider.apiKeyIdentifier)
-    let validationState = ttsProviderValidationStates[provider.rawValue] ?? .idle
-    let inFlight = isValidationInFlight(validationState)
+    let validationState = apiKeyForm.ttsStates[provider.rawValue] ?? .idle
+    let inFlight = validationState.isInFlight
     let saveDisabled = inFlight
-      || (ttsProviderAPIKeys[provider.rawValue] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      || (apiKeyForm.ttsDrafts[provider.rawValue] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     let validateDisabled = inFlight || !isStored
     let removeDisabled = inFlight
 
-    let tintColor: Color = {
-      switch provider {
-      case .elevenlabs: return .brandAccent
-      case .openai: return .green
-      case .openrouter: return .indigo
-      case .azure: return .brandLagoonDeep
-      case .deepgram: return .brandAccentWarm
-      case .soniox: return .brandLagoon
-      case .cartesia: return .purple
-      case .groq: return .orange
-      case .gemini: return .blue
-      case .mistral: return .indigo
-      case .speechmatics: return .cyan
-      case .xai: return .black
-      case .system: return .gray
-      }
-    }()
-    let systemImage: String = {
-      switch provider {
-      case .elevenlabs: return "waveform.circle"
-      case .openai: return "brain"
-      case .openrouter: return "waveform"
-      case .azure: return "cloud"
-      case .deepgram: return "bolt.circle"
-      case .soniox: return "globe"
-      case .cartesia: return "waveform.and.person.filled"
-      case .groq: return "bolt.horizontal.circle"
-      case .gemini: return "sparkles"
-      case .mistral: return "waveform.circle"
-      case .speechmatics: return "waveform.and.magnifyingglass"
-      case .xai: return "waveform.badge.mic"
-      case .system: return "speaker.wave.2"
-      }
-    }()
-    let website: String = {
-      switch provider {
-      case .elevenlabs: return "https://elevenlabs.io"
-      case .openai: return "https://platform.openai.com"
-      case .openrouter: return "https://openrouter.ai"
-      case .azure: return "https://azure.microsoft.com/en-us/services/cognitive-services/text-to-speech/"
-      case .deepgram: return "https://deepgram.com"
-      case .soniox: return "https://soniox.com"
-      case .cartesia: return "https://cartesia.ai"
-      case .groq: return "https://console.groq.com"
-      case .gemini: return "https://aistudio.google.com/apikey"
-      case .mistral: return "https://console.mistral.ai"
-      case .speechmatics: return "https://www.speechmatics.com"
-      case .xai: return "https://console.x.ai"
-      case .system: return ""
-      }
-    }()
-    // Soniox and Cartesia each use one account key for transcription and speech
-    // generation, so this is the only card for them — the transcription list
-    // skips those providers.
-    let descriptionText: String = {
-      switch provider {
-      case .azure:
-        return "For direct Azure transcription and voice output, enter key:region. "
-          + "For local-proxy transcription, set the resource endpoint above and enter local-proxy/ "
-          + "followed by the proxy token. Proxy credentials do not enable voice output."
-      case .soniox:
-        return "Stored securely in your macOS Keychain. Used for Soniox transcription and for "
-          + "Soniox TTS v2 voice output in 60+ languages."
-      case .cartesia:
-        return "Stored securely in your macOS Keychain. Used for Cartesia Ink transcription and for "
-          + "Cartesia Sonic 3.6 voice output."
-      case .groq:
-        return "Stored securely in your macOS Keychain. Used for Groq Whisper transcription and for "
-          + "Orpheus voice output. Orpheus also needs your Groq organisation to accept the model "
-          + "terms in the console; a saved key alone does not grant access."
-      case .gemini:
-        return "Stored securely in your macOS Keychain. Used for Gemini transcription and for "
-          + "Gemini voice output, billed directly by Google rather than through OpenRouter."
-      case .mistral:
-        return "Stored securely in your macOS Keychain. Used for Mistral Voxtral transcription and "
-          + "for Voxtral voice output. Mistral publishes no preset voices, so the picker loads the "
-          + "voices your account can use once this key is saved."
-      case .speechmatics:
-        return "Stored securely in your macOS Keychain. Used for Speechmatics transcription and for "
-          + "Speechmatics voice output, which the vendor still labels a preview. During that "
-          + "preview Speechmatics stores the text you send for voice output and the audio it "
-          + "generates, to improve their service."
-      default:
-        return "Stored securely in your macOS Keychain. Used only for "
-          + "\(provider.displayName) text-to-speech voice synthesis."
-      }
-    }()
+    let tintColor = provider.apiKeyCardTint
+    let systemImage = provider.apiKeyCardSystemImage
+    let website = provider.apiKeyWebsite
+    let descriptionText = provider.apiKeyCardDescription
 
     // ElevenLabs is the shared credential card for both TTS and Scribe transcription.
     // Keep it out of the transcription-provider ForEach; one card covers both capabilities.
     if provider == .elevenlabs {
-      return apiKeyCard(
+      return apiKeyCard(APIKeyCardConfiguration(
         title: "ElevenLabs API Key",
         systemImage: systemImage,
         tint: tintColor,
@@ -342,10 +269,10 @@ extension SettingsView {
         descriptionText: "Stored securely in your macOS Keychain. Used for ElevenLabs Text-to-Speech "
           + "voice synthesis and Scribe transcription. The key must have both TTS and speech-to-text permissions.",
         keyFieldLabel: "ElevenLabs API Key",
-        keyBinding: ttsBinding(for: provider.rawValue),
-        onSave: { saveTTSProviderAPIKey(provider) },
-        onValidate: isStored ? { checkTTSProviderKeyValidity(provider) } : nil,
-        onRemove: isStored ? { removeTTSProviderAPIKey(provider) } : nil,
+        keyBinding: apiKeyForm.ttsDraft(for: provider.rawValue),
+        onSave: { apiKeyForm.saveTTSKey(provider, in: environment) },
+        onValidate: isStored ? { apiKeyForm.checkTTSKey(provider, in: environment) } : nil,
+        onRemove: isStored ? { apiKeyForm.removeTTSKey(provider, in: environment) } : nil,
         isSaveDisabled: saveDisabled,
         isValidateDisabled: validateDisabled,
         isRemoveDisabled: removeDisabled,
@@ -365,10 +292,10 @@ extension SettingsView {
         link: APIKeyCatalog.keyPageURL(for: provider.apiKeyIdentifier) ?? URL(string: website),
         linkLabel: "Get API Key",
         guideUses: [.transcription, .voiceOutput]
-      )
+      ))
     }
 
-    return apiKeyCard(
+    return apiKeyCard(APIKeyCardConfiguration(
       title: provider.sharesTranscriptionCredential
         ? "\(provider.displayName) API Key"
         : "\(provider.displayName) (TTS)",
@@ -381,10 +308,10 @@ extension SettingsView {
       keyFieldLabel: provider.sharesTranscriptionCredential
         ? "\(provider.displayName) API Key"
         : "\(provider.displayName) TTS API Key",
-      keyBinding: ttsBinding(for: provider.rawValue),
-      onSave: { saveTTSProviderAPIKey(provider) },
-      onValidate: isStored ? { checkTTSProviderKeyValidity(provider) } : nil,
-      onRemove: isStored ? { removeTTSProviderAPIKey(provider) } : nil,
+      keyBinding: apiKeyForm.ttsDraft(for: provider.rawValue),
+      onSave: { apiKeyForm.saveTTSKey(provider, in: environment) },
+      onValidate: isStored ? { apiKeyForm.checkTTSKey(provider, in: environment) } : nil,
+      onRemove: isStored ? { apiKeyForm.removeTTSKey(provider, in: environment) } : nil,
       isSaveDisabled: saveDisabled,
       isValidateDisabled: validateDisabled,
       isRemoveDisabled: removeDisabled,
@@ -411,424 +338,11 @@ extension SettingsView {
         ?? (website.isEmpty ? nil : URL(string: website)),
       linkLabel: "Get API Key",
       guideUses: provider.sharesTranscriptionCredential ? [.transcription, .voiceOutput] : .voiceOutput
-    )
+    ))
   }
 
-  // Existing shared card accepts explicit actions for each credential state.
-  // swiftlint:disable:next function_parameter_count
-  private func apiKeyCard(
-    title: String,
-    systemImage: String,
-    tint: Color,
-    statusIcon: String,
-    statusTint: Color,
-    isStored: Bool,
-    descriptionText: String,
-    keyFieldLabel: String,
-    keyBinding: Binding<String>,
-    onSave: @escaping () -> Void,
-    onValidate: (() -> Void)?,
-    onRemove: (() -> Void)?,
-    isSaveDisabled: Bool,
-    isValidateDisabled: Bool,
-    isRemoveDisabled: Bool,
-    validationState: ValidationViewState,
-    credentialIdentifier: String,
-    presentsAccountBalance: Bool = true,
-    tooltip: String,
-    saveButtonTitle: String,
-    saveTooltip: String,
-    validateButtonTitle: String,
-    validateTooltip: String,
-    removeButtonTitle: String,
-    removeTooltip: String,
-    link: URL?,
-    linkLabel: String?,
-    statusLabel: String = "Status",
-    guideUses: APIKeyUses
-  ) -> some View {
-    let configuration = APIKeyCardConfiguration(
-      title: title,
-      tint: tint,
-      statusIcon: statusIcon,
-      statusTint: statusTint,
-      isStored: isStored,
-      descriptionText: descriptionText,
-      keyFieldLabel: keyFieldLabel,
-      keyBinding: keyBinding,
-      onSave: onSave,
-      onValidate: onValidate,
-      onRemove: onRemove,
-      isSaveDisabled: isSaveDisabled,
-      isValidateDisabled: isValidateDisabled,
-      isRemoveDisabled: isRemoveDisabled,
-      validationState: validationState,
-      credentialIdentifier: credentialIdentifier,
-      presentsAccountBalance: presentsAccountBalance,
-      saveButtonTitle: saveButtonTitle,
-      saveTooltip: saveTooltip,
-      validateButtonTitle: validateButtonTitle,
-      validateTooltip: validateTooltip,
-      removeButtonTitle: removeButtonTitle,
-      removeTooltip: removeTooltip,
-      link: link,
-      linkLabel: linkLabel,
-      statusLabel: statusLabel,
-      guideUses: guideUses
-    )
-
-    return SettingsCard(title: title, systemImage: systemImage, tint: tint) {
-      if settings.visualDensity.isCompact {
-        compactAPIKeyCardBody(configuration)
-      } else {
-        regularAPIKeyCardBody(configuration)
-      }
-    }
-    .speakTooltip(tooltip)
-  }
-
-  private func compactAPIKeyCardBody(_ configuration: APIKeyCardConfiguration) -> some View {
-    VStack(alignment: .leading, spacing: settings.visualDensity.cardContentSpacing) {
-      compactAPIKeyStatus(configuration)
-
-      HStack(spacing: settings.visualDensity.inlineSpacing) {
-        SecureField(configuration.keyFieldLabel, text: configuration.keyBinding)
-          .textContentType(.password)
-          .privacySensitive()
-          .textFieldStyle(.roundedBorder)
-          .speakTooltip("Paste the key exactly as issued; Speak stores it securely in your Keychain.")
-
-        compactAPIKeySaveButton(configuration)
-        compactAPIKeyValidateButton(configuration)
-        compactAPIKeyRemoveButton(configuration)
-      }
-
-      Text(configuration.descriptionText)
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .lineLimit(2)
-        .speakTooltip(configuration.descriptionText)
-
-      APIKeyGuideDisclosure(identifier: configuration.credentialIdentifier, uses: configuration.guideUses)
-
-      providerBalanceView(configuration)
-
-      validationStatusView(for: configuration.validationState)
-      validationDebugDetails(for: configuration.validationState)
-    }
-  }
-
-  /// The account balance beside the key. It never gates the card: a billing
-  /// endpoint that fails renders a reason and leaves everything else working.
-  @ViewBuilder
-  private func providerBalanceView(_ configuration: APIKeyCardConfiguration) -> some View {
-    ProviderBalanceView(
-      credentialIdentifier: configuration.credentialIdentifier,
-      isKeyStored: configuration.isStored,
-      presentsAccountBalance: configuration.presentsAccountBalance,
-      store: providerBalances
-    )
-  }
-
-  private func compactAPIKeyStatus(_ configuration: APIKeyCardConfiguration) -> some View {
-    HStack(spacing: settings.visualDensity.inlineSpacing) {
-      Label(
-        configuration.isStored ? "Saved" : "Not set",
-        systemImage: configuration.statusIcon
-      )
-      .font(.caption.weight(.semibold))
-      .foregroundStyle(
-        configuration.isStored ? configuration.statusTint : Color.secondary
-      )
-
-      if let link = configuration.link, let linkLabel = configuration.linkLabel {
-        Link(destination: link) {
-          Label(linkLabel, systemImage: "arrow.up.forward.square")
-            .labelStyle(.iconOnly)
-        }
-        .speakTooltip("Open \(configuration.title)'s site to manage your API key.")
-        .accessibilityLabel(linkLabel)
-      }
-
-      Spacer(minLength: 0)
-    }
-  }
-
-  private func compactAPIKeySaveButton(_ configuration: APIKeyCardConfiguration) -> some View {
-    Button(action: configuration.onSave) {
-      if isValidationInFlight(configuration.validationState) {
-        ProgressView()
-          .controlSize(.small)
-      } else {
-        Label(configuration.saveButtonTitle, systemImage: "arrow.down.circle")
-          .labelStyle(.iconOnly)
-      }
-    }
-    .disabled(configuration.isSaveDisabled)
-    .buttonStyle(.borderedProminent)
-    .tint(configuration.tint)
-    .speakTooltip(configuration.saveTooltip)
-    .accessibilityLabel(configuration.saveButtonTitle)
-  }
-
-  @ViewBuilder
-  private func compactAPIKeyValidateButton(_ configuration: APIKeyCardConfiguration) -> some View {
-    if let onValidate = configuration.onValidate, configuration.isStored {
-      Button(action: onValidate) {
-        if isValidationInFlight(configuration.validationState) {
-          ProgressView()
-            .controlSize(.small)
-        } else {
-          Label(configuration.validateButtonTitle, systemImage: "checkmark.shield")
-            .labelStyle(.iconOnly)
-        }
-      }
-      .disabled(configuration.isValidateDisabled)
-      .buttonStyle(.bordered)
-      .speakTooltip(configuration.validateTooltip)
-      .accessibilityLabel(configuration.validateButtonTitle)
-    }
-  }
-
-  @ViewBuilder
-  private func compactAPIKeyRemoveButton(_ configuration: APIKeyCardConfiguration) -> some View {
-    if let onRemove = configuration.onRemove, configuration.isStored {
-      DestructiveConfirmButton(
-        dialogTitle: removeKeyDialogTitle(configuration),
-        message: removeKeyDialogMessage,
-        confirmTitle: configuration.removeButtonTitle,
-        triggerRole: .destructive,
-        action: onRemove
-      ) {
-        Label(configuration.removeButtonTitle, systemImage: "trash")
-          .labelStyle(.iconOnly)
-      }
-      .disabled(configuration.isRemoveDisabled)
-      .buttonStyle(.bordered)
-      .speakTooltip(configuration.removeTooltip)
-      .accessibilityLabel(configuration.removeButtonTitle)
-    }
-  }
-
-  private func regularAPIKeyCardBody(_ configuration: APIKeyCardConfiguration) -> some View {
-    VStack(alignment: .leading, spacing: 14) {
-      HStack(alignment: .center, spacing: 12) {
-        Label(configuration.statusLabel, systemImage: configuration.statusIcon)
-          .foregroundStyle(
-            configuration.isStored ? configuration.statusTint : Color.secondary
-          )
-          .labelStyle(.titleAndIcon)
-        statusBadge(isStored: configuration.isStored, color: configuration.statusTint)
-      }
-
-      if let link = configuration.link, let linkLabel = configuration.linkLabel {
-        Link(destination: link) {
-          Label(linkLabel, systemImage: "arrow.up.forward.square")
-            .font(.caption)
-        }
-        .speakTooltip("Open \(configuration.title)'s site to create or manage your API key.")
-      }
-
-      SecureField(configuration.keyFieldLabel, text: configuration.keyBinding)
-        .textContentType(.password)
-        .privacySensitive()
-        .textFieldStyle(.roundedBorder)
-        .speakTooltip("Paste the key exactly as issued; Speak stores it securely in your Keychain.")
-
-      Text(configuration.descriptionText)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-
-      APIKeyGuideDisclosure(identifier: configuration.credentialIdentifier, uses: configuration.guideUses)
-
-      HStack(spacing: 12) {
-        regularAPIKeySaveButton(configuration)
-        regularAPIKeyValidateButton(configuration)
-        regularAPIKeyRemoveButton(configuration)
-      }
-
-      providerBalanceView(configuration)
-
-      validationStatusView(for: configuration.validationState)
-      validationDebugDetails(for: configuration.validationState)
-    }
-  }
-
-  private func regularAPIKeySaveButton(_ configuration: APIKeyCardConfiguration) -> some View {
-    Button(action: configuration.onSave) {
-      if isValidationInFlight(configuration.validationState) {
-        ProgressView()
-          .controlSize(.small)
-      } else {
-        Label(configuration.saveButtonTitle, systemImage: "arrow.down.circle")
-      }
-    }
-    .disabled(configuration.isSaveDisabled)
-    .buttonStyle(.borderedProminent)
-    .tint(configuration.tint)
-    .speakTooltip(configuration.saveTooltip)
-  }
-
-  @ViewBuilder
-  private func regularAPIKeyValidateButton(_ configuration: APIKeyCardConfiguration) -> some View {
-    if let onValidate = configuration.onValidate, configuration.isStored {
-      Button(action: onValidate) {
-        if isValidationInFlight(configuration.validationState) {
-          ProgressView()
-            .controlSize(.small)
-        } else {
-          Label(configuration.validateButtonTitle, systemImage: "checkmark.shield")
-        }
-      }
-      .disabled(configuration.isValidateDisabled)
-      .buttonStyle(.bordered)
-      .speakTooltip(configuration.validateTooltip)
-    }
-  }
-
-  @ViewBuilder
-  private func regularAPIKeyRemoveButton(_ configuration: APIKeyCardConfiguration) -> some View {
-    if let onRemove = configuration.onRemove, configuration.isStored {
-      DestructiveConfirmButton(
-        configuration.removeButtonTitle,
-        dialogTitle: removeKeyDialogTitle(configuration),
-        message: removeKeyDialogMessage,
-        confirmTitle: configuration.removeButtonTitle,
-        triggerRole: .destructive,
-        action: onRemove
-      )
-      .disabled(configuration.isRemoveDisabled)
-      .speakTooltip(configuration.removeTooltip)
-    }
-  }
-
-  private func removeKeyDialogTitle(_ configuration: APIKeyCardConfiguration) -> String {
-    "Remove the \(configuration.title) key?"
-  }
-
-  private var removeKeyDialogMessage: String {
-    "Speak forgets this key and deletes it from your Keychain. "
-      + "Features that need it stop working until you paste it again."
-  }
-
-  private struct CloudKitKeySyncSettingsCard: View {
-    let secureStorage: SecureAppStorage
-    @ObservedObject private var keySync = CloudKitKeySync.shared
-    @State private var passphrase = ""
-    @State private var syncError: String?
-
-    var body: some View {
-      SettingsCard(title: "Encrypted API-Key Sync", systemImage: "lock.icloud", tint: .brandLagoon) {
-        VStack(alignment: .leading, spacing: 12) {
-          HStack {
-            Label("Status", systemImage: keySync.status.isEnabled ? "checkmark.seal.fill" : "lock.fill")
-            Spacer()
-            Text(keySync.status.message)
-              .foregroundStyle(keySync.status.isEnabled ? .green : .secondary)
-          }
-
-          if !keySync.status.isEnabled {
-            SecureField("Sync passphrase", text: $passphrase)
-              .textContentType(.password)
-              .privacySensitive()
-              .textFieldStyle(.roundedBorder)
-
-            Button {
-              Task {
-                do {
-                  try await keySync.enable(passphrase: passphrase)
-                  passphrase = ""
-                  syncError = nil
-                } catch {
-                  syncError = error.localizedDescription
-                }
-              }
-            } label: {
-              Label("Enable API-Key Sync", systemImage: "lock.open")
-            }
-            .disabled(passphrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .buttonStyle(.borderedProminent)
-          } else {
-            HStack {
-              Button {
-                Task {
-                  do {
-                    try await keySync.syncNow()
-                    syncError = nil
-                  } catch {
-                    syncError = error.localizedDescription
-                  }
-                }
-              } label: {
-                Label("Sync Keys Now", systemImage: "arrow.triangle.2.circlepath")
-              }
-              .disabled(keySync.status.isSyncing)
-
-              Button("Disable", role: .destructive) {
-                Task { await keySync.disable() }
-              }
-            }
-          }
-
-          if let syncError {
-            Text(syncError)
-              .font(.caption)
-              .foregroundStyle(.red)
-          }
-
-          Text(
-            "Opt in to sync API keys through your private CloudKit database. Keys are encrypted with "
-              + "CryptoKit before upload. Sync is available when this app is signed into iCloud and "
-              + "CloudKit is available."
-          )
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        }
-      }
-      .task {
-        let coreStorage = await secureStorage.coreStorage()
-        await keySync.configure(secureStorage: coreStorage)
-        _ = await keySync.isAvailable()
-      }
-    }
-  }
-
-  private struct LocalKeychainStorageCard: View {
-    var body: some View {
-      SettingsCard(title: "Local Keychain Storage", systemImage: "key.fill", tint: .brandLagoon) {
-        VStack(alignment: .leading, spacing: 8) {
-          Label("Stored locally on this Mac", systemImage: "checkmark.seal.fill")
-            .foregroundStyle(.green)
-          Text(
-            "API keys stay in the macOS Keychain for this direct-download build. "
-              + "Encrypted CloudKit API-key sync is available only in App Store builds."
-          )
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        }
-      }
-    }
-  }
-
-  private func binding(for providerID: String) -> Binding<String> {
-    Binding(
-      get: { providerAPIKeys[providerID] ?? "" },
-      set: { providerAPIKeys[providerID] = $0 }
-    )
-  }
-
-  private func statusBadge(isStored: Bool, color: Color) -> some View {
-    let text = isStored ? "Saved" : "Not Set"
-    let displayColor = isStored ? color : Color.secondary
-    return Text(text.uppercased())
-      .font(.caption2.weight(.semibold))
-      .padding(.horizontal, 8)
-      .padding(.vertical, 4)
-      .background(
-        Capsule()
-          .fill(displayColor.opacity(0.15))
-      )
-      .foregroundStyle(displayColor)
+  private func apiKeyCard(_ configuration: APIKeyCardConfiguration) -> some View {
+    APIKeyCard(configuration: configuration, balances: apiKeyForm.balances)
   }
 
   // This switch maps the existing provider display palette.
@@ -850,325 +364,4 @@ extension SettingsView {
     }
   }
 
-  private func checkProviderKeyValidity(_ provider: TranscriptionProviderMetadata) {
-    providerValidationStates[provider.id] = .validating
-
-    Task {
-      let registry = TranscriptionProviderRegistry.shared
-      guard let providerInstance = await registry.provider(withID: provider.id) else {
-        await MainActor.run {
-          providerValidationStates[provider.id] =
-            .finished(.failure(message: "Provider not found"))
-        }
-        return
-      }
-
-      // Get the stored key
-      guard let storedKey = try? await environment.secureStorage.secret(identifier: provider.apiKeyIdentifier) else {
-        await MainActor.run {
-          providerValidationStates[provider.id] =
-            .finished(.failure(message: "API key not found in Keychain"))
-        }
-        return
-      }
-
-      let result = await providerInstance.validateAPIKey(storedKey)
-
-      await MainActor.run {
-        providerValidationStates[provider.id] = .finished(result)
-      }
-    }
-  }
-
-  // Keep the configuration capture, validation and secure write in one save lifecycle.
-  // swiftlint:disable:next function_body_length
-  private func saveProviderAPIKey(_ provider: TranscriptionProviderMetadata) {
-    guard let enteredValue = providerAPIKeys[provider.id]?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !enteredValue.isEmpty
-    else { return }
-
-    let value: String
-    do {
-      value = provider.id == "alibaba"
-        ? try AlibabaSpeechConfiguration.credentialsForSaving(enteredValue) : enteredValue
-    } catch {
-      providerValidationStates[provider.id] = .finished(.failure(message: error.localizedDescription))
-      return
-    }
-    providerValidationStates[provider.id] = .validating
-
-    Task {
-      let registry = TranscriptionProviderRegistry.shared
-      guard let providerInstance = await registry.provider(withID: provider.id) else {
-        await MainActor.run {
-          providerValidationStates[provider.id] =
-            .finished(.failure(message: "Provider not found"))
-        }
-        return
-      }
-
-      let validation = await providerInstance.validateAPIKey(value)
-
-      switch validation.outcome {
-      case .success:
-        do {
-          try await environment.secureStorage.storeSecret(
-            value,
-            identifier: provider.apiKeyIdentifier,
-            label: provider.apiKeyLabel
-          )
-
-          let result = validation.updatingOutcome(
-            .success(message: provider.id == "alibaba"
-              ? "Alibaba key, region and workspace saved. Access is checked when transcribing."
-              : "API key saved and validated successfully")
-          )
-
-          await MainActor.run {
-            providerAPIKeys[provider.id] = ""
-            providerValidationStates[provider.id] = .finished(result)
-            refreshBalance(forCredentialIdentifier: provider.apiKeyIdentifier)
-          }
-        } catch {
-          let failure = APIKeyValidationResult.failure(
-            message: "Failed to store key: \(error.localizedDescription)",
-            debug: validation.debug
-          )
-          await MainActor.run {
-            providerValidationStates[provider.id] = .finished(failure)
-          }
-        }
-      case .failure:
-        await MainActor.run {
-          providerValidationStates[provider.id] = .finished(validation)
-        }
-      }
-    }
-  }
-
-  private func removeProviderAPIKey(_ provider: TranscriptionProviderMetadata) {
-    Task {
-      do {
-        try await environment.secureStorage.removeSecret(identifier: provider.apiKeyIdentifier)
-        await MainActor.run {
-          providerAPIKeys[provider.id] = ""
-          providerValidationStates[provider.id] = .idle
-        }
-      } catch {
-        // Handle error silently
-      }
-    }
-  }
-
-  // MARK: - TTS Provider API Key Management
-
-  private func ttsBinding(for providerID: String) -> Binding<String> {
-    Binding(
-      get: { ttsProviderAPIKeys[providerID] ?? "" },
-      set: { ttsProviderAPIKeys[providerID] = $0 }
-    )
-  }
-
-  private func saveTTSProviderAPIKey(_ provider: TTSProvider) {
-    guard let value = ttsProviderAPIKeys[provider.rawValue]?.trimmingCharacters(in: .whitespacesAndNewlines),
-      !value.isEmpty
-    else { return }
-
-    // Drop cached controllers before the replacement lands, so a cached session
-    // cannot keep using the key the user has just replaced.
-    invalidateSharedTranscriptionCache(for: provider)
-
-    ttsProviderValidationStates[provider.rawValue] = .validating
-
-    Task {
-      let client = environment.tts.clients[provider]
-      guard let client = client else {
-        await MainActor.run {
-          ttsProviderValidationStates[provider.rawValue] =
-            .finished(.failure(message: "TTS provider not found"))
-        }
-        return
-      }
-
-      let validation = await client.validateAPIKey(value)
-
-      switch validation.outcome {
-      case .success(let message):
-        do {
-          try await environment.secureStorage.storeSecret(
-            value,
-            identifier: provider.apiKeyIdentifier,
-            label: provider.sharesTranscriptionCredential
-              ? "\(provider.displayName) API Key"
-              : "\(provider.displayName) TTS API Key"
-          )
-
-          let result = validation.updatingOutcome(
-            .success(message: "API key saved. \(message)")
-          )
-
-          await MainActor.run {
-            // Validation and storage take a network round trip. A session that
-            // started inside that window cached a controller built from the old
-            // key, so the cache is dropped again now the replacement is stored.
-            invalidateSharedTranscriptionCache(for: provider)
-            ttsProviderAPIKeys[provider.rawValue] = ""
-            ttsProviderValidationStates[provider.rawValue] = .finished(result)
-            refreshBalance(forCredentialIdentifier: provider.apiKeyIdentifier)
-          }
-        } catch {
-          let failure = APIKeyValidationResult.failure(
-            message: "Failed to store key: \(error.localizedDescription)",
-            debug: validation.debug
-          )
-          await MainActor.run {
-            ttsProviderValidationStates[provider.rawValue] = .finished(failure)
-          }
-        }
-      case .failure:
-        await MainActor.run {
-          ttsProviderValidationStates[provider.rawValue] = .finished(validation)
-        }
-      }
-    }
-  }
-
-  private func checkTTSProviderKeyValidity(_ provider: TTSProvider) {
-    ttsProviderValidationStates[provider.rawValue] = .validating
-
-    Task {
-      let client = environment.tts.clients[provider]
-      guard let client = client else {
-        await MainActor.run {
-          ttsProviderValidationStates[provider.rawValue] =
-            .finished(.failure(message: "TTS provider not found"))
-        }
-        return
-      }
-
-      guard let storedKey = try? await environment.secureStorage.secret(identifier: provider.apiKeyIdentifier) else {
-        await MainActor.run {
-          ttsProviderValidationStates[provider.rawValue] =
-            .finished(.failure(message: "API key not found in Keychain"))
-        }
-        return
-      }
-
-      let result = await client.validateAPIKey(storedKey)
-
-      await MainActor.run {
-        ttsProviderValidationStates[provider.rawValue] = .finished(result)
-      }
-    }
-  }
-
-  /// Re-reads the account balance after its credential changes, so a replaced
-  /// key never leaves the previous account's figure on screen.
-  private func refreshBalance(forCredentialIdentifier identifier: String) {
-    guard let account = ProviderBalanceDirectory.account(forCredentialIdentifier: identifier) else { return }
-    providerBalances.refresh(accountID: account.id)
-  }
-
-  /// Drops cached live controllers when this provider's key also powers
-  /// transcription, so no cached session can keep using a superseded key.
-  private func invalidateSharedTranscriptionCache(for provider: TTSProvider) {
-    guard provider.sharesTranscriptionCredential else { return }
-    environment.transcription.invalidateLiveControllerCache()
-  }
-
-  private func removeTTSProviderAPIKey(_ provider: TTSProvider) {
-    // Drop cached controllers before the key disappears, so no stale session
-    // can keep using it.
-    invalidateSharedTranscriptionCache(for: provider)
-    Task {
-      do {
-        try await environment.secureStorage.removeSecret(identifier: provider.apiKeyIdentifier)
-        await MainActor.run {
-          ttsProviderAPIKeys[provider.rawValue] = ""
-          ttsProviderValidationStates[provider.rawValue] = .idle
-        }
-      } catch {
-        // Handle error silently
-      }
-    }
-  }
-
-  private func checkOpenRouterKeyValidity() {
-    apiKeyValidationState = .validating
-
-    Task {
-      do {
-        let storedKey = try await environment.secureStorage.secret(identifier: openRouterKeyIdentifier)
-        let result = await environment.openRouter.validateAPIKey(storedKey)
-
-        await MainActor.run {
-          apiKeyValidationState = .finished(result)
-        }
-      } catch {
-        await MainActor.run {
-          apiKeyValidationState = .finished(
-            .failure(message: error.localizedDescription)
-          )
-        }
-      }
-    }
-  }
-
-  private func removeOpenRouterKey() {
-    Task {
-      do {
-        try await environment.secureStorage.removeSecret(identifier: openRouterKeyIdentifier)
-        await MainActor.run {
-          apiKeyValidationState = .idle
-          newAPIKeyValue = ""
-        }
-      } catch {
-        await MainActor.run {
-          apiKeyValidationState = .finished(
-            .failure(message: error.localizedDescription)
-          )
-        }
-      }
-    }
-  }
-
-  @ViewBuilder
-  private func validationStatusView(
-    for state: ValidationViewState,
-    successFallback: String = "Key saved and validated"
-  ) -> some View {
-    switch state {
-    case .idle:
-      EmptyView()
-    case .validating:
-      Text("Validating key…")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    case .finished(let result):
-      switch result.outcome {
-      case .success(let message):
-        Label(message.isEmpty ? successFallback : message, systemImage: "checkmark.seal")
-          .font(.caption)
-          .foregroundStyle(.green)
-      case .failure(let message):
-        Label(message, systemImage: "exclamationmark.triangle")
-          .font(.caption)
-          .foregroundStyle(.red)
-      }
-    }
-  }
-
-  @ViewBuilder
-  private func validationDebugDetails(for state: ValidationViewState) -> some View {
-    if case .finished(let result) = state, let debug = result.debug {
-      Divider()
-        .padding(.vertical, 4)
-      APIKeyValidationDebugDetailsView(debug: debug)
-    }
-  }
-
-  private func isValidationInFlight(_ state: ValidationViewState) -> Bool {
-    if case .validating = state { return true }
-    return false
-  }
 }

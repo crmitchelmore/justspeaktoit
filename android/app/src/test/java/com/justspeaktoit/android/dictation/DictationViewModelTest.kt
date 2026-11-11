@@ -224,6 +224,23 @@ class DictationViewModelTest {
     }
 
     @Test
+    fun testUploadPastItsDeadline_isAbortedAndFailsAsNetworkTimeout() {
+        h.timings = DictationTimings(transcribeMs = 100)
+        h.cloud.onTranscribe = { call ->
+            while (!call.cancelled) Thread.sleep(5)
+            throw CloudException(DictationFailure.Network, "Socket closed")
+        }
+        val rec = startCloud()
+        h.onMain { h.viewModel.stop() }
+        val failed = h.awaitState { it.dictation is DictationState.Failed && it.history.isNotEmpty() }
+
+        assertEquals(DictationFailure.NetworkTimeout, (failed.dictation as DictationState.Failed).failure)
+        assertTrue(h.cloud.transcriptions.single().call.cancelled)
+        assertEquals(DictationFailure.NetworkTimeout.name, failed.history.single().failure)
+        assertFalse("the upload file is deleted after a failure too", rec.file.exists())
+    }
+
+    @Test
     fun testLeavingTheApp_failsCaptureAndReleasesMicrophone() {
         val rec = startCloud()
         h.onMain { h.viewModel.onLeftApp() }

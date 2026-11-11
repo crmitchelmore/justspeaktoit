@@ -5,7 +5,7 @@ import SpeakCore
 //
 // The Interactions API client, its request/response models, the resumable
 // Files API upload and the ACTIVE-state poll all live in
-// `SpeakCore/GeminiInteractionsClient.swift` so iOS uploads through the same
+// `SpeakCore/Batch/Providers/GeminiInteractionsClient.swift` so iOS uploads through the same
 // code (issue #862). What remains here is the macOS `TranscriptionProvider`
 // conformance: registry metadata, credential validation and the catalogue
 // filter.

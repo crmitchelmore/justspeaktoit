@@ -392,7 +392,7 @@ version/baseline authority. `VERSION` is a build hint only.
 - Treat the OpenAI transcription `prompt` as vocabulary/keyterm biasing, not a custom formatting or tone prompt. Keep tone/style changes in post-processing.
 
 ### Key files
-- `Sources/SpeakCore/OpenAIRealtimeLiveClient.swift` (+ `…LiveConnection`, `…LiveSending`, `…LiveRun`, `…Protocol`, `…TranscriptAssembler`) — the shared portable client: endpoint, GA `session.update`, readiness gating on `session.updated`, bounded PCM admission, ordered single-in-flight sends, commit/finalisation and per-run identity. Transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP on Windows).
+- `Sources/SpeakCore/Live/Providers/OpenAIRealtime/OpenAIRealtimeLiveClient.swift` (+ `…LiveConnection`, `…LiveSending`, `…LiveRun`, `…Protocol`, `…TranscriptAssembler`) — the shared portable client: endpoint, GA `session.update`, readiness gating on `session.updated`, bounded PCM admission, ordered single-in-flight sends, commit/finalisation and per-run identity. Transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP on Windows).
 - `Sources/SpeakApp/OpenAIRealtimeTranscriptionProvider.swift` and `Sources/SpeakiOS/Services/OpenAIRealtimeWebSocketClient.swift` — thin platform adapters; keep behaviour changes in the shared client, not here.
 - Portable lifecycle tests live in `Tests/SpeakDesktopTests/OpenAIRealtime*Tests.swift` and drive the real client through a fake `StreamingWebSocketConnection`.
 
@@ -404,7 +404,7 @@ version/baseline authority. `VERSION` is a build hint only.
 - Only `transcript.done` completes a session: the server closes the socket after it, so a closure before it (even after `audio.done` left) or a finish budget that elapses without it is published as an error (`sessionNotReady`, `missingCompletion` or `transportStalled`) before the finish returns the locked spans received so far. Hosts keep that text as recovery material, not as a completed transcript.
 
 ### Key files
-- `Sources/SpeakCore/XAISpeechToTextLiveClient.swift` (+ `…LiveRun`, `…LiveConnection`, `…LiveSending`, `…LiveProtocol`, `XAISpeechToTextEvent.swift`) — the shared portable client: injected transport, readiness gating on `transcript.created`, bounded single-in-flight sends, one bounded finish and per-run identity. `LiveTranscriptionClientFactory` (Apple) and `DesktopLiveTranscription` (Windows) construct it; the desktop factory admits only `XAISpeechToText.liveCatalogID`, never the Grok Voice route.
+- `Sources/SpeakCore/Live/Providers/XAISpeechToText/XAISpeechToTextLiveClient.swift` (+ `…LiveRun`, `…LiveConnection`, `…LiveSending`, `…LiveProtocol`, `XAISpeechToTextEvent.swift`) — the shared portable client: injected transport, readiness gating on `transcript.created`, bounded single-in-flight sends, one bounded finish and per-run identity. `LiveTranscriptionClientFactory` (Apple) and `DesktopLiveTranscription` (Windows) construct it; the desktop factory admits only `XAISpeechToText.liveCatalogID`, never the Grok Voice route.
 - Portable lifecycle tests: `Tests/SpeakDesktopTests/XAISpeechToText*Tests.swift`; established protocol expectations: `Tests/SpeakCoreTests/XAISpeechToTextLiveClientTests.swift`.
 
 ## Accessibility Text Insertion

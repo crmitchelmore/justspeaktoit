@@ -30,12 +30,12 @@ All implementation code is documented in `IMPLEMENTATION_GUIDE_E2E_ENCRYPTION.md
    - Counter-based nonce management
    - Session lifecycle management
 
-2. ✅ **Modifications to `Sources/SpeakCore/TransportProtocol.swift`**
+2. ✅ **Modifications to `Sources/SpeakCore/Sync/TransportProtocol.swift`**
    - Protocol version bump: 1 → 2
    - New `EncryptedMessage` type
    - Encoder/decoder updates
 
-3. ✅ **Modifications to `Sources/SpeakCore/MacConnection.swift`**
+3. ✅ **Modifications to `Sources/SpeakCore/Sync/MacConnection.swift`**
    - Encryption instance lifecycle
    - Auto-encrypt sensitive messages
    - Auto-decrypt incoming encrypted messages

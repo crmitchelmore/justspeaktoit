@@ -29,8 +29,9 @@ if "exclude: appleCoreSources" not in portable or re.search(r"\bsources\s*:", po
     sys.exit("The portable core must discover new sources by default, with explicit Apple exclusions")
 sources = {path.relative_to(source_root).as_posix() for path in source_root.rglob("*.swift")}
 included = sources - set(excluded)
-required = {"ModelCatalog.swift", "ModelCatalogTypes.swift", "StreamingTranscriptionClient.swift",
-            "TranscriptAccumulator.swift", "RecordingLifecycleCoordinator.swift", "OpenAIBatchClient.swift",
+required = {"ModelCatalog.swift", "ModelCatalogTypes.swift", "Live/StreamingTranscriptionClient.swift",
+            "Live/TranscriptAccumulator.swift", "Recording/RecordingLifecycleCoordinator.swift",
+            "Batch/Providers/OpenAIBatchClient.swift",
             "PaidAccess/PaidAccessModels.swift", "PaidAccess/PaidAccessRouting.swift",
             "PaidAccess/PaidAccessClient.swift", "PaidAccess/PaidAccessSessionLifecycle.swift"}
 if missing := required - included:

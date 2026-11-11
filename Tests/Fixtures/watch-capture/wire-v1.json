@@ -1,0 +1,18 @@
+{
+  "description": "Apple Watch to iPhone capture hand-off, schema 1. The watch enqueue produces envelopeMetadata; the phone import reads it and answers with an acknowledgement. Each value is the exact dictionary WatchConnectivity carries: a JSON string under one key. WatchCaptureWireContractTests (SpeakWatchCoreTests) and WatchCaptureImportWireContractTests (SpeakCoreTests) both read this file.",
+  "capture": {
+    "id": "6F1D2C3B-4A5E-4F60-8172-93A4B5C6D7E8",
+    "createdAt": "2027-01-02T03:04:05Z",
+    "duration": 4.5,
+    "fileExtension": "m4a"
+  },
+  "envelopeMetadata": {
+    "watchCaptureEnvelope": "{\"schemaVersion\":1,\"id\":\"6F1D2C3B-4A5E-4F60-8172-93A4B5C6D7E8\",\"createdAt\":\"2027-01-02T03:04:05Z\",\"duration\":4.5,\"fileExtension\":\"m4a\"}"
+  },
+  "transcribedAck": {
+    "watchCaptureAck": "{\"schemaVersion\":1,\"id\":\"6F1D2C3B-4A5E-4F60-8172-93A4B5C6D7E8\",\"outcome\":\"transcribed\"}"
+  },
+  "failedAck": {
+    "watchCaptureAck": "{\"schemaVersion\":1,\"id\":\"6F1D2C3B-4A5E-4F60-8172-93A4B5C6D7E8\",\"outcome\":\"failed\",\"message\":\"Transcription failed: no speech detected.\"}"
+  }
+}

@@ -347,7 +347,7 @@ struct PolishTextIntent: AppIntent {
         await settings.ensureKeysLoaded()
         let model = settings.postProcessingModel
         try settings.requireAvailableCredentials(for: model, purpose: .postProcessing)
-        guard model == AppleLocalModels.foundationModelID || settings.hasOpenRouterKey else {
+        guard settings.hasPostProcessingKey(for: model) else {
             throw AutomationIntentError.openRouterKeyMissing
         }
         let request = AutomationIntentSupport.polishRequest(
@@ -360,7 +360,7 @@ struct PolishTextIntent: AppIntent {
             systemPrompt: request.systemPrompt,
             userMessage: request.userMessage,
             model: model,
-            apiKey: settings.openRouterAPIKey
+            apiKey: settings.postProcessingAPIKey(for: model)
         )
         guard !polished.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AutomationIntentError.noPolishOutput

@@ -23,24 +23,35 @@ struct PostProcessingSettingsPage: View {
                     Label("Model & Prompt", systemImage: "slider.horizontal.3")
                         .layoutPriority(1)
                     Spacer()
-                    Text(ModelCatalog.friendlyName(for: settings.postProcessingModel))
+                    Text(postProcessingModelName)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
             }
 
-            if settings.hasOpenRouterKey {
+            if settings.hasPostProcessingKey {
                 SettingsFootnote("Polish tidies punctuation and wording with an AI model, using your prompt.")
             } else {
-                Label("OpenRouter API key required", systemImage: "exclamationmark.triangle")
+                Label(
+                    "\(settings.postProcessingKeyProviderName) API key required",
+                    systemImage: "exclamationmark.triangle"
+                )
                     .font(.caption)
                     .foregroundStyle(.orange)
                 SettingsFootnote(
-                    "**Add an OpenRouter key** in Providers & API Keys to polish transcripts.",
+                    "**Add a \(settings.postProcessingKeyProviderName) key** in Providers & API Keys "
+                        + "to polish transcripts.",
                     alwaysShown: true
                 )
             }
         }
+    }
+
+    private var postProcessingModelName: String {
+        let model = settings.postProcessingModel
+        return ModelPickerGrouping.selectionLabel(
+            for: model, displayName: ModelCatalog.friendlyName(for: model), purpose: .postProcessing
+        )
     }
 }
 

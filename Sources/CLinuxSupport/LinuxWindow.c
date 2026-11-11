@@ -1941,7 +1941,7 @@ static GtkWidget *build_post_processing(void) {
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(prompt_scroll), GTK_WIDGET(ui.polish_prompt_row));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), prompt_scroll);
     ui.polish_key_row = ADW_PASSWORD_ENTRY_ROW(adw_password_entry_row_new());
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_key_row), "New OpenRouter key (leave empty to keep)");
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_key_row), "New key for the selected model's provider (leave empty to keep)");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_key_row));
     g_signal_connect(ui.polish_location_row, "notify::selected", G_CALLBACK(on_polish_location), NULL);
     g_signal_connect(ui.polish_model_row, "notify::selected", G_CALLBACK(on_polish_model), NULL);

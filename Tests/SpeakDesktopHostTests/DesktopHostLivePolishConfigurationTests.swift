@@ -10,7 +10,7 @@ final class DesktopHostLivePolishConfigurationTests: XCTestCase {
         let fixture = AutoCleanHostFixture()
         try await fixture.prepare()
         addTeardownBlock { try await fixture.cleanup() }
-        let alternate = try XCTUnwrap(DesktopPostProcessing.remoteModels.first {
+        let alternate = try XCTUnwrap(DesktopPostProcessing.openRouterRemoteModels.first {
             $0.id != ModelCatalog.defaultFastTextModel
         }).id
         let configuration = try DesktopConfiguration(values: [

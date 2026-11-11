@@ -1483,6 +1483,9 @@ typedef struct JSTIAPIKeyRow {
     const char *url;
     const char *hint;
     int saved;
+    /* Bit i set when the row passes SpeakCore APIKeyStatusFilter case i
+     * (All, Errors, Set, Unset). */
+    uint32_t filters;
 } JSTIAPIKeyRow;
 typedef void (*JSTIAPIKeyCallback)(int action, const char *identifier, const char *key, void *context);
 /* Copies the rows; `context` is borrowed until cleared or replaced. */

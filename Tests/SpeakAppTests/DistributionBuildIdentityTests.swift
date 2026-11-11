@@ -109,7 +109,12 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(macDependencies.contains("JustSpeakToItWidgetExtension"))
         XCTAssertFalse(macDependencies.contains("JustSpeakKeyboard"))
 
-        XCTAssertTrue(iosTarget.contains("sources: [\"SpeakiOSApp/**\"]"))
+        // Besides its own sources, iOS compiles only the Mac's two non-UI Sentry
+        // files, so both platforms share one crash-reporting contract.
+        let sharedSentryFiles = [
+            "\"Sources/SpeakApp/SentryManager.swift\"", "\"Sources/SpeakApp/SentryEventScrubber.swift\""
+        ]
+        XCTAssertTrue(iosTarget.contains("\"SpeakiOSApp/**\""))
         XCTAssertTrue(iosTarget.contains("dependencies: iosAppDependencies"))
         XCTAssertTrue(iosDependencies.contains(".package(product: \"SpeakiOSLib\")"))
         XCTAssertTrue(
@@ -117,7 +122,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
                 "iosAppDependencies.append(.target(name: \"JustSpeakKeyboard\"))"
             )
         )
-        XCTAssertFalse(iosTarget.contains("Sources/SpeakApp"))
+        let iosTargetWithoutSentry = sharedSentryFiles.reduce(String(iosTarget)) {
+            $0.replacingOccurrences(of: $1, with: "")
+        }
+        XCTAssertFalse(iosTargetWithoutSentry.contains("Sources/SpeakApp"))
         XCTAssertFalse(iosDependencies.contains("SpeakHotKeys"))
         XCTAssertFalse(iosDependencies.contains("Sparkle"))
     }

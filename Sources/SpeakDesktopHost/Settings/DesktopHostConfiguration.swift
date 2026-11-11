@@ -382,7 +382,7 @@ extension DesktopHostController {
         if oldVoice?.quality != newVoice?.quality || oldVoice?.modelID != newVoice?.modelID
             || oldVoice?.voiceID != newVoice?.voiceID
             || oldVoice?.strictVoiceSelection != newVoice?.strictVoiceSelection {
-            voiceCredentialEpoch = UUID()
+            voiceCredentials.selectionEpoch = UUID()
         }
     }
 

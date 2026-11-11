@@ -40,7 +40,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceDiscovery.listing = nil
         voiceDiscovery.listingContext = nil
         voiceDiscovery.offeredIDs = []
-        voiceProviderIssuedSlot = nil
+        voiceCredentials.issuedProviderSlot = nil
         voiceDiscovery.task?.cancel()
         cancelAccountVoiceWork()
         presentVoiceAccountProviders()
@@ -238,7 +238,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     package var voiceAccountWorkIsPending: Bool {
-        voiceDiscovery.task != nil || voiceCredentialTask != nil || voiceCredentialReadTask != nil
+        voiceDiscovery.task != nil || voiceCredentials.write != nil || voiceCredentials.readWorker != nil
             || voiceAccountWorkers > 0
     }
 

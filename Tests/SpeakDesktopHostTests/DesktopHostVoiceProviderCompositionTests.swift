@@ -43,12 +43,12 @@ final class DesktopHostVoiceProviderCompositionTests: XCTestCase {
             XCTAssertEqual(selected.favoritePicker(accountInventory: nil).identifiers[
                 selected.favoritePicker(accountInventory: nil).selected], voice.pickerIdentifier)
         }
-        let epoch = await controller.voiceCredentialEpoch
+        let epoch = await controller.voiceCredentials.selectionEpoch
         await controller.handleVoicePicker(voiceID: tuples[1].pickerIdentifier, action: 1)
         let saved = await controller.voiceOutputSettings()
         XCTAssertEqual(saved.modelID, tuples[2].modelID)
         XCTAssertEqual(saved.favoriteVoices, [preset.providerVoiceID])
-        let unchangedEpoch = await controller.voiceCredentialEpoch
+        let unchangedEpoch = await controller.voiceCredentials.selectionEpoch
         XCTAssertEqual(unchangedEpoch, epoch)
         let picker = saved.favoritePicker(accountInventory: nil)
         for (rank, voice) in tuples.enumerated() {

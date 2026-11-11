@@ -273,7 +273,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             if previous.modelID != voiceOutput.modelID || previous.voiceID != voiceOutput.voiceID
                 || previous.quality != voiceOutput.quality
                 || previous.strictVoiceSelection != voiceOutput.strictVoiceSelection {
-                voiceCredentialEpoch = UUID()
+                voiceCredentials.selectionEpoch = UUID()
             }
             if wasTracking != voiceUsageTrackingEnabled { voiceUsage.epoch = UUID() }
             if !busy, recording == nil { update(message) }

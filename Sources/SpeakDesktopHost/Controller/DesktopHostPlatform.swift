@@ -161,9 +161,13 @@ package protocol DesktopHostPlatform: Sendable {
     associatedtype LocalModelsState = Void
     static func makeLocalModelsState() -> LocalModelsState
     static func loadLocalModels(directory: URL) throws -> LocalModelsState
-    static func cancelLocalModels(controller: isolated DesktopHostController<Self>)
+    /// Cancels the imports and downloads `state` owns.
+    static func cancelLocalModels(_ state: LocalModelsState)
     /// How status lines name this computer, e.g. "this PC".
     static var localDeviceName: String { get }
+    // Readiness, recognition and live clients take the isolated controller:
+    // they open the shared runtime and read the recording settings. Holding a
+    // model and cancelling downloads touch only the local-model state.
     /// Why an on-device model cannot run now, or nil when it can.
     static func localReadiness(_ model: String, controller: isolated DesktopHostController<Self>) -> String?
     static func transcribeLocally(
@@ -172,8 +176,8 @@ package protocol DesktopHostPlatform: Sendable {
     /// Holds an on-device model for one recording or transcription until
     /// `endLocalUse`, so it cannot be removed meanwhile. Returns the held
     /// identifier, or nil for models the host does not run on-device.
-    static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String?
-    static func endLocalUse(_ held: String, controller: isolated DesktopHostController<Self>)
+    static func beginLocalUse(_ model: String, in state: inout LocalModelsState) -> String?
+    static func endLocalUse(_ held: String, in state: inout LocalModelsState)
     /// An in-process streaming client for a `DesktopHostModels.localLive`
     /// model, or nil when the host cannot stream it. Throws the user-facing
     /// reason the model cannot run now.

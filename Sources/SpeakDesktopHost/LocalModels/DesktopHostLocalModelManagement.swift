@@ -8,16 +8,12 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
     package static var localModelsFolder: String { "LocalModels" }
 
     /// The on-device models this host offers, in catalogue order.
-    package var localModelSpecs: [WhisperCppModel] {
-        DesktopLocalTranscription.models(host: Platform.localModelHost)
-            + localModels.imported.filter { Platform.localModelHost.canExecute(model: $0) }.map(\.model)
-    }
+    package var localModelSpecs: [WhisperCppModel] { localModels.specs(host: Platform.localModelHost) }
 
     /// The model behind a batch identifier or, for live use, the batch model
     /// a `local/streaming/whisperkit/...` identifier streams with.
     package func localModelSpec(for identifier: String) -> WhisperCppModel? {
-        let batch = DesktopLocalStreaming.batchModelID(forLiveModelID: identifier) ?? identifier
-        return localModelSpecs.first { $0.catalogueID == batch }
+        localModels.spec(for: identifier, host: Platform.localModelHost)
     }
 
     package var localInstaller: LocalModelInstaller {

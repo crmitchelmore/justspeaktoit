@@ -227,7 +227,7 @@ extension DesktopHostVoiceCredentialTests {
         await fulfillment(of: [entered], timeout: 3)
         let wrong = await controller.cancelVoiceCredentialSave(UUID())
         XCTAssertFalse(wrong)
-        let outstanding = await controller.voiceCredentialRequestID
+        let outstanding = await controller.voiceCredentials.write?.id
         XCTAssertEqual(outstanding, request.id)
         let active = await controller.activeOperations
         XCTAssertEqual(active, 1)
@@ -348,7 +348,7 @@ extension DesktopHostController where Platform == FakePlatform {
     ) async -> Result<Void, VoiceOutputCredentialError> {
         let request: VoiceOutputCredentialRequest
         do {
-            request = try .init(id: UUID(), selectionEpoch: voiceCredentialEpoch, purpose: purpose,
+            request = try .init(id: UUID(), selectionEpoch: voiceCredentials.selectionEpoch, purpose: purpose,
                                 identifier: identifier, operation: operation)
         } catch {
             return .failure(error as? VoiceOutputCredentialError ?? .unavailable)

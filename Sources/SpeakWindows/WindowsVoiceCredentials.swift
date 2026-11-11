@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import SpeakCore
 import SpeakDesktopHost
 import CWindowsSupport
@@ -55,8 +56,7 @@ func windowsVoiceCredentialEvent(
     _ requestID: UnsafePointer<CChar>?, _ selectionEpoch: UnsafePointer<CChar>?,
     _ secret: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     do {
         let message = try VoiceOutputCredentialMessage(
             operation: operation.map(String.init(cString:)) ?? "",

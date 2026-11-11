@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import CLinuxSupport
 
 /// One microphone capture through libpulse (PipeWire's pulse server on
@@ -16,7 +17,7 @@ public final class LinuxAudioCapture: @unchecked Sendable {
     }
 
     private let native: OpaquePointer
-    private let sink: Sink
+    private let callbacks: NativeCallbackContext<Sink>
     private let lock = NSLock()
     private var destroyed = false
 
@@ -24,18 +25,20 @@ public final class LinuxAudioCapture: @unchecked Sendable {
         device: String, sampleRate: Int, frameMilliseconds: Int,
         audio: @escaping (UnsafeBufferPointer<Int16>) -> Void, failure: @escaping (String) -> Void
     ) throws {
-        let sink = Sink(audio: audio, failure: failure)
+        let callbacks = NativeCallbackContext(Sink(audio: audio, failure: failure))
         var error = [CChar](repeating: 0, count: 1024)
-        let context = Unmanaged.passUnretained(sink).toOpaque()
         let created = device.withCString {
             jsti_capture_create(
-                $0, UInt32(sampleRate), UInt32(frameMilliseconds), linuxCaptureAudio, linuxCaptureError, context,
-                &error, error.count
+                $0, UInt32(sampleRate), UInt32(frameMilliseconds), linuxCaptureAudio, linuxCaptureError,
+                callbacks.pointer, &error, error.count
             )
         }
-        guard let created else { throw LinuxNativeError(message: String(cString: error)) }
+        guard let created else {
+            callbacks.release()
+            throw LinuxNativeError(message: String(cString: error))
+        }
         self.native = created
-        self.sink = sink
+        self.callbacks = callbacks
     }
 
     deinit { destroy() }
@@ -51,7 +54,8 @@ public final class LinuxAudioCapture: @unchecked Sendable {
             return !destroyed
         }
         guard first else { return }
-        withExtendedLifetime(sink) { jsti_capture_destroy(native) }
+        jsti_capture_destroy(native)
+        callbacks.release()
     }
 
     public struct Device: Equatable, Sendable {
@@ -63,16 +67,10 @@ public final class LinuxAudioCapture: @unchecked Sendable {
     /// Microphones the sound server offers now; speaker monitors are excluded.
     public static func devices() throws -> [Device] {
         let list = DeviceList()
-        try withExtendedLifetime(list) {
-            try LinuxNative.call {
-                jsti_audio_devices_enumerate(linuxDeviceFound, Unmanaged.passUnretained(list).toOpaque(), $0, $1)
-            }
+        try NativeCallbackContext.withScoped(list) { context in
+            try LinuxNative.call { jsti_audio_devices_enumerate(linuxDeviceFound, context, $0, $1) }
         }
         return list.devices
-    }
-
-    fileprivate static func sink(_ context: UnsafeMutableRawPointer) -> Sink {
-        Unmanaged<Sink>.fromOpaque(context).takeUnretainedValue()
     }
 }
 
@@ -82,20 +80,20 @@ private final class DeviceList {
 }
 
 private func linuxCaptureAudio(_ samples: UnsafePointer<Int16>?, _ count: Int, _ context: UnsafeMutableRawPointer?) {
-    guard let samples, let context else { return }
-    LinuxAudioCapture.sink(context).audio(UnsafeBufferPointer(start: samples, count: count))
+    guard let samples, let sink = NativeCallbackContext<LinuxAudioCapture.Sink>.resolve(context) else { return }
+    sink.audio(UnsafeBufferPointer(start: samples, count: count))
 }
 
 private func linuxCaptureError(_ message: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    LinuxAudioCapture.sink(context).failure(message.map(String.init(cString:)) ?? "Microphone capture failed.")
+    let sink = NativeCallbackContext<LinuxAudioCapture.Sink>.resolve(context)
+    sink?.failure(message.map(String.init(cString:)) ?? "Microphone capture failed.")
 }
 
 private func linuxDeviceFound(
     _ id: UnsafePointer<CChar>?, _ name: UnsafePointer<CChar>?, _ isDefault: Int32, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let id, let name, let context else { return }
-    Unmanaged<DeviceList>.fromOpaque(context).takeUnretainedValue().devices.append(
+    guard let id, let name, let list = NativeCallbackContext<DeviceList>.resolve(context) else { return }
+    list.devices.append(
         .init(id: String(cString: id), name: String(cString: name), isDefault: isDefault != 0)
     )
 }

@@ -26,6 +26,10 @@ final class WindowsEventContext {
         guard let self else { return }
         self.enqueueSettings { await self.controller.saveProfiles(profiles) }
     }
+    /// The context every native window callback receives. It retains this
+    /// holder until shutdown unregisters it; later callbacks then do nothing.
+    private(set) var callbacks: NativeCallbackContext<WindowsEventContext>!
+    var callbackContext: UnsafeMutableRawPointer { callbacks.pointer }
 
     init(controller: WindowsAppController, smokeTest: Bool) {
         self.controller = controller
@@ -50,6 +54,7 @@ final class WindowsEventContext {
                 }
             }
         }
+        callbacks = NativeCallbackContext(self)
     }
 
     func copyTranscript(_ text: String, variant: DesktopTranscriptVariant?) {
@@ -106,8 +111,7 @@ final class WindowsEventContext {
 }
 
 func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     let controller = holder.controller
     let value = text.map(String.init(cString:)) ?? ""
     switch event {
@@ -359,7 +363,7 @@ enum SpeakWindowsMain {
     /// Restores the shortcut fallback and canonical Read aloud voice before launch.
     private static func configureHotKey(_ holder: WindowsEventContext) async throws {
         var hotKey = await holder.controller.hotKeySettings()
-        let context = Unmanaged.passUnretained(holder).toOpaque()
+        let context = holder.callbackContext
         guard WindowsNative.configureVoiceOutput(await holder.controller.voiceOutputSettings(), context: context) else {
             throw WindowsNativeError(message: "Could not configure Read aloud.")
         }
@@ -375,7 +379,7 @@ enum SpeakWindowsMain {
     /// A hand-edited endpoint the dialog cannot show falls back to none rather
     /// than blocking launch; the saved setting is unchanged until the next Apply.
     private static func configureAzureResource(_ holder: WindowsEventContext) async throws {
-        let context = Unmanaged.passUnretained(holder).toOpaque()
+        let context = holder.callbackContext
         guard WindowsNative.configureAzureResource(await holder.controller.azureResourceEndpoint(), context: context)
                 || WindowsNative.configureAzureResource("", context: context) else {
             throw WindowsNativeError(message: "Could not configure the Azure Speech resource.")
@@ -395,10 +399,10 @@ enum SpeakWindowsMain {
         await controller.setMicrophoneWarning(warning)
         let processing = await controller.postProcessingOptions()
         try WindowsNative.configurePostProcessing(
-            processing, context: Unmanaged.passUnretained(holder).toOpaque()
+            processing, context: holder.callbackContext
         )
         let textOutput = await controller.textOutputOptions()
-        try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
+        try WindowsNative.configureTextOutput(textOutput, context: holder.callbackContext)
         try await configureHotKey(holder)
         guard await WindowsNative.configureActionShortcuts(holder) else {
             throw WindowsNativeError(message: "Could not configure action shortcuts.")
@@ -439,7 +443,7 @@ enum SpeakWindowsMain {
                 try WindowsNative.checked { error, capacity in
                     jsti_window_run(
                         buffer.baseAddress, buffer.count, Int32(selected), comparisonWindowEvent,
-                        Unmanaged.passUnretained(holder).toOpaque(), error, capacity
+                        holder.callbackContext, error, capacity
                     )
                 }
             }
@@ -472,7 +476,9 @@ enum SpeakWindowsMain {
         await DesktopHostShutdown.wait(within: report.isComplete ? DesktopHostShutdown.grace : .zero) {
             await hotKeys.drain()
         }
-        withExtendedLifetime(holder) {}
+        // Every native registration is cleared; a late callback finds nothing.
+        holder.profiles.callbacks.unregister()
+        holder.callbacks.unregister()
         if let windowFailure { throw windowFailure }
         if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
     }

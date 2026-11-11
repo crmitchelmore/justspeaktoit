@@ -65,7 +65,7 @@ extension LinuxWindow {
                     snapshot.id.withCString {
                         jsti_window_set_configuration_revision(
                             fields.baseAddress, fields.count, recovery.baseAddress, recovery.count,
-                            linuxConfigurationEvent, Unmanaged.passUnretained(holder).toOpaque(), $0
+                            linuxConfigurationEvent, holder.callbackContext, $0
                         )
                     }
                 }
@@ -128,7 +128,7 @@ func linuxConfigurationEvent(
     _ context: UnsafeMutableRawPointer?, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ capacity: Int
 ) -> Int32 {
     guard let context, let entries else { return -1 }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return -1 }
     let received = UnsafeBufferPointer(start: entries, count: count).map { $0.map(String.init(cString:)) ?? "" }
     do {
         switch try DesktopHostConfigurationEditorEvent(action: action, values: received) {

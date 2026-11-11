@@ -188,7 +188,7 @@ func linuxVoicePickerEvent(_ action: Int32, _ identifier: UnsafePointer<CChar>?,
     // The window forwards its existing UI callback context, not a new native holder.
     guard let identifier, let context else { return }
     let voiceID = String(cString: identifier)
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     holder.enqueueSettings {
         await holder.controller.handleVoicePicker(voiceID: voiceID, action: action)
         LinuxWindow.voiceOutput(await holder.controller.voiceOutputSettings(),
@@ -202,8 +202,7 @@ func linuxVoiceSourceEvent(
     _ action: Int32, _ source: Int32, _ text: UnsafePointer<CChar>?,
     _ record: UnsafePointer<CChar>?, _ path: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     do {
         let message = try DesktopVoiceSourceMessage(
             action: action, source: source, text: text.map(String.init(cString:)) ?? "",

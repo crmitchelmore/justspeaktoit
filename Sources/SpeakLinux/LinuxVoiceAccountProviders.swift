@@ -1,56 +1,29 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 import CLinuxSupport
 
-final class LinuxVoiceProviderRegistration: @unchecked Sendable {
-    fileprivate var holder: LinuxEventContext?
-    fileprivate init(_ holder: LinuxEventContext) { self.holder = holder }
-}
+typealias LinuxVoiceProviderRegistration = NativeCallbackContext<LinuxEventContext>
 
-private final class LinuxVoiceProviderLifecycle: @unchecked Sendable {
-    private let lock = NSLock()
-    private var active: LinuxVoiceProviderRegistration?
+extension LinuxWindow {
+    private static let providerCallbacks = NativeCallbackSlot<LinuxEventContext> { context in
+        guard let context else { return jsti_window_set_voice_provider_credential_handler(nil, nil) == 0 }
+        return jsti_window_set_voice_provider_credential_handler(linuxVoiceProviderCredentialEvent, context) == 0
+    }
 
-    func begin(_ holder: LinuxEventContext) throws -> LinuxVoiceProviderRegistration {
-        lock.lock()
-        defer { lock.unlock() }
-        if let active { try endLocked(active) }
-        let registration = LinuxVoiceProviderRegistration(holder)
-        guard jsti_window_set_voice_provider_credential_handler(
-            linuxVoiceProviderCredentialEvent, Unmanaged.passUnretained(registration).toOpaque()) == 0 else {
+    static func beginVoiceProviderCallbacks(_ holder: LinuxEventContext) throws -> LinuxVoiceProviderRegistration {
+        guard let registration = providerCallbacks.begin(holder) else {
             throw DesktopHostError(message: "The account Voice key callback could not be configured.")
         }
-        active = registration
         return registration
     }
 
-    func end(_ registration: LinuxVoiceProviderRegistration) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        try endLocked(registration)
-    }
-
-    private func endLocked(_ registration: LinuxVoiceProviderRegistration) throws {
-        guard active === registration else { return }
-        // Callback forwarding never takes this lifecycle lock or awaits work.
-        guard jsti_window_set_voice_provider_credential_handler(nil, nil) == 0 else {
-            throw DesktopHostError(message: "The account Voice key callback could not be detached safely.")
-        }
-        active = nil
-        registration.holder = nil
-    }
-}
-
-extension LinuxWindow {
-    private static let providerLifecycle = LinuxVoiceProviderLifecycle()
-
-    static func beginVoiceProviderCallbacks(_ holder: LinuxEventContext) throws -> LinuxVoiceProviderRegistration {
-        try providerLifecycle.begin(holder)
-    }
-
     static func endVoiceProviderCallbacks(_ registration: LinuxVoiceProviderRegistration) {
-        do { try providerLifecycle.end(registration) } catch { LinuxHostPlatform.update(error.localizedDescription) }
+        // Callback forwarding never takes the slot's lock or awaits work.
+        if !providerCallbacks.end(registration) {
+            LinuxHostPlatform.update("The account Voice key callback could not be detached safely.")
+        }
     }
 }
 
@@ -73,9 +46,7 @@ func linuxVoiceProviderCredentialEvent(
     _ identifier: UnsafePointer<CChar>?, _ session: UnsafePointer<CChar>?, _ epoch: UnsafePointer<CChar>?,
     _ requestID: UnsafePointer<CChar>?, _ secret: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let registration = Unmanaged<LinuxVoiceProviderRegistration>.fromOpaque(context).takeUnretainedValue()
-    guard let holder = registration.holder else { return }
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     do {
         let message = try VoiceProviderCredentialMessage(
             operation: operation.map(String.init(cString:)) ?? "",

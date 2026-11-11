@@ -99,20 +99,29 @@ private final class LinuxFeedbackFailure: @unchecked Sendable {
 
 private final class LinuxRecordingFeedbackOutput: DesktopRecordingFeedbackOutput, @unchecked Sendable {
     private let lock = NSLock()
-    private let failure = LinuxFeedbackFailure()
+    private let failure: LinuxFeedbackFailure
+    private let callbacks: NativeCallbackContext<LinuxFeedbackFailure>
     private var handle: OpaquePointer?
 
     init() throws {
-        let context = Unmanaged.passUnretained(failure).toOpaque()
+        failure = LinuxFeedbackFailure()
+        callbacks = NativeCallbackContext(failure)
         handle = jsti_recording_feedback_create({ message, context in
-            guard let message, let context else { return }
-            Unmanaged<LinuxFeedbackFailure>.fromOpaque(context).takeUnretainedValue().publish(String(cString: message))
-        }, context)
-        guard handle != nil else { throw LinuxFeedbackError(message: "Recording sound state could not be allocated.") }
+            guard let message, let failure = NativeCallbackContext<LinuxFeedbackFailure>.resolve(context) else {
+                return
+            }
+            failure.publish(String(cString: message))
+        }, callbacks.pointer)
+        guard handle != nil else {
+            callbacks.release()
+            throw LinuxFeedbackError(message: "Recording sound state could not be allocated.")
+        }
     }
 
     deinit {
+        // No native callback runs once destroy returns.
         if let handle { jsti_recording_feedback_destroy(handle) }
+        callbacks.release()
     }
 
     // The detached preparation worker retains this object until the native call returns.

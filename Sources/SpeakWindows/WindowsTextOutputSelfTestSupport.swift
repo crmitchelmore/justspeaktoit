@@ -134,8 +134,8 @@ final class SyntheticCapture: WindowsRecordingCapture {
     init(context: WindowsCaptureContext) { self.context = context }
 
     func start() throws {
-        SyntheticEffects.samples.withUnsafeBufferPointer {
-            captureAudio($0.baseAddress, $0.count, Unmanaged.passUnretained(context).toOpaque())
+        SyntheticEffects.samples.withUnsafeBufferPointer { samples in
+            NativeCallbackContext.withScoped(context) { captureAudio(samples.baseAddress, samples.count, $0) }
         }
     }
 

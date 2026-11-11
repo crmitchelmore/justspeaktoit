@@ -74,19 +74,20 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
         _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
         LinuxWindow.voiceOutput(await controller.voiceOutputSettings())
-        LinuxWindow.voiceSources(context: Unmanaged.passUnretained(holder).toOpaque())
+        LinuxWindow.voiceSources(context: holder.callbackContext)
         _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
         await controller.configureLocalModels()
-        await controller.configureLocalCleanup(presenter: Unmanaged.passUnretained(holder).toOpaque())
+        await controller.configureLocalCleanup(presenter: holder.callbackContext)
         try LinuxWindow.configureModelPreferences(await controller.preferredModelIDs())
         return await controller.selectedIndex()
     }
     LinuxCloudSync.configure(holder)
-    let context = Unmanaged.passUnretained(holder).toOpaque()
+    let context = holder.callbackContext
     let windowFailure = runGTKEventLoop(selected: selected, context: context, holder: holder)
     LinuxWindow.endVoiceProviderCallbacks(providerCallbacks)
     try shutDownWindow(controller: controller, holder: holder)
-    withExtendedLifetime(holder) {}
+    // Every native registration is cleared; a late callback finds nothing.
+    holder.callbacks.unregister()
     if let windowFailure { throw windowFailure }
     if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
 }

@@ -133,7 +133,7 @@ public final class RevAILiveClient: FinalizingStreamingTranscriptionClient, @unc
             return (active, URLRequest(url: url))
         }
         guard let opening else { return }
-        connect(opening.0, request: opening.1)
+        attach(makeConnection(opening.1), to: opening.0)
     }
 
     /// Admission is synchronous and bounded: at most `bufferedAudioSeconds` of
@@ -195,69 +195,7 @@ public final class RevAILiveClient: FinalizingStreamingTranscriptionClient, @unc
     /// returning the confirmed text, also to callers that join while the error
     /// is being delivered. Concurrent callers share one outcome; cancelling
     /// the calling task aborts the session.
-    public func finishAndWait() async -> String? {
-        let active: RevAILiveRun = withState { _ in run }
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                withState { effects in join(active, continuation, &effects) }
-            }
-        } onCancel: { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.withState { effects in if self.isCurrent(active) { self.retire(active, &effects) } }
-        }
-    }
-
-    // MARK: - Session
-
-    private func join(
-        _ active: RevAILiveRun, _ continuation: CheckedContinuation<String?, Never>,
-        _ effects: inout LiveDeferredEffects
-    ) {
-        let transcript = active.transcript
-        switch active.phase {
-        case .connecting, .streaming, .finishing:
-            guard !Task.isCancelled else {
-                retire(active, &effects)
-                effects.add { continuation.resume(returning: transcript) }
-                return
-            }
-            active.waiters.append(continuation)
-            beginFinish(active, &effects)
-        case .idle:
-            // Never started, so nothing was sent and nothing can be finished.
-            retire(active, &effects)
-            effects.add { continuation.resume(returning: transcript) }
-        case .closed:
-            // A failure still being published keeps late callers until its
-            // error is out, exactly like callers that were already waiting.
-            guard !active.deliveringFailure else {
-                active.lateWaiters.append(continuation)
-                return
-            }
-            effects.add { continuation.resume(returning: transcript) }
-        }
-    }
-
-    /// The connection is built and resumed outside the lock: the factory and
-    /// the transport may call back synchronously.
-    private func connect(_ active: RevAILiveRun, request: URLRequest) {
-        let connection = makeConnection(request)
-        let attached: Bool = withState { _ in
-            guard isCurrent(active), active.connection == nil else { return false }
-            active.connection = connection
-            return true
-        }
-        guard attached else {
-            connection.cancel()
-            return
-        }
-        log("WebSocket connecting")
-        connection.resume { [weak self, weak active] in
-            guard let self, let active, self.withState({ _ in self.isCurrent(active) }) else { return }
-            self.log("WebSocket handshake completed")
-        }
-        receive(active, connection)
-    }
+    public func finishAndWait() async -> String? { await finishActiveRun() }
 }
 
 // MARK: - Run lifecycle
@@ -380,6 +318,14 @@ extension RevAILiveClient {
         #if canImport(os) && !SPEAK_PORTABLE_CORE
         SpeakLogger.logger(category: "RevAILiveClient").info("\(event, privacy: .public)")
         #endif
+    }
+}
+
+extension RevAILiveClient: LiveRunFinishing {
+    /// Rev AI's `connected` frame, not the handshake, admits audio.
+    func connectionOpened(_ active: RevAILiveRun) {
+        guard withState({ _ in isCurrent(active) }) else { return }
+        log("WebSocket handshake completed")
     }
 }
 

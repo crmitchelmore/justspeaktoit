@@ -14,76 +14,15 @@ struct DesktopGroqSpeechSynthesis: Sendable {
         do { segments = try GroqTTSAPI.synthesisSegments(source.text) } catch let error as GroqTTSAPIError {
             throw DesktopGroqSpeechError(error)
         }
-        try Task.checkCancellation()
-        let key = try await credential().trimmingCharacters(in: .whitespacesAndNewlines)
-        try Task.checkCancellation()
-        guard !key.isEmpty else { throw DesktopGroqSpeechError.missingCredential }
         let selection = GroqTTSRequest(voiceID: voice.id)
-        var pcm = Data()
-        for segment in segments {
-            try Task.checkCancellation()
-            let audio = try await synthesizeSegment(segment, key: key, selection: selection, voice: voice)
-            let payload = audio.wav.dropFirst(44)
-            guard payload.count <= DeepgramSpeechExport.maximumPCMBytes - pcm.count else {
-                throw DesktopSpeechSynthesisError.audioTooLarge
-            }
-            pcm.append(contentsOf: payload)
-        }
-        try Task.checkCancellation()
-        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: 24_000) else {
-            throw DesktopSpeechSynthesisError.invalidAudio
-        }
-        return wav
-    }
-
-    private func synthesizeSegment(
-        _ text: String, key: String, selection: GroqTTSRequest, voice: DesktopSpeechVoice
-    ) async throws -> DeepgramSpeechAudio {
-        let request = try GroqTTSAPI.synthesisRequest(input: text, apiKey: key, request: selection)
-        let capture = VoiceSynthesisUsage.capture
-        let ticket = capture?.begin(voice: voice, inputCharacters: text.unicodeScalars.count,
-                                    usesSSML: false, pricingCharacters: text.count)
-        do {
-            let received = try await receive(request)
-            try Task.checkCancellation()
-            let audio: DeepgramSpeechAudio
-            do {
-                audio = try DeepgramSpeechWAV.canonical(received, sampleRate: 24_000, requireComplete: true)
-            } catch {
-                throw DesktopSpeechSynthesisError.invalidAudio
-            }
-            if let ticket { capture?.finish(ticket, outcome: .completed, audioDuration: audio.duration) }
-            return audio
-        } catch {
-            if let ticket { capture?.finish(ticket, outcome: error is CancellationError ? .cancelled : .failed) }
-            throw error
-        }
-    }
-
-    private func receive(_ request: URLRequest) async throws -> Data {
-        do {
-            let response = try await OpenRouterBoundedResponseTransport.perform(
-                request, session: session, limit: DeepgramSpeechSynthesizer.defaultResponseLimit,
-                deadline: .seconds(120))
-            guard (200..<300).contains(response.http.statusCode) else {
-                throw DesktopGroqSpeechError(GroqTTSAPI.error(
-                    from: response.body, statusCode: response.http.statusCode))
-            }
-            return response.body
-        } catch {
-            if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
-                throw CancellationError()
-            }
-            if let service = error as? DesktopGroqSpeechError { throw service }
-            switch error as? OpenRouterBoundedResponseTransport.Failure {
-            case .responseTooLarge: throw DesktopSpeechSynthesisError.audioTooLarge
-            case .timedOut: throw DesktopSpeechSynthesisError.timedOut
-            case .invalidResponse: throw DesktopSpeechSynthesisError.invalidAudio
-            case nil:
-                throw (error as? URLError)?.code == .timedOut
-                    ? DesktopSpeechSynthesisError.timedOut : DesktopSpeechSynthesisError.transportFailure
-            }
-        }
+        let flow = DesktopSegmentedWAVSynthesis(
+            session: session, sampleRate: 24_000,
+            request: { try GroqTTSAPI.synthesisRequest(input: $0, apiKey: $1, request: selection) },
+            serviceError: { DesktopGroqSpeechError(GroqTTSAPI.error(from: $0, statusCode: $1)) }
+        )
+        return try await flow.synthesize(
+            segments, voice: voice, missingCredential: DesktopGroqSpeechError.missingCredential,
+            credential: credential)
     }
 }
 

@@ -590,7 +590,9 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         // Settings stays open during a session, so use the model the recording started with.
         val model = sessionModelId?.let(CloudCatalog::transcriptionModel) ?: _state.value.cloudModel
         val language = _state.value.languageTag
+        val modelId = sessionModelId
         work = viewModelScope.launch {
+            var kept = false
             val event = try {
                 // The recorder stays owned (and releasable by onCleared) until stop() has finished.
                 val bytes = withContext(NonCancellable + Dispatchers.IO) { rec.stop() }
@@ -612,6 +614,11 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
             } catch (e: RequestReleasedException) {
+                // Releasing the upload is a cancel, so honour "Keep audio when a recording is cancelled".
+                if (_state.value.keepAudioOnCancel) {
+                    kept = true
+                    storeCancelledRecording(file, modelId, _state.value.retention)
+                }
                 DictationEvent.Cancelled
             } catch (e: CloudException) {
                 noteKeyFailure(model.provider, e.failure)
@@ -624,7 +631,7 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                 DictationEvent.Error(DictationFailure.KeyUnavailable)
             } finally {
                 releaseOwnership(rec)
-                withContext(NonCancellable + Dispatchers.IO) { file.delete() }
+                if (!kept) withContext(NonCancellable + Dispatchers.IO) { file.delete() }
             }
             // A cancelled upload must not deliver a late result into a newer session.
             ensureActive()
@@ -663,24 +670,29 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
                 withContext(NonCancellable + Dispatchers.IO) { file.delete() }
                 return@launch
             }
-            val id = UUID.randomUUID().toString()
-            updateHistory {
-                val kept = File(recordingsDir, "$id.wav")
-                if (!moveRecording(file, kept)) {
-                    file.delete()
-                    return@updateHistory history.cached
-                }
-                val entry = HistoryEntry(
-                    id = id,
-                    createdAtMs = System.currentTimeMillis(),
-                    mode = RecognitionMode.Cloud.name,
-                    model = modelId,
-                    status = HistoryStatus.Cancelled,
-                    text = "",
-                    audioPath = kept.absolutePath,
-                )
-                history.add(entry, retention)
+            storeCancelledRecording(file, modelId, retention)
+        }
+    }
+
+    /** Moves a stopped recording into History as a cancelled entry that can be transcribed later. */
+    private fun storeCancelledRecording(file: File, modelId: String?, retention: Retention) {
+        val id = UUID.randomUUID().toString()
+        updateHistory {
+            val kept = File(recordingsDir, "$id.wav")
+            if (!moveRecording(file, kept)) {
+                file.delete()
+                return@updateHistory history.cached
             }
+            val entry = HistoryEntry(
+                id = id,
+                createdAtMs = System.currentTimeMillis(),
+                mode = RecognitionMode.Cloud.name,
+                model = modelId,
+                status = HistoryStatus.Cancelled,
+                text = "",
+                audioPath = kept.absolutePath,
+            )
+            history.add(entry, retention)
         }
     }
 

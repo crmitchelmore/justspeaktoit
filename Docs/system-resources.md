@@ -68,8 +68,9 @@ add a small adapter to the platform monitor instead
   connection, and the dictation keyboard holds the microphone while it
   listens. Every one can be released, and Settings stays reachable while
   dictating so the main screen's holds can be. Releasing a cloud request is
-  a cancel, not a failure: History keeps the entry unchanged and a dictation
-  ends without recording one. There is no unattributed-use auditor
+  a cancel, not a failure: History keeps the entry unchanged, and a
+  dictation's recording is kept in History as cancelled when "Keep audio
+  when a recording is cancelled" is on, or discarded when it is off. There is no unattributed-use auditor
   yet: `AudioManager.getActiveRecordingConfigurations()` reports only this
   app's own recordings, and the speech-service recognisers record in another
   process, so it can't see most sessions. The system privacy indicator covers

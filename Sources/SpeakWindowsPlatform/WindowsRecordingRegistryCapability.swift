@@ -1,5 +1,6 @@
 import CWindowsSupport
 import Foundation
+import SpeakDesktop
 
 struct WindowsRegistryCause: Error, Equatable {
     let kind: UInt32
@@ -301,8 +302,7 @@ private final class WindowsRegistryNativeBackend: WindowsRegistryBackend {
         let native = try self.requireOpen()
         let name = Array(name.utf8)
         return try withoutActuallyEscaping(cancelled) { callback in
-            let context = WindowsRegistryCancellationContext(callback)
-            return try withExtendedLifetime(context) {
+            try NativeCallbackContext.withScoped(WindowsRegistryCancellationContext(callback)) { context in
                 try Self.checked { outcome in
                     name.withUnsafeBufferPointer { name in
                         data.withUnsafeBytes { bytes in
@@ -310,10 +310,9 @@ private final class WindowsRegistryNativeBackend: WindowsRegistryBackend {
                                 native, name.baseAddress, name.count,
                                 bytes.bindMemory(to: UInt8.self).baseAddress, bytes.count,
                                 { raw, checkpoint in
-                                    guard let raw else { return 1 }
-                                    return Unmanaged<WindowsRegistryCancellationContext>.fromOpaque(raw)
-                                        .takeUnretainedValue().callback(checkpoint)
-                                }, Unmanaged.passUnretained(context).toOpaque(), outcome
+                                    NativeCallbackContext<WindowsRegistryCancellationContext>.resolve(raw)?
+                                        .callback(checkpoint) ?? 1
+                                }, context, outcome
                             )
                         }
                     }

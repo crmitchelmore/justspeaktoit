@@ -14,8 +14,13 @@ final class WindowsProfilesCoordinator: @unchecked Sendable {
     private var opening = false
     private var snapshot: Snapshot?
     private let save: ([DictationProfile]) -> Void
+    /// The context the native editor's callbacks receive, until shutdown unregisters it.
+    private(set) var callbacks: NativeCallbackContext<WindowsProfilesCoordinator>!
 
-    init(save: @escaping ([DictationProfile]) -> Void) { self.save = save }
+    init(save: @escaping ([DictationProfile]) -> Void) {
+        self.save = save
+        callbacks = NativeCallbackContext(self)
+    }
 
     func begin() -> Bool {
         lock.lock(); defer { lock.unlock() }
@@ -98,8 +103,7 @@ func profilesEvent(
     _ action: Int32, _ drafts: UnsafePointer<JSTIProfileDraft>?, _ count: Int,
     _ context: UnsafeMutableRawPointer?, _ errorBuffer: UnsafeMutablePointer<CChar>?, _ capacity: Int
 ) -> Int32 {
-    guard let context else { return -1 }
-    let coordinator = Unmanaged<WindowsProfilesCoordinator>.fromOpaque(context).takeUnretainedValue()
+    guard let coordinator = NativeCallbackContext<WindowsProfilesCoordinator>.resolve(context) else { return -1 }
     guard action == 1 else { coordinator.cancel(); return 0 }
     do {
         guard count <= 1000, count >= 0, count == 0 || drafts != nil else {

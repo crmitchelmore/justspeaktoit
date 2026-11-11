@@ -38,6 +38,10 @@ final class LinuxEventContext: @unchecked Sendable {
     var cloudSync: LinuxCloudSync?
     /// Sidebar settings search; read and written on the GTK main thread only.
     lazy var settingsSearch = DesktopSettingsSearchSession(platform: .linux)
+    /// The context every native window callback receives. It retains this
+    /// holder until shutdown unregisters it; later callbacks then do nothing.
+    private(set) var callbacks: NativeCallbackContext<LinuxEventContext>!
+    var callbackContext: UnsafeMutableRawPointer { callbacks.pointer }
 
     init(controller: LinuxAppController, smokeTest: Bool) {
         self.controller = controller
@@ -72,6 +76,7 @@ final class LinuxEventContext: @unchecked Sendable {
                 }
             }
         }
+        callbacks = NativeCallbackContext(self)
     }
 
     /// Persist settings in UI event order; shutdown drains these.
@@ -256,8 +261,7 @@ func linuxWindowEvent( // swiftlint:disable:this cyclomatic_complexity
     _ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?
 ) {
     // exhaustive native GTK event-code dispatch; no behavior change.
-    guard let context else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     let value = text.map(String.init(cString:)) ?? ""
     let slot = Int(index)
     let event = Int(event)

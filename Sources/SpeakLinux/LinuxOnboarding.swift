@@ -16,7 +16,7 @@ enum LinuxOnboarding {
     }
 
     static func configure(_ holder: LinuxEventContext) throws {
-        guard jsti_setup_configure(linuxSetupEvent, Unmanaged.passUnretained(holder).toOpaque()) == 0 else {
+        guard jsti_setup_configure(linuxSetupEvent, holder.callbackContext) == 0 else {
             throw DesktopHostError(message: "The Linux setup guide could not be configured.")
         }
     }
@@ -167,8 +167,7 @@ private func linuxSetupEvent(
     _ revision: UInt64, _ command: Int32, _ step: Int32, _ action: UnsafePointer<CChar>?,
     _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     let action = action.map(String.init(cString:)) ?? ""
     holder.enqueueSettings {
         guard jsti_setup_revision() == revision else { return }

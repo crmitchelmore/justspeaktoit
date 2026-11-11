@@ -100,8 +100,8 @@ extension SpeakWindowsMain {
             batch: preferences.batch, live: preferences.live, local: preferences.local,
             localLive: preferences.localLive
         )
-        await controller.configureLocalModels(context: Unmanaged.passUnretained(holder).toOpaque())
-        await controller.configureLocalCleanup(presenter: Unmanaged.passUnretained(holder).toOpaque())
+        await controller.configureLocalModels(context: holder.callbackContext)
+        await controller.configureLocalCleanup(presenter: holder.callbackContext)
     }
 }
 
@@ -119,8 +119,7 @@ func withCStrings<Result>(_ strings: [String], _ body: ([UnsafePointer<CChar>?])
 
 /// An action from the native Local models dialog, on the UI thread.
 func localModelEvent(_ action: Int32, _ index: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     holder.enqueueSettings { await holder.controller.localModelAction(action, index: Int(index)) }
 }
 
@@ -128,8 +127,7 @@ func localModelImportEvent(
     _ repository: UnsafePointer<CChar>?, _ filename: UnsafePointer<CChar>?,
     _ cancel: Int32, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     if cancel != 0 {
         holder.enqueueSettings { await holder.controller.cancelLocalModelImport() }
     } else {

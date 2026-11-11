@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import CLinuxSupport
 
 /// Converts an imported file to canonical 16 kHz mono PCM16 WAV with
@@ -40,16 +41,15 @@ public enum LinuxAudioConversion {
     private static func decode(input: URL, output: URL, cancel: Flag) throws -> TimeInterval {
         let collector = Collector()
         var error = [CChar](repeating: 0, count: 1024)
-        let result = withExtendedLifetime(collector) {
+        let result = NativeCallbackContext.withScoped(collector) { context in
             jsti_audio_decode(input.path, UInt32(sampleRate), { samples, count, context in
-                guard let samples, let context else { return }
-                let collector = Unmanaged<Collector>.fromOpaque(context).takeUnretainedValue()
+                guard let samples, let collector = NativeCallbackContext<Collector>.resolve(context) else { return }
                 guard collector.pcm.count + count * 2 <= LinuxAudioConversion.maximumBytes else {
                     collector.overflow = true
                     return
                 }
                 collector.pcm.append(UnsafeBufferPointer(start: samples, count: count))
-            }, Unmanaged.passUnretained(collector).toOpaque(), cancel.pointer, &error, error.count)
+            }, context, cancel.pointer, &error, error.count)
         }
         if result == 1 { throw CancellationError() }
         guard result == 0 else { throw LinuxNativeError(message: String(cString: error)) }

@@ -30,17 +30,7 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header wrap" id="top">
-    <a class="brand" href="#top" aria-label="Just Speak to It home"><img src="/favicon.svg?v=20260909" width="34" height="34" alt=""><span class="brand-wordmark">Just Speak to It</span></a>
-    <nav class="site-nav" aria-label="Primary">
-      <a href="#how">How it works</a>
-      <a href="#own">Privacy</a>
-      <a href="#models">Models</a>
-      <a href="#mobile">iPhone &amp; iPad</a>
-      <a href="#automate">Automation</a>
-    </nav>
-    <a class="button button-small" href="#get">Download</a>
-  </header>
+  <!-- partial:site-header -->
 
   <main id="main">
 
@@ -59,14 +49,7 @@
         </div>
 
         <figure class="capture clip">
-          <video class="clip-video" controls playsinline preload="none" width="1280" height="720" data-clip="hero" aria-label="Dictating into a text field on a Mac, then finding the text in History" aria-describedby="clip-hero-caption">
-            <source src="/images/clips/hero-dark.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;" media="(prefers-color-scheme: dark)">
-            <source src="/images/clips/hero-light.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;">
-            <source src="/images/clips/hero-dark.mp4" type="video/mp4" media="(prefers-color-scheme: dark)">
-            <source src="/images/clips/hero-light.mp4" type="video/mp4">
-            <track kind="captions" src="/images/clips/hero.en.vtt" srclang="en" label="English" default>
-            <a href="/images/clips/hero-light.mp4" data-clip-download="hero">Download the Mac demo clip (MP4)</a>
-          </video>
+          <!-- clip:hero -->
           <figcaption id="clip-hero-caption"><span>Mac demo with narrated captions and fictional sample data (clipboard mode on the CI test runner).</span><a href="/images/clips/hero-light.mp4" data-clip-download="hero">MP4 ↗</a></figcaption>
         </figure>
       </div>
@@ -201,14 +184,7 @@
             </ul>
           </div>
           <figure class="mobile-shot mobile-clip">
-            <video class="clip-video" controls playsinline preload="none" width="640" height="1280" data-clip="iphone" aria-label="The iPhone app: tap record, see the words, copy them, then on-device and Action Button settings" aria-describedby="clip-iphone-caption">
-              <source src="/images/clips/iphone-dark.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;" media="(prefers-color-scheme: dark)">
-              <source src="/images/clips/iphone-light.webm" type="video/webm; codecs=&quot;av01.0.05M.08, opus&quot;">
-              <source src="/images/clips/iphone-dark.mp4" type="video/mp4" media="(prefers-color-scheme: dark)">
-              <source src="/images/clips/iphone-light.mp4" type="video/mp4">
-              <track kind="captions" src="/images/clips/iphone.en.vtt" srclang="en" label="English" default>
-              <a href="/images/clips/iphone-light.mp4" data-clip-download="iphone">Download the iPhone clip (MP4)</a>
-            </video>
+            <!-- clip:iphone -->
             <figcaption id="clip-iphone-caption">Simulator tour with fixed sample text. <a href="/images/ios-history-current.png">Full-size screenshot ↗</a></figcaption>
           </figure>
         </div>
@@ -270,7 +246,7 @@
           <article class="card download-card download-card--primary">
             <div class="download-head">
               <h3>macOS</h3>
-              <span class="platform-tag is-stable">Stable · v3.2.0</span>
+              <span class="platform-tag is-stable">Stable · v<!-- stable:mac-version --></span>
             </div>
             <p>macOS 14 or later. The direct download uses macOS Accessibility to type straight into active fields (there is no Mac App Store build).</p>
             <div class="download-actions">
@@ -322,25 +298,6 @@
 
   </main>
 
-  <footer class="site-footer wrap">
-    <div class="footer-top">
-      <div>
-        <a class="brand" href="#top"><img src="/favicon.svg?v=20260909" width="34" height="34" alt=""><span class="brand-wordmark">Just Speak to It</span></a>
-        <p>Made by <a href="https://mitchelmore.uk">Chris Mitchelmore</a>, who also makes <a href="https://pasta-app.com">Pasta</a>.</p>
-      </div>
-      <nav class="footer-nav" aria-label="Footer">
-        <a href="https://github.com/crmitchelmore/justspeaktoit">GitHub</a>
-        <a href="https://github.com/crmitchelmore/justspeaktoit/releases">Releases</a>
-        <a href="/privacy">Privacy</a>
-        <a href="/support">Support</a>
-        <a href="https://mitchelmore.uk">Blog</a>
-        <a href="https://pasta-app.com">Pasta</a>
-      </nav>
-    </div>
-    <div class="footer-bottom">
-      <span>© 2026 Chris Mitchelmore · MIT licensed</span>
-      <a href="#top">Back to top ↑</a>
-    </div>
-  </footer>
+  <!-- partial:site-footer -->
 </body>
 </html>

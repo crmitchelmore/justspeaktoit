@@ -11,7 +11,7 @@ npm test                        # architecture-aware download behaviour
 npm run build                   # complete deployable site in dist/
 ```
 
-Without Bun, `python3 -m http.server 3000 --directory landing-page` serves the source from the repository root. Python's server does not emulate Cloudflare's extensionless `/privacy` route or `_redirects`; use `/privacy.html` locally.
+Without Bun, run `npm run build` and then `python3 -m http.server 3000 --directory landing-page/dist` from the repository root. The source pages hold `chrome.mjs` markers, so serve the built copy rather than the source. Python's server does not emulate Cloudflare's extensionless `/privacy` route or `_redirects`; use `/privacy.html` locally.
 
 Check desktop and mobile layouts (360 px to wide desktop, no horizontal scroll), full-size screenshot links, reduced motion, keyboard focus order, images and the console. Verify explicit Apple Silicon/Intel links and automatic architecture selection. With JavaScript disabled every section still reads, the hero example still shows its sentence, and automatic downloads default safely to the universal build.
 
@@ -24,6 +24,8 @@ Check desktop and mobile layouts (360 px to wide desktop, no horizontal scroll),
 Cache policy lives in `_headers`, including explicit HTML/CSS/JS revalidation. Production builds also fingerprint the stylesheet filename and rewrite its HTML reference, so a cached older CSS response cannot break a newly deployed layout. The old `_routes.json` is deliberately excluded: it contains a `routes`/`headers` shape, but Cloudflare uses that filename for Functions `include`/`exclude` routing, not static response headers. This site has no Functions. See [Cloudflare routing](https://developers.cloudflare.com/pages/functions/routing/) and [headers](https://developers.cloudflare.com/pages/configuration/headers/).
 
 - `index.html`: content and unified download section across Mac, iOS, Linux and Windows.
+- `chrome.mjs`: the header and footer of every page, the clip `<video>` markup and the Stable Mac version shown beside its download. `build.mjs` and `serve.ts` replace each page's `<!-- partial:… -->`, `<!-- clip:… -->` and `<!-- stable:… -->` markers from it. Update `stable` when a Stable Mac release is published; Alpha builds never change it.
+- `partials/document.css`: the shared reading-column style of the privacy and support pages.
 - `site.css`: responsive layout, design tokens, typography and reduced-motion support.
 - `download-architecture.js`: existing architecture detection and safe universal fallback.
 - `clips.js`: light/dark variant selection and deferred poster loading for narrated clips.

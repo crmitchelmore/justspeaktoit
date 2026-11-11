@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { renderPage } from './chrome.mjs';
 import { loadCatalogue } from './qa/manual-checks.mjs';
 import { renderQaPage } from './qa/render.mjs';
 
 const read = file => readFile(new URL(file, import.meta.url), 'utf8');
 const catalogue = loadCatalogue(await read('../Docs/manual-checks.yml'));
 const pages = {
-  'index.html': await read('index.html'),
-  'privacy.html': await read('privacy.html'),
-  'support.html': await read('support.html'),
+  'index.html': await renderPage('index.html'),
+  'privacy.html': await renderPage('privacy.html'),
+  'support.html': await renderPage('support.html'),
   'qa/index.html': renderQaPage(catalogue),
 };
 const stylesheets = {

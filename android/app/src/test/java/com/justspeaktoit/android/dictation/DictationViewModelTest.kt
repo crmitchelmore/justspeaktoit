@@ -330,4 +330,19 @@ class DictationViewModelTest {
         assertEquals(1, h.recorders.created.size)
         assertTrue(h.cloud.transcriptions.isEmpty())
     }
+
+    @Test
+    fun testClear_whileTheRecorderStopStalls_returnsAtOnceAndReleasesWhenItUnblocks() {
+        val gate = CountDownLatch(1)
+        h.recorders.stopGate = gate
+        val rec = startCloud()
+
+        h.clear()
+        ViewModelHarness.await(rec.stopEntered)
+        assertTrue("the main thread is free while the stop stalls", h.onMain { true })
+        assertTrue(rec.file.exists())
+
+        gate.countDown()
+        awaitGone(rec.file)
+    }
 }

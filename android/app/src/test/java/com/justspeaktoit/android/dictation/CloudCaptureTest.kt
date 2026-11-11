@@ -2,9 +2,13 @@ package com.justspeaktoit.android.dictation
 
 import com.justspeaktoit.android.cloud.CallHandle
 import com.justspeaktoit.android.cloud.CloudException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -82,8 +86,42 @@ class CloudCaptureTest {
 
     @Test
     fun testClose_withNothingOwned_doesNothing() {
-        capture.close()
+        assertNull(capture.close())
         assertTrue(recorders.created.isEmpty())
+    }
+
+    @Test
+    fun testClose_whileTheRecorderStopStalls_returnsAtOnceAndReleasesWhenItUnblocks() = runBlocking {
+        val gate = CountDownLatch(1)
+        recorders.stopGate = gate
+        val recording = start()
+
+        val teardown = checkNotNull(capture.close())
+        assertNull("ownership ends immediately", capture.current)
+        ViewModelHarness.await(recorders.last.stopEntered)
+        assertTrue("the stalled stop keeps its file until it returns", recording.file.exists())
+        assertFalse(teardown.isCompleted)
+
+        gate.countDown()
+        withTimeout(ViewModelHarness.TIMEOUT_MS) { teardown.join() }
+        assertFalse(recording.file.exists())
+    }
+
+    @Test
+    fun testClose_runsOnTheInjectedTeardownScope() = runBlocking {
+        val gate = CountDownLatch(1)
+        recorders.stopGate = gate
+        val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val owned = CloudCapture(recorders, folder.root, Dispatchers.IO, teardownScope)
+        assertTrue(owned.start(onLevel = {}, onLimitReached = {}, onCaptureFailed = {}))
+        val recording = checkNotNull(owned.current)
+
+        val teardown = checkNotNull(owned.close())
+        assertTrue(teardown in checkNotNull(teardownScope.coroutineContext[Job]).children.toList())
+        gate.countDown()
+        withTimeout(ViewModelHarness.TIMEOUT_MS) { teardown.join() }
+        assertEquals(1, recorders.last.stops)
+        assertFalse(recording.file.exists())
     }
 
     @Test

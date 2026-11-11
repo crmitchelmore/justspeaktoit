@@ -5,7 +5,12 @@ import com.justspeaktoit.android.cloud.CallHandle
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.RecorderFactory
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
@@ -21,11 +26,18 @@ import java.io.File
  * A recording stays owned until its recorder has really stopped, so [close] can always release the
  * microphone, and callbacks from a recording that is no longer owned are ignored by the caller via
  * [owns]. Blocking IO runs under an overall deadline, and cancelling it aborts the blocked call.
+ *
+ * [teardown] runs the release of a recording still owned at [close]. It outlives the owner's scope on
+ * purpose (the microphone must be released after the screen is gone) and runs one stop at a time, so
+ * a stalled recorder holds at most one IO thread.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 internal class CloudCapture(
     private val recorders: RecorderFactory,
     private val cacheDir: File,
     private val io: CoroutineDispatcher,
+    private val teardown: CoroutineScope =
+        CoroutineScope(SupervisorJob() + io.limitedParallelism(1) + CoroutineName("jsti-recorder-teardown")),
 ) {
     class Recording(val recorder: AudioRecorder, val file: File)
 
@@ -85,15 +97,18 @@ internal class CloudCapture(
         if (current === recording) current = null
     }
 
-    /** Releases a recording still owned when its owner goes away, without blocking the caller. */
-    fun close() {
-        val recording = current ?: return
+    /**
+     * Releases a recording still owned when its owner goes away, without blocking the caller. Returns
+     * the teardown, or null when nothing was owned.
+     */
+    fun close(): Job? {
+        val recording = current ?: return null
         current = null
         // Stop before delete, off the main thread: joining the capture thread here could cause an ANR.
-        Thread({
+        return teardown.launch {
             recording.recorder.stop()
             recording.file.delete()
-        }, "jsti-recorder-teardown").start()
+        }
     }
 
     /**

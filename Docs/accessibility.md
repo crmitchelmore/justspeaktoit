@@ -114,12 +114,18 @@ Mac; UI tests run on hosted CI.
 
 - Icon-only buttons need `GTK_ACCESSIBLE_PROPERTY_LABEL`; GTK exposes the
   tooltip only as a description.
+- `GtkDropDown` labels itself by its selected value, which outranks
+  `GTK_ACCESSIBLE_PROPERTY_LABEL`. Name drop-downs with
+  `jsti_accessible_set_name` or a mnemonic label.
+- Repeated buttons (such as each local model's Download) carry the item in
+  their accessible name, e.g. `Download Whisper Tiny`.
 - Accessible names are the stable handles that AT-SPI agents use, so keep them
   short, unique within a window and independent of state where possible.
 - The window status label has the `status` role. Announce with
   `gtk_accessible_announce`.
 - Guard: `scripts/check-linux-accessibility.py` runs in the Linux workflow and
-  fails on unnamed icon buttons. The window self-test checks the status role.
+  fails on unnamed icon buttons and on drop-downs named only by property. The
+  window self-test checks the status role.
 
 ### Android (TalkBack and accessibility services)
 

@@ -14,7 +14,20 @@ import SpeakCore
 /// An interruption-ended notification never restarts capture.
 @MainActor
 final class LiveCaptureInput {
-    let engine = AVAudioEngine()
+    /// A running engine lent to one capture, and how to hand it back.
+    struct EngineLease {
+        let engine: AVAudioEngine
+        let giveBack: @MainActor () -> Void
+    }
+
+    /// Set while keyboard readiness keeps its engine running through a
+    /// background hand-off. iOS lets a background app keep recording but not
+    /// start a new recording (`cannotStartRecording`, `'!rec'`), so a capture
+    /// claimed then records on that running engine instead of starting its own.
+    static var engineLender: (@MainActor () -> EngineLease?)?
+
+    private let ownEngine = AVAudioEngine()
+    private var lease: EngineLease?
     private(set) var hasInputTap = false
     private(set) var ownsAudioSession = false
     private let audioSessionManager: AudioSessionManager
@@ -27,6 +40,11 @@ final class LiveCaptureInput {
         interruptionObserver = CaptureDisruptionObserver(center: center)
     }
 
+    /// The borrowed readiness engine while one is lent, otherwise this input's own.
+    var engine: AVAudioEngine { lease?.engine ?? ownEngine }
+
+    var isUsingLentEngine: Bool { lease != nil }
+
     var inputNode: AVAudioInputNode { engine.inputNode }
 
     /// True while this input holds anything a cancel must release.
@@ -37,10 +55,14 @@ final class LiveCaptureInput {
     func claimAudioSession() async throws {
         ownsAudioSession = true
         try await audioSessionManager.configureForRecording()
+        if lease == nil, !hasInputTap, let lender = Self.engineLender {
+            lease = lender()
+        }
     }
 
     func releaseAudioSession() {
         guard ownsAudioSession else { return }
+        returnLease()
         audioSessionManager.deactivate()
         ownsAudioSession = false
     }
@@ -59,14 +81,31 @@ final class LiveCaptureInput {
     }
 
     func startEngine() throws {
+        // A lent engine is already recording; starting it again from the
+        // background is exactly the start iOS refuses.
+        if lease != nil, engine.isRunning { return }
         engine.prepare()
         try engine.start()
     }
 
-    /// Stops the engine first, then removes the tap; no new buffers arrive after this.
+    /// Stops the engine first, then removes the tap; no new buffers arrive after
+    /// this. A lent engine keeps running for its owner: only this capture's tap
+    /// is removed before the engine is handed back.
     func halt() {
+        if lease != nil {
+            removeTap()
+            returnLease()
+            return
+        }
         engine.stop()
         removeTap()
+    }
+
+    private func returnLease() {
+        guard let lease else { return }
+        removeTap()
+        self.lease = nil
+        lease.giveBack()
     }
 
     /// Arms the disruption guard for the capture that has just gone live.

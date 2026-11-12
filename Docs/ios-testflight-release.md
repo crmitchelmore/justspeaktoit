@@ -7,11 +7,11 @@ required `manifest` input. Release controllers allocate that immutable manifest;
 the worker does not accept manual version, keyboard-inclusion, or direct-capture
 inputs.
 
-The worker always sets `TUIST_IOS_KEYBOARD=1`. Direct capture follows the
-manifest's train: Alpha builds set `TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=1` so the
-owner can run the direct-capture matrix (#661); Stable builds set it to `0`, so
-the Stable keyboard uses Instant Dictation handoff and makes no microphone or
-Speech permission attempt inside the extension. Physical acceptance is defined in
+The worker always sets `TUIST_IOS_KEYBOARD=1` and
+`TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0` on every train, so the keyboard uses
+Instant Dictation handoff and makes no microphone or Speech permission attempt
+inside the extension: Apple gives a custom keyboard no microphone access, even
+with Full Access. Physical acceptance is defined in
 [iOS keyboard verification](ios-keyboard-mvp-verification.md).
 
 Alpha builds also carry two preview targets for owner review: the Apple Watch
@@ -103,7 +103,7 @@ Developer portal (see [Watch provisioning](watch-provisioning.md)), then rerun
    - all three products retain `IOS_APP_GROUP`, and the app retains
      `IOS_CLOUD_CONTAINER`;
    - the archive contains `JustSpeakKeyboard.appex` and the step summary
-     reports direct capture enabled for Alpha and disabled for Stable; and
+     reports direct capture disabled; and
    - export and App Store Connect upload succeed.
 4. Keep upload, Apple processing, beta review, and public TestFlight availability
    as distinct states. Confirm the exact Alpha version/build reaches the intended

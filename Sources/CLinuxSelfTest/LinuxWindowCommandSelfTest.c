@@ -26,6 +26,18 @@ gboolean sidebar_navigation_self_test(void) {
         g_strcmp0(gtk_label_get_text(GTK_LABEL(hint)), "Ctrl+1") == 0;
     show_page(JSTI_PAGE_HISTORY);
     okay = okay && sidebar_navigate(GDK_KEY_9, GDK_CONTROL_MASK, NULL) && ui.page == JSTI_PAGE_PROFILES;
+    /* Choosing a page from the collapsed sidebar moves focus off the now-hidden sidebar. */
+    const gboolean collapsed = adw_navigation_split_view_get_collapsed(ui.split);
+    adw_navigation_split_view_set_collapsed(ui.split, TRUE);
+    adw_navigation_split_view_set_show_content(ui.split, FALSE);
+    GtkWidget *sidebar_row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_DASHBOARD));
+    gtk_widget_grab_focus(sidebar_row);
+    const gboolean on_sidebar = gtk_root_get_focus(GTK_ROOT(ui.window)) == sidebar_row;
+    show_page(JSTI_PAGE_DASHBOARD);
+    GtkWidget *moved = gtk_root_get_focus(GTK_ROOT(ui.window));
+    okay = okay && on_sidebar && moved != NULL &&
+        gtk_widget_is_ancestor(moved, gtk_stack_get_visible_child(ui.pages));
+    adw_navigation_split_view_set_collapsed(ui.split, collapsed);
     show_page(JSTI_PAGE_HISTORY);
     const GdkModifierType blocked[] = { 0, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GDK_CONTROL_MASK | GDK_ALT_MASK,
                                        GDK_CONTROL_MASK | GDK_SUPER_MASK };

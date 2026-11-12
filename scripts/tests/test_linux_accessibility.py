@@ -54,6 +54,12 @@ class LinuxAccessibilityCheckTests(unittest.TestCase):
                  'gtk_label_set_mnemonic_widget(GTK_LABEL(label), e->fields[i]);\n'
         self.assertEqual(self.check(source), [])
 
+    def test_raw_announcement_fails_outside_helper(self):
+        source = 'gtk_accessible_announce(GTK_ACCESSIBLE(list), text, GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);\n'
+        self.assertEqual(len(self.check(source)), 1)
+        self.assertEqual(self.check(source.replace("gtk_accessible_announce(GTK_ACCESSIBLE(list)",
+                                                   "jsti_accessible_announce(list")), [])
+
     def test_repository_sources_pass(self):
         root = Path(__file__).resolve().parents[2] / "Sources/CLinuxSupport"
         self.assertEqual(checker.main([str(root)]), 0)

@@ -38,11 +38,19 @@ void show_page(gint32 page) {
     if (page == JSTI_PAGE_CORRECTIONS || page == JSTI_PAGE_PRONUNCIATION)
         emit(71, "", page == JSTI_PAGE_CORRECTIONS ? 0 : 1);
     if (page == JSTI_PAGE_PROFILES) emit(JSTI_EVENT_PROFILES, "refresh", 0);
+    GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(ui.window));
     gtk_stack_set_visible_child_name(ui.pages, page_info[page].name);
     adw_window_title_set_title(ui.title, page_info[page].title);
     GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.sidebar, page);
     if (row != NULL && gtk_list_box_get_selected_row(ui.sidebar) != row) gtk_list_box_select_row(ui.sidebar, row);
     adw_navigation_split_view_set_show_content(ui.split, TRUE);
+    /* GtkStack moves focus off a page it hides, but not off the sidebar the collapsed
+     * layout just hid: focus there is lost to the keyboard and screen readers. */
+    GtkWidget *visible = gtk_stack_get_visible_child(ui.pages);
+    GtkWidget *sidebar = GTK_WIDGET(adw_navigation_split_view_get_sidebar(ui.split));
+    gboolean stranded = focus != NULL && visible != NULL && sidebar != NULL &&
+        adw_navigation_split_view_get_collapsed(ui.split) && gtk_widget_is_ancestor(focus, sidebar);
+    if (stranded) gtk_widget_child_focus(visible, GTK_DIR_TAB_FORWARD);
 }
 
 static void on_sidebar(GtkListBox *box, GtkListBoxRow *row, gpointer data) {

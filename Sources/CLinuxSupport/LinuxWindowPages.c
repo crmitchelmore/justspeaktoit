@@ -36,6 +36,7 @@ GtkWidget *transcript_view(GtkTextBuffer *buffer, int height) {
     gtk_text_view_set_left_margin(GTK_TEXT_VIEW(view), 4);
     gtk_text_view_set_right_margin(GTK_TEXT_VIEW(view), 4);
     gtk_widget_add_css_class(view, "jsti-transcript");
+    jsti_accessible_set_name(view, "Transcript");
     GtkWidget *scroller = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroller), height);
@@ -104,9 +105,9 @@ static GtkWidget *grid_of(GtkWidget *const *items, int count) {
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flow), 10);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow), 10);
     for (int index = 0; index < count; index++) gtk_flow_box_append(GTK_FLOW_BOX(flow), items[index]);
-    for (GtkWidget *child = gtk_widget_get_first_child(flow); child != NULL; child = gtk_widget_get_next_sibling(child)) {
-        gtk_widget_set_focusable(child, FALSE);
-    }
+    /* The items are read-only. Marking each GtkFlowBoxChild unfocusable is not enough:
+     * GtkFlowBox still claims Tab moved into it, so Tab from the transcript went nowhere. */
+    gtk_widget_set_can_focus(flow, FALSE);
     return flow;
 }
 

@@ -125,10 +125,25 @@ static void update_free(gpointer pointer) {
 static gboolean announce_state(gpointer unused) {
     (void)unused;
     ui.state_announcement = 0;
-    const char *text = gtk_label_get_text(ui.status);
-    if (jsti_hud_card() == NULL && text != NULL && text[0] != '\0')
-        gtk_accessible_announce(GTK_ACCESSIBLE(ui.window), text, GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+    gchar *phase = g_steal_pointer(&ui.phase_announcement);
+    if (phase != NULL)
+        jsti_accessible_announce(GTK_WIDGET(ui.window), phase, ui.phase_urgent
+                                 ? GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_HIGH : GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+    else if (jsti_hud_card() == NULL)
+        jsti_accessible_announce(GTK_WIDGET(ui.window), gtk_label_get_text(ui.status),
+                                 GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+    g_free(phase);
     return G_SOURCE_REMOVE;
+}
+
+/* A failed start leaves the state unchanged, so without this it would be silent. */
+void jsti_window_announce_phase(const char *text, gboolean urgent) {
+    if (ui.window == NULL || ui.closing || text == NULL || text[0] == '\0') return;
+    g_free(ui.phase_announcement);
+    ui.phase_announcement = g_strdup(text);
+    ui.phase_urgent = urgent;
+    if (ui.state_announcement == 0)
+        ui.state_announcement = g_idle_add_full(G_PRIORITY_LOW, announce_state, NULL, NULL);
 }
 
 void update_apply(gpointer pointer) {

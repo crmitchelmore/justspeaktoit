@@ -34,6 +34,13 @@ extension TranscriptionRecordingService {
         completionMessage: String? = nil,
         identity: (copyToken: String, surfaceOwnerID: UUID)
     ) {
+        // With Live Activities off, an activity iOS required for background
+        // capture must not linger as a result row: that row would suppress the
+        // Transcript Ready alert (#1017). `endActivity` dismisses immediately.
+        guard settings.liveActivitiesEnabled else {
+            activityManager.endActivity()
+            return
+        }
         if let completeOwnedActivity {
             completeOwnedActivity(
                 wordCount, duration, primedMessage, outcome, resultPreview, completionMessage,

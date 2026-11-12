@@ -143,7 +143,7 @@ There is no delete endpoint, by design.
 | --- | --- | --- | --- | --- | --- |
 | Live transcription | Deepgram | `deepgram/nova-3-streaming` | `nova-3` | WebSocket | Audio seconds |
 | Batch transcription | OpenRouter | `google/gemini-3.1-flash-lite` | `google/gemini-3.1-flash-lite` | HTTPS | Audio seconds |
-| Post-processing | OpenRouter | `openai/gpt-5.6-luna` | `openai/gpt-5.6-luna` | HTTPS | Tokens |
+| Post-processing | OpenRouter | `openai/gpt-6-luna` | `openai/gpt-6-luna` | HTTPS | Tokens |
 
 ### Error codes
 

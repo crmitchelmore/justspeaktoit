@@ -316,6 +316,19 @@ sessions:
           - "Open Settings \u203a Keyboard and check App Shortcuts for Search for Anything and Open Corrections."
         expected: "The sidebar shows a field reading \u201cSearch for anything\u201d with \u2318K. Transcribe starts and then stops a recording that appears in History; Say reads the clipboard aloud; api key opens and highlights an API-key card. Keyboard lists Search for Anything as \u2318K and Open Corrections as \u21e7\u2318K."
         final_gate: true
+      - id: "mac-cleanup-model-successor"
+        issues:
+          - 1578
+        title: "A removed cleanup model moves to its successor and cleanup still works"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build with the 12 November 2026 cleanup model update"
+        steps:
+          - "Before updating, note your post-processing model in Settings \u203a Post-processing (for example GPT-5.6 Luna or Claude Haiku 4.5)."
+          - "Update to the Alpha build and reopen Settings \u203a Post-processing."
+          - "With post-processing on, dictate a made-up sentence and stop."
+        expected: "A removed model now shows its successor (GPT-5.6 Luna becomes GPT-6 Luna, Claude Haiku 4.5 becomes Claude Haiku 5.5) with the same provider route, the picker no longer lists GPT-5.x, Claude 4.x or Qwen3.6 models, and the dictation is cleaned up without a key or model error."
+        final_gate: true
       - id: "mac-openrouter-discover-configure"
         issues:
           - 1575

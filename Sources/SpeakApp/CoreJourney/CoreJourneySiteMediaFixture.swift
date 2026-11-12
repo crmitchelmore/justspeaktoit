@@ -62,7 +62,7 @@ enum CoreJourneySiteMediaFixture {
             item(
                 minutesAgo: 18, duration: 41, gesture: .hold, output: .accessibility, app: "Mail",
                 transcription: ("deepgram/nova-3-streaming", .transcriptionLive),
-                polish: "openai/gpt-5-mini",
+                polish: "openai/gpt-6-luna",
                 raw: "hi sam thanks for the notes from yesterday i've gone through the draft and the only "
                     + "thing i'd change is the timeline on the second page can we move the review to thursday",
                 processed: "Hi Sam, thanks for the notes from yesterday. I've gone through the draft, and the only "
@@ -92,7 +92,7 @@ enum CoreJourneySiteMediaFixture {
             item(
                 minutesAgo: 2_910, duration: 58, gesture: .hold, output: .accessibility, app: "Pages",
                 transcription: ("local/whisperkit/large-v3-turbo", .transcriptionLocal),
-                polish: "openai/gpt-5-mini",
+                polish: "openai/gpt-6-luna",
                 raw: "the second chapter opens on the harbour just after dawn when the fishing boats are "
                     + "coming back in and nobody has noticed the lighthouse is dark",
                 processed: "The second chapter opens on the harbour just after dawn, when the fishing boats are "

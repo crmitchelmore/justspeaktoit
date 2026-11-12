@@ -280,3 +280,23 @@ Meta and the local models.
 
 Carried blockers are unchanged: Distil-Whisper v3.5 still has no WhisperKit or
 Core ML export.
+
+## Weekly check: 12 November 2026
+
+Speech and voice catalogues need no change; cleanup models were pruned (see
+[cleanup model upgrades](cleanup-model-upgrades-2026-11.md#update-12-november-2026--lean-list)).
+
+- **Soniox** v6 (`stt-async-v6`, `stt-rt-v6`) is already the default; v5 is removed on
+  15 December 2026 and saved v5 selections already migrate ([models](https://soniox.com/docs/stt/models)).
+- **Google** shuts down the Gemini 3.1 Flash TTS preview on 17 November 2026; saved
+  choices already resolve to Gemini 3.8 Flash-Lite TTS. Gemini 2.5 Flash-Lite has no
+  shutdown date ([deprecations](https://ai.google.dev/gemini-api/docs/deprecations)).
+- **ElevenLabs** Eleven v4 Turbo is served only through the Text to Dialogue websocket
+  ([models](https://elevenlabs.io/docs/overview/models)), not the text-to-speech endpoint
+  Speak uses, so it is not added.
+- **Deepgram** launched Flux TTS ($0.045 per 1k characters); **AssemblyAI** lists TTS-1 and
+  "STT 3.7 Realtime" as coming soon. Neither is integrated yet.
+- **Mistral** overview no longer labels Voxtral 3 as preview, but the
+  [migration guide](https://docs.mistral.ai/studio/audio/migrate-from-voxtral-2) still
+  describes GA as upcoming, so the preview labels and the manual Voxtral 2 migration stay.
+- **OpenAI, xAI, Groq, Cartesia, Gladia, Microsoft**: no change since 11 November.

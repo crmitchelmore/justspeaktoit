@@ -32,6 +32,19 @@ public enum CloudCatalogAndroidExport {
     /// slugs. On-device and Apple cleanup engines are Mac-only.
     static var cleanupModels: [ModelCatalog.Option] { ModelCatalog.cloudPostProcessing }
 
+    /// Every removed cleanup selection whose successor Android offers, so a saved choice
+    /// keeps its provider and key instead of falling back to the default route.
+    static var cleanupModelSuccessors: [String: String] {
+        let offered = Set(cleanupModels.map(\.id))
+        return Dictionary(
+            CleanupModelRemovals.all.compactMap { removal in
+                let successor = ModelCatalog.currentPostProcessingModel(removal.successorID)
+                return offered.contains(successor) ? (removal.id, successor) : nil
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
     private struct Provider: Encodable {
         let id, credentialId: String
         /// Native text providers only: the cleanup endpoint, which Android's transport must match.
@@ -56,6 +69,8 @@ public enum CloudCatalogAndroidExport {
         let transcriptionModels: [Model]
         let cleanup: Cleanup
         let cleanupModels: [CleanupModel]
+        /// Removed cleanup selections and the offered model each now uses.
+        let cleanupModelSuccessors: [String: String]
     }
 
     public static func json() throws -> Data {
@@ -68,7 +83,8 @@ public enum CloudCatalogAndroidExport {
                 model: ModelCatalog.defaultPostProcessingModel,
                 systemPrompt: TranscriptCleanupPolicy.systemPrompt()
             ),
-            cleanupModels: cleanupModels.map(exportedCleanup)
+            cleanupModels: cleanupModels.map(exportedCleanup),
+            cleanupModelSuccessors: cleanupModelSuccessors
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]

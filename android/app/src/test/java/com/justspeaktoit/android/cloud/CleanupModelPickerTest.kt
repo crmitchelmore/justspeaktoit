@@ -14,9 +14,9 @@ class CleanupModelPickerTest {
             listOf("Anthropic", "Google Gemini", "Groq", "Mistral", "OpenAI"),
             direct.map { it.vendor }.distinct(),
         )
-        assertEquals("native/anthropic/claude-haiku-4-5", direct.first().selectionId)
+        assertEquals("native/anthropic/claude-haiku-5-5", direct.first().selectionId)
         val openAI = direct.filter { it.provider == CloudProvider.OpenAI }.map { it.displayName }
-        assertEquals(listOf("GPT-5 Mini", "GPT-5.4 Mini", "GPT-6 Luna", "GPT-6.1 Sol"), openAI)
+        assertEquals(listOf("GPT-6 Luna", "GPT-6.1 Sol", "GPT-6.1 Terra"), openAI)
     }
 
     @Test
@@ -24,7 +24,7 @@ class CleanupModelPickerTest {
         val openRouter = CleanupModelPicker.openRouter()
         assertTrue(openRouter.all { it.isOpenRouter && it.provider == CloudProvider.OpenRouter })
         assertEquals(
-            listOf("Anthropic", "Google", "Meta Llama", "Mistral", "OpenAI", "Qwen"),
+            listOf("Anthropic", "Google", "Mistral", "OpenAI", "Qwen"),
             openRouter.map { it.vendor }.distinct(),
         )
         // A model offered both ways is never a top-level OpenRouter entry.
@@ -52,15 +52,25 @@ class CleanupModelPickerTest {
     fun testSavedChoices_keepTheirRouteAndUnknownFallsBackToDefault() {
         assertEquals(CloudProvider.OpenRouter, CloudCatalog.cleanupModel(null).provider)
         assertEquals(CloudCatalog.CLEANUP_MODEL, CloudCatalog.cleanupModel("gone/model").selectionId)
-        assertEquals(CloudProvider.Anthropic, CloudCatalog.cleanupModel("native/anthropic/claude-sonnet-4-6").provider)
+        assertEquals(CloudProvider.Anthropic, CloudCatalog.cleanupModel("native/anthropic/claude-sonnet-5-5").provider)
+    }
+
+    @Test
+    fun testRemovedChoices_moveToTheirSuccessorOnTheSameRoute() {
+        assertEquals(
+            "native/anthropic/claude-sonnet-5-5",
+            CloudCatalog.cleanupModel("native/anthropic/claude-sonnet-4-6").selectionId,
+        )
+        assertEquals("native/openai/gpt-6-luna", CloudCatalog.cleanupModel("native/openai/gpt-5.4-mini").selectionId)
+        assertEquals("openai/gpt-6-luna", CloudCatalog.cleanupModel("openai/gpt-5.6-luna").selectionId)
     }
 
     @Test
     fun testCleanupRoutesToTheModelsOwnEndpointAndModelName() {
-        val claude = CloudCatalog.cleanupModel("native/anthropic/claude-haiku-4-5")
+        val claude = CloudCatalog.cleanupModel("native/anthropic/claude-haiku-5-5")
         assertEquals("https://api.anthropic.com/v1/chat/completions", CloudWire.cleanupUrl(claude))
         val claudeBody = org.json.JSONObject(CloudWire.cleanupBody(claude.apiName, "x", CloudWire.cleanupMaxTokens(claude)))
-        assertEquals("claude-haiku-4-5", claudeBody.getString("model"))
+        assertEquals("claude-haiku-5-5", claudeBody.getString("model"))
         assertEquals(CloudWire.ANTHROPIC_MAX_TOKENS, claudeBody.getInt("max_tokens"))
         val viaOpenRouter = CloudCatalog.cleanupModel("openai/gpt-6-luna")
         assertEquals(null, CloudWire.cleanupMaxTokens(viaOpenRouter))

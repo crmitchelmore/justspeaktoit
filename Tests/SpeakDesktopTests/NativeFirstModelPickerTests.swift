@@ -78,24 +78,24 @@ final class NativeFirstModelPickerTests: XCTestCase {
 
     func testAnthropicRouteUsesItsOwnKeyAndOmitsTemperature() throws {
         XCTAssertEqual(
-            ModelCredentialResolver.requirement(for: "native/anthropic/claude-sonnet-4-6", purpose: .postProcessing),
+            ModelCredentialResolver.requirement(for: "native/anthropic/claude-sonnet-5-5", purpose: .postProcessing),
             .apiKey(identifier: "anthropic.apiKey", providerName: "Anthropic")
         )
-        let target = try ChatCompletionTarget.resolve("native/anthropic/claude-haiku-4-5")
+        let target = try ChatCompletionTarget.resolve("native/anthropic/claude-haiku-5-5")
         XCTAssertEqual(target.url.absoluteString, "https://api.anthropic.com/v1/chat/completions")
         let request = OpenRouterChatRequest(
-            model: "native/anthropic/claude-haiku-4-5", temperature: 0.2,
+            model: "native/anthropic/claude-haiku-5-5", temperature: 0.2,
             messages: [.init(role: "user", content: "fixture")], stream: true, maxTokens: nil
         )
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
         )
-        XCTAssertEqual(object["model"] as? String, "claude-haiku-4-5")
+        XCTAssertEqual(object["model"] as? String, "claude-haiku-5-5")
         XCTAssertNil(object["temperature"], "Claude 4.7 and later reject a temperature below 1")
         XCTAssertEqual(object["max_tokens"] as? Int, 8_192, "Anthropic rejects requests without an output limit")
         let openRouter = try XCTUnwrap(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(OpenRouterChatRequest(
-                model: "anthropic/claude-haiku-4.5", temperature: 0.2,
+                model: "anthropic/claude-haiku-5.5", temperature: 0.2,
                 messages: [.init(role: "user", content: "fixture")], stream: nil, maxTokens: nil
             ))) as? [String: Any]
         )
@@ -130,7 +130,7 @@ final class NativeFirstModelPickerTests: XCTestCase {
     // MARK: - Migration
 
     func testSavedOpenRouterSelectionsKeepTheirRoute() {
-        for saved in ["openai/gpt-6-luna", "openai/gpt-5.6-luna", "openai/gpt-5-mini",
+        for saved in ["openai/gpt-6-luna", "openai/gpt-6.1-terra",
                       CleanupModelSelection.prefix + "openai/future-model"] {
             XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(saved), saved)
             XCTAssertTrue(ModelPickerGrouping.isOpenRouter(saved, purpose: .postProcessing), saved)
@@ -139,7 +139,10 @@ final class NativeFirstModelPickerTests: XCTestCase {
         for native in ModelRetirements.current(NativeTextModels.postProcessing).map(\.id) {
             XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(native), native)
         }
-        XCTAssertEqual(ModelCatalog.defaultPostProcessingModel, "openai/gpt-5.6-luna")
+        // Removed OpenRouter models move to an OpenRouter successor.
+        XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel("openai/gpt-5.6-luna"), "openai/gpt-6-luna")
+        XCTAssertTrue(ModelPickerGrouping.isOpenRouter("openai/gpt-6-luna", purpose: .postProcessing))
+        XCTAssertEqual(ModelCatalog.defaultPostProcessingModel, "openai/gpt-6-luna")
     }
 
     // MARK: - Grouping and ordering
@@ -190,14 +193,14 @@ final class NativeFirstModelPickerTests: XCTestCase {
             groups.direct.map { ModelPickerGrouping.providerName(for: $0.id, purpose: .postProcessing) }.uniqued(),
             ["Anthropic", "Google Gemini", "Groq", "Mistral", "OpenAI"]
         )
-        XCTAssertEqual(groups.direct.first?.id, "native/anthropic/claude-haiku-4-5")
+        XCTAssertEqual(groups.direct.first?.id, "native/anthropic/claude-haiku-5-5")
     }
 
     func testOpenRouterGroupSortsByVendorPrefix() {
         let groups = ModelPickerGrouping.groups(ModelCatalog.cloudPostProcessing, purpose: .postProcessing)
         let vendors = groups.openRouter.map { ModelPickerGrouping.providerName(for: $0.id, purpose: .postProcessing) }
             .uniqued()
-        XCTAssertEqual(vendors, ["Anthropic", "Google", "Meta Llama", "Mistral", "OpenAI", "Qwen"])
+        XCTAssertEqual(vendors, ["Anthropic", "Google", "Mistral", "OpenAI", "Qwen"])
         XCTAssertEqual(
             ModelPickerGrouping.providerName(for: CleanupModelSelection.prefix + "openai/x", purpose: .postProcessing),
             "OpenAI"
@@ -254,7 +257,7 @@ final class NativeFirstModelPickerTests: XCTestCase {
             return XCTFail("OpenRouter entries are not labelled")
         }
         XCTAssertTrue(flat[..<firstOpenRouter].allSatisfy { NativeTextModels.isNative($0.id) })
-        XCTAssertEqual(DesktopPostProcessing.remoteModels.first?.id, "native/anthropic/claude-haiku-4-5")
+        XCTAssertEqual(DesktopPostProcessing.remoteModels.first?.id, "native/anthropic/claude-haiku-5-5")
     }
 
     func testSearchMatchesNameIdentifierAndDescription() {

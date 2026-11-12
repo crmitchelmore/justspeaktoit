@@ -50,7 +50,7 @@ final class CleanupModelDiscoveryTests: XCTestCase {
         await store.refresh(force: true)
         XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)
         XCTAssertEqual(store.options(), ModelCatalog.cloudPostProcessing)
-        XCTAssertEqual(ModelCatalog.defaultPostProcessingModel, "openai/gpt-5.6-luna")
+        XCTAssertEqual(ModelCatalog.defaultPostProcessingModel, "openai/gpt-6-luna")
         XCTAssertFalse(try DesktopConfiguration().enabled(CleanupModelSelection.preferenceKey))
     }
 
@@ -167,7 +167,7 @@ final class CleanupModelDiscoveryTests: XCTestCase {
         XCTAssertTrue(restored.enabled(CleanupModelSelection.preferenceKey))
         XCTAssertEqual(restored.text("postProcessingOutputLanguage"),
                        configuration.text("postProcessingOutputLanguage"))
-        XCTAssertEqual(ModelCatalog.defaultPostProcessingModel, "openai/gpt-5.6-luna")
+        XCTAssertEqual(ModelCatalog.defaultPostProcessingModel, "openai/gpt-6-luna")
     }
 
     private func entry(_ id: String, outputs: [String] = ["text"],

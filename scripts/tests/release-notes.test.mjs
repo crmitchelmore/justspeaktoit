@@ -69,10 +69,10 @@ test("generator requests Luna medium and appends the changelog", async () => {
     };
 
     const result = await generateReleaseNotes({ context, apiKey: "test", fetchImpl });
-    assert.equal(request.model, "gpt-5.6-luna");
+    assert.equal(request.model, "gpt-6-luna");
     assert.deepEqual(request.reasoning, { effort: "medium" });
     assert.match(result.notes, /Full changelog/);
-    assert.match(result.notes, /model=gpt-5\.6-luna effort=medium/);
+    assert.match(result.notes, /model=gpt-6-luna effort=medium/);
     assert.equal(result.usedFallback, false);
 });
 

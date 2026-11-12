@@ -70,7 +70,7 @@ final class SharedApplicationPreferenceTests: XCTestCase {
     /// Values written by an older build load unchanged on both platforms.
     func testOldPreferencesRoundTrip() {
         defaults.set("groq/whisper-large-v3-turbo", forKey: "batchTranscriptionModel")
-        defaults.set("anthropic/claude-haiku-4.5", forKey: "postProcessingModel")
+        defaults.set("anthropic/claude-haiku-5.5", forKey: "postProcessingModel")
         defaults.set("fr_FR", forKey: "preferredLocale")
         defaults.set("Saved words", forKey: "transcriptionKeywords")
         defaults.set("compact", forKey: "visualDensity")
@@ -85,7 +85,7 @@ final class SharedApplicationPreferenceTests: XCTestCase {
             XCTAssertEqual(Shared.batchTranscriptionModel.projection(on: platform).value(in: defaults),
                            "groq/whisper-large-v3-turbo")
             XCTAssertEqual(Shared.postProcessingModel.projection(on: platform).value(in: defaults),
-                           "anthropic/claude-haiku-4.5")
+                           "anthropic/claude-haiku-5.5")
             XCTAssertEqual(Shared.preferredLocale.projection(on: platform).value(in: defaults), "fr_FR")
             XCTAssertEqual(Shared.transcriptionKeywords.projection(on: platform).value(in: defaults), "Saved words")
             XCTAssertEqual(Shared.visualDensity.projection(on: platform).value(in: defaults),

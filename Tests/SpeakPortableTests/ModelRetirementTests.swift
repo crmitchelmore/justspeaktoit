@@ -82,28 +82,20 @@ final class ModelRetirementTests: XCTestCase {
         }
     }
 
-    func testCleanupRetirements_moveSavedAndInFlightSelectionsOnTheirDay() throws {
-        XCTAssertEqual(Dictionary(uniqueKeysWithValues: cleanup.map { ($0.id, $0.successorID) }), [
-            "openai/gpt-5-mini": "openai/gpt-5.6-luna",
+    func testRetiringCleanupModels_areRemovedAndMoveImmediately() {
+        // Superseded cleanup models leave the catalogue at once (CleanupModelRemovals),
+        // so none waits for its shutdown day.
+        XCTAssertTrue(cleanup.isEmpty)
+        let today = Date()
+        for (id, successor) in [
+            "openai/gpt-5-mini": "openai/gpt-6-luna",
             "openai/gpt-5.4-nano": "openai/gpt-6-luna",
             "native/openai/gpt-5-mini": "native/openai/gpt-6-luna",
             "native/groq/llama-3.1-8b-instant": "native/groq/openai/gpt-oss-20b"
-        ])
-        for retirement in cleanup {
-            let day = retirement.shutdownDate
-            let eve = day.addingTimeInterval(-1)
-            let successor = try XCTUnwrap(retirement.successorID)
-            // `postProcessing` already hides models shut down before today, so add the raw native list.
-            let before = ModelRetirements.current(
-                NativeTextModels.postProcessing + ModelCatalog.postProcessing, at: eve)
-            XCTAssertTrue(before.first { $0.id == retirement.id }?.description?.contains(retirement.notice) == true)
-            XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(retirement.id, at: eve), retirement.id)
-            let after = Set(ModelRetirements.current(ModelCatalog.postProcessing, at: day).map(\.id))
-            XCTAssertFalse(after.contains(retirement.id), retirement.id)
-            XCTAssertTrue(after.contains(successor), retirement.id)
+        ] {
+            XCTAssertFalse(ModelCatalog.postProcessing.contains { $0.id == id }, id)
+            XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(id, at: today), successor)
             XCTAssertNil(ModelRetirements.retirement(for: successor), "successor must not chain: \(successor)")
-            XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(retirement.id, at: day), successor)
-            XCTAssertNil(ModelRetirements.successor(for: retirement.id, mode: .batch, at: day))
         }
         XCTAssertNil(ModelRetirements.retirement(for: ModelCatalog.defaultPostProcessingModel))
     }

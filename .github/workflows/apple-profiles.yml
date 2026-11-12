@@ -2,7 +2,9 @@ name: Apple App IDs and profiles
 
 # Regenerates the iOS App Store profiles through the App Store Connect API and
 # checks their entitlements (#1119); release-ios.yml fetches them the same way
-# at build time. Optionally enables Sign in with Apple on the direct-download
+# at build time. For Alpha it also registers and probes the watch app, its
+# complication and the Share extension, which only Alpha TestFlight carries;
+# a missing one is reported without failing the run. Optionally enables Sign in with Apple on the direct-download
 # Mac App ID, which the Paid Access web flow uses as its primary App ID.
 on:
   workflow_dispatch:
@@ -43,6 +45,7 @@ jobs:
           import json, os
           config = json.load(open("Sources/SpeakCore/Resources/ReleaseTrains.json"))[os.environ["TRAIN"]]
           for env, key in [("BUNDLE_ID", "iosBundleIdentifier"), ("IOS_APP_GROUP", "iosAppGroup"),
+                           ("WATCH_APP_GROUP", "watchAppGroup"),
                            ("IOS_CLOUD_CONTAINER", "iosCloudContainer"), ("MAC_CLOUD_CONTAINER", "macCloudContainer")]:
               print(f"{env}={config[key]}")
           PY
@@ -70,11 +73,11 @@ jobs:
           [ "$SHARED_CONTAINER" = "1" ] && SHARED_CONTAINER_RULE=--require
           # Mirrors release-ios.yml. Extension profiles may carry containers they don't use.
           check() {
-            local bundle="$1" expected_containers="$2"
+            local bundle="$1" expected_containers="$2" group="${GROUP:-$IOS_APP_GROUP}"
             shift 2
             local output="$RUNNER_TEMP/$bundle.mobileprovision"
             ruby scripts/ensure-ios-app-store-profile.rb --bundle-id "$bundle" --certificate-serial "$SERIAL" \
-              --output "$output" --require "$GROUP_KEY=$IOS_APP_GROUP" --exact "$GROUP_KEY" "$@"
+              --output "$output" --require "$GROUP_KEY=$group" --exact "$GROUP_KEY" "$@" || return 1
             security cms -D -i "$output" | python3 -c '
           import plistlib, sys
           bundle, group, expected = sys.argv[1], sys.argv[2], [c for c in sys.argv[3].split(",") if c]
@@ -88,14 +91,31 @@ jobs:
           assert groups == [group], "wrong App Group"
           if expected:
               assert expected[0] in containers and set(containers) <= set(expected), "wrong iCloud containers"
-          ' "$bundle" "$IOS_APP_GROUP" "$expected_containers" | tee -a "$GITHUB_STEP_SUMMARY"
+          ' "$bundle" "$group" "$expected_containers" | tee -a "$GITHUB_STEP_SUMMARY" || { rm -f "$output"; return 1; }
             rm -f "$output"
+          }
+          # Alpha preview targets: release-ios.yml leaves a target out of
+          # Alpha rather than failing, so a probe failure is reported only.
+          preview() {
+            local label="$1" bundle="$2" group="$3" name="$4"
+            if GROUP="$group" check "$bundle" "" --register "$name" --capability APP_GROUPS; then
+              echo "- $label: ready for Alpha" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- $label: **not ready** (Alpha builds without it). In the Apple Developer portal, register App Group $group if needed and link it to $bundle." >> "$GITHUB_STEP_SUMMARY"
+            fi
           }
           check "$BUNDLE_ID" "$IOS_CLOUD_CONTAINER,$MAC_CLOUD_CONTAINER" \
             --require "$ICLOUD_KEY=$IOS_CLOUD_CONTAINER" "$SHARED_CONTAINER_RULE" "$ICLOUD_KEY=$MAC_CLOUD_CONTAINER" \
             --exact "$ICLOUD_KEY"
           check "$BUNDLE_ID.JustSpeakToItWidgetExtension" ""
           check "$BUNDLE_ID.keyboard" ""
+          if [ "${{ matrix.train }}" = "alpha" ]; then
+            echo "#### Alpha preview targets" >> "$GITHUB_STEP_SUMMARY"
+            preview "Share extension" "$BUNDLE_ID.share" "$IOS_APP_GROUP" "JustSpeakToIt Share"
+            preview "Watch app" "$BUNDLE_ID.watchkitapp" "$WATCH_APP_GROUP" "JustSpeakToIt Watch"
+            preview "Watch complication" "$BUNDLE_ID.watchkitapp.complication" "$WATCH_APP_GROUP" \
+              "JustSpeakToIt Watch Complication"
+          fi
           rm -f "$APP_STORE_CONNECT_KEY_PATH"
 
   mac-sign-in-with-apple:

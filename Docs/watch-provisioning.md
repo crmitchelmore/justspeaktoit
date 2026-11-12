@@ -1,9 +1,12 @@
 # Apple Watch provisioning checklist
 
 The watch app and its watch-face complication are feature-flagged
-(`TUIST_WATCH_APP=1 tuist generate`) and excluded from release signing until
-the portal work below is done. Default generates, CI release builds and
-TestFlight are unaffected while the flag is off.
+(`TUIST_WATCH_APP=1 tuist generate`). Alpha TestFlight builds turn the flag on
+for owner review and Stable builds keep it off. An Alpha build leaves the watch
+app out, with the reason in its step summary, until both watch profiles carry
+the watch App Group (see
+[Alpha preview targets](ios-testflight-release.md#alpha-preview-targets)).
+Default generates and CI builds are unaffected.
 
 ## Bundle identifiers
 
@@ -11,6 +14,10 @@ TestFlight are unaffected while the flag is off.
 | --- | --- | --- |
 | `JustSpeakWatchApp` | `com.justspeaktoit.ios.watchkitapp` | watchOS app (companion of `com.justspeaktoit.ios`) |
 | `JustSpeakWatchWidgetExtension` | `com.justspeaktoit.ios.watchkitapp.complication` | WidgetKit extension embedded in the watch app |
+
+Alpha maps every id under the Alpha app: `com.justspeaktoit.ios.alpha.watchkitapp`
+and `com.justspeaktoit.ios.alpha.watchkitapp.complication`, with the App Group
+`group.com.justspeaktoit.watch.alpha` (`watchAppGroup` in `ReleaseTrains.json`).
 
 Extension ids must stay prefixed by the containing app's id, and the watch
 app's id must stay prefixed by the iPhone app's id — renaming any of the three
@@ -38,23 +45,40 @@ complication simply shows the idle state. An existing install's `captures.json`
 is migrated out of Application Support the first time the App Group is
 available.
 
-## Portal steps (required before shipping)
+## Portal steps
 
-1. Register the bundle id `com.justspeaktoit.ios.watchkitapp`.
-2. Register the bundle id `com.justspeaktoit.ios.watchkitapp.complication`.
-3. Register the App Group `group.com.justspeaktoit.watch`, then enable **App
-   Groups** on *both* watch identifiers and associate that group with each.
-   (Automatic signing fails on the watch targets until this is done, because
-   both now ship an entitlements file.)
-4. Local device testing: `TUIST_WATCH_APP=1 tuist generate`, then let Xcode's
-   automatic signing create the development profiles for both ids.
-5. App Store / TestFlight: create App Store provisioning profiles for both
-   watch ids, add them as repo secrets, and extend `release-ios.yml` the way
-   the widget/keyboard profiles are handled. The manifest hooks already exist:
-   `TUIST_WATCH_PROFILE_NAME` and `TUIST_WATCH_WIDGET_PROFILE_NAME` feed
-   `configureManualSigning` in `Project.swift`. Add `TUIST_WATCH_APP=1` to the
-   release generate step at that point.
-6. The watch `AppIcon` asset catalog is generated alongside the Mac/iOS artwork
+Alpha TestFlight (`release-ios.yml` and `apple-profiles.yml` do the rest):
+
+1. The workflows register `com.justspeaktoit.ios.alpha.watchkitapp` and
+   `com.justspeaktoit.ios.alpha.watchkitapp.complication` when missing and
+   enable **App Groups** on both through the App Store Connect API.
+2. **Owner, in the Apple Developer portal:** register the App Group
+   `group.com.justspeaktoit.watch.alpha` if it does not exist, then open each of
+   the two Alpha watch identifiers, configure **App Groups** and tick that
+   group. The API cannot make this association.
+3. Run **Apple App IDs and profiles** (`apple-profiles.yml`). Its Alpha summary
+   reports `Watch app: ready for Alpha` once both profiles carry the group.
+   The next Alpha release then embeds the watch app; `TUIST_WATCH_PROFILE_NAME`
+   and `TUIST_WATCH_WIDGET_PROFILE_NAME` feed `configureManualSigning` in
+   `Project.swift`.
+
+The Share extension (`com.justspeaktoit.ios.alpha.share`) follows the same
+path with the existing group `group.com.justspeaktoit.ios.alpha`.
+
+Stable (only when the watch app is approved for Stable):
+
+1. Register `com.justspeaktoit.ios.watchkitapp` and
+   `com.justspeaktoit.ios.watchkitapp.complication`, register the App Group
+   `group.com.justspeaktoit.watch`, enable **App Groups** on both identifiers
+   and associate that group with each.
+2. Turn the flag on for Stable in the **Select Alpha preview targets** step.
+
+Local device testing: `TUIST_WATCH_APP=1 tuist generate`, then let Xcode's
+automatic signing create development profiles for both ids. (Automatic signing
+fails on the watch targets until the App Group is associated, because both ship
+an entitlements file.)
+
+The watch `AppIcon` asset catalog is generated alongside the Mac/iOS artwork
    by `scripts/assets/generate-icon.swift` and bundled by the watch target. Validate the
    icon and provisioning in the archived Watch app before App Store submission.
 

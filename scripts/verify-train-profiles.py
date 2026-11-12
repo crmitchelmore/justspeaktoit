@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fail before archiving if any profile belongs to the other train."""
+import json
 import os
 import plistlib
 import subprocess
@@ -12,6 +13,17 @@ parent = os.environ['BUNDLE_ID']
 profiles = [('mac-app-store', parent)] if surface == 'mac-store' else [
     ('ios-appstore', parent), ('ios-widget-appstore', parent + '.JustSpeakToItWidgetExtension'),
     ('ios-keyboard-appstore', parent + '.keyboard')]
+groups = {}
+if surface == 'ios':
+    # Alpha-only targets are checked only when the release kept them enabled.
+    train = os.environ.get('RELEASE_TRAIN', 'stable')
+    config = json.loads(Path('Sources/SpeakCore/Resources/ReleaseTrains.json').read_text())[train]
+    if os.environ.get('TUIST_IOS_SHARE_EXTENSION') == '1':
+        profiles.append(('ios-share-appstore', parent + '.share'))
+    if os.environ.get('TUIST_WATCH_APP') == '1':
+        profiles += [('watch-appstore', parent + '.watchkitapp'),
+                     ('watch-widget-appstore', parent + '.watchkitapp.complication')]
+        groups = {'watch-appstore': config['watchAppGroup'], 'watch-widget-appstore': config['watchAppGroup']}
 for name, identifier in profiles:
     path = root / (name + '.provisionprofile')
     profile = plistlib.loads(subprocess.check_output(['security', 'cms', '-D', '-i', str(path)]))
@@ -19,7 +31,8 @@ for name, identifier in profiles:
     app_id = entitlements.get('application-identifier', entitlements.get('com.apple.application-identifier', ''))
     if app_id.split('.', 1)[-1] != identifier:
         raise SystemExit(f'Profile {name} does not authorise {identifier}')
-    if surface == 'ios' and entitlements.get('com.apple.security.application-groups', []) != [os.environ['IOS_APP_GROUP']]:
+    expected_group = groups.get(name, os.environ.get('IOS_APP_GROUP'))
+    if surface == 'ios' and entitlements.get('com.apple.security.application-groups', []) != [expected_group]:
         raise SystemExit(f'Profile {name} has the wrong App Group')
     if name in ['ios-appstore', 'mac-app-store']:
         containers = set(entitlements.get('com.apple.developer.icloud-container-identifiers', []))

@@ -179,6 +179,29 @@ module IOSProfileEnsure
       assert transport.drained?
     end
 
+    def test_register_creates_app_id_and_app_groups_but_still_requires_the_linked_group
+      name = ensurer([]).first.profile_name
+      script = [
+        ["GET", "/v1/bundleIds?filter", 200, { "data" => [] }],
+        ["POST", "/v1/bundleIds", 201, { "data" => { "id" => "B1", "attributes" => { "identifier" => BUNDLE_ID } } }],
+        ["GET", "/v1/bundleIds/B1/bundleIdCapabilities", 200, { "data" => [] }],
+        ["POST", "/v1/bundleIdCapabilities", 201, { "data" => { "id" => "CAP1" } }],
+      ] + setup_steps + [
+        ["GET", "/v1/bundleIds/B1/profiles", 200, { "data" => [] }],
+        ["POST", "/v1/profiles", 201, { "data" => profile("P5", name: name, groups: []) }],
+      ]
+      transport = FakeTransport.new(script)
+      subject = Ensurer.new(client: IOSProfileBootstrap::Client.new(transport: transport), bundle_id: BUNDLE_ID,
+                            certificate_serial: SERIAL, required: { GROUP => ["group.example"] }, exact: [GROUP],
+                            register_name: "Example Watch", capabilities: ["APP_GROUPS"],
+                            logger: ->(_m) {}, sleeper: ->(_seconds) {})
+      error = assert_raises(ValidationError) { subject.ensure_profile }
+      assert_match(/lacks #{GROUP}=group.example/, error.message)
+      assert transport.drained?
+      assert_equal "Example Watch", transport.calls[1].body.dig(:data, :attributes, :name)
+      assert_equal "APP_GROUPS", transport.calls[3].body.dig(:data, :attributes, :capabilityType)
+    end
+
     def test_unregistered_app_id_fails_without_creating_one
       script = [["GET", "/v1/bundleIds?filter", 200, { "data" => [] }]]
       subject, transport = ensurer(script)

@@ -135,6 +135,15 @@ module IOSProfileBootstrap
       profile_content(profile)
     end
 
+    # Registers the App ID when missing and enables the requested
+    # capabilities, without creating or touching any profile. The API cannot
+    # associate a specific App Group with an App ID; that stays a portal step.
+    def ensure_registration
+      bundle = ensure_bundle_id
+      ensure_capabilities(bundle.fetch("id"))
+      bundle
+    end
+
     def normalized_serial
       @certificate_serial.delete(":").upcase.sub(/^0+/, "")
     end

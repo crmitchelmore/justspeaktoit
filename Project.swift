@@ -72,7 +72,9 @@ let version: String = {
 let appProfileName = ProcessInfo.processInfo.environment["APP_PROFILE_NAME"]
 let widgetProfileName = ProcessInfo.processInfo.environment["WIDGET_PROFILE_NAME"]
 let keyboardProfileName = ProcessInfo.processInfo.environment["KEYBOARD_PROFILE_NAME"]
-let shareProfileName = ProcessInfo.processInfo.environment["SHARE_PROFILE_NAME"]
+// Tuist forwards only `TUIST_`-prefixed variables into manifest evaluation.
+let shareProfileName = ProcessInfo.processInfo.environment["TUIST_SHARE_PROFILE_NAME"]
+    ?? ProcessInfo.processInfo.environment["SHARE_PROFILE_NAME"]
 let watchProfileName = ProcessInfo.processInfo.environment["TUIST_WATCH_PROFILE_NAME"]
 let watchWidgetProfileName = ProcessInfo.processInfo.environment["TUIST_WATCH_WIDGET_PROFILE_NAME"]
 let macAppStoreProfileName = ProcessInfo.processInfo.environment["TUIST_MAC_PROFILE_NAME"]
@@ -561,11 +563,13 @@ let shareTarget: Target = .target(
     name: "JustSpeakShare",
     destinations: .iOS,
     product: .appExtension,
-    bundleId: "com.justspeaktoit.ios.share",
+    // Extension bundle ids must be prefixed with the containing app's, so
+    // Alpha maps it (and its App Group) to the Alpha identity.
+    bundleId: trainIdentifier("com.justspeaktoit.ios.share"),
     deploymentTargets: .iOS("17.0"),
-    infoPlist: .file(path: "JustSpeakShare/Info.plist"),
+    infoPlist: .file(path: .relativeToRoot(trainPlistPath("JustSpeakShare/Info.plist"))),
     sources: ["JustSpeakShare/**/*.swift"],
-    entitlements: .file(path: "JustSpeakShare/JustSpeakShare.entitlements"),
+    entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakShare/JustSpeakShare.entitlements"))),
     dependencies: [
         .package(product: "SpeakCore")
     ],

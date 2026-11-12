@@ -88,6 +88,7 @@ Lint job) and in `make test-tooling`. It fails on:
 | `icon-only-control` | `Button`/`Menu`/`Link` whose label is only an `Image`, with no `.accessibilityLabel` |
 | `icon-only-missing-id` | a labelled icon-only control without `.accessibilityIdentifier` |
 | `empty-control-label` | `Toggle("")`, `Picker("")`, `TextField("")` and similar without `.accessibilityLabel` |
+| `untitled-control` | a `Slider(value:)` or `TextEditor(text:)` with no label closure and no `.accessibilityLabel`; a caption drawn as a separate `Text` does not name the control, so VoiceOver reads only its value |
 | `unlabelled-segmented-picker` | an iOS `Picker` with `.pickerStyle(.segmented)` and no `.accessibilityLabel` or `.accessibilityIdentifier`; UIKit's segmented control drops the Picker title, so the control has no name (macOS keeps it) |
 | `tap-without-trait` | `.onTapGesture`/`.onLongPressGesture` without the button trait or an accessibility action |
 

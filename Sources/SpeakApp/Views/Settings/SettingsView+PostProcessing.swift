@@ -393,6 +393,8 @@ extension SettingsView {
         }
         Slider(
           value: settingsBinding(\AppSettings.postProcessingTemperature), in: 0...1, step: 0.05)
+        .accessibilityLabel("Temperature")
+        .accessibilityValue(String(format: "%.2f", settings.postProcessingTemperature))
         .speakTooltip("Lower values stay close to your words; higher values let Speak be more creative.")
       }
     }

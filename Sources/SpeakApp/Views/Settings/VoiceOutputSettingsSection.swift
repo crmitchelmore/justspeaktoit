@@ -118,6 +118,8 @@ struct VoiceOutputSettingsSection: View, AppSettingsBindingProviding {
             }
             Slider(
               value: settingsBinding(\AppSettings.ttsSpeed), in: usesRealtimeVoice ? 0.5...1.5 : 0.5...2.0, step: 0.1)
+              .accessibilityLabel("Speed")
+              .accessibilityValue(String(format: "%.2fx", settings.ttsSpeed))
               .speakTooltip("Adjust playback speed from 0.5x (slower) to 2.0x (faster)")
           }
 
@@ -130,6 +132,8 @@ struct VoiceOutputSettingsSection: View, AppSettingsBindingProviding {
                 .foregroundStyle(.secondary)
             }
             Slider(value: settingsBinding(\AppSettings.ttsPitch), in: -12...12, step: 1)
+              .accessibilityLabel("Pitch")
+              .accessibilityValue("\(Int(settings.ttsPitch)) semitones")
               .speakTooltip("Adjust voice pitch from -12 (lower) to +12 (higher) semitones")
           }
         }

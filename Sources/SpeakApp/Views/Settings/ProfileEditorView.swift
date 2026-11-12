@@ -156,6 +156,7 @@ extension ProfileEditorView {
       Toggle("Custom polish prompt", isOn: $draft.useCustomPrompt)
       if draft.useCustomPrompt {
         TextEditor(text: $draft.customPrompt)
+          .accessibilityLabel("Custom polish prompt")
           .font(.body.monospaced())
           .frame(minHeight: 120)
           .overlay(

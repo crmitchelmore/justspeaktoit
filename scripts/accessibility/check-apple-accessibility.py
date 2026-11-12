@@ -19,6 +19,9 @@ Rules (each finding names the rule):
                       icon-only control (labelled) with no
                       .accessibilityIdentifier, so agents cannot target it
                       stably.
+  untitled-control    Slider(value:)/TextEditor(text:) with no label closure
+                      and no .accessibilityLabel: VoiceOver reads only the
+                      value, because the visible caption is a separate Text.
   unlabelled-segmented-picker
                       iOS Picker with .pickerStyle(.segmented) and no
                       .accessibilityLabel or .accessibilityIdentifier: UIKit's
@@ -61,6 +64,8 @@ ICON = re.compile(r"\bImage\s*\(")
 EMPTY_TITLE = re.compile(
     r'\b(Toggle|Picker|TextField|SecureField|DatePicker|ColorPicker|Stepper)\s*\(\s*""'
 )
+
+UNTITLED = re.compile(r"(?<![\w.])(Slider|TextEditor)\s*\(\s*(value|text)\s*:")
 
 
 @dataclass(frozen=True)
@@ -302,6 +307,19 @@ def scan_source(path: str, source: str) -> list[Finding]:
             continue
         findings.append(Finding(path, ln, "empty-control-label",
                                 f'{m.group(1)}("") has no accessible name; add .accessibilityLabel'))
+
+    for m in UNTITLED.finditer(text):
+        paren = text.index("(", m.start())
+        after = skip_ws(text, match_close(text, paren))
+        if after < len(text) and text[after] == "{":
+            continue  # label closure names the control
+        end, _ = control_extent(text, m.start())
+        chain = modifier_chain(text, end)
+        ln = line_of(m.start())
+        if ignored(lines, ln) or any(mod in chain for mod in LABEL_MODIFIERS):
+            continue
+        findings.append(Finding(path, ln, "untitled-control",
+                                f"{m.group(1)} has no title; add .accessibilityLabel"))
 
     if path.startswith(SEGMENTED_UNNAMED_DIRS):
         for m in PICKER.finditer(text):

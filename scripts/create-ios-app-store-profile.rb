@@ -179,9 +179,12 @@ module IOSProfileBootstrap
         created = @client.post("/v1/bundleIds", create_body).fetch("data")
         log "Registered bundle ID #{@bundle_id}"
         validate_bundle!(created)
-      rescue ConflictError
-        log "Bundle ID #{@bundle_id} already exists (created concurrently); re-fetching"
-        validate_bundle!(refetch("Bundle ID #{@bundle_id}") { fetch_bundle })
+      rescue ConflictError => error
+        # App Store Connect also answers 409 for entity errors that are not
+        # duplicates, so keep Apple's reason for the case where none appears.
+        description = "Bundle ID #{@bundle_id} (#{conflict_detail(error)})"
+        log "#{description} conflicted; re-fetching"
+        validate_bundle!(refetch(description) { fetch_bundle })
       end
     end
 
@@ -371,6 +374,14 @@ module IOSProfileBootstrap
       raise ValidationError, "Apple returned a profile without profileContent" unless content
 
       content
+    end
+
+    def conflict_detail(error)
+      errors = JSON.parse(error.body.to_s).fetch("errors", [])
+      details = errors.map { |item| [item["code"], item["detail"]].compact.join(": ") }.reject(&:empty?)
+      details.empty? ? "no detail" : details.join("; ")
+    rescue JSON::ParserError
+      "no detail"
     end
 
     # Bounded, jittered polling for a resource that App Store Connect reported

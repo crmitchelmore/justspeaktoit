@@ -7,12 +7,16 @@ final class CloudKitHistorySyncTransport: HistorySyncTransport {
         guard let database = SyncConfiguration.privateDatabase else {
             throw SyncError.cloudUnavailable
         }
-
-        let operation = try makeFetchOperation(after: tokenData)
-        let accumulator = HistoryFetchAccumulator()
-        configureCallbacks(for: operation, accumulator: accumulator)
-        try await execute(operation, on: database)
-        return try accumulator.page()
+        let page = try await CloudKitZoneChangeFetch.page(
+            after: tokenData, in: database,
+            // Other record types share the zone (for example encrypted
+            // secrets) and belong to their own reconciliation subsystem.
+            change: { HistoryRecordCodec.change(from: CloudKitRecordFields($0)) },
+            deletion: { HistoryRecordCodec.deletion(recordName: $0.recordName, recordType: $1) }
+        )
+        return HistoryChangePage(
+            changes: page.changes, serverChangeTokenData: page.serverChangeTokenData, moreComing: page.moreComing
+        )
     }
 
     func upload(entries: [SyncableHistoryEntry]) async -> HistoryUploadResult {
@@ -36,12 +40,7 @@ final class CloudKitHistorySyncTransport: HistorySyncTransport {
                     recordName: entry.id.uuidString,
                     zoneID: SyncConfiguration.zoneID
                 )
-                let existingRecord: CKRecord?
-                do {
-                    existingRecord = try await database.record(for: recordID)
-                } catch let error as CKError where error.code == .unknownItem {
-                    existingRecord = nil
-                }
+                let existingRecord = try await CloudKitZoneChangeFetch.existingRecord(recordID, in: database)
 
                 if let existingRecord,
                    let remoteEntry = SyncRecord.entry(from: existingRecord),
@@ -78,119 +77,6 @@ final class CloudKitHistorySyncTransport: HistorySyncTransport {
             try await database.deleteRecord(withID: recordID)
         } catch let error as CKError where error.code == .unknownItem {
             // An already absent record is a successful deletion reconciliation.
-        }
-    }
-
-    private func makeFetchOperation(after tokenData: Data?) throws -> CKFetchRecordZoneChangesOperation {
-        let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
-        if let tokenData {
-            config.previousServerChangeToken = try NSKeyedUnarchiver.unarchivedObject(
-                ofClass: CKServerChangeToken.self,
-                from: tokenData
-            )
-        }
-
-        let operation = CKFetchRecordZoneChangesOperation(
-            recordZoneIDs: [SyncConfiguration.zoneID],
-            configurationsByRecordZoneID: [SyncConfiguration.zoneID: config]
-        )
-        // Consume one explicit page at a time. The shared coordinator saves
-        // each page's token only after that page has been committed locally.
-        operation.fetchAllChanges = false
-        return operation
-    }
-
-    private func configureCallbacks(
-        for operation: CKFetchRecordZoneChangesOperation,
-        accumulator: HistoryFetchAccumulator
-    ) {
-        operation.recordWasChangedBlock = { _, result in
-            switch result {
-            case .success(let record):
-                // Other record types share the zone (for example encrypted
-                // secrets) and belong to their own reconciliation subsystem.
-                if let change = HistoryRecordCodec.change(from: CloudKitRecordFields(record)) {
-                    accumulator.append(change: change)
-                }
-            case .failure(let error):
-                accumulator.append(error: error)
-            }
-        }
-        operation.recordWithIDWasDeletedBlock = { recordID, recordType in
-            if let change = HistoryRecordCodec.deletion(recordName: recordID.recordName, recordType: recordType) {
-                accumulator.append(change: change)
-            }
-        }
-        operation.recordZoneChangeTokensUpdatedBlock = { _, token, _ in
-            accumulator.update(token: token)
-        }
-        operation.recordZoneFetchResultBlock = { _, result in
-            switch result {
-            case .success(let (token, _, moreComing)):
-                accumulator.update(token: token, moreComing: moreComing)
-            case .failure(let error):
-                accumulator.append(error: error)
-            }
-        }
-    }
-
-    private func execute(
-        _ operation: CKFetchRecordZoneChangesOperation,
-        on database: CKDatabase
-    ) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            operation.fetchRecordZoneChangesResultBlock = { result in
-                switch result {
-                case .success:
-                    continuation.resume()
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
-            }
-            database.add(operation)
-        }
-    }
-}
-
-private final class HistoryFetchAccumulator: @unchecked Sendable {
-    private let lock = NSLock()
-    private var changes: [HistoryRemoteChange] = []
-    private var token: CKServerChangeToken?
-    private var moreComing = false
-    private var errors: [Error] = []
-
-    func append(change: HistoryRemoteChange) {
-        lock.withLock { changes.append(change) }
-    }
-
-    func append(error: Error) {
-        lock.withLock { errors.append(error) }
-    }
-
-    func update(token: CKServerChangeToken?, moreComing: Bool? = nil) {
-        lock.withLock {
-            if let token {
-                self.token = token
-            }
-            if let moreComing {
-                self.moreComing = moreComing
-            }
-        }
-    }
-
-    func page() throws -> HistoryChangePage {
-        try lock.withLock {
-            if let error = errors.first {
-                throw error
-            }
-            let tokenData = try token.map {
-                try NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: true)
-            }
-            return HistoryChangePage(
-                changes: changes,
-                serverChangeTokenData: tokenData,
-                moreComing: moreComing
-            )
         }
     }
 }

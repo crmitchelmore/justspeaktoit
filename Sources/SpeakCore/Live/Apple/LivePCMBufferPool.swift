@@ -1,8 +1,8 @@
 import AVFoundation
 import Foundation
 
-/// Pool of reusable copy buffers so the audio tap never allocates on the
-/// real-time audio thread.
+/// Pool of reusable copy buffers, so the audio tap allocates only until the
+/// pool is warm and never queues unbounded audio.
 ///
 /// Live transcription controllers copy every tap buffer before handing it to
 /// their processing queue. Allocating an `AVAudioPCMBuffer` for that copy on
@@ -10,11 +10,20 @@ import Foundation
 /// controller checks a buffer out of this pool and recycles it once the copy
 /// has been converted and sent.
 ///
-/// `buffer(format:frameCapacity:)` only reuses a pooled buffer whose format
-/// matches exactly and whose capacity is large enough; otherwise it allocates a
-/// fresh one, which is then eligible for pooling when recycled. The pool holds
-/// at most `maximumBuffers` idle buffers so a burst of oversized requests
-/// cannot grow the free list without bound.
+/// ## What the tap pays
+///
+/// This is bounded, not allocation-free or lock-free:
+/// - Every checkout and recycle takes a short `NSLock` that only the tap and
+///   the processing queue contend for; neither holds it across a copy,
+///   conversion or send.
+/// - A checkout reuses an idle buffer whose format matches exactly and whose
+///   capacity is large enough. On a miss (a cold pool, a new format, a longer
+///   tap, or more than `maximumBuffers` copies in flight) it allocates a fresh
+///   buffer on the calling thread, which is then eligible for pooling when
+///   recycled. Growing the idle list may also allocate the first few times.
+/// - The pool holds at most `maximumBuffers` idle buffers, so a burst of
+///   oversized requests cannot grow the free list without bound. Once the
+///   consumer keeps up and the format is steady, checkouts are warm hits.
 ///
 /// ## Overload policy
 ///
@@ -24,8 +33,8 @@ import Foundation
 /// enqueue it, growing queued audio without limit. `maximumOutstanding`
 /// therefore caps how many buffers may be checked out at once. Once the cap is
 /// reached `buffer(format:frameCapacity:)` returns `nil`, the tap drops that
-/// chunk instead of allocating (it never blocks and never waits on the render
-/// thread), and a drop counter is incremented. The counter is summarised in a
+/// chunk instead of allocating (it does not wait for the consumer), and a drop
+/// counter is incremented. The counter is summarised in a
 /// single log line at session teardown — never per drop, never from the render
 /// thread, and never with any audio content.
 public final class LivePCMBufferPool: @unchecked Sendable {

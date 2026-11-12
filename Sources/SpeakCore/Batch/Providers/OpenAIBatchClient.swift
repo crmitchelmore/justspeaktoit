@@ -173,7 +173,7 @@ public struct OpenAIBatchClient: TranscriptionProvider {
     }
     let transcriptText = response.transcriptText
 
-    let mappedSegments =
+    let segments =
       response.segments?.map { segment in
         TranscriptionSegment(
           startTime: segment.start,
@@ -181,21 +181,7 @@ public struct OpenAIBatchClient: TranscriptionProvider {
           text: response.segmentText(for: segment)
         )
       } ?? []
-    let segments =
-      mappedSegments.isEmpty
-      ? [TranscriptionSegment(startTime: 0, endTime: duration, text: transcriptText)]
-      : mappedSegments
-
-    return TranscriptionResult(
-      text: transcriptText,
-      segments: segments,
-      confidence: nil,
-      duration: duration,
-      modelIdentifier: model,
-      cost: nil,
-      rawPayload: String(data: payload, encoding: .utf8),
-      debugInfo: nil
-    )
+    return .batch(text: transcriptText, segments: segments, duration: duration, model: model, payload: payload)
   }
 }
 

@@ -39,7 +39,7 @@ extension DesktopHostController {
         let canonicalDuration = try? NativePCM16WAVReader.canonicalDuration(at: audio)
         let local = DesktopHostModels.isLocal(model)
         if local, canonicalDuration != nil {
-            return try await Platform.transcribeLocally(audio, model: model, language: language, controller: self)
+            return try await Platform.transcribeLocally(audio, model: model, language: language, host: self)
         }
         guard local || DesktopTranscription.requiresCanonicalPCM16WAV(model: model), canonicalDuration == nil else {
             return try await DesktopTranscription.transcribe(
@@ -74,7 +74,7 @@ extension DesktopHostController {
             try Task.checkCancellation()
             if local {
                 result = try await Platform.transcribeLocally(
-                    request.audio, model: request.model, language: request.language, controller: self
+                    request.audio, model: request.model, language: request.language, host: self
                 )
             } else {
                 if historySaved { update("Transcribing… Your original file is saved in History.", state: 2) }

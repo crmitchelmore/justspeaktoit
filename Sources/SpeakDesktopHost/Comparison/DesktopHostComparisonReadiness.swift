@@ -33,7 +33,7 @@ extension DesktopHostController {
         return options.map { option in
             if DesktopHostModels.isLocal(option.id) {
                 return .init(
-                    option: option, key: "", unavailableReason: Platform.localReadiness(option.id, controller: self)
+                    option: option, key: "", unavailableReason: Platform.localReadiness(option.id, host: self)
                 )
             }
             let purpose: ModelCredentialPurpose = DesktopHostModels.isLive(option.id)

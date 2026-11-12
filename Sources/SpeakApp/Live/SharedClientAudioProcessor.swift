@@ -6,8 +6,11 @@ import SpeakCore
 // project's 400-line budget. Module-internal rather than `private` now that it
 // lives in its own file; it has no callers outside the shared-client path.
 
-/// Copies each tap buffer out of a pool and converts it off the render
-/// thread, so the audio callback never allocates or blocks.
+/// Copies each tap buffer into a pooled buffer and converts it off the render
+/// thread. The callback is bounded, not real-time safe: it takes the pool's
+/// short lock, allocates a copy buffer on a pool miss (see
+/// `LivePCMBufferPool`), enqueues one block on `queue` (which allocates), and
+/// drops the chunk rather than waiting when processing falls behind.
 ///
 /// `LivePCM16Conversion` keeps one converter per input format and one
 /// reusable output buffer, with no `converter.reset()` between chunks.

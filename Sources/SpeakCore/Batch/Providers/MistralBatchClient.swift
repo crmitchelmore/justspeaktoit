@@ -193,20 +193,9 @@ public struct MistralBatchClient: TranscriptionProvider {
       duration = await durationResolver(audioURL)
     }
     let transcriptText = response.transcriptText
-    let mappedSegments = response.transcriptionSegments(duration: duration)
-    let segments = mappedSegments.isEmpty
-      ? [TranscriptionSegment(startTime: 0, endTime: duration, text: transcriptText)]
-      : mappedSegments
-
-    return TranscriptionResult(
-      text: transcriptText,
-      segments: segments,
-      confidence: nil,
-      duration: duration,
-      modelIdentifier: model,
-      cost: nil,
-      rawPayload: String(data: payload, encoding: .utf8),
-      debugInfo: nil
+    return .batch(
+      text: transcriptText, segments: response.transcriptionSegments(duration: duration), duration: duration,
+      model: model, payload: payload
     )
   }
 }

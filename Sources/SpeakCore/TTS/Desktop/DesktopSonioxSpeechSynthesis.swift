@@ -25,22 +25,9 @@ struct DesktopSonioxSpeechSynthesis: Sendable {
         }
         let request = try request(for: voice, selection: selection, text: source.text)
         let end = ContinuousClock.now.advanced(by: .seconds(120))
-        var pcm = Data()
-        for segment in segments {
-            try Task.checkCancellation()
-            let audio = try await synthesizeSegment(
-                segment, key: key, request: request, selection: selection, end: end)
-            let payload = audio.wav.dropFirst(44)
-            guard payload.count <= DeepgramSpeechExport.maximumPCMBytes - pcm.count else {
-                throw DesktopSpeechSynthesisError.audioTooLarge
-            }
-            pcm.append(contentsOf: payload)
+        return try await DesktopSpeechHTTP.joinedWAV(segments, sampleRate: selection.sampleRate) { segment in
+            try await synthesizeSegment(segment, key: key, request: request, selection: selection, end: end)
         }
-        try Task.checkCancellation()
-        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: selection.sampleRate) else {
-            throw DesktopSpeechSynthesisError.invalidAudio
-        }
-        return wav
     }
 
     private func request(
@@ -65,26 +52,14 @@ struct DesktopSonioxSpeechSynthesis: Sendable {
         var urlRequest = try SonioxTTSAPI.synthesisRequest(
             text: text, apiKey: key, request: request, region: selection.sonioxRegion)
         urlRequest.timeoutInterval = 120
-        let capture = VoiceSynthesisUsage.capture
-        let ticket = capture?.begin(voice: selection.voice, inputCharacters: text.unicodeScalars.count,
-            usesSSML: false, pricingCharacters: text.count, accountInventory: selection.accountInventory)
-        do {
-            let received = try await receive(urlRequest, end: end)
-            try Task.checkCancellation()
-            let audio: DeepgramSpeechAudio
-            do {
-                audio = try DeepgramSpeechWAV.canonical(
-                    received, sampleRate: selection.sampleRate, requireComplete: true)
-            } catch {
-                throw DesktopSpeechSynthesisError.invalidAudio
-            }
-            try Task.checkCancellation()
-            if let ticket { capture?.finish(ticket, outcome: .completed, audioDuration: audio.duration) }
-            return audio
-        } catch {
-            if let ticket { capture?.finish(ticket, outcome: error is CancellationError ? .cancelled : .failed) }
-            throw error
-        }
+        return try await DesktopSpeechHTTP.measuredSegment(
+            sampleRate: selection.sampleRate, requireComplete: true,
+            begin: {
+                $0.begin(voice: selection.voice, inputCharacters: text.unicodeScalars.count, usesSSML: false,
+                         pricingCharacters: text.count, accountInventory: selection.accountInventory)
+            },
+            receive: { try await receive(urlRequest, end: end) }
+        )
     }
 
     private func receive(_ request: URLRequest, end: ContinuousClock.Instant) async throws -> Data {
@@ -98,19 +73,9 @@ struct DesktopSonioxSpeechSynthesis: Sendable {
             }
             return received.body
         } catch {
-            if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
-                throw CancellationError()
-            }
-            if let service = error as? DesktopSonioxSpeechError { throw service }
-            if let failure = error as? DesktopSpeechSynthesisError { throw failure }
-            switch error as? OpenRouterBoundedResponseTransport.Failure {
-            case .responseTooLarge: throw DesktopSpeechSynthesisError.audioTooLarge
-            case .timedOut: throw DesktopSpeechSynthesisError.timedOut
-            case .invalidResponse: throw DesktopSpeechSynthesisError.invalidAudio
-            case nil:
-                throw (error as? URLError)?.code == .timedOut
-                    ? DesktopSpeechSynthesisError.timedOut : DesktopSpeechSynthesisError.transportFailure
-            }
+            if DesktopSpeechHTTP.isCancellation(error) { throw CancellationError() }
+            if error is DesktopSonioxSpeechError || error is DesktopSpeechSynthesisError { throw error }
+            throw DesktopSpeechHTTP.transportError(error)
         }
     }
 

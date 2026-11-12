@@ -119,20 +119,9 @@ public struct DesktopSpeechSynthesis: Sendable {
         let supplied = try await credential()
         try Task.checkCancellation()
         let sampleRate = voice.sampleRate(quality: options.quality)
-        var pcm = Data()
-        for segment in segments {
-            let audio = try await azureSegment(segment, voice: voice, options: options, credential: supplied)
-            let payload = audio.wav.dropFirst(44)
-            guard payload.count <= DeepgramSpeechExport.maximumPCMBytes - pcm.count else {
-                throw DesktopSpeechSynthesisError.audioTooLarge
-            }
-            pcm.append(contentsOf: payload)
+        return try await DesktopSpeechHTTP.joinedWAV(segments, sampleRate: sampleRate) { segment in
+            try await azureSegment(segment, voice: voice, options: options, credential: supplied)
         }
-        try Task.checkCancellation()
-        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: sampleRate) else {
-            throw DesktopSpeechSynthesisError.invalidAudio
-        }
-        return wav
     }
 
     private func azureSegment(
@@ -147,45 +136,17 @@ public struct DesktopSpeechSynthesis: Sendable {
         guard let body = request.httpBody, body.count <= Self.maximumSSMLBytes else {
             throw DesktopSpeechSynthesisError.ssmlTooLarge
         }
-        let capture = VoiceSynthesisUsage.capture
-        let id = capture?.begin(voice: voice, inputCharacters: text.unicodeScalars.count, usesSSML: options.useSSML)
-        do {
-            let received = try await receive(request)
-            try Task.checkCancellation()
-            let audio: DeepgramSpeechAudio
-            do { audio = try DeepgramSpeechWAV.canonical(received, sampleRate: sampleRate) } catch {
-                throw DesktopSpeechSynthesisError.invalidAudio
+        return try await DesktopSpeechHTTP.measuredSegment(
+            sampleRate: sampleRate,
+            begin: {
+                $0.begin(voice: voice, inputCharacters: text.unicodeScalars.count, usesSSML: options.useSSML)
+            },
+            receive: {
+                try await DesktopSpeechHTTP.receive(request, session: session) { http in
+                    guard http.statusCode == 200 else { throw AzureSpeechError.service(http.statusCode) }
+                }
             }
-            if let id { capture?.finish(id, outcome: .completed, audioDuration: audio.duration) }
-            return audio
-        } catch {
-            if let id { capture?.finish(id, outcome: error is CancellationError ? .cancelled : .failed) }
-            throw error
-        }
-    }
-
-    private func receive(_ request: URLRequest) async throws -> Data {
-        do {
-            return try await OpenRouterBoundedResponseTransport.perform(
-                request, session: session, limit: DeepgramSpeechSynthesizer.defaultResponseLimit,
-                deadline: .seconds(120)
-            ) { http in
-                guard http.statusCode == 200 else { throw AzureSpeechError.service(http.statusCode) }
-            }.body
-        } catch {
-            if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
-                throw CancellationError()
-            }
-            if let service = error as? AzureSpeechError { throw service }
-            switch error as? OpenRouterBoundedResponseTransport.Failure {
-            case .responseTooLarge: throw DesktopSpeechSynthesisError.audioTooLarge
-            case .timedOut: throw DesktopSpeechSynthesisError.timedOut
-            case .invalidResponse: throw DesktopSpeechSynthesisError.invalidAudio
-            case nil:
-                throw (error as? URLError)?.code == .timedOut
-                    ? DesktopSpeechSynthesisError.timedOut : DesktopSpeechSynthesisError.transportFailure
-            }
-        }
+        )
     }
 }
 

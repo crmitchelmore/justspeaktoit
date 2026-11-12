@@ -51,6 +51,7 @@ enum DesktopSpeechHTTP {
             } catch {
                 throw DesktopSpeechSynthesisError.invalidAudio
             }
+            try Task.checkCancellation()
             if let ticket { capture?.finish(ticket, outcome: .completed, audioDuration: audio.duration) }
             return audio
         } catch {
@@ -106,11 +107,12 @@ enum DesktopSpeechHTTP {
         let error: Error
     }
 
-    private static func isCancellation(_ error: Error) -> Bool {
+    static func isCancellation(_ error: Error) -> Bool {
         Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
-    private static func transportError(_ error: Error) -> Error {
+    /// The shared failure for a transport error that is not a cancellation.
+    static func transportError(_ error: Error) -> Error {
         switch error as? OpenRouterBoundedResponseTransport.Failure {
         case .responseTooLarge: DesktopSpeechSynthesisError.audioTooLarge
         case .timedOut: DesktopSpeechSynthesisError.timedOut

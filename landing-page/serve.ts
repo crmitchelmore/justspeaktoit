@@ -3,6 +3,7 @@
  * Run with: bun run serve.ts
  */
 import { pages, renderPage } from "./chrome.mjs";
+import { renderStylesheet } from "./stylesheet.mjs";
 
 const server = Bun.serve({
   port: 3000,
@@ -21,6 +22,11 @@ const server = Bun.serve({
     
     // Pages are rendered from chrome.mjs markers, as build.mjs does.
     const page = path.slice(1);
+    if (page === "site.css") {
+      return new Response(await renderStylesheet(), {
+        headers: { "Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-cache" },
+      });
+    }
     if (pages.includes(page)) {
       return new Response(await renderPage(page), {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },

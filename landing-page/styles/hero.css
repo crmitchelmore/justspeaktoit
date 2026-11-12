@@ -1,0 +1,86 @@
+/* ---------- Hero ---------- */
+
+.hero { padding-block: clamp(1.75rem, 4vw, 3.25rem) clamp(3rem, 6vw, 5rem); }
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(2rem, 5vw, 4rem);
+  align-items: center;
+}
+
+/* Let the screenshot run to the right edge of the viewport so the app is
+   legible rather than a thumbnail. */
+@media (min-width: 1100px) {
+  .hero .capture {
+    width: calc(100% + var(--gutter) + (100vw - min(100vw, var(--wrap))) / 2 - 12px);
+  }
+}
+
+@media (max-width: 940px) {
+  .hero-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  font-size: .85rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: var(--wash-hover);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: .4rem .9rem;
+  text-decoration: none;
+}
+
+.badge:hover { color: var(--text); border-color: var(--line-strong); }
+
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--lagoon);
+  box-shadow: 0 0 0 4px rgba(46, 212, 191, .16);
+  flex: none;
+}
+
+.hero h1 {
+  font-size: clamp(2.75rem, 1.2rem + 5.6vw, 4.7rem);
+  font-weight: 800;
+  letter-spacing: -.035em;
+  text-wrap: initial;
+  margin-block: 1.1rem .9rem;
+}
+
+.hero h1 em {
+  font-style: normal;
+  background: linear-gradient(100deg, var(--accent-warm), var(--accent-deep));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lede {
+  font-size: clamp(1.08rem, 1rem + .4vw, 1.24rem);
+  color: var(--text-dim);
+  max-width: 46ch;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.4rem;
+  margin-top: 2rem;
+}
+
+.download-meta {
+  margin-top: .95rem;
+  font-size: .9rem;
+  color: var(--text-faint);
+}
+
+.download-meta a { color: var(--text-dim); }
+.download-meta + .download-meta { margin-top: .5rem; }
+.download-meta code { color: var(--text-dim); font-size: .85em; }

@@ -347,7 +347,9 @@ before cancellation completes, and playback never starts for a cancelled operati
 Caller cancellation directly cancels that run's synthesis task without a MainActor hop; actor-isolated playback
 cleanup follows when the caller unwinds, so busy UI work cannot keep a cancelled HTTP request alive.
 
-[IOSTranscriptionSession.swift](../Sources/SpeakiOS/Services/IOSTranscriptionSession.swift) resolves four backend kinds:
+[IOSTranscriptionSession.swift](../Sources/SpeakiOS/Services/IOSTranscriptionSession.swift) builds the session that
+[IOSTranscriptionSessionResolution.swift](../Sources/SpeakiOS/Services/IOSTranscriptionSessionResolution.swift)
+resolves to one of four backend kinds:
 
 - batch records first, then `IOSBatchTranscriptionClient` selects Apple Speech Analyzer, provider-specific/shared batch
   clients, or OpenRouter according to the selected model;

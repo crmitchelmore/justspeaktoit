@@ -1,0 +1,51 @@
+/* ---------- Buttons ---------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .55rem;
+  background: linear-gradient(135deg, var(--accent-warm), var(--accent-deep));
+  color: #180f0a;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.02rem;
+  letter-spacing: -.01em;
+  padding: .85rem 1.5rem;
+  border-radius: 999px;
+  border: 0;
+  text-decoration: none;
+  box-shadow: 0 10px 30px -14px rgba(255, 107, 61, .9);
+  transition: transform .18s var(--ease), box-shadow .18s var(--ease);
+}
+
+.button:hover {
+  color: #180f0a;
+  transform: translateY(-2px);
+  box-shadow: 0 18px 38px -16px rgba(255, 107, 61, .95);
+}
+
+.button-ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  box-shadow: none;
+}
+
+.button-ghost:hover { color: var(--text); background: var(--wash-hover); box-shadow: none; }
+
+.button-small { padding: .6rem 1.1rem; font-size: .93rem; }
+
+.quiet-link {
+  color: var(--text-dim);
+  font-weight: 500;
+  text-decoration: none;
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 2px;
+}
+
+.quiet-link:hover { color: var(--text); border-color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .button, .button:hover { transform: none; transition: none; }
+}

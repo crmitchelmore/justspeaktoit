@@ -13,7 +13,8 @@
 import { ApiError, jsonResponse, readBoundedText } from '../http.js';
 import { requireSecret } from '../env.js';
 import { EntitlementTransitionError } from '../entitlement.js';
-import { payloadDigest, subscriptionView, verifyStripeSignature } from '../billing/stripe.js';
+import { payloadDigest, verifyStripeSignature } from '../billing/stripe.js';
+import { decideStripeEvent } from '../billing/stripe-entitlement.js';
 import {
   acceptedAppleEnvironments,
   appleRootCertificate,
@@ -23,10 +24,18 @@ import {
   type StoreKitRenewalPayload,
 } from '../auth/storekit.js';
 import { verifyAppleSignedJws } from '../auth/apple-jws.js';
-import { transitionEntitlement } from './billing.js';
+import { transitionEntitlement } from '../billing/entitlement-transition.js';
 import type { RequestContext } from '../context.js';
 
 const MAX_WEBHOOK_BYTES = 512 * 1024;
+
+/** How each refused Stripe event is logged; the reason itself is recorded on the event. */
+const STRIPE_REFUSAL_LOGS = {
+  price_not_in_plan: { level: 'info', event: 'webhook.stripe.other_price' },
+  subscription_not_current: { level: 'info', event: 'webhook.stripe.other_subscription' },
+  metadata_user_mismatch: { level: 'error', event: 'webhook.stripe.metadata_mismatch' },
+  unattributable_customer: { level: 'error', event: 'webhook.stripe.unattributable' },
+} as const;
 
 /**
  * Acknowledges a delivery whose transition the entitlement machine refuses.
@@ -94,115 +103,33 @@ export async function handleStripeWebhook(
   }
 
   try {
-    const view = subscriptionView(event);
-    if (view === null) {
+    const decision = await decideStripeEvent(event, context.config.stripePriceIds, {
+      findUserByCustomer: (customerId) =>
+        context.repository.entitlements.findUserByBillingCustomer('stripe', customerId),
+      findSubscriptionOwner: (subscriptionId) =>
+        context.repository.entitlements.findUserIdBySourceReference('stripe', subscriptionId),
+    });
+    if (decision.kind !== 'apply') {
       await context.repository.entitlements.completeWebhookEvent({
         provider: 'stripe',
         eventId: event.id,
-        status: 'ignored',
-        failureReason: null,
+        status: decision.kind === 'ignore' ? 'ignored' : 'failed',
+        failureReason: decision.reason,
         nowSeconds: context.nowSeconds,
       });
-      return jsonResponse({ received: true, ignored: true }, { correlationId: context.correlationId });
-    }
-
-    // The subscription must bill on a price we sell. Stripe accounts routinely
-    // carry other products, and a webhook for one of them must not silently
-    // grant this product's entitlement.
-    //
-    // Only events that would grant or extend access are gated this way. A
-    // cancellation must always be applied: `customer.subscription.deleted`
-    // frequently arrives without expanded line items, and refusing it for
-    // "wrong price" would leave a cancelled user entitled indefinitely — the
-    // failure that costs us money rather than protecting it.
-    const grantsAccess = view.status !== 'expired';
-    if (grantsAccess && !view.priceIds.some((id) => context.config.stripePriceIds.includes(id))) {
-      await context.repository.entitlements.completeWebhookEvent({
-        provider: 'stripe',
-        eventId: event.id,
-        status: 'ignored',
-        failureReason: 'price_not_in_plan',
-        nowSeconds: context.nowSeconds,
-      });
-      context.logger.info('webhook.stripe.other_price', { event_type: event.type });
-      return jsonResponse({ received: true, ignored: true }, { correlationId: context.correlationId });
-    }
-
-    // Attribution comes from the customer mapping we wrote ourselves when the
-    // checkout was created. `metadata.user_id` is writable from the Stripe
-    // dashboard and by anything holding an API key, so it is only ever a
-    // cross-check: if it disagrees with the mapping, something is wrong and the
-    // safe move is to change nothing.
-    const userId = await context.repository.entitlements.findUserByBillingCustomer('stripe', view.customerId);
-    if (userId !== null && view.userIdHint !== null && view.userIdHint !== userId) {
-      await context.repository.entitlements.completeWebhookEvent({
-        provider: 'stripe',
-        eventId: event.id,
-        status: 'failed',
-        failureReason: 'metadata_user_mismatch',
-        nowSeconds: context.nowSeconds,
-      });
-      context.logger.error('webhook.stripe.metadata_mismatch', { event_type: event.type });
-      return jsonResponse({ received: true }, { correlationId: context.correlationId });
-    }
-
-    // A cancellation skips the price gate, which leaves it able to expire an
-    // entitlement belonging to a different subscription entirely — another
-    // product on the same Stripe customer, or a previous subscription of ours.
-    // It may only apply to the subscription the entitlement actually names.
-    if (!grantsAccess && userId !== null) {
-      const owner = await context.repository.entitlements.findUserIdBySourceReference('stripe', view.subscriptionId);
-      if (owner !== userId) {
-        await context.repository.entitlements.completeWebhookEvent({
-          provider: 'stripe',
-          eventId: event.id,
-          status: 'ignored',
-          failureReason: 'subscription_not_current',
-          nowSeconds: context.nowSeconds,
-        });
-        context.logger.info('webhook.stripe.other_subscription', { event_type: event.type });
-        return jsonResponse(
-          { received: true, ignored: true },
-          { correlationId: context.correlationId },
-        );
+      if (decision.reason !== null) {
+        const log = STRIPE_REFUSAL_LOGS[decision.reason];
+        context.logger[log.level](log.event, { event_type: event.type });
       }
+      return jsonResponse(
+        decision.kind === 'ignore' ? { received: true, ignored: true } : { received: true },
+        { correlationId: context.correlationId },
+      );
     }
 
-    if (userId === null) {
-      // The subscription exists but we cannot attribute it. Recording this as
-      // failed keeps it visible for reconciliation instead of silently dropping.
-      await context.repository.entitlements.completeWebhookEvent({
-        provider: 'stripe',
-        eventId: event.id,
-        status: 'failed',
-        failureReason: 'unattributable_customer',
-        nowSeconds: context.nowSeconds,
-      });
-      context.logger.error('webhook.stripe.unattributable', { event_type: event.type });
-      return jsonResponse({ received: true }, { correlationId: context.correlationId });
-    }
-
+    const { userId } = decision.transition;
     try {
-      await transitionEntitlement(context, {
-        userId,
-        status: view.status,
-        // The price actually billed, not the plan's headline price, so a yearly
-        // subscriber's record does not claim to be on the monthly plan.
-        planId:
-          view.priceIds.find((id) => context.config.stripePriceIds.includes(id)) ??
-          context.config.stripePriceIds[0] ??
-          'unknown',
-        source: 'stripe',
-        sourceReference: view.subscriptionId,
-        currentPeriodStart: view.currentPeriodStart,
-        currentPeriodEnd: view.currentPeriodEnd,
-        cancelAtPeriodEnd: view.cancelAtPeriodEnd,
-        revocationReason: null,
-        sourceEventAt: event.created,
-        reason: event.type,
-        eventSource: 'stripe',
-        sourceEventId: event.id,
-      });
+      await transitionEntitlement(context, decision.transition);
     } catch (error) {
       if (!(error instanceof EntitlementTransitionError)) throw error;
       return acknowledgeIllegalTransition(context, 'stripe', event.id, event.type, error);

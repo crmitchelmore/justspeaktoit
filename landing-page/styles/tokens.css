@@ -1,0 +1,69 @@
+/* Just Speak to It — justspeaktoit.com
+   Palette mirrors the app: Sources/SpeakCore/App/Apple/BrandColors.swift
+   Accent #FF6B3D · warm #FF9C4A · deep #E3522E · lagoon #2ED4BF / #1AAB99 */
+
+:root {
+  color-scheme: light dark;
+
+  --ground: #121417;
+  --ground-deep: #0d0f11;
+  --surface: #191c21;
+  --surface-2: #212630;
+  --line: rgba(255, 255, 255, .10);
+  --line-strong: rgba(255, 255, 255, .18);
+
+  --text: #f5f3f0;
+  --text-dim: #adb4bd;
+  --text-faint: #868e98;
+
+  --wash: rgba(255, 255, 255, .045);
+  --wash-faint: rgba(255, 255, 255, .015);
+  --wash-hover: rgba(255, 255, 255, .05);
+  --shadow-deep: var(--shadow-deep);
+  --terminal: #0a0c0e;
+
+  --accent: #ff6b3d;
+  --accent-warm: #ff9c4a;
+  --accent-deep: #e3522e;
+  --accent-link: #ff9166;
+  --lagoon: #2ed4bf;
+  --lagoon-deep: #1aab99;
+
+  --display: "Cabinet Grotesk", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --body: "General Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --wrap: 1200px;
+  --gutter: clamp(1.25rem, 5vw, 3.5rem);
+  --radius: 18px;
+  --radius-lg: 26px;
+  --block: clamp(3.4rem, 6.5vw, 5.2rem);
+
+  --ease: cubic-bezier(.2, .8, .2, 1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ground: #f7f5f2;
+    --ground-deep: #efebe6;
+    --surface: #ffffff;
+    --surface-2: #ece8e3;
+    --line: rgba(22, 24, 28, .12);
+    --line-strong: rgba(22, 24, 28, .22);
+
+    --text: #16181c;
+    --text-dim: #464d56;
+    --text-faint: #5f6670;
+
+    --accent: #c9461c;
+    --accent-link: #b23d14;
+    --lagoon: #0d7c6f;
+    --lagoon-deep: #0a6a5f;
+
+    --wash: rgba(255, 255, 255, .85);
+    --wash-faint: rgba(255, 255, 255, .55);
+    --wash-hover: rgba(22, 24, 28, .05);
+    --shadow-deep: rgba(22, 24, 28, .35);
+    --terminal: #fbfaf8;
+  }
+}

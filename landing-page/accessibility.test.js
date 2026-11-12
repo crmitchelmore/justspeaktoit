@@ -5,6 +5,7 @@ import test from 'node:test';
 import { renderPage } from './chrome.mjs';
 import { loadCatalogue } from './qa/manual-checks.mjs';
 import { renderQaPage } from './qa/render.mjs';
+import { renderStylesheet } from './stylesheet.mjs';
 
 const read = file => readFile(new URL(file, import.meta.url), 'utf8');
 const pages = {
@@ -14,7 +15,7 @@ const pages = {
   'qa/index.html': renderQaPage(loadCatalogue(await read('../Docs/manual-checks.yml'))),
 };
 const stylesheets = {
-  'site.css': await read('site.css'),
+  'site.css': await renderStylesheet(),
   'qa/qa.css': await read('qa/qa.css'),
   'privacy.html': pages['privacy.html'],
   'support.html': pages['support.html'],

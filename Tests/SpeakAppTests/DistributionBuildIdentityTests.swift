@@ -269,7 +269,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(manifest.contains("environment[\"WATCH_WIDGET_PROFILE_NAME\"]"))
         XCTAssertTrue(releaseWorkflow.contains("check_bundle \"Watch complication\""))
         XCTAssertTrue(
-            widgetTarget.contains("bundleId: trainIdentifier(\"com.justspeaktoit.ios.watchkitapp.complication\")")
+            widgetTarget.contains("bundleId: trainIdentifier(\"com.justspeaktoit.ios.watchkitapp.widget\")")
         )
         XCTAssertTrue(widgetTarget.contains("product: .appExtension"))
         XCTAssertTrue(watchTarget.contains(".target(name: \"JustSpeakWatchWidgetExtension\")"))

@@ -65,7 +65,7 @@ summary also reports whether each preview target below is ready.
 | --- | --- | --- | --- |
 | Share extension | `com.justspeaktoit.ios.alpha.share` | `group.com.justspeaktoit.ios.alpha` | `ios-share-appstore` |
 | Watch app | `com.justspeaktoit.ios.alpha.watchkitapp` | `group.com.justspeaktoit.watch.alpha` | `watch-appstore` |
-| Watch complication | `com.justspeaktoit.ios.alpha.watchkitapp.complication` | `group.com.justspeaktoit.watch.alpha` | `watch-widget-appstore` |
+| Watch complication | `com.justspeaktoit.ios.alpha.watchkitapp.widget` | `group.com.justspeaktoit.watch.alpha` | `watch-widget-appstore` |
 
 The **Select Alpha preview targets** step turns both flags on for Alpha only.
 Profiles are then fetched with `ensure-ios-app-store-profile.rb --register`,

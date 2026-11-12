@@ -22,7 +22,7 @@ if surface == 'ios':
         profiles.append(('ios-share-appstore', parent + '.share'))
     if os.environ.get('TUIST_WATCH_APP') == '1':
         profiles += [('watch-appstore', parent + '.watchkitapp'),
-                     ('watch-widget-appstore', parent + '.watchkitapp.complication')]
+                     ('watch-widget-appstore', parent + '.watchkitapp.widget')]
         groups = {'watch-appstore': config['watchAppGroup'], 'watch-widget-appstore': config['watchAppGroup']}
 for name, identifier in profiles:
     path = root / (name + '.provisionprofile')

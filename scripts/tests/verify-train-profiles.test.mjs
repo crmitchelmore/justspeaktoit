@@ -45,9 +45,9 @@ test('Alpha watch and share profiles are checked only when enabled, the watch pa
   {env:{...process.env,...env,TUIST_WATCH_APP:'0',TUIST_IOS_SHARE_EXTENSION:'0',...flags,PATH:root+':'+process.env.PATH},stdio:'pipe'}).toString();
  assert.doesNotMatch(verify(),/watchkitapp|\.share/);
  write('ios-share-appstore','.share',env.IOS_APP_GROUP);
- write('watch-appstore','.watchkitapp',watchGroup);write('watch-widget-appstore','.watchkitapp.complication',watchGroup);
+ write('watch-appstore','.watchkitapp',watchGroup);write('watch-widget-appstore','.watchkitapp.widget',watchGroup);
  const output=verify({TUIST_WATCH_APP:'1',TUIST_IOS_SHARE_EXTENSION:'1'});
- for(const id of ['.share','.watchkitapp','.watchkitapp.complication'])assert.match(output,new RegExp(`Validated ${env.BUNDLE_ID}${id.replaceAll('.','\\.')}\\n`));
- write('watch-widget-appstore','.watchkitapp.complication',env.IOS_APP_GROUP);
+ for(const id of ['.share','.watchkitapp','.watchkitapp.widget'])assert.match(output,new RegExp(`Validated ${env.BUNDLE_ID}${id.replaceAll('.','\\.')}\\n`));
+ write('watch-widget-appstore','.watchkitapp.widget',env.IOS_APP_GROUP);
  assert.throws(()=>verify({TUIST_WATCH_APP:'1'}),error=>error.stderr.toString().includes('watch-widget-appstore has the wrong App Group'));
 });

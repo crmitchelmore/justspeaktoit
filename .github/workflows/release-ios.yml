@@ -242,10 +242,10 @@ jobs:
               --register "JustSpeakToIt Watch" --capability APP_GROUPS \
               --require "$GROUP_KEY=$WATCH_APP_GROUP" --exact "$GROUP_KEY" \
               || watch_missing="$BUNDLE_ID.watchkitapp"
-            install_profile watch-widget-appstore "$BUNDLE_ID.watchkitapp.complication" "" \
+            install_profile watch-widget-appstore "$BUNDLE_ID.watchkitapp.widget" "" \
               --register "JustSpeakToIt Watch Complication" --capability APP_GROUPS \
               --require "$GROUP_KEY=$WATCH_APP_GROUP" --exact "$GROUP_KEY" \
-              || watch_missing="${watch_missing:+$watch_missing and }$BUNDLE_ID.watchkitapp.complication"
+              || watch_missing="${watch_missing:+$watch_missing and }$BUNDLE_ID.watchkitapp.widget"
             if [ -z "$watch_missing" ]; then
               {
                 echo "TUIST_WATCH_PROFILE_NAME=$(profile_name watch-appstore)"
@@ -318,7 +318,7 @@ jobs:
               optional_profiles[f"{bundle_id}.share"] = os.environ.get("SHARE_PROFILE_NAME", "")
           if os.environ.get("TUIST_WATCH_APP", "0") == "1":
               optional_profiles[f"{bundle_id}.watchkitapp"] = os.environ.get("WATCH_PROFILE_NAME", "")
-              optional_profiles[f"{bundle_id}.watchkitapp.complication"] = os.environ.get("WATCH_WIDGET_PROFILE_NAME", "")
+              optional_profiles[f"{bundle_id}.watchkitapp.widget"] = os.environ.get("WATCH_WIDGET_PROFILE_NAME", "")
 
           if not app_profile or not widget_profile:
               raise SystemExit("Missing app/widget provisioning profile names")
@@ -602,7 +602,7 @@ jobs:
           fi
           if [ "$TUIST_WATCH_APP" = "1" ]; then
             add_export_profile "$BUNDLE_ID.watchkitapp" watch-appstore
-            add_export_profile "$BUNDLE_ID.watchkitapp.complication" watch-widget-appstore
+            add_export_profile "$BUNDLE_ID.watchkitapp.widget" watch-widget-appstore
           fi
           
           xcodebuild -exportArchive \

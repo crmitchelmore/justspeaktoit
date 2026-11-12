@@ -17,7 +17,7 @@ import Foundation
 /// app keeps working, the complication simply shows idle.
 public struct WatchSharedContainer: Sendable {
     /// App Group shared by `com.justspeaktoit.ios.watchkitapp` and
-    /// `com.justspeaktoit.ios.watchkitapp.complication`. Distinct from the
+    /// `com.justspeaktoit.ios.watchkitapp.widget`. Distinct from the
     /// iOS group (`group.com.justspeaktoit.ios`): App Group containers are
     /// per-device, so the watch pair needs its own registration.
     public static let appGroupIdentifier = ReleaseTrain.current.watchAppGroup

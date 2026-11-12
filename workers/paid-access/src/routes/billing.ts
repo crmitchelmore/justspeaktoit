@@ -4,15 +4,8 @@
 
 import { ApiError, jsonResponse, readJson } from '../http.js';
 import { requireSecret } from '../env.js';
-import {
-  applyUpdate,
-  billingPeriod,
-  effectiveStatus,
-  grantsAccess,
-  type Entitlement,
-  type EntitlementSource,
-  type EntitlementStatus,
-} from '../entitlement.js';
+import { transitionEntitlement } from '../billing/entitlement-transition.js';
+import { billingPeriod, effectiveStatus, grantsAccess } from '../entitlement.js';
 import { StripeClient } from '../billing/stripe.js';
 import {
   acceptedAppleEnvironments,
@@ -27,77 +20,6 @@ import { policyDocument } from '../policy.js';
 import type { AuthenticatedContext } from '../context.js';
 
 const MAX_BILLING_BODY_BYTES = 32 * 1024;
-
-/**
- * Writes an entitlement transition with bounded optimistic-concurrency retries.
- *
- * Concurrent webhook deliveries for the same subscription are common; retrying
- * on a version conflict keeps both writes correct without holding a long
- * transaction open.
- */
-export async function transitionEntitlement(
-  context: {
-    repository: AuthenticatedContext['repository'];
-    correlationId: string;
-    nowSeconds: number;
-  },
-  input: {
-    userId: string;
-    status: EntitlementStatus;
-    planId: string;
-    source: EntitlementSource;
-    sourceReference: string | null;
-    currentPeriodStart: number | null;
-    currentPeriodEnd: number | null;
-    cancelAtPeriodEnd: boolean;
-    revocationReason: string | null;
-    sourceEventAt: number;
-    reason: string;
-    eventSource: 'stripe' | 'storekit' | 'manual' | 'system';
-    sourceEventId: string | null;
-  },
-): Promise<{ applied: boolean; entitlement: Entitlement }> {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const current = await context.repository.entitlements.ensureSubscription(
-      input.userId, input.source, input.sourceReference, context.nowSeconds,
-    );
-    const outcome = applyUpdate(
-      current,
-      {
-        status: input.status,
-        planId: input.planId,
-        source: input.source,
-        sourceReference: input.sourceReference,
-        currentPeriodStart: input.currentPeriodStart,
-        currentPeriodEnd: input.currentPeriodEnd,
-        cancelAtPeriodEnd: input.cancelAtPeriodEnd,
-        revocationReason: input.revocationReason,
-        sourceEventAt: input.sourceEventAt,
-      },
-      context.nowSeconds,
-    );
-
-    if (outcome.kind === 'stale') {
-      return { applied: false, entitlement: (await context.repository.entitlements.findEntitlement(input.userId, context.nowSeconds))! };
-    }
-
-    const written = await context.repository.entitlements.writeEntitlementTransition({
-      next: outcome.next,
-      expectedVersion: current.version,
-      scopeToSubscription: true,
-      fromStatus: current.status,
-      reason: input.reason,
-      eventSource: input.eventSource,
-      sourceEventId: input.sourceEventId,
-      correlationId: context.correlationId,
-      nowSeconds: context.nowSeconds,
-    });
-    if (written) {
-      return { applied: true, entitlement: (await context.repository.entitlements.findEntitlement(input.userId, context.nowSeconds))! };
-    }
-  }
-  throw new ApiError('conflict', 'Entitlement is being updated concurrently; retry');
-}
 
 export async function handleEntitlement(context: AuthenticatedContext): Promise<Response> {
   const entitlement = await context.repository.entitlements.ensureEntitlement(

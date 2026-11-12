@@ -1,6 +1,7 @@
 import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './_worker.js';
+import {desktopDownloads} from '../scripts/desktop-release-lib.mjs';
 
 const release = 'https://github.com/crmitchelmore/justspeaktoit/releases/download';
 const serve = async (path, published) => {
@@ -12,13 +13,15 @@ const serve = async (path, published) => {
   return worker.fetch(new Request(`https://justspeaktoit.com${path}`), {ASSETS: {fetch: () => new Response('static')}});
 };
 
+// The desktop download goldens come from the assets the release train
+// publishes, so a renamed or added asset fails here instead of on the site.
+const desktopRoutes = Object.fromEntries(desktopDownloads.map(({kind, architecture, asset}) =>
+  [`/alpha/download/${kind === 'flatpak' ? 'linux' : 'windows'}-${architecture}`, asset]));
+
 test('desktop Alpha routes redirect to the pointed Alpha only when the asset was published', async () => {
-  const routes = {
-    '/alpha/download/windows-x64': 'JustSpeakToIt-windows-x64-developer.zip',
-    '/alpha/download/windows-arm64': 'JustSpeakToIt-windows-arm64-developer.zip',
-    '/alpha/download/linux-x86_64': 'JustSpeakToIt-linux-x86_64.flatpak',
-  };
-  for (const [path, asset] of Object.entries(routes)) {
+  assert.deepEqual(Object.keys(desktopRoutes).sort(),
+    ['/alpha/download/linux-x86_64', '/alpha/download/windows-arm64', '/alpha/download/windows-x64']);
+  for (const [path, asset] of Object.entries(desktopRoutes)) {
     const found = await serve(path, [asset]);
     assert.equal(found.status, 302);
     assert.equal(found.headers.get('Location'), `${release}/alpha-build-7/${asset}`);
@@ -41,8 +44,8 @@ test('desktop Alpha routes return unavailable when the asset HEAD request reject
       assert.equal(init.method, 'HEAD');
       throw new TypeError('Network unavailable');
     };
-    for (const platform of ['windows-x64', 'windows-arm64', 'linux-x86_64']) {
-      const response = await worker.fetch(new Request(`https://justspeaktoit.com/alpha/download/${platform}`), {});
+    for (const path of Object.keys(desktopRoutes)) {
+      const response = await worker.fetch(new Request(`https://justspeaktoit.com${path}`), {});
       assert.equal(response.status, 503);
       assert.equal(response.headers.get('Location'), null);
       assert.equal(await response.text(), 'Desktop Alpha build not yet available');

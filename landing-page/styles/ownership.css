@@ -1,0 +1,26 @@
+/* ---------- Ownership ---------- */
+
+.own { background: var(--ground-deep); border-block: 1px solid var(--line); }
+
+.own-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1.1rem;
+}
+
+.own-grid .card { display: flex; flex-direction: column; gap: .45rem; }
+
+.icon {
+  width: 34px; height: 34px;
+  margin-bottom: .7rem;
+  color: var(--accent);
+}
+
+.icon--lagoon { color: var(--lagoon); }
+
+.note {
+  margin-top: 1.6rem;
+  font-size: .93rem;
+  color: var(--text-faint);
+  max-width: 70ch;
+}

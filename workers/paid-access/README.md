@@ -47,6 +47,8 @@ workers/paid-access/
 │   │   ├── session.ts           HS256 access tokens; refresh tokens stored only as SHA-256 hashes
 │   │   └── storekit.ts          StoreKit 2 signed transactions and App Store Server Notifications V2
 │   ├── billing/stripe.ts        Checkout, Customer Portal and webhook signature verification
+│   ├── billing/stripe-entitlement.ts  Stripe subscription event → entitlement decision (pure)
+│   ├── billing/entitlement-transition.ts  The one entitlement write path, with bounded version retries
 │   ├── audio/wav.ts             Exact PCM WAV duration, the billed quantity for batch audio
 │   ├── data/                    All SQL. Uniqueness is the idempotency mechanism
 │   │   ├── repository.ts        `Repository`: one D1 binding, one repository per aggregate

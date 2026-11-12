@@ -60,9 +60,9 @@ modules:
 
   # Local transcription runtime. The app dlopens libwhisper.so.1 from
   # /app/lib/justspeaktoit (<executable dir>/../lib/justspeaktoit) and loads
-  # the ggml backends from the same directory. Same pin and options as the
-  # Windows runtime (scripts/windows-local-runtime/dependencies.json) and
-  # scripts/linux-build-whisper.sh.
+  # the ggml backends from the same directory. Same whisper.cpp pin as the
+  # Windows runtime (scripts/windows-local-runtime/dependencies.json) and the
+  # native Linux runtime (scripts/linux-local-runtime/build-whisper-runtime.py).
   - name: whisper-cpp
     buildsystem: cmake-ninja
     builddir: true

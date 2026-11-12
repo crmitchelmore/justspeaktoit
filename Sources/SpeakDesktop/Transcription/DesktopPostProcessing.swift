@@ -104,6 +104,10 @@ public enum DesktopPostProcessing {
             let model = ModelCatalog.normalizedPostProcessingModel(stored)
             result.modelIdentifier = model
         }
+        // A remembered remote choice of a removed model keeps its route via its successor.
+        if let remembered = result.lastRemoteModelIdentifier {
+            result.lastRemoteModelIdentifier = ModelCatalog.currentPostProcessingModel(remembered)
+        }
         if result.lastRemoteModelIdentifier == nil, mode(for: result.modelIdentifier) == .remote {
             result.lastRemoteModelIdentifier = result.modelIdentifier
         }

@@ -772,11 +772,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     public static func normalizedPostProcessingModel(_ identifier: String?, at date: Date) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let current = currentPostProcessingModel(trimmed, at: date)
+        if current != trimmed { return current }
         if trimmed.hasPrefix("local/post-processing/") || CleanupModelSelection.modelID(from: trimmed) != nil {
             return trimmed
         }
-        let current = currentPostProcessingModel(trimmed, at: date)
-        if current != trimmed { return current }
         if scheduledPostProcessing.contains(where: { $0.id == trimmed }) { return trimmed }
         return defaultPostProcessingModel
     }

@@ -14,6 +14,11 @@ the Stable keyboard uses Instant Dictation handoff and makes no microphone or
 Speech permission attempt inside the extension. Physical acceptance is defined in
 [iOS keyboard verification](ios-keyboard-mvp-verification.md).
 
+Alpha builds also carry two preview targets for owner review: the Apple Watch
+app with its complication (`TUIST_WATCH_APP=1`) and the Share extension
+(`TUIST_IOS_SHARE_EXTENSION=1`). Stable sets both to `0`. See
+[Alpha preview targets](#alpha-preview-targets).
+
 ## Release controllers and identifiers
 
 [Alpha and Stable release trains](alpha-stable-release-trains.md) is the current
@@ -51,7 +56,35 @@ frozen source without the script. The job summary lists each profile's source,
 iCloud containers and App Groups.
 
 To regenerate and check both trains' profiles outside a release, run the
-**Apple App IDs and profiles** workflow (`apple-profiles.yml`).
+**Apple App IDs and profiles** workflow (`apple-profiles.yml`). Its Alpha
+summary also reports whether each preview target below is ready.
+
+## Alpha preview targets
+
+| Target | Alpha bundle id | App Group | Profile file |
+| --- | --- | --- | --- |
+| Share extension | `com.justspeaktoit.ios.alpha.share` | `group.com.justspeaktoit.ios.alpha` | `ios-share-appstore` |
+| Watch app | `com.justspeaktoit.ios.alpha.watchkitapp` | `group.com.justspeaktoit.watch.alpha` | `watch-appstore` |
+| Watch complication | `com.justspeaktoit.ios.alpha.watchkitapp.complication` | `group.com.justspeaktoit.watch.alpha` | `watch-widget-appstore` |
+
+The **Select Alpha preview targets** step turns both flags on for Alpha only.
+Profiles are then fetched with `ensure-ios-app-store-profile.rb --register`,
+which registers a missing App ID and enables App Groups on it. The API cannot
+link a specific App Group to an App ID, so the profile must also carry the
+target's group. Every one of these is optional for the release:
+
+- If the selected source predates train-aware signing for a target, or its
+  profile cannot be fetched with the right group, Alpha is built without that
+  target. The watch app needs both watch profiles.
+- The step summary records each decision, for example
+  `Watch app included: 0 (reason: no App Store profile for … with
+  group.com.justspeaktoit.watch.alpha …)`.
+- When a target is included, the archive must embed it with the manifest
+  version/build and its App Group, and export maps its profile.
+
+To bring a missing target in, link its App Group to its App ID in the Apple
+Developer portal (see [Watch provisioning](watch-provisioning.md)), then rerun
+`apple-profiles.yml`. The next Alpha build picks it up.
 
 ## Verify an authorised iOS release
 

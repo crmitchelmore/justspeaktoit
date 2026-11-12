@@ -44,9 +44,23 @@ if surface != 'mac-direct':
         raise SystemExit('Signed archive has the wrong iCloud key-value store')
     if surface == 'ios' and entitlements.get('com.apple.security.application-groups') != [config['iosAppGroup']]:
         raise SystemExit('Signed archive has the wrong App Groups')
+def expected_group(bundle):
+    # The watch app and its complication share the watch pair's own App Group.
+    return config['watchAppGroup' if 'Watch' in bundle.relative_to(app).parts else 'iosAppGroup']
+
+for watch in sorted((app / 'Watch').glob('*.app')):
+    watch_info = plistlib.loads((watch / 'Info.plist').read_bytes())
+    if not watch_info['CFBundleIdentifier'].startswith(expected_id + '.'):
+        raise SystemExit('Watch app belongs to another app identity')
+    if watch_info.get('WKCompanionAppBundleIdentifier') != expected_id:
+        raise SystemExit('Watch app names another companion app')
+    for key in ['SpeakReleaseTrain', 'CFBundleShortVersionString', 'CFBundleVersion']:
+        if watch_info.get(key) != expected[key]: raise SystemExit(f'Watch app {key} mismatch')
+    if signed_entitlements(watch).get('com.apple.security.application-groups') != [expected_group(watch)]:
+        raise SystemExit('Signed watch app has the wrong App Groups')
 for extension in app.rglob('*.appex'):
     ext = plistlib.loads((extension / 'Info.plist').read_bytes())
-    if surface == 'ios' and signed_entitlements(extension).get('com.apple.security.application-groups') != [config['iosAppGroup']]:
+    if surface == 'ios' and signed_entitlements(extension).get('com.apple.security.application-groups') != [expected_group(extension)]:
         raise SystemExit('Signed extension has the wrong App Groups')
     if not ext['CFBundleIdentifier'].startswith(expected_id + '.'):
         raise SystemExit('Extension belongs to another app identity')

@@ -53,6 +53,33 @@ jobs:
             echo "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0" >> "$GITHUB_ENV"
           fi
 
+      # Alpha TestFlight carries the built-but-unreviewed watch app (with its
+      # complication) and Share extension for owner review; Stable never does.
+      # A target is dropped again, with its reason in the summary, when its
+      # source predates train-aware signing or its profile cannot be fetched
+      # with the right App Group, so an Alpha release never fails on them.
+      - name: Select Alpha preview targets
+        run: |
+          watch=0 share=0
+          watch_reason="Stable train" share_reason="Stable train"
+          if [ "$RELEASE_TRAIN" = "alpha" ]; then
+            watch=1 share=1 watch_reason="" share_reason=""
+            if ! grep -q watchAppGroup scripts/verify-release-train-archive.py; then
+              watch=0 watch_reason="selected source predates Alpha watch signing"
+            fi
+            if ! grep -qF 'trainIdentifier("com.justspeaktoit.ios.share")' Project.swift; then
+              share=0 share_reason="selected source predates the train-mapped Share extension"
+            fi
+          fi
+          WATCH_APP_GROUP=$(node -e 'console.log(require("./Sources/SpeakCore/Resources/ReleaseTrains.json")[process.argv[1]].watchAppGroup)' "$RELEASE_TRAIN")
+          {
+            echo "TUIST_WATCH_APP=$watch"
+            echo "WATCH_APP_REASON=$watch_reason"
+            echo "TUIST_IOS_SHARE_EXTENSION=$share"
+            echo "SHARE_EXTENSION_REASON=$share_reason"
+            echo "WATCH_APP_GROUP=$WATCH_APP_GROUP"
+          } >> "$GITHUB_ENV"
+
       - name: Stamp immutable app metadata
         run: python3 scripts/stamp-release-train.py ios
 
@@ -189,8 +216,51 @@ jobs:
             echo "KEYBOARD_PROFILE_NAME=$KEYBOARD_PROFILE_NAME" >> "$GITHUB_ENV"
           fi
 
+          # Alpha preview targets: register missing App IDs and turn on App
+          # Groups, then require the profile to carry the target's group. The
+          # API cannot link a specific group to an App ID, so a missing link
+          # (or any other failure) drops the target instead of the release.
+          profile_name() { security cms -D -i "$PROFILE_DIR/$1.provisionprofile" | plutil -extract Name raw -; }
+          exclude_target() {
+            echo "::warning::$1 left out of this Alpha build: $3"
+            { echo "$2=0"; echo "$4=$3"; } >> "$GITHUB_ENV"
+          }
+          if [ "$TUIST_IOS_SHARE_EXTENSION" = "1" ]; then
+            if install_profile ios-share-appstore "$BUNDLE_ID.share" "" \
+              --register "JustSpeakToIt Share" --capability APP_GROUPS \
+              --require "$GROUP_KEY=$IOS_APP_GROUP" --exact "$GROUP_KEY"; then
+              echo "TUIST_SHARE_PROFILE_NAME=$(profile_name ios-share-appstore)" >> "$GITHUB_ENV"
+            else
+              exclude_target "Share extension" TUIST_IOS_SHARE_EXTENSION \
+                "no App Store profile for $BUNDLE_ID.share with $IOS_APP_GROUP (link that App Group to the App ID in the Apple Developer portal)" \
+                SHARE_EXTENSION_REASON
+            fi
+          fi
+          if [ "$TUIST_WATCH_APP" = "1" ]; then
+            watch_missing=""
+            install_profile watch-appstore "$BUNDLE_ID.watchkitapp" "" \
+              --register "JustSpeakToIt Watch" --capability APP_GROUPS \
+              --require "$GROUP_KEY=$WATCH_APP_GROUP" --exact "$GROUP_KEY" \
+              || watch_missing="$BUNDLE_ID.watchkitapp"
+            install_profile watch-widget-appstore "$BUNDLE_ID.watchkitapp.complication" "" \
+              --register "JustSpeakToIt Watch Complication" --capability APP_GROUPS \
+              --require "$GROUP_KEY=$WATCH_APP_GROUP" --exact "$GROUP_KEY" \
+              || watch_missing="${watch_missing:+$watch_missing and }$BUNDLE_ID.watchkitapp.complication"
+            if [ -z "$watch_missing" ]; then
+              {
+                echo "TUIST_WATCH_PROFILE_NAME=$(profile_name watch-appstore)"
+                echo "TUIST_WATCH_WIDGET_PROFILE_NAME=$(profile_name watch-widget-appstore)"
+              } >> "$GITHUB_ENV"
+            else
+              exclude_target "Watch app" TUIST_WATCH_APP \
+                "no App Store profile for $watch_missing with $WATCH_APP_GROUP (link that App Group to the App ID in the Apple Developer portal)" \
+                WATCH_APP_REASON
+            fi
+          fi
+
           # Container ids and App Groups only; never the profile itself.
-          for name in ios-appstore ios-widget-appstore ios-keyboard-appstore; do
+          for name in ios-appstore ios-widget-appstore ios-keyboard-appstore \
+            ios-share-appstore watch-appstore watch-widget-appstore; do
             [ -f "$PROFILE_DIR/$name.provisionprofile" ] || continue
             security cms -D -i "$PROFILE_DIR/$name.provisionprofile" | python3 -c '
           import plistlib, sys
@@ -215,6 +285,9 @@ jobs:
             echo "- Extension included: $TUIST_IOS_KEYBOARD"
             echo "- Direct capture enabled: $TUIST_IOS_KEYBOARD_DIRECT_CAPTURE"
             echo "- Commit: $GITHUB_SHA"
+            echo "### Alpha preview targets"
+            echo "- Watch app included: $TUIST_WATCH_APP${WATCH_APP_REASON:+ (reason: $WATCH_APP_REASON)}"
+            echo "- Share extension included: $TUIST_IOS_SHARE_EXTENSION${SHARE_EXTENSION_REASON:+ (reason: $SHARE_EXTENSION_REASON)}"
           } >> "$GITHUB_STEP_SUMMARY"
       
       - name: Patch iOS Signing Settings
@@ -223,6 +296,9 @@ jobs:
           APP_PROFILE_NAME: ${{ env.APP_PROFILE_NAME }}
           WIDGET_PROFILE_NAME: ${{ env.WIDGET_PROFILE_NAME }}
           KEYBOARD_PROFILE_NAME: ${{ env.KEYBOARD_PROFILE_NAME }}
+          SHARE_PROFILE_NAME: ${{ env.TUIST_SHARE_PROFILE_NAME }}
+          WATCH_PROFILE_NAME: ${{ env.TUIST_WATCH_PROFILE_NAME }}
+          WATCH_WIDGET_PROFILE_NAME: ${{ env.TUIST_WATCH_WIDGET_PROFILE_NAME }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           python - <<'PY'
@@ -235,11 +311,22 @@ jobs:
           keyboard_profile = os.environ.get("KEYBOARD_PROFILE_NAME", "")
           team_id = os.environ.get("APPLE_TEAM_ID", "")
           include_keyboard = os.environ.get("TUIST_IOS_KEYBOARD", "0") == "1"
+          bundle_id = os.environ["BUNDLE_ID"]
+          # Alpha preview targets, keyed by exact bundle id.
+          optional_profiles = {}
+          if os.environ.get("TUIST_IOS_SHARE_EXTENSION", "0") == "1":
+              optional_profiles[f"{bundle_id}.share"] = os.environ.get("SHARE_PROFILE_NAME", "")
+          if os.environ.get("TUIST_WATCH_APP", "0") == "1":
+              optional_profiles[f"{bundle_id}.watchkitapp"] = os.environ.get("WATCH_PROFILE_NAME", "")
+              optional_profiles[f"{bundle_id}.watchkitapp.complication"] = os.environ.get("WATCH_WIDGET_PROFILE_NAME", "")
 
           if not app_profile or not widget_profile:
               raise SystemExit("Missing app/widget provisioning profile names")
           if include_keyboard and not keyboard_profile:
               raise SystemExit("Keyboard feature enabled without a keyboard provisioning profile name")
+          for identifier, profile in optional_profiles.items():
+              if not profile:
+                  raise SystemExit(f"{identifier} enabled without a provisioning profile name")
 
           pbx_path = Path("Just Speak to It.xcodeproj/project.pbxproj")
           text = pbx_path.read_text()
@@ -274,7 +361,11 @@ jobs:
               )
               def repl(match):
                   settings = match.group("settings")
-                  if f"PRODUCT_BUNDLE_IDENTIFIER = {os.environ['BUNDLE_ID']}.JustSpeakToItWidgetExtension;" in settings:
+                  optional = next((profile for identifier, profile in optional_profiles.items()
+                                   if f"PRODUCT_BUNDLE_IDENTIFIER = {identifier};" in settings), None)
+                  if optional:
+                      settings = patch_release_block(settings, optional)
+                  elif f"PRODUCT_BUNDLE_IDENTIFIER = {os.environ['BUNDLE_ID']}.JustSpeakToItWidgetExtension;" in settings:
                       settings = patch_release_block(settings, widget_profile)
                   elif include_keyboard and f"PRODUCT_BUNDLE_IDENTIFIER = {os.environ['BUNDLE_ID']}.keyboard;" in settings:
                       settings = patch_release_block(settings, keyboard_profile)
@@ -284,6 +375,9 @@ jobs:
               return pattern.sub(repl, text)
 
           updated = patch_blocks(text)
+          for identifier in optional_profiles:
+              if f"PRODUCT_BUNDLE_IDENTIFIER = {identifier};" not in updated:
+                  raise SystemExit(f"{identifier} is enabled but missing from the generated project")
           pbx_path.write_text(updated)
           PY
 
@@ -400,6 +494,31 @@ jobs:
             }
           fi
 
+          # Alpha preview targets: present exactly when enabled, same version,
+          # build and App Group as the rest of their train.
+          check_bundle() {
+            local label="$1" flag="$2" path="$3" group="$4" bundle_version bundle_build bundle_group
+            if [ "$flag" != "1" ]; then
+              [ ! -e "$path" ] || { echo "::error::$label is off, but $path was embedded in the archive."; exit 1; }
+              return 0
+            fi
+            [ -d "$path" ] || { echo "::error::$label is on, but $path is missing from the archive."; exit 1; }
+            bundle_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$path/Info.plist")
+            bundle_build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$path/Info.plist")
+            [ "$bundle_version" = "$VERSION" ] || { echo "$label version mismatch: expected '$VERSION', got '$bundle_version'"; exit 1; }
+            [ "$bundle_build" = "$BUILD_NUMBER" ] || { echo "$label build mismatch: expected '$BUILD_NUMBER', got '$bundle_build'"; exit 1; }
+            codesign -d --entitlements - --xml "$path" > "$RUNNER_TEMP/preview-entitlements.plist"
+            bundle_group=$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' \
+              "$RUNNER_TEMP/preview-entitlements.plist" 2>/dev/null || true)
+            [ "$bundle_group" = "$group" ] || { echo "$label group mismatch: expected '$group', got '${bundle_group:-missing}'"; exit 1; }
+          }
+          WATCH_PATH="$APP_PATH/Watch/JustSpeakToItWatch.app"
+          check_bundle "Share extension" "$TUIST_IOS_SHARE_EXTENSION" "$APP_PATH/PlugIns/JustSpeakShare.appex" "$IOS_APP_GROUP"
+          check_bundle "Watch app" "$TUIST_WATCH_APP" "$WATCH_PATH" "$WATCH_APP_GROUP"
+          if [ "$TUIST_WATCH_APP" = "1" ]; then
+            check_bundle "Watch complication" 1 "$WATCH_PATH/PlugIns/JustSpeakWatchWidgetExtension.appex" "$WATCH_APP_GROUP"
+          fi
+
           codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/app-entitlements.plist"
           codesign -d --entitlements - --xml "$WIDGET_PATH" > "$RUNNER_TEMP/widget-entitlements.plist"
           APP_GROUP=$(/usr/libexec/PlistBuddy \
@@ -472,6 +591,18 @@ jobs:
             /usr/libexec/PlistBuddy \
               -c "Add :provisioningProfiles:$BUNDLE_ID.keyboard string $KEYBOARD_PROFILE_UUID" \
               ExportOptions.plist
+          fi
+          add_export_profile() {
+            local profile_uuid
+            profile_uuid=$(security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/$2.provisionprofile" | plutil -extract UUID raw -)
+            /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:$1 string $profile_uuid" ExportOptions.plist
+          }
+          if [ "$TUIST_IOS_SHARE_EXTENSION" = "1" ]; then
+            add_export_profile "$BUNDLE_ID.share" ios-share-appstore
+          fi
+          if [ "$TUIST_WATCH_APP" = "1" ]; then
+            add_export_profile "$BUNDLE_ID.watchkitapp" watch-appstore
+            add_export_profile "$BUNDLE_ID.watchkitapp.complication" watch-widget-appstore
           fi
           
           xcodebuild -exportArchive \

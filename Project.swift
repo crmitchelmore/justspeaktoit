@@ -322,10 +322,10 @@ macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = .string(
 var projectPackages: [Package] = [
     .remote(url: "https://github.com/weichsel/ZIPFoundation.git", requirement: .exact("0.9.20")),
     .package(path: .relativeToRoot(".")),
-    .remote(url: "https://github.com/jaywcjlove/PermissionFlow.git", requirement: .exact("2.11.2")),
+    .remote(url: "https://github.com/jaywcjlove/PermissionFlow.git", requirement: .exact("2.11.4")),
     .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0")),
     .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "1.1.0")),
-    .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.17.4"))
+    .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.18.3"))
 ]
 if !isAppStoreBuild {
     macAppSettings["INFOPLIST_KEY_PostHogProjectKey"] = "$(POSTHOG_PROJECT_KEY)"

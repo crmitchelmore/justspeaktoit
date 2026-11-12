@@ -563,10 +563,13 @@ try {
     $context.Remove('extra')
     Assert-That ($packagedFake.Calls -eq $before) 'packaged-noncandidate-no-diagnostic-launch'
     # The optional child must skip when the original remaining budget is small.
-    $now = [Diagnostics.Stopwatch]::GetTimestamp()
+    # Stopwatch ticks count from boot on Linux, so a fresh CI VM can be under
+    # 55 s old; pin a clock past that so startedTicks stays positive.
+    $now = [Math]::Max([Diagnostics.Stopwatch]::GetTimestamp(), 120 * $frequency)
     $context.startedTicks = $now - 55 * $frequency; $context.endedTicks = $now - $frequency
     $context.originalDeadlineTicks = $now + 5 * $frequency
-    $result = Invoke-JstiPackagedEventDiagnostic $setup $run $context 'C:\Owned\SpeakWindows.exe' ('0' * 64) 'owned-package'
+    $budgetClock = { $now }.GetNewClosure()
+    $result = Invoke-JstiPackagedEventDiagnostic $setup $run $context 'C:\Owned\SpeakWindows.exe' ('0' * 64) 'owned-package' $budgetClock
     Assert-That ($result.status -ceq 'deadline' -and $packagedFake.Calls -eq $before) 'packaged-insufficient-original-budget'
 } finally {
     Set-Item Function:Get-JstiDiagnosticIdentity -Value $packagedIdentityFunction

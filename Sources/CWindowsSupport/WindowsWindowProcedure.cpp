@@ -12,8 +12,13 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     switch (message) {
     case WM_ACTIVATE:
         if (LOWORD(wparam) == WA_INACTIVE) state.cancelKeyHeld = false;
-        break;
+        if (HIWORD(wparam)) break;
+        // Back from a dialog, the setup guide or another app, focus returns to a
+        // control rather than the bare window, which screen readers cannot use.
+        jsti::chrome::rememberFocus(window, wparam, state.focus, navBaseID + state.page);
+        return 0;
     case WM_CREATE:
+        jsti::accessibility::attach(window);
         if (!createControls(window)) return -1;
         startHandsFreeGuard(window);
         return 0;

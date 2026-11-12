@@ -26,6 +26,9 @@ const Palette &palette();
 // colours and stay black, so dark mode draws those unthemed and the parent's
 // WM_CTLCOLORSTATIC colours apply. Owner-drawn buttons are left alone.
 void themeControl(HWND control);
+// Whether themeControl has made multiline `control` hand Tab back to dialog
+// navigation while it is read-only.
+bool releasesDialogKeys(HWND control);
 // A light or dark title bar.
 void themeTitleBar(HWND window);
 // The window's title bar and every child control.
@@ -69,7 +72,7 @@ bool addControl(HWND parent, const wchar_t *type, const wchar_t *text, DWORD sty
 HWND createOwnedDialog(HWND owner, const wchar_t *className, WNDPROC procedure, const wchar_t *title,
                        int clientWidth, int clientHeight, DWORD style, DWORD exStyle, void *instance);
 // WM_ACTIVATE: remembers the focused control on deactivation and restores it,
-// or the control `fallback`, on activation.
+// or the control `fallback` when it is gone, hidden or disabled, on activation.
 void rememberFocus(HWND window, WPARAM wparam, HWND &focus, int fallback);
 
 // A native settings dialog's window frame: its smallest logical client size,

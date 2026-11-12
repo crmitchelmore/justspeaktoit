@@ -113,10 +113,26 @@ Mac; UI tests run on hosted CI.
   needs a non-zero ID that is unique within its window.
 - Announce with `jsti::accessibility::announce`, which raises a UI Automation
   notification that Narrator, NVDA and JAWS speak. Do not rely on
-  `EVENT_SYSTEM_ALERT`.
+  `EVENT_SYSTEM_ALERT`. Every top-level window calls
+  `jsti::accessibility::attach` on `WM_CREATE` so notifications come from its
+  root provider. Narrator drops notifications from a window that is not in the
+  foreground, so announce from the foreground window (the HUD does this) and
+  re-announce a repeated result, such as a second failed start.
+- A control with no label to its left gets its name from
+  `jsti::accessibility::name`. Do not leave a list or pane unnamed.
+- Keyboard focus must always land on something the user can act on. A page
+  shortcut or navigation moves focus to the new page. A closed dialog or
+  wizard returns focus to the control that opened it. Reactivating the window
+  restores the last focused control. A read-only multi-line edit must let Tab
+  and Shift+Tab move focus.
+- Do not set a list's selection while the list is not focused: the proxy turns
+  the selection change into a focus announcement. Tab from settings search
+  closes the search, restoring the sidebar, and moves on to the next control.
 - Guard: `--ui-smoke-test` runs `jsti::accessibility::audit` on every main
   window page and fails when a shown, focusable control lacks a unique
-  AutomationId or a name.
+  AutomationId or a name. Its screen-reader self-test covers the root provider,
+    search announcements, Tab out of search, the transcript's Tab handling and
+    focus restored on activation.
 
 ### Linux (GTK 4 and AT-SPI)
 

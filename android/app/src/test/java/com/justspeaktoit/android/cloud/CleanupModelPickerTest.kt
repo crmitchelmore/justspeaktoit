@@ -14,9 +14,9 @@ class CleanupModelPickerTest {
             listOf("Anthropic", "Google Gemini", "Groq", "Mistral", "OpenAI"),
             direct.map { it.vendor }.distinct(),
         )
-        assertEquals("native/anthropic/claude-haiku-4-5", direct.first().selectionId)
+        assertEquals("native/anthropic/claude-haiku-5-5", direct.first().selectionId)
         val openAI = direct.filter { it.provider == CloudProvider.OpenAI }.map { it.displayName }
-        assertEquals(listOf("GPT-5 Mini", "GPT-5.4 Mini", "GPT-6 Luna", "GPT-6.1 Sol"), openAI)
+        assertEquals(listOf("GPT-6 Luna", "GPT-6.1 Sol", "GPT-6.1 Terra"), openAI)
     }
 
     @Test
@@ -24,7 +24,7 @@ class CleanupModelPickerTest {
         val openRouter = CleanupModelPicker.openRouter()
         assertTrue(openRouter.all { it.isOpenRouter && it.provider == CloudProvider.OpenRouter })
         assertEquals(
-            listOf("Anthropic", "Google", "Meta Llama", "Mistral", "OpenAI", "Qwen"),
+            listOf("Anthropic", "Google", "Mistral", "OpenAI", "Qwen"),
             openRouter.map { it.vendor }.distinct(),
         )
         // A model offered both ways is never a top-level OpenRouter entry.

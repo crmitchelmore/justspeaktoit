@@ -316,7 +316,7 @@ private extension SherpaStreamingSourcesSection {
   }
 
   private var canAddStreamingModelSource: Bool {
-    streamingHuggingFaceRepoID.split(separator: "/").count == 2
+    HuggingFaceRepoInput.isValidRepoID(streamingHuggingFaceRepoID)
       && !streamingHuggingFaceModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 

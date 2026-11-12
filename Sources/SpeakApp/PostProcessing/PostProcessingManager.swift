@@ -292,8 +292,8 @@ final class PostProcessingManager: ObservableObject {
       let promptPayload = PostProcessingPromptPayload(
         modelIdentifier: model,
         customPrompt: nil,
-        systemPrompt: LocalPostProcessingModelManager.localSystemPrompt(systemPrompt),
-        userPrompt: LocalPostProcessingModelManager.localUserPrompt(systemPrompt: systemPrompt, rawText: rawText)
+        systemPrompt: LocalPostProcessingPrompt.systemPrompt(systemPrompt),
+        userPrompt: LocalPostProcessingPrompt.userPrompt(rawText: rawText)
       )
       return .success(
         .init(

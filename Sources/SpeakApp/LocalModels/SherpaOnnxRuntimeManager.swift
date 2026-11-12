@@ -43,11 +43,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
 
   private init(fileManager: FileManager = .default) {
     self.fileManager = fileManager
-    let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-      ?? fileManager.homeDirectoryForCurrentUser
-    baseDirectory = base
-        .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
-      .appendingPathComponent("LocalModels", isDirectory: true)
+    baseDirectory = LocalModelsDirectory.root(fileManager: fileManager)
       .appendingPathComponent("SherpaOnnx", isDirectory: true)
     sidecar = LocalPythonSidecar(
       virtualEnvironmentURL: baseDirectory.appendingPathComponent("venv", isDirectory: true),

@@ -318,7 +318,7 @@ private extension LocalTranscriptionModelsCard {
   }
 
   private var canImportHuggingFaceModel: Bool {
-    huggingFaceRepoID.split(separator: "/").count == 2
+    HuggingFaceRepoInput.isValidRepoID(huggingFaceRepoID)
       && !huggingFaceModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 

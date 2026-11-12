@@ -115,12 +115,10 @@ final class PaidAccessManager: NSObject, ObservableObject {
 
   /// Mirrors the flow's state into the published properties.
   private func publish(_ state: PaidAccessFlowState) {
-    if self.entitlement != state.entitlement { self.entitlement = state.entitlement }
-    if self.policy != state.policy { self.policy = state.policy }
-    if self.isSignedIn != state.isSignedIn { self.isSignedIn = state.isSignedIn }
-    if self.isBusy != state.isBusy { self.isBusy = state.isBusy }
-    if self.lastError != state.lastError { self.lastError = state.lastError }
-    if self.products != state.products { self.products = state.products }
+    state.publish(to: self, through: PaidAccessFlowState.Mirror(
+      entitlement: \.entitlement, policy: \.policy, isSignedIn: \.isSignedIn,
+      isBusy: \.isBusy, lastError: \.lastError, products: \.products
+    ))
   }
 
   // MARK: - Derived state

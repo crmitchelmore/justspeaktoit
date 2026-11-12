@@ -1,6 +1,7 @@
 #if canImport(StoreKit)
 import Foundation
 import SpeakCore
+import StoreKit
 import XCTest
 
 @MainActor
@@ -278,6 +279,40 @@ private final class FlowClient: PaidAccessClienting, @unchecked Sendable {
     ) async throws -> String { throw PaidAccessError.invalidResponse }
     func liveTranscriptionRequest(session: PaidAccessSession, language: String?, sampleRate: Int) throws -> URLRequest {
         throw PaidAccessError.invalidResponse
+    }
+}
+@MainActor
+final class PaidAccessStatePublicationTests: XCTestCase {
+    func testPublish_writesOnlyTheFieldsThatChanged() {
+        let host = MirrorHost()
+        var state = PaidAccessFlowState()
+        state.isBusy = true
+        state.lastError = "Offline"
+
+        host.mirror(state)
+        host.mirror(state)
+
+        XCTAssertTrue(host.isBusy)
+        XCTAssertEqual(host.lastError, "Offline")
+        XCTAssertEqual(host.writes, ["isBusy", "lastError"], "Unchanged fields and repeats are not rewritten")
+    }
+}
+
+@MainActor
+private final class MirrorHost {
+    private(set) var writes: [String] = []
+    private(set) var entitlement: PaidEntitlement = .unentitled { didSet { writes.append("entitlement") } }
+    private(set) var policy: PaidRoutingPolicy = .unknown { didSet { writes.append("policy") } }
+    private(set) var isSignedIn = false { didSet { writes.append("isSignedIn") } }
+    private(set) var isBusy = false { didSet { writes.append("isBusy") } }
+    private(set) var lastError: String? { didSet { writes.append("lastError") } }
+    private(set) var products: [Product] = [] { didSet { writes.append("products") } }
+
+    func mirror(_ state: PaidAccessFlowState) {
+        state.publish(to: self, through: PaidAccessFlowState.Mirror(
+            entitlement: \.entitlement, policy: \.policy, isSignedIn: \.isSignedIn,
+            isBusy: \.isBusy, lastError: \.lastError, products: \.products
+        ))
     }
 }
 #endif

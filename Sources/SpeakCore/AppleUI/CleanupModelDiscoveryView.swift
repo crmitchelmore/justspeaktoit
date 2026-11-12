@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// Shared native Mac/iOS opt-in control. Opening settings while disabled performs no network work.
+@available(*, deprecated, message: "Use OpenRouterCleanupBrowser, which includes the discovery opt-in.")
 public struct CleanupModelDiscoveryView: View {
     @Binding private var selection: String
     @Binding private var enabled: Bool

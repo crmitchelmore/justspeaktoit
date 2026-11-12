@@ -316,6 +316,20 @@ sessions:
           - "Open Settings \u203a Keyboard and check App Shortcuts for Search for Anything and Open Corrections."
         expected: "The sidebar shows a field reading \u201cSearch for anything\u201d with \u2318K. Transcribe starts and then stops a recording that appears in History; Say reads the clipboard aloud; api key opens and highlights an API-key card. Keyboard lists Search for Anything as \u2318K and Open Corrections as \u21e7\u2318K."
         final_gate: true
+      - id: "mac-openrouter-discover-configure"
+        issues:
+          - 1575
+        title: "OpenRouter cleanup and transcription pickers discover models and open a details page"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes #1575"
+        steps:
+          - "Open Settings \u203a Post-processing, choose Remote, click the Remote Post-processing Model picker and click the OpenRouter row."
+          - "Turn on Discover OpenAI cleanup models via OpenRouter, type gpt in Search models, click a model and check its Pricing and Temperature, then click Use for cleanup."
+          - "Open Settings \u203a Transcription, click the Remote Batch Model picker, click the OpenRouter row and wait for the list to refresh."
+          - "Click any discovered model, then click Use for transcription."
+        expected: "Both OpenRouter rows open a searchable list with provider and price filters, a Back button and a Refresh button. Each model opens a page with its pricing; choosing one closes the sheet and the picker shows OpenRouter \u203a the chosen model. Native providers are still listed first."
+        final_gate: true
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"
@@ -665,6 +679,19 @@ sessions:
           - "Re-read Resolution Center, resolve every remaining review finding and approve the frozen candidate through the normal Stable process."
         expected: "The exact candidate's device evidence, SDK privacy report, nutrition labels, published policy, consent/withdrawal behavior, support URLs and private review information agree. No credentials enter public issues or screenshots, and no submission is approved solely because the archive builds."
         final_gate: false
+      - id: "iphone-openrouter-cleanup-discover-configure"
+        issues:
+          - 1575
+        title: "OpenRouter cleanup picker discovers models and opens a details page"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes #1575"
+        steps:
+          - "Open Settings \u203a Post-Processing and tap the OpenRouter row under the native models."
+          - "Turn on Discover OpenAI cleanup models via OpenRouter and search for gpt."
+          - "Tap a model, check its Pricing, then tap Use for cleanup."
+        expected: "The OpenRouter row opens a searchable list with provider and price filters; each model opens a page with its pricing, and choosing one returns to Post-Processing with that model ticked under OpenRouter."
+        final_gate: true
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"

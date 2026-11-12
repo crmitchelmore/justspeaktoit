@@ -3,9 +3,9 @@
 
 import json
 import os
-from pathlib import Path
 import runpy
 import sys
+from pathlib import Path
 
 # Each hotkey journey spends ~60s in real gesture windows, so the suites run as
 # parallel CI shards that each keep the unchanged 600s UI runtime budget. Every

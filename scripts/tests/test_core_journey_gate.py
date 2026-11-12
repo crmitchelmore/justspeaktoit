@@ -6,12 +6,12 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
-import sys
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest import mock
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "core-journey/run-core-journey-e2e.py"

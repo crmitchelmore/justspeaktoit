@@ -8,9 +8,13 @@ Usage:
     scripts/pre-pr --base REF    # compare against another base
     scripts/pre-pr --fetch       # fetch origin/main first
     scripts/pre-pr --markdown    # print the PR-body summary after the run
+    scripts/pre-pr --no-fix      # skip the autofix pass (scripts/quality fix) that runs first
+    scripts/pre-pr --fail-on-fix # fail if the autofix changed anything (the pre-push hook uses it)
 
-It compares HEAD plus uncommitted and untracked files with the merge base of
---base, selects the lint, build and unit-test checks for each affected area,
+First it autofixes the changed files (`scripts/quality fix`: SwiftFormat,
+SwiftLint --fix, Ruff, ESLint) and lists what it changed, so the record covers
+the fixed tree; commit those edits. Then it compares HEAD plus uncommitted and
+untracked files with the merge base of --base, selects the lint, build and unit-test checks for each affected area,
 and writes a machine-readable summary to .build/pre-pr/summary.json (and a
 Markdown copy for the PR body). The exit status is 0 only when every selected
 check passed. Advisory checks report "warn" and never fail the run. The
@@ -59,7 +63,7 @@ UI_TEST_TARGETS = {'SpeakAppUITests', 'SpeakiOSUITests'}
 # affected-swift-tests.py.
 CI_MACOS_SKIP_TARGETS = {'SpeakDesktopTests', 'SpeakAutomationKitTests'}
 # Cheap static checks run first so most failures surface within seconds.
-COST = {'swift-test-coverage': 0, 'actionlint': 0, 'shellcheck': 0, 'swiftformat': 1, 'landing-tests': 1,
+COST = {'swift-test-coverage': 0, 'autofix': 0, 'quality': 1, 'landing-tests': 1,
         'ci-lint': 2, 'apple-build': 3, 'apple-unit-tests': 4, 'api-compatibility': 5}
 
 
@@ -127,7 +131,7 @@ class Graph:
     shared: object = None
 
     @classmethod
-    def from_dump(cls, dump: dict) -> 'Graph':
+    def from_dump(cls, dump: dict) -> Graph:
         shared = affected_selector().TargetGraph(dump)
         targets = {name: {'type': shared.types[name], 'path': shared.paths[name].rstrip('/')}
                    for name in shared.paths}
@@ -307,6 +311,17 @@ def routing():
 
 
 @functools.cache
+def quality():
+    """scripts/quality: which files each autofixer and linter owns."""
+    from importlib.machinery import SourceFileLoader
+    loader = SourceFileLoader('jsti_quality', str(Path(__file__).resolve().parent / 'quality'))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+@functools.cache
 def outcomes():
     """scripts/ci/pre_pr_outcome.py: the one classifier of check and run outcomes."""
     spec = importlib.util.spec_from_file_location('pre_pr_outcome',
@@ -357,15 +372,13 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
     swift = area('swift', 'swift')
     api = area('public-api', 'api')
     windows = area('windows', 'windows')
-    workflows = area('workflows', 'workflows')
-    shell = area('shell', 'shell')
+    area('workflows', 'workflows')
+    area('shell', 'shell')
     android = area('android', 'android')
     worker = area('paid-access-worker', 'paid-access-worker')
     landing = area('landing-page', 'landing-page')
 
     checks: list[Check] = []
-    existing = [f for f in files if (ROOT / f).is_file()]
-    swift_files = [f for f in existing if f.endswith('.swift') and not f.startswith(('Tooling/', 'android/'))]
     swift_changes = [f for f in files if f.endswith('.swift') and f.startswith(('Sources/', 'Tests/'))]
     test_env = {'JSTI_TEST_KEYCHAIN_REDIRECT': '1', 'JSTI_TEST_KEYCHAIN': '1'}
     scratch = ['--scratch-path', str(OUT / 'apple-build')]
@@ -391,9 +404,6 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
         elif linux == 'skip' and not sys.platform.startswith('linux'):
             checks.append(Check('ci-lint-linux', 'ci-lint', 'CI Lint job on Ubuntu (make ci-lint)', [],
                                 skip_reason='--no-linux', incomplete=True))
-    if swift_files:
-        checks.append(Check('swiftformat', 'ci-lint', 'SwiftFormat lint (changed files, advisory)',
-                            ['scripts/swiftformat.sh', '--lint', '--quiet', *swift_files], advisory=True))
     if swift and not IS_MAC:
         checks.append(Check('apple-build', 'swift', 'macOS job: SwiftPM build and unit tests', [],
                             skip_reason='macOS only; CI runs it'))
@@ -443,16 +453,13 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
         else:
             checks.append(Check('api-compatibility', 'public-api', title, [], skip_reason='macOS only',
                                 incomplete=True))
-    changed_workflows = [f for f in workflows if f.startswith('.github/workflows/') and (ROOT / f).is_file()]
-    if changed_workflows:
-        # Advisory: CI does not gate on actionlint and local versions can lag new workflow syntax.
-        checks.append(Check('actionlint', 'workflows', 'actionlint (changed workflows, advisory)',
-                            ['actionlint', *changed_workflows], requires='actionlint', advisory=True))
-    shell_files = [f for f in shell if (ROOT / f).is_file() and not f.endswith(('pre-pr', '.py'))]
-    if shell_files:
-        checks.append(Check('shellcheck', 'shell', 'ShellCheck (changed scripts, advisory)',
-                            ['shellcheck', '-S', 'warning', *shell_files],
-                            requires='shellcheck', advisory=True))
+    owned = quality().classify(files)
+    linted = sorted({f for kind in ('swift', 'python', 'shell', 'workflows') for f in owned[kind]})
+    if linted:
+        # Zero violations, as CI's Lint job enforces with `scripts/quality check --all`.
+        kinds = ', '.join(k for k in ('swift', 'python', 'shell', 'workflows') if owned[k])
+        checks.append(Check('quality', 'quality', f'Code quality: scripts/quality check ({kinds})',
+                            ['python3', 'scripts/quality', 'check', *linted]))
     if android:
         # The Android CI job's script. Locally only with a working JDK and an approved feed
         # (android/settings.gradle.kts refuses public registries off GitHub-hosted runners);
@@ -531,7 +538,7 @@ def launch(check: Check) -> subprocess.Popen | None:
         log.close()
 
 
-def finish(check: Check, process: subprocess.Popen | None, verbose: bool) -> None:
+def finish(check: Check, process: subprocess.Popen | None, verbose: bool, restore: bool = True) -> None:
     if process is None:
         return
     code = process.wait()
@@ -543,7 +550,7 @@ def finish(check: Check, process: subprocess.Popen | None, verbose: bool) -> Non
     drifted = () if check.background else set(check.forbid_drift) & (dirty_tracked() - check.dirty_before)
     settle(check, outcomes().after_exit(advisory=check.advisory, exit_code=code, tests_executed=executed,
                                         drifted=drifted, log=display(check.log)))
-    if not check.background:
+    if restore and not check.background:
         restore_side_effects(check, check.dirty_before)
 
 
@@ -641,15 +648,15 @@ def main() -> int:
     parser.add_argument('--keep-going', action='store_true', help='run every check even after a failure')
     parser.add_argument('--markdown', action='store_true', help='print the PR-body summary when done')
     parser.add_argument('--verbose', '-v', action='store_true', help='stream check output')
+    parser.add_argument('--no-fix', action='store_true', help='skip the autofix pass that runs first')
+    parser.add_argument('--fail-on-fix', action='store_true',
+                        help='fail when the autofix changes a file (for hooks, where the commit is already made)')
     args = parser.parse_args()
 
     if args.fetch and args.base.startswith('origin/'):
         git('fetch', '--quiet', 'origin', args.base.removeprefix('origin/'))
     merge_base, files = changed_files(args.base)
     checks, areas = plan(files, args.full, args.quick, args.linux or 'auto', args.base)
-    head = git('rev-parse', 'HEAD')
-    tree = worktree_tree()
-    dirty = bool(git('status', '--porcelain'))
 
     print(f'pre-pr: {len(files)} changed files against {args.base} ({merge_base[:12]})')
     for name, hits in areas.items():
@@ -660,7 +667,43 @@ def main() -> int:
         return 0
 
     with machine_lock():
-        return execute(args, checks, areas, files, merge_base, head, tree, dirty)
+        autofix = run_autofix(args, files)
+        head = git('rev-parse', 'HEAD')
+        tree = worktree_tree()
+        dirty = bool(git('status', '--porcelain'))
+        return execute(args, [autofix, *checks], areas, files, merge_base, head, tree, dirty)
+
+
+def run_autofix(args, files: list[str]) -> Check:
+    """scripts/quality fix over the changed files, recorded as the run's first check."""
+    check = Check('autofix', 'quality', 'Autofix (scripts/quality fix)', ['python3', 'scripts/quality', 'fix'])
+    if args.no_fix:
+        settle(check, outcomes().before_launch(skip_reason='--no-fix', failure='', missing_tool=None,
+                                               advisory=False))
+        return check
+    print(f'▶ [quality] {check.title}', flush=True)
+    existing = [f for f in files if (ROOT / f).is_file()]
+    if not existing:
+        check.status = 'pass'
+        check.note = 'no files to fix'
+        return check
+    before = worktree_tree()
+    check.command = [*check.command, *existing]
+    finish(check, launch(check), args.verbose, restore=False)  # its edits are the point; keep them
+    after = worktree_tree()
+    changed = git('diff-tree', '-r', '--name-only', before, after).splitlines() if before and after else []
+    if changed and check.status == 'pass':
+        shown = ', '.join(changed[:5]) + ('…' if len(changed) > 5 else '')
+        check.note = f'fixed {len(changed)} file{"s" if len(changed) != 1 else ""}: {shown}'
+        print(f'pre-pr: autofix changed {len(changed)} file(s); review and commit them:', flush=True)
+        for name in changed:
+            print(f'    {name}', flush=True)
+        if args.fail_on_fix:
+            check.status = 'fail'
+            check.note += '; commit the fixes and push again'
+    mark = outcomes().ICONS[check.status]
+    print(f'  {mark} [quality] {check.title}: {check.status}{" — " + check.note if check.note else ""}', flush=True)
+    return check
 
 
 def execute(args, checks, areas, files, merge_base, head, tree, dirty) -> int:
@@ -683,8 +726,10 @@ def execute(args, checks, areas, files, merge_base, head, tree, dirty) -> int:
         if check.background:
             print(f'▶ [{check.area}] {check.title} (in the background; log {display(check.log)})', flush=True)
             background.append((check, launch(check)))
+    if checks and checks[0].id == 'autofix':
+        failed = checks[0].status == 'fail'
     for check in checks:
-        if check.background:
+        if check.background or check.id == 'autofix':
             continue
         if failed and not args.keep_going and not check.advisory:
             settle(check, outcomes().not_run('earlier failure'))

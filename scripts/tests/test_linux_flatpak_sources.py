@@ -1,15 +1,15 @@
 """Regression checks for the Flatpak's pinned offline SwiftPM mirror setup."""
-import hashlib
 import contextlib
 import copy
+import hashlib
 import io
 import json
 import os
 import runpy
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -1,11 +1,10 @@
 import importlib.util
 import json
-from pathlib import Path
-import tempfile
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
-
 
 SPEC = importlib.util.spec_from_file_location(
     "owned_simulator", Path(__file__).resolve().parents[1] / "ios/owned-ios-ci-simulator.py")

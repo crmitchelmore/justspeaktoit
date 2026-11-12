@@ -64,7 +64,7 @@ if [ ! -x "$root/scripts/pre-pr" ]; then
     echo "pre-pr: scripts/pre-pr not found on this branch; skipping"
     exit 0
 fi
-if ! "$root/scripts/pre-pr"; then
+if ! "$root/scripts/pre-pr" --fail-on-fix; then
     echo "❌ pre-pr failed — push blocked. Fix the failures, or push with JSTI_SKIP_PRE_PR=1 to bypass." >&2
     exit 1
 fi

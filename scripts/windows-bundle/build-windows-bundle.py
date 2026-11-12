@@ -18,7 +18,6 @@ import argparse
 import fnmatch
 import hashlib
 import json
-import os
 import pathlib
 import platform
 import re
@@ -38,11 +37,13 @@ if str(HERE) not in sys.path:
 import redistributables  # noqa: E402
 import windows_pe  # noqa: E402
 import windows_targets  # noqa: E402
+
 sys.path.insert(0, str(HERE.parent / "local-llm-runtime"))
-import local_llm_package  # noqa: E402
 import http.client
 import time
 import urllib.error
+
+import local_llm_package  # noqa: E402
 
 # GitHub release assets and other pinned sources intermittently return 5xx or
 # time out; an outage on 9 Nov lasted well over the old single attempt. The
@@ -527,7 +528,7 @@ def load_local_runtime(directory, pins_path=LOCAL_RUNTIME_PINS, architecture="x6
     try:
         manifest = json.loads((directory / "runtime-manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
-        raise BundleError("cannot read the local runtime manifest: %s" % error)
+        raise BundleError("cannot read the local runtime manifest: %s" % error) from error
     target = (pins.get("architectures") or {}).get(architecture)
     if target is None:
         raise BundleError("no whisper.cpp runtime is pinned for " + architecture)
@@ -882,9 +883,9 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
     }
     if local_llm:
         generated["README.txt"] += (
-            "\nNative on-device cleanup: CPU llama.cpp b6500 in LocalLLMRuntime/llama.dll. "
-            "Models are separate, explicit downloads. provisioning.json records built bytes, not model-quality "
-            "acceptance. No subprocess or remote fallback is used.\n").encode()
+            b"\nNative on-device cleanup: CPU llama.cpp b6500 in LocalLLMRuntime/llama.dll. "
+            b"Models are separate, explicit downloads. provisioning.json records built bytes, not model-quality "
+            b"acceptance. No subprocess or remote fallback is used.\n")
         generated["THIRD-PARTY-NOTICES.txt"] += (
             "\nllama.cpp b6500 (commit " + local_llm_package.COMMIT + "), including ggml: "
             "LocalLLMRuntime/llama.dll\nMIT license: LocalLLMRuntime/LICENSE.llama-cpp\n").encode()
@@ -1046,4 +1047,4 @@ if __name__ == "__main__":
     try:
         main()
     except (BundleError, redistributables.ExtractionError, windows_pe.PEFormatError, ValueError) as error:
-        raise SystemExit("windows bundle: " + str(error))
+        raise SystemExit("windows bundle: " + str(error)) from error

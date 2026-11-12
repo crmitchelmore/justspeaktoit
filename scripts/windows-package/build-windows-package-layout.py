@@ -44,4 +44,4 @@ if __name__ == "__main__":
     try:
         main()
     except (windows_msix.PackageError, windows_msix.BUNDLE.BundleError, windows_msix.windows_pe.PEFormatError) as error:
-        raise SystemExit("windows package: " + str(error))
+        raise SystemExit("windows package: " + str(error)) from error

@@ -11,11 +11,11 @@ logs are private files and only aggregate process metrics are printed.
 import argparse
 import json
 import os
-from pathlib import Path
 import statistics
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 
 
 def process_metrics(pid):

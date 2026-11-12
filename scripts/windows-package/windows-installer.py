@@ -71,4 +71,4 @@ if __name__ == "__main__":
     try:
         main()
     except windows_msix.PackageError as error:
-        raise SystemExit("windows installer: " + str(error))
+        raise SystemExit("windows installer: " + str(error)) from error

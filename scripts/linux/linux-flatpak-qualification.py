@@ -2,12 +2,11 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import runpy
 import subprocess
 import sys
-
+from pathlib import Path
 
 WORKFLOW = '.github/workflows/linux-flatpak.yml'
 VERIFY = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'packaging/linux/verify_build_revision.py'))

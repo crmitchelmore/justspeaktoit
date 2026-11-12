@@ -11,13 +11,12 @@ import collections
 import importlib.util
 import json
 import os
-from pathlib import Path
 import signal
 import stat
 import subprocess
 import sys
 import threading
-
+from pathlib import Path
 
 SUITE = "ModulateOpeningAudioQualificationTests"
 REQUIRED_CASES = (

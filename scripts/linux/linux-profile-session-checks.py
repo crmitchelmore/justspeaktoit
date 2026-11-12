@@ -3,7 +3,6 @@
 import importlib.util
 import json
 import os
-from pathlib import Path
 import selectors
 import shutil
 import signal
@@ -11,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 spec = importlib.util.spec_from_file_location('profile_identity', Path(__file__).with_name('linux-profile-identity-checks.py'))
 identity = importlib.util.module_from_spec(spec)

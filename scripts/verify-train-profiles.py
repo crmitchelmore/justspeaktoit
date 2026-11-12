@@ -5,6 +5,7 @@ import plistlib
 import subprocess
 import sys
 from pathlib import Path
+
 root = Path(sys.argv[2]) if len(sys.argv) > 2 else Path.home() / 'Library/MobileDevice/Provisioning Profiles'
 surface = sys.argv[1]
 parent = os.environ['BUNDLE_ID']

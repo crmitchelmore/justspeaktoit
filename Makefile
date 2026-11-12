@@ -94,8 +94,9 @@ lint: ## Run strict SwiftLint (isolated Tooling graph) with zero violations and 
 
 # CI parity: ci.yml's Lint job and scripts/pre-pr both run exactly this target.
 .PHONY: ci-lint
-ci-lint: ## Run the CI Lint job: whole-repo strict SwiftLint, accessibility, suppression ratchet, tooling pins and tests
+ci-lint: ## Run the CI Lint job: whole-repo strict SwiftLint, quality checks, suppression ratchet, tooling pins and tests
 	$(MAKE) lint
+	$(MAKE) quality
 	python3 scripts/ci/lint-suppression-ratchet.py
 	git diff --exit-code Tooling/Package.resolved
 	$(MAKE) test-tooling
@@ -109,10 +110,17 @@ ci-portable-linux: ## Run the CI Portable Swift (Linux) job's build and tests (L
 lint-accessibility: ## Check Apple SwiftUI controls have accessible names and identifiers
 	python3 scripts/accessibility/check-apple-accessibility.py
 
+.PHONY: quality
+quality: ## Zero-violation SwiftFormat, Ruff, ShellCheck and actionlint over the whole repository
+	python3 scripts/quality check --all
+
+.PHONY: fix
+fix: ## Autofix the files changed against origin/main (scripts/pre-pr runs this first)
+	python3 scripts/quality fix
+
 .PHONY: format
-format: ## Auto-fix formatting and lint violations where possible
-	./scripts/swiftformat.sh .
-	./scripts/swiftlint.sh lint --fix --format
+format: ## Autofix the whole repository (SwiftFormat, SwiftLint --fix, Ruff, ESLint)
+	python3 scripts/quality fix --all
 
 .PHONY: update-tooling
 update-tooling: ## Intentionally upgrade the lint toolchain pinned in Tooling/Package.resolved

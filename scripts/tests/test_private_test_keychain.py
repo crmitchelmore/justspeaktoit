@@ -2,7 +2,6 @@
 import importlib.util
 import json
 import os
-from pathlib import Path
 import shutil
 import signal
 import subprocess
@@ -10,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = ROOT / 'scripts/with-test-keychain.py'

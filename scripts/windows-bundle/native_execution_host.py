@@ -13,7 +13,6 @@ import time
 import windows_pe
 import windows_targets
 
-
 MACHINE_NAMES = {0: "unknown", windows_pe.IMAGE_FILE_MACHINE_I386: "x86", windows_pe.IMAGE_FILE_MACHINE_AMD64: "x64",
                  windows_pe.IMAGE_FILE_MACHINE_ARM64: "arm64", 0x01C4: "arm"}
 # Loaded only into emulated (x64 or ARM64EC) and WOW64 processes.

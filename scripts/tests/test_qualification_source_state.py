@@ -3,13 +3,12 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
-
 
 HELPER = Path(__file__).resolve().parents[1] / "qualification/qualification_source_state.py"
 SPEC = importlib.util.spec_from_file_location("source_state", HELPER)

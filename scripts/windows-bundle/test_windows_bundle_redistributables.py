@@ -11,7 +11,16 @@ import zipfile
 HERE = pathlib.Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
-from bundle_test_fixtures import BUILD, REDIST, build_burn_bundle, build_cabinet, build_compound_file, build_pe, encode_msi_name, msi_streams  # noqa: E402
+from bundle_test_fixtures import (  # noqa: E402
+    BUILD,
+    REDIST,
+    build_burn_bundle,
+    build_cabinet,
+    build_compound_file,
+    build_pe,
+    encode_msi_name,
+    msi_streams,
+)
 
 
 class CabinetTests(unittest.TestCase):

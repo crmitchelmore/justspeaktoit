@@ -21,6 +21,7 @@ def load(name, file_name):
 NATIVE = load("verify_native_execution", "verify-native-execution.py")
 import native_execution_debugger as DEBUGGER  # noqa: E402
 import windows_pe as PE  # noqa: E402
+
 AMD64, ARM64 = PE.IMAGE_FILE_MACHINE_AMD64, PE.IMAGE_FILE_MACHINE_ARM64
 
 

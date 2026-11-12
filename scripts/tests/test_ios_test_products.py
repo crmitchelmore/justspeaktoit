@@ -1,12 +1,11 @@
 import importlib.util
 import io
 import json
-from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import call, patch
-
 
 SPEC = importlib.util.spec_from_file_location(
     "ios_test_products", Path(__file__).resolve().parents[1] / "ios/ios-test-products.py"

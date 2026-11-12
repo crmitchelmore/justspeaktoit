@@ -16,7 +16,14 @@ HERE = pathlib.Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 from bundle_test_fixtures import (  # noqa: E402,F401
-    BUILD, LOCAL_ARM64_GRAPH, LOCAL_GRAPH, LOCAL_PINS, MACHINES, MIGRATION, PE, write_local_runtime,
+    BUILD,
+    LOCAL_ARM64_GRAPH,
+    LOCAL_GRAPH,
+    LOCAL_PINS,
+    MACHINES,
+    MIGRATION,
+    PE,
+    write_local_runtime,
 )
 from pe_test_fixtures import build_pe  # noqa: E402
 

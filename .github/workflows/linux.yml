@@ -146,9 +146,11 @@ jobs:
       # $GITHUB_WORKSPACE is right.
       - name: Point the on-device checks at the runtime
         run: |
-          echo "JSTI_WHISPER_RUNTIME_DIRECTORY=$GITHUB_WORKSPACE/local-runtime/runtime" >> "$GITHUB_ENV"
-          echo "JSTI_WHISPER_TEST_AUDIO=$GITHUB_WORKSPACE/local-runtime/fixtures/jfk.wav" >> "$GITHUB_ENV"
-          echo "JSTI_LOCAL_MODEL_DIRECTORY=$GITHUB_WORKSPACE/local-models" >> "$GITHUB_ENV"
+          {
+            echo "JSTI_WHISPER_RUNTIME_DIRECTORY=$GITHUB_WORKSPACE/local-runtime/runtime"
+            echo "JSTI_WHISPER_TEST_AUDIO=$GITHUB_WORKSPACE/local-runtime/fixtures/jfk.wav"
+            echo "JSTI_LOCAL_MODEL_DIRECTORY=$GITHUB_WORKSPACE/local-models"
+          } >> "$GITHUB_ENV"
 
       # The root Package.resolved pins the Apple graph. The Linux graph (SwiftNIO)
       # is pinned separately, and --force-resolved-versions fails the build

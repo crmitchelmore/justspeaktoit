@@ -6,6 +6,7 @@ import plistlib
 import subprocess
 import sys
 from pathlib import Path
+
 app, manifest_path, surface = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 manifest = json.loads(manifest_path.read_text())
 train = manifest['train']

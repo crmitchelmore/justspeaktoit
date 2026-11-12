@@ -52,8 +52,12 @@ jobs:
       - name: Cache lint tooling
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: Tooling/.build
-          key: ${{ runner.os }}-${{ runner.arch }}-hosted-${{ github.workspace }}-tooling-${{ hashFiles('Tooling/Package.resolved') }}
+          # Tooling/.build: SwiftLint and SwiftFormat; .build/quality-tools: scripts/quality's Ruff,
+          # ShellCheck and actionlint (pinned and SHA-256 verified).
+          path: |
+            Tooling/.build
+            .build/quality-tools
+          key: ${{ runner.os }}-${{ runner.arch }}-hosted-${{ github.workspace }}-tooling-${{ hashFiles('Tooling/Package.resolved', 'Tooling/quality-requirements.txt', 'scripts/quality') }}
       - name: Lint and tooling tests (make ci-lint)
         run: make ci-lint
 

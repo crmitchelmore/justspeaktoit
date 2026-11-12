@@ -25,7 +25,12 @@ import native_execution_debugger as DEBUGGER  # noqa: E402
 import native_execution_host as HOST  # noqa: E402
 import native_execution_process as PROCESS  # noqa: E402
 from native_execution_fakes import (  # noqa: E402
-    AMD64, ARM64, Clock, FIXTURES, NATIVE, StandaloneRequests,
+    AMD64,
+    ARM64,
+    FIXTURES,
+    NATIVE,
+    Clock,
+    StandaloneRequests,
 )
 
 
@@ -129,7 +134,7 @@ ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
                                JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
             completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
                                        input=json.dumps(value).encode(), env=environment, cwd=directory,
-                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+                                       capture_output=True, timeout=15, check=False)
         self.assertEqual(completed.returncode, 0, "actual pure projector failed")
         self.assertEqual(completed.stderr, b"")
         self.assertLessEqual(len(completed.stdout), 8192)
@@ -282,7 +287,7 @@ ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
     def test_refusal_facts_saturate_counts_without_canaries_utf8_or_raw_fragments(self):
         data = b"JSTI_DIAG_READY\n" * 40 + b"JSTI_DIAG_FAULT 0xc0000374\n" * 35
         data += b"JSTI_DIAG_END\n" * 20 + b"JSTI_DIAG_MODULES\n" * 30 + b"JSTI_DIAG_STACK\n" * 18
-        data += b"C:\\PRIVATE_CANARY !private_function 00000001`00000042 \xff " + "ιδιωτικό".encode("utf-8")
+        data += b"C:\\PRIVATE_CANARY !private_function 00000001`00000042 \xff " + "ιδιωτικό".encode()
         facts = DEBUGGER.project_debugger(data)["refusalFacts"]
         self.assertEqual(facts["counts"], dict(ready=17, fault=17, end=17, modules=17, stack=17,
                                               ip=0, moduleRanges=0, stackRows=0))
@@ -371,7 +376,7 @@ foreach ($encodedValue in $values) {
                                JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
             completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
                                        input=json.dumps([json.dumps(value) for value in values]).encode("utf-8"), env=environment, cwd=directory,
-                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+                                       capture_output=True, timeout=15, check=False)
         self.assertEqual(completed.returncode, 0, "actual pure refusal-facts projector failed")
         self.assertEqual(completed.stderr, b"")
         rows = completed.stdout.decode("utf-8").splitlines()
@@ -491,7 +496,7 @@ foreach ($encoded in ([Console]::In.ReadToEnd() | ConvertFrom-Json -Depth 8)) {
                                JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
             completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
                                        input=json.dumps([json.dumps(v) for v in values]).encode("utf-8"), env=environment,
-                                       cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15, check=False)
+                                       cwd=directory, capture_output=True, timeout=15, check=False)
         self.assertEqual(completed.returncode, 0, "actual pure process-facts projection failed")
         self.assertEqual(completed.stderr, b"")
         rows = completed.stdout.decode("utf-8").splitlines()
@@ -650,8 +655,7 @@ class DiagnosticBootstrapTests(unittest.TestCase):
             completed = subprocess.run([
                 os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
                 str(HERE / "test-failure-diagnostic-bootstrap.ps1")],
-                cwd=directory, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                timeout=30, check=False)
+                cwd=directory, env=environment, capture_output=True, timeout=30, check=False)
         self.assertEqual(completed.returncode, 0, "actual PowerShell bootstrap fake checks failed")
         self.assertEqual(completed.stdout.strip(), b"Diagnostic bootstrap pure-fake checks passed.")
         self.assertEqual(completed.stderr, b"")

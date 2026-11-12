@@ -19,7 +19,14 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 import windows_msix  # noqa: E402
 from package_test_fixtures import (  # noqa: E402,F401
-    BUILD, BUNDLE_TESTS, COMMIT, build_blockmap, make_bundle, make_package, sha256, write_bundle,
+    BUILD,
+    BUNDLE_TESTS,
+    COMMIT,
+    build_blockmap,
+    make_bundle,
+    make_package,
+    sha256,
+    write_bundle,
 )
 
 

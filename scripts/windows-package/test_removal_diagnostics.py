@@ -1,12 +1,11 @@
 """Exercise bounded read-only failure diagnostics; never touch an installed package."""
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / 'scripts/windows-package/test-windows-package-lifecycle.ps1'

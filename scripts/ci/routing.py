@@ -91,7 +91,7 @@ def drift() -> list[str]:
 
 
 def write() -> None:
-    for name, route in routes().items():
+    for route in routes().values():
         for target in route.get('workflows', []):
             path = ROOT / target['file']
             lines = path.read_text(encoding='utf-8').split('\n')

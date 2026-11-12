@@ -104,13 +104,17 @@ We use Conventional Commits:
 
 ### Linting
 
-```bash
-# Run SwiftLint (resolves the isolated Tooling/ graph, pinned in Tooling/Package.resolved)
-make lint
+Every linter must report zero violations; there is no baseline.
 
-# Run SwiftFormat
-./scripts/swiftformat.sh .
+```bash
+brew install shellcheck actionlint   # once; Ruff installs itself on first use
+
+make fix       # autofix changed files (SwiftFormat, SwiftLint --fix, Ruff, ESLint)
+make quality   # SwiftFormat, Ruff, ShellCheck and actionlint over the whole repo
+make lint      # strict SwiftLint (isolated Tooling/ graph, pinned in Tooling/Package.resolved)
 ```
+
+`scripts/pre-pr` runs the autofix first and then the same checks as CI.
 
 ### Code Organization
 

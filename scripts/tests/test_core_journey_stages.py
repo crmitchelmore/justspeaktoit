@@ -5,12 +5,12 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "core-journey/run-core-journey-stages.py"
@@ -208,7 +208,6 @@ class StageTests(unittest.TestCase):
 
     def test_successful_build_receipt_admits_only_unchanged_products_and_options(self):
         command = self.prepare()
-        suites = stages.UI["REQUIRED_SUITES"]
         passing = passing_ui_output()
         runtime = [sys.executable, "-c", f"print({passing!r})"]
         with mock.patch.object(stages, "identity", return_value=self.identity):
@@ -318,7 +317,6 @@ class StageTests(unittest.TestCase):
 
     def test_failed_skipped_or_timed_out_ui_runtime_cannot_publish_green_coverage(self):
         command = self.prepare()
-        suites = stages.UI["REQUIRED_SUITES"]
         passing = passing_ui_output()
         for source, budget, expected in [
             (f"print({passing!r}); raise SystemExit(17)", 2, 17),

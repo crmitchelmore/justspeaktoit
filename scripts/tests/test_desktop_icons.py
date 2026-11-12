@@ -364,9 +364,9 @@ class DesktopIconTests(unittest.TestCase):
             root = pathlib.Path(scratch)
             (root / "Resources/Desktop").mkdir(parents=True)
             (root / "Resources/Desktop/AppIcon.ico").write_bytes(expected[:-1])
-            from unittest import mock
             import contextlib
             import io
+            from unittest import mock
             with mock.patch.object(ICONS, "ROOT", root), mock.patch.object(ICONS, "exports",
                     return_value={"Resources/Desktop/AppIcon.ico": expected}), mock.patch.object(
                     sys, "argv", ["icons", "--check"]), contextlib.redirect_stderr(io.StringIO()) as failure:

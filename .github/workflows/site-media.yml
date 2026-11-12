@@ -279,12 +279,12 @@ jobs:
           for source in mac ios; do
             for appearance in light dark; do
               # The newest attempt of a re-run wins.
-              latest=$(ls -d "$RUNNER_TEMP/downloads/site-media-$source-$appearance-"* | sort -V | tail -1)
+              latest=$(printf '%s\n' "$RUNNER_TEMP/downloads/site-media-$source-$appearance-"* | sort -V | tail -1)
               mv "$latest" "$RUNNER_TEMP/captures/$source-$appearance"
             done
           done
           python3 scripts/site-media/fetch-desktop-tours.py "$RUNNER_TEMP/captures"
-          ls -R "$RUNNER_TEMP/captures" | head -80
+          find "$RUNNER_TEMP/captures" | sort | head -80
 
       - name: Render clips
         timeout-minutes: 60

@@ -13,7 +13,6 @@ import argparse
 import hashlib
 import json
 import mmap
-from pathlib import Path
 import platform
 import subprocess
 import sys
@@ -22,16 +21,18 @@ import tempfile
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
-import redistributables  # noqa: E402
-import windows_targets  # noqa: E402
 import http.client
 import time
 import urllib.error
+
+import redistributables  # noqa: E402
+import windows_targets  # noqa: E402
 
 # GitHub release assets and other pinned sources intermittently return 5xx or
 # time out; an outage on 9 Nov lasted well over the old single attempt. The
@@ -239,4 +240,4 @@ if __name__ == "__main__":
     try:
         main()
     except (PinError, redistributables.ExtractionError, subprocess.CalledProcessError, OSError, ValueError) as error:
-        raise SystemExit("pin swift runtime: " + str(error))
+        raise SystemExit("pin swift runtime: " + str(error)) from error

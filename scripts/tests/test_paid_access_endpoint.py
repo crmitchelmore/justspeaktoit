@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
 from test_paid_access_recovery import block
 
 ROOT = Path(__file__).resolve().parents[2]

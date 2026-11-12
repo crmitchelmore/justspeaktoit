@@ -6,8 +6,8 @@ import re
 import sys
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 _loader = importlib.machinery.SourceFileLoader('pre_pr', str(ROOT / 'scripts' / 'pre-pr'))
@@ -40,11 +40,33 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(checks[0].forbid_drift, ('Tooling/Package.resolved',))
         self.assertEqual(checks[0].env, {'JSTI_LINT_BASELINE_BASE': 'origin/main'})
 
-    def test_workflow_change_adds_actionlint(self):
-        selected, _, _ = ids(['.github/workflows/ci.yml'])
-        self.assertIn('actionlint', selected)
+    def test_workflow_change_adds_the_required_quality_check(self):
+        selected, _, checks = ids(['.github/workflows/ci.yml'])
         self.assertIn('ci-lint', selected)
         self.assertNotIn('portable-linux', selected)
+        quality = next(c for c in checks if c.id == 'quality')
+        self.assertEqual(quality.command, ['python3', 'scripts/quality', 'check', '.github/workflows/ci.yml'])
+        self.assertFalse(quality.advisory)
+
+    def test_python_and_shell_scripts_are_quality_checked(self):
+        _, _, checks = ids(['scripts/pre-pr', 'scripts/swiftlint.sh', 'scripts/ci/routing.py', 'Docs/x.md'])
+        quality = next(c for c in checks if c.id == 'quality')
+        self.assertEqual(quality.command[3:], ['scripts/ci/routing.py', 'scripts/pre-pr', 'scripts/swiftlint.sh'])
+
+    def test_autofix_lists_its_edits_and_fails_only_when_asked(self):
+        def fake_finish(check, process, verbose, restore=True):
+            self.assertFalse(restore)
+            check.status = 'pass'
+
+        for fail_on_fix, expected in ((False, 'pass'), (True, 'fail')):
+            args = mock.Mock(no_fix=False, fail_on_fix=fail_on_fix, verbose=False)
+            with mock.patch.object(pre_pr, 'worktree_tree', side_effect=['before', 'after']), \
+                    mock.patch.object(pre_pr, 'launch'), mock.patch.object(pre_pr, 'finish', fake_finish), \
+                    mock.patch.object(pre_pr, 'git', return_value='Sources/A.swift'), \
+                    mock.patch('builtins.print'):
+                check = pre_pr.run_autofix(args, ['Package.swift'])
+            self.assertEqual(check.status, expected)
+            self.assertIn('fixed 1 file: Sources/A.swift', check.note)
 
     def test_android_runs_remotely_without_a_working_jdk_and_feed(self):
         with mock.patch.dict(pre_pr.os.environ, {'JSTI_ANDROID_LOCAL': '0'}):
@@ -127,7 +149,7 @@ class PlanTests(unittest.TestCase):
         for full in (False, True):
             _, _, checks = ids(everything, full)
             for check in checks:
-                if check.id in {'shellcheck', 'swiftlint', 'swiftformat'}:
+                if check.id == 'quality':
                     continue  # static linters only read the named files
                 command = ' '.join(check.command)
                 for forbidden in ('xcodebuild', 'UITests', 'core-journey', 'verify-launch', 'preflight',

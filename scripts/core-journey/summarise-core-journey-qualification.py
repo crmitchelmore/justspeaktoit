@@ -14,8 +14,8 @@ retry and disqualifies; an incomplete job leaves its shard short of the total.
 """
 
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 RUNS_PER_SHARD = 20
 COLD_RUNS = 5

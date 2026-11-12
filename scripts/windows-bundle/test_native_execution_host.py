@@ -19,7 +19,13 @@ sys.path.insert(0, str(HERE))
 import native_execution_host as HOST  # noqa: E402
 import native_execution_run as RUN  # noqa: E402
 from native_execution_fakes import (  # noqa: E402
-    AMD64, ARM64, FIXTURES, FakeAPI, FakeProcess, SYSTEM, native_image,
+    AMD64,
+    ARM64,
+    FIXTURES,
+    SYSTEM,
+    FakeAPI,
+    FakeProcess,
+    native_image,
 )
 
 

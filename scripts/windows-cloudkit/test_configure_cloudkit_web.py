@@ -1,7 +1,7 @@
 """Checks the CloudKit Web Services build-setting writer with synthetic tokens."""
-from pathlib import Path
 import importlib.util
 import unittest
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("configure", HERE / "configure-cloudkit-web.py")

@@ -1,11 +1,11 @@
 """Prevent app and fixture Security calls bypassing native CI file isolation."""
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = ROOT / 'scripts/verify-no-test-keychain-redirect.sh'

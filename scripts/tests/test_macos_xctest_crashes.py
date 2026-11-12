@@ -6,9 +6,9 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'ci/collect-macos-xctest-crashes.py'

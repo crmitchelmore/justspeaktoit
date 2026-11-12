@@ -434,7 +434,7 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
     try:
         root = ET.fromstring(data)
     except ET.ParseError as error:
-        raise PackageError("manifest is not well-formed XML: %s" % error)
+        raise PackageError("manifest is not well-formed XML: %s" % error) from error
     ns = NAMESPACES
     if root.tag != "{%s}Package" % ns["f"]:
         raise PackageError("manifest root must be the foundation Package element")
@@ -568,7 +568,7 @@ def verify_bundle(bundle_dir, expected_commit=None):
     try:
         evidence = json.loads((bundle_dir / "bundle-evidence.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
-        raise PackageError("cannot read bundle-evidence.json: %s" % error)
+        raise PackageError("cannot read bundle-evidence.json: %s" % error) from error
     archive_record = evidence.get("zip") or {}
     name = archive_record.get("name")
     if not isinstance(name, str) or pathlib.PurePosixPath(name).name != name or not name.endswith(".zip") or "\\" in name:
@@ -593,7 +593,7 @@ def verify_bundle(bundle_dir, expected_commit=None):
                 BUNDLE.check_bundle_path(info.filename)
             entries = {info.filename: bundle.read(info) for info in infos}
     except (zipfile.BadZipFile, BUNDLE.BundleError) as error:
-        raise PackageError("bundle archive is invalid: %s" % error)
+        raise PackageError("bundle archive is invalid: %s" % error) from error
     manifest_bytes = entries.get("bundle-manifest.json")
     if manifest_bytes is None or sha256(manifest_bytes) != (evidence.get("manifest") or {}).get("sha256"):
         raise PackageError("bundle-manifest.json does not match bundle-evidence.json")
@@ -625,14 +625,14 @@ def verify_bundle(bundle_dir, expected_commit=None):
     try:
         BUNDLE.check_bundle_layout(sorted(entries), policy)
     except BUNDLE.BundleError as error:
-        raise PackageError(str(error))
+        raise PackageError(str(error)) from error
     reserved = [path for path in entries if _reserved_package_path(path)]
     if reserved:
         raise PackageError("bundle uses reserved package paths: " + ", ".join(sorted(reserved)))
     try:
         target = windows_targets.for_bundle_architecture((manifest.get("bundle") or {}).get("architecture"))
     except ValueError as error:
-        raise PackageError(str(error))
+        raise PackageError(str(error)) from error
     architecture = target["name"]
     if (application.get("target") != target["swiftTriple"]
             or application.get("buildHost") != BUNDLE.APPLICATION_HOSTS[architecture]):
@@ -732,7 +732,7 @@ def build_layout(bundle_dir, output_dir, version, publisher=None, expected_commi
     try:
         BUNDLE.check_bundle_layout(sorted(files) + [PACKAGE_MANIFEST], BUNDLE.Policy.load())
     except BUNDLE.BundleError as error:
-        raise PackageError(str(error))
+        raise PackageError(str(error)) from error
     rows = []
     for path in sorted(files):
         data, origin = files[path]
@@ -902,7 +902,7 @@ def verify_package(package_path, layout_dir, signed, unsigned_reference=None):
                     raise PackageError("block map hashes do not match " + name)
             ET.fromstring(archive.read(parts[CONTENT_TYPES_PART]))
     except (zipfile.BadZipFile, ET.ParseError, KeyError, ValueError) as error:
-        raise PackageError("package is unreadable: %s" % error)
+        raise PackageError("package is unreadable: %s" % error) from error
     if unsigned_reference is not None:
         with zipfile.ZipFile(unsigned_reference) as reference:
             unsigned_bytes = reference.read(BLOCKMAP_PART)

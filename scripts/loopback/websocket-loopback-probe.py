@@ -20,13 +20,13 @@ import argparse
 import base64
 import hashlib
 import json
-from pathlib import Path
 import socket
 import socketserver
 import struct
 import sys
 import threading
 import time
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:

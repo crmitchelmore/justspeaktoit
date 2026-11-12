@@ -229,7 +229,7 @@ def transform(source, destination, tool, architecture, source_commit, *, replace
             stream.write(data)
     except FileExistsError:
         if read_stable(retained)[0] != data:
-            raise SymbolsError("retained diagnostic original does not match its content hash")
+            raise SymbolsError("retained diagnostic original does not match its content hash") from None
     temporary = None
     try:
         version = subprocess.run([str(tool), "--version"], check=True, stdout=subprocess.PIPE,

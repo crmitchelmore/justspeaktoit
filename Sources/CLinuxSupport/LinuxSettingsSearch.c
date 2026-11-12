@@ -32,6 +32,7 @@ static struct {
     GtkStack *stack;
     GtkListBox *list;
     GtkWidget *empty;
+    GtkWidget *scroller;
     guint count;
     /* Set by choosing a result or Escape: the page list shows until the query
      * changes or the entry is focused again. */
@@ -71,6 +72,8 @@ static void search_refresh(void) {
     gboolean active = !search.dismissed && (query || (search.count > 0 && search_contains_focus()));
     gtk_widget_set_visible(search.empty, query && search.count == 0);
     gtk_widget_set_visible(GTK_WIDGET(search.list), search.count > 0);
+    /* With no rows the scroller would take focus itself and Orca would read an unnamed "scroll pane". */
+    gtk_widget_set_can_focus(search.scroller, search.count > 0);
     gtk_stack_set_visible_child_name(search.stack, active ? "results" : "navigation");
 }
 
@@ -142,11 +145,18 @@ static void on_search_focus_leave(GtkEventControllerFocus *controller, gpointer 
     search_queue_refresh();
 }
 
-/* Down moves from the entry into the results. */
+/* Down moves from the entry into the results. With no match it stays in the entry and repeats
+ * that nothing matched, rather than moving focus to another part of the window. */
 static gboolean on_search_key(GtkEventControllerKey *controller, guint keyval, guint keycode,
                               GdkModifierType modifiers, gpointer data) {
     (void)controller; (void)keycode; (void)modifiers; (void)data;
-    if ((keyval != GDK_KEY_Down && keyval != GDK_KEY_KP_Down) || !search_active() || search.count == 0) return FALSE;
+    if ((keyval != GDK_KEY_Down && keyval != GDK_KEY_KP_Down) || !search_active()) return FALSE;
+    if (search.count == 0) {
+        if (!gtk_widget_get_visible(search.empty)) return FALSE;
+        jsti_accessible_announce(GTK_WIDGET(search.entry), "No settings match",
+                                 GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+        return TRUE;
+    }
     GtkListBoxRow *first = gtk_list_box_get_row_at_index(search.list, 0);
     return first != NULL && gtk_widget_grab_focus(GTK_WIDGET(first));
 }
@@ -320,8 +330,10 @@ struct _GtkWidget *jsti_settings_search_new(struct _GtkWidget *navigation) {
     gtk_box_append(GTK_BOX(results), GTK_WIDGET(search.list));
     gtk_box_append(GTK_BOX(results), search.empty);
     GtkWidget *scroller = gtk_scrolled_window_new();
+    search.scroller = scroller;
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller), results);
+    gtk_widget_set_can_focus(scroller, FALSE);
 
     search.stack = GTK_STACK(gtk_stack_new());
     gtk_stack_set_transition_type(search.stack, GTK_STACK_TRANSITION_TYPE_NONE);
@@ -380,12 +392,17 @@ static const char *check_search(void) {
     if (!search_active() || !gtk_widget_get_visible(search.empty) || gtk_widget_get_visible(GTK_WIDGET(search.list))) {
         return "an unmatched settings query did not say no settings match";
     }
+    if (gtk_widget_get_can_focus(search.scroller) || gtk_widget_child_focus(search.scroller, GTK_DIR_TAB_FORWARD) ||
+        !on_search_key(NULL, GDK_KEY_Down, 0, 0, NULL)) {
+        return "an empty settings search let focus reach its unnamed scroller";
+    }
     apply_rows(rows, G_N_ELEMENTS(rows));
     GtkListBoxRow *second = gtk_list_box_get_row_at_index(search.list, 1);
     if (search.count != 2 || second == NULL || gtk_widget_get_visible(search.empty) ||
         g_strcmp0(gtk_widget_get_name(GTK_WIDGET(second)), rows[1].identifier) != 0) {
         return "settings search rows or their identifiers were not shown";
     }
+    if (!gtk_widget_get_can_focus(search.scroller)) return "settings search rows could not take focus";
     g_signal_emit_by_name(search.list, "row-activated", second);
     if (recorded.opens != 1 || recorded.opened != 1 || search_query()[0] != '\0' || search_active()) {
         return "choosing a settings result did not report its row and close the search";

@@ -155,6 +155,30 @@ Mac; UI tests run on hosted CI.
   marks each `GtkFlowBoxChild` with `gtk_widget_set_focusable(child, FALSE)`,
   so focus goes straight to the button: one Tab stop per button, not an extra
   silent "table cell" before each.
+- A navigation list is one Tab stop, as GTK lists are: Tab enters on the
+  selected row and leaves the list, and the arrow keys move between rows
+  (`gtk_list_box_set_tab_behavior(list, GTK_LIST_TAB_ITEM)`, with a small
+  focus-scope wrapper for GTK before 4.18). Otherwise Tab walks every sidebar
+  row and, because selection follows focus, opens each page in turn.
+- Selectable labels kept for mouse copying (About version details,
+  Troubleshooting findings) are both `gtk_widget_set_focusable(label, FALSE)`
+  and `gtk_widget_set_can_focus(label, FALSE)`: a selectable label's focus
+  handler claims Tab even when it cannot take focus, so `focusable` alone
+  traps Tab on it. A focused selectable label is read as silent or as
+  "selected opens popup".
+  Where the text explains a button, compose it into the button's
+  `GTK_ACCESSIBLE_PROPERTY_DESCRIPTION`. Orca reads the targets of a
+  described-by relation in varying order.
+- Activating a control with Return or Space keeps the focus ring visible, even
+  after GTK's `gtk-keyboard-focus-visible-timeout` has hidden it and the
+  control keeps focus (Start Recording with no API key).
+- A scrolled area with nothing focusable inside is
+  `gtk_widget_set_can_focus(scroller, FALSE)`, because an empty
+  `GtkScrolledWindow` takes focus itself and Orca reads an unnamed "scroll
+  pane" (settings search with no match, Troubleshooting before its findings
+  arrive; once they do, Troubleshooting focuses Check again if nothing has
+  focus). Down from the settings search with no match stays in the entry and
+  repeats "No settings match".
 - Guard: `scripts/accessibility/check-linux-accessibility.py` runs in the Linux workflow and
   fails on unnamed icon buttons, on drop-downs named only by property and on
   raw `gtk_accessible_announce` calls. The window self-test checks the status
@@ -163,7 +187,10 @@ Mac; UI tests run on hosted CI.
   the page, that sidebar shortcuts move focus with the selection, that About
   links take one Tab stop each, that idle status notices and state changes are
   announced as described above and that the Record buttons hand focus to Cancel
-  and back.
+  and back. It also checks that the wide sidebar is one Tab stop, that the
+  About and Troubleshooting labels are not, that keyboard activation keeps the
+  focus ring visible and that empty settings search results and an empty
+  Troubleshooting window keep focus out of their scrolled areas.
 
 ### Android (TalkBack and accessibility services)
 

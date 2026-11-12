@@ -172,5 +172,24 @@ final class ForegroundRunCollaboratorTests: XCTestCase {
         guard case .discarded(let result) = drained else { return XCTFail("Cancel discards the utterance") }
         XCTAssertEqual(result.text, "words")
     }
+
+    // MARK: Shown transcript
+
+    func testShownTranscript_partialsKeepTheThrottledCountAndTheFinalIsExact() {
+        var shown = ForegroundShownTranscript()
+        shown.show(partial: "one two", words: 2)
+        shown.show(partial: "one two three", words: nil)
+        XCTAssertEqual(shown.text, "one two three")
+        XCTAssertEqual(shown.wordCount, 2, "a partial the mirror did not admit keeps the earlier count")
+
+        shown.confidence = 0.8
+        shown.show(final: "one two\nthree  four")
+        XCTAssertEqual(shown.wordCount, 4)
+        let result = shown.result(confidence: shown.confidence, duration: 3, model: "apple/local")
+        XCTAssertEqual(result.text, "one two\nthree  four")
+        XCTAssertEqual(result.confidence, 0.8)
+        XCTAssertEqual(result.duration, 3)
+        XCTAssertEqual(result.modelIdentifier, "apple/local")
+    }
 }
 #endif

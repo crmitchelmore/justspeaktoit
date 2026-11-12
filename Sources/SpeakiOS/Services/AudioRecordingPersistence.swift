@@ -141,28 +141,8 @@ public final class AudioRecordingPersistence: ObservableObject {
             throw AudioPersistenceError.alreadyRecording
         }
 
-        let rid = UUID()
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let filename = "Recording-\(timestamp)-\(rid.uuidString.prefix(8)).m4a"
-        let url = Self.recordingsDirectory.appendingPathComponent(filename)
-
-        // Create an AAC output file.
-        // AVAudioFile with .m4a uses AAC by default when given a
-        // processing format; we convert PCM→AAC on write.
-        let outputSettings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: format.sampleRate,
-            AVNumberOfChannelsKey: format.channelCount,
-            AVEncoderBitRateKey: 128_000,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-        ]
-
-        let file = try AVAudioFile(
-            forWriting: url,
-            settings: outputSettings,
-            commonFormat: format.commonFormat,
-            interleaved: format.isInterleaved
-        )
+        let (url, file) = try RecordingOutputFile.create(for: format, in: Self.recordingsDirectory)
+        let filename = url.lastPathComponent
         // Install the file and open admission under one lock hold, so the
         // install is queued strictly ahead of any write this unlock admits.
         writerState.withLockUnchecked { state in
@@ -387,14 +367,6 @@ public final class AudioRecordingPersistence: ObservableObject {
         let keep = Self.shouldKeepCancelledRecording(at: url, startedAt: startedAt, keepAudio: keepsCancelledAudio())
         if !keep { try? FileManager.default.removeItem(at: url) }
         logger.info("Cancelled and \(keep ? "kept" : "deleted"): \(url.lastPathComponent)")
-    }
-
-    /// Under half a second holds no word, so it is never worth keeping.
-    static func shouldKeepCancelledRecording(at url: URL, startedAt: Date?, keepAudio: Bool,
-                                             now: Date = Date()) -> Bool {
-        guard keepAudio, let startedAt, now.timeIntervalSince(startedAt) >= 0.5 else { return false }
-        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber
-        return (size?.int64Value ?? 0) > 0
     }
 }
 #endif

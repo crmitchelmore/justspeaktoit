@@ -2,16 +2,12 @@ import SpeakCore
 import SwiftUI
 import UIKit
 
-// swiftlint:disable file_length
-
-// swiftlint:disable type_body_length
 /// Compact dictation-first keyboard surface.
 ///
-/// Layout is a live transcript strip above one control row:
-/// globe · language chip · profile chip · mic/stop · delete · return. Each chip
-/// appears only when it has somewhere to switch to, and the mic drops its
-/// caption once both are present so the row never wraps. There is deliberately
-/// no QWERTY layer — the globe key returns to the system keyboard for typing.
+/// Layout is a live transcript strip above one control row
+/// (``KeyboardControlRow``), with the insert-pending chip above both when the
+/// app has left a transcript waiting. There is deliberately no QWERTY layer —
+/// the globe key returns to the system keyboard for typing.
 struct KeyboardRootView: View {
     @ObservedObject var model: KeyboardViewModel
     let showsInputModeSwitch: Bool
@@ -20,12 +16,24 @@ struct KeyboardRootView: View {
     let showInputModeList: (UIButton, UIEvent) -> Void
 
     var body: some View {
+        let surface = model.surface
         VStack(spacing: 8) {
-            if let chip = pendingPickupChip {
-                pickupChipRow(chip)
+            if case let .chip(chip) = model.pickupOffering {
+                KeyboardPickupChipRow(
+                    chip: chip,
+                    insert: { model.insertPendingPickup() },
+                    dismiss: { model.dismissPendingPickup() }
+                )
             }
-            transcriptStrip
-            controlRow
+            transcriptStrip(surface)
+            KeyboardControlRow(
+                model: model,
+                surface: surface,
+                showsInputModeSwitch: showsInputModeSwitch,
+                insertText: insertText,
+                deleteBackward: deleteBackward,
+                showInputModeList: showInputModeList
+            )
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
@@ -34,75 +42,23 @@ struct KeyboardRootView: View {
         .background(Color(uiColor: .systemGroupedBackground))
     }
 
-    // MARK: - Insert-pending chip (issue #1003)
-
-    private var pendingPickupChip: KeyboardPickupPolicy.Chip? {
-        guard case let .chip(chip) = model.pickupOffering else { return nil }
-        return chip
-    }
-
-    /// One tap inserts; one tap dismisses. Nothing here inserts on its own —
-    /// putting a transcript the user did not just ask for into whichever field
-    /// happens to be focused would corrupt their document.
-    private func pickupChipRow(_ chip: KeyboardPickupPolicy.Chip) -> some View {
-        HStack(spacing: 6) {
-            Button {
-                model.insertPendingPickup()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "text.insert")
-                        .font(.footnote.weight(.semibold))
-                        .accessibilityHidden(true)
-                    Text(chip.label)
-                        .font(.footnote.weight(.medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
-                .padding(.horizontal, 10)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(chip.label)
-            .accessibilityHint("Inserts this transcript at the cursor")
-            .accessibilityIdentifier("keyboardPickupChip")
-
-            Button {
-                model.dismissPendingPickup()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.footnote.weight(.semibold))
-                    .frame(width: 34, height: 34)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss pending transcript")
-            .accessibilityIdentifier("keyboardPickupDismissButton")
-        }
-        .foregroundStyle(.primary)
-        .background(
-            Color.accentColor.opacity(0.16),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-        )
-    }
-
-    // MARK: - Transcript strip
-
-    private var transcriptStrip: some View {
+    private func transcriptStrip(_ surface: KeyboardSurfaceState) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: stripSymbol)
+            Image(systemName: surface.stripSymbol)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(stripTint)
+                .foregroundStyle(Self.tint(surface.stripTone))
                 .padding(.top, 2)
                 .accessibilityHidden(true)
-            Text(stripText)
-                .font(.subheadline.weight(stripShowsLiveText ? .medium : .regular))
-                .foregroundStyle(stripShowsLiveText ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            Text(surface.stripText)
+                .font(.subheadline.weight(surface.showsLiveText ? .medium : .regular))
+                .foregroundStyle(surface.showsLiveText ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.updatesFrequently)
-                .accessibilityLabel(stripAccessibilityLabel)
+                .accessibilityLabel(surface.stripAccessibilityLabel)
                 .accessibilityIdentifier("keyboardLiveTranscript")
-            if showsCancel {
+            if surface.showsCancel {
                 Button("Cancel") {
                     model.cancelTapped()
                 }
@@ -114,473 +70,15 @@ struct KeyboardRootView: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 62, alignment: .topLeading)
         .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .animation(.easeInOut(duration: 0.15), value: stripText)
+        .animation(.easeInOut(duration: 0.15), value: surface.stripText)
     }
 
-    // MARK: - Control row
-
-    private var controlRow: some View {
-        HStack(spacing: 8) {
-            if showsInputModeSwitch {
-                InputModeSwitchButton(action: showInputModeList)
-                    .frame(width: 46, height: 46)
-                    .background(keyBackground)
-                    .accessibilityLabel("Next keyboard")
-                    .accessibilityHint("Touch and hold to choose another keyboard")
-            }
-
-            if let chip = model.languageChipLabel, model.showsLanguageChip, !isBlocked {
-                chipButton(
-                    label: chip,
-                    accessibilityLabel: "Dictation language \(chip). Tap to switch.",
-                    identifier: "keyboardLanguageChip",
-                    action: model.cycleLanguage
-                )
-            }
-
-            if let chip = model.profileChipLabel, !isBlocked {
-                profileMenu(label: chip)
-            }
-
-            micButton
-
-            Button {
-                deleteBackward()
-            } label: {
-                Image(systemName: "delete.left")
-                    .font(.body.weight(.medium))
-                    .frame(width: 46, height: 46)
-            }
-            .background(keyBackground)
-            .disabled(controlsDisabled)
-            .accessibilityLabel("Delete backward")
-            .accessibilityIdentifier("keyboardDeleteButton")
-
-            Button {
-                insertText("\n")
-            } label: {
-                Image(systemName: "return")
-                    .font(.body.weight(.medium))
-                    .frame(width: 46, height: 46)
-            }
-            .background(keyBackground)
-            .disabled(controlsDisabled)
-            .accessibilityLabel("Return")
-            .accessibilityIdentifier("keyboardReturnButton")
-        }
-        .foregroundStyle(.primary)
-    }
-
-    /// One quick-switch chip: a key-sized button whose single tap advances the
-    /// preference ring, disabled while capture or post-processing runs.
-    private func chipButton(
-        label: String,
-        accessibilityLabel: String,
-        identifier: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.footnote.weight(.semibold))
-                .lineLimit(1)
-                .padding(.horizontal, 8)
-                .frame(minWidth: 44, minHeight: 46)
-        }
-        .background(keyBackground)
-        .disabled(model.isBusy)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityIdentifier(identifier)
-    }
-
-    private func profileMenu(label: String) -> some View {
-        Menu {
-            ForEach(model.profileOptions) { profile in
-                Button {
-                    model.selectProfile(profile.id)
-                } label: {
-                    Label(
-                        "\(profile.displayName) · \(profile.route.displayName)",
-                        systemImage: profile.id == model.selectedProfileIdentifier ? "checkmark" : "circle"
-                    )
-                }
-            }
-        } label: {
-            Text(label)
-                .font(.footnote.weight(.semibold))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .padding(.horizontal, 8)
-                .frame(minWidth: 44, minHeight: 46)
-        }
-        .background(keyBackground)
-        .disabled(model.isBusy)
-        .accessibilityLabel(
-            "Dictation profile \(model.profileDisplayName), \(model.profileRouteDisplayName). Choose profile."
-        )
-        .accessibilityIdentifier("keyboardProfileChip")
-    }
-
-    private var micButton: some View {
-        Button {
-            model.micTapped()
-        } label: {
-            HStack(spacing: 8) {
-                if micShowsProgress {
-                    ProgressView()
-                } else {
-                    Image(systemName: micSymbol)
-                        .font(.title3.weight(.semibold))
-                }
-                if let caption = micCaption {
-                    Text(caption)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 46)
-            .foregroundStyle(.white)
-            .background(
-                micTint,
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(micDisabled)
-        .accessibilityLabel(micAccessibilityLabel)
-        .accessibilityIdentifier("keyboardMicButton")
-    }
-
-    private var keyBackground: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color(uiColor: .secondarySystemGroupedBackground))
-    }
-
-    // MARK: - Strip content
-
-    private var stripShowsLiveText: Bool {
-        !currentLiveText.isEmpty
-    }
-
-    private var currentLiveText: String {
-        switch model.mode {
-        case .direct:
-            return model.liveText
-        case .handoff:
-            return model.handoff.liveTranscript
-        case .blocked:
-            return ""
-        }
-    }
-
-    private var stripText: String {
-        if stripShowsLiveText {
-            return currentLiveText
-        }
-        switch model.mode {
-        case .direct:
-            switch model.directState {
-            case .idle:
-                return "Tap the mic and speak. Words appear as you talk."
-            case .starting:
-                return "Starting the microphone…"
-            case .recording:
-                return "Listening…"
-            case .stopping:
-                return "Finishing…"
-            case .finished:
-                return "Inserted. Tap the mic to dictate more."
-            case let .failed(failure):
-                return Self.failureCopy(failure)
-            }
-        case .handoff:
-            return Self.handoffCopy(
-                model.handoff.presentation,
-                endReason: model.handoff.instantEndReason
-            )
-        case let .blocked(reason):
-            switch reason {
-            case .fullAccessRequired:
-                return "Turn on Allow Full Access for Just Speak in Settings › General › Keyboard to dictate."
-            case .sharedContainerUnavailable:
-                return "Open the Just Speak app once, then try this keyboard again."
-            }
-        }
-    }
-
-    private static func failureCopy(_ failure: KeyboardDictationMachine.Failure) -> String {
-        switch failure {
-        case .microphoneUnavailable:
-            return "The keyboard can't use the microphone. Allow it in Settings, "
-                + "or open Just Speak and enable Instant Dictation."
-        case .speechRecognitionUnavailable:
-            return "Speech recognition isn't available. Allow it in Settings, then try again."
-        case .audioInterrupted:
-            return "Audio was interrupted. Tap the mic to try again."
-        case .targetChanged:
-            return "The text field changed, so dictation stopped. Tap the mic to continue here."
-        case .noSpeech:
-            return "No speech detected. Tap the mic and try again."
-        }
-    }
-
-    private static func handoffCopy(
-        _ presentation: KeyboardHandoffController.Presentation,
-        endReason: InstantDictationReadinessEndReason?
-    ) -> String {
-        switch presentation {
-        case .idle:
-            return "Instant Dictation ready. Tap the mic to speak."
-        case .starting:
-            return "Connecting to Just Speak…"
-        case .waitingForApp:
-            // A recorded terminal reason says which of microphone exhaustion,
-            // session-window expiry or store failure ended readiness; without
-            // one the generic reconnect prompt still stands (issue #995).
-            guard let endReason else {
-                return "Open Just Speak once to reconnect Instant Dictation, then return here."
-            }
-            return endReason.readinessMessage
-        case .recording:
-            return "Listening via Just Speak…"
-        case .transcribing:
-            return "Finishing transcript…"
-        case .inserted:
-            return "Inserted. Tap the mic to dictate more."
-        case .unavailable:
-            return "Just Speak is unavailable. Open the app once, then tap the mic to retry."
-        case .cancelled:
-            return "Cancelled. Nothing was inserted."
-        case .targetChanged:
-            return "The text field changed, so nothing was inserted. Tap the mic to retry."
-        case let .error(code):
-            return Self.handoffErrorCopy(code)
-        }
-    }
-
-    private static func handoffErrorCopy(_ code: KeyboardHandoffRecord.FailureCode) -> String {
-        switch code {
-        case .fullAccessRequired:
-            return "Turn on Full Access in Settings, then try again."
-        case .appUnavailable:
-            // Also how a background microphone refusal arrives (issue #1469):
-            // iOS only lets Just Speak take the microphone again once it has
-            // been opened.
-            return "iOS paused Just Speak's microphone. Open Just Speak, then return here and tap the mic."
-        case .recordingUnavailable:
-            return "Just Speak couldn't start recording. Tap the mic to retry."
-        case .noSpeech:
-            return "No speech detected. Nothing was inserted."
-        case .timedOut:
-            return "The request expired. Tap the mic to retry."
-        case .invalidRequest, .unknown:
-            return "The handoff ended safely. Tap the mic to retry."
-        case .targetChanged:
-            return "The destination changed, so nothing was inserted. Tap the mic to retry."
-        case .profileUnavailable:
-            // Reported both before recording (missing model or credentials,
-            // nothing recorded) and after a failed polish (raw transcript saved
-            // to History), so the copy must hold for either.
-            return "This profile is unavailable. Open Just Speak to check its model and credentials. "
-                + "Anything already recorded is saved in the app's History."
-        }
-    }
-
-    /// The status symbol is hidden from assistive technology, so VoiceOver
-    /// reads the strip as status plus content.
-    private var stripAccessibilityLabel: String {
-        guard stripShowsLiveText else { return stripText }
-        return "\(liveStatusDescription). \(stripText)"
-    }
-
-    private var liveStatusDescription: String {
-        switch model.mode {
-        case .direct:
-            switch model.directState {
-            case .stopping: return "Finishing dictation"
-            case .finished: return "Dictation inserted"
-            default: return "Dictating"
-            }
-        case .handoff:
-            switch model.handoff.presentation {
-            case .transcribing: return "Finishing dictation"
-            case .inserted: return "Dictation inserted"
-            default: return "Dictating"
-            }
-        case .blocked:
-            return "Dictation unavailable"
-        }
-    }
-
-    private var stripSymbol: String {
-        switch model.mode {
-        case .direct:
-            switch model.directState {
-            case .recording, .stopping: return "waveform"
-            case .finished: return "checkmark.circle.fill"
-            case .failed: return "exclamationmark.triangle.fill"
-            default: return "mic"
-            }
-        case .handoff:
-            switch model.handoff.presentation {
-            case .recording, .transcribing: return "waveform"
-            case .inserted: return "checkmark.circle.fill"
-            case .waitingForApp: return "arrow.up.forward.app"
-            case .unavailable, .targetChanged, .error: return "exclamationmark.triangle.fill"
-            default: return "mic"
-            }
-        case .blocked:
-            return "lock.trianglebadge.exclamationmark"
-        }
-    }
-
-    private var stripTint: Color {
-        switch stripSymbol {
-        case "checkmark.circle.fill": return .green
-        case "exclamationmark.triangle.fill", "lock.trianglebadge.exclamationmark": return .orange
-        case "waveform": return .red
-        case "wand.and.sparkles": return .blue
-        default: return .secondary
-        }
-    }
-
-    // MARK: - Mic button state
-
-    private var micSymbol: String {
-        if isActivelyCapturing {
-            return "stop.fill"
-        }
-        return "mic.fill"
-    }
-
-    private var micTint: Color {
-        if isActivelyCapturing {
-            return .red
-        }
-        return micDisabled ? Color.gray.opacity(0.5) : .blue
-    }
-
-    /// The caption is dropped once both quick-switch chips are on the row, so
-    /// the single control row keeps a full-size mic key on the narrowest
-    /// supported iPhone instead of wrapping or truncating.
-    private var micCaption: String? {
-        if model.languageChipLabel != nil,
-           model.showsLanguageChip,
-           model.profileChipLabel != nil {
-            return nil
-        }
-        if isActivelyCapturing {
-            return "Stop"
-        }
-        switch model.mode {
-        case .direct, .handoff:
-            return "Speak"
-        case .blocked:
-            return nil
-        }
-    }
-
-    private var micShowsProgress: Bool {
-        switch model.mode {
-        case .direct:
-            return model.directState == .starting || model.directState == .stopping
-        case .handoff:
-            let presentation = model.handoff.presentation
-            return presentation == .starting || presentation == .transcribing
-        case .blocked:
-            return false
-        }
-    }
-
-    private var isActivelyCapturing: Bool {
-        switch model.mode {
-        case .direct:
-            return model.directState == .recording
-        case .handoff:
-            return model.handoff.presentation == .recording
-        case .blocked:
-            return false
-        }
-    }
-
-    private var micDisabled: Bool {
-        switch model.mode {
-        case .direct:
-            return model.directState == .stopping
-        case .handoff:
-            let presentation = model.handoff.presentation
-            return presentation == .transcribing || presentation == .waitingForApp
-        case .blocked:
-            return true
-        }
-    }
-
-    private var micAccessibilityLabel: String {
-        isActivelyCapturing ? "Stop dictation" : "Start dictation"
-    }
-
-    private var controlsDisabled: Bool {
-        switch model.mode {
-        case .direct:
-            return model.isBusy
-        case .handoff:
-            let presentation = model.handoff.presentation
-            return presentation == .recording || presentation == .transcribing
-        case .blocked:
-            return false
-        }
-    }
-
-    private var isBlocked: Bool {
-        if case .blocked = model.mode { return true }
-        return false
-    }
-
-    private var showsCancel: Bool {
-        switch model.mode {
-        case .direct:
-            return model.directState == .recording || model.directState == .starting
-        case .handoff:
-            let presentation = model.handoff.presentation
-            return presentation == .starting || presentation == .recording
-                || presentation == .transcribing
-        case .blocked:
-            return false
-        }
-    }
-}
-// swiftlint:enable type_body_length
-
-struct InputModeSwitchButton: UIViewRepresentable {
-    let action: (UIButton, UIEvent) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(action: action)
-    }
-
-    func makeUIView(context: Context) -> UIButton {
-        let button = UIButton(type: .system)
-        button.setImage(UIImage(systemName: "globe"), for: .normal)
-        button.tintColor = .label
-        button.accessibilityLabel = "Next keyboard"
-        button.addTarget(
-            context.coordinator,
-            action: #selector(Coordinator.handle(_:event:)),
-            for: .allTouchEvents
-        )
-        return button
-    }
-
-    func updateUIView(_ uiView: UIButton, context: Context) {}
-
-    final class Coordinator: NSObject {
-        let action: (UIButton, UIEvent) -> Void
-
-        init(action: @escaping (UIButton, UIEvent) -> Void) {
-            self.action = action
-        }
-
-        @objc func handle(_ sender: UIButton, event: UIEvent) {
-            action(sender, event)
+    private static func tint(_ tone: KeyboardSurfaceState.Tone) -> Color {
+        switch tone {
+        case .success: return .green
+        case .warning: return .orange
+        case .live: return .red
+        case .neutral: return .secondary
         }
     }
 }

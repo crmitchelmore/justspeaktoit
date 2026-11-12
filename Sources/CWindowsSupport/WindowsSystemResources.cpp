@@ -351,6 +351,8 @@ bool jsti_system_resources_self_test(HWND owner, std::string &error) {
         while (PeekMessageW(&message, window, refreshMessage, refreshMessage, PM_REMOVE)) DispatchMessageW(&message);
     };
     auto enabled = [&](int id) { return IsWindowEnabled(GetDlgItem(window, id)) != FALSE; };
+    // The fixture stays hidden, so IsWindowVisible is always false; check each control's own style instead.
+    auto shown = [](HWND child) { return (GetWindowLongPtrW(child, GWL_STYLE) & WS_VISIBLE) != 0; };
     auto text = [&](int id) {
         wchar_t buffer[512]{}; GetDlgItemTextW(window, id, buffer, 512); return std::wstring(buffer);
     };
@@ -368,7 +370,7 @@ bool jsti_system_resources_self_test(HWND owner, std::string &error) {
     passed = jsti_window_set_system_resources(&view) == 0 && passed;
     drain();
     passed = passed && SendDlgItemMessageW(window, listID, LB_GETCOUNT, 0, 0) == 2 &&
-        text(headlineID) == L"2 resources in use." && IsWindowVisible(GetDlgItem(window, warningID)) &&
+        text(headlineID) == L"2 resources in use." && shown(GetDlgItem(window, warningID)) &&
         enabled(releaseID) && text(releaseID) == L"&Stop playback" && enabled(releaseAllID);
     SendDlgItemMessageW(window, releaseID, BM_CLICK, 0, 0);
     passed = passed && observed.calls == 1 && observed.event == JSTI_EVENT_SYSTEM_RESOURCE_RELEASE &&
@@ -389,14 +391,14 @@ bool jsti_system_resources_self_test(HWND owner, std::string &error) {
     passed = jsti_window_set_system_resources(&empty) == 0 && passed;
     drain();
     passed = passed && SendDlgItemMessageW(window, listID, LB_GETCOUNT, 0, 0) == 0 &&
-        !IsWindowVisible(GetDlgItem(window, warningID)) && !enabled(releaseID) && !enabled(releaseAllID) &&
+        !shown(GetDlgItem(window, warningID)) && !enabled(releaseID) && !enabled(releaseAllID) &&
         text(detailID) == L"Just Speak to It isn't holding anything.";
     passed = jsti_window_set_system_resources(&view) == 0 && passed;
     drain();
     auto fits = [&] {
         RECT client{}; GetClientRect(window, &client);
         for (HWND child = GetWindow(window, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT)) {
-            if (!IsWindowVisible(child)) continue;
+            if (!shown(child)) continue;
             RECT bounds{}; GetWindowRect(child, &bounds);
             MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&bounds), 2);
             if (bounds.left < 0 || bounds.top < 0 || bounds.right > client.right || bounds.bottom > client.bottom)

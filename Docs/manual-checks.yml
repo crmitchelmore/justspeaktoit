@@ -524,6 +524,21 @@ sessions:
           - "If any attempt shows a message, note its exact wording."
         expected: "Each dictation inserts exactly once and music keeps playing. No attempt says to check the microphone permission. If iOS ever refuses, the keyboard says \"iOS paused Just Speak's microphone. Open Just Speak, then return here and tap the mic.\", and doing that makes the next attempt work."
         final_gate: true
+      - id: "iphone-keyboard-background-repeat"
+        issues:
+          - 1469
+          - 661
+        title: "Keyboard: three dictations in a row from Notes, live and batch, without reopening the app"
+        minutes: 5
+        core: true
+        build: "TestFlight Just Speak to It Alpha that records keyboard dictations on the readiness engine"
+        steps:
+          - "Keyboard enabled with Allow Full Access on. Open Just Speak once so Instant Dictation is ready, then swipe home."
+          - "In Notes, with the Just Speak keyboard, dictate \"first\", \"second\" and \"third\" one after another, stopping each time. Do not open Just Speak in between."
+          - "In Just Speak choose a batch (record then upload) transcription model, swipe home and dictate \"batch\" in Notes."
+          - "If any attempt shows a message, note its exact wording."
+        expected: "All four dictations insert exactly once. The keyboard never asks for microphone or Speech permission and never shows a microphone error."
+        final_gate: true
       - id: "iphone-hands-free"
         issues:
           - 614

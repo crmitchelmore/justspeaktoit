@@ -16,15 +16,16 @@ final class TranscriberCoordinator: ObservableObject {
     /// button and the auto-start stay on one action.
     @Published private(set) var state: RecordingServiceState = .idle
     @Published private(set) var isRunning = false
-    @Published private(set) var partialText = ""
+    @Published private(set) var shown = ForegroundShownTranscript()
+    var partialText: String { shown.text }
+    var wordCount: Int { shown.wordCount }
+    var confidence: Double? { shown.confidence }
     @Published private(set) var error: Error? {
         didSet { if error == nil { issueFailureSnapshot = IOSIssueReporter.failedRequest() } }
     }
     private(set) var issueFailureSnapshot = IOSIssueReporter.failedRequest()
     @Published private(set) var recordingWarning: String?
     @Published private(set) var currentModel: String = AppleLocalModels.preferredSpeechModelID
-    @Published private(set) var confidence: Double?
-    @Published private(set) var wordCount: Int = 0
     @Published private(set) var captureStopNotice: String?
 
     var audioSessionManager: AudioSessionManager { launcher.audioSessionManager }
@@ -247,7 +248,7 @@ private extension TranscriberCoordinator {
                 guard let self else { return }
                 self.observation.noteFirstLivePartial(text: text, isFinal: isFinal, run: runID)
                 self.handlePartialResult(text: text, isFinal: isFinal)
-                self.confidence = session.confidence
+                self.shown.confidence = session.confidence
             },
             warning: { [weak self] in self?.handleRecordingWarning($0) },
             failure: { [weak self] error, session in self?.handleSessionFailure(error, from: session) },
@@ -274,9 +275,8 @@ private extension TranscriberCoordinator {
     }
 
     func handlePartialResult(text: String, isFinal: Bool) {
-        partialText = text
         // Throttled; the full transcript is committed once more at stop.
-        if let words = mirror.admit(text) { wordCount = words }
+        shown.show(partial: text, words: mirror.admit(text))
         liveActivity.publishTranscript(
             text, finalising: owner.phase == .stopping, presentingCapture: observation.isPresentingCapture,
             words: wordCount, seconds: elapsedSeconds
@@ -297,8 +297,7 @@ private extension TranscriberCoordinator {
             }
         )
         guard case .finished(let result) = settlement else { return settlement.discarded }
-        partialText = result.text
-        wordCount = result.text.split(whereSeparator: \.isWhitespace).count
+        shown.show(final: result.text)
         liveActivity.complete(
             result, words: wordCount, seconds: duration, rearmHandsFree: rearmHandsFree, stopNotice: captureStopNotice
         )
@@ -309,14 +308,10 @@ private extension TranscriberCoordinator {
     }
 
     func liveResult(confidence: Double?, duration: Int) -> TranscriptionResult {
-        .shown(partialText, confidence: confidence, duration: duration, model: currentModel)
+        shown.result(confidence: confidence, duration: duration, model: currentModel)
     }
 
-    func clearShownTranscript() {
-        partialText = ""
-        wordCount = 0
-        confidence = nil
-    }
+    func clearShownTranscript() { shown = ForegroundShownTranscript() }
 
     func emptyResult() -> TranscriptionResult { .shown("", confidence: nil, duration: 0, model: currentModel) }
 

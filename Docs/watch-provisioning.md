@@ -13,11 +13,18 @@ Default generates and CI builds are unaffected.
 | Target | Bundle id | Product |
 | --- | --- | --- |
 | `JustSpeakWatchApp` | `com.justspeaktoit.ios.watchkitapp` | watchOS app (companion of `com.justspeaktoit.ios`) |
-| `JustSpeakWatchWidgetExtension` | `com.justspeaktoit.ios.watchkitapp.complication` | WidgetKit extension embedded in the watch app |
+| `JustSpeakWatchWidgetExtension` | `com.justspeaktoit.ios.watchkitapp.widget` | WidgetKit extension embedded in the watch app |
 
 Alpha maps every id under the Alpha app: `com.justspeaktoit.ios.alpha.watchkitapp`
-and `com.justspeaktoit.ios.alpha.watchkitapp.complication`, with the App Group
+and `com.justspeaktoit.ios.alpha.watchkitapp.widget`, with the App Group
 `group.com.justspeaktoit.watch.alpha` (`watchAppGroup` in `ReleaseTrains.json`).
+
+The complication's suffix is `watchkitapp.widget` on every train. Apple refused
+to register `com.justspeaktoit.ios.alpha.watchkitapp.complication` for the team
+("not available"), and Stable had never shipped the watch app, so the old
+`watchkitapp.complication` suffix was retired rather than kept per train.
+Linking the watch App Group to the new identifier is still a manual portal step
+(see [Portal steps](#portal-steps)).
 
 Extension ids must stay prefixed by the containing app's id, and the watch
 app's id must stay prefixed by the iPhone app's id — renaming any of the three
@@ -50,12 +57,13 @@ available.
 Alpha TestFlight (`release-ios.yml` and `apple-profiles.yml` do the rest):
 
 1. The workflows register `com.justspeaktoit.ios.alpha.watchkitapp` and
-   `com.justspeaktoit.ios.alpha.watchkitapp.complication` when missing and
+   `com.justspeaktoit.ios.alpha.watchkitapp.widget` when missing and
    enable **App Groups** on both through the App Store Connect API.
 2. **Owner, in the Apple Developer portal:** register the App Group
    `group.com.justspeaktoit.watch.alpha` if it does not exist, then open each of
    the two Alpha watch identifiers, configure **App Groups** and tick that
-   group. The API cannot make this association.
+   group. The API cannot make this association. After the first run registers
+   `com.justspeaktoit.ios.alpha.watchkitapp.widget`, it needs this link too.
 3. Run **Apple App IDs and profiles** (`apple-profiles.yml`). Its Alpha summary
    reports `Watch app: ready for Alpha` once both profiles carry the group.
    The next Alpha release then embeds the watch app; `TUIST_WATCH_PROFILE_NAME`
@@ -68,7 +76,7 @@ path with the existing group `group.com.justspeaktoit.ios.alpha`.
 Stable (only when the watch app is approved for Stable):
 
 1. Register `com.justspeaktoit.ios.watchkitapp` and
-   `com.justspeaktoit.ios.watchkitapp.complication`, register the App Group
+   `com.justspeaktoit.ios.watchkitapp.widget`, register the App Group
    `group.com.justspeaktoit.watch`, enable **App Groups** on both identifiers
    and associate that group with each.
 2. Turn the flag on for Stable in the **Select Alpha preview targets** step.

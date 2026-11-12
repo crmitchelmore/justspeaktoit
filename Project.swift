@@ -526,7 +526,7 @@ let watchWidgetTarget: Target = .target(
     destinations: [.appleWatch],
     product: .appExtension,
     // Extension bundle ids must be prefixed with the containing watch app's.
-    bundleId: trainIdentifier("com.justspeaktoit.ios.watchkitapp.complication"),
+    bundleId: trainIdentifier("com.justspeaktoit.ios.watchkitapp.widget"),
     deploymentTargets: .watchOS("10.0"),
     infoPlist: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatchWidget/Info.plist"))),
     sources: [

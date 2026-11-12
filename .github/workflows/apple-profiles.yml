@@ -113,7 +113,7 @@ jobs:
             echo "#### Alpha preview targets" >> "$GITHUB_STEP_SUMMARY"
             preview "Share extension" "$BUNDLE_ID.share" "$IOS_APP_GROUP" "JustSpeakToIt Share"
             preview "Watch app" "$BUNDLE_ID.watchkitapp" "$WATCH_APP_GROUP" "JustSpeakToIt Watch"
-            preview "Watch complication" "$BUNDLE_ID.watchkitapp.complication" "$WATCH_APP_GROUP" \
+            preview "Watch complication" "$BUNDLE_ID.watchkitapp.widget" "$WATCH_APP_GROUP" \
               "JustSpeakToIt Watch Complication"
           fi
           rm -f "$APP_STORE_CONNECT_KEY_PATH"

@@ -29,7 +29,7 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
  const watch=join(app,'Watch/JustSpeakToItWatch.app'),complication=join(watch,'PlugIns/JustSpeakWatchWidgetExtension.appex');mkdirSync(complication,{recursive:true});
  const watchGroup={'com.apple.security.application-groups':['group.com.justspeaktoit.watch.alpha']};
  plist(join(watch,'Info.plist'),{...info,CFBundleIdentifier:info.CFBundleIdentifier+'.watchkitapp',WKCompanionAppBundleIdentifier:info.CFBundleIdentifier});
- plist(join(complication,'Info.plist'),{...info,CFBundleIdentifier:info.CFBundleIdentifier+'.watchkitapp.complication'});
+ plist(join(complication,'Info.plist'),{...info,CFBundleIdentifier:info.CFBundleIdentifier+'.watchkitapp.widget'});
  plist(join(watch,'signed.plist'),watchGroup);plist(join(complication,'signed.plist'),watchGroup);
  assert.match(verify().toString(),/Verified ios alpha/);
  plist(join(complication,'signed.plist'),{'com.apple.security.application-groups':entitlements['com.apple.security.application-groups']});

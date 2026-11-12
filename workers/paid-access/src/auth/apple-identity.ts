@@ -46,12 +46,12 @@ function remoteJwks(): ReturnType<typeof createRemoteJWKSet> {
 }
 
 /**
- * Apple echoes the `nonce` exactly as the client set it. Native clients set it
- * to the SHA-256 hex digest of a locally generated random value, so we accept
- * either the raw value or its digest and compare in constant time.
+ * Apple echoes the `nonce` exactly as the client set it. Every client sets it
+ * to the SHA-256 hex digest of a locally generated random value and sends the
+ * raw value here, so only the digest is accepted. Accepting the raw value too
+ * would let anyone holding a token replay it by submitting the claim itself.
  */
 async function nonceMatches(expectedRawNonce: string, tokenNonce: string): Promise<boolean> {
-  if (timingSafeEqual(expectedRawNonce, tokenNonce)) return true;
   const digest = await sha256Hex(expectedRawNonce);
   return timingSafeEqual(digest, tokenNonce);
 }

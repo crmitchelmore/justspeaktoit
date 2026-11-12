@@ -25,6 +25,7 @@ gboolean configuration_self_test(void);
 gboolean sidebar_navigation_self_test(void); /* LinuxWindowCommandSelfTest.c */
 gboolean action_execution_self_test(void);
 gboolean command_forwarding_self_test(void);
+gboolean status_notice_self_test(void);
 gboolean command_process_self_test(char *error, size_t capacity);
 gboolean post_processing_self_test(void); /* LinuxWindowCleanupSelfTest.c */
 int32_t local_cleanup_sources_self_test(char *error, size_t capacity);

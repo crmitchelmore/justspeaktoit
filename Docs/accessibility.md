@@ -132,6 +132,14 @@ Mac; UI tests run on hosted CI.
   `jsti_accessible_announce`, which speaks through the widget's window: GTK
   silently drops `gtk_accessible_announce` on a child widget whose accessible
   context a screen reader has not queried yet.
+- GTK does not treat the `status` role as a live region, so an idle
+  status-only update (a finished model download, a saved setting) is
+  announced once. A state change announces the status it carried, even if a
+  later status-only update (such as a recording sound warning) replaces the
+  label first.
+- Making the focused Record button insensitive while transcribing moves focus
+  to Cancel; when the work ends, focus returns to the Record button that was
+  pressed.
 - Wizard steps that rebuild a page announce the new step and put focus back on
   the button that was pressed, because making the footer insensitive drops it.
 - Name read-only text views, such as the transcript (`Transcript`).
@@ -152,8 +160,10 @@ Mac; UI tests run on hosted CI.
   raw `gtk_accessible_announce` calls. The window self-test checks the status
   role, that dashboard flow boxes never swallow Tab, that setup steps keep
   keyboard focus, that collapsed-sidebar and search navigation move focus into
-  the page, that sidebar shortcuts move focus with the selection and that About
-  links take one Tab stop each.
+  the page, that sidebar shortcuts move focus with the selection, that About
+  links take one Tab stop each, that idle status notices and state changes are
+  announced as described above and that the Record buttons hand focus to Cancel
+  and back.
 
 ### Android (TalkBack and accessibility services)
 

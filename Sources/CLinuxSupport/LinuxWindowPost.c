@@ -126,13 +126,16 @@ static gboolean announce_state(gpointer unused) {
     (void)unused;
     ui.state_announcement = 0;
     gchar *phase = g_steal_pointer(&ui.phase_announcement);
+    gchar *status = g_steal_pointer(&ui.status_announcement);
+    ui.status_announcement_is_state = FALSE;
     if (phase != NULL)
         jsti_accessible_announce(GTK_WIDGET(ui.window), phase, ui.phase_urgent
                                  ? GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_HIGH : GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
     else if (jsti_hud_card() == NULL)
-        jsti_accessible_announce(GTK_WIDGET(ui.window), gtk_label_get_text(ui.status),
+        jsti_accessible_announce(GTK_WIDGET(ui.window), status != NULL ? status : gtk_label_get_text(ui.status),
                                  GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
     g_free(phase);
+    g_free(status);
     return G_SOURCE_REMOVE;
 }
 
@@ -148,8 +151,19 @@ void jsti_window_announce_phase(const char *text, gboolean urgent) {
 
 void update_apply(gpointer pointer) {
     Update *update = pointer;
-    if (update->state >= 0 && update->state != ui.state && ui.state_announcement == 0)
-        ui.state_announcement = g_idle_add_full(G_PRIORITY_LOW, announce_state, NULL, NULL);
+    gboolean state_changes = update->state >= 0 && update->state != ui.state;
+    /* GTK does not treat the status role as a live region, so an idle notice such as a finished model download
+       would otherwise stay silent. Recording notices are spoken through state changes and the HUD instead. */
+    gboolean notice = !state_changes && ui.state == JSTI_STATE_IDLE && update->status != NULL &&
+                      update->status[0] != '\0' && g_strcmp0(update->status, gtk_label_get_text(ui.status)) != 0;
+    /* Later status-only updates (such as a sound warning) must not replace the state's own words. */
+    if (state_changes || (notice && !(ui.state_announcement != 0 && ui.status_announcement_is_state))) {
+        g_free(ui.status_announcement);
+        ui.status_announcement = g_strdup(update->status);
+        ui.status_announcement_is_state = state_changes;
+        if (ui.state_announcement == 0)
+            ui.state_announcement = g_idle_add_full(G_PRIORITY_LOW, announce_state, NULL, NULL);
+    }
     if (update->status != NULL) gtk_label_set_text(ui.status, update->status);
     if (update->has_transcript) {
         cleanup_preview.visible = FALSE;

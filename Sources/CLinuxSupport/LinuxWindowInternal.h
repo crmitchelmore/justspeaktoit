@@ -53,6 +53,8 @@ typedef struct UI {
     guint state_announcement; /* Idle source that speaks a state change when the HUD is hidden */
     gchar *phase_announcement; /* A finished HUD phase the idle speaks instead of the status */
     gboolean phase_urgent;
+    gchar *status_announcement; /* The status the pending announcement speaks, captured when it was queued */
+    gboolean status_announcement_is_state; /* An idle notice does not replace a pending state change */
     gchar *tray_summary; /* Sessions, Recording Time and Spend for the status notifier */
     gboolean closing;
     gboolean cancel_key_held;

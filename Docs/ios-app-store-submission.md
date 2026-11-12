@@ -36,21 +36,48 @@ flag produces ITMS-90683 on upload and traps the dictation path at runtime.
 
 ## Privacy manifests
 
-Three bundles ship a `PrivacyInfo.xcprivacy`, one per binary:
+The app and each enabled extension ship their own `PrivacyInfo.xcprivacy`:
 
 - `SpeakiOSApp/PrivacyInfo.xcprivacy`
 - `JustSpeakToItWidgetExtension/PrivacyInfo.xcprivacy`
 - `JustSpeakKeyboard/PrivacyInfo.xcprivacy`
+- `JustSpeakShare/PrivacyInfo.xcprivacy` (optional)
+- `JustSpeakWatch/PrivacyInfo.xcprivacy` (optional)
+- `JustSpeakWatchWidget/PrivacyInfo.xcprivacy` (optional)
 
-Both extensions link SpeakCore, which reads the App Group defaults and file
+The keyboard and phone widget link SpeakCore, which reads the App Group defaults and file
 attributes, so both declare the matching required-reason categories. A missing
 declaration earns ITMS-91053.
 
-The app manifest declares two collected data types. Audio data covers the
+The app also declares system boot time under `35F9.1`: shared transcription
+retry helpers use uptime to measure elapsed time. They do not transmit raw
+uptime. This is the timer/elapsed-event reason in Apple's
+[required-reason API reference](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
+The Share extension stages a user-selected file locally, but its linked
+SpeakCore binary retains UserDefaults/AppStorage references, so it declares
+own-app and App Group defaults reasons too. Watch transfers to the user's
+paired phone. Neither declares direct service collection; Watch does not
+declare required-reason APIs absent from its current code and linked binary.
+
+The app manifest declares six collected data types. Audio data covers the
 recording sent to the transcription provider. Other user content covers
 transcript text, which leaves the device separately when post-processing sends
-it to a language model or voice output sends it to a speech provider. The App
-Store Connect nutrition label must agree with this file.
+it to a language model or voice output sends it to a speech provider. Crash
+and performance data, other diagnostics and the installation ID cover the shared Sentry configuration. The App Store
+Connect nutrition label must agree with this file.
+
+macOS has separate manifests under `Sources/SpeakApp/Resources/AppStore/` and
+`Direct/`. Tuist selects exactly one and packages it at
+`Contents/Resources/PrivacyInfo.xcprivacy`; SwiftPM includes the Direct resource.
+Both declare cloud audio/text and installation-linked diagnostics. Direct
+additionally declares opt-in product interactions and the Analytics purpose
+for its separate, resettable installation ID. These identifiers are not used
+for cross-app tracking. The `APP_STORE` build excludes the product-analytics
+transport and its Analytics-purpose declarations, not Sentry diagnostics.
+The Mac App Store surface remains retired from the
+release trains; maintaining its build configuration does not re-enable it.
+See [Apple's manifest placement rules](https://developer.apple.com/documentation/bundleresources/placing-content-in-a-bundle)
+and [data-use declarations](https://developer.apple.com/documentation/bundleresources/describing-data-use-in-privacy-manifests).
 
 ## Export compliance
 
@@ -94,32 +121,42 @@ must agree with `SpeakiOSApp/PrivacyInfo.xcprivacy`.
 **Data used to track you: none.** No advertising identifier, no ATT prompt, no
 tracking domains. `NSPrivacyTracking` is false.
 
-**Data linked to you: none.** Nothing collected is tied to an identity the app
-holds.
-
-**Data not linked to you: four types.**
+**Data not linked to you: two content types.** These declarations cover the
+app's provider routes; verify the selected providers' practices as part of
+the candidate privacy report and disclosure review.
 
 | Type | Purpose | Basis in the code |
 | --- | --- | --- |
 | Audio Data | App Functionality | Recordings go to the transcription provider chosen in Settings |
 | Other User Content | App Functionality | Post-processing sends transcript text to a language model; voice output sends it to a speech provider |
-| Crash Data | App Functionality | `SentryManager` reports crashes to Sentry, without a user identity and with credentials scrubbed |
-| Performance Data | App Functionality | Sentry samples 20% of launch and network timings and records release-health sessions |
+
+**Data linked to you: four diagnostic/identifier types.** Sentry's
+`SentryClient` supplies a random installation ID when the app has not assigned
+a user, and `SentryHub` puts that ID in release-health sessions. Neither
+`sendDefaultPii = false` nor credential scrubbing removes that linkage.
+Apple's [linked-data definition](https://developer.apple.com/app-store/app-privacy-details/#linked-data)
+includes linkage through a device, not only a real-world name.
+
+| Type | Purpose | Basis in the code |
+| --- | --- | --- |
+| Crash Data | App Functionality | Sentry crash/error reports associated with the installation ID |
+| Performance Data | App Functionality | Sentry samples 20% of launch and network timings |
+| Other Diagnostic Data | App Functionality | Diagnostic context and release-health sessions, also declared by the Sentry SDK |
+| Device ID | App Functionality | Random Sentry installation ID; not IDFA, IDFV or a hardware identifier |
 
 Answer **No** to every other category, including Contact Info, Health, Financial
-Info, Location, Contacts, Browsing History, Search History, Identifiers, Usage
-Data, Purchases and Sensitive Info. Under Diagnostics, answer **Other
-Diagnostic Data: No**. Three of those deserve the
-reasoning written down, because they look like yes and are not:
+Info, Location, Contacts, Browsing History, Search History, Usage
+Data, Purchases and Sensitive Info. Distinguish these flows when entering the
+answers:
 
-- **Identifiers.** `DeviceIdentityStore` keeps a device id, but it lives in the
-  Keychain and is only sent to a paired Mac over the local network. It never
-  reaches a server of ours.
-- **Usage Data and Diagnostics.** The iOS app initialises no analytics SDK, so
+- **Identifiers.** Declare Sentry's installation ID as Device ID above.
+  Separately, `DeviceIdentityStore` keeps a pairing device ID in the
+  Keychain and only sends it to a paired Mac over the local network.
+- **Usage Data and Diagnostics.** The iOS app initialises no product-analytics SDK, so
   Usage Data stays No until issue #776 ships opt-in PostHog to iOS. The app
   (not its extensions) does run Sentry, sharing the Mac's `SentryManager`
-  configuration and credential scrubber, so Diagnostics declares Crash Data and
-  Performance Data as above. Other Diagnostic Data stays No.
+  configuration and credential scrubber, so Diagnostics declares Crash Data,
+  Performance Data and Other Diagnostic Data as above.
 - **History and API keys in iCloud.** History, including transcript text,
   syncs to the user's own private CloudKit database automatically when the
   device is signed in to iCloud, unless the user turns off iCloud History Sync
@@ -171,8 +208,8 @@ the current provider list. Replace them with something like this:
 > Just Speak Keyboard is a custom keyboard extension. Full Access is used only
 > to reach the shared App Group container, so the keyboard can hand dictation to
 > the container app and receive the text back. The keyboard is fully usable
-> without Full Access: it falls back to the handoff path and tells the user what
-> is unavailable. It sends nothing to any server of ours.
+> for editing and switching keyboards without Full Access; dictation is disabled
+> with an explanation. The extension sends nothing to any server of ours.
 >
 > A Live Activity shows recording progress on the Lock Screen and Dynamic
 > Island. Start Recording, Stop Recording, Toggle Recording and transcript-copy
@@ -230,7 +267,9 @@ localisation and App Information.
 > private iCloud, unless you turn that off. Already use the Mac app? Scan its QR code to
 > copy your settings and keys across.
 >
-> No ads, no tracking, no analytics. Open source under the MIT licence.
+> No ads, no cross-app tracking, no product analytics. Installation-linked crash
+> and performance diagnostics are disclosed in our privacy policy. Open source
+> under the MIT licence.
 
 ## Screenshots
 
@@ -283,6 +322,50 @@ integration before fresh readback; configured references alone do not prove
 credential or API access.
 
 ## Regression cover
+
+Apple's `IntentDescription` documentation requires a short, sentence-case
+description ending with a period:
+[IntentDescription](https://developer.apple.com/documentation/appintents/intentdescription).
+An App Store Connect ITMS-90626 upload notice for iOS 3.2.0 (build 1000.1.1)
+also rejected App Intent descriptions containing `iPhone` or `Siri`. The
+macOS-runnable `testAppleAppIntentDescriptionsAvoidRejectedTerms` scans app
+and extension sources for both platforms. It checks those two rejected terms
+and the final period, and fails unsupported description expressions rather
+than silently omitting them. It does **not** establish sentence case,
+shortness, localized compiler metadata, or every App Store validation rule.
+
+`scripts/verify-release-train-archive.py`, already invoked before release
+export/upload, checks the **actual bundled** privacy manifests, their audited
+required reasons, collected-data field types, microphone/speech purpose
+strings and excluded Store product analytics. It also reads the compiler's
+`Metadata.appintents/extract.actionsdata`: description keys are checked for
+the rejected terms and final period; App Shortcuts are limited to ten and
+phrases must contain the application-name placeholder. Unrecognized localized
+description alternatives fail for explicit review rather than being ignored.
+This does not validate every localization or Apple's server-side rules.
+A dependency's manifest cannot stand
+in for the app's own resource. Nested Watch apps and complications use the
+Watch App Group, not the phone's group. All owned bundles must agree on
+version, build, train and source. Fixtures cover missing/misplaced/malformed
+manifests, missing uptime reasons, diagnostic installation linkage, compiler
+descriptions, shortcut limits/phrases, purpose strings, wrong Watch groups and
+companion identity, and the Store sandbox. These are admission checks, not
+proof that SDK internals or runtime data flows satisfy every review policy.
+
+The wider source audit also checked
+[Review Guidelines](https://developer.apple.com/app-store/review/guidelines/)
+2.4.5 (Mac Store sandbox/self-updates), 2.5.4/2.5.14 (background audio and
+recording indicators), 4.4.1 (keyboard input without Full Access), and
+5.1.1/5.1.2 (privacy, consent and third-party AI sharing), plus
+[App Shortcuts guidance](https://developer.apple.com/design/human-interface-guidelines/app-shortcuts).
+Existing Store compilation guards exclude Sparkle and external executable
+model runtimes. The keyboard's blocked Full Access state disables dictation,
+not its editing keys or next-keyboard control. Real-device microphone,
+locked/background recording and consent/withdrawal behavior still need
+release-candidate evidence. In particular, default-on Sentry diagnostics
+must not be mistaken for the separate Direct-only product-analytics opt-in:
+its disclosure/consent and retention need explicit release review. Static
+metadata tests cannot close those gates or the App Store Connect findings.
 
 The July rejection remains an `UNRESOLVED_ISSUES` submission. After the owner
 approves a corrected candidate and the review findings are resolved, the release

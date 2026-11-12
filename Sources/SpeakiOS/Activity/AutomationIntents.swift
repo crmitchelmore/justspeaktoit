@@ -55,7 +55,7 @@ struct StopDictationIntent: AudioRecordingIntent {
     static var description = IntentDescription(
         """
         Stops a recording started with Start Recording or Toggle Recording and returns the transcript \
-        to the next action. Needs an unlocked iPhone.
+        to the next action. Requires the device to be unlocked.
         """,
         categoryName: "Recording",
         searchKeywords: ["finish", "end", "transcription", "get text"]

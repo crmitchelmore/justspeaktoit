@@ -220,12 +220,16 @@ if isPaidAccessBuild {
 }
 
 var iosWidgetSettings: [String: SettingValue] = [
+    "SPEAK_RELEASE_TRAIN": .string(releaseTrain),
+    "SPEAK_GIT_COMMIT_SHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"
 ]
 
 var iosShareSettings: [String: SettingValue] = [
     "APPLICATION_EXTENSION_API_ONLY": "YES",
+    "SPEAK_RELEASE_TRAIN": .string(releaseTrain),
+    "SPEAK_GIT_COMMIT_SHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)",
     "SKIP_INSTALL": "YES"
@@ -266,6 +270,8 @@ var watchAppSettings: [String: SettingValue] = [
 // the extension-side branch of `StartWatchRecordingIntent`, which cannot touch
 // the microphone from a widget process.
 var watchWidgetSettings: [String: SettingValue] = [
+    "SPEAK_RELEASE_TRAIN": .string(releaseTrain),
+    "SPEAK_GIT_COMMIT_SHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)",
     "SKIP_INSTALL": "YES",
@@ -380,6 +386,9 @@ let macAppTarget: Target = .target(
     resources: [
         .glob(pattern: .relativeToRoot(isAlphaBuild ? "Resources/AppIconAlpha.icns" : "Resources/AppIcon.icns")),
         .glob(pattern: "Resources/Sounds/**"),
+        .glob(pattern: .relativeToRoot(
+            "Sources/SpeakApp/Resources/\(isAppStoreBuild ? "AppStore" : "Direct")/PrivacyInfo.xcprivacy"
+        )),
         // Pinned Phonon-2 runtime requirements; SwiftPM bundles the same file for `swift build`.
         .glob(pattern: "Sources/SpeakApp/Resources/phonon-requirements.txt")
     ],
@@ -508,7 +517,7 @@ let watchAppTarget: Target = .target(
         "JustSpeakWatch/**",
         "JustSpeakWatchShared/**"
     ],
-    resources: ["JustSpeakWatch/Assets.xcassets"],
+    resources: ["JustSpeakWatch/Assets.xcassets", "JustSpeakWatch/PrivacyInfo.xcprivacy"],
     entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatch/JustSpeakWatch.entitlements"))),
     dependencies: [
         .target(name: "JustSpeakWatchWidgetExtension"),
@@ -533,6 +542,7 @@ let watchWidgetTarget: Target = .target(
         "JustSpeakWatchWidget/**",
         "JustSpeakWatchShared/**"
     ],
+    resources: ["JustSpeakWatchWidget/PrivacyInfo.xcprivacy"],
     entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatchWidget/JustSpeakWatchWidget.entitlements"))),
     dependencies: [
         .package(product: "SpeakWatchCore")
@@ -569,6 +579,7 @@ let shareTarget: Target = .target(
     deploymentTargets: .iOS("17.0"),
     infoPlist: .file(path: .relativeToRoot(trainPlistPath("JustSpeakShare/Info.plist"))),
     sources: ["JustSpeakShare/**/*.swift"],
+    resources: ["JustSpeakShare/PrivacyInfo.xcprivacy"],
     entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakShare/JustSpeakShare.entitlements"))),
     dependencies: [
         .package(product: "SpeakCore")

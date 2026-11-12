@@ -206,7 +206,7 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
     public static var description = IntentDescription(
         """
         Starts recording, or stops it if one is running. Recommended for the Action Button, Back Tap, \
-        widgets and Siri. The transcript goes to the destination chosen in Settings.
+        and widgets. The transcript goes to the destination chosen in Settings.
         """,
         categoryName: "Recording",
         searchKeywords: ["begin", "start", "stop", "transcription", "transcribe", "action button"]
@@ -329,7 +329,7 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
     public static var description = IntentDescription(
         """
         Stops the current recording and sends the transcript to the destination chosen in Settings. \
-        Works on a locked iPhone but returns no text; to use the text in a later action, \
+        Works while the device is locked but returns no text; to use the text in a later action, \
         use Stop Dictation and Get Text.
         """,
         categoryName: "Recording",

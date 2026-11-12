@@ -54,7 +54,7 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>Just Speak to It needs Accessibility access to observe the Fn key for global shortcuts.</string>
+	<string>Just Speak to It uses Accessibility access to insert dictated text into the app you are typing in and detect global recording shortcuts.</string>
 	<!-- App Transport Security: the shipping feed and every download stay
 	     HTTPS. The single exception is the release smoke test
 	     (scripts/sparkle-update-smoke.sh), which serves a synthetic appcast from
@@ -81,7 +81,7 @@
 		<string>_speaktransport._tcp</string>
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Just Speak to It uses the microphone to capture audio for transcription.</string>
+	<string>Just Speak to It records your voice to turn it into text. Audio is sent to the transcription provider you choose in Settings, or stays on this Mac when you choose an on-device model.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>com.justspeaktoit.transcript</string>
@@ -89,7 +89,7 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Just Speak to It transcribes your speech into text using speech recognition.</string>
+	<string>Apple speech recognition turns your recorded voice into text. Audio may be processed by Apple when on-device recognition is unavailable and fallback is enabled.</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<true/>
 	<key>NSSupportsSuddenTermination</key>

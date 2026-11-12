@@ -256,6 +256,8 @@ gboolean sidebar_key_pressed(GtkEventControllerKey *controller, guint keyval, gu
                                     GdkModifierType modifiers, gpointer data);
 void action_key_released(GtkEventControllerKey *controller, guint keyval, guint keycode,
                                 GdkModifierType modifiers, gpointer data);
+void focus_ring_key_released(GtkEventControllerKey *controller, guint keyval, guint keycode,
+                             GdkModifierType modifiers, gpointer data);
 void action_window_active(GObject *object, GParamSpec *spec, gpointer data);
 GtkWidget *build_sidebar(void);
 GtkWidget *settings_hero(const char *title, const char *subtitle);

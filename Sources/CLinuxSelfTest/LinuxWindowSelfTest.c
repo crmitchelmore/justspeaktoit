@@ -37,6 +37,10 @@ static int32_t about_self_test(char *error, size_t capacity) {
         ++about_count;
     }
     if (about_count != 6) return fail(error, capacity, "About canonical links are missing");
+    /* The version details stay copyable with the mouse but are not a Tab stop Orca reads as silent. */
+    if (!gtk_label_get_selectable(about_page()->about_details) ||
+        gtk_widget_child_focus(GTK_WIDGET(about_page()->about_details), GTK_DIR_TAB_FORWARD))
+        return fail(error, capacity, "About version details are a silent Tab stop or are no longer copyable");
     /* Each link is one Tab stop: focus enters the first button, not its flow box child. */
     GtkWidget *previous = gtk_root_get_focus(GTK_ROOT(ui.window));
     if (previous != NULL) g_object_ref(previous);
@@ -61,7 +65,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_visual_density_self_test(GTK_WIDGET(ui.window)) != 0)
         return fail(error, capacity, "layout density geometry, Normal restoration or editing focus failed");
     if (!sidebar_navigation_self_test())
-        return fail(error, capacity, "sidebar hints, focus guards or window-local navigation failed");
+        return fail(error, capacity, "sidebar hints, focus guards, single Tab stop or window-local navigation failed");
     if (jsti_action_shortcuts_self_test(error, capacity) != 0) return -1;
     if (jsti_action_shortcut_editor_self_test(ui.window, error, capacity) != 0) return -1;
     if (!action_execution_self_test())
@@ -69,7 +73,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (!command_forwarding_self_test())
         return fail(error, capacity, "desktop-bound command parsing, dispatch or lifetime admission failed");
     if (!status_notice_self_test())
-        return fail(error, capacity, "status announcements or the record button's focus hand-off to Cancel failed");
+        return fail(error, capacity, "status announcements, the record button's focus hand-off to Cancel or its focus ring failed");
     if (!command_process_self_test(error, capacity)) return -1;
     if (!post_processing_self_test())
         return fail(error, capacity, "Local/Remote post-processing controls, key isolation or callback indexes failed");

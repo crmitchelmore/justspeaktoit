@@ -381,6 +381,11 @@ GtkWidget *build_about(void) {
     about_page()->about_details = GTK_LABEL(gtk_label_new("Build metadata has not been supplied by this host."));
     gtk_label_set_xalign(about_page()->about_details, 0);
     gtk_label_set_selectable(about_page()->about_details, TRUE);
+    /* Selectable for copying with the mouse, but not a Tab stop: Orca reads a focused selectable label
+     * as silent, and the version text is read with the rest of the page. can_focus, not just focusable:
+     * a selectable label's focus vfunc claims Tab even when it cannot take focus, which traps Tab. */
+    gtk_widget_set_focusable(GTK_WIDGET(about_page()->about_details), FALSE);
+    gtk_widget_set_can_focus(GTK_WIDGET(about_page()->about_details), FALSE);
     gtk_label_set_wrap(about_page()->about_details, TRUE);
     gtk_box_append(GTK_BOX(body), GTK_WIDGET(about_page()->about_details));
     about_page()->about_links = GTK_FLOW_BOX(gtk_flow_box_new());

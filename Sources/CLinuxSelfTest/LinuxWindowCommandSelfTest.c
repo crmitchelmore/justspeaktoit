@@ -44,6 +44,15 @@ gboolean sidebar_navigation_self_test(void) {
     okay = okay && sidebar_navigate(GDK_KEY_9, GDK_CONTROL_MASK, sidebar_row) &&
         gtk_root_get_focus(GTK_ROOT(ui.window)) ==
             GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_PROFILES));
+    /* Beside the content the sidebar is one Tab stop: Tab leaves it without opening the next
+     * page, and Shift+Tab comes back to the shown page's row. */
+    GtkWidget *profiles_row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_PROFILES));
+    gtk_widget_child_focus(GTK_WIDGET(ui.window), GTK_DIR_TAB_FORWARD);
+    GtkWidget *tabbed = gtk_root_get_focus(GTK_ROOT(ui.window));
+    okay = okay && tabbed != NULL && !gtk_widget_is_ancestor(tabbed, GTK_WIDGET(ui.sidebar)) &&
+        ui.page == JSTI_PAGE_PROFILES;
+    gtk_widget_child_focus(GTK_WIDGET(ui.window), GTK_DIR_TAB_BACKWARD);
+    okay = okay && gtk_root_get_focus(GTK_ROOT(ui.window)) == profiles_row && ui.page == JSTI_PAGE_PROFILES;
     jsti_settings_search_focus();
     GtkWidget *searching = gtk_root_get_focus(GTK_ROOT(ui.window));
     show_page(JSTI_PAGE_DASHBOARD);
@@ -210,6 +219,17 @@ gboolean status_notice_self_test(void) {
     gboolean header_to_cancel = gtk_root_get_focus(GTK_ROOT(ui.window)) == cancel;
     update_apply(&idle);
     gboolean header_back = gtk_root_get_focus(GTK_ROOT(ui.window)) == header;
+    /* Return on Start Recording that leaves focus in place (no API key) keeps the focus ring visible
+     * after GTK's focus-visible timeout; typing a space in a text field does not force it on. */
+    gtk_window_set_focus(ui.window, record);
+    gtk_window_set_focus_visible(ui.window, FALSE);
+    focus_ring_key_released(NULL, GDK_KEY_Return, 36, 0, NULL);
+    gboolean ring_kept = gtk_window_get_focus_visible(ui.window);
+    jsti_settings_search_focus();
+    GtkWidget *field = gtk_root_get_focus(GTK_ROOT(ui.window));
+    gtk_window_set_focus_visible(ui.window, FALSE);
+    focus_ring_key_released(NULL, GDK_KEY_space, 65, 0, NULL);
+    gboolean typing_quiet = GTK_IS_EDITABLE(field) && !gtk_window_get_focus_visible(ui.window);
     if (ui.state_announcement != 0) g_source_remove(ui.state_announcement);
     ui.state_announcement = 0;
     g_clear_pointer(&ui.status_announcement, g_free);
@@ -219,7 +239,8 @@ gboolean status_notice_self_test(void) {
     show_page(page);
     gtk_label_set_text(ui.status, saved);
     g_free(saved);
-    return announced && !repeated && !chatty && kept && to_cancel && to_record && header_to_cancel && header_back;
+    return announced && !repeated && !chatty && kept && to_cancel && to_record && header_to_cancel && header_back &&
+        ring_kept && typing_quiet;
 }
 
 gboolean command_forwarding_self_test(void) {

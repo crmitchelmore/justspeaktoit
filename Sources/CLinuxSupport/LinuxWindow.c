@@ -102,6 +102,7 @@ static void build_window(void) {
     GtkEventController *navigation_keys = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(navigation_keys, GTK_PHASE_BUBBLE);
     g_signal_connect(navigation_keys, "key-pressed", G_CALLBACK(sidebar_key_pressed), NULL);
+    g_signal_connect(navigation_keys, "key-released", G_CALLBACK(focus_ring_key_released), NULL);
     gtk_widget_add_controller(window, navigation_keys);
     GtkEventController *releases = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(releases, GTK_PHASE_CAPTURE);

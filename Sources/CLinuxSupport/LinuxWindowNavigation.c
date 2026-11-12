@@ -145,6 +145,20 @@ void action_key_released(GtkEventControllerKey *controller, guint keyval, guint 
     jsti_action_shortcuts_release(keycode);
 }
 
+/* GTK hides the focus ring when a key press leaves focus where it was and the ring has already
+ * timed out (gtk-keyboard-focus-visible-timeout), so pressing Return on Start Recording with no API key left the button
+ * focused with no visible ring. Activating a control from the keyboard keeps its ring visible.
+ * This runs in the window's bubble phase, after GTK's capture-phase handler. */
+void focus_ring_key_released(GtkEventControllerKey *controller, guint keyval, guint keycode,
+                             GdkModifierType modifiers, gpointer data) {
+    (void)controller; (void)keycode; (void)modifiers; (void)data;
+    if (keyval != GDK_KEY_Return && keyval != GDK_KEY_KP_Enter && keyval != GDK_KEY_ISO_Enter &&
+        keyval != GDK_KEY_space && keyval != GDK_KEY_KP_Space) return;
+    GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(ui.window));
+    if (focus == NULL || GTK_IS_EDITABLE(focus) || GTK_IS_TEXT_VIEW(focus)) return;
+    gtk_window_set_focus_visible(ui.window, TRUE);
+}
+
 void action_window_active(GObject *object, GParamSpec *spec, gpointer data) {
     (void)spec; (void)data;
     if (!gtk_window_is_active(GTK_WINDOW(object))) {
@@ -165,6 +179,49 @@ static void sidebar_header(GtkListBoxRow *row, GtkListBoxRow *before, gpointer d
     gtk_label_set_xalign(GTK_LABEL(label), 0);
     gtk_widget_add_css_class(label, "jsti-sidebar-heading");
     gtk_list_box_row_set_header(row, label);
+}
+
+#if !GTK_CHECK_VERSION(4, 18, 0)
+/* GTK before 4.18 has no gtk_list_box_set_tab_behavior and GtkListBox cannot be
+ * subclassed, so this wrapper gives the sidebar GTK_LIST_TAB_ITEM behaviour: Tab
+ * from a row leaves the list and only the arrow keys move between rows. */
+typedef struct { GtkWidget parent_instance; } JstiTabItemScope;
+typedef struct { GtkWidgetClass parent_class; } JstiTabItemScopeClass;
+G_DEFINE_TYPE(JstiTabItemScope, jsti_tab_item_scope, GTK_TYPE_WIDGET)
+
+static gboolean tab_item_scope_focus(GtkWidget *widget, GtkDirectionType direction) {
+    if ((direction == GTK_DIR_TAB_FORWARD || direction == GTK_DIR_TAB_BACKWARD) &&
+        gtk_widget_get_focus_child(widget) != NULL) return FALSE;
+    return GTK_WIDGET_CLASS(jsti_tab_item_scope_parent_class)->focus(widget, direction);
+}
+
+static void tab_item_scope_dispose(GObject *object) {
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(object))) != NULL) gtk_widget_unparent(child);
+    G_OBJECT_CLASS(jsti_tab_item_scope_parent_class)->dispose(object);
+}
+
+static void jsti_tab_item_scope_class_init(JstiTabItemScopeClass *klass) {
+    G_OBJECT_CLASS(klass)->dispose = tab_item_scope_dispose;
+    GTK_WIDGET_CLASS(klass)->focus = tab_item_scope_focus;
+    gtk_widget_class_set_layout_manager_type(GTK_WIDGET_CLASS(klass), GTK_TYPE_BIN_LAYOUT);
+}
+
+static void jsti_tab_item_scope_init(JstiTabItemScope *scope) { (void)scope; }
+#endif
+
+/* The sidebar is one Tab stop, as GTK lists are: Tab enters on the shown page's
+ * row and leaves the list, and the arrow keys move between rows. */
+static GtkWidget *sidebar_tab_item(GtkWidget *scroller) {
+#if GTK_CHECK_VERSION(4, 18, 0)
+    gtk_list_box_set_tab_behavior(ui.sidebar, GTK_LIST_TAB_ITEM);
+    return scroller;
+#else
+    GtkWidget *scope = g_object_new(jsti_tab_item_scope_get_type(), NULL);
+    gtk_widget_set_vexpand(scope, TRUE);
+    gtk_widget_set_parent(scroller, scope);
+    return scope;
+#endif
 }
 
 GtkWidget *build_sidebar(void) {
@@ -206,7 +263,7 @@ GtkWidget *build_sidebar(void) {
     gtk_box_append(GTK_BOX(brand), name);
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), brand);
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), jsti_settings_search_new(scroller));
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), jsti_settings_search_new(sidebar_tab_item(scroller)));
     return toolbar;
 }
 

@@ -230,8 +230,6 @@ extension DesktopHostController {
     /// Retained cloud enable/model values do not grant permission to use them.
     package func exportConfiguration(path: String) throws {
         guard !closed else { throw DesktopHostError(message: "The app is closing.") }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let voice = try Platform.exportVoiceConfiguration(settings.voiceOutput, over: configuration())
         let projected = try DesktopPostProcessingConfiguration.exportOptions(settings.postProcessing, over: voice)
         var values = projected.values
@@ -239,16 +237,13 @@ extension DesktopHostController {
         values.removeValue(forKey: "automationEnabled")
         values.removeValue(forKey: DesktopConnectionPreWarming.approvalProjectionKey)
         let preferences = try DesktopConfiguration(values: values)
-        let document = DesktopConfigurationDocument(preferences: preferences)
-        let data = try encoder.encode(document)
-        guard data.count <= DesktopConfigurationDocument.maximumBytes else { throw DesktopConfigurationError.tooLarge }
-        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        try DesktopConfigurationDocument(preferences: preferences).write(to: path)
         update("Portable preferences exported, including preserved imported values. Credential stores were not read.")
     }
 
     package func importConfiguration(path: String) async throws {
         guard !closed else { throw DesktopHostError(message: "The app is closing.") }
-        let document = try readConfigurationDocument(path: path)
+        let document = try DesktopConfigurationDocument.read(from: path)
         if busy || recording != nil || (automationUsesLocalConsent && dictationSessionID != nil) {
             if automationUsesLocalConsent,
                document.preferences.values["enableAutomationServer"]?.storage == .bool(false) {
@@ -274,28 +269,6 @@ extension DesktopHostController {
         Platform.hud(.hidden)
         try publishImportedLocalChoices(from: previous)
         update(configurationImportStatus(document, settings: changed) + cleanup)
-    }
-
-    private func readConfigurationDocument(path: String) throws -> DesktopConfigurationDocument {
-        let source = URL(fileURLWithPath: path)
-        let maximumBytes = DesktopConfigurationDocument.maximumBytes
-        let attributes = try FileManager.default.attributesOfItem(atPath: source.path)
-        guard attributes[.type] as? FileAttributeType == .typeRegular,
-              let size = attributes[.size] as? NSNumber, size.intValue <= maximumBytes else {
-            throw DesktopConfigurationError.tooLarge
-        }
-        let file = try FileHandle(forReadingFrom: source)
-        defer { try? file.close() }
-        var data = Data()
-        while data.count <= maximumBytes {
-            guard let chunk = try file.read(upToCount: min(65_536, maximumBytes + 1 - data.count)),
-                  !chunk.isEmpty else { break }
-            data.append(chunk)
-        }
-        guard data.count <= maximumBytes else { throw DesktopConfigurationError.tooLarge }
-        let document = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: data)
-        guard document.version == 1 else { throw DesktopConfigurationError.unsupportedVersion }
-        return document
     }
 
     private func prepareConfigurationImport(_ document: DesktopConfigurationDocument) throws -> Settings {
@@ -391,10 +364,4 @@ extension DesktopHostController {
         let failure = await disarmHandsFree(status: "Hands-free disarmed after configuration changed.")
         return failure.map { " Hands-free cleanup failed: \($0)" } ?? ""
     }
-}
-
-package struct DesktopConfigurationDocument: Codable {
-    package static let maximumBytes = 1_048_576
-    package var version = 1
-    package let preferences: DesktopConfiguration
 }

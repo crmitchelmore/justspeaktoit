@@ -23,17 +23,18 @@ final class DesktopPOSIXRecordingRegistry: DesktopRecordingRegistryNamespace, @u
     private var anchors: [(descriptor: Int32, name: String)]
     private var closed = false
     private var directory: Int32 { anchors[anchors.count - 1].descriptor }
+    private typealias Descriptors = DesktopPOSIXRecordingDescriptors
 
     init(history: URL, initialize: Bool) throws {
-        try Self.validHistory(history)
+        try Descriptors.validHistory(history)
         var held: [(descriptor: Int32, name: String)] = []
         do {
-            let historyInfo = try Self.openHistory(history, anchors: &held)
+            let historyInfo = try Descriptors.openHistory(history, anchors: &held)
             let parent = held[held.count - 1].descriptor
-            let leaf = try Self.openNamespace(parent: parent, initialize: initialize)
+            let leaf = try Descriptors.openNamespace(parent: parent, initialize: initialize)
             held.append((leaf, ".recording-locations"))
-            let info = try Self.lockNamespace(leaf)
-            if initialize, fsync(parent) != 0 { throw Self.posixError() }
+            let info = try Descriptors.lockNamespace(leaf)
+            if initialize, fsync(parent) != 0 { throw Descriptors.posixError() }
             self.historyDevice = UInt64(historyInfo.st_dev)
             self.historyFile = UInt64(historyInfo.st_ino)
             self.namespaceDevice = UInt64(info.st_dev)
@@ -43,7 +44,7 @@ final class DesktopPOSIXRecordingRegistry: DesktopRecordingRegistryNamespace, @u
             let primary = error
             var cleanup: Error?
             for anchor in held.reversed() {
-                if Glibc.close(anchor.descriptor) != 0, cleanup == nil { cleanup = Self.posixError() }
+                if Glibc.close(anchor.descriptor) != 0, cleanup == nil { cleanup = Descriptors.posixError() }
             }
             if let cleanup {
                 throw DesktopRecordingLocationCleanupFailure(primaryError: primary, cleanupError: cleanup)
@@ -57,9 +58,11 @@ final class DesktopPOSIXRecordingRegistry: DesktopRecordingRegistryNamespace, @u
     func validate() throws {
         guard !closed else { throw DesktopRecordingRegistryError.closed }
         for (index, anchor) in anchors.enumerated() {
-            try Self.secureDirectory(anchor.descriptor, privateLeaf: index == anchors.count - 1)
+            try Descriptors.secureDirectory(anchor.descriptor, privateLeaf: index == anchors.count - 1)
             if index > 0 {
-                try Self.same(parent: anchors[index - 1].descriptor, name: anchor.name, descriptor: anchor.descriptor)
+                try Descriptors.same(
+                    parent: anchors[index - 1].descriptor, name: anchor.name, descriptor: anchor.descriptor
+                )
             }
         }
     }
@@ -69,7 +72,7 @@ final class DesktopPOSIXRecordingRegistry: DesktopRecordingRegistryNamespace, @u
         closed = true
         var failure: Error?
         for anchor in anchors.reversed() {
-            if Glibc.close(anchor.descriptor) != 0, failure == nil { failure = Self.posixError() }
+            if Glibc.close(anchor.descriptor) != 0, failure == nil { failure = Descriptors.posixError() }
         }
         anchors.removeAll()
         if let failure { throw failure }
@@ -80,11 +83,13 @@ extension DesktopPOSIXRecordingRegistry {
     func names() throws -> [String] {
         try validate()
         let duplicate = fcntl(directory, F_DUPFD_CLOEXEC, 0)
-        guard duplicate >= 0 else { throw Self.posixError() }
+        guard duplicate >= 0 else { throw Descriptors.posixError() }
         guard let stream = fdopendir(duplicate) else {
-            let primary = Self.posixError()
+            let primary = Descriptors.posixError()
             if Glibc.close(duplicate) != 0 {
-                throw DesktopRecordingLocationCleanupFailure(primaryError: primary, cleanupError: Self.posixError())
+                throw DesktopRecordingLocationCleanupFailure(
+                    primaryError: primary, cleanupError: Descriptors.posixError()
+                )
             }
             throw primary
         }
@@ -95,7 +100,7 @@ extension DesktopPOSIXRecordingRegistry {
             try validate()
         } catch { failure = error }
         if closedir(stream) != 0 {
-            let cleanup = Self.posixError()
+            let cleanup = Descriptors.posixError()
             if let failure {
                 throw DesktopRecordingLocationCleanupFailure(primaryError: failure, cleanupError: cleanup)
             }
@@ -111,17 +116,17 @@ extension DesktopPOSIXRecordingRegistry {
         let file = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         guard file >= 0 else {
             if errno == ENOENT { throw DesktopRecordingRegistryError.missing }
-            throw Self.posixError()
+            throw Descriptors.posixError()
         }
         var result = Data()
         var failure: Error?
         do {
             result = try Self.readBytes(file)
-            try Self.same(parent: directory, name: name, descriptor: file)
+            try Descriptors.same(parent: directory, name: name, descriptor: file)
             try validate()
         } catch { failure = error }
         if Glibc.close(file) != 0 {
-            let cleanup = Self.posixError()
+            let cleanup = Descriptors.posixError()
             if let failure {
                 throw DesktopRecordingLocationCleanupFailure(primaryError: failure, cleanupError: cleanup)
             }
@@ -138,7 +143,7 @@ extension DesktopPOSIXRecordingRegistry {
         while true {
             errno = 0
             guard let entry = readdir(stream) else {
-                if errno != 0 { throw posixError() }
+                if errno != 0 { throw Descriptors.posixError() }
                 return result
             }
             let name = withUnsafePointer(to: entry.pointee.d_name) {
@@ -155,7 +160,7 @@ extension DesktopPOSIXRecordingRegistry {
     }
 
     private static func readBytes(_ file: Int32, checkingCancellation: Bool = true) throws -> Data {
-        let before = try regularPrivateFile(file)
+        let before = try Descriptors.regularPrivateFile(file)
         var result = Data()
         var buffer = [UInt8](repeating: 0, count: 4_096)
         while true {
@@ -163,14 +168,14 @@ extension DesktopPOSIXRecordingRegistry {
             let count = buffer.withUnsafeMutableBytes {
                 pread(file, $0.baseAddress, $0.count, off_t(result.count))
             }
-            guard count >= 0 else { throw posixError() }
+            guard count >= 0 else { throw Descriptors.posixError() }
             if count == 0 { break }
             guard result.count + count <= DesktopRecordingLocationCodec.maximumBytes else {
                 throw DesktopRecordingRegistryError.budget
             }
             result.append(contentsOf: buffer.prefix(count))
         }
-        let after = try regularPrivateFile(file)
+        let after = try Descriptors.regularPrivateFile(file)
         guard before.st_dev == after.st_dev, before.st_ino == after.st_ino,
               before.st_size == after.st_size, before.st_mtim.tv_sec == after.st_mtim.tv_sec,
               before.st_mtim.tv_nsec == after.st_mtim.tv_nsec, before.st_ctim.tv_sec == after.st_ctim.tv_sec,
@@ -209,7 +214,7 @@ extension DesktopPOSIXRecordingRegistry {
             )
         } catch { failure = error }
         if Glibc.close(file) != 0 {
-            Self.collect(Self.posixError(), into: &outcome.cleanup)
+            Self.collect(Descriptors.posixError(), into: &outcome.cleanup)
         }
         if let failure {
             throw DesktopRecordingRegistryWriteFailure(
@@ -230,7 +235,7 @@ extension DesktopPOSIXRecordingRegistry {
     ) throws {
         try Self.writeBytes(data, file: file)
         guard fchmod(file, 0o400) == 0, fsync(file) == 0 else {
-            throw Self.posixError()
+            throw Descriptors.posixError()
         }
         try checkCancellation()
         try validate()
@@ -243,7 +248,7 @@ extension DesktopPOSIXRecordingRegistry {
             if let error = outcome.cleanup { outcome.cleanup = nil; throw error }
             throw DesktopRecordingRegistryCapabilityError.invalidOutcome
         }
-        if fsync(directory) != 0 { Self.collect(Self.posixError(), into: &failure) }
+        if fsync(directory) != 0 { Self.collect(Descriptors.posixError(), into: &failure) }
         do { try checkCancellation() } catch { Self.collect(error, into: &failure) }
         // Fences still run after cancellation; a committed name is never retried or rolled back.
         do { try verifyPublication(file: file, name: name, data: data) } catch {
@@ -253,22 +258,22 @@ extension DesktopPOSIXRecordingRegistry {
     }
     private func verifyPublication(file: Int32, name: String, data: Data) throws {
         try validate()
-        _ = try Self.regularPrivateFile(file)
-        try Self.same(parent: directory, name: name, descriptor: file)
+        _ = try Descriptors.regularPrivateFile(file)
+        try Descriptors.same(parent: directory, name: name, descriptor: file)
         let reader = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        guard reader >= 0 else { throw Self.posixError() }
+        guard reader >= 0 else { throw Descriptors.posixError() }
         var failure: Error?
         do {
-            try Self.sameDescriptor(file, reader)
+            try Descriptors.sameDescriptor(file, reader)
             guard try Self.readBytes(reader, checkingCancellation: false) == data else {
                 throw DesktopRecordingRegistryError.corrupt
             }
-            _ = try Self.regularPrivateFile(file)
-            try Self.sameDescriptor(file, reader)
-            try Self.same(parent: directory, name: name, descriptor: file)
+            _ = try Descriptors.regularPrivateFile(file)
+            try Descriptors.sameDescriptor(file, reader)
+            try Descriptors.same(parent: directory, name: name, descriptor: file)
             try validate()
         } catch { failure = error }
-        if Glibc.close(reader) != 0 { Self.collect(Self.posixError(), into: &failure) }
+        if Glibc.close(reader) != 0 { Self.collect(Descriptors.posixError(), into: &failure) }
         if let failure { throw failure }
     }
     private static func nativeFailure(_ code: Int32, unsupported: Int32 = 0) -> Error? {
@@ -289,7 +294,7 @@ extension DesktopPOSIXRecordingRegistry {
             while offset < bytes.count {
                 try Task.checkCancellation()
                 let count = Glibc.write(file, bytes.baseAddress?.advanced(by: offset), bytes.count - offset)
-                guard count > 0 else { throw posixError() }
+                guard count > 0 else { throw Descriptors.posixError() }
                 offset += count
             }
         }
@@ -304,97 +309,6 @@ private extension DesktopPOSIXRecordingRegistry {
             if let id = UUID(uuidString: value), id.uuidString == value { return true }
         }
         return false
-    }
-
-    private static func same(parent: Int32, name: String, descriptor: Int32) throws {
-        var held = stat()
-        var named = stat()
-        guard fstat(descriptor, &held) == 0 else { throw posixError() }
-        guard fstatat(parent, name, &named, AT_SYMLINK_NOFOLLOW) == 0,
-              held.st_dev == named.st_dev, held.st_ino == named.st_ino,
-              held.st_mode & S_IFMT == named.st_mode & S_IFMT else {
-            throw DesktopRecordingLocationError.changedLocation
-        }
-    }
-    private static func sameDescriptor(_ first: Int32, _ second: Int32) throws {
-        var left = stat()
-        var right = stat()
-        guard fstat(first, &left) == 0, fstat(second, &right) == 0 else { throw posixError() }
-        guard left.st_dev == right.st_dev, left.st_ino == right.st_ino else {
-            throw DesktopRecordingLocationError.changedLocation
-        }
-    }
-    private static func secureDirectory(_ descriptor: Int32, privateLeaf: Bool) throws {
-        var info = stat()
-        guard fstat(descriptor, &info) == 0 else { throw posixError() }
-        guard info.st_mode & S_IFMT == S_IFDIR, info.st_uid == geteuid() || (!privateLeaf && info.st_uid == 0),
-              info.st_mode & (privateLeaf ? 0o077 : 0o022) == 0 else {
-            throw DesktopRecordingRegistryError.foreign
-        }
-    }
-
-    private static func regularPrivateFile(_ descriptor: Int32) throws -> stat {
-        var info = stat()
-        guard fstat(descriptor, &info) == 0 else { throw posixError() }
-        guard info.st_mode & S_IFMT == S_IFREG, info.st_uid == geteuid(), info.st_nlink == 1,
-              info.st_mode & 0o777 == 0o400, info.st_size >= 0,
-              info.st_size <= DesktopRecordingLocationCodec.maximumBytes else {
-            throw DesktopRecordingRegistryError.corrupt
-        }
-        return info
-    }
-
-    private static func posixError() -> NSError { NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
-
-    static func validHistory(_ history: URL) throws {
-        guard history.isFileURL, history.host?.isEmpty != false, history.query == nil, history.fragment == nil,
-              history.path.hasPrefix("/"), !history.path.utf8.contains(0),
-              history.path == history.standardizedFileURL.path else {
-            throw DesktopRecordingRegistryError.foreign
-        }
-    }
-
-    static func openHistory(_ history: URL, anchors: inout [(descriptor: Int32, name: String)]) throws -> stat {
-        let root = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard root >= 0 else { throw posixError() }
-        anchors.append((root, "/"))
-        try secureDirectory(root, privateLeaf: false)
-        for name in history.pathComponents.dropFirst() {
-            let next = openat(anchors[anchors.count - 1].descriptor, name,
-                              O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-            guard next >= 0 else { throw posixError() }
-            anchors.append((next, name))
-            try secureDirectory(next, privateLeaf: false)
-        }
-        var info = stat()
-        guard fstat(anchors[anchors.count - 1].descriptor, &info) == 0 else { throw posixError() }
-        guard info.st_uid == geteuid() else { throw DesktopRecordingRegistryError.foreign }
-        let expected = try DesktopRecordingLocationIdentity.directory(history)
-        guard expected.device == UInt64(info.st_dev), expected.file == UInt64(info.st_ino) else {
-            throw DesktopRecordingRegistryError.identityUnavailable
-        }
-        return info
-    }
-
-    static func openNamespace(parent: Int32, initialize: Bool) throws -> Int32 {
-        if initialize, mkdirat(parent, ".recording-locations", 0o700) != 0 { throw posixError() }
-        let leaf = openat(parent, ".recording-locations", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard leaf >= 0 else {
-            if errno == ENOENT { throw DesktopRecordingRegistryError.missing }
-            throw posixError()
-        }
-        return leaf
-    }
-
-    static func lockNamespace(_ leaf: Int32) throws -> stat {
-        try secureDirectory(leaf, privateLeaf: true)
-        guard flock(leaf, LOCK_EX | LOCK_NB) == 0 else {
-            if errno == EWOULDBLOCK { throw DesktopRecordingRegistryError.busy }
-            throw posixError()
-        }
-        var info = stat()
-        guard fstat(leaf, &info) == 0 else { throw posixError() }
-        return info
     }
 }
 #endif

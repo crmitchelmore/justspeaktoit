@@ -350,3 +350,20 @@ int32_t jsti_background_request(
     if (result == 0) *reached = request.reached;
     return result;
 }
+
+/* --------------------------------------------------------------- self-test */
+
+/* Each session unit stops and reports through the shared thread only once it
+ * exists, so querying or stopping either session before any portal call never
+ * opens the session bus. The --self-test process makes no portal call first. */
+int32_t jsti_portal_self_test(char *error, size_t capacity) {
+    gboolean started = portal_started();
+    jsti_shortcuts_stop();
+    jsti_remote_desktop_stop();
+    int32_t active = jsti_remote_desktop_active();
+    if (!started && (portal_started() || active != 0)) {
+        jsti_set_error(error, capacity, "Self-test: stopping an unstarted portal session started the portal thread.");
+        return -1;
+    }
+    return 0;
+}

@@ -1,4 +1,5 @@
-/* Self-tests for post-processing, local cleanup sources, cleanup preview and migration restore. */
+/* Self-tests for post-processing, local cleanup sources, cleanup preview, migration restore and the
+ * Polish prompt draft. */
 #include "LinuxWindowSelfTestInternal.h"
 #include "../CLinuxSupport/LinuxWindowDashboardState.h"
 #include "../CLinuxSupport/LinuxWindowHistoryState.h"
@@ -381,4 +382,22 @@ gboolean migration_restore_self_test(void) {
     g_clear_pointer(&observed.text, g_free);
     refresh_actions();
     return okay;
+}
+
+int32_t polish_prompt_self_test(char *error, size_t capacity) {
+    GtkTextBuffer *prompt = gtk_text_view_get_buffer(polish_page()->polish_prompt_row);
+    GtkTextIter prompt_start, prompt_end;
+    gtk_text_buffer_get_bounds(prompt, &prompt_start, &prompt_end);
+    gchar *draft = gtk_text_buffer_get_text(prompt, &prompt_start, &prompt_end, TRUE);
+    gint32 saved_enabled = adw_switch_row_get_active(polish_page()->polish_row) ? 1 : 0;
+    gint32 disabled = 0;
+    post_processing_enabled_apply(&disabled);
+    gtk_text_buffer_get_bounds(prompt, &prompt_start, &prompt_end);
+    gchar *after_fix = gtk_text_buffer_get_text(prompt, &prompt_start, &prompt_end, TRUE);
+    gboolean draft_preserved = g_strcmp0(draft, after_fix) == 0 && !adw_switch_row_get_active(polish_page()->polish_row);
+    post_processing_enabled_apply(&saved_enabled);
+    g_free(draft); g_free(after_fix);
+    if (!draft_preserved || jsti_window_set_post_processing_enabled(2) != -1)
+        return fail(error, capacity, "cleanup fix refresh replaced a prompt draft or accepted an invalid state");
+    return 0;
 }

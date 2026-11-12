@@ -223,7 +223,7 @@ extension DesktopHostController {
             let held = beginLocalUse(request.model)
             defer { endLocalUse(held) }
             return try await Platform.transcribeLocally(
-                request.audio, model: request.model, language: request.language, controller: self
+                request.audio, model: request.model, language: request.language, host: self
             )
         }
         return try await DesktopTranscription.transcribe(

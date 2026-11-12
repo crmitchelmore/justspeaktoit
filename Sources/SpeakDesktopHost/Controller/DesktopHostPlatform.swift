@@ -169,13 +169,13 @@ package protocol DesktopHostPlatform: Sendable {
     static func cancelLocalModels(_ state: LocalModelsState)
     /// How status lines name this computer, e.g. "this PC".
     static var localDeviceName: String { get }
-    // Readiness, recognition and live clients take the isolated controller:
-    // they open the shared runtime and read the recording settings. Holding a
-    // model and cancelling downloads touch only the local-model state.
+    // Readiness, recognition and live clients see only the host's local-model
+    // side (`DesktopHostLocalModelHost`): they open the shared runtime and
+    // report status. Holding a model touches only the local-model state.
     /// Why an on-device model cannot run now, or nil when it can.
-    static func localReadiness(_ model: String, controller: isolated DesktopHostController<Self>) -> String?
+    static func localReadiness(_ model: String, host: isolated some DesktopHostLocalModelHost<Self>) -> String?
     static func transcribeLocally(
-        _ audio: URL, model: String, language: String?, controller: isolated DesktopHostController<Self>
+        _ audio: URL, model: String, language: String?, host: isolated some DesktopHostLocalModelHost<Self>
     ) async throws -> TranscriptionResult
     /// Holds an on-device model for one recording or transcription until
     /// `endLocalUse`, so it cannot be removed meanwhile. Returns the held
@@ -186,7 +186,7 @@ package protocol DesktopHostPlatform: Sendable {
     /// model, or nil when the host cannot stream it. Throws the user-facing
     /// reason the model cannot run now.
     static func makeLocalLiveClient(
-        _ model: String, language: String?, controller: isolated DesktopHostController<Self>
+        _ model: String, language: String?, host: isolated some DesktopHostLocalModelHost<Self>
     ) async throws -> (any FinalizingStreamingTranscriptionClient)?
 
     static func makeLocalCleanup(directory: URL) throws -> DesktopLocalLLMStore?

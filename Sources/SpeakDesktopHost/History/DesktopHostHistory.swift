@@ -199,7 +199,7 @@ extension DesktopHostController {
         case .remote: return nil
         case .onDevice:
             if let onDeviceReadiness { return onDeviceReadiness(model) }
-            return Platform.localReadiness(model, controller: self)
+            return Platform.localReadiness(model, host: self)
         case .liveOnly:
             return "This used a live model. Open its audio, then choose Batch and import it to transcribe again."
         case .unavailable:

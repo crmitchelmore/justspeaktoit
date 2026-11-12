@@ -52,12 +52,12 @@ package extension DesktopHostPlatform {
 
     static var localDeviceName: String { "this computer" }
 
-    static func localReadiness(_ model: String, controller: isolated DesktopHostController<Self>) -> String? {
+    static func localReadiness(_ model: String, host: isolated some DesktopHostLocalModelHost<Self>) -> String? {
         "This on-device model is not available in this \(displayName) build."
     }
 
     static func transcribeLocally(
-        _ audio: URL, model: String, language: String?, controller: isolated DesktopHostController<Self>
+        _ audio: URL, model: String, language: String?, host: isolated some DesktopHostLocalModelHost<Self>
     ) async throws -> TranscriptionResult {
         throw DesktopTranscriptionError.unsupportedModel
     }
@@ -67,7 +67,7 @@ package extension DesktopHostPlatform {
     static func endLocalUse(_ held: String, in state: inout LocalModelsState) {}
 
     static func makeLocalLiveClient(
-        _ model: String, language: String?, controller: isolated DesktopHostController<Self>
+        _ model: String, language: String?, host: isolated some DesktopHostLocalModelHost<Self>
     ) async throws -> (any FinalizingStreamingTranscriptionClient)? { nil }
 }
 
@@ -85,7 +85,7 @@ extension DesktopHostController {
     @discardableResult
     package func requireCredentialOrLocalModel(_ model: String) throws -> String {
         if DesktopHostModels.isLocal(model) {
-            if let problem = Platform.localReadiness(model, controller: self) {
+            if let problem = Platform.localReadiness(model, host: self) {
                 throw DesktopHostError(message: problem)
             }
             return ""
@@ -141,7 +141,7 @@ extension DesktopHostController {
     package func readyStatus(savedRecordings: Int) throws -> String {
         let hint = Platform.readyHint(hotKeySettings())
         if DesktopHostModels.isLocal(settings.model) {
-            return Platform.localReadiness(settings.model, controller: self)
+            return Platform.localReadiness(settings.model, host: self)
                 ?? "Ready on \(Platform.localDeviceName). \(hint) \(savedRecordings) saved recordings."
         }
         let key = try Platform.apiKey(name: credentialIdentifier(for: settings.model))

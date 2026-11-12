@@ -113,8 +113,7 @@ public struct ElevenLabsBatchClient: TranscriptionProvider {
     ) async throws -> TranscriptionResult {
         let duration = try await durationResolver(audioURL)
 
-        let segments: [TranscriptionSegment]
-        let wordSegments = response.words?.compactMap { word -> TranscriptionSegment? in
+        let segments = response.words?.compactMap { word -> TranscriptionSegment? in
             guard word.type == "word" else { return nil }
             return TranscriptionSegment(
                 startTime: word.start ?? 0,
@@ -122,23 +121,7 @@ public struct ElevenLabsBatchClient: TranscriptionProvider {
                 text: word.text
             )
         } ?? []
-
-        if wordSegments.isEmpty {
-            segments = [TranscriptionSegment(startTime: 0, endTime: duration, text: response.text)]
-        } else {
-            segments = wordSegments
-        }
-
-        return TranscriptionResult(
-            text: response.text,
-            segments: segments,
-            confidence: nil,
-            duration: duration,
-            modelIdentifier: model,
-            cost: nil,
-            rawPayload: String(data: payload, encoding: .utf8),
-            debugInfo: nil
-        )
+        return .batch(text: response.text, segments: segments, duration: duration, model: model, payload: payload)
     }
 
 }

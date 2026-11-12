@@ -200,20 +200,7 @@ public struct RevAIBatchClient: TranscriptionProvider {
       }
     }
 
-    if segments.isEmpty {
-      segments = [TranscriptionSegment(startTime: 0, endTime: duration, text: fullText)]
-    }
-
-    return TranscriptionResult(
-      text: fullText,
-      segments: segments,
-      confidence: nil,
-      duration: duration,
-      modelIdentifier: model,
-      cost: nil,
-      rawPayload: nil,
-      debugInfo: nil
-    )
+    return .batch(text: fullText, segments: segments, duration: duration, model: model, payload: nil)
   }
 
 }

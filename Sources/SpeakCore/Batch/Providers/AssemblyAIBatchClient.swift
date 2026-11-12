@@ -192,30 +192,15 @@ public struct AssemblyAIBatchClient: TranscriptionProvider {
     model: String
   ) -> TranscriptionResult {
     let text = response.text ?? ""
-    let segments: [TranscriptionSegment]
-
-    if let words = response.words, !words.isEmpty {
-      segments = words.map { word in
-        TranscriptionSegment(
-          startTime: TimeInterval(word.start) / 1000.0,
-          endTime: TimeInterval(word.end) / 1000.0,
-          text: word.text
-        )
-      }
-    } else {
-      segments = [TranscriptionSegment(startTime: 0, endTime: duration, text: text)]
+    let segments = (response.words ?? []).map { word in
+      TranscriptionSegment(
+        startTime: TimeInterval(word.start) / 1000.0,
+        endTime: TimeInterval(word.end) / 1000.0,
+        text: word.text
+      )
     }
-
-    return TranscriptionResult(
-      text: text,
-      segments: segments,
-      confidence: response.confidence,
-      duration: duration,
-      modelIdentifier: model,
-      cost: nil,
-      rawPayload: nil,
-      debugInfo: nil
-    )
+    return .batch(text: text, segments: segments, confidence: response.confidence, duration: duration,
+                  model: model, payload: nil)
   }
 
   // MARK: - API Key Validation

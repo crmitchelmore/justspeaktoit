@@ -1,5 +1,7 @@
-/* Corrections and Pronunciation editors (LinuxVocabulary.c): the editor model and
- * the operations its self-test (CLinuxSelfTest) drives. Not public ABI. */
+/* Corrections and Pronunciation editors: the editor model shared by the page
+ * (LinuxVocabulary.c), its button actions (LinuxVocabularyActions.c) and host
+ * payloads (LinuxVocabularyPresentation.c), and the operations its self-test
+ * (CLinuxSelfTest) drives. Not public ABI. */
 #ifndef JSTI_LINUX_VOCABULARY_INTERNAL_H
 #define JSTI_LINUX_VOCABULARY_INTERNAL_H
 
@@ -30,8 +32,11 @@ typedef struct { int kind; gchar *payload; gboolean refresh; } Presentation;
 
 #pragma GCC visibility push(hidden)
 
-/* The open editor of each vocabulary kind, or NULL. GTK main thread only. */
-extern Editor *vocabulary_editors[5];
+/* The open editor of each vocabulary kind (0...4), or NULL. LinuxVocabulary.c
+ * owns the table; the self-test swaps an entry and puts it back. GTK main
+ * thread only. */
+Editor *vocabulary_editor(int kind);
+void vocabulary_set_editor(int kind, Editor *editor);
 
 GtkWidget *jsti_vocabulary_page_new(int kind);
 /* The selected row is filtered out of view. */
@@ -46,6 +51,20 @@ gchar *vocabulary_action_payload(Editor *e, const char *action);
 void vocabulary_send_action(Editor *e, const char *action);
 /* Applies a Presentation (its `data`); the caller keeps ownership. */
 void vocabulary_present(gpointer data);
+
+/* LinuxVocabulary.c, for the action and presentation units. */
+/* Appends a TAB and `value`, escaping %, TAB, CR and LF. */
+void vocabulary_append_field(GString *payload, const char *value);
+/* Disables row actions while the selection is hidden by filters. */
+void vocabulary_selection_controls(Editor *e);
+/* Re-runs the list filter and keeps the selection only while it is visible. */
+void vocabulary_apply_filters(Editor *e);
+/* A word-wrapping text view in a scroller; `*view` receives the text view. */
+GtkWidget *vocabulary_multiline(GtkWidget **view);
+/* LinuxVocabularyActions.c: a button that runs `action` (a static string). */
+GtkWidget *vocabulary_button(Editor *e, const char *title, const char *action);
+/* LinuxVocabularyPresentation.c: frees a Category. */
+void vocabulary_category_free(gpointer data);
 
 #pragma GCC visibility pop
 

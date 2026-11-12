@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
+import { CATALOGUE_PATH, newAlphaChecks, pleaseTestMarkdown, previousDeliveredSource } from './alpha-testing-notes-lib.mjs';
 import { buildCatalogue, mergeEntries } from './release-notes-catalogue-lib.mjs';
 import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, publicationSurfaces, stablePublicationSurfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
 
@@ -61,6 +62,13 @@ function baseline(all, surface) {
     if(configured) return git('rev-parse',`${configured}^{commit}`);
     // No version has ever been published on this surface: full initial range.
     return git('rev-list','--max-parents=0','HEAD').split('\n')[0];
+}
+const fileAt = (rev, path) => { try { return git('show',`${rev}:${path}`); } catch { return ''; } };
+const isAncestor = (ancestor, rev) => { try { git('merge-base','--is-ancestor',ancestor,rev); return true; } catch { return false; } };
+// Human checks added since the last Alpha delivered on this surface.
+function alphaTesting(manifests, all, surface, platform, source, fallback) {
+    const previous=previousDeliveredSource({manifests,releases:all,surface,source,isAncestor}) ?? fallback;
+    return pleaseTestMarkdown(newAlphaChecks({previous:fileAt(previous,CATALOGUE_PATH),current:fileAt(source,CATALOGUE_PATH),platform}));
 }
 function ensureRelease(manifest, all) {
     if(all.some(r=>r.tag_name===manifest.tag)) return;
@@ -122,7 +130,7 @@ if(command === 'allocate' || command === 'prepare') {
         const base=train === 'alpha' ? git('rev-parse', `${source}^1`) : retiredSurfaces.includes(surface) ? manifest.surfaces['mac-direct'].baseline : baseline(all,surface);
         git('merge-base','--is-ancestor',base,source);
         const commits=parseCommits(git('log','--first-parent','--reverse','--format=%H%x1f%s%x1f%b%x1e',`${base}..${source}`));
-        const notes=notesFor(commits,platform,`https://github.com/${repo}/compare/${base}...${source}`);
+        const notes=notesFor(commits,platform,`https://github.com/${repo}/compare/${base}...${source}`,train === 'alpha' ? alphaTesting(manifests,all,surface,platform,source,base) : '');
         const storeNotes=notes.length <= 4000 ? notes : notes.slice(0,3900)+'\nFull release notes are available in the app.';
         manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : `${1000+Math.floor(allocation.ordinal/10000)}.${Math.floor(allocation.ordinal/100)%100}.${allocation.ordinal%100}`,version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes),...(retiredSurfaces.includes(surface)?{retired:true}:{})};
     }

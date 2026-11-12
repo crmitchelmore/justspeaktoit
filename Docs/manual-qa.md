@@ -5,6 +5,15 @@ Apple Watch or Mac, or makes a product decision. They are collected in one
 checklist so the owner can work through them in a few device sessions and
 submit every result with one click.
 
+Human checks never block a pull request or merge. Add a check to the
+catalogue in the same PR as the change it validates; after merge, the first
+Alpha containing it lists it under **Please test** in its release notes and
+TestFlight "What to Test" (see
+[alpha-stable-release-trains.md](alpha-stable-release-trains.md#please-test-human-checks)).
+Write `build` as the Alpha that includes the change, for example "Alpha build
+that includes #123". Ids starting `owner-` and decisions are owner-only and are
+left out of Alpha notes.
+
 - **Checklist:** <https://justspeaktoit.com/qa> (noindex). Answers are saved in
   the browser's local storage, so the owner can stop and resume.
 - **Catalogue:** [`Docs/manual-checks.yml`](manual-checks.yml) is the single

@@ -12,6 +12,7 @@ Brief description of the changes.
 - [ ] I have added tests that prove my fix/feature works
 - [ ] Existing tests pass with `make test`
 - Verification notes / screenshots / logs:
+- Human checks (run on Alpha after merge, never a merge blocker): added to `Docs/manual-checks.yml` / none
 
 ## Pre-PR checks
 <!-- Paste the output of `scripts/pre-pr --markdown` (or .build/pre-pr/summary.md) here, keeping its hidden marker. -->

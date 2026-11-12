@@ -50,7 +50,7 @@ export const parseCommits = (log) => log
         return { sha, subject, body: bodyParts.join("\x1f").trim() };
     });
 
-export const deterministicNotes = ({ commits, compareURL }) => {
+export const deterministicNotes = ({ commits, compareURL, testing = "" }) => {
     const sections = new Map();
     for (const commit of commits) {
         const { section, text } = sectionForSubject(commit.subject);
@@ -73,6 +73,7 @@ export const deterministicNotes = ({ commits, compareURL }) => {
         }
     }
 
+    if (testing) parts.push(`\n${testing}`);
     if (compareURL) parts.push(`\n**Full changelog:** ${compareURL}`);
     return `${parts.join("\n")}\n`;
 };

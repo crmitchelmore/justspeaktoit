@@ -257,7 +257,7 @@ final class StatusBarController {
 
   private var mainManagerActionTitle: String {
     switch mainManager.state {
-    case .idle, .completed(_), .failed(_):
+    case .idle, .completed, .failed:
       return "Start Recording"
     case .recording:
       return "Stop Recording"
@@ -367,5 +367,7 @@ extension StatusBarController {
       .store(in: &cancellables)
   }
 }
-// @Implement: This file should provide the UI for the status bar. It should briefly show the core settings of the app (which model we're currently using and if we're using post-processing). To open the main window of the app.What is the current insert method, and what are brief stats from recordings?
+// @Implement: This file should provide the UI for the status bar. It should briefly show the core settings of the app
+// (which model we're currently using and if we're using post-processing). To open the main window of the app.What is
+// the current insert method, and what are brief stats from recordings?
 // StatusBarController hosts an NSStatusItem with dynamic menu reflecting recording & processing state.

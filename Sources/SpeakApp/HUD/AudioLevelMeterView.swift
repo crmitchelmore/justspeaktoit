@@ -48,7 +48,7 @@ struct AudioLevelMeterView: View {
                 .init(color: .green, location: 0.5),
                 .init(color: .yellow, location: 0.7),
                 .init(color: .orange, location: 0.85),
-                .init(color: .red, location: 1.0),
+                .init(color: .red, location: 1.0)
             ]),
             startPoint: .leading,
             endPoint: .trailing

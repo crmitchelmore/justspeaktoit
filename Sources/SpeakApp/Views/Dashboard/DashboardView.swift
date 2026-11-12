@@ -248,6 +248,12 @@ struct DashboardView: View {
   }
 }
 
-// @Implement: This file shows the default and most important currently configured setup. Initially it should show a disabled record button until minimum required permissions are enabled. IF and when they are provided the button should show "record". It should expose what permissions are currently granted and enable the user to grant those permissions if required.
+// @Implement: This file shows the default and most important currently configured setup. Initially it should show a
+// disabled record button until minimum required permissions are enabled. IF and when they are provided the button
+// should show "record". It should expose what permissions are currently granted and enable the user to grant those
+// permissions if required.
 
-// It should show when it's recording and the previously transcribed/processed item, it should also show the total number of recordings and the total spend and any other useful information. Ideally, we can make this into a nice graph. This should be kind of the friendly dashboard that we land on that gives you the key information for the app and can get you started.
+// It should show when it's recording and the previously transcribed/processed item, it should also show the total
+// number of recordings and the total spend and any other useful information. Ideally, we can make this into a nice
+// graph. This should be kind of the friendly dashboard that we land on that gives you the key information for the app
+// and can get you started.

@@ -25,14 +25,14 @@ import os.log
 /// Adding mutable state after `init` requires real isolation first.
 public final class SettingsSync: @unchecked Sendable {
     public static let shared = SettingsSync()
-    
+
     /// Whether iCloud KV store is available (requires Apple Developer subscription)
     public private(set) var isAvailable: Bool = false
-    
+
     private var store: NSUbiquitousKeyValueStore?
     private let localStorage = UserDefaults.standard
     private let notificationCenter: NotificationCenter
-    
+
     /// Keys that should be synced
     public enum SyncKey: String, CaseIterable {
         case selectedModel = "sync.selectedModel"
@@ -42,18 +42,18 @@ public final class SettingsSync: @unchecked Sendable {
         case darkModePreference = "sync.darkModePreference"
         case lastSyncTimestamp = "sync.lastSyncTimestamp"
     }
-    
+
     /// Notification posted when remote settings change
     public static let didReceiveRemoteChangesNotification = Notification.Name("SettingsSyncDidReceiveRemoteChanges")
-    
+
     private init() {
         self.notificationCenter = NotificationCenter.default
-        
+
         // Check if iCloud is available before trying to use it
         if FileManager.default.ubiquityIdentityToken != nil {
             self.store = NSUbiquitousKeyValueStore.default
             self.isAvailable = true
-            
+
             // Listen for remote changes
             notificationCenter.addObserver(
                 self,
@@ -61,7 +61,7 @@ public final class SettingsSync: @unchecked Sendable {
                 name: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
                 object: store
             )
-            
+
             // Start syncing
             store?.synchronize()
         } else {
@@ -71,13 +71,13 @@ public final class SettingsSync: @unchecked Sendable {
             SpeakLogger.sync.info("iCloud not available - using local storage only")
         }
     }
-    
+
     deinit {
         notificationCenter.removeObserver(self)
     }
-    
+
     // MARK: - Public API
-    
+
     /// Stores a string value for the given key (falls back to local storage if iCloud unavailable)
     public func set(_ value: String?, forKey key: SyncKey) {
         if let store = store {
@@ -89,7 +89,7 @@ public final class SettingsSync: @unchecked Sendable {
             localStorage.set(value, forKey: key.rawValue)
         }
     }
-    
+
     /// Stores a boolean value for the given key (falls back to local storage if iCloud unavailable)
     public func set(_ value: Bool, forKey key: SyncKey) {
         if let store = store {
@@ -100,7 +100,7 @@ public final class SettingsSync: @unchecked Sendable {
             localStorage.set(value, forKey: key.rawValue)
         }
     }
-    
+
     /// Retrieves a string value for the given key
     public func string(forKey key: SyncKey) -> String? {
         if let store = store {
@@ -109,7 +109,7 @@ public final class SettingsSync: @unchecked Sendable {
             return localStorage.string(forKey: key.rawValue)
         }
     }
-    
+
     /// Retrieves a boolean value for the given key
     public func bool(forKey key: SyncKey) -> Bool {
         if let store = store {
@@ -118,12 +118,12 @@ public final class SettingsSync: @unchecked Sendable {
             return localStorage.bool(forKey: key.rawValue)
         }
     }
-    
+
     /// Forces a sync with iCloud (no-op if iCloud unavailable)
     public func synchronize() -> Bool {
         store?.synchronize() ?? true
     }
-    
+
     /// Gets the timestamp of the last sync (nil if iCloud unavailable)
     public var lastSyncDate: Date? {
         guard let store = store else { return nil }
@@ -131,14 +131,14 @@ public final class SettingsSync: @unchecked Sendable {
         guard timestamp > 0 else { return nil }
         return Date(timeIntervalSince1970: timestamp)
     }
-    
+
     // MARK: - Private
-    
+
     @objc private func storeDidChange(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reason = userInfo[NSUbiquitousKeyValueStoreChangeReasonKey] as? Int
         else { return }
-        
+
         switch reason {
         case NSUbiquitousKeyValueStoreServerChange,
              NSUbiquitousKeyValueStoreInitialSyncChange:
@@ -249,7 +249,7 @@ public struct SyncStatus: Equatable, Sendable {
     public var preferredBackend: SyncBackend {
         availability.preferredBackend
     }
-    
+
     public init(
         iCloudKeychainAvailable: Bool = false,
         iCloudKVStoreAvailable: Bool = false,
@@ -270,12 +270,12 @@ public struct SyncStatus: Equatable, Sendable {
             transportAvailable: transportAvailable
         )
     }
-    
+
     /// Checks current sync availability
     public static func current(iCloudCloudKitAvailable: Bool = false) -> SyncStatus {
         let sync = SettingsSync.shared
         let availability = SyncAvailability.current(iCloudCloudKitAvailable: iCloudCloudKitAvailable)
-        
+
         return SyncStatus(
             iCloudKeychainAvailable: KeychainSyncAvailability.isAvailable(),
             iCloudKVStoreAvailable: availability.iCloudKVStoreAvailable,

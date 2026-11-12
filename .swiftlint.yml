@@ -1,7 +1,8 @@
 strict: true
+analyzer_rules:
+  - explicit_self
 opt_in_rules:
   - empty_count
-  - explicit_self
   - fatal_error_message
   - implicit_return
   - redundant_nil_coalescing

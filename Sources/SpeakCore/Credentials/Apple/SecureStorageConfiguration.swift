@@ -91,7 +91,8 @@ public struct SecureStorageConfiguration: Sendable {
     }
 
     public let service: String
-    public let masterAccount: String
+    // Public SpeakCore API and the persisted Keychain account; renaming it is a breaking change.
+    public let masterAccount: String // swiftlint:disable:this inclusive_language
     /// Previous service names whose aggregate payload should be copied into the
     /// canonical service on first access. Legacy items are retained so older app
     /// versions can still roll back safely.

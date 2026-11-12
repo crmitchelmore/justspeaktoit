@@ -10,7 +10,8 @@ struct MigrationRecovery {
     private let service = ReleaseTrain.current.namespace("com.justspeaktoit.migration-recovery")
     var directory: URL { root.appendingPathComponent("MigrationRecovery") }
     var exists: Bool {
-        FileManager.default.fileExists(atPath: directory.appendingPathComponent("recovery.zip").path) }
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent("recovery.zip").path)
+    }
 
     func save(_ snapshot: MigrationSnapshot) throws {
         let manager = FileManager.default

@@ -6,7 +6,7 @@ import Foundation
 public let SpeakTransportServiceType = ReleaseTrain.current.bonjourService // swiftlint:disable:this identifier_name
 
 /// Protocol version for compatibility checking
-public let SpeakTransportProtocolVersion = 1
+public let SpeakTransportProtocolVersion = 1 // swiftlint:disable:this identifier_name
 
 // MARK: - Message Types
 

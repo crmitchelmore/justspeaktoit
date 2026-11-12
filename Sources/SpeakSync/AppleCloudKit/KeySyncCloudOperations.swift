@@ -1,6 +1,7 @@
 import CloudKit
 import CryptoKit
 import Foundation
+import os
 import Security
 import SpeakCore
 

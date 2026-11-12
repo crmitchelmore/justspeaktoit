@@ -121,12 +121,12 @@ guards that enforce them.
 
 ### Linting
 ```bash
-make lint                                          # strict SwiftLint against the baseline
+make lint                                          # strict SwiftLint: zero violations, no baseline
 ./scripts/swiftlint.sh lint --strict Sources/SpeakApp  # lint a subset
 ./scripts/swiftformat.sh Sources/SpeakApp          # format a subset (isolated Tooling graph)
 ```
 - SwiftLint and SwiftFormat resolve through the isolated `Tooling/` graph (pinned in `Tooling/Package.resolved`) so app/test dependency changes cannot downgrade the linter; upgrade it intentionally with `make update-tooling`.
-- CI SwiftLint also runs with `.swiftlint-baseline.json`; the baseline is line-number-sensitive, so prefer exact-line inline suppressions when unblocking lint to avoid baseline drift.
+- SwiftLint has no baseline: every violation fails. Fix it; where a rule is genuinely wrong for one line (for example a public API name), use a scoped `// swiftlint:disable:this <rule>` or `:next` with a reason. File-wide `swiftlint:disable` is legacy debt that `scripts/ci/lint-suppression-ratchet.py` stops from growing.
 
 ## MCP Tools
 
@@ -203,7 +203,7 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Prefer expressive type names (`ContentView`, `SpeakApp`)
 - Keep new API surface `internal` unless exposure is required for cross-module use
 - Use `public` for types that need to be accessed from Xcode project or other modules
-- Enforce linting via `.swiftlint.yml`; rules include `explicit_self`, `implicit_return`, line-length 120/160
+- Enforce linting via `.swiftlint.yml`; rules include `implicit_return`, line-length 120/160
 - Apple UI controls need accessible names and stable identifiers; follow [Docs/accessibility.md](Docs/accessibility.md). `make lint` runs `scripts/accessibility/check-apple-accessibility.py`
 
 ## Testing Guidelines
@@ -222,9 +222,10 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
 `--full` to run every macOS unit-test target.
 
 - **Lint:** `make ci-lint`, the target ci.yml's Lint job runs. That is
-  whole-repo strict SwiftLint against the baseline, accessibility, a ratchet
-  that fails when `.swiftlint-baseline.json` gains entries against
-  `origin/main` (`scripts/ci/lint-baseline-ratchet.py`),
+  whole-repo strict SwiftLint with zero violations and no baseline,
+  accessibility, a ratchet that fails when file-wide `swiftlint:disable`
+  suppressions grow against `origin/main`
+  (`scripts/ci/lint-suppression-ratchet.py`),
   `Tooling/Package.resolved` drift and `make test-tooling`. It runs unless
   every changed file is docs, website, Android or Workers.
 - **Portable Swift (Linux):** `scripts/ci-portable-linux.sh` in the CI image

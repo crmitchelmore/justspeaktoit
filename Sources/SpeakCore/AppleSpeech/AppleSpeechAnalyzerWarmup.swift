@@ -56,9 +56,9 @@ enum AppleSpeechAnalyzerLiveSetup {
     /// app's lifetime; iOS lets it linger briefly to bound memory.
     static var modelRetention: SpeechAnalyzer.Options.ModelRetention {
         #if os(macOS)
-        return .processLifetime
+        .processLifetime
         #else
-        return .lingering
+        .lingering
         #endif
     }
 

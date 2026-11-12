@@ -642,6 +642,8 @@ let iosTestsTarget: Target = .target(
             "JustSpeakKeyboard/KeyboardDirectCaptureSession.swift",
             "JustSpeakKeyboard/KeyboardDocumentSession.swift",
             "JustSpeakKeyboard/KeyboardHandoffController.swift",
+            "JustSpeakKeyboard/KeyboardStatusCopy.swift",
+            "JustSpeakKeyboard/KeyboardSurfaceState.swift",
             "JustSpeakKeyboard/KeyboardViewModel.swift"
         ]
         : ["Tests/SpeakiOSTests/**"],

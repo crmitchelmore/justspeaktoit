@@ -2,7 +2,9 @@
 import importlib.machinery
 import importlib.util
 import json
+import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,18 +12,21 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-_loader = importlib.machinery.SourceFileLoader('pre_pr', str(ROOT / 'scripts' / 'pre-pr'))
-_spec = importlib.util.spec_from_loader('pre_pr', _loader)
-pre_pr = importlib.util.module_from_spec(_spec)
-sys.modules['pre_pr'] = pre_pr
-_loader.exec_module(pre_pr)
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+from pre_pr import environment, lock, planner, runner, swift_tests
+from pre_pr import summary as record
+
+_loader = importlib.machinery.SourceFileLoader('pre_pr_cli', str(ROOT / 'scripts' / 'pre-pr'))
+_spec = importlib.util.spec_from_loader('pre_pr_cli', _loader)
+cli = importlib.util.module_from_spec(_spec)
+_loader.exec_module(cli)
 _evidence_spec = importlib.util.spec_from_file_location('pre_pr_evidence', ROOT / 'scripts' / 'check-pre-pr-evidence.py')
 evidence = importlib.util.module_from_spec(_evidence_spec)
 _evidence_spec.loader.exec_module(evidence)
 
 
 def ids(files, full=False):
-    checks, areas = pre_pr.plan(files, full)
+    checks, areas = planner.plan(files, full)
     return [c.id for c in checks], areas, checks
 
 
@@ -60,44 +65,44 @@ class PlanTests(unittest.TestCase):
 
         for fail_on_fix, expected in ((False, 'pass'), (True, 'fail')):
             args = mock.Mock(no_fix=False, fail_on_fix=fail_on_fix, verbose=False)
-            with mock.patch.object(pre_pr, 'worktree_tree', side_effect=['before', 'after']), \
-                    mock.patch.object(pre_pr, 'launch'), mock.patch.object(pre_pr, 'finish', fake_finish), \
-                    mock.patch.object(pre_pr, 'git', return_value='Sources/A.swift'), \
+            with mock.patch.object(cli, 'worktree_tree', side_effect=['before', 'after']), \
+                    mock.patch.object(cli, 'launch'), mock.patch.object(cli, 'finish', fake_finish), \
+                    mock.patch.object(cli, 'git', return_value='Sources/A.swift'), \
                     mock.patch('builtins.print'):
-                check = pre_pr.run_autofix(args, ['Package.swift'])
+                check = cli.run_autofix(args, ['Package.swift'])
             self.assertEqual(check.status, expected)
             self.assertIn('fixed 1 file: Sources/A.swift', check.note)
 
     def test_android_runs_remotely_without_a_working_jdk_and_feed(self):
-        with mock.patch.dict(pre_pr.os.environ, {'JSTI_ANDROID_LOCAL': '0'}):
-            checks, _ = pre_pr.plan(['android/app/build.gradle.kts'], False)
+        with mock.patch.dict(os.environ, {'JSTI_ANDROID_LOCAL': '0'}):
+            checks, _ = planner.plan(['android/app/build.gradle.kts'], False)
         android = {c.id: c for c in checks}['android']
         self.assertTrue(android.background)
         self.assertEqual(android.command[:4], ['python3', 'scripts/linux-precheck', '--job', 'android'])
         self.assertFalse(android.advisory or android.skip_reason or android.requires)
-        with mock.patch.dict(pre_pr.os.environ, {'JSTI_ANDROID_LOCAL': '1'}):
-            checks, _ = pre_pr.plan(['android/app/build.gradle.kts'], False)
+        with mock.patch.dict(os.environ, {'JSTI_ANDROID_LOCAL': '1'}):
+            checks, _ = planner.plan(['android/app/build.gradle.kts'], False)
         self.assertEqual({c.id: c for c in checks}['android'].command, ['bash', 'scripts/ci-android.sh'])
 
     def test_macos_java_stub_is_not_a_jdk(self):
         failing = mock.Mock(returncode=1)
-        with mock.patch.dict(pre_pr.os.environ, {'JSTI_MAVEN_MIRROR': 'https://feed'}), \
-                mock.patch.object(pre_pr.subprocess, 'run', return_value=failing):
-            pre_pr.os.environ.pop('JSTI_ANDROID_LOCAL', None)
-            self.assertFalse(pre_pr.android_runs_locally())
+        with mock.patch.dict(os.environ, {'JSTI_MAVEN_MIRROR': 'https://feed'}), \
+                mock.patch.object(subprocess, 'run', return_value=failing):
+            os.environ.pop('JSTI_ANDROID_LOCAL', None)
+            self.assertFalse(environment.android_runs_locally())
 
     def test_public_library_change_runs_the_api_compatibility_job(self):
-        with mock.patch.object(pre_pr, 'IS_MAC', True), mock.patch.object(pre_pr, 'pr_title_env', lambda: {}):
-            checks, areas = pre_pr.plan(['Sources/SpeakCore/OpenRouter/Apple/OpenRouterAPIClient.swift'], False)
+        with mock.patch.object(environment, 'IS_MAC', True), mock.patch.object(environment, 'pr_title_env', lambda: {}):
+            checks, areas = planner.plan(['Sources/SpeakCore/OpenRouter/Apple/OpenRouterAPIClient.swift'], False)
             api = {c.id: c for c in checks}['api-compatibility']
             self.assertEqual(api.command[:2], ['bash', 'scripts/ci-api-compatibility.sh'])
-            self.assertEqual(api.command[2], pre_pr.merge_base_or('origin/main'))
+            self.assertEqual(api.command[2], environment.merge_base_or('origin/main'))
             self.assertIn('public-api', areas)
             for path in ('Sources/SpeakApp/AppDelegate.swift', 'Sources/SpeakDesktop/X.swift', 'Docs/x.md'):
-                ids_ = [c.id for c in pre_pr.plan([path], False)[0]]
+                ids_ = [c.id for c in planner.plan([path], False)[0]]
                 self.assertNotIn('api-compatibility', ids_, path)
-        with mock.patch.object(pre_pr, 'IS_MAC', False):
-            api = {c.id: c for c in pre_pr.plan(['Package.swift'], False)[0]}['api-compatibility']
+        with mock.patch.object(environment, 'IS_MAC', False):
+            api = {c.id: c for c in planner.plan(['Package.swift'], False)[0]}['api-compatibility']
         self.assertTrue(api.incomplete)
 
     def test_android_worker_and_landing_are_independent_areas(self):
@@ -116,26 +121,26 @@ class PlanTests(unittest.TestCase):
         self.assertTrue(checks[0].background)
         self.assertIn('scripts/linux-precheck', checks[0].command)
         self.assertIn('ci-lint', selected)
-        if pre_pr.IS_MAC:
+        if environment.IS_MAC:
             self.assertIn('apple-build', selected)
             self.assertEqual({c.id: c for c in checks}['apple-build'].forbid_drift, ('Package.resolved',))
 
     def test_lint_also_runs_on_ubuntu_like_ci(self):
-        with mock.patch.object(pre_pr.sys, 'platform', 'darwin'):
-            checks = {c.id: c for c in pre_pr.plan(['scripts/release-train.mjs'], False)[0]}
+        with mock.patch.object(sys, 'platform', 'darwin'):
+            checks = {c.id: c for c in planner.plan(['scripts/release-train.mjs'], False)[0]}
             self.assertEqual(checks['ci-lint-linux'].command[2:4], ['--job', 'lint'])
             self.assertTrue(checks['ci-lint-linux'].background)
-            skipped = {c.id: c for c in pre_pr.plan(['scripts/release-train.mjs'], False, linux='skip')[0]}
+            skipped = {c.id: c for c in planner.plan(['scripts/release-train.mjs'], False, linux='skip')[0]}
             self.assertTrue(skipped['ci-lint-linux'].incomplete)
-        with mock.patch.object(pre_pr.sys, 'platform', 'linux'):
-            ids_ = [c.id for c in pre_pr.plan(['scripts/release-train.mjs'], False)[0]]
+        with mock.patch.object(sys, 'platform', 'linux'):
+            ids_ = [c.id for c in planner.plan(['scripts/release-train.mjs'], False)[0]]
         self.assertNotIn('ci-lint-linux', ids_)
 
     def test_linux_modes(self):
         for mode, flag in (('remote', '--remote'), ('container', '--container')):
-            checks, _ = pre_pr.plan(['Package.swift'], False, linux=mode)
+            checks, _ = planner.plan(['Package.swift'], False, linux=mode)
             self.assertIn(flag, checks[0].command)
-        checks, _ = pre_pr.plan(['Package.swift'], False, linux='skip')
+        checks, _ = planner.plan(['Package.swift'], False, linux='skip')
         linux = {c.id: c for c in checks}['portable-linux']
         self.assertTrue(linux.incomplete)
         self.assertEqual(linux.skip_reason, '--no-linux')
@@ -172,17 +177,17 @@ class PlanTests(unittest.TestCase):
                    'merge_base': 'b' * 40, 'changed_file_count': 1, 'duration_seconds': 3.0, 'result': 'pass',
                    'checks': [{'title': 'x', 'area': 'tooling', 'status': 'pass', 'note': '',
                                'duration_seconds': 3.0}]}
-        text = pre_pr.markdown(summary)
+        text = record.markdown(summary)
         marker = text.split('<!-- pre-pr-summary ')[1].split(' -->')[0]
         self.assertEqual(json.loads(marker), {'schema': 1, 'head': 'a' * 40, 'result': 'pass'})
         summary['tree'] = 'c' * 40
-        marker = pre_pr.markdown(summary).split('<!-- pre-pr-summary ')[1].split(' -->')[0]
+        marker = record.markdown(summary).split('<!-- pre-pr-summary ')[1].split(' -->')[0]
         self.assertEqual(json.loads(marker)['tree'], 'c' * 40)
 
     def test_worktree_tree_matches_a_clean_head(self):
-        if pre_pr.git('status', '--porcelain'):
+        if environment.git('status', '--porcelain'):
             self.skipTest('only comparable on a clean checkout')
-        self.assertEqual(pre_pr.worktree_tree(), pre_pr.git('rev-parse', 'HEAD^{tree}'))
+        self.assertEqual(environment.worktree_tree(), environment.git('rev-parse', 'HEAD^{tree}'))
 
 
 class CIParityTests(unittest.TestCase):
@@ -193,7 +198,7 @@ class CIParityTests(unittest.TestCase):
     macos = (ROOT / '.github' / 'workflows' / 'ci-macos-debug.yml').read_text(encoding='utf-8')
 
     def test_macos_skip_targets_match_ci(self):
-        self.assertEqual(set(re.findall(r'--skip-target (\w+)', self.macos)), pre_pr.CI_MACOS_SKIP_TARGETS)
+        self.assertEqual(set(re.findall(r'--skip-target (\w+)', self.macos)), swift_tests.CI_MACOS_SKIP_TARGETS)
 
     def test_android_command_matches_android_yml(self):
         android = (ROOT / '.github' / 'workflows' / 'android.yml').read_text(encoding='utf-8')
@@ -205,8 +210,8 @@ class CIParityTests(unittest.TestCase):
 
     def test_plan_needs_no_history(self):
         # CI's Lint job runs these tests in a shallow checkout without origin/main.
-        with mock.patch.object(pre_pr, 'IS_MAC', True), mock.patch.object(pre_pr, 'pr_title_env', lambda: {}):
-            checks, _ = pre_pr.plan(['Package.swift'], False, base='no-such-ref/main')
+        with mock.patch.object(environment, 'IS_MAC', True), mock.patch.object(environment, 'pr_title_env', lambda: {}):
+            checks, _ = planner.plan(['Package.swift'], False, base='no-such-ref/main')
         self.assertEqual({c.id: c for c in checks}['api-compatibility'].command[2], 'no-such-ref/main')
 
     def test_api_products_match_the_gate(self):
@@ -214,7 +219,7 @@ class CIParityTests(unittest.TestCase):
         products = set(re.search(r'PRODUCTS=\(([^)]*)\)', gate).group(1).split()) | {'SpeakWatchCore'}
         dirs = {'SpeakiOSLib': 'SpeakiOS'}
         for product in products:
-            self.assertIn(f'Sources/{dirs.get(product, product)}/**', pre_pr.routing().routes()['api']['paths'],
+            self.assertIn(f'Sources/{dirs.get(product, product)}/**', environment.routing().routes()['api']['paths'],
                           product)
 
     def test_linux_image_is_the_ci_image(self):
@@ -226,7 +231,7 @@ class CIParityTests(unittest.TestCase):
 
 
 def fake_graph():
-    return pre_pr.Graph.from_dump({'targets': [
+    return swift_tests.Graph.from_dump({'targets': [
         {'name': 'Core', 'type': 'regular', 'dependencies': []},
         {'name': 'App', 'type': 'executable', 'dependencies': [{'byName': ['Core', None]}]},
         {'name': 'Demo', 'type': 'executable', 'dependencies': [{'byName': ['Core', None]}]},
@@ -273,7 +278,7 @@ class SelectionTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def select(self, files, full=False, exclude=frozenset()):
-        return pre_pr.select_tests(files, full, self.graph, set(exclude), root=self.root)
+        return swift_tests.select_tests(files, full, self.graph, set(exclude), root=self.root)
 
     def test_source_change_runs_every_dependent_test_that_names_its_types(self):
         selection = self.select(['Sources/Core/Widget.swift'])
@@ -287,8 +292,8 @@ class SelectionTests(unittest.TestCase):
 
     def test_unmatched_module_without_own_target_runs_every_covering_target(self):
         self.assertEqual(self.select(['Sources/Demo/main.swift']).filters, [])  # nothing covers Demo
-        self.assertEqual(pre_pr.uncovered_modules(['Sources/Demo/main.swift'], [self.graph]), ['Demo'])
-        self.assertEqual(pre_pr.uncovered_modules(['Sources/Core/Helpers.swift'], [self.graph]), [])
+        self.assertEqual(swift_tests.uncovered_modules(['Sources/Demo/main.swift'], [self.graph]), ['Demo'])
+        self.assertEqual(swift_tests.uncovered_modules(['Sources/Core/Helpers.swift'], [self.graph]), [])
 
     def test_name_matched_test_file_is_selected_even_without_a_reference(self):
         self.assertEqual(self.select(['Sources/App/AppView.swift']).filters, ['AppTests\\.(?:AppViewTests)\\b'])
@@ -321,28 +326,28 @@ class SelectionTests(unittest.TestCase):
 
     def test_files_outside_the_graph_select_nothing(self):
         self.assertEqual(self.select(['Sources/Windows/App.swift', 'Docs/x.md']).filters, [])
-        self.assertEqual(pre_pr.uncovered_modules(['Sources/Windows/App.swift'], [self.graph]), [])
+        self.assertEqual(swift_tests.uncovered_modules(['Sources/Windows/App.swift'], [self.graph]), [])
 
     def test_uncovered_module_adds_a_failing_check(self):
-        with mock.patch.object(pre_pr, 'IS_MAC', True), \
-                mock.patch.object(pre_pr, 'load_graph', lambda portable: None if portable else self.graph), \
-                mock.patch.object(pre_pr, 'ROOT', self.root):
-            checks, _ = pre_pr.plan(['Sources/Demo/main.swift'], False)
+        with mock.patch.object(environment, 'IS_MAC', True), \
+                mock.patch.object(swift_tests, 'load_graph', lambda portable: None if portable else self.graph), \
+                mock.patch.object(environment, 'ROOT', self.root):
+            checks, _ = planner.plan(['Sources/Demo/main.swift'], False)
         by_id = {c.id: c for c in checks}
         self.assertIn('Demo', by_id['swift-test-coverage'].failure)
         order = [c.id for c in checks]
         self.assertLess(order.index('swift-test-coverage'), order.index('apple-build'), 'cheap failures run first')
 
     def test_unreadable_graph_fails_closed(self):
-        with mock.patch.object(pre_pr, 'IS_MAC', True), mock.patch.object(pre_pr, 'load_graph', lambda _: None):
-            checks, _ = pre_pr.plan(['Sources/SpeakCore/Credentials/Apple/SecureStorage.swift'], False)
+        with mock.patch.object(environment, 'IS_MAC', True), mock.patch.object(swift_tests, 'load_graph', lambda _: None):
+            checks, _ = planner.plan(['Sources/SpeakCore/Credentials/Apple/SecureStorage.swift'], False)
         self.assertTrue({c.id: c for c in checks}['apple-unit-tests'].failure)
 
 
 class RunTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.out = mock.patch.object(pre_pr, 'OUT', Path(self.tmp.name))
+        self.out = mock.patch.object(environment, 'OUT', Path(self.tmp.name))
         self.out.start()
 
     def tearDown(self):
@@ -350,9 +355,9 @@ class RunTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_check(self, **kwargs):
-        check = pre_pr.Check('x', 'tooling', 'x', kwargs.pop('command', ['true']), **kwargs)
-        with mock.patch.object(pre_pr, 'restore_side_effects', lambda *_: None):
-            pre_pr.run(check, verbose=False)
+        check = runner.Check('x', 'tooling', 'x', kwargs.pop('command', ['true']), **kwargs)
+        with mock.patch.object(runner, 'restore_side_effects', lambda *_: None):
+            runner.run(check, verbose=False)
         return check
 
     def test_missing_required_tool_fails(self):
@@ -375,15 +380,15 @@ class RunTests(unittest.TestCase):
 
     def test_modifying_a_ci_checked_file_fails(self):
         states = iter([set(), {'Package.resolved'}])
-        with mock.patch.object(pre_pr, 'dirty_tracked', lambda: next(states)):
+        with mock.patch.object(runner, 'dirty_tracked', lambda: next(states)):
             check = self.run_check(forbid_drift=('Package.resolved',))
         self.assertEqual(check.status, 'fail')
         self.assertIn('Package.resolved', check.note)
 
     def test_counts_both_test_frameworks(self):
         log = 'Executed 4 tests\nExecuted 12 tests, with 0 failures\n✔ Test run with 7 tests in 2 suites passed'
-        self.assertEqual(pre_pr.tests_executed(log), 19)
-        self.assertEqual(pre_pr.tests_executed('No matching test cases were run'), 0)
+        self.assertEqual(runner.tests_executed(log), 19)
+        self.assertEqual(runner.tests_executed('No matching test cases were run'), 0)
 
 
 class EvidenceTests(unittest.TestCase):
@@ -393,7 +398,7 @@ class EvidenceTests(unittest.TestCase):
         summary = {'schema': 1, 'head': head or self.head, 'dirty': False, 'base_ref': 'origin/main',
                    'merge_base': 'b' * 40, 'changed_file_count': 1, 'duration_seconds': 1.0, 'result': result,
                    'checks': []}
-        return 'Intro\n\n' + pre_pr.markdown(summary)
+        return 'Intro\n\n' + record.markdown(summary)
 
     def test_generated_passing_record_at_head_is_accepted(self):
         self.assertEqual(evidence.evaluate(self.body(), self.head, 'crmitchelmore')[0], 'ok')
@@ -432,11 +437,11 @@ class MachineLockTests(unittest.TestCase):
             order, entered = [], threading.Event()
 
             def second():
-                with pre_pr.machine_lock(path):
+                with lock.machine_lock(path):
                     order.append('second')
                 entered.set()
 
-            with pre_pr.machine_lock(path):
+            with lock.machine_lock(path):
                 waiter = threading.Thread(target=second)
                 waiter.start()
                 self.assertFalse(entered.wait(0.5), 'the second run must wait for the lock')
@@ -446,7 +451,7 @@ class MachineLockTests(unittest.TestCase):
             self.assertEqual(order, ['first', 'second'])
 
     def test_off_disables_the_lock(self):
-        with pre_pr.machine_lock('off'), pre_pr.machine_lock('off'):
+        with lock.machine_lock('off'), lock.machine_lock('off'):
             pass
 
 

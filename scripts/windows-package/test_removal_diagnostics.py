@@ -8,13 +8,14 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / 'scripts/windows-package/test-windows-package-lifecycle.ps1'
+CHECKS = ROOT / 'scripts/windows-package/LifecycleChecks.ps1'
+INSTALLATION = ROOT / 'scripts/windows-package/LifecycleInstallation.ps1'
 POWERSHELL = shutil.which('powershell') or shutil.which('pwsh')
 
 
 class RemovalDiagnosticTests(unittest.TestCase):
     def test_strict_deadline_and_failed_assertion_are_preserved(self):
-        source = SOURCE.read_text(encoding='utf-8')
+        source = INSTALLATION.read_text(encoding='utf-8')
         removal = source.split('function Assert-Removed(', 1)[1].split('# --- user data', 1)[0]
         self.assertIn('$filesRemoved = $installLocation -and (Wait-PathState $installLocation $false 120)', removal)
         self.assertIn('if (-not $filesRemoved) {', removal)
@@ -25,9 +26,9 @@ class RemovalDiagnosticTests(unittest.TestCase):
 
     @unittest.skipUnless(POWERSHELL, 'PowerShell runtime unavailable; actual mocked helper runs in Windows packaging CI')
     def test_actual_helper_bounds_relative_inventory_and_registration_metadata_without_mutation(self):
-        source = SOURCE.read_text(encoding='utf-8')
+        source = CHECKS.read_text(encoding='utf-8')
         helper = 'function Get-PreviousPackageDiagnostics(' + source.split(
-            'function Get-PreviousPackageDiagnostics(', 1)[1].split('# --- certificates', 1)[0]
+            'function Get-PreviousPackageDiagnostics(', 1)[1]
         with tempfile.TemporaryDirectory(prefix='jsti-removal-diagnostics-') as folder:
             root = Path(folder)
             payload = root / 'retained package'

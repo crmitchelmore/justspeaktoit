@@ -31,6 +31,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     case quickVoice3
     case pasteLastHistoryItem
     case editSelectionByVoice
+    case openCommandPalette
 
     var id: String { rawValue }
 
@@ -63,6 +64,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .quickVoice3: return "Quick Switch Voice 3"
         case .pasteLastHistoryItem: return "Paste Last History Item"
         case .editSelectionByVoice: return "Edit Selection by Voice"
+        case .openCommandPalette: return "Search for Anything"
         }
     }
 
@@ -89,7 +91,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openVoiceOutput:
             return KeyBinding(keyCode: 32, modifiers: [.command], isGlobal: false)  // ⌘U
         case .openCorrections:
-            return KeyBinding(keyCode: 40, modifiers: [.command], isGlobal: false)  // ⌘K
+            return KeyBinding(keyCode: 40, modifiers: [.command, .shift], isGlobal: false)  // ⇧⌘K
         case .openTroubleshooting:
             return KeyBinding(keyCode: 17, modifiers: [.command], isGlobal: false)  // ⌘T
         case .openTranscriptionSettings:
@@ -124,6 +126,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
             return KeyBinding(keyCode: 9, modifiers: [.command, .option])  // ⌥⌘V
         case .editSelectionByVoice:
             return KeyBinding(keyCode: 14, modifiers: [.command, .option])  // ⌥⌘E
+        case .openCommandPalette:
+            return KeyBinding(keyCode: 40, modifiers: [.command], isGlobal: false)  // ⌘K
         }
     }
 
@@ -141,7 +145,11 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openVoiceOutput:
             return [KeyBinding(keyCode: 20, modifiers: [.command, .option], isGlobal: false)]
         case .openCorrections:
-            return [KeyBinding(keyCode: 21, modifiers: [.command, .option], isGlobal: false)]
+            // ⌘K moved to Search for Anything.
+            return [
+                KeyBinding(keyCode: 21, modifiers: [.command, .option], isGlobal: false),
+                KeyBinding(keyCode: 40, modifiers: [.command], isGlobal: false)
+            ]
         case .openTroubleshooting:
             return [KeyBinding(keyCode: 23, modifiers: [.command, .option], isGlobal: false)]
         case .openSettings:

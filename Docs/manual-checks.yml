@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-11"
+updated: "2026-11-12"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -300,6 +300,21 @@ sessions:
           - "Click the toolbar Stop button."
           - "Start another recording from the menu bar's Start Recording item while the window is open, then stop it with the Dashboard button."
         expected: "Both buttons show Stop (red) as soon as the window opens mid-recording and switch the moment a recording starts or ends from anywhere. Each Stop ends the recording, which is transcribed and appears in History; the buttons then return to Record."
+        final_gate: true
+      - id: "mac-search-for-anything"
+        issues:
+          - 1551
+        title: "Sidebar \u201cSearch for anything\u201d and \u2318K run actions and find settings"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes #1551"
+        steps:
+          - "Open the main window. Check the top of the sidebar, above Speak, then click Search for anything."
+          - "Type transcribe, press Return, say a made-up sentence, then press \u2318K, type transcribe and press Return again."
+          - "Copy a sentence in another app, return, press \u2318K, type say and choose Say Clipboard Aloud."
+          - "Press \u2318K, type api key and choose any result."
+          - "Open Settings \u203a Keyboard and check App Shortcuts for Search for Anything and Open Corrections."
+        expected: "The sidebar shows a field reading \u201cSearch for anything\u201d with \u2318K. Transcribe starts and then stops a recording that appears in History; Say reads the clipboard aloud; api key opens and highlights an API-key card. Keyboard lists Search for Anything as \u2318K and Open Corrections as \u21e7\u2318K."
         final_gate: true
   - id: "iphone"
     device: "iPhone"

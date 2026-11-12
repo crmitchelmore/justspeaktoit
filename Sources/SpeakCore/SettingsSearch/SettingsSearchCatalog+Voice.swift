@@ -115,7 +115,10 @@ extension SettingsSearchCatalog {
         SettingsSearchEntry(
             id: "shortcuts.app", title: "App Shortcuts", section: .shortcuts, systemImage: "app.badge",
             summary: "Shortcuts for navigating Speak's own windows and pages.",
-            keywords: ["open settings", "show history", "quick switch voice", "navigation shortcuts", "rebind"],
+            keywords: [
+                "open settings", "show history", "quick switch voice", "navigation shortcuts", "rebind",
+                "search for anything", "command palette"
+            ],
             platforms: .macOS
         ),
         SettingsSearchEntry(

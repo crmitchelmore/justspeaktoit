@@ -24,7 +24,7 @@ import {
   type StoreKitRenewalPayload,
 } from '../auth/storekit.js';
 import { verifyAppleSignedJws } from '../auth/apple-jws.js';
-import { transitionEntitlement } from './billing.js';
+import { transitionEntitlement } from '../billing/entitlement-transition.js';
 import type { RequestContext } from '../context.js';
 
 const MAX_WEBHOOK_BYTES = 512 * 1024;

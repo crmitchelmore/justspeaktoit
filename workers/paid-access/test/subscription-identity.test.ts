@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { Repository } from '../src/data/repository.js';
 import { grantsAccess, type EntitlementSource, type EntitlementStatus } from '../src/entitlement.js';
-import { transitionEntitlement } from '../src/routes/billing.js';
+import { transitionEntitlement } from '../src/billing/entitlement-transition.js';
 
 const NOW = 1800000000;
 async function fixture() {

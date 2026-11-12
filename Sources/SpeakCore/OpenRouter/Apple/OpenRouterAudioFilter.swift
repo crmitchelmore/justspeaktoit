@@ -1,5 +1,19 @@
 import Foundation
 
+/// Search, provider and listed-price filtering shared by every OpenRouter browser.
+struct OpenRouterBrowserFilter: Equatable {
+    var query = ""
+    var provider = ""
+    var freeOnly = false
+
+    func matches(searchText: [String], provider itemProvider: String, hasZeroPrices: Bool) -> Bool {
+        if !provider.isEmpty, itemProvider != provider { return false }
+        if freeOnly, !hasZeroPrices { return false }
+        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return search.isEmpty || searchText.contains { $0.localizedCaseInsensitiveContains(search) }
+    }
+}
+
 /// Search metadata without interpreting provider-specific price units.
 struct OpenRouterAudioFilter {
     var capability: OpenRouterAudioCapability = .transcription
@@ -9,12 +23,15 @@ struct OpenRouterAudioFilter {
 
     func matches(_ model: OpenRouterAudioModel) -> Bool {
         guard model.supports(capability) else { return false }
-        if !provider.isEmpty, Self.provider(for: model) != provider { return false }
-        if freeOnly, !Self.hasZeroPrices(model) { return false }
-        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return search.isEmpty || [model.id, model.name, model.description].contains {
-            $0.localizedCaseInsensitiveContains(search)
-        }
+        return OpenRouterBrowserFilter(query: query, provider: provider, freeOnly: freeOnly).matches(
+            searchText: Self.searchText(for: model),
+            provider: Self.provider(for: model),
+            hasZeroPrices: Self.hasZeroPrices(model)
+        )
+    }
+
+    static func searchText(for model: OpenRouterAudioModel) -> [String] {
+        [model.id, model.name, model.description]
     }
 
     static func provider(for model: OpenRouterAudioModel) -> String {

@@ -190,11 +190,13 @@ static void report_apply(gpointer pointer) {
             GtkWidget *button = gtk_button_new_with_label(row->navigation_title);
             g_signal_connect(button, "clicked", G_CALLBACK(navigate_clicked), GINT_TO_POINTER(row->page));
             gtk_flow_box_insert(GTK_FLOW_BOX(actions), button, -1);
+            gtk_widget_set_focusable(gtk_widget_get_parent(button), FALSE);
         }
         if (row->fix != 0) {
             GtkWidget *button = gtk_button_new_with_label(row->fix_title);
             g_signal_connect(button, "clicked", G_CALLBACK(command_clicked), GINT_TO_POINTER(row->fix));
             gtk_flow_box_insert(GTK_FLOW_BOX(actions), button, -1);
+            gtk_widget_set_focusable(gtk_widget_get_parent(button), FALSE);
             if (ui.first_fix == NULL) ui.first_fix = button;
         }
         gtk_box_append(GTK_BOX(finding), actions);

@@ -44,13 +44,17 @@ void show_page(gint32 page) {
     GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.sidebar, page);
     if (row != NULL && gtk_list_box_get_selected_row(ui.sidebar) != row) gtk_list_box_select_row(ui.sidebar, row);
     adw_navigation_split_view_set_show_content(ui.split, TRUE);
-    /* GtkStack moves focus off a page it hides, but not off the sidebar the collapsed
-     * layout just hid: focus there is lost to the keyboard and screen readers. */
+    /* GtkStack moves focus off a page it hides, but never off the sidebar. Focus there
+     * would be lost when the collapsed layout hides it, or left on the search that chose
+     * the page, so it moves into the page. A shortcut pressed on a sidebar row moves
+     * focus to the new row, so the row Orca reads and Return opens is the shown page. */
     GtkWidget *visible = gtk_stack_get_visible_child(ui.pages);
     GtkWidget *sidebar = GTK_WIDGET(adw_navigation_split_view_get_sidebar(ui.split));
-    gboolean stranded = focus != NULL && visible != NULL && sidebar != NULL &&
-        adw_navigation_split_view_get_collapsed(ui.split) && gtk_widget_is_ancestor(focus, sidebar);
-    if (stranded) gtk_widget_child_focus(visible, GTK_DIR_TAB_FORWARD);
+    if (focus == NULL || visible == NULL || sidebar == NULL || !gtk_widget_is_ancestor(focus, sidebar)) return;
+    if (adw_navigation_split_view_get_collapsed(ui.split) || !gtk_widget_is_ancestor(focus, GTK_WIDGET(ui.sidebar)))
+        gtk_widget_child_focus(visible, GTK_DIR_TAB_FORWARD);
+    else if (row != NULL && focus != GTK_WIDGET(row))
+        gtk_widget_grab_focus(GTK_WIDGET(row));
 }
 
 static void on_sidebar(GtkListBox *box, GtkListBoxRow *row, gpointer data) {

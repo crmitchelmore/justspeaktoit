@@ -37,6 +37,19 @@ gboolean sidebar_navigation_self_test(void) {
     GtkWidget *moved = gtk_root_get_focus(GTK_ROOT(ui.window));
     okay = okay && on_sidebar && moved != NULL &&
         gtk_widget_is_ancestor(moved, gtk_stack_get_visible_child(ui.pages));
+    /* Beside the content, a shortcut pressed on a sidebar row moves focus to the new
+     * row, and a page opened from settings search moves focus into that page. */
+    adw_navigation_split_view_set_collapsed(ui.split, FALSE);
+    gtk_widget_grab_focus(sidebar_row);
+    okay = okay && sidebar_navigate(GDK_KEY_9, GDK_CONTROL_MASK, sidebar_row) &&
+        gtk_root_get_focus(GTK_ROOT(ui.window)) ==
+            GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_PROFILES));
+    jsti_settings_search_focus();
+    GtkWidget *searching = gtk_root_get_focus(GTK_ROOT(ui.window));
+    show_page(JSTI_PAGE_DASHBOARD);
+    moved = gtk_root_get_focus(GTK_ROOT(ui.window));
+    okay = okay && searching != NULL && searching != moved && moved != NULL &&
+        gtk_widget_is_ancestor(moved, gtk_stack_get_visible_child(ui.pages));
     adw_navigation_split_view_set_collapsed(ui.split, collapsed);
     show_page(JSTI_PAGE_HISTORY);
     const GdkModifierType blocked[] = { 0, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GDK_CONTROL_MASK | GDK_ALT_MASK,

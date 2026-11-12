@@ -6,67 +6,23 @@ import SwiftUI
 struct CloudKitKeySyncSettingsCard: View {
   let secureStorage: SecureAppStorage
   @ObservedObject private var keySync = CloudKitKeySync.shared
-  @State private var passphrase = ""
-  @State private var syncError: String?
 
   var body: some View {
     SettingsCard(title: "Encrypted API-Key Sync", systemImage: "lock.icloud", tint: .brandLagoon) {
       VStack(alignment: .leading, spacing: 12) {
-        HStack {
-          Label("Status", systemImage: keySync.status.isEnabled ? "checkmark.seal.fill" : "lock.fill")
-          Spacer()
-          Text(keySync.status.message)
-            .foregroundStyle(keySync.status.isEnabled ? .green : .secondary)
-        }
-
-        if !keySync.status.isEnabled {
-          SecureField("Sync passphrase", text: $passphrase)
-            .textContentType(.password)
-            .privacySensitive()
-            .textFieldStyle(.roundedBorder)
-
-          Button {
-            Task {
-              do {
-                try await keySync.enable(passphrase: passphrase)
-                passphrase = ""
-                syncError = nil
-              } catch {
-                syncError = error.localizedDescription
-              }
-            }
-          } label: {
-            Label("Enable API-Key Sync", systemImage: "lock.open")
-          }
-          .disabled(passphrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-          .buttonStyle(.borderedProminent)
-        } else {
-          HStack {
-            Button {
-              Task {
-                do {
-                  try await keySync.syncNow()
-                  syncError = nil
-                } catch {
-                  syncError = error.localizedDescription
-                }
-              }
-            } label: {
-              Label("Sync Keys Now", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .disabled(keySync.status.isSyncing)
-
-            Button("Disable", role: .destructive) {
-              Task { await keySync.disable() }
-            }
-          }
-        }
-
-        if let syncError {
-          Text(syncError)
-            .font(.caption)
-            .foregroundStyle(.red)
-        }
+        EncryptedKeySyncControls(
+          status: EncryptedKeySyncDisplayStatus(
+            isEnabled: keySync.status.isEnabled,
+            isSyncing: keySync.status.isSyncing,
+            message: keySync.status.message
+          ),
+          statusTitle: "Status",
+          statusSystemImage: keySync.status.isEnabled ? "checkmark.seal.fill" : "lock.fill",
+          spacing: 12,
+          enable: { try await keySync.enable(passphrase: $0) },
+          syncNow: { try await keySync.syncNow() },
+          disable: { await keySync.disable() }
+        )
 
         Text(
           "Opt in to sync API keys through your private CloudKit database. Keys are encrypted with "

@@ -634,7 +634,7 @@ sessions:
     setup:
       - "Double Tap-capable Watch (Series 9+, Ultra 2) on watchOS 11+, paired with the iPhone; Watch Settings \u203a Gestures \u203a Double Tap on."
       - "iPhone Watch app \u203a Smart Stack \u203a Live Activities on; Transcribe Voice in iPhone Control Center."
-      - "Optional watch-app checks only (decided: dev build now): register the watch ids and App Group (Docs/watch-provisioning.md steps 1-3), then build with TUIST_WATCH_APP=1 tuist generate and run the SpeakiOS scheme on your iPhone."
+      - "Optional watch-app checks only (decided: dev build now): the watch ids and App Groups are registered for development signing, and an Alpha dev build with the watch app was installed on the iPhone on 12 Nov 2026 (Stable untouched). If Just Speak to It Alpha is not on the Watch, install it from the iPhone Watch app \u203a Available Apps. To rebuild, see Docs/watch-provisioning.md \u203a Development build."
     items:
       - id: "watch-smart-stack-stop"
         issues:
@@ -659,9 +659,9 @@ sessions:
         title: "Watch app: complication start, 60 s wrist-down, delivered to iPhone"
         minutes: 8
         core: false
-        build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (see Watch setup)"
+        build: "Just Speak to It Alpha dev build with the watch app (see Watch setup)"
         prerequisites:
-          - "Watch provisioning done (Docs/watch-provisioning.md steps 1-3)"
+          - "Just Speak to It Alpha installed on the Watch (see Watch setup)"
         steps:
           - "Add the Just Speak to It \"Record\" complication to a watch face; note the Watch battery %."
           - "Tap the complication, say \"marker alpha\" and lower your wrist so the screen sleeps."
@@ -677,9 +677,9 @@ sessions:
         title: "Watch app: offline and force-quit captures still deliver once"
         minutes: 7
         core: false
-        build: "Xcode dev build from current main with TUIST_WATCH_APP=1 (see Watch setup)"
+        build: "Just Speak to It Alpha dev build with the watch app (see Watch setup)"
         prerequisites:
-          - "Watch provisioning done (Docs/watch-provisioning.md steps 1-3)"
+          - "Just Speak to It Alpha installed on the Watch (see Watch setup)"
         steps:
           - "Turn on iPhone Airplane Mode (Bluetooth and Wi-Fi off)."
           - "Tap the complication, say \"offline seven\", tap to stop."

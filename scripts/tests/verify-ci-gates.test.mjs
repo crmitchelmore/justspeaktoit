@@ -423,7 +423,7 @@ test('aggregate never checks out or executes repository helper code', () => {
 });
 
 test('only pull requests cancel an in-progress CI run', () => {
-  assert.match(workflow, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
+  assert.match(workflow, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name != 'pull_request' && github\.run_attempt != '1' && format\('-attempt-\{0\}', github\.run_id\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
     'main and merge-batch runs must finish so main is ever verified');
 });
 

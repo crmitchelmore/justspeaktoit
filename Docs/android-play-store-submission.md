@@ -31,6 +31,12 @@ environment. Secrets are read only by that job.
 | Upload keystore secrets | Upload-key-signed AAB artefact, signature verified (refuses a debug certificate) |
 | Keystore and `PLAY_SERVICE_ACCOUNT_JSON` | The signed AAB is also published to the **internal** track |
 
+The same upload key signs the sideloadable `JustSpeakToIt-android.apk` that
+every green Alpha attaches and `justspeaktoit.com/alpha/download/android`
+serves (see [the release train doc](alpha-stable-release-trains.md#android-alpha-apk)).
+Play re-signs its builds with the Play App Signing key, so a sideloaded APK and
+a Play install cannot update each other; uninstall one before installing the other.
+
 The track release is created as a `draft` until the repository variable
 `JSTI_PLAY_RELEASE_STATUS` is set to `completed`. Google rejects non-draft
 releases while the app itself is still a draft, so flip the variable only after
@@ -167,6 +173,13 @@ account JSON, and never paste them into an issue.
    default language English (United Kingdom), App, Free. Accept the
    declarations. The package name is fixed by the first upload:
    `com.justspeaktoit.android`.
+Steps 2 and 3 are done: an RSA 4096 PKCS12 upload key (alias `upload`, SHA-256
+certificate fingerprint `A9:2E:3F:3A:69:2A:F9:D0:12:E2:28:9D:F7:7F:9B:33:CA:64:D9:1C:1B:42:E3:BE:38:CF:E5:8D:CC:DD:0E:31`)
+is in the `android-release` secrets, with a copy in the owner Mac's login
+Keychain under service `justspeaktoit-android-upload` (accounts
+`upload-keystore-base64` and `upload-keystore-password`; the key password is
+the same). Copy both into 1Password. Repeat them only to rotate the key.
+
 2. **Create the upload key** on a trusted machine (Play App Signing keeps the
    real app signing key):
    ```bash

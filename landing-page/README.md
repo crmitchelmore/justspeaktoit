@@ -23,7 +23,7 @@ Check desktop and mobile layouts (360 px to wide desktop, no horizontal scroll),
 
 Cache policy lives in `_headers`, including explicit HTML/CSS/JS revalidation. Production builds also fingerprint the stylesheet filename and rewrite its HTML reference, so a cached older CSS response cannot break a newly deployed layout. The old `_routes.json` is deliberately excluded: it contains a `routes`/`headers` shape, but Cloudflare uses that filename for Functions `include`/`exclude` routing, not static response headers. This site has no Functions. See [Cloudflare routing](https://developers.cloudflare.com/pages/functions/routing/) and [headers](https://developers.cloudflare.com/pages/configuration/headers/).
 
-- `index.html`: content and unified download section across Mac, iOS, Linux and Windows.
+- `index.html`: content and unified download section across Mac, iOS, Android, Linux and Windows.
 - `chrome.mjs`: the header and footer of every page, the clip `<video>` markup and the Stable Mac version shown beside its download. `build.mjs` and `serve.ts` replace each page's `<!-- partial:… -->`, `<!-- clip:… -->` and `<!-- stable:… -->` markers from it. Update `stable` when a Stable Mac release is published; Alpha builds never change it.
 - `partials/document.css`: the shared reading-column style of the privacy and support pages.
 - `styles/*.css`: the stylesheet, one file per page section (design tokens, base typography, then each section in page order). `stylesheet.mjs` lists them in cascade order; the build and preview server publish them concatenated as `/site.css`.

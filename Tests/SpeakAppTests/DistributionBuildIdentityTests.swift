@@ -232,9 +232,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(featureFlags.contains("static var watchCaptureEnabled: Bool"))
         XCTAssertTrue(app.contains("if FeatureFlags.watchCaptureEnabled {"))
 
-        // The watch app is a separate bundle id that still needs provisioning,
-        // so release signing must not pick it up yet.
-        XCTAssertFalse(releaseWorkflow.contains("TUIST_WATCH_APP"))
+        // #1552: only Alpha TestFlight carries the watch app; Stable never
+        // turns the flag on.
+        XCTAssertTrue(releaseWorkflow.contains("watch=0 share=0"))
+        XCTAssertTrue(releaseWorkflow.contains("if [ \"$RELEASE_TRAIN\" = \"alpha\" ]; then\n            watch=1"))
         XCTAssertTrue(watchTarget.contains("bundleId: trainIdentifier(\"com.justspeaktoit.ios.watchkitapp\")"))
         XCTAssertTrue(
             watchTarget.contains("\"WKCompanionAppBundleIdentifier\": .string(trainValue(\"iosBundleIdentifier\"))")
@@ -260,13 +261,17 @@ final class DistributionBuildIdentityTests: XCTestCase {
         let watchTarget = try targetBlock(named: "JustSpeakWatchApp", in: manifest)
 
         // The complication rides on the watch app's flag: it is embedded in
-        // the watch app and needs its own provisioning before release signing.
+        // the watch app, so release signing installs and checks its profile
+        // only when the watch app ships.
         XCTAssertTrue(manifest.contains("projectTargets.append(watchWidgetTarget)"))
         XCTAssertTrue(manifest.contains("environment[\"TUIST_WATCH_PROFILE_NAME\"]"))
         XCTAssertTrue(manifest.contains("environment[\"TUIST_WATCH_WIDGET_PROFILE_NAME\"]"))
         XCTAssertFalse(manifest.contains("environment[\"WATCH_PROFILE_NAME\"]"))
         XCTAssertFalse(manifest.contains("environment[\"WATCH_WIDGET_PROFILE_NAME\"]"))
-        XCTAssertFalse(releaseWorkflow.contains("JustSpeakWatchWidget"))
+        XCTAssertTrue(
+            releaseWorkflow.contains("install_profile watch-widget-appstore \"$BUNDLE_ID.watchkitapp.complication\"")
+        )
+        XCTAssertTrue(releaseWorkflow.contains("PlugIns/JustSpeakWatchWidgetExtension.appex"))
         XCTAssertTrue(
             widgetTarget.contains("bundleId: trainIdentifier(\"com.justspeaktoit.ios.watchkitapp.complication\")")
         )
@@ -446,11 +451,9 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("iCloud container mismatch"))
         XCTAssertTrue(workflow.contains("$IOS_CLOUD_CONTAINER"))
         XCTAssertTrue(workflow.contains("TUIST_IOS_KEYBOARD: \"1\""))
-        XCTAssertTrue(
-            workflow.contains(
-                "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: \"0\""
-            )
-        )
+        // #1547: only Alpha carries keyboard direct capture; Stable stays handoff-only.
+        XCTAssertTrue(workflow.contains("echo \"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=1\" >> \"$GITHUB_ENV\""))
+        XCTAssertTrue(workflow.contains("else\n            echo \"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0\""))
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
         XCTAssertTrue(workflow.contains("python3 scripts/verify-keyboard-purpose-strings.py"))
         XCTAssertFalse(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))

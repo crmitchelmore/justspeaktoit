@@ -47,6 +47,14 @@ final class KeyPressPrimerRuntime {
   private(set) var lastKeyDownUptime: TimeInterval?
 
   private(set) lazy var primer = HotKeyPressPrimer<PrimedLiveInput>(dependencies: makeDependencies())
+  /// Mic-free live-input preparation started on key-down when the primer
+  /// does not open the microphone (#611).
+  private(set) lazy var inputWarmUp = HotKeyInputWarmUp<LiveInputPreparation>(
+    dependencies: makeInputWarmUpDependencies()
+  )
+  /// A warm-up a recognised gesture claimed for the session it is starting.
+  private var claimedInputWarmUp: LiveInputPreparation?
+  private var claimedInputWarmUpExpiry: HotKeyPressPrimerTimer?
 
   init(context: Context, standby: LiveInputStandby<AVAudioEngine> = LiveInputEngines.standby) {
     self.context = context
@@ -69,6 +77,7 @@ final class KeyPressPrimerRuntime {
           self.scheduleRefill(after: 0)
         } else {
           self.primer.cancel()
+          self.inputWarmUp.cancel()
           self.cancelPendingRefill()
           self.standby.clear()
         }
@@ -101,13 +110,22 @@ final class KeyPressPrimerRuntime {
     case .pressed:
       lastKeyDownUptime = event.uptime
       primer.pressBegan(at: event.uptime)
+      if primer.isActive {
+        // The primer's open builds (or starts) the input itself.
+        inputWarmUp.cancel()
+      } else {
+        inputWarmUp.pressBegan(at: event.uptime)
+      }
       // The hold or second tap that starts a session comes 200-500 ms later;
       // query TCC now so the capture start can reuse the answer (#611).
       context.permissions.refresh(.microphone)
     case .released:
       primer.pressEnded(at: event.uptime)
+      inputWarmUp.pressEnded(at: event.uptime)
     case .reset:
       primer.cancel()
+      inputWarmUp.cancel()
+      releaseClaimedInputWarmUp()
     }
   }
 
@@ -120,14 +138,32 @@ final class KeyPressPrimerRuntime {
     return .recognisedHotKey(keyDownUptime: keyDown)
   }
 
-  /// Claims the press's primed microphone for a session the gesture starts.
+  /// Claims the press's primed microphone, or its mic-free input warm-up, for
+  /// a session the gesture starts. Synchronous, so no release timer can drop
+  /// either while the session starts.
   func reserve() -> PrimedLiveInputReservation? {
-    primer.reserve()
+    if let warmUp = inputWarmUp.claim() {
+      holdClaimedInputWarmUp(warmUp)
+    }
+    return primer.reserve()
+  }
+
+  /// The input warm-up for a starting session: the one its gesture claimed,
+  /// else one still running from a press (a start from elsewhere must not
+  /// open the microphone while that press builds an input node). The caller
+  /// owns it and must `finish` it.
+  func takeInputWarmUp() -> LiveInputPreparation? {
+    claimedInputWarmUpExpiry?.cancel()
+    claimedInputWarmUpExpiry = nil
+    let claimed = claimedInputWarmUp
+    claimedInputWarmUp = nil
+    return claimed ?? inputWarmUp.claim()
   }
 
   /// Closes a claimed capture the session did not adopt. A no-op once the
-  /// session took it over.
+  /// session took it over. Also releases a claimed input warm-up no start took.
   func release(_ reservation: PrimedLiveInputReservation?) {
+    releaseClaimedInputWarmUp()
     guard let reservation else { return }
     Task { @MainActor [weak self] in
       guard let capture = await reservation.value, capture.isOpen else { return }
@@ -195,22 +231,28 @@ final class KeyPressPrimerRuntime {
         guard let stopped = await capture.close() else { return }
         standby.stock(stopped.engine, inputDeviceID: stopped.inputDeviceID)
       },
-      schedule: { delay, action in
-        let task = Task { @MainActor in
-          try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
-          guard !Task.isCancelled else { return }
-          action()
-        }
-        return HotKeyPressPrimerTimer { task.cancel() }
-      }
+      schedule: Self.scheduleOnMain
     )
+  }
+
+  private static func scheduleOnMain(
+    _ delay: TimeInterval, _ action: @escaping @MainActor () -> Void
+  ) -> HotKeyPressPrimerTimer {
+    let task = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+      guard !Task.isCancelled else { return }
+      action()
+    }
+    return HotKeyPressPrimerTimer { task.cancel() }
   }
 
   /// Whether a key-down may open the microphone right now. Never true while
   /// anything else could be using it, and never for a route whose controller
   /// would build its own input node.
   private func pressMayOpenMicrophone() -> Bool {
-    guard isIdleForMicrophone() else { return false }
+    // A warm-up may still be building an input node; opening the microphone
+    // beside it is the Bluetooth stall `LiveInputEngineStore` describes.
+    guard isIdleForMicrophone(), !inputWarmUp.isActive, claimedInputWarmUp == nil else { return false }
     return context.transcription.liveRouteUsesLiveInputEngine(
       profiles: context.profiles.profiles,
       frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -256,6 +298,70 @@ final class KeyPressPrimerRuntime {
   private func cancelPendingRefill() {
     pendingRefill?.cancel()
     pendingRefill = nil
+  }
+}
+
+// MARK: - Input warm-up
+
+extension KeyPressPrimerRuntime {
+  private func holdClaimedInputWarmUp(_ warmUp: LiveInputPreparation) {
+    releaseClaimedInputWarmUp()
+    claimedInputWarmUp = warmUp
+    // Bounded even if the gesture never reaches a start.
+    let lifetime = HotKeyInputWarmUp<LiveInputPreparation>.defaultLifetime
+    claimedInputWarmUpExpiry = Self.scheduleOnMain(lifetime) { [weak self, weak warmUp] in
+      guard let self, let warmUp, self.claimedInputWarmUp === warmUp else { return }
+      self.releaseClaimedInputWarmUp()
+    }
+  }
+
+  private func releaseClaimedInputWarmUp() {
+    claimedInputWarmUpExpiry?.cancel()
+    claimedInputWarmUpExpiry = nil
+    guard let warmUp = claimedInputWarmUp else { return }
+    claimedInputWarmUp = nil
+    Self.releaseInputWarmUp(warmUp)
+  }
+
+  private static func releaseInputWarmUp(_ warmUp: LiveInputPreparation) {
+    Task { @MainActor in await warmUp.finish(startFailed: true) }
+  }
+
+  private func makeInputWarmUpDependencies() -> HotKeyInputWarmUp<LiveInputPreparation>.Dependencies {
+    let devices = context.devices
+    return HotKeyInputWarmUp<LiveInputPreparation>.Dependencies(
+      isEligible: { [weak self] in self?.pressMayWarmInput() ?? false },
+      keepsAliveForDoubleTap: { [weak self] in
+        self?.context.settings.hotKeyActivationStyle.allowsDoubleTap ?? false
+      },
+      doubleTapWindow: { [weak self] in self?.context.settings.doubleTapWindow ?? 0.4 },
+      lifetime: { [weak self] in
+        let window = self?.context.settings.doubleTapWindow ?? 0.4
+        return max(HotKeyInputWarmUp<LiveInputPreparation>.defaultLifetime, 2 * window + 0.5)
+      },
+      begin: {
+        let preparation = LiveInputPreparation(deviceManager: devices, engines: LiveInputEngines.shared)
+        preparation.prepareAhead()
+        return preparation
+      },
+      release: { Self.releaseInputWarmUp($0) },
+      schedule: Self.scheduleOnMain
+    )
+  }
+
+  /// Whether a key-down may build the live input now. Mic-free, so it does
+  /// not depend on `warmMicrophoneOnKeyPress`; the primer takes precedence.
+  private func pressMayWarmInput() -> Bool {
+    guard context.sessionIsIdle(),
+      !primer.isActive,
+      context.audioFiles.requiresPhysicalInput,
+      !context.devices.devices.isEmpty,
+      context.permissions.status(for: .microphone).isGranted
+    else { return false }
+    return context.transcription.liveRouteUsesLiveInputEngine(
+      profiles: context.profiles.profiles,
+      frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    )
   }
 }
 

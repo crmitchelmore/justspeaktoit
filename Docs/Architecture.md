@@ -191,7 +191,7 @@ cross-cutting utilities stay at the top level.
 | `PostProcessing/`, `Vocabulary/`, `OpenRouter/` | Cleanup/polish policy, lexicon/auto-correction/pronunciation, OpenRouter chat and audio. |
 | `History/`, `Credentials/`, `Balance/`, `Sync/`, `DataMigration/`, `Automation/`, `Analytics/`, `Desktop/`, `App/` | History records and diagnostics, keys and validation, provider balances, settings/key/config transfer, migration, automation protocol, analytics, portable desktop configuration and app information. |
 | `ModelComparison/`, `PaidAccess/`, `SettingsSearch/`, `SpeechInsights/`, `Resources/` | Existing feature folders and bundled resources. |
-| `AppleUI/` | Apple-only SwiftUI views shared by the macOS and iOS apps (skeletons, release notes, credential status, provider fields, balances, OpenRouter audio browser). |
+| `AppleUI/` | Apple-only SwiftUI views shared by the macOS and iOS apps (skeletons, release notes, credential status, provider fields, balances, the shared OpenRouter discover-then-configure browser for speech, transcription and cleanup). |
 
 `appleCoreSources` in `Package.swift` lists Apple-only folders only, relative to `Sources/SpeakCore`. Each feature
 keeps its Apple adapters in an `Apple/` subfolder (for example `Keyboard/Apple/`, `Credentials/Apple/`); SwiftUI views

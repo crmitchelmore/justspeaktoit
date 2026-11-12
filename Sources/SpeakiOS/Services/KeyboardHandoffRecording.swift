@@ -11,6 +11,8 @@ protocol KeyboardHandoffReadinessHost: AnyObject {
     var isReadinessRunning: Bool { get }
     /// Stops the readiness engine but leaves the audio session active for the dictation.
     func pauseReadinessForRecording()
+    /// Lends the running readiness engine to a background dictation, or nil.
+    func lendReadinessEngine() -> LiveCaptureInput.EngineLease?
     /// Records that the readiness session is now recording.
     func handoffDidBeginRecording()
     func resumeReadinessAfterRequest() async
@@ -147,7 +149,10 @@ final class KeyboardHandoffRecording {
     ///
     /// In the background the readiness engine keeps running and the session
     /// stays active, because iOS lets a background app continue recording but
-    /// not start it (issue #1469). In the foreground it is stopped as before.
+    /// not start it (issue #1469). The dictation then records on that running
+    /// engine through ``LiveCaptureInput/engineLender`` rather than starting a
+    /// second one, which iOS refuses from the background with
+    /// `cannotStartRecording`. In the foreground readiness is stopped as before.
     private func holdReadinessThroughRecordingIfNeeded() {
         let inForeground = UIApplication.shared.applicationState != .background
         let keepsRunning = KeyboardHandoffStartDiagnosis.keepsReadinessRunningDuringRecording(
@@ -160,8 +165,12 @@ final class KeyboardHandoffRecording {
             AudioSessionManager.activeSessionHold = { [weak host] in
                 host?.isReadinessRunning ?? false
             }
+            LiveCaptureInput.engineLender = { [weak host] in
+                host?.lendReadinessEngine()
+            }
         } else {
             AudioSessionManager.activeSessionHold = nil
+            LiveCaptureInput.engineLender = nil
             host?.pauseReadinessForRecording()
         }
     }

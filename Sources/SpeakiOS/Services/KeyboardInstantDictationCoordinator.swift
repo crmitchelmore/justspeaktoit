@@ -355,11 +355,16 @@ extension KeyboardInstantDictationCoordinator: KeyboardHandoffReadinessHost {
         readinessAudio.stop(deactivateAudioSession: false)
     }
 
+    func lendReadinessEngine() -> LiveCaptureInput.EngineLease? {
+        readinessAudio.lendRunningEngine()
+    }
+
     func handoffDidBeginRecording() {
         session = sessionStore.heartbeat(phase: .recording)
     }
 
     func resumeReadinessAfterRequest() async {
+        LiveCaptureInput.engineLender = nil
         guard sessionStore.isEnabled else {
             endSession(disable: true)
             return

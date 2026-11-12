@@ -42,13 +42,12 @@ class KeyboardPurposeStringsTests(unittest.TestCase):
         self.assertIn('python3 scripts/verify-keyboard-purpose-strings.py "$KEYBOARD_PATH/Info.plist"', workflow)
         self.assertNotIn("Handoff-only keyboard unexpectedly declares", workflow)
 
-    def test_release_workflow_enables_direct_capture_for_alpha_only(self):
+    def test_release_workflow_ships_handoff_keyboard_on_every_train(self):
         workflow = (ROOT / ".github/workflows/release-ios.yml").read_text()
         policy = workflow.split("- name: Select keyboard capture policy", 1)[1].split("- name:", 1)[0]
-        self.assertIn('if [ "$RELEASE_TRAIN" = "alpha" ]; then', policy)
-        alpha, stable = policy.split("else", 1)
-        self.assertIn("TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=1", alpha)
-        self.assertIn("TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0", stable)
+        self.assertIn("TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0", policy)
+        self.assertNotIn("TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=1", policy)
+        self.assertNotIn("RELEASE_TRAIN", policy)
         self.assertNotIn('TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "', workflow.split("jobs:", 1)[0])
 
     def run_preview_target_policy(self, train, source=ROOT):

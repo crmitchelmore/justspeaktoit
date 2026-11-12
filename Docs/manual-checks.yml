@@ -318,7 +318,7 @@ sessions:
         final_gate: true
       - id: "mac-cleanup-model-successor"
         issues:
-          - 1483
+          - 1578
         title: "A removed cleanup model moves to its successor and cleanup still works"
         minutes: 3
         core: false
@@ -328,6 +328,20 @@ sessions:
           - "Update to the Alpha build and reopen Settings \u203a Post-processing."
           - "With post-processing on, dictate a made-up sentence and stop."
         expected: "A removed model now shows its successor (GPT-5.6 Luna becomes GPT-6 Luna, Claude Haiku 4.5 becomes Claude Haiku 5.5) with the same provider route, the picker no longer lists GPT-5.x, Claude 4.x or Qwen3.6 models, and the dictation is cleaned up without a key or model error."
+        final_gate: true
+      - id: "mac-openrouter-discover-configure"
+        issues:
+          - 1575
+        title: "OpenRouter cleanup and transcription pickers discover models and open a details page"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes #1575"
+        steps:
+          - "Open Settings \u203a Post-processing, choose Remote, click the Remote Post-processing Model picker and click the OpenRouter row."
+          - "Turn on Discover OpenAI cleanup models via OpenRouter, type gpt in Search models, click a model and check its Pricing and Temperature, then click Use for cleanup."
+          - "Open Settings \u203a Transcription, click the Remote Batch Model picker, click the OpenRouter row and wait for the list to refresh."
+          - "Click any discovered model, then click Use for transcription."
+        expected: "Both OpenRouter rows open a searchable list with provider and price filters, a Back button and a Refresh button. Each model opens a page with its pricing; choosing one closes the sheet and the picker shows OpenRouter \u203a the chosen model. Native providers are still listed first."
         final_gate: true
   - id: "iphone"
     device: "iPhone"
@@ -523,6 +537,21 @@ sessions:
           - "If any attempt shows a message, note its exact wording."
         expected: "Each dictation inserts exactly once and music keeps playing. No attempt says to check the microphone permission. If iOS ever refuses, the keyboard says \"iOS paused Just Speak's microphone. Open Just Speak, then return here and tap the mic.\", and doing that makes the next attempt work."
         final_gate: true
+      - id: "iphone-keyboard-background-repeat"
+        issues:
+          - 1469
+          - 661
+        title: "Keyboard: three dictations in a row from Notes, live and batch, without reopening the app"
+        minutes: 5
+        core: true
+        build: "TestFlight Just Speak to It Alpha that records keyboard dictations on the readiness engine"
+        steps:
+          - "Keyboard enabled with Allow Full Access on. Open Just Speak once so Instant Dictation is ready, then swipe home."
+          - "In Notes, with the Just Speak keyboard, dictate \"first\", \"second\" and \"third\" one after another, stopping each time. Do not open Just Speak in between."
+          - "In Just Speak choose a batch (record then upload) transcription model, swipe home and dictate \"batch\" in Notes."
+          - "If any attempt shows a message, note its exact wording."
+        expected: "All four dictations insert exactly once. The keyboard never asks for microphone or Speech permission and never shows a microphone error."
+        final_gate: true
       - id: "iphone-hands-free"
         issues:
           - 614
@@ -678,6 +707,19 @@ sessions:
           - "Re-read Resolution Center, resolve every remaining review finding and approve the frozen candidate through the normal Stable process."
         expected: "The exact candidate's device evidence, SDK privacy report, nutrition labels, published policy, consent/withdrawal behavior, support URLs and private review information agree. No credentials enter public issues or screenshots, and no submission is approved solely because the archive builds."
         final_gate: false
+      - id: "iphone-openrouter-cleanup-discover-configure"
+        issues:
+          - 1575
+        title: "OpenRouter cleanup picker discovers models and opens a details page"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes #1575"
+        steps:
+          - "Open Settings \u203a Post-Processing and tap the OpenRouter row under the native models."
+          - "Turn on Discover OpenAI cleanup models via OpenRouter and search for gpt."
+          - "Tap a model, check its Pricing, then tap Use for cleanup."
+        expected: "The OpenRouter row opens a searchable list with provider and price filters; each model opens a page with its pricing, and choosing one returns to Post-Processing with that model ticked under OpenRouter."
+        final_gate: true
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"

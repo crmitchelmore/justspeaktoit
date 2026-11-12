@@ -5,7 +5,7 @@ import SwiftUI
 // MARK: - Post-processing model picker
 
 /// Native and on-device cleanup models first, then one OpenRouter row that opens
-/// a searchable list of OpenRouter models. Grouping comes from the shared
+/// the shared discover-then-configure OpenRouter browser. Grouping comes from the shared
 /// `ModelPickerGrouping`, so the list always reflects the route a model uses.
 struct PostProcessingModelPickerRows: View {
     @ObservedObject var settings: AppSettings
@@ -33,8 +33,15 @@ struct PostProcessingModelPickerRows: View {
         }
         if !groups.openRouter.isEmpty {
             NavigationLink {
-                OpenRouterPostProcessingModelList(
-                    settings: settings, options: groups.openRouter, onSelect: onSelect
+                OpenRouterCleanupBrowser(
+                    selection: settings.postProcessingModel,
+                    discoveryEnabled: $settings.cleanupModelDiscoveryEnabled,
+                    options: { Self.options(selected: settings.postProcessingModel) },
+                    embedded: true,
+                    onSelect: { identifier in
+                        settings.postProcessingModel = identifier
+                        onSelect()
+                    }
                 )
             } label: {
                 HStack {
@@ -72,36 +79,6 @@ struct PostProcessingModelPickerRows: View {
             return selected.displayName
         }
         return "Choose from \(groups.openRouter.count) models with one OpenRouter key"
-    }
-}
-
-/// The OpenRouter level: every OpenRouter cleanup model, searchable, plus the
-/// optional discovery of newer OpenRouter models.
-private struct OpenRouterPostProcessingModelList: View {
-    @ObservedObject var settings: AppSettings
-    let options: [ModelCatalog.Option]
-    let onSelect: () -> Void
-    @State private var query = ""
-
-    var body: some View {
-        List {
-            Section {
-                ForEach(ModelPickerGrouping.filter(options, query: query)) { model in
-                    PostProcessingModelRow(settings: settings, model: model, showsDescription: true, onSelect: onSelect)
-                }
-            } footer: {
-                Text("These models are sent to OpenRouter with your OpenRouter key.")
-            }
-            Section("Model discovery") {
-                CleanupModelDiscoveryView(
-                    selection: $settings.postProcessingModel,
-                    enabled: $settings.cleanupModelDiscoveryEnabled
-                )
-            }
-        }
-        .searchable(text: $query, prompt: "Search OpenRouter models")
-        .navigationTitle(ModelPickerGrouping.openRouterTitle)
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

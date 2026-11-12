@@ -213,6 +213,37 @@ sessions:
           - "Copy the Package/Identity Name and Publisher values from Product identity into a comment on #1157."
         expected: "The reserved identity is on #1157, so an agent can set the MSIX identity and add the Store submission job."
         final_gate: false
+      - id: "owner-android-apk-install"
+        issues:
+          - 1582
+        title: "Android: install the Alpha APK from the website"
+        minutes: 5
+        core: false
+        build: "An Android 10+ phone and the newest Alpha with JustSpeakToIt-android.apk"
+        prerequisites:
+          - "Release flow: Docs/alpha-stable-release-trains.md (Android Alpha APK)"
+        steps:
+          - "On the phone open https://justspeaktoit.com/#get and tap Download APK in the Android card."
+          - "Allow installs from the browser when Android asks, then install and open Just Speak to It."
+          - "Dictate a made-up sentence with on-device recognition and copy the transcript."
+          - "After the next Alpha, download and install the APK again over the existing app."
+        expected: "The APK installs without a signature warning, dictation works, and the newer APK upgrades in place with History kept."
+        final_gate: false
+      - id: "owner-play-console"
+        issues:
+          - 1582
+        title: "Android: create the Play Console app and service account"
+        minutes: 45
+        core: false
+        build: "Google Play Console and Google Cloud console"
+        prerequisites:
+          - "Steps: Docs/android-play-store-submission.md (Owner setup, steps 1 and 4 to 10; the upload key already exists)"
+        steps:
+          - "Create the app in Play Console, download the justspeaktoit-android-release artefact from the newest green Android run on main and upload app-release.aab to Internal testing by hand."
+          - "Create the Play service account and save its JSON as PLAY_SERVICE_ACCOUNT_JSON in the android-release environment."
+          - "Fill in the App content forms and store listing from the guide."
+        expected: "The next green Android run on main publishes to the internal track without manual steps."
+        final_gate: false
       - id: "mac-compare-models-history"
         issues:
           - 1387

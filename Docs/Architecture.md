@@ -303,9 +303,9 @@ File/Batch has no sample-count ceiling; bounded preparation rolls back unused fi
 and reservations. These are deliberate native safety policies, not Mac equivalence:
 per-file import/conversion stays 25 MB (Mac comparison: 100 MiB), and Live retains
 eight simultaneous lanes and its existing PCM/provider budgets.
-`WindowsComparison.cpp` and `LinuxComparison.c` own their native editors and
-file/save pickers, connected by small host adapters. `DesktopHostComparisonExports`
-uses canonical all-round/selected-round JSON/Markdown documents for saves and
+`WindowsComparison.cpp` and `LinuxComparison.c` (with `LinuxComparisonPickers.c`)
+own their native editors and file/save pickers, connected by small host adapters.
+`DesktopHostComparisonExports` uses canonical all-round/selected-round JSON/Markdown documents for saves and
 explicit native clipboard copies. Picker-scoped round identities survive later
 selection changes; missing rounds fail explicitly. Separate comparison hooks
 connect the store to the existing owned desktop iCloud service and its explicit

@@ -97,7 +97,7 @@ We use Conventional Commits:
 
 ### Swift Style
 
-- **4-space indentation** (configured in `.swiftformat`)
+- **4-space indentation** for new files (`.swiftformat` does not reindent; match the existing indentation when editing a 2-space file)
 - **120 character line limit** (soft), 160 (hard)
 - Use `explicit_self` where configured
 - Follow SwiftUI conventions for view code

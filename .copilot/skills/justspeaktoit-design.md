@@ -32,65 +32,69 @@ Use this skill when creating **landing pages**, **marketing sites**, **web UI**,
 ## Color System
 
 ### Primary palette
+The canonical tokens live in `landing-page/styles/tokens.css`, which mirrors the native colours in `Sources/SpeakCore/App/Apple/BrandColors.swift`. Read that file for the full set; the core dark values are:
+
 ```css
 :root {
   /* Backgrounds */
-  --color-bg: #0b0f14;               /* Obsidian */
-  --color-bg-elevated: #111a26;      /* Lifted surface */
-  --color-bg-card: #1a2533;          /* Card surfaces */
-  
+  --ground: #121417;                 /* Page background */
+  --ground-deep: #0d0f11;            /* Deepest bands */
+  --surface: #191c21;                /* Cards and panels */
+  --surface-2: #212630;              /* Raised surfaces */
+  --line: rgba(255, 255, 255, .10);  /* Borders */
+
   /* Text */
-  --color-text: #f8fafc;             /* Primary text, near-white */
-  --color-text-muted: #9aa6bd;       /* Secondary text, slate */
-  
+  --text: #f5f3f0;                   /* Primary text, warm near-white */
+  --text-dim: #adb4bd;               /* Secondary text */
+  --text-faint: #868e98;             /* Tertiary text */
+
   /* Accent (ember + saffron) */
-  --color-accent: #ff6a3d;           /* Ember */
-  --color-accent-warm: #ff9b4a;      /* Saffron */
-  --color-accent-deep: #e4512f;      /* Ember deep */
-  --color-accent-glow: rgba(255, 106, 61, 0.32); /* For shadows/glows */
-  
+  --accent: #ff6b3d;                 /* Ember */
+  --accent-warm: #ff9c4a;            /* Saffron */
+  --accent-deep: #e3522e;            /* Ember deep */
+  --accent-link: #ff9166;            /* Links on dark */
+
   /* Supporting */
-  --color-secondary: #2dd4bf;        /* Lagoon teal for contrast */
-  --color-success: #4ade80;          /* Green for positive states */
-  --color-border: rgba(255, 255, 255, 0.08);
+  --lagoon: #2ed4bf;                 /* Lagoon teal for contrast */
+  --lagoon-deep: #1aab99;
 }
 ```
 
 ### Color usage rules
 - **Accent (ember)**: Primary CTAs and core brand moments
 - **Accent warm (saffron)**: Gradients and subtle highlights only
-- **Secondary (lagoon)**: Sparse contrast—use in small doses
-- **Success (green)**: Status indicators, confirmation states
-- **Never**: Don't mix accent + secondary in the same element unless it is a hero gradient
+- **Lagoon**: Sparse contrast—use in small doses
+- **Never**: Don't mix accent + lagoon in the same element unless it is a hero gradient
 
 ### Dark mode is default
-The brand is dark-mode native. Light mode should feel like an inversion, not the primary experience.
+The brand is dark-mode native. `tokens.css` also defines light values under `prefers-color-scheme: light` (for example `--ground: #f7f5f2`, `--accent: #c9461c` for contrast); use the tokens rather than hard-coded colours so both schemes work.
 
 ## Typography
 
 ### Font stack
 ```css
 :root {
-  /* Display/headings: Satoshi - geometric, modern, confident */
-  --font-display: 'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
-  
+  /* Display/headings: Cabinet Grotesk - bold, confident */
+  --display: "Cabinet Grotesk", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+
   /* Body: General Sans - readable, friendly, professional */
-  --font-body: 'General Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --body: "General Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 ```
 
 ### Font loading
 ```html
 <link rel="preconnect" href="https://api.fontshare.com">
-<link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,900&f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://cdn.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@700,800&f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
 ```
 
 ### Type scale
 | Element | Font | Weight | Size |
 |---------|------|--------|------|
-| Hero title | Satoshi | 900 | clamp(3rem, 8vw, 6rem) |
-| Section title | Satoshi | 900 | clamp(2rem, 5vw, 3rem) |
-| Card title | Satoshi | 700 | 1.25rem |
+| Hero title | Cabinet Grotesk | 800 | clamp(2.75rem, 1.2rem + 5.6vw, 4.7rem) |
+| Section title | Cabinet Grotesk | 800 | clamp(2rem, 5vw, 3rem) |
+| Card title | Cabinet Grotesk | 700 | 1.25rem |
 | Body | General Sans | 400-500 | 1rem |
 | Small/muted | General Sans | 400 | 0.9rem |
 | Eyebrow | General Sans | 600 | 0.85rem, uppercase, letter-spacing: 0.15em |
@@ -102,7 +106,7 @@ The animated waveform is a signature brand element representing voice/audio:
 ```css
 .waveform-bar {
   width: 4px;
-  background: linear-gradient(to top, var(--color-accent-deep), var(--color-accent-warm));
+  background: linear-gradient(to top, var(--accent-deep), var(--accent-warm));
   border-radius: 4px;
   animation: wave 1.2s ease-in-out infinite;
 }
@@ -144,7 +148,7 @@ body::before {
 ### Card styling
 ```css
 .card {
-  background: var(--color-bg-card);
+  background: var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 20px;
   padding: 2rem;
@@ -206,14 +210,14 @@ elements.forEach((el, i) => {
 }
 
 .btn--primary {
-  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-warm) 100%);
-  color: var(--color-bg);
-  box-shadow: 0 0 30px var(--color-accent-glow);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-warm) 100%);
+  color: var(--ground);
+  box-shadow: 0 0 30px rgba(255, 107, 61, 0.32);
 }
 
 .btn--primary:hover {
   transform: translateY(-3px) scale(1.02);
-  box-shadow: 0 0 50px var(--color-accent-glow);
+  box-shadow: 0 0 50px rgba(255, 107, 61, 0.32);
 }
 ```
 
@@ -223,12 +227,12 @@ elements.forEach((el, i) => {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  background: var(--color-bg-card);
+  background: var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 0.5rem 1rem;
   border-radius: 100px;
   font-size: 0.85rem;
-  color: var(--color-text-muted);
+  color: var(--text-dim);
 }
 ```
 
@@ -243,13 +247,11 @@ elements.forEach((el, i) => {
 
 ## Native App Theming (SwiftUI)
 
-Apply a consistent accent color across macOS + iOS:
+Apply a consistent accent color across macOS + iOS with the shared colours in `Sources/SpeakCore/App/Apple/BrandColors.swift` (`.brandAccent`, `.brandAccentWarm`, `.brandAccentDeep`, `.brandLagoon`, `.brandLagoonDeep`) rather than new literals:
 
 ```swift
-private let brandAccent = Color(red: 1.0, green: 0.42, blue: 0.24) // Ember
-
 ContentView()
-  .tint(brandAccent)
+  .tint(.brandAccent)
 ```
 
 Guidelines:
@@ -356,9 +358,9 @@ AppKit rules:
 
 When creating new pages/materials:
 
-1. [ ] Uses dark background (#0b0f14) as base
-2. [ ] Ember accent (#ff6a3d) for primary actions only
-3. [ ] Satoshi for headings, General Sans for body
+1. [ ] Uses the `tokens.css` ground (#121417 dark) as base
+2. [ ] Ember accent (`--accent`, #ff6b3d dark) for primary actions only
+3. [ ] Cabinet Grotesk for headings, General Sans for body
 4. [ ] No purple/violet gradients
 5. [ ] Waveform or voice motif present
 6. [ ] Scroll reveal animations on sections
@@ -369,4 +371,4 @@ When creating new pages/materials:
 
 ## Reference Implementation
 
-See `/landing-page/index.html` for the canonical implementation of this design system.
+See `landing-page/index.html` and its stylesheets in `landing-page/styles/` (published together as `/site.css` by `landing-page/stylesheet.mjs`) for the canonical implementation of this design system.

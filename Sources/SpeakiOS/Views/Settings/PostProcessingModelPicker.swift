@@ -37,11 +37,12 @@ struct PostProcessingModelPickerRows: View {
                     selection: settings.postProcessingModel,
                     discoveryEnabled: $settings.cleanupModelDiscoveryEnabled,
                     options: { Self.options(selected: settings.postProcessingModel) },
-                    embedded: true
-                ) { identifier in
-                    settings.postProcessingModel = identifier
-                    onSelect()
-                }
+                    embedded: true,
+                    onSelect: { identifier in
+                        settings.postProcessingModel = identifier
+                        onSelect()
+                    }
+                )
             } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {

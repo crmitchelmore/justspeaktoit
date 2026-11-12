@@ -32,7 +32,8 @@ public struct OpenRouterAudioBrowser: View {
     public var body: some View {
         OpenRouterModelBrowser(
             title: "OpenRouter audio models",
-            intro: "Use your OpenRouter key for cloud transcription and speech. Browsing downloads model metadata only.",
+            intro: "Use your OpenRouter key for cloud transcription and speech. "
+                + "Browsing downloads model metadata only.",
             items: catalog.models(for: capability).sorted { $0.name < $1.name },
             status: OpenRouterBrowserStatus(
                 isRefreshing: catalog.isRefreshing, errorMessage: catalog.errorMessage,

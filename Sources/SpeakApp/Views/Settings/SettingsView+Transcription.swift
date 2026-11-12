@@ -193,19 +193,7 @@ extension SettingsView {
           ),
           credentialPurpose: .batchTranscription,
           storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
-          openRouterBrowser: { select, back in
-            AnyView(
-              OpenRouterTranscriptionBrowser(
-                apiKeyProvider: { [storage = environment.secureStorage] in
-                  try? await storage.secret(identifier: "openrouter.apiKey")
-                },
-                selection: settings.batchTranscriptionModel,
-                bundled: ModelCatalog.batchTranscription,
-                onBack: back,
-                onSelect: select
-              )
-            )
-          }
+          openRouterBrowser: batchTranscriptionOpenRouterBrowser
         )
         if isCustomBatchTranscriptionModel {
           SettingsInlineInfo(
@@ -383,18 +371,6 @@ extension SettingsView {
 
   var cloudPostProcessingOptions: [ModelCatalog.Option] {
     CleanupModelDiscoveryStore.shared.options(selected: settings.postProcessingModel)
-  }
-
-  /// The batch catalogue plus a saved live-discovered OpenRouter choice, so the
-  /// picker names it rather than showing it as a custom identifier.
-  private var batchTranscriptionOptions: [ModelCatalog.Option] {
-    let selected = settings.batchTranscriptionModel
-    guard let modelID = OpenRouterTranscriptionSelection.modelID(from: selected) else {
-      return ModelCatalog.batchTranscription
-    }
-    return ModelCatalog.batchTranscription + [
-      .init(id: selected, displayName: modelID, description: "Discovered OpenRouter speech-to-text model.")
-    ]
   }
 
   private var isCustomBatchTranscriptionModel: Bool {

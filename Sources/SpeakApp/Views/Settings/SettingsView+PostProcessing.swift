@@ -334,18 +334,7 @@ extension SettingsView {
         credentialPurpose: .postProcessing,
         storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
         usesDetailedChooser: true,
-        openRouterBrowser: { select, back in
-          AnyView(
-            OpenRouterCleanupBrowser(
-              selection: settings.postProcessingModel,
-              discoveryEnabled: settingsBinding(\AppSettings.cleanupModelDiscoveryEnabled),
-              options: { CleanupModelDiscoveryStore.shared.options(selected: settings.postProcessingModel) },
-              temperature: settingsBinding(\AppSettings.postProcessingTemperature),
-              onBack: back,
-              onSelect: select
-            )
-          )
-        }
+        openRouterBrowser: cleanupOpenRouterBrowser
       )
 
       SettingsInlineInfo(

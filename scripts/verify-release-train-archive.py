@@ -192,7 +192,7 @@ def main():
         app_group = config['watchAppGroup' if is_watch else 'iosAppGroup']
         if surface == 'ios' and signed_entitlements(extension).get('com.apple.security.application-groups') != [app_group]:
             raise SystemExit('Signed extension has the wrong App Groups')
-        if ext.get('WKApplication') is True and ext.get('WKCompanionAppBundleIdentifier') != expected_id:
+        if is_watch and extension.suffix == '.app' and ext.get('WKCompanionAppBundleIdentifier') != expected_id:
             raise SystemExit('Watch app has the wrong companion identity')
         if not ext['CFBundleIdentifier'].startswith(expected_id + '.'):
             raise SystemExit('Extension belongs to another app identity')

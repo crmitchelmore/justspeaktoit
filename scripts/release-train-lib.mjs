@@ -82,8 +82,8 @@ export function effectiveCommits(commits) {
         seen.add(key); return true;
     });
 }
-export function notesFor(commits, platform, compareURL) {
-    return deterministicNotes({commits: filterCommitsForTrack(effectiveCommits(commits), platform), compareURL});
+export function notesFor(commits, platform, compareURL, testing = '') {
+    return deterministicNotes({commits: filterCommitsForTrack(effectiveCommits(commits), platform), compareURL, testing});
 }
 export function notesHTML(manifest, surface) { return markdownToHTML(manifest.surfaces[surface].notes); }
 export function canAdvance(current, incoming) { return !current || BigInt(incoming.build) > BigInt(current.build); }

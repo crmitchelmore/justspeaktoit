@@ -205,4 +205,71 @@ final class TransportPairingManagerTests: XCTestCase {
         XCTAssertTrue(manager.pairedDevices.isEmpty, "Regeneration must clear pairings")
         XCTAssertFalse(manager.isDevicePaired(id: "device-1"))
     }
+
+    // MARK: - Failed-attempt lockout
+
+    private func isolatedManager() throws -> PairingManager {
+        let suite = "TransportPairingManagerTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        return PairingManager(defaults: defaults)
+    }
+
+    func testAttemptPairing_locksOutEveryAttemptAfterRepeatedFailures() throws {
+        let manager = try isolatedManager()
+        let code = manager.pairingCode
+        let start = Date(timeIntervalSince1970: 1_000_000)
+
+        for _ in 0..<PairingAttemptLimiter.freeFailures {
+            XCTAssertEqual(manager.attemptPairing(with: "wrong", now: start), .rejected)
+        }
+        guard case .lockedOut(let retryAfter) = manager.attemptPairing(with: code, now: start) else {
+            return XCTFail("The correct code must be refused while locked out")
+        }
+        XCTAssertEqual(retryAfter, PairingAttemptLimiter.baseLockout, accuracy: 0.001)
+
+        let afterWindow = start.addingTimeInterval(PairingAttemptLimiter.baseLockout)
+        XCTAssertEqual(manager.attemptPairing(with: code, now: afterWindow), .accepted)
+        XCTAssertEqual(manager.attemptPairing(with: "wrong", now: afterWindow), .rejected, "Success resets the count")
+    }
+
+    func testAttemptPairing_lockoutDoublesUpToTheCap() throws {
+        let manager = try isolatedManager()
+        var now = Date(timeIntervalSince1970: 1_000_000)
+        var lockouts: [TimeInterval] = []
+
+        for _ in 0..<(PairingAttemptLimiter.freeFailures + 20) {
+            switch manager.attemptPairing(with: "wrong", now: now) {
+            case .lockedOut(let retryAfter):
+                lockouts.append(retryAfter)
+                now.addTimeInterval(retryAfter)
+            case .rejected:
+                continue
+            case .accepted:
+                XCTFail("A wrong code must never be accepted")
+            }
+        }
+
+        XCTAssertEqual(Array(lockouts.prefix(4)), [30, 60, 120, 240])
+        XCTAssertEqual(lockouts.last, PairingAttemptLimiter.maximumLockout)
+    }
+
+    func testRegeneratePairingCode_clearsALockout() throws {
+        let manager = try isolatedManager()
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        for _ in 0..<PairingAttemptLimiter.freeFailures {
+            _ = manager.attemptPairing(with: "wrong", now: now)
+        }
+
+        let code = manager.regeneratePairingCode()
+
+        XCTAssertEqual(manager.attemptPairing(with: code, now: now), .accepted)
+    }
+
+    func testConstantTimeEquals_matchesStringEquality() {
+        XCTAssertTrue(PairingManager.constantTimeEquals("012345", "012345"))
+        XCTAssertFalse(PairingManager.constantTimeEquals("012345", "012346"))
+        XCTAssertFalse(PairingManager.constantTimeEquals("012345", "01234"))
+        XCTAssertFalse(PairingManager.constantTimeEquals("", "012345"))
+    }
 }

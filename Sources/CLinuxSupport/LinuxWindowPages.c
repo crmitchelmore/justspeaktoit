@@ -36,6 +36,7 @@ GtkWidget *transcript_view(GtkTextBuffer *buffer, int height) {
     gtk_text_view_set_left_margin(GTK_TEXT_VIEW(view), 4);
     gtk_text_view_set_right_margin(GTK_TEXT_VIEW(view), 4);
     gtk_widget_add_css_class(view, "jsti-transcript");
+    jsti_accessible_set_name(view, "Transcript");
     GtkWidget *scroller = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroller), height);
@@ -104,9 +105,9 @@ static GtkWidget *grid_of(GtkWidget *const *items, int count) {
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flow), 10);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow), 10);
     for (int index = 0; index < count; index++) gtk_flow_box_append(GTK_FLOW_BOX(flow), items[index]);
-    for (GtkWidget *child = gtk_widget_get_first_child(flow); child != NULL; child = gtk_widget_get_next_sibling(child)) {
-        gtk_widget_set_focusable(child, FALSE);
-    }
+    /* The items are read-only. Marking each GtkFlowBoxChild unfocusable is not enough:
+     * GtkFlowBox still claims Tab moved into it, so Tab from the transcript went nowhere. */
+    gtk_widget_set_can_focus(flow, FALSE);
     return flow;
 }
 
@@ -192,8 +193,15 @@ void dashboard_add_compact_setters(AdwBreakpoint *breakpoint) {
     g_value_unset(&unequal);
 }
 
+static gboolean has_window_focus(GtkWidget *widget) {
+    GtkRoot *root = gtk_widget_get_root(widget);
+    return root != NULL && gtk_root_get_focus(root) == widget;
+}
+
 void dashboard_refresh_actions(gint32 state, gboolean copyable) {
     gboolean recording = state == JSTI_STATE_RECORDING;
+    gboolean record_focused = has_window_focus(GTK_WIDGET(dashboard_page()->record));
+    gboolean cancel_focused = has_window_focus(GTK_WIDGET(dashboard_page()->cancel));
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), copyable);
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->cancel), state == JSTI_STATE_WORKING);
     gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->cancel), state == JSTI_STATE_WORKING);
@@ -207,6 +215,10 @@ void dashboard_refresh_actions(gint32 state, gboolean copyable) {
     gtk_label_set_text(dashboard_page()->live_preview, preview != NULL && preview[0] != '\0' ? preview : "Listening…");
     gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->live_preview), recording);
     g_free(preview);
+    /* A disabled or hidden button drops keyboard focus to nothing, so it moves to the button that replaces it. */
+    if (record_focused && state == JSTI_STATE_WORKING) gtk_widget_grab_focus(GTK_WIDGET(dashboard_page()->cancel));
+    else if (cancel_focused && state != JSTI_STATE_WORKING)
+        gtk_widget_grab_focus(GTK_WIDGET(dashboard_page()->record));
 }
 
 void dashboard_set_copy_enabled(gboolean enabled) {

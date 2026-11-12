@@ -2,6 +2,7 @@
  * refresh that asks every page to follow the window state. */
 #include "LinuxWindowInternal.h"
 #include "LinuxWindowDashboardPage.h"
+#include "LinuxWindowDashboardState.h"
 #include "LinuxWindowHistoryPage.h"
 #include "LinuxWindowModelsPage.h"
 #include "LinuxWindowStoragePage.h"
@@ -21,7 +22,19 @@ void refresh_actions(void) {
     gboolean copyable = has_text && !cleanup_preview_visible();
     gboolean recording = ui.state == JSTI_STATE_RECORDING;
     dashboard_refresh_actions(ui.state, copyable);
-    gtk_widget_set_sensitive(GTK_WIDGET(ui.header_record), ui.state != JSTI_STATE_WORKING);
+    /* Disabling the focused header button would leave keyboard focus nowhere until the work finishes. */
+    static gboolean header_refocus;
+    GtkWidget *header = GTK_WIDGET(ui.header_record);
+    if (ui.state == JSTI_STATE_WORKING && gtk_root_get_focus(GTK_ROOT(ui.window)) == header) {
+        header_refocus = TRUE;
+        if (ui.page == JSTI_PAGE_DASHBOARD) gtk_widget_grab_focus(GTK_WIDGET(dashboard_page()->cancel));
+    }
+    gtk_widget_set_sensitive(header, ui.state != JSTI_STATE_WORKING);
+    if (ui.state != JSTI_STATE_WORKING && header_refocus) {
+        header_refocus = FALSE;
+        GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(ui.window));
+        if (focus == NULL || focus == GTK_WIDGET(dashboard_page()->record)) gtk_widget_grab_focus(header);
+    }
     adw_button_content_set_label(ADW_BUTTON_CONTENT(gtk_button_get_child(ui.header_record)),
                                  recording ? "Stop" : "Record");
     adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(gtk_button_get_child(ui.header_record)),

@@ -72,7 +72,9 @@ let version: String = {
 let appProfileName = ProcessInfo.processInfo.environment["APP_PROFILE_NAME"]
 let widgetProfileName = ProcessInfo.processInfo.environment["WIDGET_PROFILE_NAME"]
 let keyboardProfileName = ProcessInfo.processInfo.environment["KEYBOARD_PROFILE_NAME"]
-let shareProfileName = ProcessInfo.processInfo.environment["SHARE_PROFILE_NAME"]
+// Tuist forwards only `TUIST_`-prefixed variables into manifest evaluation.
+let shareProfileName = ProcessInfo.processInfo.environment["TUIST_SHARE_PROFILE_NAME"]
+    ?? ProcessInfo.processInfo.environment["SHARE_PROFILE_NAME"]
 let watchProfileName = ProcessInfo.processInfo.environment["TUIST_WATCH_PROFILE_NAME"]
 let watchWidgetProfileName = ProcessInfo.processInfo.environment["TUIST_WATCH_WIDGET_PROFILE_NAME"]
 let macAppStoreProfileName = ProcessInfo.processInfo.environment["TUIST_MAC_PROFILE_NAME"]
@@ -326,10 +328,10 @@ macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = .string(
 var projectPackages: [Package] = [
     .remote(url: "https://github.com/weichsel/ZIPFoundation.git", requirement: .exact("0.9.20")),
     .package(path: .relativeToRoot(".")),
-    .remote(url: "https://github.com/jaywcjlove/PermissionFlow.git", requirement: .exact("2.11.2")),
+    .remote(url: "https://github.com/jaywcjlove/PermissionFlow.git", requirement: .exact("2.11.4")),
     .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0")),
     .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "1.1.0")),
-    .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.17.4"))
+    .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.18.3"))
 ]
 if !isAppStoreBuild {
     macAppSettings["INFOPLIST_KEY_PostHogProjectKey"] = "$(POSTHOG_PROJECT_KEY)"
@@ -533,7 +535,7 @@ let watchWidgetTarget: Target = .target(
     destinations: [.appleWatch],
     product: .appExtension,
     // Extension bundle ids must be prefixed with the containing watch app's.
-    bundleId: trainIdentifier("com.justspeaktoit.ios.watchkitapp.complication"),
+    bundleId: trainIdentifier("com.justspeaktoit.ios.watchkitapp.widget"),
     deploymentTargets: .watchOS("10.0"),
     infoPlist: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatchWidget/Info.plist"))),
     sources: [
@@ -571,6 +573,8 @@ let shareTarget: Target = .target(
     name: "JustSpeakShare",
     destinations: .iOS,
     product: .appExtension,
+    // Extension bundle ids must be prefixed with the containing app's, so
+    // Alpha maps it (and its App Group) to the Alpha identity.
     bundleId: trainIdentifier("com.justspeaktoit.ios.share"),
     deploymentTargets: .iOS("17.0"),
     infoPlist: .file(path: .relativeToRoot(trainPlistPath("JustSpeakShare/Info.plist"))),

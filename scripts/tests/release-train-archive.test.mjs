@@ -76,6 +76,21 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
   assert.throws(verify,error=>error.stderr.toString().includes('unavailable local-network feature'));
  }
  plist(join(app,'Info.plist'),info);assert.match(verify().toString(),/Verified ios alpha/);
+ // The watch pair uses its own App Group, never the iPhone one.
+ const watch=join(app,'Watch/JustSpeakToItWatch.app'),complication=join(watch,'PlugIns/JustSpeakWatchWidgetExtension.appex');mkdirSync(complication,{recursive:true});
+ const watchGroup={'com.apple.security.application-groups':['group.com.justspeaktoit.watch.alpha']};
+ plist(join(watch,'Info.plist'),{...info,CFBundleIdentifier:info.CFBundleIdentifier+'.watchkitapp',WKCompanionAppBundleIdentifier:info.CFBundleIdentifier});
+ plist(join(complication,'Info.plist'),{...info,CFBundleIdentifier:info.CFBundleIdentifier+'.watchkitapp.widget'});
+ copyFileSync('JustSpeakWatch/PrivacyInfo.xcprivacy',join(watch,'PrivacyInfo.xcprivacy'));
+ copyFileSync('JustSpeakWatchWidget/PrivacyInfo.xcprivacy',join(complication,'PrivacyInfo.xcprivacy'));
+ plist(join(watch,'signed.plist'),watchGroup);plist(join(complication,'signed.plist'),watchGroup);
+ assert.match(verify().toString(),/Verified ios alpha/);
+ plist(join(complication,'signed.plist'),{'com.apple.security.application-groups':entitlements['com.apple.security.application-groups']});
+ assert.throws(verify,error=>error.stderr.toString().includes('Signed extension has the wrong App Groups'));
+ plist(join(complication,'signed.plist'),watchGroup);
+ plist(join(watch,'Info.plist'),{...info,CFBundleIdentifier:info.CFBundleIdentifier+'.watchkitapp',WKCompanionAppBundleIdentifier:'com.justspeaktoit.ios'});
+ assert.throws(verify,error=>error.stderr.toString().includes('wrong companion identity'));
+ rmSync(join(app,'Watch'),{recursive:true});
  const shared={...entitlements,'com.apple.developer.icloud-container-identifiers':['iCloud.com.justspeaktoit.ios.alpha','iCloud.com.justspeaktoit.alpha']};
  plist(join(app,'signed.plist'),shared);
  assert.throws(verify,error=>error.stderr.toString().includes('wrong CloudKit containers'));
@@ -113,7 +128,7 @@ test('Stable archive accepts the actual widget and keyboard source plists',t=>{
  const watch=join(app,'Watch/Watch.app'),complication=join(watch,'PlugIns/Complication.appex');
  mkdirSync(complication,{recursive:true});
  plist(join(watch,'Info.plist'),{...info,CFBundleIdentifier:info.CFBundleIdentifier+'.watchkitapp',WKApplication:true,WKCompanionAppBundleIdentifier:info.CFBundleIdentifier});
- const watchSettings={PRODUCT_BUNDLE_IDENTIFIER:info.CFBundleIdentifier+'.watchkitapp.complication',MARKETING_VERSION:item.version,CURRENT_PROJECT_VERSION:item.build,SPEAK_RELEASE_TRAIN:'stable',SPEAK_GIT_COMMIT_SHA:source};
+ const watchSettings={PRODUCT_BUNDLE_IDENTIFIER:info.CFBundleIdentifier+'.watchkitapp.widget',MARKETING_VERSION:item.version,CURRENT_PROJECT_VERSION:item.build,SPEAK_RELEASE_TRAIN:'stable',SPEAK_GIT_COMMIT_SHA:source};
  writeFileSync(join(complication,'Info.plist'),readFileSync('JustSpeakWatchWidget/Info.plist','utf8').replace(/\$\(([^)]+)\)/g,(original,key)=>watchSettings[key]??original));
  copyFileSync('JustSpeakWatch/PrivacyInfo.xcprivacy',join(watch,'PrivacyInfo.xcprivacy'));
  copyFileSync('JustSpeakWatchWidget/PrivacyInfo.xcprivacy',join(complication,'PrivacyInfo.xcprivacy'));

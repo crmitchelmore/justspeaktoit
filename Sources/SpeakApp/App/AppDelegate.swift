@@ -155,3 +155,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
+
+extension AppDelegate: NSMenuItemValidation {
+    /// Pause/Resume and Stop Speaking carry bare Space and Escape. Disabling them while
+    /// nothing is speaking lets those keys reach the focused control or dismiss a sheet.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(pauseResumeTTS), #selector(stopTTS):
+            return MainActor.assumeIsolated { environment?.tts.hasControllableSpeech ?? false }
+        default:
+            return true
+        }
+    }
+}

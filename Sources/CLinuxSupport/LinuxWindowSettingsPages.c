@@ -381,6 +381,11 @@ GtkWidget *build_about(void) {
     about_page()->about_details = GTK_LABEL(gtk_label_new("Build metadata has not been supplied by this host."));
     gtk_label_set_xalign(about_page()->about_details, 0);
     gtk_label_set_selectable(about_page()->about_details, TRUE);
+    /* Selectable for copying with the mouse, but not a Tab stop: Orca reads a focused selectable label
+     * as silent, and the version text is read with the rest of the page. can_focus, not just focusable:
+     * a selectable label's focus vfunc claims Tab even when it cannot take focus, which traps Tab. */
+    gtk_widget_set_focusable(GTK_WIDGET(about_page()->about_details), FALSE);
+    gtk_widget_set_can_focus(GTK_WIDGET(about_page()->about_details), FALSE);
     gtk_label_set_wrap(about_page()->about_details, TRUE);
     gtk_box_append(GTK_BOX(body), GTK_WIDGET(about_page()->about_details));
     about_page()->about_links = GTK_FLOW_BOX(gtk_flow_box_new());
@@ -428,8 +433,12 @@ static void about_information_apply(gpointer pointer) {
     GtkWidget *child;
     while ((child = gtk_widget_get_first_child(GTK_WIDGET(about_page()->about_links))) != NULL)
         gtk_flow_box_remove(about_page()->about_links, child);
-    for (guint i = 0; information->titles[i] != NULL; ++i)
-        gtk_flow_box_insert(about_page()->about_links, link_button(information->titles[i], information->urls[i]), -1);
+    for (guint i = 0; information->titles[i] != NULL; ++i) {
+        GtkWidget *link = link_button(information->titles[i], information->urls[i]);
+        gtk_flow_box_insert(about_page()->about_links, link, -1);
+        /* One Tab stop per link: an unfocusable flow box child hands focus to its button. */
+        gtk_widget_set_focusable(gtk_widget_get_parent(link), FALSE);
+    }
 }
 
 int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count) {

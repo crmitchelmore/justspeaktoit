@@ -2,9 +2,10 @@
 
 This runbook qualifies the keyboard shape that ships today: the extension is
 included and uses Instant Dictation handoff to the containing app. The release
-worker sets `TUIST_IOS_KEYBOARD=1` and
-`TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0`; the keyboard extension does not capture
-audio or request microphone or Speech permission.
+worker sets `TUIST_IOS_KEYBOARD=1`, and for Stable
+`TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0`; the Stable keyboard extension does not
+capture audio or request microphone or Speech permission. Alpha TestFlight
+builds set direct capture to `1` for the experiment at the end of this runbook.
 
 Architecture and path selection are documented in
 [iOS Keyboard v2 design](ios-keyboard-v2-design.md). Instant Dictation behavior
@@ -45,8 +46,10 @@ A missing row remains PENDING. Never infer a pass.
 
 The reusable **Release iOS (TestFlight)** workflow accepts only a required
 `manifest`. It loads that immutable manifest, configures the selected release
-train, and fixes keyboard inclusion on and direct capture off. There are no
-`include_keyboard` or `enable_direct_capture` inputs.
+train, and fixes keyboard inclusion on. Direct capture is on for Alpha
+TestFlight builds (the owner-authorised physical build for the direct-capture
+experiment below, #661) and off for Stable. There are no `include_keyboard` or
+`enable_direct_capture` inputs.
 
 For a local development build of the shipping shape:
 

@@ -441,7 +441,7 @@ let package = portableCoreBuild ? portablePackage : Package(
         // with swift-snapshot-testing's constraint (issue #677), and neither is
         // linked by any target, so keeping them here only made every app, iOS
         // and CLI build clone them. Run them via `make lint` / `make format`.
-        .package(url: "https://github.com/jaywcjlove/PermissionFlow.git", exact: "2.11.2"),
+        .package(url: "https://github.com/jaywcjlove/PermissionFlow.git", exact: "2.11.4"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0"),
         // Mirrored in Project.swift (`projectPackages`): Xcode resolves both
@@ -449,7 +449,7 @@ let package = portableCoreBuild ? portablePackage : Package(
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "1.1.0"),
         .package(
             url: "https://github.com/FluidInference/FluidAudio.git",
-            exact: "0.17.4"
+            exact: "0.18.3"
         ),
         .package(
             url: "https://github.com/pointfreeco/swift-snapshot-testing.git",

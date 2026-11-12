@@ -118,6 +118,18 @@ reports "An error occurred in retrieving update information". Hourly
 reconciliation dispatches with the workflow token (`actions: write`), not a
 personal token.
 
+### Please test (human checks)
+
+Human validation never blocks a pull request or merge; it happens on Alpha.
+Alpha notes (the GitHub release, Sparkle, the in-app catalogue and TestFlight
+"What to Test") end with a **Please test** section listing the
+[`Docs/manual-checks.yml`](manual-checks.yml) checks whose ids are new since the
+previous Alpha delivered on that surface (a `<surface>-receipt.json` asset), so
+checks from superseded or undelivered builds carry forward. Mac notes list Mac
+checks; iOS notes list iPhone and Watch checks. `owner-` items and decisions are
+never listed. `scripts/alpha-testing-notes-lib.mjs` builds the section; a
+catalogue that fails to parse omits it rather than failing the release.
+
 The local Codex Run action launches Alpha with `script/build_and_run.sh`.
 Alpha starts without a global recording hotkey; configure one in Settings.
 

@@ -144,6 +144,10 @@ struct _GtkWidget *jsti_page_new(struct _GtkWidget **content);
  * relation at their visible text, which outranks GTK_ACCESSIBLE_PROPERTY_LABEL,
  * so that relation is cleared too. */
 void jsti_accessible_set_name(struct _GtkWidget *widget, const char *name);
+/* Announces through the widget's window. GTK drops an announcement from an
+ * accessible whose AT context is not realised yet, which is true of most child
+ * widgets until a screen reader has queried them; a shown window's always is. */
+void jsti_accessible_announce(struct _GtkWidget *widget, const char *text, int priority);
 void jsti_visual_density_apply(struct _GtkWidget *root, const JSTIVisualDensity *density);
 int32_t jsti_visual_density_self_test(struct _GtkWidget *root);
 /* A gradient header. `variant` is NULL (brand), "voice" or "settings".
@@ -179,6 +183,9 @@ gboolean jsti_hud_overlay_supported(void);
 void jsti_hud_destroy(void);
 /* The HUD's card and shadow, when on screen, for snapshots; NULL otherwise. */
 struct _GtkWidget *jsti_hud_card(void);
+/* LinuxWindowPost.c: speaks a finished HUD phase through the main window where
+ * no HUD window can be shown (Wayland), in place of the state-change status. */
+void jsti_window_announce_phase(const char *text, gboolean urgent);
 /* Checks the HUD never takes focus, sits at the bottom centre of the work
  * area on X11 and hides again. On Wayland it only checks nothing is shown. */
 int32_t jsti_hud_self_test(char *error, size_t capacity);

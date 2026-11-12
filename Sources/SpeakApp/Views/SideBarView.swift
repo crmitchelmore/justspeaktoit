@@ -191,6 +191,9 @@ struct SideBarView: View {
     }
     .listStyle(.sidebar)
     .scrollContentBackground(.hidden)
+    .safeAreaInset(edge: .top, spacing: 0) {
+      SidebarSearchButton()
+    }
   }
 
   private func sidebarRow(for item: SidebarItem, indented: Bool = false) -> some View {

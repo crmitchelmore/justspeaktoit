@@ -177,14 +177,16 @@ extension TranscriptionRecordingService {
         // A Live Activity is required to record in the *background* via an
         // AudioRecordingIntent — without one the AppIntents system-policy check
         // asserts (EXC_BREAKPOINT). In the foreground a Live Activity is optional,
-        // so only enforce this when the app isn't active.
+        // so only enforce this when the app isn't active. The optional
+        // foreground activity honours the Live Activities setting (#1017).
         let appIsActive = dependencies.applicationState() == .active
         let activityProvider = providerFallbackNotice == OfflineCaptureRouting.fallbackNotice
             ? "\(modelDisplayName) (Offline)"
             : providerFallbackNotice == nil
                 ? modelDisplayName
                 : "\(modelDisplayName) (\(settings.credentialFallbackReason))"
-        let activityStarted = (requiresLiveActivity || appIsActive)
+        let wantsActivity = appIsActive ? settings.liveActivitiesEnabled : requiresLiveActivity
+        let activityStarted = wantsActivity
             ? activityManager.startActivity(provider: activityProvider, initialStatus: .arming)
             : false
         if requiresLiveActivity && !activityStarted && !appIsActive {

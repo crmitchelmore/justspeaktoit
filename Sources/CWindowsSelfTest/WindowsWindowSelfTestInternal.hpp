@@ -33,6 +33,7 @@ bool sidebarStartupSelfTest();
 bool shellSelfTest(std::string &failure);
 bool cleanupPreviewSelfTest(HWND window);
 bool settingsSearchSelfTest(HWND window);
+bool screenReaderSelfTest(HWND window, std::string &failure);
 bool densityAndSidebarSelfTest(HWND window, std::string &failure);
 void jsti_smoke_stage(const char *stage);
 

@@ -5,7 +5,7 @@ User-triggered permission actions in onboarding, Settings and the dashboard shar
 recording and shortcut checks retain `request` / `ensureGranted` and never start
 a guide automatically.
 
-[PermissionFlow 2.11.2](https://github.com/jaywcjlove/PermissionFlow/tree/v2.11.2)
+[PermissionFlow 2.11.4](https://github.com/jaywcjlove/PermissionFlow/tree/v2.11.4)
 provides the animated floating app card for Accessibility and Input Monitoring.
 It opens the specific System Settings pane and lets the user drag the **running
 app bundle** into the list. Its configuration disables extra Accessibility

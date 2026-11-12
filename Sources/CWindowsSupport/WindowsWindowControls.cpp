@@ -126,6 +126,8 @@ bool createControls(HWND window) {
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL |
             WS_TABSTOP, settingsResultsID) &&
         add(L"STATIC", L"No settings match", 0, settingsNoMatchID);
+    // The list follows the search box, not a label, so it is named directly.
+    if (okay) jsti::accessibility::name(GetDlgItem(window, settingsResultsID), L"Settings results");
     for (int page = 0; page < pageCount && okay; ++page) {
         okay = add(L"BUTTON", pageInfo[page].title, BS_PUSHBUTTON | WS_TABSTOP, navBaseID + page);
     }

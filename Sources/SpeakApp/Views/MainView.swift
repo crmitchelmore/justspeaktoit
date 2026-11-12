@@ -29,9 +29,14 @@ struct MainView: View {
     .environment(\.appVisualDensity, settings.visualDensity)
     .toolbar { toolbar }
     .sheet(isPresented: $environment.isSettingsSearchPresented) {
-      SettingsSearchPalette { entry in
-        selection = MacSettingsSearch.sidebarItem(for: entry.section)
-        environment.settingsSearchTarget = entry.id
+      SettingsSearchPalette { item in
+        switch item {
+        case .setting(let entry):
+          selection = MacSettingsSearch.sidebarItem(for: entry.section)
+          environment.settingsSearchTarget = entry.id
+        case .command(let command):
+          environment.runPaletteCommand(command)
+        }
       }
     }
     .onReceive(environment.$sidebarNavigationTarget) { item in
@@ -96,11 +101,11 @@ struct MainView: View {
       Button {
         environment.isSettingsSearchPresented = true
       } label: {
-        Label("Search Settings", systemImage: "magnifyingglass")
+        Label("Search", systemImage: "magnifyingglass")
       }
       .keyboardShortcut("f", modifiers: .command)
-      .speakTooltip("Search every setting, API key and shortcut (⌘F).")
-      .accessibilityLabel("Search settings")
+      .speakTooltip("Search for anything: actions, settings, API keys and shortcuts (⌘F).")
+      .accessibilityLabel("Search for anything")
       .accessibilityIdentifier("settingsSearchButton")
     }
     ToolbarItem(placement: .primaryAction) {

@@ -225,6 +225,7 @@ public struct PostProcessingView: View {
                                 .foregroundStyle(.secondary)
 
                             TextEditor(text: $inputText)
+                                .accessibilityLabel("Input")
                                 .font(.body)
                                 .frame(minHeight: density.isCompact ? 64 : 120)
                                 .padding(density.isCompact ? 4 : 8)

@@ -9,7 +9,11 @@ import SwiftUI
 @MainActor
 final class TextToSpeechManager: ObservableObject {
   @Published private(set) var isSynthesizing = false
-  @Published private(set) var isPlaying = false
+  @Published private(set) var isPlaying = false {
+    didSet { if isPlaying { isPaused = false } }
+  }
+  /// Playback was paused and can resume.
+  private(set) var isPaused = false
   @Published private(set) var synthesisProgress: Double = 0
   @Published private(set) var lastResult: TTSResult?
   @Published private(set) var lastError: TTSError?
@@ -187,16 +191,22 @@ final class TextToSpeechManager: ObservableObject {
     playback.stop()
     progressivePlayer.stop()
     isPlaying = false
+    isPaused = false
   }
+
+  /// Whether Pause/Resume and Stop Speaking have anything to act on.
+  var hasControllableSpeech: Bool { isPlaying || isPaused || isSynthesizing }
 
   func pause() {
     if progressivePlayer.isActive {
       progressivePlayer.pause()
+      isPaused = isPlaying
       isPlaying = false
       return
     }
     playbackTask?.cancel()
     audioPlayer?.pause()
+    isPaused = isPlaying
     isPlaying = false
   }
 

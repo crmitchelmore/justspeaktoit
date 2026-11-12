@@ -22,7 +22,7 @@ static gpointer context;
 static struct {
     GtkWindow *window;
     GtkLabel *summary;
-    GtkWidget *body, *check, *first_fix;
+    GtkWidget *scroller, *body, *check, *first_fix;
     gboolean pending;
     guint64 displayed;
 } ui;
@@ -120,7 +120,20 @@ static GtkWidget *text_label(const char *text) {
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
     gtk_label_set_max_width_chars(GTK_LABEL(label), 72);
     gtk_label_set_selectable(GTK_LABEL(label), TRUE);
+    /* Copyable with the mouse but not a Tab stop, which Orca would read as "selected opens popup".
+     * Each finding's buttons carry its text as their accessible description instead. can_focus too, because
+     * a selectable label's focus vfunc otherwise claims Tab without taking focus, which traps Tab on it. */
+    gtk_widget_set_focusable(label, FALSE);
+    gtk_widget_set_can_focus(label, FALSE);
     return label;
+}
+
+/* One composed string rather than a described-by relation, whose targets Orca reads in varying order. */
+static void describe(GtkWidget *button, const char *title, const char *status, const char *detail) {
+    char *text = detail[0] == '\0' ? g_strdup_printf("%s, %s.", title, status)
+                                    : g_strdup_printf("%s, %s. %s", title, status, detail);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(button), GTK_ACCESSIBLE_PROPERTY_DESCRIPTION, text, -1);
+    g_free(text);
 }
 
 void jsti_troubleshooting_open(GtkWindow *owner) {
@@ -134,11 +147,17 @@ void jsti_troubleshooting_open(GtkWindow *owner) {
     GtkWidget *scrolled = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_widget_set_vexpand(scrolled, TRUE);
+    /* Out of the focus chain until findings add buttons: an empty scrolled window takes focus itself
+     * and Orca reads it as an unnamed "scroll pane". */
+    gtk_widget_set_can_focus(scrolled, FALSE);
+    ui.scroller = scrolled;
     ui.body = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), ui.body);
     gtk_box_append(GTK_BOX(column), scrolled);
     ui.check = gtk_button_new_with_mnemonic("_Check again");
     gtk_widget_set_halign(ui.check, GTK_ALIGN_START);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(ui.check), GTK_ACCESSIBLE_PROPERTY_DESCRIPTION,
+                                   "Checking saved settings...", -1);
     g_signal_connect(ui.check, "clicked", G_CALLBACK(command_clicked),
                      GINT_TO_POINTER(JSTI_LINUX_TROUBLESHOOTING_CHECK));
     gtk_box_append(GTK_BOX(column), ui.check);
@@ -164,7 +183,10 @@ static void report_apply(gpointer pointer) {
     ui.pending = FALSE;
     gtk_window_set_modal(ui.window, FALSE);
     gtk_label_set_text(ui.summary, report->summary);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(ui.check), GTK_ACCESSIBLE_PROPERTY_DESCRIPTION,
+                                   report->summary, -1);
     ui.first_fix = NULL;
+    gboolean actionable = FALSE;
     GtkWidget *child;
     while ((child = gtk_widget_get_first_child(ui.body)) != NULL)
         gtk_box_remove(GTK_BOX(ui.body), child);
@@ -189,19 +211,28 @@ static void report_apply(gpointer pointer) {
         if (row->navigation_title[0] != '\0') {
             GtkWidget *button = gtk_button_new_with_label(row->navigation_title);
             g_signal_connect(button, "clicked", G_CALLBACK(navigate_clicked), GINT_TO_POINTER(row->page));
+            describe(button, row->title, row->status, row->detail);
             gtk_flow_box_insert(GTK_FLOW_BOX(actions), button, -1);
+            gtk_widget_set_focusable(gtk_widget_get_parent(button), FALSE);
+            actionable = TRUE;
         }
         if (row->fix != 0) {
             GtkWidget *button = gtk_button_new_with_label(row->fix_title);
             g_signal_connect(button, "clicked", G_CALLBACK(command_clicked), GINT_TO_POINTER(row->fix));
+            describe(button, row->title, row->status, row->detail);
             gtk_flow_box_insert(GTK_FLOW_BOX(actions), button, -1);
+            gtk_widget_set_focusable(gtk_widget_get_parent(button), FALSE);
             if (ui.first_fix == NULL) ui.first_fix = button;
+            actionable = TRUE;
         }
         gtk_box_append(GTK_BOX(finding), actions);
         gtk_box_append(GTK_BOX(ui.body), finding);
     }
+    gtk_widget_set_can_focus(ui.scroller, actionable);
     gtk_widget_set_sensitive(ui.body, TRUE);
     gtk_widget_set_sensitive(ui.check, TRUE);
+    /* Nothing is focusable while the first check runs, so give focus to Check again, which reads the summary. */
+    if (gtk_root_get_focus(GTK_ROOT(ui.window)) == NULL) gtk_widget_grab_focus(ui.check);
 }
 
 static gboolean valid_text(const char *text, gsize maximum) {
@@ -258,6 +289,8 @@ int32_t jsti_troubleshooting_self_test(GtkWindow *owner, char *error, size_t cap
     callback = fixture_callback; context = &fixture;
     g_mutex_unlock(&lock);
     jsti_troubleshooting_open(owner);
+    gboolean scroller_skipped = gtk_root_get_focus(GTK_ROOT(ui.window)) != ui.scroller &&
+        !gtk_widget_child_focus(ui.scroller, GTK_DIR_TAB_FORWARD);
     JSTILinuxTroubleshootingRow row = {
         "Clipboard", "Synthetic read-only details.", "Warning", "Open General", "Keep transcript",
         JSTI_PAGE_GENERAL, JSTI_LINUX_TROUBLESHOOTING_KEEP_CLIPBOARD
@@ -270,7 +303,12 @@ int32_t jsti_troubleshooting_self_test(GtkWindow *owner, char *error, size_t cap
     gboolean valid = fixture.calls == 1 && fixture.command == JSTI_LINUX_TROUBLESHOOTING_CHECK &&
         ui.first_fix != NULL && !ui.pending && !gtk_window_get_modal(ui.window) &&
         gtk_window_get_transient_for(ui.window) == owner && gtk_window_get_destroy_with_parent(ui.window) &&
-        GTK_IS_LABEL(details) && gtk_label_get_selectable(GTK_LABEL(details)) && gtk_label_get_wrap(GTK_LABEL(details));
+        GTK_IS_LABEL(details) && gtk_label_get_selectable(GTK_LABEL(details)) &&
+        gtk_label_get_wrap(GTK_LABEL(details)) &&
+        !gtk_widget_child_focus(details, GTK_DIR_TAB_FORWARD) &&
+        !gtk_widget_child_focus(GTK_WIDGET(ui.summary), GTK_DIR_TAB_FORWARD) &&
+        scroller_skipped && gtk_widget_get_can_focus(ui.scroller) &&
+        gtk_root_get_focus(GTK_ROOT(ui.window)) == ui.check;
     if (valid) {
         guint64 old = fixture.ticket;
         g_signal_emit_by_name(ui.first_fix, "clicked");
@@ -303,6 +341,9 @@ int32_t jsti_troubleshooting_self_test(GtkWindow *owner, char *error, size_t cap
     g_mutex_lock(&lock);
     callback = saved_callback; context = saved_context;
     g_mutex_unlock(&lock);
-    if (!valid) { jsti_set_error(error, capacity, "Troubleshooting lifecycle or action fence failed."); return -1; }
+    if (!valid) {
+        jsti_set_error(error, capacity, "Troubleshooting lifecycle, action fence or focus chain failed.");
+        return -1;
+    }
     return 0;
 }

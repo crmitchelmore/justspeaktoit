@@ -9,67 +9,15 @@ import SpeakCore
 final class CloudKitComparisonSyncTransport: ComparisonSyncTransport {
     func fetchChanges(after tokenData: Data?) async throws -> ComparisonChangePage {
         guard let database = SyncConfiguration.privateDatabase else { throw SyncError.cloudUnavailable }
-        let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
-        if let tokenData {
-            config.previousServerChangeToken = try NSKeyedUnarchiver.unarchivedObject(
-                ofClass: CKServerChangeToken.self,
-                from: tokenData
-            )
-        }
-        let operation = CKFetchRecordZoneChangesOperation(
-            recordZoneIDs: [SyncConfiguration.zoneID],
-            configurationsByRecordZoneID: [SyncConfiguration.zoneID: config]
+        let page = try await CloudKitZoneChangeFetch.page(
+            after: tokenData, in: database,
+            // An unknown version throws, so the page is not consumed: a compatible build must replay it.
+            change: { try ComparisonRecordCodec.change(from: CloudKitRecordFields($0)) },
+            deletion: { ComparisonRecordCodec.deletion(recordName: $0.recordName, recordType: $1) }
         )
-        operation.fetchAllChanges = false
-        let accumulator = ComparisonFetchAccumulator()
-        configureCallbacks(for: operation, accumulator: accumulator)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            operation.fetchRecordZoneChangesResultBlock = { result in
-                switch result {
-                case .success: continuation.resume()
-                case .failure(let error): continuation.resume(throwing: error)
-                }
-            }
-            database.add(operation)
-        }
-        return try accumulator.page()
-    }
-
-    private func configureCallbacks(
-        for operation: CKFetchRecordZoneChangesOperation,
-        accumulator: ComparisonFetchAccumulator
-    ) {
-        operation.recordWasChangedBlock = { _, result in
-            switch result {
-            case .success(let record):
-                do {
-                    if let change = try ComparisonRecordCodec.change(from: CloudKitRecordFields(record)) {
-                        accumulator.append(change: change)
-                    }
-                } catch {
-                    // Do not consume unknown versions: a compatible build must replay this page.
-                    accumulator.append(error: error)
-                }
-            case .failure(let error):
-                accumulator.append(error: error)
-            }
-        }
-        operation.recordWithIDWasDeletedBlock = { recordID, recordType in
-            if let change = ComparisonRecordCodec.deletion(recordName: recordID.recordName, recordType: recordType) {
-                accumulator.append(change: change)
-            }
-        }
-        operation.recordZoneChangeTokensUpdatedBlock = { _, token, _ in
-            accumulator.update(token: token)
-        }
-        operation.recordZoneFetchResultBlock = { _, result in
-            switch result {
-            case .success(let (token, _, moreComing)):
-                accumulator.update(token: token, moreComing: moreComing)
-            case .failure(let error):
-                accumulator.append(error: error)
-            }
-        }
+        return ComparisonChangePage(
+            changes: page.changes, serverChangeTokenData: page.serverChangeTokenData, moreComing: page.moreComing
+        )
     }
 
     func upload(revisions: [ModelComparisonRevision]) async -> ComparisonUploadResult {
@@ -81,12 +29,7 @@ final class CloudKitComparisonSyncTransport: ComparisonSyncTransport {
         for revision in revisions {
             do {
                 let recordID = ComparisonSyncRecord.recordID(for: revision.id)
-                let existing: CKRecord?
-                do {
-                    existing = try await database.record(for: recordID)
-                } catch let error as CKError where error.code == .unknownItem {
-                    existing = nil
-                }
+                let existing = try await CloudKitZoneChangeFetch.existingRecord(recordID, in: database)
                 if let existing {
                     let remote = try ComparisonSyncRecord.revision(from: existing)
                     if ComparisonConflictPolicy.remoteWins(remote, over: revision) {
@@ -102,39 +45,5 @@ final class CloudKitComparisonSyncTransport: ComparisonSyncTransport {
             }
         }
         return result
-    }
-
-}
-
-private final class ComparisonFetchAccumulator: @unchecked Sendable {
-    private let lock = NSLock()
-    private var changes: [ComparisonRemoteChange] = []
-    private var token: CKServerChangeToken?
-    private var moreComing = false
-    private var errors: [Error] = []
-
-    func append(change: ComparisonRemoteChange) {
-        lock.withLock { changes.append(change) }
-    }
-
-    func append(error: Error) {
-        lock.withLock { errors.append(error) }
-    }
-
-    func update(token: CKServerChangeToken?, moreComing: Bool? = nil) {
-        lock.withLock {
-            if let token { self.token = token }
-            if let moreComing { self.moreComing = moreComing }
-        }
-    }
-
-    func page() throws -> ComparisonChangePage {
-        try lock.withLock {
-            if let error = errors.first { throw error }
-            let tokenData = try token.map {
-                try NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: true)
-            }
-            return ComparisonChangePage(changes: changes, serverChangeTokenData: tokenData, moreComing: moreComing)
-        }
     }
 }

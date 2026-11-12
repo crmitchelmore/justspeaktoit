@@ -76,6 +76,7 @@ public struct OpenRouterAudioBrowser: View {
                 Text("Text to speech").tag(OpenRouterAudioCapability.speech)
             }
             .pickerStyle(.segmented)
+            .accessibilityIdentifier("openRouterBrowser.capability")
         }
     }
 

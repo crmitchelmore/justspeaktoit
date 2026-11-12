@@ -119,7 +119,9 @@ struct OpenRouterModelBrowser<Item: Identifiable, Header: View, Detail: View>: V
                     Text("All providers").tag("")
                     ForEach(providers, id: \.self) { Text($0).tag($0) }
                 }
+                .accessibilityIdentifier("openRouterBrowser.provider")
                 Toggle("Zero listed prices", isOn: $filter.freeOnly)
+                    .accessibilityIdentifier("openRouterBrowser.zeroPrices")
             }
         }
     }

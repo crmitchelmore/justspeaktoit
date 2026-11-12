@@ -231,6 +231,8 @@ final class LiveInputPreparation {
   private var inputSession: AudioInputDeviceManager.SessionContext?
   private var token: LiveInputEngineStore<AVAudioEngine>.Token?
   private let primed: PrimedLiveInputReservation?
+  /// A preparation started ahead of its session by a hotkey press.
+  private var preparingAhead: Task<Void, Never>?
 
   /// - Parameter primed: the microphone the hotkey press already opened, if
   ///   any. Its running engine is handed on instead of building a new one.
@@ -244,7 +246,23 @@ final class LiveInputPreparation {
     self.primed = primed
   }
 
+  /// Starts preparing now, on the hotkey press, so the start that claims this
+  /// preparation only waits for whatever is left (#611). Never opens the
+  /// microphone.
+  func prepareAhead() {
+    guard preparingAhead == nil else { return }
+    preparingAhead = Task { @MainActor [self] in await self.build() }
+  }
+
   func prepare() async {
+    if let preparingAhead {
+      await preparingAhead.value
+      return
+    }
+    await build()
+  }
+
+  private func build() async {
     // Taken before any suspension, so token order is start order: an older
     // start resuming late can never retire a newer start's preparation.
     let token = engines.beginPreparation()
@@ -288,6 +306,9 @@ final class LiveInputPreparation {
   ///   (already running) engine a controller claimed is then stopped too, in
   ///   case that controller threw before taking ownership of it.
   func finish(startFailed: Bool = false) async {
+    // An ahead-of-time build still running would install its engine, or begin
+    // an input session, after this cleanup.
+    await preparingAhead?.value
     if let token {
       engines.discard(token, releasingClaimed: startFailed)
       self.token = nil

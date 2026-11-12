@@ -82,8 +82,15 @@ final class SessionStartPipeline {
   }
 
   func start(_ request: Request) async -> HandsFreeCaptureStartOutcome {
+    // Taken first, so no exit can leave a hotkey press's input warm-up behind.
+    var warmedInput = owners.keyPressPrimer.takeInputWarmUp()
     // Every exit closes a primed microphone this start did not take over.
-    defer { owners.keyPressPrimer.release(request.primedInput) }
+    defer {
+      owners.keyPressPrimer.release(request.primedInput)
+      if let warmedInput {
+        Task { await warmedInput.finish(startFailed: true) }
+      }
+    }
     guard let host, host.mayStartSession, !isStarting else { return .rejected(.captureFailed) }
     isStarting = true
     defer { isStarting = false }
@@ -135,7 +142,9 @@ final class SessionStartPipeline {
     session.isLocalAutomationCapture = true
     host.activate(session)
 
-    return await runStartSequence(for: session, request: request, host: host)
+    let preparation = warmedInput
+    warmedInput = nil
+    return await runStartSequence(for: session, request: request, warmedInput: preparation, host: host)
   }
 
   // MARK: - Start sequence
@@ -145,16 +154,13 @@ final class SessionStartPipeline {
   private func runStartSequence(
     for session: ActiveSession,
     request: Request,
+    warmedInput: LiveInputPreparation?,
     host: SessionStartHost
   ) async -> HandsFreeCaptureStartOutcome {
     // Claim the recorder staged while idle. Returns nil — and the cold path
     // runs — whenever the environment moved since it was staged.
     let warmContext = owners.captureWarmer.claimWarmContext()
-    let liveInputPreparation = LiveInputPreparation(
-      deviceManager: capture.devices,
-      engines: LiveInputEngines.shared,
-      primed: request.primedInput
-    )
+    let liveInputPreparation = await makeLiveInputPreparation(primed: request.primedInput, warmedInput: warmedInput)
 
     do {
       // Issue #641: the start cue is played by the sequencer *after* capture is
@@ -163,19 +169,7 @@ final class SessionStartPipeline {
       // listening yet. The pre-warm path (issue #663) runs inside the same
       // step — a claimed staged recorder still has to prove it is capturing.
       let startStream = makeStartStreamStep(for: session, request: request, host: host)
-      // The live engine's input node is built before the recorder opens the
-      // microphone; built afterwards it stalled stream start (and the cue) by
-      // ~3 s on Bluetooth inputs. See `LiveInputEngineStore`. Routes that
-      // capture through their own engine (WhisperKit) would never claim it.
-      let prepareStream: RecordingStartSequencer.Step? = capture.audioFiles.requiresPhysicalInput
-        && transcription.liveRouteUsesLiveInputEngine
-        ? { await liveInputPreparation.prepare() }
-        : nil
-      if let primedInput = request.primedInput, prepareStream == nil {
-        // This route builds its own input node (or none); it must not do so
-        // beside the primer's open microphone.
-        await owners.keyPressPrimer.closeBeforeStart(primedInput)
-      }
+      let prepareStream = await makePrepareStreamStep(using: liveInputPreparation, primed: request.primedInput)
       let hudDuringStart = beginStartingHUD(for: request, buildsInputNode: prepareStream != nil)
       let sequencer = RecordingStartSequencer(
         isSessionCurrent: { [weak host] in host?.activeSession === session },
@@ -190,7 +184,11 @@ final class SessionStartPipeline {
       let timeline = try await sequencer.run()
       await liveInputPreparation.finish()
       Self.recordStartTimeline(timeline, for: session, logger: logger)
-      await recordKeyDownLatency(for: session, primedInput: request.primedInput)
+      await recordKeyDownLatency(
+        for: session,
+        primedInput: request.primedInput,
+        inputWarmedAhead: prepareStream != nil && warmedInput != nil && liveInputPreparation === warmedInput
+      )
       return .started
     } catch is RecordingStartAbort {
       await liveInputPreparation.finish(startFailed: true)
@@ -299,6 +297,44 @@ final class SessionStartPipeline {
     owners.captureRuntime.stop()
     await capture.audioFiles.cancelRecording(deleteFile: true)
   }
+}
+
+// MARK: - Live input preparation and latency records
+
+extension SessionStartPipeline {
+  /// The live input preparation: the one a hotkey press started (#611),
+  /// unless the primer's microphone supplies the engine.
+  private func makeLiveInputPreparation(
+    primed: PrimedLiveInputReservation?,
+    warmedInput: LiveInputPreparation?
+  ) async -> LiveInputPreparation {
+    if let warmedInput {
+      if primed == nil { return warmedInput }
+      await warmedInput.finish(startFailed: true)
+    }
+    return LiveInputPreparation(deviceManager: capture.devices, engines: LiveInputEngines.shared, primed: primed)
+  }
+
+  /// The step that builds the live engine's input node before the recorder
+  /// opens the microphone; built afterwards it stalled stream start by ~3 s on
+  /// Bluetooth inputs (see `LiveInputEngineStore`). Nil for routes that capture
+  /// through their own engine (WhisperKit), which would never claim it.
+  private func makePrepareStreamStep(
+    using liveInputPreparation: LiveInputPreparation,
+    primed: PrimedLiveInputReservation?
+  ) async -> RecordingStartSequencer.Step? {
+    if capture.audioFiles.requiresPhysicalInput && transcription.liveRouteUsesLiveInputEngine {
+      return { await liveInputPreparation.prepare() }
+    }
+    if let primed {
+      // This route builds its own input node (or none); it must not do so
+      // beside the primer's open microphone.
+      await owners.keyPressPrimer.closeBeforeStart(primed)
+    }
+    // A build a hotkey press started must end before the microphone opens.
+    await liveInputPreparation.finish(startFailed: true)
+    return nil
+  }
 
   // MARK: - Latency records
 
@@ -339,9 +375,16 @@ final class SessionStartPipeline {
 
   /// Logs key-down → capture and key-down → first primed audio, and keeps
   /// them on the session for diagnosis.
-  private func recordKeyDownLatency(for session: ActiveSession, primedInput: PrimedLiveInputReservation?) async {
+  private func recordKeyDownLatency(
+    for session: ActiveSession,
+    primedInput: PrimedLiveInputReservation?,
+    inputWarmedAhead: Bool
+  ) async {
     guard let keyDownMs = session.keyDownToCaptureMilliseconds else { return }
     var summary = "capture \(keyDownMs)ms after key-down"
+    if inputWarmedAhead {
+      summary += ", live input prepared from key-down"
+    }
     if let primed = await primedInput?.value {
       let warmUpMs = Int(((primed.startedUptime - primed.keyDownUptime) * 1000).rounded())
       summary += ", microphone warmed at key-down (running at \(warmUpMs)ms"

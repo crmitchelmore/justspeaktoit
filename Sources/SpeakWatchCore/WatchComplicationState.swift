@@ -348,3 +348,17 @@ public struct WatchRecordingRequest: Codable, Equatable, Sendable {
         return self.consume(claim, now: now, from: container)
     }
 }
+
+extension WatchRecordingRequest {
+    /// Watch-face complications are not interactive: a tap on the face only
+    /// launches the app (an intent button runs in place in the Smart Stack
+    /// alone). The complication's `widgetURL` carries the tap into the app,
+    /// which toggles recording when it opens this URL.
+    public static let watchFaceLaunchURL = URL(string: "justspeaktoit-watch://record")
+        ?? URL(fileURLWithPath: "/")
+
+    /// Whether `url` is the complication tap that should toggle recording.
+    public static func isWatchFaceLaunch(_ url: URL) -> Bool {
+        url.scheme == self.watchFaceLaunchURL.scheme && url.host == self.watchFaceLaunchURL.host
+    }
+}

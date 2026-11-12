@@ -1,24 +1,23 @@
 import SpeakCore
 import SwiftUI
 
-/// ⌘F settings search: typeahead over the shared settings catalogue plus one
-/// entry per API-key card. Choosing a result navigates to and highlights it.
+/// "Search for anything" (⌘K, or ⌘F): typeahead over app actions, the shared
+/// settings catalogue and one entry per API-key card. Choosing an action runs it;
+/// choosing a setting navigates to and highlights it.
 struct SettingsSearchPalette: View {
-  let onSelect: (SettingsSearchEntry) -> Void
+  let onSelect: (CommandPaletteSearch.Item) -> Void
 
   @Environment(\.dismiss) private var dismiss
+  @EnvironmentObject private var shortcutManager: ShortcutManager
   @AppStorage("settingsSearch.recentEntryIDs") private var storedRecents = ""
   @State private var query = ""
   @State private var selectedIndex = 0
-  @State private var index = SettingsSearchIndex(entries: MacSettingsSearch.catalogEntries)
+  @State private var search = CommandPaletteSearch(
+    commands: CommandPaletteCommand.all(), settings: MacSettingsSearch.catalogEntries
+  )
   @FocusState private var isFieldFocused: Bool
 
-  private struct Row: Identifiable {
-    let entry: SettingsSearchEntry
-    let matchedKeyword: String?
-    let group: String?
-    var id: String { entry.id }
-  }
+  private typealias Row = CommandPaletteSearch.Row
 
   var body: some View {
     let rows = visibleRows
@@ -33,8 +32,9 @@ struct SettingsSearchPalette: View {
     .onChange(of: query) { _, _ in selectedIndex = 0 }
     .task {
       let providers = await TranscriptionProviderRegistry.shared.allProviders()
-      index = SettingsSearchIndex(
-        entries: MacSettingsSearch.catalogEntries
+      search = CommandPaletteSearch(
+        commands: CommandPaletteCommand.all(),
+        settings: MacSettingsSearch.catalogEntries
           + MacSettingsSearch.apiKeyEntries(transcriptionProviders: providers)
       )
     }
@@ -45,11 +45,11 @@ struct SettingsSearchPalette: View {
       Image(systemName: "magnifyingglass")
         .foregroundStyle(.secondary)
         .accessibilityHidden(true)
-      TextField("Search settings, keys and shortcuts", text: $query)
+      TextField("Search for anything", text: $query)
         .textFieldStyle(.plain)
         .font(.title3)
         .focused($isFieldFocused)
-        .accessibilityLabel("Search settings")
+        .accessibilityLabel("Search for anything")
         .accessibilityIdentifier("settingsSearchField")
         .onSubmit { choose(rows.indices.contains(selectedIndex) ? rows[selectedIndex] : rows.first) }
         .onKeyPress(.downArrow) {
@@ -73,7 +73,7 @@ struct SettingsSearchPalette: View {
   }
 
   private var completions: [String] {
-    index.completions(for: query, limit: 5)
+    search.completions(for: query, limit: 5)
   }
 
   @ViewBuilder
@@ -108,8 +108,8 @@ struct SettingsSearchPalette: View {
       ScrollViewReader { proxy in
         List {
           ForEach(Array(rows.enumerated()), id: \.element.id) { position, row in
-            if let group = row.group, position == 0 || rows[position - 1].group != group {
-              Text(group)
+            if position == 0 || rows[position - 1].group != row.group {
+              Text(row.group)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
@@ -119,7 +119,7 @@ struct SettingsSearchPalette: View {
           }
         }
         .listStyle(.plain)
-        .accessibilityLabel(query.isEmpty ? "Recent and suggested settings" : "\(rows.count) settings found")
+        .accessibilityLabel(query.isEmpty ? "Actions and suggested settings" : "\(rows.count) results found")
         .onChange(of: selectedIndex) { _, newValue in
           guard rows.indices.contains(newValue) else { return }
           proxy.scrollTo(rows[newValue].id)
@@ -128,67 +128,105 @@ struct SettingsSearchPalette: View {
     }
   }
 
+  @ViewBuilder
   private func resultRow(_ row: Row, isSelected: Bool) -> some View {
-    let entry = row.entry
-    let detail = row.matchedKeyword.map { "Matches “\($0)” · \(entry.summary)" } ?? entry.summary
-    return Button {
-      choose(row)
-    } label: {
-      HStack(spacing: 12) {
-        Image(systemName: entry.systemImage)
-          .frame(width: 22)
-          .foregroundStyle(Color.accentColor)
-          .accessibilityHidden(true)
-        VStack(alignment: .leading, spacing: 2) {
-          HStack(spacing: 6) {
-            Text(entry.title).font(.body.weight(.semibold))
-            if !entry.isSectionRoot {
-              Text(entry.section.title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-          }
-          Text(detail)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-        }
-        Spacer(minLength: 0)
-      }
-      .padding(.vertical, 4)
-      .padding(.horizontal, 6)
-      .contentShape(Rectangle())
-      .background(
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .fill(isSelected ? Color.accentColor.opacity(0.18) : .clear)
+    switch row.item {
+    case .command(let command):
+      commandRow(command, row: row, isSelected: isSelected)
+    case .setting(let entry):
+      settingRow(entry, row: row, isSelected: isSelected)
+    }
+  }
+
+  private func commandRow(_ command: CommandPaletteCommand, row: Row, isSelected: Bool) -> some View {
+    let binding = command.shortcutAction.map { shortcutManager.binding(for: $0) }
+    let shortcut = binding.flatMap { $0.isEnabled ? $0.displayString : nil }
+    return rowButton(row, isSelected: isSelected) {
+      rowContent(
+        systemImage: command.systemImage, title: command.title, caption: nil,
+        detail: command.summary, trailing: shortcut
       )
     }
-    .buttonStyle(.plain)
-    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(command.title)
+    .accessibilityHint(shortcut.map { "\(command.summary) Shortcut: \($0)." } ?? command.summary)
+    .accessibilityIdentifier("commandPaletteResult.\(command.id)")
+  }
+
+  private func settingRow(_ entry: SettingsSearchEntry, row: Row, isSelected: Bool) -> some View {
+    let detail = row.matchedKeyword.map { "Matches “\($0)” · \(entry.summary)" } ?? entry.summary
+    return rowButton(row, isSelected: isSelected) {
+      rowContent(
+        systemImage: entry.systemImage, title: entry.title,
+        caption: entry.isSectionRoot ? nil : entry.section.title, detail: detail, trailing: nil
+      )
+    }
     .accessibilityLabel(entry.isSectionRoot ? "\(entry.title) settings" : "\(entry.title), \(entry.section.title)")
     .accessibilityHint(detail)
-    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     .accessibilityIdentifier(entry.resultAccessibilityIdentifier)
   }
 
-  private var visibleRows: [Row] {
-    guard query.trimmingCharacters(in: .whitespaces).isEmpty else {
-      return index.search(query, limit: 30).map { Row(entry: $0.entry, matchedKeyword: $0.matchedKeyword, group: nil) }
+  private func rowButton<Label: View>(
+    _ row: Row, isSelected: Bool, @ViewBuilder label: () -> Label
+  ) -> some View {
+    Button {
+      choose(row)
+    } label: {
+      label()
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .contentShape(Rectangle())
+        .background(
+          RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(isSelected ? Color.accentColor.opacity(0.18) : .clear)
+        )
     }
-    let recentIDs = SettingsSearchRecents.decode(storedRecents)
-    let recents = recentIDs.compactMap { index.entry(id: $0) }
-    let suggested = SettingsSearchCatalog.suggestedEntryIDs
-      .filter { !recentIDs.contains($0) }
-      .compactMap { index.entry(id: $0) }
-    return recents.map { Row(entry: $0, matchedKeyword: nil, group: "Recent") }
-      + suggested.map { Row(entry: $0, matchedKeyword: nil, group: "Suggested") }
+    .buttonStyle(.plain)
+    .accessibilityElement(children: .ignore)
+    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+  }
+
+  private func rowContent(
+    systemImage: String, title: String, caption: String?, detail: String, trailing: String?
+  ) -> some View {
+    HStack(spacing: 12) {
+      Image(systemName: systemImage)
+        .frame(width: 22)
+        .foregroundStyle(Color.accentColor)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
+          Text(title).font(.body.weight(.semibold))
+          if let caption {
+            Text(caption)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+        Text(detail)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+      Spacer(minLength: 0)
+      if let trailing {
+        Text(trailing)
+          .font(.caption.monospaced())
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private var visibleRows: [Row] {
+    search.rows(for: query, recentSettingIDs: SettingsSearchRecents.decode(storedRecents))
   }
 
   private func choose(_ row: Row?) {
     guard let row else { return }
-    let recents = SettingsSearchRecents.recording(row.entry.id, in: SettingsSearchRecents.decode(storedRecents))
-    storedRecents = SettingsSearchRecents.encode(recents)
-    onSelect(row.entry)
+    if case .setting(let entry) = row.item {
+      let recents = SettingsSearchRecents.recording(entry.id, in: SettingsSearchRecents.decode(storedRecents))
+      storedRecents = SettingsSearchRecents.encode(recents)
+    }
     dismiss()
+    onSelect(row.item)
   }
 }

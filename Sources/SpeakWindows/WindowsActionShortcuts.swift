@@ -14,6 +14,8 @@ extension WindowsHostPlatform {
 enum WindowsActionShortcutRun: Equatable {
     case record, page(String), playPause, stopSpeech, apiKeys, permissions, compareModels
     case quickVoice(Int), pasteLastHistoryItem, speakSelectedText, speakClipboard, troubleshooting, voiceEdit
+    /// Kept for the Mac; Windows has no command palette yet.
+    case unavailable
 
     // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
@@ -45,10 +47,11 @@ enum WindowsActionShortcutRun: Equatable {
         case .speakClipboard: self = .speakClipboard
         case .openTroubleshooting: self = .troubleshooting
         case .editSelectionByVoice: self = .voiceEdit
+        case .openCommandPalette: self = .unavailable
         }
     }
 
-    static let runnable = Set(DesktopShortcutAction.allCases)
+    static let runnable = Set(DesktopShortcutAction.allCases.filter { Self($0) != .unavailable })
 
     var code: Int32 {
         switch self {
@@ -67,6 +70,7 @@ enum WindowsActionShortcutRun: Equatable {
         case .speakClipboard: return Int32(JSTI_ACTION_RUN_SPEAK_CLIPBOARD)
         case .troubleshooting: return Int32(JSTI_ACTION_RUN_TROUBLESHOOTING)
         case .voiceEdit: return Int32(JSTI_ACTION_RUN_VOICE_EDIT)
+        case .unavailable: return Int32(JSTI_ACTION_RUN_NONE)
         }
     }
 

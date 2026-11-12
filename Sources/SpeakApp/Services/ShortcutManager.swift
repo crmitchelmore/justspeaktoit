@@ -66,6 +66,15 @@ final class ShortcutManager: ObservableObject {
         handlers[action] = handler
     }
 
+    /// Runs an action's registered handler directly, as if its shortcut had been
+    /// pressed, so other entry points (the command palette) share one code path.
+    @discardableResult
+    func perform(_ action: ShortcutAction) -> Bool {
+        guard action.isAvailable(in: .current), let handler = handlers[action] else { return false }
+        handler()
+        return true
+    }
+
     /// Unregisters a handler for a specific action.
     func unregister(action: ShortcutAction) {
         handlers[action] = nil

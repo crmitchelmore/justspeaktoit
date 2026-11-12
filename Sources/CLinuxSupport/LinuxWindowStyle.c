@@ -265,6 +265,13 @@ void jsti_accessible_set_name(GtkWidget *widget, const char *name) {
     gtk_accessible_update_property(GTK_ACCESSIBLE(widget), GTK_ACCESSIBLE_PROPERTY_LABEL, name, -1);
 }
 
+void jsti_accessible_announce(GtkWidget *widget, const char *text, int priority) {
+    if (widget == NULL || text == NULL || text[0] == '\0') return;
+    GtkRoot *root = gtk_widget_get_root(widget);
+    GtkWidget *speaker = root != NULL && GTK_IS_WINDOW(root) ? GTK_WIDGET(root) : widget;
+    gtk_accessible_announce(GTK_ACCESSIBLE(speaker), text, (GtkAccessibleAnnouncementPriority)priority);
+}
+
 GtkWidget *jsti_page_new(GtkWidget **content) {
     GtkWidget *scroller = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroller), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);

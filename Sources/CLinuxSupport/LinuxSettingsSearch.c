@@ -215,7 +215,7 @@ static void search_results_apply(gpointer data) {
     if (!search_has_query() || search.dismissed) return;
     gchar *announcement = search.count == 0 ? g_strdup("No settings match")
         : g_strdup_printf(g_dngettext(NULL, "%u setting found", "%u settings found", search.count), search.count);
-    gtk_accessible_announce(GTK_ACCESSIBLE(search.list), announcement, GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+    jsti_accessible_announce(GTK_WIDGET(search.list), announcement, GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
     g_free(announcement);
 }
 

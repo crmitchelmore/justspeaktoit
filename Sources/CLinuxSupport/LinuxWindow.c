@@ -72,6 +72,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     retire_migration_restore();
     storage_page_close();
     g_clear_handle_id(&ui.state_announcement, g_source_remove);
+    g_clear_pointer(&ui.phase_announcement, g_free);
     jsti_hud_destroy();
     jsti_tray_stop();
     emit(JSTI_EVENT_CLOSING, "", 0);

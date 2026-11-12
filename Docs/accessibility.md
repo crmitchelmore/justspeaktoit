@@ -129,10 +129,23 @@ Mac; UI tests run on hosted CI.
 - Accessible names are the stable handles that AT-SPI agents use, so keep them
   short, unique within a window and independent of state where possible.
 - The window status label has the `status` role. Announce with
-  `gtk_accessible_announce`.
+  `jsti_accessible_announce`, which speaks through the widget's window: GTK
+  silently drops `gtk_accessible_announce` on a child widget whose accessible
+  context a screen reader has not queried yet.
+- Wizard steps that rebuild a page announce the new step and put focus back on
+  the button that was pressed, because making the footer insensitive drops it.
+- Name read-only text views, such as the transcript (`Transcript`).
+- Opening a page from the collapsed sidebar, or from a settings search result,
+  moves focus into the page; focus left on the hidden sidebar is lost.
+- Keep read-only `GtkFlowBox` grids out of the focus chain with
+  `gtk_widget_set_can_focus(flow, FALSE)`. Marking each `GtkFlowBoxChild`
+  unfocusable is not enough: the flow box still reports that it took focus,
+  so Tab stops moving.
 - Guard: `scripts/accessibility/check-linux-accessibility.py` runs in the Linux workflow and
-  fails on unnamed icon buttons and on drop-downs named only by property. The
-  window self-test checks the status role.
+  fails on unnamed icon buttons, on drop-downs named only by property and on
+  raw `gtk_accessible_announce` calls. The window self-test checks the status
+  role, that dashboard flow boxes never swallow Tab, that setup steps keep
+  keyboard focus and that collapsed-sidebar navigation moves focus into the page.
 
 ### Android (TalkBack and accessibility services)
 

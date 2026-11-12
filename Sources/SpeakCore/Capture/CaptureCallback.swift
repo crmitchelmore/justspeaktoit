@@ -318,6 +318,10 @@ public struct CaptureCallback: Equatable, Sendable {
     ///   the device — either to a web server or, as a Universal Link, to
     ///   whichever app claims that domain. A dictation goes to another app on
     ///   this phone or nowhere.
+    /// - browser wrapper schemes (`x-safari-https`, `googlechromes`,
+    ///   `firefox`, `microsoft-edge-https` and the like) and web transports
+    ///   (`ws`, `wss`, `ftp`), because each one hands a URL — and the
+    ///   transcript appended to it — to a browser that loads it from the web.
     /// - `javascript`, `data`, `file`, `blob`, `about`, `vbscript` because they
     ///   address content rather than an app.
     /// - `tel`, `sms`, `facetime`, `mailto` because a link should not be able
@@ -325,7 +329,14 @@ public struct CaptureCallback: Equatable, Sendable {
     /// - the app's own scheme, so a callback cannot re-enter the app and loop.
     public static let refusedSchemes: Set<String> = [
         "http", "https", "javascript", "data", "file", "blob", "about", "vbscript",
-        "tel", "telprompt", "sms", "facetime", "facetime-audio", "mailto", "justspeaktoit"
+        "tel", "telprompt", "sms", "facetime", "facetime-audio", "mailto", "justspeaktoit",
+        "ws", "wss", "ftp", "ftps",
+        "x-safari-http", "x-safari-https", "x-web-search",
+        "googlechrome", "googlechromes", "googlechrome-x-callback",
+        "firefox", "firefox-focus", "firefox-klar",
+        "microsoft-edge", "microsoft-edge-http", "microsoft-edge-https",
+        "brave", "opera", "opera-http", "opera-https", "touch-http", "touch-https",
+        "duckduckgo", "ddgquicklink", "onionhttp", "onionhttps"
     ]
 
     /// Validates a caller-supplied callback before the app will ever open it.

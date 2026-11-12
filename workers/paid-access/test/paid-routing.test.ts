@@ -203,7 +203,7 @@ describe('paid routing entitlement gate', () => {
     const body = (await response.json()) as { text: string; model: string; provider: string };
     expect(body.text).toBe('Hello, world.');
     // The server, not the client, decided which model was used.
-    expect(body.model).toBe('openai/gpt-5.6-luna');
+    expect(body.model).toBe('openai/gpt-6-luna');
     expect(body.provider).toBe('openrouter');
 
     const usage = await env.DB.prepare(
@@ -212,7 +212,7 @@ describe('paid routing entitlement gate', () => {
       .bind(userId)
       .first<{ operation: string; model: string; unit_kind: string; units: number }>();
     expect(usage?.operation).toBe('post_processing');
-    expect(usage?.model).toBe('openai/gpt-5.6-luna');
+    expect(usage?.model).toBe('openai/gpt-6-luna');
     expect(usage?.unit_kind).toBe('tokens');
     // 40 prompt + 20 completion tokens, as reported by the provider.
     expect(usage?.units).toBe(60);
@@ -276,7 +276,7 @@ describe('paid routing request validation', () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as { model: string; provider: string };
-    expect(body.model).toBe('openai/gpt-5.6-luna');
+    expect(body.model).toBe('openai/gpt-6-luna');
     expect(body.provider).toBe('openrouter');
   });
 

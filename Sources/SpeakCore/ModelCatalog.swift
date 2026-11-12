@@ -542,9 +542,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         )
     ] + NativeTextModels.postProcessing + [
         // OpenRouter routes. Unprefixed IDs are OpenRouter slugs; native routes use `native/`.
-        // GPT-6 IDs/rates verified against OpenAI docs and OpenRouter (2026-11); see
-        // Docs/cleanup-model-upgrades-2026-11.md for pricing tiers and evidence.
-        // No measured cleanup latency is available; retain Option's default tier.
+        // IDs and base rates verified 12 November 2026 against OpenRouter's models API and
+        // the providers' pricing pages; see Docs/cleanup-model-upgrades-2026-11.md. The list
+        // keeps one entry per price/quality tier: a model that a newer, cheaper model from the
+        // same provider matches is removed and migrated by `CleanupModelRemovals`.
+        // New entries carry no measured cleanup latency; Option's default tier applies.
         Option(
             id: "openai/gpt-6-luna",
             displayName: "GPT-6 Luna",
@@ -552,6 +554,15 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "Base token pricing shown; long-context rates may be higher.",
             tags: [.cheap],
             pricing: Pricing(promptPerMTokens: 0.10, completionPerMTokens: 0.50),
+            contextLength: 1_050_000
+        ),
+        Option(
+            id: "openai/gpt-6.1-terra",
+            displayName: "GPT-6.1 Terra",
+            description: "Balanced GPT-6.1 quality and cost via OpenRouter. "
+                + "Base token pricing shown; long-context rates may be higher.",
+            tags: [.quality],
+            pricing: Pricing(promptPerMTokens: 1.0, completionPerMTokens: 5.0),
             contextLength: 1_050_000
         ),
         Option(
@@ -571,28 +582,6 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             pricing: Pricing(promptPerMTokens: 10.0, completionPerMTokens: 50.0),
             contextLength: 1_050_000
         ),
-
-        // Fast / cheap cleanup
-        Option(
-            id: "openai/gpt-5.4-nano",
-            displayName: "GPT-5.4 Nano",
-            description: "Newest ultra-low-cost OpenAI option for quick cleanup.",
-            estimatedLatencyMs: 350,
-            latencyTier: .fast,
-            tags: [.fast, .cheap],
-            pricing: Pricing(promptPerMTokens: 0.20, completionPerMTokens: 1.25),
-            contextLength: 400_000
-        ),
-        Option(
-            id: "openai/gpt-5-mini",
-            displayName: "GPT-5 Mini",
-            description: "Fast and cheap OpenAI reasoning model for reliable transcript cleanup.",
-            estimatedLatencyMs: 500,
-            latencyTier: .fast,
-            tags: [.fast, .cheap],
-            pricing: Pricing(promptPerMTokens: 0.25, completionPerMTokens: 2.0),
-            contextLength: 400_000
-        ),
         Option(
             id: "google/gemini-3.1-flash-lite",
             displayName: "Gemini 3.1 Flash Lite",
@@ -604,13 +593,29 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             contextLength: 1_048_576
         ),
         Option(
-            id: "qwen/qwen3.6-flash",
-            displayName: "Qwen3.6 Flash",
-            description: "Recent fast Qwen model with low-cost long-context cleanup.",
-            estimatedLatencyMs: 400,
+            id: "google/gemini-3.5-flash-lite",
+            displayName: "Gemini 3.5 Flash Lite",
+            description: "Newest Gemini Flash Lite; Google's replacement for Gemini 2.5 Flash.",
+            tags: [.fast],
+            pricing: Pricing(promptPerMTokens: 0.30, completionPerMTokens: 2.5),
+            contextLength: 1_048_576
+        ),
+        Option(
+            id: "google/gemini-2.5-flash-lite",
+            displayName: "Gemini 2.5 Flash Lite",
+            description: "Very fast and inexpensive for everyday cleanup.",
+            estimatedLatencyMs: 450,
             latencyTier: .fast,
             tags: [.fast, .cheap],
-            pricing: Pricing(promptPerMTokens: 0.25, completionPerMTokens: 1.5),
+            pricing: Pricing(promptPerMTokens: 0.1, completionPerMTokens: 0.4),
+            contextLength: 1_048_576
+        ),
+        Option(
+            id: "qwen/qwen3.8-flash",
+            displayName: "Qwen3.8 Flash",
+            description: "Newest fast Qwen model with low-cost long-context cleanup.",
+            tags: [.fast, .cheap],
+            pricing: Pricing(promptPerMTokens: 0.15, completionPerMTokens: 0.47),
             contextLength: 1_000_000
         ),
         Option(
@@ -624,43 +629,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             contextLength: 262_144
         ),
         Option(
-            id: "google/gemini-2.5-flash-lite",
-            displayName: "Gemini 2.5 Flash Lite",
-            description: "Very fast and inexpensive for everyday cleanup.",
-            estimatedLatencyMs: 450,
-            latencyTier: .fast,
-            tags: [.fast, .cheap],
-            pricing: Pricing(promptPerMTokens: 0.1, completionPerMTokens: 0.4),
-            contextLength: 1_048_576
-        ),
-        Option(
-            id: "qwen/qwen3.6-35b-a3b",
-            displayName: "Qwen3.6 35B A3B",
-            description: "Tiny-cost recent Qwen model for routine cleanup and formatting.",
-            estimatedLatencyMs: 350,
-            latencyTier: .fast,
-            tags: [.fast, .cheap],
-            pricing: Pricing(promptPerMTokens: 0.15, completionPerMTokens: 1.0),
-            contextLength: 262_144
-        ),
-        Option(
-            id: "meta-llama/llama-4-scout",
-            displayName: "Llama 4 Scout",
-            description: "Cheap long-context cleanup option with good speed.",
-            estimatedLatencyMs: 550,
-            latencyTier: .fast,
-            tags: [.fast, .cheap],
-            pricing: Pricing(promptPerMTokens: 0.08, completionPerMTokens: 0.3),
-            contextLength: 327_680
-        ),
-
-        // Claude 5.5 IDs/rates from OpenRouter's models API and Anthropic's models
-        // overview (2026-11-11). No measured cleanup latency; Option's default tier applies.
-        Option(
             id: "anthropic/claude-haiku-5.5",
             displayName: "Claude Haiku 5.5",
-            description: "Anthropic's newest Haiku via OpenRouter, priced well below Haiku 4.5.",
-            tags: [.cheap],
+            description: "Anthropic's fastest, lowest-cost Claude via OpenRouter.",
+            tags: [.fast, .cheap],
             pricing: Pricing(promptPerMTokens: 0.10, completionPerMTokens: 0.50),
             contextLength: 1_000_000
         ),
@@ -668,103 +640,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: "anthropic/claude-sonnet-5.5",
             displayName: "Claude Sonnet 5.5",
             description: "Anthropic's newest Sonnet via OpenRouter, for structure- and tone-preserving cleanup.",
-            tags: [.quality],
+            tags: [.quality, .leading],
             pricing: Pricing(promptPerMTokens: 2.0, completionPerMTokens: 10.0),
             contextLength: 1_000_000
-        ),
-
-        // Fast / quality cleanup
-        Option(
-            id: "anthropic/claude-haiku-4.5",
-            displayName: "Claude Haiku 4.5",
-            description: "Fast, reliable formatting with strong instruction following.",
-            estimatedLatencyMs: 900,
-            latencyTier: .fast,
-            tags: [.fast, .quality],
-            pricing: Pricing(promptPerMTokens: 1.0, completionPerMTokens: 5.0),
-            contextLength: 200_000
-        ),
-        Option(
-            id: "openai/gpt-5.6-luna",
-            displayName: "GPT-5.6 Luna",
-            description: "Fastest GPT-5.6 model for efficient, high-volume transcript cleanup.",
-            estimatedLatencyMs: 450,
-            latencyTier: .fast,
-            tags: [.fast, .cheap, .quality],
-            pricing: Pricing(promptPerMTokens: 0.20, completionPerMTokens: 1.2),
-            contextLength: 1_050_000
-        ),
-        Option(
-            id: "openai/gpt-5.4-mini",
-            displayName: "GPT-5.4 Mini",
-            description: "Recent OpenAI mini model for higher-quality cleanup at moderate cost.",
-            estimatedLatencyMs: 650,
-            latencyTier: .fast,
-            tags: [.fast, .quality],
-            pricing: Pricing(promptPerMTokens: 0.75, completionPerMTokens: 4.5),
-            contextLength: 400_000
-        ),
-        Option(
-            id: "google/gemini-2.5-flash",
-            displayName: "Gemini 2.5 Flash",
-            description: "Great speed and quality for large transcript cleanup.",
-            estimatedLatencyMs: 650,
-            latencyTier: .fast,
-            tags: [.fast],
-            pricing: Pricing(promptPerMTokens: 0.3, completionPerMTokens: 2.5),
-            contextLength: 1_048_576
-        ),
-
-        // Leading quality
-        Option(
-            id: "openai/gpt-5.5",
-            displayName: "GPT-5.5",
-            description: "Latest OpenAI generation for top-tier transcript cleanup quality.",
-            estimatedLatencyMs: 1200,
-            latencyTier: .medium,
-            tags: [.quality, .leading],
-            pricing: Pricing(promptPerMTokens: 5.0, completionPerMTokens: 30.0),
-            contextLength: 1_050_000
-        ),
-        Option(
-            id: "openai/gpt-5.6-terra",
-            displayName: "GPT-5.6 Terra",
-            description: "Balanced GPT-5.6 capability and cost for high-quality transcript cleanup.",
-            estimatedLatencyMs: 750,
-            latencyTier: .medium,
-            tags: [.quality, .leading],
-            pricing: Pricing(promptPerMTokens: 2.0, completionPerMTokens: 12.0),
-            contextLength: 1_050_000
-        ),
-        Option(
-            id: "openai/gpt-5.6-sol",
-            displayName: "GPT-5.6 Sol",
-            description: "Flagship GPT-5.6 model for the highest-quality transcript cleanup.",
-            estimatedLatencyMs: 1_200,
-            latencyTier: .slow,
-            tags: [.quality, .leading],
-            pricing: Pricing(promptPerMTokens: 4.0, completionPerMTokens: 20.0),
-            contextLength: 1_050_000
-        ),
-        Option(
-            id: "anthropic/claude-sonnet-4.6",
-            displayName: "Claude Sonnet 4.6",
-            description: "Excellent structure + tone preservation.",
-            estimatedLatencyMs: 1400,
-            latencyTier: .medium,
-            tags: [.quality, .leading],
-            pricing: Pricing(promptPerMTokens: 3.0, completionPerMTokens: 15.0),
-            contextLength: 1_000_000
-        ),
-        Option(
-            id: "openai/gpt-5.4",
-            displayName: "GPT-5.4",
-            description: "Top-tier cleanup quality with low-latency responses.",
-            estimatedLatencyMs: 900,
-            latencyTier: .fast,
-            tags: [.fast, .quality, .leading],
-            pricing: Pricing(promptPerMTokens: 2.5, completionPerMTokens: 15.0),
-            contextLength: 1_050_000
         )
     ]
 
@@ -871,9 +749,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             ?? trimmed
     }
 
-    /// GPT-5 Mini, the previous default, shuts down on 2026-12-11. GPT-5.6 Luna
-    /// is the closest-priced current OpenAI model; see `ModelRetirements`.
-    public static let defaultPostProcessingModel = "openai/gpt-5.6-luna"
+    /// GPT-6 Luna is cheaper ($0.10/$0.50 per million tokens) and newer than
+    /// GPT-5.6 Luna, the previous default; see `CleanupModelRemovals`.
+    public static let defaultPostProcessingModel = "openai/gpt-6-luna"
 
     /// Low-latency cloud text model for latency-sensitive rewrites (live polish,
     /// spoken-response summaries) when the user has not chosen one.
@@ -897,9 +775,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         if trimmed.hasPrefix("local/post-processing/") || CleanupModelSelection.modelID(from: trimmed) != nil {
             return trimmed
         }
-        if let successor = ModelRetirements.successor(for: trimmed, mode: .postProcessing, at: date) {
-            return successor
-        }
+        let current = currentPostProcessingModel(trimmed, at: date)
+        if current != trimmed { return current }
         if scheduledPostProcessing.contains(where: { $0.id == trimmed }) { return trimmed }
         return defaultPostProcessingModel
     }
@@ -923,6 +800,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         if let exact = optionsByID[trimmed.lowercased()] {
             return exact.displayName
         }
+        if let removed = CleanupModelRemovals.removal(for: trimmed) { return removed.displayName }
         if let local = localPostProcessing.first(where: { $0.id.lowercased() == trimmed.lowercased() }) {
             return local.displayName
         }

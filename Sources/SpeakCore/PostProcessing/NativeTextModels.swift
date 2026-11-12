@@ -74,26 +74,23 @@ public enum NativeTextModels {
 
     public static func isNative(_ selection: String) -> Bool { route(for: selection) != nil }
 
-    // Native IDs verified November 2026 against each provider's model docs; Anthropic,
-    // OpenAI and Gemini rates match the OpenRouter entries for the same models.
+    // Native IDs and standard rates verified 12 November 2026 against each provider's
+    // model docs; superseded entries live in `CleanupModelRemovals`.
     public static let postProcessing: [ModelCatalog.Option] = [
-        option(anthropic, "claude-haiku-4-5", "Claude Haiku 4.5",
-               "Fast, reliable formatting, direct from Anthropic.",
-               latency: 900, tier: .fast, tags: [.fast, .quality],
-               pricing: .init(promptPerMTokens: 1.0, completionPerMTokens: 5.0), context: 200_000),
-        option(anthropic, "claude-sonnet-4-6", "Claude Sonnet 4.6",
+        option(anthropic, "claude-haiku-5-5", "Claude Haiku 5.5",
+               "Anthropic's fastest, lowest-cost Claude, direct from Anthropic.",
+               tags: [.fast, .cheap],
+               pricing: .init(promptPerMTokens: 0.10, completionPerMTokens: 0.50), context: 1_000_000),
+        option(anthropic, "claude-sonnet-5-5", "Claude Sonnet 5.5",
                "Excellent structure and tone preservation, direct from Anthropic.",
-               latency: 1400, tier: .medium, tags: [.quality, .leading],
-               pricing: .init(promptPerMTokens: 3.0, completionPerMTokens: 15.0), context: 1_000_000),
+               tags: [.quality, .leading],
+               pricing: .init(promptPerMTokens: 2.0, completionPerMTokens: 10.0), context: 1_000_000),
         option(openAI, "gpt-6-luna", "GPT-6 Luna", "Cost-efficient GPT-6, direct from OpenAI.",
                tags: [.cheap], pricing: .init(promptPerMTokens: 0.10, completionPerMTokens: 0.50),
                context: 1_050_000),
-        option(openAI, "gpt-5-mini", "GPT-5 Mini", "Fast, reliable cleanup, direct from OpenAI.",
-               latency: 500, tier: .fast, tags: [.fast, .cheap],
-               pricing: .init(promptPerMTokens: 0.25, completionPerMTokens: 2.0), context: 400_000),
-        option(openAI, "gpt-5.4-mini", "GPT-5.4 Mini", "Higher-quality cleanup, direct from OpenAI.",
-               latency: 650, tier: .fast, tags: [.fast, .quality],
-               pricing: .init(promptPerMTokens: 0.75, completionPerMTokens: 4.5), context: 400_000),
+        option(openAI, "gpt-6.1-terra", "GPT-6.1 Terra", "Balanced GPT-6.1 quality and cost, direct from OpenAI.",
+               tags: [.quality], pricing: .init(promptPerMTokens: 1.0, completionPerMTokens: 5.0),
+               context: 1_050_000),
         option(openAI, "gpt-6.1-sol", "GPT-6.1 Sol", "OpenAI's middle GPT-6 tier, direct from OpenAI.",
                tags: [.quality], pricing: .init(promptPerMTokens: 2.0, completionPerMTokens: 10.0),
                context: 1_050_000),
@@ -101,17 +98,15 @@ public enum NativeTextModels {
                "Low-cost, long-context cleanup, direct from Google.",
                latency: 400, tier: .fast, tags: [.fast, .cheap],
                pricing: .init(promptPerMTokens: 0.25, completionPerMTokens: 1.5), context: 1_048_576),
-        option(google, "gemini-2.5-flash", "Gemini 2.5 Flash", "Fast, capable cleanup, direct from Google.",
-               latency: 650, tier: .fast, tags: [.fast],
-               pricing: .init(promptPerMTokens: 0.3, completionPerMTokens: 2.5), context: 1_048_576),
+        option(google, "gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite",
+               "Newest Gemini Flash Lite, direct from Google.",
+               tags: [.fast],
+               pricing: .init(promptPerMTokens: 0.30, completionPerMTokens: 2.5), context: 1_048_576),
         option(groq, "openai/gpt-oss-120b", "GPT-OSS 120B", "Open-weight model on Groq's low-latency hardware.",
                latency: 400, tier: .fast, tags: [.fast], context: 131_072),
-        // Groq's replacement for Llama 3.1 8B Instant (console.groq.com/docs/models, 2026-11-11).
         option(groq, "openai/gpt-oss-20b", "GPT-OSS 20B", "Very fast, inexpensive open-weight cleanup on Groq.",
                latency: 250, tier: .instant, tags: [.fast, .cheap],
                pricing: .init(promptPerMTokens: 0.075, completionPerMTokens: 0.30), context: 131_072),
-        option(groq, "llama-3.1-8b-instant", "Llama 3.1 8B Instant", "Very fast, inexpensive cleanup on Groq.",
-               latency: 250, tier: .instant, tags: [.fast, .cheap], context: 131_072),
         option(mistral, "mistral-small-latest", "Mistral Small", "Inexpensive formatting, direct from Mistral.",
                latency: 450, tier: .fast, tags: [.fast, .cheap])
     ]

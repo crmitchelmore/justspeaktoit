@@ -24,21 +24,9 @@ struct DesktopGeminiSpeechSynthesis: Sendable {
         try Task.checkCancellation()
         guard !key.isEmpty else { throw DesktopGeminiSpeechError.missingCredential }
         let selection = GeminiTTSRequest(model: model, voiceID: voice.id, languageIdentifier: language)
-        var pcm = Data()
-        for segment in segments {
-            try Task.checkCancellation()
-            let audio = try await synthesizeSegment(segment, key: key, selection: selection, voice: voice)
-            let payload = audio.wav.dropFirst(44)
-            guard payload.count <= DeepgramSpeechExport.maximumPCMBytes - pcm.count else {
-                throw DesktopSpeechSynthesisError.audioTooLarge
-            }
-            pcm.append(contentsOf: payload)
+        return try await DesktopSpeechHTTP.joinedWAV(segments, sampleRate: GeminiTTSAPI.defaultSampleRate) { segment in
+            try await synthesizeSegment(segment, key: key, selection: selection, voice: voice)
         }
-        try Task.checkCancellation()
-        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: GeminiTTSAPI.defaultSampleRate) else {
-            throw DesktopSpeechSynthesisError.invalidAudio
-        }
-        return wav
     }
 
     static func validateLanguage(_ language: String?) throws {
@@ -103,27 +91,8 @@ struct DesktopGeminiSpeechSynthesis: Sendable {
     }
 
     private func receive(_ request: URLRequest) async throws -> Data {
-        do {
-            let response = try await OpenRouterBoundedResponseTransport.perform(
-                request, session: session, limit: DeepgramSpeechSynthesizer.defaultResponseLimit,
-                deadline: .seconds(120))
-            guard (200..<300).contains(response.http.statusCode) else {
-                throw GeminiTTSAPI.error(from: response.body, statusCode: response.http.statusCode)
-            }
-            return response.body
-        } catch {
-            if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
-                throw CancellationError()
-            }
-            if let service = error as? GeminiTTSAPIError { throw service }
-            switch error as? OpenRouterBoundedResponseTransport.Failure {
-            case .responseTooLarge: throw DesktopSpeechSynthesisError.audioTooLarge
-            case .timedOut: throw DesktopSpeechSynthesisError.timedOut
-            case .invalidResponse: throw DesktopSpeechSynthesisError.invalidAudio
-            case nil:
-                throw (error as? URLError)?.code == .timedOut
-                    ? DesktopSpeechSynthesisError.timedOut : DesktopSpeechSynthesisError.transportFailure
-            }
+        try await DesktopSpeechHTTP.receive(request, session: session) { body, statusCode in
+            GeminiTTSAPI.error(from: body, statusCode: statusCode)
         }
     }
 }

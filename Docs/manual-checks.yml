@@ -628,7 +628,7 @@ sessions:
           - "Switch to the Just Speak keyboard in Notes and swipe through its keys."
         expected: "Every control has a meaningful name and nothing is clipped. \"Recording\" and \"Transcribing\" are announced, the scrub closes the import sheet, and every keyboard key is named."
         final_gate: true
-      - id: "iphone-store-device-readiness"
+      - id: "owner-iphone-store-device-readiness"
         issues:
           - 1468
         title: "Store candidate: fresh-install microphone and iPad recording controls"
@@ -646,7 +646,7 @@ sessions:
           - "Deny microphone access on a test installation and confirm the app explains how to recover without claiming it is recording."
         expected: "Both devices expose the recording control, complete local and review-provider transcription, show recording state, stop cleanly and save one item per completed recording. Denied access is recoverable. This supplies device evidence for the historical July review findings, not App Store approval."
         final_gate: false
-      - id: "iphone-store-privacy-and-review-metadata"
+      - id: "owner-iphone-store-privacy-and-review-metadata"
         issues:
           - 1468
         title: "Store candidate: privacy report, consent and private review information"

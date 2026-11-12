@@ -135,17 +135,25 @@ Mac; UI tests run on hosted CI.
 - Wizard steps that rebuild a page announce the new step and put focus back on
   the button that was pressed, because making the footer insensitive drops it.
 - Name read-only text views, such as the transcript (`Transcript`).
-- Opening a page from the collapsed sidebar, or from a settings search result,
-  moves focus into the page; focus left on the hidden sidebar is lost.
+- Opening a page from the collapsed sidebar, or from a settings search result
+  in either layout, moves focus into the page; focus left on the hidden sidebar
+  is lost, and focus left on the search makes Orca read the wrong place. A
+  Ctrl+number shortcut pressed on a sidebar row moves focus to the new row.
 - Keep read-only `GtkFlowBox` grids out of the focus chain with
   `gtk_widget_set_can_focus(flow, FALSE)`. Marking each `GtkFlowBoxChild`
   unfocusable is not enough: the flow box still reports that it took focus,
   so Tab stops moving.
+- A `GtkFlowBox` that lays out buttons (About links, Troubleshooting actions)
+  marks each `GtkFlowBoxChild` with `gtk_widget_set_focusable(child, FALSE)`,
+  so focus goes straight to the button: one Tab stop per button, not an extra
+  silent "table cell" before each.
 - Guard: `scripts/accessibility/check-linux-accessibility.py` runs in the Linux workflow and
   fails on unnamed icon buttons, on drop-downs named only by property and on
   raw `gtk_accessible_announce` calls. The window self-test checks the status
   role, that dashboard flow boxes never swallow Tab, that setup steps keep
-  keyboard focus and that collapsed-sidebar navigation moves focus into the page.
+  keyboard focus, that collapsed-sidebar and search navigation move focus into
+  the page, that sidebar shortcuts move focus with the selection and that About
+  links take one Tab stop each.
 
 ### Android (TalkBack and accessibility services)
 

@@ -37,6 +37,15 @@ static int32_t about_self_test(char *error, size_t capacity) {
         ++about_count;
     }
     if (about_count != 6) return fail(error, capacity, "About canonical links are missing");
+    /* Each link is one Tab stop: focus enters the first button, not its flow box child. */
+    GtkWidget *previous = gtk_root_get_focus(GTK_ROOT(ui.window));
+    if (previous != NULL) g_object_ref(previous);
+    gboolean entered = gtk_widget_child_focus(GTK_WIDGET(about_page()->about_links), GTK_DIR_TAB_FORWARD);
+    GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(ui.window));
+    gtk_root_set_focus(GTK_ROOT(ui.window), previous);
+    g_clear_object(&previous);
+    if (!entered || !GTK_IS_BUTTON(focus))
+        return fail(error, capacity, "About links take a second Tab stop before each button");
     return 0;
 }
 

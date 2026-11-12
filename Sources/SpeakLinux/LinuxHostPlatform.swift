@@ -208,7 +208,8 @@ enum LinuxHostPlatform: DesktopHostAutomationPlatform, DesktopNativeWindowPlatfo
     package static func readyHint(_ hotKey: LinuxHotKeySettings) -> String {
         let name = shortcutName
         switch hotKey.activation {
-        case .pressToToggle: return "\(name) starts or stops recording."
+        // The name opens the sentence; the portal fallback is "the dictation shortcut".
+        case .pressToToggle: return "\(name.prefix(1).uppercased())\(name.dropFirst()) starts or stops recording."
         case .holdToRecord: return "Hold \(name) to record."
         case .doubleTapToggle: return "Double-tap \(name) to start or stop recording."
         case .holdAndDoubleTap: return "Hold \(name) to record, or double-tap it to start and stop."

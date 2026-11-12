@@ -49,11 +49,21 @@ Content staged;
 HWND window = nullptr;
 bool registered = false;
 Content shown;
+unsigned announcements = 0;
 ULONGLONG phaseStarted = 0;
 ULONGLONG hideDeadline = 0;
 float meter = 0;
 
 bool terminal(int phase) { return phase == success || phase == failure; }
+
+// Narrator ignores notifications raised by a window that is not in the
+// foreground, and the HUD never activates. When one of this thread's windows is
+// in front (Record pressed in the app), announce from it; otherwise the HUD
+// still speaks for screen readers that accept it, such as NVDA (#1400).
+HWND announcementSource() {
+    HWND foreground = GetForegroundWindow();
+    return foreground && GetWindowThreadProcessId(foreground, nullptr) == GetCurrentThreadId() ? foreground : window;
+}
 
 UINT terminalDuration(const Content &content) {
     return content.displayMilliseconds > 0 ? static_cast<UINT>(content.displayMilliseconds) :
@@ -452,6 +462,7 @@ bool ensureWindow() {
     // Never activated and click-through: insertion keeps the user's field.
     window = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
                              className, L"Just Speak to It", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
+    jsti::accessibility::attach(window);
     return window != nullptr;
 }
 
@@ -498,7 +509,12 @@ void apply() {
     render();
     SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER);
-    if (newPhase) jsti::accessibility::announce(window, name, shown.phase == failure);
+    // A result is announced every time it is staged: a repeated failure, such
+    // as pressing Record again without a key, otherwise says nothing (#1400).
+    if (newPhase || terminal(shown.phase)) {
+        ++announcements;
+        jsti::accessibility::announce(announcementSource(), name, shown.phase == failure);
+    }
 }
 
 bool visible() { return window && IsWindowVisible(window); }
@@ -635,11 +651,21 @@ bool selfTest(std::string &error) {
     passed = passed && check(IsWindowVisible(window) && terminalDuration(shown) == 6000,
                              "an old short error timer hid a replacement error.");
     hideDeadline = GetTickCount64() - 1;
+    const unsigned announcedBefore = announcements;
     stage(failure, L"Something went wrong", L"Synthetic failure.", L"", 6000);
     apply();
     SendMessageW(window, WM_TIMER, hideTimer, 0);
     passed = passed && check(IsWindowVisible(window) && hideDeadline > GetTickCount64(),
                              "an identical replacement error did not restart its timer.");
+    passed = passed && check(announcements == announcedBefore + 1,
+                             "an identical replacement error was not announced to screen readers.");
+    stage(recording, L"Recording", L"Capturing audio", L"Live words");
+    apply();
+    const unsigned announcedRecording = announcements;
+    stage(recording, L"Recording", L"Capturing audio", L"Live words and more");
+    apply();
+    passed = passed && check(announcements == announcedRecording,
+                             "a live transcript update repeated the recording announcement.");
     stage(recording, L"Recording", L"Capturing audio", L"");
     apply();
     SendMessageW(window, WM_TIMER, hideTimer, 0);

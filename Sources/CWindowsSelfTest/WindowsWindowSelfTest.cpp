@@ -61,6 +61,9 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     if (!settingsSearchSelfTest(window))
         return jsti::fail("Settings search results, keyboard choice, empty state or input refusal failed.",
                           error, errorCapacity);
+    jsti_smoke_stage("window.screen-reader.begin");
+    { std::string failure;
+      if (!screenReaderSelfTest(window, failure)) return jsti::fail(failure, error, errorCapacity); }
     jsti_smoke_stage("window.issue-helper.begin");
     { std::string failure;
       if (!jsti_issue_report_self_test(failure)) return jsti::fail(failure, error, errorCapacity); }

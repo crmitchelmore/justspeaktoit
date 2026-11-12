@@ -21,6 +21,7 @@ developer identity. ARM64 packages are built and exercised by
 | `LifecycleOwnership.ps1`, `test-lifecycle-ownership.ps1` | Admission and owned-state cleanup rules, verified against a fake machine |
 | `test-windows-package-admission.ps1` | Negative control: the lifecycle test must refuse, and leave untouched, an existing installation |
 | `verify-windows-package.py`, `windows_msix.py`, `lifecycle_support.py` | Shared checks, fixture and negative controls |
+| `msix_identity.py`, `msix_assets.py`, `msix_manifest.py`, `msix_layout.py`, `msix_package.py` | The phases `windows_msix.py` re-exports: identity rules, logo rendering, manifest render and check, bundle-to-layout, and independent package verification |
 
 Design, data behaviour, signing, evidence and remaining gates are in
 [Docs/windows-installer.md](../../Docs/windows-installer.md).

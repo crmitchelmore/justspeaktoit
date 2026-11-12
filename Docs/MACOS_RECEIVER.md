@@ -46,7 +46,11 @@ A bare host-and-port endpoint lacks the HTTP request line required for the
 WebSocket handshake. The receiver accepts any request path. A client sends
 `hello` and authenticates with the pairing code before sending text. Wrong codes,
 protocol-version mismatch and transcript frames before authentication are
-rejected; framing limits also apply inside `NWProtocolWebSocket`.
+rejected; framing limits also apply inside `NWProtocolWebSocket`. Codes are
+compared in constant time, and after five consecutive wrong codes (counted across
+all connections) every attempt is refused for a lockout that starts at 30 seconds
+and doubles per further failure up to an hour. A correct code or regenerating the
+code clears it.
 
 ## Existing coverage and remaining qualification
 

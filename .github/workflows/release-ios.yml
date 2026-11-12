@@ -15,11 +15,9 @@ concurrency:
 env:
   GH_TOKEN: ${{ github.token }}
   APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
-  # The extension now ships by default, while direct capture remains an
-  # independent, default-off rollout. Handoff-only builds never attempt the
-  # keyboard-process microphone or Speech permission path.
+  # The extension ships on every train. Direct capture is chosen per train
+  # after the manifest loads (see "Select keyboard capture policy").
   TUIST_IOS_KEYBOARD: "1"
-  TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
   # #1119: set the IOS_SHARED_CLOUD_CONTAINER repository variable to 1 only
   # after the Mac container is assigned to the iOS App IDs
   # (Docs/cloudkit-shared-container.md); profiles are then fetched with it.
@@ -42,6 +40,18 @@ jobs:
         env:
           MANIFEST: ${{ inputs.manifest }}
         run: node scripts/release-train.mjs configure --tag "$MANIFEST" --surface ios
+
+      # #661: the Alpha TestFlight app carries keyboard direct capture so the
+      # owner can run the physical direct-capture matrix. Stable stays
+      # handoff-only and never attempts the keyboard-process microphone or
+      # Speech permission path.
+      - name: Select keyboard capture policy
+        run: |
+          if [ "$RELEASE_TRAIN" = "alpha" ]; then
+            echo "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=1" >> "$GITHUB_ENV"
+          else
+            echo "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0" >> "$GITHUB_ENV"
+          fi
 
       - name: Stamp immutable app metadata
         run: python3 scripts/stamp-release-train.py ios

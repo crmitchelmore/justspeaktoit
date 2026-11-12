@@ -10,8 +10,6 @@ between the workflows and pre-pr changes a row and fails.
 Regenerate the table only for an intended routing change, and review the diff:
     python3 scripts/tests/test_ci_routing.py --regenerate
 """
-import importlib.machinery
-import importlib.util
 import json
 import sys
 import tempfile
@@ -21,12 +19,10 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 TABLE_PATH = Path(__file__).resolve().parent / 'fixtures' / 'ci-routing-truth-table.json'
-_loader = importlib.machinery.SourceFileLoader('pre_pr', str(ROOT / 'scripts' / 'pre-pr'))
-_spec = importlib.util.spec_from_loader('pre_pr', _loader)
-pre_pr = importlib.util.module_from_spec(_spec)
-sys.modules['pre_pr'] = pre_pr
-_loader.exec_module(pre_pr)
-routing = pre_pr.routing()
+sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
+from pre_pr import environment, planner, swift_tests
+
+routing = environment.routing()
 
 PATHS = [
     # Docs, website, Android and Workers: no Apple lint.
@@ -101,11 +97,11 @@ def workflow_routes(path: str) -> dict:
 
 
 def pre_pr_areas(path: str) -> list[str]:
-    with mock.patch.object(pre_pr, 'load_graph', lambda portable: None), \
-            mock.patch.object(pre_pr, 'pr_title_env', lambda: {}), \
-            mock.patch.object(pre_pr, 'merge_base_or', lambda base: base), \
-            mock.patch.object(pre_pr, 'android_runs_locally', lambda: False):
-        _, areas = pre_pr.plan([path], False)
+    with mock.patch.object(swift_tests, 'load_graph', lambda portable: None), \
+            mock.patch.object(environment, 'pr_title_env', lambda: {}), \
+            mock.patch.object(environment, 'merge_base_or', lambda base: base), \
+            mock.patch.object(environment, 'android_runs_locally', lambda: False):
+        _, areas = planner.plan([path], False)
     return sorted(areas)
 
 

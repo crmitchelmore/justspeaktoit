@@ -7,7 +7,7 @@ live in `tests/` unless a folder carries its own `test_*.py`.
 | --- | --- |
 | `accessibility/` | Apple and Linux accessibility lint (`make lint` runs the Apple check) |
 | `assets/` | App, DMG and desktop icon generators |
-| `ci/` | CI-only helpers: routing, affected tests, retries, crash/sample collection, API and boundary gates |
+| `ci/` | CI-only helpers: routing, affected tests, retries, crash/sample collection, API and boundary gates; `ci/pre_pr/` holds `pre-pr`'s planner, test selection, check runner, summary and lock |
 | `core-journey/` | The core-journey contract gate, its stages and UI verifier |
 | `dev/` | Local conveniences (`.env` loading, checksum verification) |
 | `ios/` | iOS CI simulator, test products and test evidence |

@@ -11,6 +11,13 @@ tells x64, ARM64, ARM64EC and ARM64X apart). `verify-windows-bundle.ps1` runs
 that bundle on Windows with an isolated PATH and records sampled loaded
 modules and, for ARM64, the machine of each process.
 
+`build-windows-bundle.py` owns the command line and re-exports the builder's
+surface. Each phase is a sibling module: `bundle_policy` (module categories,
+import closure, path safety and the deterministic ZIP), `bundle_sources`
+(pinned downloads and every authenticated input), `bundle_notices` (README and
+licence notices) and `bundle_assembly` (entries, manifest and the llvm-readobj
+cross-check).
+
 | Architecture | Application | Swift runtime | Visual C++ runtime |
 |---|---|---|---|
 | x64 (default) | Mac cross-build (`build-windows-app.py`) | Cross-build cache, committed `swift-runtime-lock.json` | x64 package of the pinned `VC_redist.x64.exe` |

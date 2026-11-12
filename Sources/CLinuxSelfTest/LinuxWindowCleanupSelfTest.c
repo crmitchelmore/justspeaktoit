@@ -1,9 +1,25 @@
-/* Self-tests for post-processing, local cleanup sources, cleanup preview and migration restore. */
+/* Self-tests for post-processing, local cleanup sources, cleanup preview, migration restore and the
+ * Polish prompt draft. */
 #include "LinuxWindowSelfTestInternal.h"
 #include "../CLinuxSupport/LinuxWindowDashboardState.h"
 #include "../CLinuxSupport/LinuxWindowHistoryState.h"
 #include "../CLinuxSupport/LinuxWindowPolishState.h"
 #include "../CLinuxSupport/LinuxWindowStorageState.h"
+
+/* Remote with no remembered remote model selects nothing, emits nothing on
+ * Apply, and disables every remote-only control. */
+static gboolean remote_without_memory_stays_unselected(Polish *fixture) {
+    fixture->remembered_remote_index = -1;
+    polish_apply(fixture);
+    adw_combo_row_set_selected(polish_page()->polish_location_row, 1);
+    observed.event = 0;
+    on_polish_apply(NULL, NULL);
+    return observed.event == 0 && polish_selected_model() == -1 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_prompt_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_key_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_directives_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_tags_row));
+}
 
 gboolean post_processing_self_test(void) {
     if (polish_page()->polish_catalog == NULL || polish_page()->polish_local_notice == NULL) return FALSE;
@@ -70,16 +86,7 @@ gboolean post_processing_self_test(void) {
     adw_combo_row_set_selected(polish_page()->polish_location_row, 1);
     row = adw_combo_row_get_selected(polish_page()->polish_model_row);
     okay = okay && row < polish_page()->polish_slots->len && g_array_index(polish_page()->polish_slots, gint32, row) == 1;
-    fixture.remembered_remote_index = -1;
-    polish_apply(&fixture);
-    adw_combo_row_set_selected(polish_page()->polish_location_row, 1);
-    observed.event = 0;
-    on_polish_apply(NULL, NULL);
-    okay = okay && observed.event == 0 && polish_selected_model() == -1 &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_prompt_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_key_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_directives_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_tags_row));
+    okay = remote_without_memory_stays_unselected(&fixture) && okay;
     fixture.selected = -1;
     polish_apply(&fixture);
     observed.event = 0;
@@ -190,16 +197,7 @@ int32_t local_cleanup_sources_self_test(char *error, size_t capacity) {
     okay = okay && observed.index == 3 &&
         g_strcmp0(observed.text, "One%20stop%20after%20each%20word.%0AExact%09second%20line.\t\t0\t1") == 0;
     if (!okay && failure_stage == NULL) failure_stage = "downloaded local callback";
-    fixture.remembered_remote_index = -1;
-    polish_apply(&fixture);
-    adw_combo_row_set_selected(polish_page()->polish_location_row, 1);
-    observed.event = 0;
-    on_polish_apply(NULL, NULL);
-    okay = okay && observed.event == 0 && polish_selected_model() == -1 &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_prompt_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_key_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_directives_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_tags_row));
+    okay = remote_without_memory_stays_unselected(&fixture) && okay;
     if (!okay && failure_stage == NULL) failure_stage = "unavailable remote stays unselected";
     adw_combo_row_set_selected(polish_page()->polish_location_row, 0);
     okay = okay && polish_selected_model() == 4;
@@ -381,4 +379,22 @@ gboolean migration_restore_self_test(void) {
     g_clear_pointer(&observed.text, g_free);
     refresh_actions();
     return okay;
+}
+
+int32_t polish_prompt_self_test(char *error, size_t capacity) {
+    GtkTextBuffer *prompt = gtk_text_view_get_buffer(polish_page()->polish_prompt_row);
+    GtkTextIter prompt_start, prompt_end;
+    gtk_text_buffer_get_bounds(prompt, &prompt_start, &prompt_end);
+    gchar *draft = gtk_text_buffer_get_text(prompt, &prompt_start, &prompt_end, TRUE);
+    gint32 saved_enabled = adw_switch_row_get_active(polish_page()->polish_row) ? 1 : 0;
+    gint32 disabled = 0;
+    post_processing_enabled_apply(&disabled);
+    gtk_text_buffer_get_bounds(prompt, &prompt_start, &prompt_end);
+    gchar *after_fix = gtk_text_buffer_get_text(prompt, &prompt_start, &prompt_end, TRUE);
+    gboolean draft_preserved = g_strcmp0(draft, after_fix) == 0 && !adw_switch_row_get_active(polish_page()->polish_row);
+    post_processing_enabled_apply(&saved_enabled);
+    g_free(draft); g_free(after_fix);
+    if (!draft_preserved || jsti_window_set_post_processing_enabled(2) != -1)
+        return fail(error, capacity, "cleanup fix refresh replaced a prompt draft or accepted an invalid state");
+    return 0;
 }

@@ -130,7 +130,7 @@ Write-Output 'PASS sixteen deterministic mock-only family waits (no real sleeps 
             fixture = pathlib.Path(scratch) / "start-entry-mock.ps1"
             fixture.write_text(script, encoding="utf-8")
             result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(fixture),
-                                     str(HERE / "test-windows-package-lifecycle.ps1")],
+                                     str(HERE / "LifecycleInstallation.ps1")],
                                     capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PASS fourteen mock-only", result.stdout)

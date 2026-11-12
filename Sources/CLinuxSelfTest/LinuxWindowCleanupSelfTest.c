@@ -6,6 +6,21 @@
 #include "../CLinuxSupport/LinuxWindowPolishState.h"
 #include "../CLinuxSupport/LinuxWindowStorageState.h"
 
+/* Remote with no remembered remote model selects nothing, emits nothing on
+ * Apply, and disables every remote-only control. */
+static gboolean remote_without_memory_stays_unselected(Polish *fixture) {
+    fixture->remembered_remote_index = -1;
+    polish_apply(fixture);
+    adw_combo_row_set_selected(polish_page()->polish_location_row, 1);
+    observed.event = 0;
+    on_polish_apply(NULL, NULL);
+    return observed.event == 0 && polish_selected_model() == -1 &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_prompt_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_key_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_directives_row)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_tags_row));
+}
+
 gboolean post_processing_self_test(void) {
     if (polish_page()->polish_catalog == NULL || polish_page()->polish_local_notice == NULL) return FALSE;
     guint row = adw_combo_row_get_selected(polish_page()->polish_model_row);
@@ -71,16 +86,7 @@ gboolean post_processing_self_test(void) {
     adw_combo_row_set_selected(polish_page()->polish_location_row, 1);
     row = adw_combo_row_get_selected(polish_page()->polish_model_row);
     okay = okay && row < polish_page()->polish_slots->len && g_array_index(polish_page()->polish_slots, gint32, row) == 1;
-    fixture.remembered_remote_index = -1;
-    polish_apply(&fixture);
-    adw_combo_row_set_selected(polish_page()->polish_location_row, 1);
-    observed.event = 0;
-    on_polish_apply(NULL, NULL);
-    okay = okay && observed.event == 0 && polish_selected_model() == -1 &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_prompt_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_key_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_directives_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_tags_row));
+    okay = remote_without_memory_stays_unselected(&fixture) && okay;
     fixture.selected = -1;
     polish_apply(&fixture);
     observed.event = 0;
@@ -191,16 +197,7 @@ int32_t local_cleanup_sources_self_test(char *error, size_t capacity) {
     okay = okay && observed.index == 3 &&
         g_strcmp0(observed.text, "One%20stop%20after%20each%20word.%0AExact%09second%20line.\t\t0\t1") == 0;
     if (!okay && failure_stage == NULL) failure_stage = "downloaded local callback";
-    fixture.remembered_remote_index = -1;
-    polish_apply(&fixture);
-    adw_combo_row_set_selected(polish_page()->polish_location_row, 1);
-    observed.event = 0;
-    on_polish_apply(NULL, NULL);
-    okay = okay && observed.event == 0 && polish_selected_model() == -1 &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_prompt_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_key_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_directives_row)) &&
-        !gtk_widget_get_sensitive(GTK_WIDGET(polish_page()->polish_tags_row));
+    okay = remote_without_memory_stays_unselected(&fixture) && okay;
     if (!okay && failure_stage == NULL) failure_stage = "unavailable remote stays unselected";
     adw_combo_row_set_selected(polish_page()->polish_location_row, 0);
     okay = okay && polish_selected_model() == 4;

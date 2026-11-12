@@ -73,6 +73,27 @@ Alpha TestFlight (`release-ios.yml` and `apple-profiles.yml` do the rest):
 The Share extension (`com.justspeaktoit.ios.alpha.share`) follows the same
 path with the existing group `group.com.justspeaktoit.ios.alpha`.
 
+## Development build
+
+For owner checks on a paired iPhone and Watch before Alpha TestFlight embeds
+the watch app. Build the Alpha train so the dev build replaces only the Alpha
+TestFlight install, not Stable:
+
+```bash
+xcodebuild -downloadPlatform watchOS   # once; the scheme embeds a watch app
+TUIST_RELEASE_TRAIN=alpha TUIST_WATCH_APP=1 tuist generate --no-open
+xcodebuild -workspace "Just Speak to It.xcworkspace" -scheme SpeakiOS \
+  -configuration Debug -destination 'id=<iPhone UDID>' \
+  -derivedDataPath .build/watch-dev -allowProvisioningUpdates build
+xcrun devicectl device install app --device <iPhone id> \
+  .build/watch-dev/Build/Products/Debug-iphoneos/JustSpeakToItAlpha.app
+```
+
+Automatic signing registers any missing watch identifiers and links each watch
+App Group to them, so it also completes portal step 2. iOS installs the embedded
+watch app on the paired Watch (or install it from the iPhone Watch app ›
+Available Apps). Reinstall Alpha from TestFlight to go back.
+
 Stable (only when the watch app is approved for Stable):
 
 1. Register `com.justspeaktoit.ios.watchkitapp` and

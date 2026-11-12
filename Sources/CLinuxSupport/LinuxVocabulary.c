@@ -4,7 +4,13 @@
 
 GtkWidget *jsti_vocabulary_page_new(int kind);
 
-Editor *vocabulary_editors[5];
+static Editor *vocabulary_editors[5];
+Editor *vocabulary_editor(int kind) {
+    return kind >= 0 && kind < (int)G_N_ELEMENTS(vocabulary_editors) ? vocabulary_editors[kind] : NULL;
+}
+void vocabulary_set_editor(int kind, Editor *editor) {
+    if (kind >= 0 && kind < (int)G_N_ELEMENTS(vocabulary_editors)) vocabulary_editors[kind] = editor;
+}
 GtkWidget *jsti_vocabulary_learning_preferences(void) {
     return vocabulary_editors[0] != NULL ? vocabulary_editors[0]->learning_preferences : NULL;
 }

@@ -138,21 +138,21 @@ static gboolean pronunciation_filter_checks(Editor *e, char *error, size_t capac
         "Pronunciation category controls exceeded minimum-size/scaled bounds.", error, capacity);
 }
 static gboolean pronunciation_filter_self_test(char *error, size_t capacity) {
-    Editor *previous = vocabulary_editors[1];
+    Editor *previous = vocabulary_editor(1);
     GtkWidget *window = gtk_window_new(); g_object_ref_sink(window);
     gtk_window_set_default_size(GTK_WINDOW(window), 800, 640);
     GtkWidget *page = jsti_vocabulary_page_new(1);
     gtk_window_set_child(GTK_WINDOW(window), page);
     gtk_widget_realize(window);
-    const gboolean valid = pronunciation_filter_checks(vocabulary_editors[1], error, capacity);
+    const gboolean valid = pronunciation_filter_checks(vocabulary_editor(1), error, capacity);
     gtk_window_destroy(GTK_WINDOW(window)); g_object_unref(window);
-    vocabulary_editors[1] = previous;
+    vocabulary_set_editor(1, previous);
     return valid;
 }
 int32_t jsti_vocabulary_self_test(char *error, size_t capacity) {
-    Editor *previous_legacy = vocabulary_editors[4];
+    Editor *previous_legacy = vocabulary_editor(4);
     GtkWidget *legacy_page = jsti_vocabulary_page_new(4); g_object_ref_sink(legacy_page);
-    Editor *legacy = vocabulary_editors[4];
+    Editor *legacy = vocabulary_editor(4);
     const gchar *legacy_row[] = {"fixture-identity", "Word\t%", "Spoken\nform", "", "", "", "", "", NULL};
     g_ptr_array_add(legacy->rows, g_strdupv((gchar **)legacy_row)); legacy->selected = 0;
     vocabulary_fill(legacy, (gchar **)legacy_row);
@@ -175,10 +175,10 @@ int32_t jsti_vocabulary_self_test(char *error, size_t capacity) {
     legacy->selected = -1; vocabulary_fill(legacy, NULL);
     legacy_payload = vocabulary_action_payload(legacy, "save");
     legacy_valid = legacy_valid && g_strcmp0(legacy_payload, "save\t\t\t") == 0;
-    g_free(legacy_payload); g_object_unref(legacy_page); vocabulary_editors[4] = previous_legacy;
+    g_free(legacy_payload); g_object_unref(legacy_page); vocabulary_set_editor(4, previous_legacy);
     if (!legacy_valid) { jsti_set_error(error, capacity, "Legacy dictionary entry identity/escaped fields failed."); return -1; }
     for (int kind = 0; kind < 2; ++kind) {
-        Editor *e = vocabulary_editors[kind];
+        Editor *e = vocabulary_editor(kind);
         if (e == NULL) { jsti_set_error(error, capacity, "Vocabulary editor was not constructed."); return -1; }
         gchar *row[] = {"", "Synthetic", "Canonical", "spoken\nvariant\t%", kind == 0 ? "manual" : "Custom",
             kind == 0 ? "work" : "true", kind == 0 ? "low" : "true", "fixture notes", NULL};
@@ -197,10 +197,10 @@ int32_t jsti_vocabulary_self_test(char *error, size_t capacity) {
         vocabulary_fill(e, NULL); vocabulary_set_text(e->preview, ""); vocabulary_set_text(e->preview_tags, "");
         if (!valid) { jsti_set_error(error, capacity, "Vocabulary field and preview events were not preserved."); return -1; }
     }
-    Editor *existing_candidates = vocabulary_editors[3];
+    Editor *existing_candidates = vocabulary_editor(3);
     GtkWidget *candidate_page = jsti_vocabulary_page_new(3);
     g_object_ref_sink(candidate_page);
-    Editor *candidate = vocabulary_editors[3];
+    Editor *candidate = vocabulary_editor(3);
     const gchar *fixture[] = {"synthetic\t%", "Synthetic", "Canonical", "2", "Synthetic", "", "", "Pending", NULL};
     g_ptr_array_add(candidate->rows, g_strdupv((gchar **)fixture)); candidate->selected = 0;
     gchar *candidate_payload = vocabulary_action_payload(candidate, "promote");
@@ -212,7 +212,7 @@ int32_t jsti_vocabulary_self_test(char *error, size_t capacity) {
     g_free(candidate_id); g_strfreev(candidate_fields); g_free(candidate_payload);
     candidate_payload = vocabulary_action_payload(candidate, "clear");
     candidate_valid = candidate_valid && g_strcmp0(candidate_payload, "clear") == 0;
-    g_free(candidate_payload); g_object_unref(candidate_page); vocabulary_editors[3] = existing_candidates;
+    g_free(candidate_payload); g_object_unref(candidate_page); vocabulary_set_editor(3, existing_candidates);
     if (!candidate_valid) { jsti_set_error(error, capacity, "Stored candidate events were not preserved."); return -1; }
     return pronunciation_filter_self_test(error, capacity) ? 0 : -1;
 }

@@ -30,8 +30,11 @@ typedef struct { int kind; gchar *payload; gboolean refresh; } Presentation;
 
 #pragma GCC visibility push(hidden)
 
-/* The open editor of each vocabulary kind, or NULL. GTK main thread only. */
-extern Editor *vocabulary_editors[5];
+/* The open editor of each vocabulary kind (0...4), or NULL. LinuxVocabulary.c
+ * owns the table; the self-test swaps an entry and puts it back. GTK main
+ * thread only. */
+Editor *vocabulary_editor(int kind);
+void vocabulary_set_editor(int kind, Editor *editor);
 
 GtkWidget *jsti_vocabulary_page_new(int kind);
 /* The selected row is filtered out of view. */

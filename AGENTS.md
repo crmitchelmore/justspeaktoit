@@ -63,12 +63,15 @@ When a user reports that a freshly shipped macOS release won't install or launch
 4. Verify launch locally (e.g. `open -n /Applications/JustSpeakToIt.app`) before asking the user to retry.
 5. If local install verification is requested, confirm `/Applications/JustSpeakToIt.app` exists, read `CFBundleShortVersionString`, and verify the process is running.
 
-## Owner Manual Checks
+## Human Checks Run on Alpha, After Merge
 
-When an issue is blocked only on an owner device check or decision, add it to
-`Docs/manual-checks.yml` (served at `justspeaktoit.com/qa`) instead of asking in
-the issue; results come back through the `manual-qa-results` workflow. See
-[Docs/manual-qa.md](Docs/manual-qa.md).
+Human or device validation never blocks a pull request or merge: do not ask the
+owner to check anything before merging, and do not leave a PR open waiting for
+one. Add the check to `Docs/manual-checks.yml` in the same PR as the change; it
+appears in the **Please test** section of the first Alpha's notes that contains
+it, and on `justspeaktoit.com/qa`. Use an `owner-` id prefix for owner-only setup
+tasks, which Alpha testers never see. Results come back through the
+`manual-qa-results` workflow. See [Docs/manual-qa.md](Docs/manual-qa.md).
 
 ## Project Structure & Module Organization
 

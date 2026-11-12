@@ -191,5 +191,5 @@ converter.convert(to: outputBuffer, error: &error) { ... }
 Always include:
 - **Files changed**
 - **What changed** (1–3 bullets)
-- **How to verify** (`scripts/pre-pr` result, plus any manual check)
+- **How to verify** (`scripts/pre-pr` result; any human check goes in `Docs/manual-checks.yml` for Alpha testers after merge, never as a merge blocker)
 - **Risks / edge cases**

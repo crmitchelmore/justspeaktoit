@@ -16,6 +16,7 @@ struct VoiceOutputTextCard: View {
           self.historyItemPicker
         } else {
           TextEditor(text: self.$composer.inputText)
+            .accessibilityLabel("Text to speak")
             .font(.body)
             .frame(minHeight: 300)
             .scrollContentBackground(.hidden)

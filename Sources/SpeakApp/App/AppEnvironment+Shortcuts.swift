@@ -26,7 +26,9 @@ extension AppEnvironment {
         }
       }
     }
-    shortcuts.register(action: .pauseResumeTTS) { [weak self] in
+    // Space and Escape apply only while there is speech to control.
+    let hasSpeech: () -> Bool = { [weak self] in self?.tts.hasControllableSpeech ?? false }
+    shortcuts.register(action: .pauseResumeTTS, isActive: hasSpeech) { [weak self] in
       guard let self else { return }
       if self.tts.isPlaying {
         self.tts.pause()
@@ -34,7 +36,7 @@ extension AppEnvironment {
         self.tts.resume()
       }
     }
-    shortcuts.register(action: .stopTTS) { [weak self] in
+    shortcuts.register(action: .stopTTS, isActive: hasSpeech) { [weak self] in
       self?.tts.stop()
     }
     shortcuts.register(action: .pasteLastHistoryItem) { [weak self] in self?.pasteLastHistoryItem() }

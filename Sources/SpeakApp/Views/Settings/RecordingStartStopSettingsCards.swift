@@ -75,6 +75,8 @@ struct RecordingStartStopSettingsCards: View, AppSettingsBindingProviding {
               in: 0.5...5.0,
               step: 0.5
             )
+            .accessibilityLabel("Silence duration")
+            .accessibilityValue(String(format: "%.1f seconds", settings.silenceDuration))
             .speakTooltip("How long to wait in silence before stopping hands-free recording.")
           }
         } else {
@@ -116,6 +118,8 @@ struct RecordingStartStopSettingsCards: View, AppSettingsBindingProviding {
               in: 0.01...0.2,
               step: 0.01
             )
+            .accessibilityLabel("Silence threshold")
+            .accessibilityValue("\(Int(settings.silenceThreshold * 100))%")
             .speakTooltip("Audio levels below this are considered silence. Lower = more sensitive.")
           }
 
@@ -136,6 +140,8 @@ struct RecordingStartStopSettingsCards: View, AppSettingsBindingProviding {
               in: 0.5...5.0,
               step: 0.5
             )
+            .accessibilityLabel("Silence duration")
+            .accessibilityValue(String(format: "%.1f seconds", settings.silenceDuration))
             .speakTooltip("How long to wait in silence before auto-stopping.")
           }
         }
@@ -167,6 +173,8 @@ struct RecordingStartStopSettingsCards: View, AppSettingsBindingProviding {
             in: 0...2,
             step: 0.1
           )
+          .accessibilityLabel("Streaming stop grace")
+          .accessibilityValue(String(format: "%.1f seconds", settings.liveStopGracePeriod))
           .speakTooltip("Extra delay before closing the streaming transcription connection after you stop recording.")
           Text(
             settings.liveStopGracePeriod,
@@ -196,6 +204,8 @@ struct RecordingStartStopSettingsCards: View, AppSettingsBindingProviding {
             in: 0...2,
             step: 0.1
           )
+          .accessibilityLabel("Recording buffer")
+          .accessibilityValue(String(format: "%.1f seconds", settings.postRecordingTailDuration))
           .speakTooltip("Control how long Speak keeps capturing after you finish talking.")
           Text(
             settings.postRecordingTailDuration,

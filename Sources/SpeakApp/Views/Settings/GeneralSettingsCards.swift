@@ -119,6 +119,8 @@ struct RecordingSoundsSettingsCard: View, AppSettingsBindingProviding {
               in: 0.02...1.0,
               step: 0.02
             )
+            .accessibilityLabel("Volume")
+            .accessibilityValue(Self.volumeLabel(for: settings.recordingSoundVolume))
             Image(systemName: "speaker.wave.3.fill")
               .foregroundStyle(.secondary)
               .font(.caption)

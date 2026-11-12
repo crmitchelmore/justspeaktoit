@@ -91,6 +91,8 @@ extension SettingsView {
               .foregroundStyle(.secondary)
             }
             Slider(value: settingsBinding(\AppSettings.holdThreshold), in: 0.2...1.5, step: 0.05)
+            .accessibilityLabel("Hold Threshold")
+            .accessibilityValue(String(format: "%.2f seconds", settings.holdThreshold))
             .speakTooltip("Decide how long you must hold the shortcut before Speak starts recording.")
           }
 
@@ -105,6 +107,8 @@ extension SettingsView {
               .foregroundStyle(.secondary)
             }
             Slider(value: settingsBinding(\AppSettings.doubleTapWindow), in: 0.2...1.0, step: 0.05)
+            .accessibilityLabel("Double Tap Window")
+            .accessibilityValue(String(format: "%.2f seconds", settings.doubleTapWindow))
             .speakTooltip("Set the gap allowed between taps when you double-press to trigger Speak.")
           }
 

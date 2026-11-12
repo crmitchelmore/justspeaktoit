@@ -148,7 +148,11 @@ extension ContentView {
                             }
                         }
                 }
-                .accessibilityLabel(showHistoryBadge ? "History, new background recording" : "History")
+                // A label that changes with the badge is dropped from the toolbar
+                // button, leaving it unnamed; keep the name fixed and expose the
+                // badge as the value (#1399).
+                .accessibilityLabel("History")
+                .accessibilityValue(showHistoryBadge ? "New background recording" : "")
                 .accessibilityIdentifier("historyNavLink")
 
                 NavigationLink {

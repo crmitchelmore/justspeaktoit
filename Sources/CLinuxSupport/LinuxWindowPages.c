@@ -193,8 +193,15 @@ void dashboard_add_compact_setters(AdwBreakpoint *breakpoint) {
     g_value_unset(&unequal);
 }
 
+static gboolean has_window_focus(GtkWidget *widget) {
+    GtkRoot *root = gtk_widget_get_root(widget);
+    return root != NULL && gtk_root_get_focus(root) == widget;
+}
+
 void dashboard_refresh_actions(gint32 state, gboolean copyable) {
     gboolean recording = state == JSTI_STATE_RECORDING;
+    gboolean record_focused = has_window_focus(GTK_WIDGET(dashboard_page()->record));
+    gboolean cancel_focused = has_window_focus(GTK_WIDGET(dashboard_page()->cancel));
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), copyable);
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->cancel), state == JSTI_STATE_WORKING);
     gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->cancel), state == JSTI_STATE_WORKING);
@@ -208,6 +215,10 @@ void dashboard_refresh_actions(gint32 state, gboolean copyable) {
     gtk_label_set_text(dashboard_page()->live_preview, preview != NULL && preview[0] != '\0' ? preview : "Listening…");
     gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->live_preview), recording);
     g_free(preview);
+    /* A disabled or hidden button drops keyboard focus to nothing, so it moves to the button that replaces it. */
+    if (record_focused && state == JSTI_STATE_WORKING) gtk_widget_grab_focus(GTK_WIDGET(dashboard_page()->cancel));
+    else if (cancel_focused && state != JSTI_STATE_WORKING)
+        gtk_widget_grab_focus(GTK_WIDGET(dashboard_page()->record));
 }
 
 void dashboard_set_copy_enabled(gboolean enabled) {

@@ -68,6 +68,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         return fail(error, capacity, "action shortcut native page, event, slot or sensitivity routing failed");
     if (!command_forwarding_self_test())
         return fail(error, capacity, "desktop-bound command parsing, dispatch or lifetime admission failed");
+    if (!status_notice_self_test())
+        return fail(error, capacity, "status announcements or the record button's focus hand-off to Cancel failed");
     if (!command_process_self_test(error, capacity)) return -1;
     if (!post_processing_self_test())
         return fail(error, capacity, "Local/Remote post-processing controls, key isolation or callback indexes failed");

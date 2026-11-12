@@ -167,6 +167,61 @@ static guint command_wait_milliseconds(gint64 remaining) {
     return (guint)((MIN(remaining, 15 * G_TIME_SPAN_SECOND) + 999) / 1000);
 }
 
+/* An idle status notice is announced once, recording notices are left to state changes and the HUD, and the
+   record buttons hand keyboard focus to Cancel while transcribing and take it back afterwards. */
+gboolean status_notice_self_test(void) {
+    if (ui.state_announcement != 0) g_source_remove(ui.state_announcement);
+    ui.state_announcement = 0;
+    gchar *saved = g_strdup(gtk_label_get_text(ui.status));
+    const gint32 state = ui.state;
+    const gint page = ui.page;
+    ui.state = JSTI_STATE_IDLE;
+    Update notice = { .status = (gchar *)"Whisper Tiny downloaded and verified.", .state = -1 };
+    update_apply(&notice);
+    gboolean announced = ui.state_announcement != 0;
+    if (ui.state_announcement != 0) g_source_remove(ui.state_announcement);
+    ui.state_announcement = 0;
+    update_apply(&notice);
+    gboolean repeated = ui.state_announcement != 0;
+    ui.state = JSTI_STATE_WORKING;
+    Update transcribing = { .status = (gchar *)"Transcribing", .state = -1 };
+    update_apply(&transcribing);
+    gboolean chatty = ui.state_announcement != 0;
+    /* A state change speaks its own status, even after a later status-only update. */
+    ui.state = JSTI_STATE_IDLE;
+    Update recording = { .status = (gchar *)"Recording…", .state = JSTI_STATE_RECORDING };
+    update_apply(&recording);
+    Update warning = { .status = (gchar *)"Recording sounds unavailable.", .state = -1 };
+    update_apply(&warning);
+    gboolean kept = g_strcmp0(ui.status_announcement, "Recording…") == 0;
+    /* Stopping disables the focused record button; focus moves to Cancel and back. */
+    GtkWidget *record = GTK_WIDGET(dashboard_page()->record), *cancel = GTK_WIDGET(dashboard_page()->cancel);
+    show_page(JSTI_PAGE_DASHBOARD);
+    gtk_window_set_focus(ui.window, record);
+    Update working = { .state = JSTI_STATE_WORKING };
+    update_apply(&working);
+    gboolean to_cancel = gtk_root_get_focus(GTK_ROOT(ui.window)) == cancel;
+    Update idle = { .state = JSTI_STATE_IDLE };
+    update_apply(&idle);
+    gboolean to_record = gtk_root_get_focus(GTK_ROOT(ui.window)) == record;
+    GtkWidget *header = GTK_WIDGET(ui.header_record);
+    gtk_window_set_focus(ui.window, header);
+    update_apply(&working);
+    gboolean header_to_cancel = gtk_root_get_focus(GTK_ROOT(ui.window)) == cancel;
+    update_apply(&idle);
+    gboolean header_back = gtk_root_get_focus(GTK_ROOT(ui.window)) == header;
+    if (ui.state_announcement != 0) g_source_remove(ui.state_announcement);
+    ui.state_announcement = 0;
+    g_clear_pointer(&ui.status_announcement, g_free);
+    ui.status_announcement_is_state = FALSE;
+    ui.state = state;
+    refresh_actions();
+    show_page(page);
+    gtk_label_set_text(ui.status, saved);
+    g_free(saved);
+    return announced && !repeated && !chatty && kept && to_cancel && to_record && header_to_cancel && header_back;
+}
+
 gboolean command_forwarding_self_test(void) {
     WindowCommand command;
     const gchar *background[] = { "justspeaktoit", JSTI_LOGIN_LAUNCH_ARGUMENT };

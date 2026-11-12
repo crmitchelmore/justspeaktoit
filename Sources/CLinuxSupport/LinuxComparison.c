@@ -1,55 +1,13 @@
-#include "LinuxSupportInternal.h"
-#include <adwaita.h>
+/* The Compare Models window: its controls, model list, handlers and the
+ * host's presentation. Owns Comparison (LinuxComparisonState.h). */
+#include "LinuxComparisonState.h"
 #include <string.h>
 
-typedef struct {
-    GtkWindow *window;
-    GtkDropDown *mode;
-    GtkEntry *language, *ranks;
-    GtkListBox *models;
-    GtkDropDown *rounds;
-    GtkDropDown *reference;
-    GtkDropDown *export_scope;
-    GtkTextView *detail;
-    GtkWidget *column;
-    GtkButton *run, *stop, *cancel, *judge, *json, *markdown, *play, *stop_audio, *delete_round;
-    GtkCheckButton *sync;
-    GtkButton *sync_now;
-    GtkCheckButton *save_history;
-    GtkButton *select_all, *select_none;
-    GtkButton *copy_json, *copy_markdown;
-    GtkButton *next_file;
-    GPtrArray *model_ids, *round_ids, *reference_ids;
-    gchar *selected, *model_rows, *round_rows, *reference_rows;
-    gchar *batch_round;
-    gboolean suppress;
-} Comparison;
 static Comparison ui;
-typedef struct { GtkWindow *window; GString *payload; gboolean markdown; } PickerRequest;
-static PickerRequest *picker_request(GString *payload, gboolean markdown) {
-    PickerRequest *request = g_new0(PickerRequest, 1);
-    request->window = g_object_ref(ui.window); request->payload = payload; request->markdown = markdown;
-    return request;
-}
-static void free_request(PickerRequest *request) {
-    g_object_unref(request->window);
-    if (request->payload != NULL) g_string_free(request->payload, TRUE);
-    g_free(request);
-}
-static gboolean testing = FALSE;
-static gint32 test_event = 0;
-static gint32 test_index = 0;
-static gchar *test_payload = NULL;
+Comparison *comparison_ui(void) { return &ui; }
 static void models_changed(GtkCheckButton *button, gpointer data);
 
-static void comparison_emit(gint32 event, const char *text, gint32 index) {
-    if (!testing) { jsti_window_emit(event, text, index); return; }
-    test_event = event;
-    test_index = index;
-    g_free(test_payload); test_payload = g_strdup(text);
-}
-
-static void comparison_error(const char *message) {
+void comparison_error(const char *message) {
     g_warning("Comparison: %s", message);
     if (ui.window != NULL) {
         GtkTextBuffer *buffer = gtk_text_view_get_buffer(ui.detail);
@@ -152,33 +110,6 @@ static void round_changed(GObject *object, GParamSpec *spec, gpointer data) {
     if (!ui.suppress && row < ui.round_ids->len)
         comparison_emit(101, g_ptr_array_index(ui.round_ids, row), 0);
 }
-static void picker_error(GError *error) {
-    if (error != NULL && !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED)
-        && !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_CANCELLED))
-        comparison_error(error->message);
-    g_clear_error(&error);
-}
-static void files_chosen(GObject *source, GAsyncResult *result, gpointer data) {
-    PickerRequest *request = data;
-    GString *payload = request->payload;
-    GError *error = NULL;
-    GListModel *files = gtk_file_dialog_open_multiple_finish(GTK_FILE_DIALOG(source), result, &error);
-    if (files != NULL) {
-        gboolean valid = g_list_model_get_n_items(files) > 0;
-        for (guint i = 0; valid && i < g_list_model_get_n_items(files); ++i) {
-            GFile *file = g_list_model_get_item(files, i);
-            gchar *path = g_file_get_path(file);
-            valid = path != NULL && strpbrk(path, "\r\n\t") == NULL;
-            if (valid) { g_string_append_c(payload, '\n'); g_string_append(payload, path); }
-            g_free(path); g_object_unref(file);
-        }
-        if (valid && ui.window == request->window) comparison_emit(102, payload->str, 0);
-        else if (ui.window == request->window) comparison_error("Choose local audio files with single-line names.");
-        g_object_unref(files);
-    }
-    if (ui.window == request->window) picker_error(error); else g_clear_error(&error);
-    free_request(request);
-}
 static void run_clicked(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     const char *language = gtk_editable_get_text(GTK_EDITABLE(ui.language));
@@ -204,10 +135,7 @@ static void run_clicked(GtkButton *button, gpointer data) {
     if (live) {
         comparison_emit(103, payload->str, 0); g_string_free(payload, TRUE); return;
     }
-    GtkFileDialog *picker = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(picker, "Choose one sample, or multiple samples for Batch");
-    gtk_file_dialog_open_multiple(picker, ui.window, NULL, files_chosen, picker_request(payload, FALSE));
-    g_object_unref(picker);
+    comparison_choose_samples(payload);
 }
 static void action_clicked(GtkButton *button, gpointer data) {
     (void)data;
@@ -231,77 +159,6 @@ static void sync_changed(GtkCheckButton *button, gpointer data) {
 static void save_history_changed(GtkCheckButton *button, gpointer data) {
     (void)data;
     if (!ui.suppress) comparison_emit(129, "", gtk_check_button_get_active(button));
-}
-static void confirm_deletion(PickerRequest *request, const char *response) {
-    if (strcmp(response, "delete") == 0 && ui.window == request->window
-        && gtk_widget_get_sensitive(GTK_WIDGET(ui.delete_round))
-        && g_strcmp0(ui.selected, request->payload->str) == 0)
-        comparison_emit(120, request->payload->str, 0);
-}
-static void deletion_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
-    confirm_deletion(data, response);
-    gtk_window_destroy(GTK_WINDOW(dialog));
-}
-static void free_deletion_request(gpointer data, GClosure *closure) {
-    (void)closure; free_request(data);
-}
-static void delete_clicked(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    if (ui.selected == NULL || *ui.selected == '\0') return;
-    GtkWidget *dialog = adw_message_dialog_new(ui.window, "Delete comparison?",
-        "Delete this saved comparison and its app-owned audio? Original imports are not changed.\n\n"
-        "A previously synced comparison is also deleted on its other devices when sync is enabled "
-        "for its original iCloud account.");
-    adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel", "delete", "Delete", NULL);
-    adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "delete", ADW_RESPONSE_DESTRUCTIVE);
-    adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
-    adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
-    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-    g_signal_connect_data(dialog, "response", G_CALLBACK(deletion_response),
-        picker_request(g_string_new(ui.selected), FALSE), free_deletion_request, 0);
-    gtk_window_present(GTK_WINDOW(dialog));
-}
-static void save_export(PickerRequest *request, const char *path) {
-    if (ui.window != request->window) return;
-    if (request->payload != NULL) {
-        gchar *payload = g_strdup_printf("%s\n%s", request->payload->str, path);
-        comparison_emit(127, payload, request->markdown ? 1 : 0);
-        g_free(payload);
-    } else comparison_emit(107, path, request->markdown ? 1 : 0);
-}
-static void export_chosen(GObject *source, GAsyncResult *result, gpointer data) {
-    PickerRequest *request = data;
-    GError *error = NULL;
-    GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, &error);
-    if (file != NULL) {
-        gchar *path = g_file_get_path(file);
-        if (path != NULL && ui.window == request->window) save_export(request, path);
-        else if (ui.window == request->window) comparison_error("Choose a local destination for the comparison export.");
-        g_free(path); g_object_unref(file);
-    }
-    if (ui.window == request->window) picker_error(error); else g_clear_error(&error);
-    free_request(request);
-}
-static void export_clicked(GtkButton *button, gpointer data) {
-    (void)data;
-    if (gtk_drop_down_get_selected(ui.export_scope) == 1 && (ui.selected == NULL || *ui.selected == '\0')) {
-        comparison_error("Select a saved comparison to export."); return;
-    }
-    gboolean markdown = button == ui.markdown;
-    GtkFileDialog *picker = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(picker, "Export transcripts and model identities (no audio)");
-    gtk_file_dialog_set_initial_name(picker, markdown ? "Comparisons.md" : "Comparisons.json");
-    GString *scope = gtk_drop_down_get_selected(ui.export_scope) == 1 ? g_string_new(ui.selected) : NULL;
-    gtk_file_dialog_save(picker, ui.window, NULL, export_chosen, picker_request(scope, markdown));
-    g_object_unref(picker);
-}
-static void copy_export(GtkButton *button, gpointer data) {
-    (void)data;
-    const char *scope = gtk_drop_down_get_selected(ui.export_scope) == 1 ? ui.selected : "";
-    if (scope == NULL || (gtk_drop_down_get_selected(ui.export_scope) == 1 && *scope == '\0')) {
-        comparison_error("Select a saved comparison to export."); return;
-    }
-    comparison_emit(126, scope != NULL ? scope : "", button == ui.copy_markdown ? 1 : 0);
 }
 static gboolean closing(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
@@ -420,17 +277,17 @@ void jsti_comparison_open(GtkWindow *parent) {
     jsti_accessible_set_name(GTK_WIDGET(ui.export_scope), "Comparison export scope");
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.export_scope));
     GtkWidget *exports = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    ui.json = GTK_BUTTON(button_new("Save JSON…", G_CALLBACK(export_clicked)));
-    ui.markdown = GTK_BUTTON(button_new("Save Markdown…", G_CALLBACK(export_clicked)));
+    ui.json = GTK_BUTTON(button_new("Save JSON…", G_CALLBACK(comparison_export_clicked)));
+    ui.markdown = GTK_BUTTON(button_new("Save Markdown…", G_CALLBACK(comparison_export_clicked)));
     gtk_box_append(GTK_BOX(exports), GTK_WIDGET(ui.json)); gtk_box_append(GTK_BOX(exports), GTK_WIDGET(ui.markdown));
     gtk_box_append(GTK_BOX(column), exports);
     GtkWidget *copies = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    ui.copy_json = GTK_BUTTON(button_new("Copy JSON", G_CALLBACK(copy_export)));
-    ui.copy_markdown = GTK_BUTTON(button_new("Copy Markdown", G_CALLBACK(copy_export)));
+    ui.copy_json = GTK_BUTTON(button_new("Copy JSON", G_CALLBACK(comparison_copy_export)));
+    ui.copy_markdown = GTK_BUTTON(button_new("Copy Markdown", G_CALLBACK(comparison_copy_export)));
     gtk_box_append(GTK_BOX(copies), GTK_WIDGET(ui.copy_json));
     gtk_box_append(GTK_BOX(copies), GTK_WIDGET(ui.copy_markdown));
     gtk_box_append(GTK_BOX(column), copies);
-    ui.delete_round = GTK_BUTTON(button_new("Delete / discard saved round…", G_CALLBACK(delete_clicked)));
+    ui.delete_round = GTK_BUTTON(button_new("Delete / discard saved round…", G_CALLBACK(comparison_delete_clicked)));
     gtk_widget_add_css_class(GTK_WIDGET(ui.delete_round), "destructive-action");
     gtk_box_append(GTK_BOX(column), GTK_WIDGET(ui.delete_round));
     ui.sync = GTK_CHECK_BUTTON(gtk_check_button_new());
@@ -456,20 +313,12 @@ void jsti_comparison_open(GtkWindow *parent) {
     gtk_window_present(ui.window);
     comparison_emit(100, "", 0);
 }
-typedef struct {
-    gchar *models, *rounds, *detail, *selected;
-    gboolean busy, recording, judgeable, sync_enabled, sync_available;
-    gchar *references, *reference;
-    gchar *batch_round;
-    gint32 batch_remaining;
-    gboolean can_next;
-} Presentation;
 static void free_presentation(gpointer value) {
     Presentation *p = value;
     g_free(p->models); g_free(p->rounds); g_free(p->detail); g_free(p->selected);
     g_free(p->references); g_free(p->reference); g_free(p->batch_round); g_free(p);
 }
-static void present(gpointer value) {
+void comparison_present(gpointer value) {
     if (ui.window == NULL) return;
     Presentation *p = value;
     ui.suppress = TRUE;
@@ -566,9 +415,9 @@ int32_t jsti_comparison_present_batch(const char *models, const char *rounds, co
     p->sync_enabled = sync_enabled != 0; p->sync_available = sync_available != 0;
     p->references = g_strdup(references); p->reference = g_strdup(reference);
     p->batch_round = g_strdup(batch_round); p->batch_remaining = batch_remaining; p->can_next = can_next != 0;
-    return jsti_window_post(present, p, free_presentation);
+    return jsti_window_post(comparison_present, p, free_presentation);
 }
-static void present_save_history(gpointer value) {
+void comparison_present_save_history(gpointer value) {
     if (ui.window == NULL) return;
     ui.suppress = TRUE;
     gtk_check_button_set_active(ui.save_history, *(gboolean *)value);
@@ -577,185 +426,6 @@ static void present_save_history(gpointer value) {
 int32_t jsti_comparison_set_save_history(int32_t enabled) {
     gboolean *state = g_new(gboolean, 1);
     *state = enabled != 0;
-    return jsti_window_post(present_save_history, state, g_free);
+    return jsti_window_post(comparison_present_save_history, state, g_free);
 }
 
-static Presentation fixture(gboolean revealed) {
-    Presentation p = {
-        .models = "test/file-a\tFile A\t0\t1\ntest/file-b\tFile B\t0\t0\ntest/live-a\tLive A\t1\t0\ntest/live-b\tLive B\t1\t0",
-        .rounds = "synthetic-round\tSynthetic sample.wav", .selected = "synthetic-round",
-        .detail = revealed
-            ? "Synthetic judged comparison\n\nResult A - File A (rank 2)\nCould we meet Friday?\n"
-              "\nResult B - File B (rank 1)\nCould we meet on Friday?\n\nScoreboard\nFile B: 1 win\nFile A: 0 wins"
-            : "Synthetic sample.wav\n\nResult A\nCould we meet Friday?\n\nResult B\nCould we meet on Friday?\n"
-              "Could we meet [+on] Friday?\n\nDiff against Result A: [+added] / [-removed].\n"
-              "Rank every blind result to reveal models.",
-        .judgeable = !revealed, .sync_available = TRUE,
-        .references = "synthetic-a\tResult A\nsynthetic-b\tResult B", .reference = "synthetic-a"
-    };
-    return p;
-}
-
-static void finish_fixture(void) {
-    if (ui.window != NULL) gtk_window_close(ui.window);
-    testing = FALSE;
-    g_clear_pointer(&test_payload, g_free);
-}
-
-int32_t jsti_comparison_self_test(GtkWindow *parent, char *error, size_t capacity) {
-    testing = TRUE;
-    jsti_comparison_open(parent);
-    Presentation p = fixture(FALSE);
-    present(&p);
-    gboolean valid = ui.model_ids->len == 2 && ui.round_ids->len == 1
-        && gtk_widget_get_sensitive(GTK_WIDGET(ui.judge));
-    valid = valid && gtk_check_button_get_active(GTK_CHECK_BUTTON(
-        gtk_list_box_row_get_child(gtk_list_box_get_row_at_index(ui.models, 0))));
-    valid = valid && ui.reference_ids->len == 2;
-    gtk_drop_down_set_selected(ui.reference, 1);
-    valid = valid && test_event == 124 && g_strcmp0(test_payload, "synthetic-b") == 0;
-    g_signal_emit_by_name(ui.select_all, "clicked");
-    valid = valid && test_event == 125 && test_index == 0
-        && g_strcmp0(test_payload, "test/file-a\ttest/file-b") == 0;
-    g_signal_emit_by_name(ui.select_none, "clicked");
-    valid = valid && test_event == 125 && g_strcmp0(test_payload, "") == 0;
-    gchar *all_models = p.models;
-    p.models = "test/file-b\tFile B\t0\t0\ntest/live-a\tLive A\t1\t0\ntest/live-b\tLive B\t1\t0";
-    present(&p);
-    valid = valid && ui.model_ids->len == 1 && !gtk_widget_get_sensitive(GTK_WIDGET(ui.run));
-    g_signal_emit_by_name(ui.select_all, "clicked");
-    valid = valid && test_event == 125 && g_strcmp0(test_payload, "test/file-b") == 0;
-    p.models = all_models; present(&p);
-    valid = valid && gtk_widget_get_sensitive(GTK_WIDGET(ui.run));
-    valid = valid && gtk_widget_get_sensitive(GTK_WIDGET(ui.sync))
-        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.sync_now))
-        && gtk_label_get_wrap(GTK_LABEL(gtk_check_button_get_child(ui.sync)));
-    gtk_check_button_set_active(ui.sync, TRUE);
-    valid = valid && test_event == 121 && test_index == 1;
-    p.sync_enabled = TRUE; present(&p);
-    valid = valid && gtk_widget_get_sensitive(GTK_WIDGET(ui.sync_now));
-    g_signal_emit_by_name(ui.sync_now, "clicked");
-    valid = valid && test_event == 122;
-    valid = valid && !gtk_check_button_get_active(ui.save_history)
-        && gtk_label_get_wrap(GTK_LABEL(gtk_check_button_get_child(ui.save_history)));
-    gtk_check_button_set_active(ui.save_history, TRUE);
-    valid = valid && test_event == 129 && test_index == 1;
-    gboolean saved = FALSE;
-    present_save_history(&saved);
-    valid = valid && !gtk_check_button_get_active(ui.save_history) && test_event == 129 && test_index == 1;
-    gtk_drop_down_set_selected(ui.mode, 1);
-    for (guint i = 0; i < ui.model_ids->len; ++i) {
-        GtkListBoxRow *row = gtk_list_box_get_row_at_index(ui.models, (int)i);
-        GtkCheckButton *check = GTK_CHECK_BUTTON(gtk_list_box_row_get_child(row));
-        valid = valid && GTK_IS_LABEL(gtk_check_button_get_child(check))
-            && gtk_label_get_wrap(GTK_LABEL(gtk_check_button_get_child(check)));
-        gtk_check_button_set_active(check, TRUE);
-    }
-    gtk_editable_set_text(GTK_EDITABLE(ui.language), "en_GB");
-    g_signal_emit_by_name(ui.run, "clicked");
-    valid = valid && test_event == 103 && g_strcmp0(test_payload, "en_GB\ntest/live-a\ttest/live-b") == 0;
-    gtk_editable_set_text(GTK_EDITABLE(ui.ranks), "2,1");
-    g_signal_emit_by_name(ui.judge, "clicked");
-    valid = valid && test_event == 106 && g_strcmp0(test_payload, "synthetic-round\n2,1") == 0;
-    g_signal_emit_by_name(ui.play, "clicked");
-    valid = valid && test_event == 108 && g_strcmp0(test_payload, "synthetic-round") == 0;
-    g_signal_emit_by_name(ui.copy_json, "clicked");
-    valid = valid && test_event == 126 && test_index == 0 && g_strcmp0(test_payload, "") == 0;
-    gtk_drop_down_set_selected(ui.export_scope, 1);
-    g_signal_emit_by_name(ui.copy_markdown, "clicked");
-    valid = valid && test_event == 126 && test_index == 1 && g_strcmp0(test_payload, "synthetic-round") == 0;
-    PickerRequest *export_request = picker_request(g_string_new("picker-round"), FALSE);
-    save_export(export_request, "synthetic.json");
-    valid = valid && test_event == 127 && test_index == 0
-        && g_strcmp0(test_payload, "picker-round\nsynthetic.json") == 0;
-    free_request(export_request);
-    PickerRequest *deletion = picker_request(g_string_new(ui.selected), FALSE);
-    confirm_deletion(deletion, "cancel");
-    valid = valid && test_event == 127;
-    confirm_deletion(deletion, "delete");
-    valid = valid && test_event == 120 && g_strcmp0(test_payload, "synthetic-round") == 0;
-    g_string_assign(deletion->payload, "a-stale-round");
-    test_event = 0; confirm_deletion(deletion, "delete");
-    valid = valid && test_event == 0;
-    free_request(deletion);
-    p.batch_round = "synthetic-round"; p.batch_remaining = 1; p.can_next = FALSE; present(&p);
-    valid = valid && gtk_widget_get_visible(GTK_WIDGET(ui.next_file))
-        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.next_file))
-        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.run)) && gtk_widget_get_sensitive(GTK_WIDGET(ui.cancel));
-    test_event = 0; g_signal_emit_by_name(ui.next_file, "clicked");
-    valid = valid && test_event == 0;
-    p.judgeable = FALSE; p.can_next = TRUE; present(&p);
-    valid = valid && gtk_widget_get_sensitive(GTK_WIDGET(ui.next_file));
-    g_signal_emit_by_name(ui.next_file, "clicked");
-    valid = valid && test_event == 128 && g_strcmp0(test_payload, "synthetic-round") == 0;
-    PickerRequest *stale_export = picker_request(g_string_new(ui.selected), TRUE);
-    p.busy = TRUE; p.recording = TRUE; p.judgeable = FALSE; present(&p);
-    valid = valid && !gtk_widget_get_sensitive(GTK_WIDGET(ui.run))
-        && gtk_widget_get_sensitive(GTK_WIDGET(ui.stop)) && !gtk_widget_get_sensitive(GTK_WIDGET(ui.judge))
-        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.copy_json))
-        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.export_scope))
-        && !gtk_widget_get_sensitive(GTK_WIDGET(ui.next_file));
-    finish_fixture();
-    valid = valid && test_event == 123;
-    save_export(stale_export, "late-picker.md");
-    valid = valid && test_event == 123;
-    free_request(stale_export);
-    if (!valid) jsti_set_error(error, capacity, "Comparison selection, judging, playback or capture controls failed.");
-    return valid ? 0 : -1;
-}
-
-typedef struct { GtkWindow *parent; gchar *directory; guint stage; AdwColorScheme original; } ComparisonTour;
-static Presentation tour_fixture(guint stage) {
-    Presentation p = fixture(stage == 1 || stage == 3);
-    if (stage >= 2) {
-        p.batch_round = "synthetic-round"; p.batch_remaining = 1; p.can_next = stage == 3;
-        p.detail = stage == 3
-            ? "Batch paused. One sample queued. Choose Next file to continue.\n\n"
-              "Result A - File A (rank 2)\nCould we meet Friday?\n\n"
-              "Result B - File B (rank 1)\nCould we meet on Friday?\n\nScoreboard\nFile B: 1 win\nFile A: 0 wins"
-            : "Batch paused. One sample queued. Judge before Next file.\n\n"
-              "Result A\nCould we meet Friday?\n\nResult B\nCould we meet on Friday?\n"
-              "Could we meet [+on] Friday?\n\nRank every blind result to reveal models.";
-    }
-    return p;
-}
-static gboolean comparison_snapshot(gpointer value) {
-    ComparisonTour *tour = value;
-    const char *names[] = {"comparison-blind-light.png", "comparison-revealed-dark.png",
-        "comparison-batch-paused-light.png", "comparison-batch-ready-dark.png"};
-    const char *name = names[tour->stage];
-    gchar *path = g_build_filename(tour->directory, name, NULL);
-    if (ui.window == NULL || jsti_widget_save_snapshot(adw_window_get_content(ADW_WINDOW(ui.window)), path, TRUE) != 0)
-        g_printerr("Comparison snapshot %s failed.\n", name);
-    g_free(path);
-    const char *full_names[] = {"comparison-blind-light-full.png", "comparison-revealed-dark-full.png",
-        "comparison-batch-paused-light-full.png", "comparison-batch-ready-dark-full.png"};
-    const char *full_name = full_names[tour->stage];
-    path = g_build_filename(tour->directory, full_name, NULL);
-    if (ui.window == NULL || jsti_widget_save_snapshot(ui.column, path, TRUE) != 0)
-        g_printerr("Comparison snapshot %s failed.\n", full_name);
-    g_free(path);
-    if (tour->stage < 3) {
-        ++tour->stage;
-        Presentation p = tour_fixture(tour->stage); present(&p);
-        adw_style_manager_set_color_scheme(adw_style_manager_get_default(),
-            tour->stage == 2 ? ADW_COLOR_SCHEME_FORCE_LIGHT : ADW_COLOR_SCHEME_FORCE_DARK);
-        g_timeout_add(700, comparison_snapshot, tour);
-    } else {
-        finish_fixture();
-        adw_style_manager_set_color_scheme(adw_style_manager_get_default(), tour->original);
-        gtk_window_close(tour->parent);
-        g_free(tour->directory); g_free(tour);
-    }
-    return G_SOURCE_REMOVE;
-}
-
-void jsti_comparison_screenshot_tour(GtkWindow *parent, const char *directory) {
-    ComparisonTour *tour = g_new0(ComparisonTour, 1);
-    tour->parent = parent; tour->directory = g_strdup(directory);
-    tour->original = adw_style_manager_get_color_scheme(adw_style_manager_get_default());
-    adw_style_manager_set_color_scheme(adw_style_manager_get_default(), ADW_COLOR_SCHEME_FORCE_LIGHT);
-    testing = TRUE; jsti_comparison_open(parent);
-    Presentation p = fixture(FALSE); present(&p);
-    g_timeout_add(700, comparison_snapshot, tour);
-}

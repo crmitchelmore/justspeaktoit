@@ -17,7 +17,8 @@ Automation inspection), `WindowsTextOutputWorker.cpp` (the per-target worker),
 `WindowsTextOutputInsertion.cpp` (insert, copy and learning entry points),
 `Sources/CWindowsSelfTest/WindowsTextOutputSelfTest.cpp` (deterministic checks),
 `WindowsClipboardOutput.cpp` (clipboard-only output without a captured field),
-`WindowsTextOutputSettings.cpp` (the native Text output dialog),
+`WindowsTextOutputSettings.cpp` (the host's Text output configuration),
+`WindowsTextOutputSettingsDialog.cpp` (the native Text output dialog),
 `Sources/SpeakWindowsPlatform/WindowsTextOutput.swift` (ownership, settings
 and status text), `Sources/SpeakWindows/WindowsOutputJob.swift` (the output
 job), `Sources/SpeakDesktopHost/Output/DesktopHostOutput.swift` (the shared

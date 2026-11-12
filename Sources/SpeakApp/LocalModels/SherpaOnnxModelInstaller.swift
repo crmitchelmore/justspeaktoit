@@ -28,33 +28,20 @@ struct SherpaOnnxModelInstaller {
   let fileManager: FileManager
 
   func install(_ source: LocalStreamingModelSource, into finalDirectory: URL) async throws {
-    let tempDirectory = finalDirectory.deletingLastPathComponent()
-      .appendingPathComponent(finalDirectory.lastPathComponent + ".download", isDirectory: true)
-    defer {
-      if fileManager.fileExists(atPath: tempDirectory.path) {
-        try? fileManager.removeItem(at: tempDirectory)
-      }
-    }
-    let spec = try SherpaOnnxModelSpecification.resolve(for: source)
-    if fileManager.fileExists(atPath: tempDirectory.path) {
-      try fileManager.removeItem(at: tempDirectory)
-    }
-    try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+    try await StagedModelInstall.install(at: finalDirectory, fileManager: fileManager) { tempDirectory in
+      let spec = try SherpaOnnxModelSpecification.resolve(for: source)
+      try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
 
-    if let archiveURL = spec.archiveURL {
-      try await downloadArchive(from: archiveURL, to: tempDirectory, expectedSHA256: spec.archiveSHA256)
-    } else {
-      for file in spec.files {
-        let destination = tempDirectory.appendingPathComponent(file)
-        try await downloadFile(repoID: source.repoID, filename: file, to: destination)
+      if let archiveURL = spec.archiveURL {
+        try await downloadArchive(from: archiveURL, to: tempDirectory, expectedSHA256: spec.archiveSHA256)
+      } else {
+        for file in spec.files {
+          let destination = tempDirectory.appendingPathComponent(file)
+          try await downloadFile(repoID: source.repoID, filename: file, to: destination)
+        }
       }
+      try Task.checkCancellation()
     }
-
-    try Task.checkCancellation()
-    if fileManager.fileExists(atPath: finalDirectory.path) {
-      try fileManager.removeItem(at: finalDirectory)
-    }
-    try fileManager.moveItem(at: tempDirectory, to: finalDirectory)
   }
 
   private func downloadFile(repoID: String, filename: String, to destination: URL) async throws {

@@ -72,13 +72,8 @@ final class FluidAudioModelManager: ObservableObject {
     modelsDirectory: URL? = nil
   ) {
     self.fileManager = fileManager
-    let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-      ?? fileManager.homeDirectoryForCurrentUser
     self.modelsDirectory = modelsDirectory
-      ?? applicationSupport
-        .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
-        .appendingPathComponent("LocalModels", isDirectory: true)
-        .appendingPathComponent("FluidAudio", isDirectory: true)
+      ?? LocalModelsDirectory.root(fileManager: fileManager).appendingPathComponent("FluidAudio", isDirectory: true)
     refresh()
   }
 

@@ -45,14 +45,11 @@ enum CleanupPromptPreview {
     )
 
     if PostProcessingManager.isDownloadedLocalPostProcessingModel(model) {
-      let localUserPrompt = LocalPostProcessingModelManager.localUserPrompt(
-        systemPrompt: effectiveSystemPrompt,
-        rawText: "{{RAW_TRANSCRIPT}}"
-      )
+      let localUserPrompt = LocalPostProcessingPrompt.userPrompt(rawText: "{{RAW_TRANSCRIPT}}")
       return """
       System prompt sent to the local model:
 
-      \(LocalPostProcessingModelManager.localSystemPrompt(effectiveSystemPrompt))
+      \(LocalPostProcessingPrompt.systemPrompt(effectiveSystemPrompt))
 
       User prompt sent to the local model:
 

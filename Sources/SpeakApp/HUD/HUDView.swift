@@ -2,14 +2,11 @@ import Foundation
 import SpeakCore
 import SwiftUI
 
-// swiftlint:disable type_body_length file_length
 struct HUDOverlay: View {
   @ObservedObject var manager: HUDManager
   @EnvironmentObject private var settings: AppSettings
-  @Environment(\.colorScheme) private var colorScheme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
     if manager.snapshot.phase.isVisible {
@@ -46,35 +43,13 @@ struct HUDOverlay: View {
   @ViewBuilder
   private var content: some View {
     let base = VStack(spacing: 12) {
-      animatedGlyph
+      HUDPhaseGlyph(style: style, headline: manager.snapshot.headline, animates: animates)
         .accessibilityHidden(false)
-      VStack(spacing: 4) {
-        Text(manager.snapshot.headline)
-          .font(.headline)
-          .foregroundStyle(headlineColor)
-          .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-          .accessibilityLabel("Status: \(manager.snapshot.headline)")
-          .accessibilityAddTraits(.isHeader)
-        if let sub = manager.snapshot.subheadline {
-          Text(sub)
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-            .accessibilityLabel(sub)
-        }
-        if manager.snapshot.showRetryHint {
-          Text("Press ⌘R to retry")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.top, 4)
-            .accessibilityHint("Press Command-R to retry the operation")
-        }
-      }
-      .accessibilityElement(children: .combine)
+      statusText
       if case .recording = manager.snapshot.phase {
         AudioLevelMeterView(
           level: manager.audioLevel,
-          animatesLevel: !shouldUseLegacyRendering && !reduceMotion,
+          animatesLevel: animates,
           width: 100,
           height: 4
         )
@@ -104,14 +79,22 @@ struct HUDOverlay: View {
 
       // Live transcript section (recording and voice-edit listening phases with content)
       if manager.snapshot.phase == .recording || manager.snapshot.phase == .editing,
-         settings.showLiveTranscriptInHUD {
-        transcriptSection
+         settings.showLiveTranscriptInHUD,
+         let transcriptText = manager.snapshot.liveText, !transcriptText.isEmpty {
+        // Show the live transcript inline (no disclosure/expand UI).
+        HUDLiveTranscriptView(
+          text: transcriptText,
+          isFinal: manager.snapshot.liveTextIsFinal,
+          confidence: manager.snapshot.liveTextConfidence,
+          animates: animates
+        )
+          .padding(.top, 4)
       }
 
       // Capture health row: shown during recording and failure phases.
       switch manager.snapshot.phase {
       case .recording, .failure:
-        captureHealthRow
+        HUDCaptureHealthRow(health: manager.captureHealth)
           .padding(.top, 4)
       default:
         EmptyView()
@@ -121,301 +104,53 @@ struct HUDOverlay: View {
     .padding(.vertical, 16)
     .accessibilityElement(children: .contain)
     .accessibilitySortPriority(1)
-    let shell = hudShell(base)
+    let shell = base
+      .modifier(HUDShell(style: style, usesLegacyRendering: shouldUseLegacyRendering))
       .frame(maxWidth: hudMaxWidth)
       .padding(.horizontal, 60)
       .accessibilityAddTraits(.isModal)
-    if shouldUseLegacyRendering || reduceMotion {
-      shell
-    } else {
+    if animates {
       // The phase/expansion springs live on `presentedContent` so the compact
       // HUD gets the same animation; only the shadow is specific to this shell.
       shell.shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
-    }
-  }
-
-  @ViewBuilder
-  private func hudShell<Content: View>(_ view: Content) -> some View {
-    let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-    #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
-    if #available(macOS 26.0, *), HUDPlatformWorkarounds.isGlassEffectEnabled, !reduceTransparency {
-      view
-        .background(phaseTint)
-        .glassEffect(.regular.tint(phaseColor.opacity(0.18)).interactive(), in: .rect(cornerRadius: 20))
-        .overlay(shape.stroke(phaseColor.opacity(0.35), lineWidth: strokeWidth))
     } else {
-      hudShellFallback(view, shape: shape)
-    }
-    #else
-    hudShellFallback(view, shape: shape)
-    #endif
-  }
-
-  @ViewBuilder
-  private func hudShellFallback<Content: View>(_ view: Content, shape: RoundedRectangle) -> some View {
-    if reduceTransparency {
-      view
-        .background(
-          shape
-            .fill(opaqueBackgroundColor)
-            .overlay(phaseTint)
-        )
-        .overlay(shape.stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth))
-    } else if shouldUseLegacyRendering {
-      view
-        .background(
-          shape
-            .fill(legacyBackgroundColor)
-            .overlay(phaseTint)
-        )
-        .overlay(shape.stroke(phaseColor.opacity(0.28), lineWidth: strokeWidth))
-    } else {
-      view
-        .background(
-          shape
-            .fill(.thickMaterial)
-            .overlay(phaseTint)
-        )
-        .overlay(shape.stroke(phaseColor.opacity(0.45), lineWidth: strokeWidth))
+      shell
     }
   }
 
-  @ViewBuilder
-  private func liveTranscriptionView(text: String) -> some View {
-    let isFinal = manager.snapshot.liveTextIsFinal
-    let confidence = manager.snapshot.liveTextConfidence
-
-    HStack(spacing: 6) {
-      ZStack(alignment: .top) {
-        // Invisible two-line template reserves a fixed height so the HUD
-        // doesn't reflow every time streamed text wraps from one line to two.
-        Text(verbatim: " \n ")
-          .font(.callout)
-          .hidden()
-        Text(text)
-          .font(isFinal ? .callout : .callout.italic())
-          .fontWeight(isFinal ? .regular : .light)
-          .foregroundStyle(isFinal ? .primary : .secondary)
-          .multilineTextAlignment(.center)
-          .lineLimit(2)
-          .truncationMode(.head)
-          .animation(
-            (shouldUseLegacyRendering || reduceMotion) ? nil : .easeInOut(duration: 0.2),
-            value: isFinal
-          )
-          .accessibilityLabel(isFinal ? "Transcript: \(text)" : "Partial transcript: \(text)")
-      }
-
-      if let confidence, confidence > 0 {
-        Text("\(Int(confidence * 100))%")
-          .font(.caption2.monospacedDigit())
+  private var statusText: some View {
+    VStack(spacing: 4) {
+      Text(manager.snapshot.headline)
+        .font(.headline)
+        .foregroundStyle(style.headlineColor)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .accessibilityLabel("Status: \(manager.snapshot.headline)")
+        .accessibilityAddTraits(.isHeader)
+      if let sub = manager.snapshot.subheadline {
+        Text(sub)
+          .font(.subheadline)
           .foregroundStyle(.secondary)
-          .padding(.horizontal, 4)
-          .padding(.vertical, 2)
-          .background(
-            Capsule()
-              .fill(.quaternary)
-          )
-          .accessibilityLabel("Confidence: \(Int(confidence * 100)) percent")
+          .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+          .accessibilityLabel(sub)
+      }
+      if manager.snapshot.showRetryHint {
+        Text("Press ⌘R to retry")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .padding(.top, 4)
+          .accessibilityHint("Press Command-R to retry the operation")
       }
     }
-  }
-
-  @ViewBuilder
-  private var transcriptSection: some View {
-    let transcriptText = manager.snapshot.liveText ?? ""
-    if !transcriptText.isEmpty {
-      // Show the live transcript inline (no disclosure/expand UI).
-      liveTranscriptionView(text: transcriptText)
-        .padding(.top, 4)
-    }
-  }
-
-  @ViewBuilder
-  private var captureHealthRow: some View {
-    let health = manager.captureHealth
-    let micWarning = health.noInputDevicesAvailable || health.microphonePermission == .denied
-    // Use higher contrast for warning state to meet WCAG AA.
-    let micColor: Color = micWarning
-      ? (colorScheme == .dark ? Color.red.opacity(0.9) : Color.red)
-      : .secondary
-    let microphonePermissionLabel = {
-      if health.noInputDevicesAvailable {
-        return "No device"
-      }
-      switch health.microphonePermission {
-      case .granted:
-        return "Granted"
-      case .denied:
-        return "Denied"
-      default:
-        return "Unknown"
-      }
-    }()
-    let micIcon = micWarning ? "mic.slash.fill" : "mic.fill"
-    let deviceLabel = health.noInputDevicesAvailable ? "No microphone connected" : health.inputDeviceName
-    // At accessibility text sizes the compact single-line row cannot hold the
-    // enlarged captions, so stack the items vertically and let labels wrap
-    // instead of clipping them.
-    let usesAccessibilityLayout = dynamicTypeSize.isAccessibilitySize
-    let rowLayout = usesAccessibilityLayout
-      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-      : AnyLayout(HStackLayout(spacing: 6))
-    rowLayout {
-      HStack(alignment: .firstTextBaseline, spacing: 4) {
-        Image(systemName: micIcon)
-          .font(.system(size: 9, weight: .semibold))
-          .foregroundStyle(micColor)
-          .accessibilityLabel("Microphone permission: \(microphonePermissionLabel)")
-
-        Text(health.noInputDevicesAvailable ? deviceLabel : "Preferred: \(deviceLabel)")
-          .font(.caption2)
-          .foregroundStyle(health.noInputDevicesAvailable ? micColor : .secondary)
-          .lineLimit(usesAccessibilityLayout ? 3 : 1)
-          .truncationMode(.tail)
-          .help(
-            health.noInputDevicesAvailable
-              ? "No microphone connected. Connect a microphone to record."
-              : "Preferred microphone: \(deviceLabel). Changes apply to new recording sessions."
-          )
-          .accessibilityLabel(
-            health.noInputDevicesAvailable ? deviceLabel : "Preferred microphone: \(deviceLabel)"
-          )
-      }
-
-      if !usesAccessibilityLayout {
-        Text(verbatim: "·")
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.tertiary)
-          .accessibilityHidden(true)
-      }
-
-      Text(health.providerLabel)
-        .font(.caption2.weight(.medium))
-        .foregroundStyle(.secondary)
-        .lineLimit(usesAccessibilityLayout ? 3 : 1)
-        .truncationMode(.middle)
-        .layoutPriority(1)
-        .help(health.providerLabel)
-        .accessibilityLabel("Transcription provider: \(health.providerLabel)")
-
-      LatencyBadgeCompact(tier: health.latencyTier, emphasized: true)
-        .layoutPriority(2)
-        .accessibilityLabel("Latency: \(health.latencyTier.displayName)")
-    }
-    // Size to content with a compact floor: the row keeps its familiar 18pt
-    // height at standard type sizes but grows (never clips) when Dynamic Type
-    // enlarges the captions.
-    .frame(minHeight: 18)
-    .fixedSize(horizontal: false, vertical: true)
     .accessibilityElement(children: .combine)
   }
 
-  private var phaseColor: Color {
-    switch manager.snapshot.phase {
-    case .armed:
-      return .brandLagoon
-    case .recording:
-      return .red
-    case .transcribing:
-      return .brandLagoon
-    case .postProcessing:
-      return .brandAccent
-    case .delivering:
-      return .green
-    case .editing:
-      return .brandAccentWarm
-    case .success:
-      return .green
-    case .failure:
-      return .red
-    case .hidden:
-      return .gray
-    }
+  private var style: HUDPhaseStyle {
+    HUDPhaseStyle(phase: manager.snapshot.phase)
   }
 
-  private var headlineColor: Color {
-    switch manager.snapshot.phase {
-    case .failure:
-      return phaseColor
-    default:
-      return .primary
-    }
-  }
-
-  @ViewBuilder
-  private var phaseTint: some View {
-    let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
-    switch manager.snapshot.phase {
-    case .failure:
-      shape.fill(phaseColor.opacity(0.18))
-    case .postProcessing:
-      shape.fill(phaseColor.opacity(0.06))
-    default:
-      EmptyView()
-    }
-  }
-
-  private var strokeWidth: CGFloat {
-    switch manager.snapshot.phase {
-    case .failure:
-      return 2
-    default:
-      return 1
-    }
-  }
-
-  @ViewBuilder
-  private var animatedGlyph: some View {
-    switch manager.snapshot.phase {
-    case .failure:
-      if shouldUseLegacyRendering || reduceMotion {
-        Image(systemName: "exclamationmark.triangle.fill")
-          .font(.system(size: 32, weight: .bold))
-          .foregroundStyle(phaseColor)
-          .accessibilityLabel("Error indicator")
-          .accessibilityAddTraits(.isImage)
-      } else {
-        TimelineView(.animation) { context in
-          let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
-          let scale = 0.9 + (progress < 0.5 ? progress : 1 - progress) * 0.35
-          Image(systemName: "exclamationmark.triangle.fill")
-            .font(.system(size: 32, weight: .bold))
-            .foregroundStyle(phaseColor.gradient)
-            .scaleEffect(scale)
-            .shadow(color: phaseColor.opacity(0.45), radius: 10, x: 0, y: 6)
-            .accessibilityLabel("Error indicator")
-            .accessibilityAddTraits(.isImage)
-        }
-      }
-    case .success:
-      Image(systemName: "checkmark.circle.fill")
-        .font(.system(size: 28, weight: .semibold))
-        .foregroundStyle(phaseColor)
-        .shadow(color: phaseColor.opacity(0.3), radius: 6, x: 0, y: 4)
-        .accessibilityLabel("Success indicator")
-        .accessibilityAddTraits(.isImage)
-    default:
-      if shouldUseLegacyRendering || reduceMotion {
-        Circle()
-          .fill(phaseColor)
-          .frame(width: 18, height: 18)
-          .accessibilityLabel("\(manager.snapshot.headline) status indicator")
-          .accessibilityAddTraits(.isImage)
-      } else {
-        TimelineView(.animation) { context in
-          let progress = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
-          let scale = 0.9 + (progress < 0.5 ? progress : 1 - progress) * 0.4
-          Circle()
-            .fill(phaseColor.gradient)
-            .frame(width: 18, height: 18)
-            .scaleEffect(scale)
-            .shadow(color: phaseColor.opacity(0.4), radius: 6, x: 0, y: 4)
-            .accessibilityLabel("\(manager.snapshot.headline) status indicator")
-            .accessibilityAddTraits(.isImage)
-        }
-      }
-    }
+  /// Motion is off on the legacy renderer and under Reduce Motion.
+  private var animates: Bool {
+    !shouldUseLegacyRendering && !reduceMotion
   }
 
   private var shouldUseLegacyRendering: Bool {
@@ -424,14 +159,6 @@ struct HUDOverlay: View {
 
   private var hudMaxWidth: CGFloat {
     dynamicTypeSize.isAccessibilitySize || manager.isExpanded ? 500 : 320
-  }
-
-  private var opaqueBackgroundColor: Color {
-    colorScheme == .dark ? .black : .white
-  }
-
-  private var legacyBackgroundColor: Color {
-    colorScheme == .dark ? Color.black.opacity(0.82) : Color.white.opacity(0.94)
   }
 
   /// Seconds and hundredths, growing a minutes field once the clock passes a
@@ -451,49 +178,3 @@ struct HUDOverlay: View {
     }
   }
 }
-
-/// Draws a HUD clock from the instant its phase started, on a schedule of its
-/// own, so the running time never has to be republished through the manager.
-///
-/// `start` comes from ``HUDManager/sessionStart``, which changes only on a
-/// phase transition; `interval` is the resolution the caller actually displays
-/// (hundredths for the full HUD, whole seconds for the compact one). Anchoring
-/// the schedule to `start` also lines every tick up with the moment the shown
-/// value changes. A `nil` start means the phase has no clock, so the label
-/// renders a static zero rather than a live one.
-struct HUDElapsedClock<Content: View>: View {
-  let start: Date?
-  let interval: TimeInterval
-  private let content: (TimeInterval) -> Content
-
-  init(
-    start: Date?,
-    interval: TimeInterval,
-    @ViewBuilder content: @escaping (TimeInterval) -> Content
-  ) {
-    self.start = start
-    self.interval = interval
-    self.content = content
-  }
-
-  var body: some View {
-    if let start {
-      TimelineView(.periodic(from: start, by: interval)) { context in
-        content(max(context.date.timeIntervalSince(start), 0))
-      }
-    } else {
-      content(0)
-    }
-  }
-}
-
-/// Stands in for the elapsed clock while the microphone is still coming up:
-/// showing "0s" would read as a clock that has started.
-struct HUDAwaitingAudioIndicator: View {
-  var body: some View {
-    ProgressView()
-      .controlSize(.mini)
-      .accessibilityLabel("Getting ready")
-  }
-}
-// swiftlint:enable type_body_length file_length

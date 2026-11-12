@@ -26,13 +26,7 @@ enum CleanupPromptPreview {
       """
     }
 
-    let rawLanguage = outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
-    let language: String
-    if rawLanguage.uppercased() == "ENGB" || rawLanguage.lowercased() == "en_gb" {
-      language = "British English"
-    } else {
-      language = rawLanguage
-    }
+    let language = PostProcessingPromptBuilder.outputLanguage(outputLanguage) ?? ""
 
     let effectiveSystemPrompt = TranscriptCleanupPolicy.systemPrompt(
       outputLanguage: language,

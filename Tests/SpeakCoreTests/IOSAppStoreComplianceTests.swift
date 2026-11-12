@@ -70,6 +70,82 @@ final class IOSAppStoreComplianceTests: XCTestCase {
         )
     }
 
+    func testAppleAppIntentDescriptionsAvoidRejectedTerms() throws {
+        let roots = [
+            "Sources/SpeakiOS", "Sources/SpeakApp", "JustSpeakWatchShared", "JustSpeakWatch",
+            "JustSpeakToItWidgetExtension", "JustSpeakWatchWidget", "JustSpeakShare", "JustSpeakKeyboard"
+        ]
+        var checked = 0
+        for root in roots {
+            let enumerator = try XCTUnwrap(FileManager.default.enumerator(
+                at: repositoryRoot.appendingPathComponent(root), includingPropertiesForKeys: nil
+            ))
+            for case let file as URL in enumerator where file.pathExtension == "swift" {
+                let source = try String(contentsOf: file, encoding: .utf8)
+                guard source.contains("import AppIntents") else { continue }
+                for description in try intentDescriptions(in: source, path: file.path) {
+                    for term in ["iPhone", "Siri"] {
+                        XCTAssertFalse(
+                            description.localizedCaseInsensitiveContains(term),
+                            "\(file.path): ITMS-90626 prohibits '\(term)' in App Intent descriptions"
+                        )
+                    }
+                    XCTAssertTrue(description.hasSuffix("."), "\(file.path): description must end with a period")
+                    checked += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(checked, 0, "No App Intent descriptions were checked")
+    }
+
+    private func intentDescriptions(in source: String, path: String) throws -> [String] {
+        let initializer = #"IntentDescription\s*\(\s*"#
+        let literalProperty = #"\bstatic\s+(?:var|let)\s+description\s*:\s*IntentDescription\s*\{\s*"#
+        let pattern = "(?:" + initializer + "|" + literalProperty + #")("""[\s\S]*?"""|"(?:\\.|[^"\\])*")\s*[,)}]"#
+        let expression = try NSRegularExpression(pattern: pattern)
+        let range = NSRange(source.startIndex..., in: source)
+        let matches = expression.matches(in: source, range: range)
+        let declarations = try NSRegularExpression(pattern: #"\bstatic\s+(?:var|let)\s+description\b"#)
+        XCTAssertEqual(
+            matches.count, declarations.numberOfMatches(in: source, range: range),
+            "\(path): keep intent descriptions as direct string literals so the source guard can check them"
+        )
+        return matches.map {
+            let literal = (source as NSString).substring(with: $0.range(at: 1))
+            XCTAssertFalse(literal.contains("\\("), "\(path): interpolated descriptions require a metadata audit")
+            XCTAssertFalse(literal.contains("\\u"), "\(path): escaped descriptions require a metadata audit")
+            let quotes = literal.hasPrefix("\"\"\"") ? 3 : 1
+            return String(literal.dropFirst(quotes).dropLast(quotes))
+                .replacingOccurrences(of: #"\\\r?\n\s*"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    func testDescriptionSourceGuardReadsInitializersAndLiteralRepresentations() throws {
+        let source = #"""
+        static var description: IntentDescription { IntentDescription("Uses iPhone.") }
+        static var description: IntentDescription { "Uses Siri." }
+        static var description: IntentDescription {
+            IntentDescription("""
+                Uses si\
+                ri.
+                """)
+        }
+        """#
+        XCTAssertEqual(
+            try intentDescriptions(in: source, path: "fixture"),
+            ["Uses iPhone.", "Uses Siri.", "Uses siri."]
+        )
+    }
+
+    func testIOSAppShortcutCountStaysWithinApplesLimit() throws {
+        let source = try contents(of: "Sources/SpeakiOS/Activity/TranscriptionShortcuts.swift")
+        let expression = try NSRegularExpression(pattern: #"\bAppShortcut\s*\("#)
+        let count = expression.numberOfMatches(in: source, range: NSRange(source.startIndex..., in: source))
+        XCTAssertGreaterThan(count, 0)
+        XCTAssertLessThanOrEqual(count, 10, "Apple permits at most ten App Shortcuts per app")
+    }
+
     // MARK: - Keyboard extension
 
     func testKeyboardExtension_alwaysShipsTheInfoPlistThatDeclaresItsPurposeStrings() throws {
@@ -110,7 +186,10 @@ final class IOSAppStoreComplianceTests: XCTestCase {
         let manifests = [
             "SpeakiOSApp/PrivacyInfo.xcprivacy",
             "JustSpeakToItWidgetExtension/PrivacyInfo.xcprivacy",
-            "JustSpeakKeyboard/PrivacyInfo.xcprivacy"
+            "JustSpeakKeyboard/PrivacyInfo.xcprivacy",
+            "JustSpeakShare/PrivacyInfo.xcprivacy",
+            "JustSpeakWatch/PrivacyInfo.xcprivacy",
+            "JustSpeakWatchWidget/PrivacyInfo.xcprivacy"
         ]
         for path in manifests {
             let privacy = try plist(at: path)
@@ -126,6 +205,29 @@ final class IOSAppStoreComplianceTests: XCTestCase {
         let manifest = try contents(of: "Project.swift")
         XCTAssertTrue(manifest.contains("\"JustSpeakKeyboard/PrivacyInfo.xcprivacy\""))
         XCTAssertTrue(manifest.contains("\"JustSpeakToItWidgetExtension/PrivacyInfo.xcprivacy\""))
+        XCTAssertTrue(manifest.contains("\"JustSpeakShare/PrivacyInfo.xcprivacy\""))
+        XCTAssertTrue(manifest.contains("\"JustSpeakWatch/PrivacyInfo.xcprivacy\""))
+        XCTAssertTrue(manifest.contains("\"JustSpeakWatchWidget/PrivacyInfo.xcprivacy\""))
+    }
+
+    func testSharedTranscriptionTimersHaveARequiredReasonDeclaration() throws {
+        let privacy = try plist(at: "SpeakiOSApp/PrivacyInfo.xcprivacy")
+        let entries = try XCTUnwrap(privacy["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
+        let bootTime = try XCTUnwrap(entries.first {
+            $0["NSPrivacyAccessedAPIType"] as? String == "NSPrivacyAccessedAPICategorySystemBootTime"
+        })
+        XCTAssertTrue((bootTime["NSPrivacyAccessedAPITypeReasons"] as? [String])?.contains("35F9.1") == true)
+    }
+
+    func testShareExtensionUsesTheSelectedReleaseTrainIdentityAndStorage() throws {
+        let project = try contents(of: "Project.swift")
+        for expression in [
+            #"trainIdentifier("com.justspeaktoit.ios.share")"#,
+            #"trainPlistPath("JustSpeakShare/Info.plist")"#,
+            #"trainPlistPath("JustSpeakShare/JustSpeakShare.entitlements")"#
+        ] {
+            XCTAssertTrue(project.contains(expression), "Share extension must not embed Stable identity in Alpha")
+        }
     }
 
     func testExtensionPrivacyManifests_declareTheSharedDefaultsTheyRead() throws {
@@ -161,14 +263,16 @@ final class IOSAppStoreComplianceTests: XCTestCase {
         )
     }
 
-    /// The app reports crashes to Sentry, so the manifest (and the App Store
-    /// nutrition label it must agree with) declares diagnostics, unlinked.
-    func testAppPrivacyManifest_declaresSentryDiagnosticsUnlinked() throws {
+    /// Sentry supplies an installation ID independently of sendDefaultPii.
+    func testAppPrivacyManifest_declaresInstallationLinkedSentryDiagnostics() throws {
         let privacy = try plist(at: "SpeakiOSApp/PrivacyInfo.xcprivacy")
         let collected = try XCTUnwrap(privacy["NSPrivacyCollectedDataTypes"] as? [[String: Any]])
-        for type in ["NSPrivacyCollectedDataTypeCrashData", "NSPrivacyCollectedDataTypePerformanceData"] {
+        for type in [
+            "NSPrivacyCollectedDataTypeCrashData", "NSPrivacyCollectedDataTypePerformanceData",
+            "NSPrivacyCollectedDataTypeOtherDiagnosticData", "NSPrivacyCollectedDataTypeDeviceID"
+        ] {
             let entry = try XCTUnwrap(collected.first { $0["NSPrivacyCollectedDataType"] as? String == type }, type)
-            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeLinked"] as? Bool, false, type)
+            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeLinked"] as? Bool, true, type)
             XCTAssertEqual(entry["NSPrivacyCollectedDataTypeTracking"] as? Bool, false, type)
         }
     }

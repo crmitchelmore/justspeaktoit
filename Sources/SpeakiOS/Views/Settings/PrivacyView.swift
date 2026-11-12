@@ -85,7 +85,7 @@ struct PrivacyView: View {
 
             Text(
                 summary.activeRecipients.isEmpty
-                    ? "With your current settings nothing is sent to a cloud provider."
+                    ? "With your current settings no recording or transcript content is sent to a cloud provider."
                     : "With your current settings your content can be sent to "
                         + PrivacyWorkflowSummary.formattedList(summary.activeRecipients) + "."
             )
@@ -157,6 +157,7 @@ struct PrivacyView: View {
                     value: historySync.isSyncEnabled ? PrivacyStorageDisclosure.historySyncCondition : "Off"
                 )
                 InfoRow(label: "API-Key Sync", value: PrivacyStorageDisclosure.apiKeySyncCondition)
+                InfoRow(label: "Crash and Performance Diagnostics", value: "Sentry (EU), in release builds")
                 Text(PrivacyStorageDisclosure.historySync)
                     .foregroundStyle(.secondary)
             }
@@ -168,8 +169,8 @@ struct PrivacyView: View {
     private var notCollectedSection: some View {
         Section("What We Don't Collect") {
             VStack(alignment: .leading, spacing: 8) {
-                CheckRow(text: "No usage analytics")
-                CheckRow(text: "No personal information")
+                CheckRow(text: "No product analytics")
+                CheckRow(text: "No advertising identifiers")
                 CheckRow(text: "No transcription content")
                 CheckRow(text: "No third-party tracking")
             }

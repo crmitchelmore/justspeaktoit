@@ -538,7 +538,12 @@ let package = portableCoreBuild ? portablePackage : Package(
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Sentry", package: "sentry-cocoa")
             ],
-            resources: [.copy("Resources/AppIcon.icns"), .copy("Resources/phonon-requirements.txt")]
+            exclude: ["Resources/AppStore"],
+            resources: [
+                .copy("Resources/AppIcon.icns"),
+                .copy("Resources/phonon-requirements.txt"),
+                .copy("Resources/Direct/PrivacyInfo.xcprivacy")
+            ]
         ),
         .executableTarget(
             name: "SpeakHotKeysDemo",

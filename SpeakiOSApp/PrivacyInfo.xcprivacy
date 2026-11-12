@@ -10,7 +10,7 @@
 
     <!-- Data types the iOS app collects. Transcription audio is sent to the
          user-selected provider for App Functionality. Sentry reports crashes
-         and sampled performance data, unlinked and scrubbed of credentials. -->
+         and sampled diagnostics with a random installation ID. -->
     <key>NSPrivacyCollectedDataTypes</key>
     <array>
         <dict>
@@ -42,13 +42,13 @@
                 <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
             </array>
         </dict>
-        <!-- Sentry (SentryManager): crash reports, and sampled launch and
-             network timings, sent without a user identity. -->
+        <!-- Sentry supplies a persistent installation ID even when
+             sendDefaultPii is false. Diagnostics are linked to that ID. -->
         <dict>
             <key>NSPrivacyCollectedDataType</key>
             <string>NSPrivacyCollectedDataTypeCrashData</string>
             <key>NSPrivacyCollectedDataTypeLinked</key>
-            <false/>
+            <true/>
             <key>NSPrivacyCollectedDataTypeTracking</key>
             <false/>
             <key>NSPrivacyCollectedDataTypePurposes</key>
@@ -60,7 +60,31 @@
             <key>NSPrivacyCollectedDataType</key>
             <string>NSPrivacyCollectedDataTypePerformanceData</string>
             <key>NSPrivacyCollectedDataTypeLinked</key>
+            <true/>
+            <key>NSPrivacyCollectedDataTypeTracking</key>
             <false/>
+            <key>NSPrivacyCollectedDataTypePurposes</key>
+            <array>
+                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSPrivacyCollectedDataType</key>
+            <string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>
+            <key>NSPrivacyCollectedDataTypeLinked</key>
+            <true/>
+            <key>NSPrivacyCollectedDataTypeTracking</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypePurposes</key>
+            <array>
+                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSPrivacyCollectedDataType</key>
+            <string>NSPrivacyCollectedDataTypeDeviceID</string>
+            <key>NSPrivacyCollectedDataTypeLinked</key>
+            <true/>
             <key>NSPrivacyCollectedDataTypeTracking</key>
             <false/>
             <key>NSPrivacyCollectedDataTypePurposes</key>
@@ -96,6 +120,14 @@
             <key>NSPrivacyAccessedAPITypeReasons</key>
             <array>
                 <string>E174.1</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>35F9.1</string>
             </array>
         </dict>
     </array>

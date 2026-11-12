@@ -79,6 +79,50 @@ final class AppStoreInfoPlistTests: XCTestCase {
         XCTAssertEqual(appStorePlist["CFBundleName"] as? String, "Just Speak to It App Store")
     }
 
+    func testRecordingPurposeStringsDescribeCloudAndLocalProcessing() {
+        for info in [directPlist!, appStorePlist!] {
+            let microphone = info["NSMicrophoneUsageDescription"] as? String ?? ""
+            XCTAssertTrue(microphone.contains("provider you choose in Settings"))
+            XCTAssertTrue(microphone.contains("on-device model"))
+            let speech = info["NSSpeechRecognitionUsageDescription"] as? String ?? ""
+            XCTAssertTrue(speech.contains("processed by Apple"))
+        }
+    }
+
+    func testMacPrivacyManifestsKeepProductAnalyticsOutOfTheStore() throws {
+        let store = try Self.loadPlist(at: "Sources/SpeakApp/Resources/AppStore/PrivacyInfo.xcprivacy")
+        let direct = try Self.loadPlist(at: "Sources/SpeakApp/Resources/Direct/PrivacyInfo.xcprivacy")
+        let storeEntries = try XCTUnwrap(store["NSPrivacyCollectedDataTypes"] as? [[String: Any]])
+        let directEntries = try XCTUnwrap(direct["NSPrivacyCollectedDataTypes"] as? [[String: Any]])
+        let baseline = Set([
+            "NSPrivacyCollectedDataTypeAudioData", "NSPrivacyCollectedDataTypeOtherUserContent",
+            "NSPrivacyCollectedDataTypeCrashData", "NSPrivacyCollectedDataTypePerformanceData",
+            "NSPrivacyCollectedDataTypeOtherDiagnosticData", "NSPrivacyCollectedDataTypeDeviceID"
+        ])
+        XCTAssertEqual(Set(storeEntries.compactMap { $0["NSPrivacyCollectedDataType"] as? String }), baseline)
+        for type in ["NSPrivacyCollectedDataTypeProductInteraction", "NSPrivacyCollectedDataTypeDeviceID"] {
+            let entry = try XCTUnwrap(directEntries.first { $0["NSPrivacyCollectedDataType"] as? String == type })
+            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeLinked"] as? Bool, true)
+            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeTracking"] as? Bool, false)
+            let purposes = try XCTUnwrap(entry["NSPrivacyCollectedDataTypePurposes"] as? [String])
+            XCTAssertTrue(purposes.contains("NSPrivacyCollectedDataTypePurposeAnalytics"))
+        }
+        for entry in storeEntries {
+            let purposes = try XCTUnwrap(entry["NSPrivacyCollectedDataTypePurposes"] as? [String])
+            XCTAssertEqual(purposes, ["NSPrivacyCollectedDataTypePurposeAppFunctionality"])
+            if !["NSPrivacyCollectedDataTypeAudioData", "NSPrivacyCollectedDataTypeOtherUserContent"]
+                .contains(entry["NSPrivacyCollectedDataType"] as? String ?? "") {
+                XCTAssertEqual(entry["NSPrivacyCollectedDataTypeLinked"] as? Bool, true)
+            }
+        }
+        XCTAssertEqual(store["NSPrivacyTracking"] as? Bool, false)
+        XCTAssertEqual(direct["NSPrivacyTracking"] as? Bool, false)
+        XCTAssertEqual(
+            store["NSPrivacyAccessedAPITypes"] as? NSArray,
+            direct["NSPrivacyAccessedAPITypes"] as? NSArray
+        )
+    }
+
     private static func loadPlist(at path: String) throws -> [String: Any] {
         let url = URL(fileURLWithPath: path)
         let data = try Data(contentsOf: url)

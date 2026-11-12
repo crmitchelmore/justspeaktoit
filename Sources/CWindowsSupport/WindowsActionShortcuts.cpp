@@ -1,5 +1,4 @@
-#include "include/CWindowsSupport.h"
-#include "WindowsSupportInternal.hpp"
+#include "WindowsActionShortcutsInternal.hpp"
 #include "WindowsWindowChrome.hpp"
 #include <commctrl.h>
 #include <cwchar>
@@ -17,43 +16,47 @@
 // Provided by WindowsWindowBridge.cpp.
 void jsti_window_action_command(HWND window, int run, const char *page);
 
+namespace jsti::actionShortcuts {
 namespace {
 constexpr UINT applyMessage = WM_APP + 0x51, refreshMessage = WM_APP + 0x52;
 constexpr int firstHotKeyID = 0x100;
 constexpr size_t maximumRows = 64, maximumPresets = 8;
 
-struct Row {
-    std::string identifier, title, note, page;
-    std::wstring wideTitle, wideNote;
-    int run = JSTI_ACTION_RUN_NONE;
-    UINT modifiers = 0, key = 0;
-    bool enabled = false, global = false, canBeGlobal = false;
+// The host's rows and presets, and the receiver for system-wide shortcuts. The
+// host's threads and the UI thread share them under `mutex`; the receiver is
+// created and destroyed on the UI thread.
+struct Shared {
+    std::mutex mutex;
+    Configuration configuration;
+    HWND receiver = nullptr;
 };
+Shared &shared() {
+    static Shared value;
+    return value;
+}
 
-struct Configuration {
-    std::vector<Row> rows;
-    std::vector<std::wstring> presetNames;
-    std::vector<std::vector<Row>> presets;
-    JSTIActionShortcutsCallback callback = nullptr;
-    JSTIActionShortcutsRefresh refresh = nullptr;
-    void *context = nullptr;
-};
-std::mutex configurationMutex;
-Configuration configuration;
-HWND receiver = nullptr;  // guarded by configurationMutex; created and destroyed on the UI thread
+} // namespace
 
-// UI thread only.
-struct Runtime {
-    HWND owner = nullptr;
-    std::vector<Row> rows;
-    std::vector<int> registered;
-    BOOL (WINAPI *registerKey)(HWND, int, UINT, UINT) = RegisterHotKey;
-    BOOL (WINAPI *unregisterKey)(HWND, int) = UnregisterHotKey;
-} runtime;
-
+Runtime &runtime() {
+    static Runtime value;
+    return value;
+}
 Configuration snapshot() {
-    std::lock_guard<std::mutex> lock(configurationMutex);
-    return configuration;
+    std::lock_guard<std::mutex> lock(shared().mutex);
+    return shared().configuration;
+}
+Configuration exchangeConfiguration(Configuration next) {
+    std::lock_guard<std::mutex> lock(shared().mutex);
+    std::swap(shared().configuration, next);
+    return next;
+}
+void commitRows(const std::vector<Row> &rows) {
+    std::lock_guard<std::mutex> lock(shared().mutex);
+    if (shared().configuration.rows.size() == rows.size()) shared().configuration.rows = rows;
+}
+bool receiverRunning() {
+    std::lock_guard<std::mutex> lock(shared().mutex);
+    return shared().receiver != nullptr;
 }
 
 bool modifierKey(UINT key) {
@@ -65,6 +68,7 @@ bool modifierKey(UINT key) {
     }
 }
 
+namespace {
 bool validKey(UINT modifiers, UINT key) {
     if (modifiers & ~static_cast<UINT>(MOD_ALT | MOD_CONTROL | MOD_SHIFT)) return false;
     return key == 0 ? modifiers == 0 : key < 0xFF && !modifierKey(key);
@@ -80,6 +84,7 @@ bool runnable(const Row &row) { return row.run != JSTI_ACTION_RUN_NONE && row.en
 bool registersGlobally(const Row &row) {
     return runnable(row) && row.global && row.canBeGlobal && globalCombination(row.modifiers, row.key);
 }
+} // namespace
 
 bool extendedKey(UINT key) {
     switch (key) {
@@ -89,6 +94,7 @@ bool extendedKey(UINT key) {
     }
 }
 
+namespace {
 std::wstring keyName(UINT key) {
     UINT scan = MapVirtualKeyW(key, MAPVK_VK_TO_VSC);
     if (extendedKey(key)) scan |= 0x100;
@@ -98,6 +104,8 @@ std::wstring keyName(UINT key) {
     std::swprintf(fallback, 16, L"Key 0x%02X", key);
     return fallback;
 }
+
+} // namespace
 
 std::wstring comboName(UINT modifiers, UINT key) {
     if (!key) return L"Not set";
@@ -134,21 +142,22 @@ std::vector<JSTIActionShortcut> view(const std::vector<Row> &rows) {
 }
 
 void unregisterAll() {
-    HWND target = receiver;
-    for (int id : runtime.registered) runtime.unregisterKey(target, id);
-    runtime.registered.clear();
+    HWND target = shared().receiver;
+    for (int id : runtime().registered) runtime().unregisterKey(target, id);
+    runtime().registered.clear();
 }
 
 // Registers every eligible row, returning the combinations Windows refused.
 std::vector<std::wstring> registerRows(const std::vector<Row> &rows) {
     unregisterAll();
     std::vector<std::wstring> failures;
+    const HWND receiver = shared().receiver;
     if (!receiver) return failures;
     for (size_t index = 0; index < rows.size(); ++index) {
         const Row &row = rows[index];
         if (!registersGlobally(row)) continue;
         const int id = firstHotKeyID + static_cast<int>(index);
-        if (runtime.registerKey(receiver, id, row.modifiers | MOD_NOREPEAT, row.key)) runtime.registered.push_back(id);
+        if (runtime().registerKey(receiver, id, row.modifiers | MOD_NOREPEAT, row.key)) runtime().registered.push_back(id);
         else failures.push_back(comboName(row.modifiers, row.key) + L" (" + row.wideTitle + L")");
     }
     return failures;
@@ -162,12 +171,13 @@ std::wstring failureText(const std::vector<std::wstring> &failures) {
 }
 
 void apply(bool announce) {
-    runtime.rows = snapshot().rows;
-    const auto failures = registerRows(runtime.rows);
+    runtime().rows = snapshot().rows;
+    const auto failures = registerRows(runtime().rows);
     if (!announce || failures.empty()) return;
     jsti_window_update(jsti::utf8(failureText(failures)).c_str(), nullptr, -1);
 }
 
+namespace {
 LRESULT CALLBACK receiverProcedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case applyMessage: apply(true); return 0;
@@ -179,10 +189,10 @@ LRESULT CALLBACK receiverProcedure(HWND window, UINT message, WPARAM wparam, LPA
     case WM_HOTKEY: {
         const int index = static_cast<int>(wparam) - firstHotKeyID;
         // A modal dialog disables the owner; it gets the keys back when it closes.
-        if (index < 0 || static_cast<size_t>(index) >= runtime.rows.size() || !runtime.owner ||
-            !IsWindowEnabled(runtime.owner)) return 0;
-        const Row row = runtime.rows[static_cast<size_t>(index)];
-        if (registersGlobally(row)) jsti_window_action_command(runtime.owner, row.run, row.page.c_str());
+        if (index < 0 || static_cast<size_t>(index) >= runtime().rows.size() || !runtime().owner ||
+            !IsWindowEnabled(runtime().owner)) return 0;
+        const Row row = runtime().rows[static_cast<size_t>(index)];
+        if (registersGlobally(row)) jsti_window_action_command(runtime().owner, row.run, row.page.c_str());
         return 0;
     }
     default: return DefWindowProcW(window, message, wparam, lparam);
@@ -215,323 +225,6 @@ bool belongsToFocus(HWND focus, UINT modifiers, UINT key) {
         return true;
     return plain && (key == VK_SPACE || key == VK_RETURN) && focusedClass(focus, {L"Button"});
 }
-
-// ---- Action shortcuts dialog ----------------------------------------------
-
-enum Control { introID = 900, listID, keyLabelID, keyID, clearID, enabledID, globalID, noteID, presetLabelID, presetID,
-               resetID, statusID };
-constexpr DWORD windowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
-constexpr DWORD windowExStyle = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
-constexpr int minimumClientWidth = 720, minimumClientHeight = 540;
-
-struct Dialog {
-    Configuration config;
-    HWND owner = nullptr;
-    HFONT font = nullptr;
-    HWND focus = nullptr;
-    std::vector<HWND> controls;
-    int selected = -1;
-    bool loading = false, saved = false;
-};
-
-using jsti::chrome::scale;
-
-void layout(HWND window) {
-    RECT bounds{};
-    GetClientRect(window, &bounds);
-    auto at = [&](int value) { return scale(window, value); };
-    const int margin = at(20), row = at(28), button = at(32), gap = at(8), buttonWidth = at(100);
-    const int right = static_cast<int>(bounds.right), width = right - 2 * margin;
-    auto move = [&](int id, int x, int y, int w, int h) { MoveWindow(GetDlgItem(window, id), x, y, w, h, TRUE); };
-    int y = static_cast<int>(bounds.bottom) - margin - button;
-    move(IDOK, right - margin - 2 * buttonWidth - gap, y, buttonWidth, button);
-    move(IDCANCEL, right - margin - buttonWidth, y, buttonWidth, button);
-    y -= gap + at(64);
-    move(statusID, margin, y, width, at(64));
-    y -= gap + row;
-    move(presetLabelID, margin, y + at(4), at(70), at(22));
-    move(presetID, margin + at(76), y, at(200), at(200));
-    move(resetID, margin + at(286), y, at(170), row);
-    y -= gap + at(24);
-    move(enabledID, margin, y, at(120), at(24));
-    move(globalID, margin + at(130), y, at(200), at(24));
-    move(noteID, margin + at(340), y + at(2), std::max(at(40), width - at(340)), at(22));
-    y -= gap + row;
-    move(keyLabelID, margin, y + at(4), at(200), at(22));
-    move(keyID, margin + at(206), y, at(220), row);
-    move(clearID, margin + at(434), y, at(90), row);
-    move(introID, margin, at(16), width, at(40));
-    const int top = at(60);
-    move(listID, margin, top, width, std::max(at(80), y - gap - top));
-    HWND list = GetDlgItem(window, listID);
-    const int columns = width - at(24);
-    const int widths[] = {columns * 34 / 100, columns * 20 / 100, columns * 14 / 100,
-                          columns - columns * 34 / 100 - columns * 20 / 100 - columns * 14 / 100};
-    for (int column = 0; column < 4; ++column) ListView_SetColumnWidth(list, column, widths[column]);
-}
-
-void refreshFont(HWND window, Dialog &dialog) { jsti::chrome::refreshDialogFont(window, dialog.controls, dialog.font); }
-
-WORD hotkeyValue(UINT modifiers, UINT key) {
-    BYTE flags = 0;
-    if (modifiers & MOD_SHIFT) flags |= HOTKEYF_SHIFT;
-    if (modifiers & MOD_CONTROL) flags |= HOTKEYF_CONTROL;
-    if (modifiers & MOD_ALT) flags |= HOTKEYF_ALT;
-    if (extendedKey(key)) flags |= HOTKEYF_EXT;
-    return MAKEWORD(static_cast<BYTE>(key), flags);
-}
-
-void setCell(HWND list, int item, int column, const std::wstring &text) {
-    LVITEMW cell{};
-    cell.iSubItem = column;
-    cell.pszText = const_cast<wchar_t *>(text.c_str());
-    SendMessageW(list, LVM_SETITEMTEXTW, static_cast<WPARAM>(item), reinterpret_cast<LPARAM>(&cell));
-}
-
-void showRow(HWND window, const Dialog &dialog, int index) {
-    const Row &row = dialog.config.rows[static_cast<size_t>(index)];
-    HWND list = GetDlgItem(window, listID);
-    setCell(list, index, 1, comboName(row.modifiers, row.key));
-    setCell(list, index, 2, whereText(row));
-    setCell(list, index, 3, noteText(row));
-}
-
-int matchingPreset(const Dialog &dialog) {
-    for (size_t preset = 0; preset < dialog.config.presets.size(); ++preset) {
-        const auto &rows = dialog.config.presets[preset];
-        bool same = rows.size() == dialog.config.rows.size();
-        for (size_t index = 0; same && index < rows.size(); ++index) {
-            const Row &left = rows[index], &right = dialog.config.rows[index];
-            same = left.modifiers == right.modifiers && left.key == right.key && left.enabled == right.enabled &&
-                left.global == right.global;
-        }
-        if (same) return static_cast<int>(preset);
-    }
-    return static_cast<int>(dialog.config.presets.size());  // "Custom"
-}
-
-std::wstring lines(const char *text) {
-    std::wstring wide, result;
-    if (!jsti::wide(text, wide)) return L"";
-    for (wchar_t character : wide) {
-        if (character == L'\n' && (result.empty() || result.back() != L'\r')) result += L'\r';
-        result += character;
-    }
-    return result;
-}
-
-// Asks the host about the edited rows. Returns the host's verdict.
-int check(HWND window, Dialog &dialog, bool commit) {
-    if (!dialog.config.callback) return -1;
-    char message[4096] = {};
-    const auto rows = view(dialog.config.rows);
-    const int result = dialog.config.callback(rows.data(), rows.size(), commit ? 1 : 0, message, sizeof(message),
-                                              dialog.config.context);
-    message[sizeof(message) - 1] = 0;
-    SetDlgItemTextW(window, statusID, lines(message).c_str());
-    return result == 0 ? 0 : -1;
-}
-
-void loadDetail(HWND window, Dialog &dialog) {
-    dialog.loading = true;
-    const bool valid = dialog.selected >= 0 && static_cast<size_t>(dialog.selected) < dialog.config.rows.size();
-    Row empty;
-    const Row &row = valid ? dialog.config.rows[static_cast<size_t>(dialog.selected)] : empty;
-    const std::wstring label = valid ? L"&Shortcut for " + row.wideTitle : L"&Shortcut";
-    SetDlgItemTextW(window, keyLabelID, label.c_str());
-    SendDlgItemMessageW(window, keyID, HKM_SETHOTKEY, row.key ? hotkeyValue(row.modifiers, row.key) : 0, 0);
-    CheckDlgButton(window, enabledID, row.enabled ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(window, globalID, row.global ? BST_CHECKED : BST_UNCHECKED);
-    SetDlgItemTextW(window, noteID, noteText(row).c_str());
-    for (int id : {keyID, clearID, enabledID}) EnableWindow(GetDlgItem(window, id), valid);
-    EnableWindow(GetDlgItem(window, globalID), valid && row.canBeGlobal);
-    dialog.loading = false;
-}
-
-void edited(HWND window, Dialog &dialog) {
-    if (dialog.selected >= 0) showRow(window, dialog, dialog.selected);
-    if (dialog.selected >= 0) {
-        SetDlgItemTextW(window, noteID, noteText(dialog.config.rows[static_cast<size_t>(dialog.selected)]).c_str());
-    }
-    SendDlgItemMessageW(window, presetID, CB_SETCURSEL, static_cast<WPARAM>(matchingPreset(dialog)), 0);
-    check(window, dialog, false);
-}
-
-void readDetail(HWND window, Dialog &dialog) {
-    if (dialog.loading || dialog.selected < 0) return;
-    Row &row = dialog.config.rows[static_cast<size_t>(dialog.selected)];
-    const WORD value = static_cast<WORD>(SendDlgItemMessageW(window, keyID, HKM_GETHOTKEY, 0, 0));
-    const UINT key = LOBYTE(value), flags = HIBYTE(value);
-    const UINT modifiers = ((flags & HOTKEYF_ALT) ? MOD_ALT : 0) | ((flags & HOTKEYF_CONTROL) ? MOD_CONTROL : 0) |
-        ((flags & HOTKEYF_SHIFT) ? MOD_SHIFT : 0);
-    // A modifier on its own is still being typed.
-    if (key && !modifierKey(key)) { row.key = key; row.modifiers = modifiers; }
-    else if (!key && !modifiers) { row.key = 0; row.modifiers = 0; }
-    row.enabled = IsDlgButtonChecked(window, enabledID) == BST_CHECKED;
-    if (row.canBeGlobal) row.global = IsDlgButtonChecked(window, globalID) == BST_CHECKED;
-    edited(window, dialog);
-}
-
-void applyPreset(HWND window, Dialog &dialog, int preset) {
-    if (preset < 0 || static_cast<size_t>(preset) >= dialog.config.presets.size()) return;
-    const auto &rows = dialog.config.presets[static_cast<size_t>(preset)];
-    for (size_t index = 0; index < rows.size() && index < dialog.config.rows.size(); ++index) {
-        Row &row = dialog.config.rows[index];
-        row.modifiers = rows[index].modifiers;
-        row.key = rows[index].key;
-        row.enabled = rows[index].enabled;
-        row.global = rows[index].global;
-    }
-    for (size_t index = 0; index < dialog.config.rows.size(); ++index) showRow(window, dialog, static_cast<int>(index));
-    loadDetail(window, dialog);
-    edited(window, dialog);
-}
-
-bool createControls(HWND window, Dialog &dialog) {
-    INITCOMMONCONTROLSEX classes{sizeof(classes), ICC_HOTKEY_CLASS | ICC_LISTVIEW_CLASSES};
-    if (!InitCommonControlsEx(&classes)) return false;
-    auto add = [&](const wchar_t *kind, const wchar_t *text, DWORD style, int id) {
-        HWND control = CreateWindowExW(0, kind, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, window,
-            reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr);
-        if (control) dialog.controls.push_back(control);
-        return control != nullptr;
-    };
-    const bool okay =
-        add(L"STATIC", L"Shortcuts for individual actions. They are shared with Just Speak to It on your Mac; "
-            L"actions marked Mac only are kept for it.", SS_LEFT, introID) &&
-        add(WC_LISTVIEWW, L"", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, listID) &&
-        add(L"STATIC", L"&Shortcut", 0, keyLabelID) &&
-        add(HOTKEY_CLASSW, L"", WS_TABSTOP | WS_BORDER, keyID) &&
-        add(L"BUTTON", L"C&lear", BS_PUSHBUTTON | WS_TABSTOP, clearID) &&
-        add(L"BUTTON", L"&Enabled", BS_AUTOCHECKBOX | WS_TABSTOP, enabledID) &&
-        add(L"BUTTON", L"Works in &other apps", BS_AUTOCHECKBOX | WS_TABSTOP, globalID) &&
-        add(L"STATIC", L"", SS_LEFT | SS_ENDELLIPSIS, noteID) &&
-        add(L"STATIC", L"&Preset", 0, presetLabelID) &&
-        add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, presetID) &&
-        add(L"BUTTON", L"&Reset to defaults", BS_PUSHBUTTON | WS_TABSTOP, resetID) &&
-        add(L"STATIC", L"", SS_LEFT, statusID) &&
-        add(L"BUTTON", L"&Save", BS_DEFPUSHBUTTON | WS_GROUP | WS_TABSTOP, IDOK) &&
-        add(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, IDCANCEL);
-    if (!okay) return false;
-    HWND list = GetDlgItem(window, listID);
-    ListView_SetExtendedListViewStyle(list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
-    const wchar_t *titles[] = {L"Action", L"Shortcut", L"Where", L"Note"};
-    for (int column = 0; column < 4; ++column) {
-        LVCOLUMNW header{};
-        header.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-        header.pszText = const_cast<wchar_t *>(titles[column]);
-        header.cx = 100;
-        header.iSubItem = column;
-        if (SendMessageW(list, LVM_INSERTCOLUMNW, static_cast<WPARAM>(column), reinterpret_cast<LPARAM>(&header)) < 0)
-            return false;
-    }
-    for (size_t index = 0; index < dialog.config.rows.size(); ++index) {
-        LVITEMW item{};
-        item.mask = LVIF_TEXT;
-        item.iItem = static_cast<int>(index);
-        item.pszText = const_cast<wchar_t *>(dialog.config.rows[index].wideTitle.c_str());
-        if (SendMessageW(list, LVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&item)) < 0) return false;
-        showRow(window, dialog, static_cast<int>(index));
-    }
-    for (const auto &name : dialog.config.presetNames) {
-        const LRESULT added = SendDlgItemMessageW(window, presetID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name.c_str()));
-        if (added == CB_ERR || added == CB_ERRSPACE) return false;
-    }
-    SendDlgItemMessageW(window, presetID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Custom"));
-    SendDlgItemMessageW(window, presetID, CB_SETCURSEL, static_cast<WPARAM>(matchingPreset(dialog)), 0);
-    EnableWindow(GetDlgItem(window, resetID), !dialog.config.presets.empty());
-    refreshFont(window, dialog);
-    layout(window);
-    dialog.selected = dialog.config.rows.empty() ? -1 : 0;
-    if (dialog.selected == 0) ListView_SetItemState(list, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-    loadDetail(window, dialog);
-    check(window, dialog, false);
-    return true;
-}
-
-void close(HWND window) {
-    const HWND owner = GetWindow(window, GW_OWNER);
-    if (owner) EnableWindow(owner, TRUE);
-    DestroyWindow(window);
-}
-
-void save(HWND window, Dialog &dialog) {
-    if (dialog.saved || check(window, dialog, false) != 0) return;
-    // Probe the new set before the host stores it; a refusal keeps the old one.
-    const auto failures = registerRows(dialog.config.rows);
-    if (!failures.empty()) {
-        registerRows(runtime.rows);
-        const std::wstring message = failureText(failures).substr(0, failureText(failures).find(L", so it")) +
-            L". Choose another shortcut or turn off Works in other apps.";
-        SetDlgItemTextW(window, statusID, message.c_str());
-        return;
-    }
-    if (check(window, dialog, true) != 0) {
-        registerRows(runtime.rows);
-        return;
-    }
-    dialog.saved = true;
-    runtime.rows = dialog.config.rows;
-    {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        if (configuration.rows.size() == dialog.config.rows.size()) configuration.rows = dialog.config.rows;
-    }
-    close(window);
-}
-
-constexpr jsti::chrome::DialogFrame dialogFrame{
-    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, listID, IDOK};
-
-bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM lparam, LRESULT &) {
-    switch (message) {
-    case WM_NOTIFY: {
-        const auto header = reinterpret_cast<NMHDR *>(lparam);
-        if (header->idFrom != static_cast<UINT_PTR>(listID) || header->code != LVN_ITEMCHANGED) return false;
-        const auto change = reinterpret_cast<NMLISTVIEW *>(lparam);
-        if ((change->uChanged & LVIF_STATE) && (change->uNewState & LVIS_SELECTED) &&
-            !(change->uOldState & LVIS_SELECTED)) {
-            dialog.selected = change->iItem;
-            loadDetail(window, dialog);
-        }
-        return true;
-    }
-    case WM_COMMAND:
-        switch (LOWORD(wparam)) {
-        case keyID: if (HIWORD(wparam) == EN_CHANGE) readDetail(window, dialog); return true;
-        case enabledID: case globalID: if (HIWORD(wparam) == BN_CLICKED) readDetail(window, dialog); return true;
-        case clearID:
-            if (HIWORD(wparam) == BN_CLICKED) {
-                SendDlgItemMessageW(window, keyID, HKM_SETHOTKEY, 0, 0);
-                readDetail(window, dialog);
-                SetFocus(GetDlgItem(window, keyID));
-            }
-            return true;
-        case presetID:
-            if (HIWORD(wparam) == CBN_SELCHANGE)
-                applyPreset(window, dialog, static_cast<int>(SendDlgItemMessageW(window, presetID, CB_GETCURSEL, 0, 0)));
-            return true;
-        case resetID: if (HIWORD(wparam) == BN_CLICKED) applyPreset(window, dialog, 0); return true;
-        case IDOK: if (HIWORD(wparam) == BN_CLICKED) save(window, dialog); return true;
-        case IDCANCEL: if (HIWORD(wparam) == BN_CLICKED) close(window); return true;
-        default: return false;
-        }
-        return false;
-    }
-    return false;
-}
-
-const jsti::chrome::DialogProcedure<Dialog> dialogParts{dialogFrame, layout, refreshFont, createControls, close, handle};
-
-LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    return jsti::chrome::dialogProcedure(dialogParts, window, message, wparam, lparam);
-}
-
-HWND createDialog(HWND owner, Dialog &dialog) {
-    dialog.owner = owner;
-    return jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItActionShortcuts", procedure, L"Action shortcuts — Just Speak to It",
-        760, 600, windowStyle, windowExStyle, &dialog);
-}
-
 bool parseRow(const JSTIActionShortcut &source, Row &row, bool keysOnly) {
     if (!validKey(source.modifiers, source.virtual_key)) return false;
     row.modifiers = source.modifiers;
@@ -563,6 +256,9 @@ bool parseRow(const JSTIActionShortcut &source, Row &row, bool keysOnly) {
     return true;
 }
 } // namespace
+} // namespace jsti::actionShortcuts
+
+using namespace jsti::actionShortcuts;
 
 // ---- window integration ----------------------------------------------------
 
@@ -583,10 +279,10 @@ bool jsti_action_shortcuts_start(HWND owner, std::string &failure) {
         failure = jsti::systemError("Preparing action shortcuts");
         return false;
     }
-    runtime.owner = owner;
-    { std::lock_guard<std::mutex> lock(configurationMutex); receiver = created; }
-    runtime.rows = snapshot().rows;
-    const auto failures = registerRows(runtime.rows);
+    runtime().owner = owner;
+    { std::lock_guard<std::mutex> lock(shared().mutex); shared().receiver = created; }
+    runtime().rows = snapshot().rows;
+    const auto failures = registerRows(runtime().rows);
     if (failures.empty()) return true;
     failure = jsti::utf8(failureText(failures));
     return false;
@@ -596,31 +292,33 @@ void jsti_action_shortcuts_stop() {
     unregisterAll();
     HWND destroyed = nullptr;
     {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        destroyed = receiver;
-        receiver = nullptr;
+        auto &state = shared();
+        std::lock_guard<std::mutex> lock(state.mutex);
+        destroyed = state.receiver;
+        state.receiver = nullptr;
     }
     if (destroyed) DestroyWindow(destroyed);
-    runtime.owner = nullptr;
-    runtime.rows.clear();
+    runtime().owner = nullptr;
+    runtime().rows.clear();
 }
 
 // Asks the host to read its bindings again, for example after an import.
 void jsti_action_shortcuts_request_refresh() {
-    std::lock_guard<std::mutex> lock(configurationMutex);
-    if (receiver && configuration.refresh) PostMessageW(receiver, refreshMessage, 0, 0);
+    auto &state = shared();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.receiver && state.configuration.refresh) PostMessageW(state.receiver, refreshMessage, 0, 0);
 }
 
 // Window-local rows, from the main message loop. Returns true when handled.
 bool jsti_action_shortcut_key_message(HWND window, const MSG &message) {
     if ((message.message != WM_KEYDOWN && message.message != WM_SYSKEYDOWN) || (message.lParam & (1L << 30)) ||
         !(message.hwnd == window || IsChild(window, message.hwnd)) || !IsWindowEnabled(window) ||
-        runtime.rows.empty()) return false;
+        runtime().rows.empty()) return false;
     const UINT key = static_cast<UINT>(message.wParam);
     if (modifierKey(key) || (GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000)) return false;
     const UINT modifiers = ((GetKeyState(VK_CONTROL) & 0x8000) ? MOD_CONTROL : 0) |
         ((GetKeyState(VK_MENU) & 0x8000) ? MOD_ALT : 0) | ((GetKeyState(VK_SHIFT) & 0x8000) ? MOD_SHIFT : 0);
-    for (const Row &row : runtime.rows) {
+    for (const Row &row : runtime().rows) {
         if (!runnable(row) || row.key != key || row.modifiers != modifiers) continue;
         if (belongsToFocus(GetFocus(), modifiers, key)) return false;
         const Row chosen = row;
@@ -634,7 +332,7 @@ void jsti_show_action_shortcuts(HWND owner) {
     Dialog dialog;
     dialog.config = snapshot();
     if (!dialog.config.callback || dialog.config.rows.empty()) return;
-    if (runtime.rows.size() == dialog.config.rows.size()) dialog.config.rows = runtime.rows;
+    if (runtime().rows.size() == dialog.config.rows.size()) dialog.config.rows = runtime().rows;
     HWND window = createDialog(owner, dialog);
     if (!window) {
         jsti_window_update(jsti::systemError("Opening action shortcuts").c_str(), nullptr, -1);
@@ -644,8 +342,9 @@ void jsti_show_action_shortcuts(HWND owner) {
 }
 
 bool jsti_action_shortcuts_available() {
-    std::lock_guard<std::mutex> lock(configurationMutex);
-    return configuration.callback != nullptr && !configuration.rows.empty();
+    auto &state = shared();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    return state.configuration.callback != nullptr && !state.configuration.rows.empty();
 }
 
 int jsti_window_set_action_shortcuts(const JSTIActionShortcut *rows, size_t count, const char *const *presetNames,
@@ -675,9 +374,10 @@ int jsti_window_set_action_shortcuts(const JSTIActionShortcut *rows, size_t coun
         updated.callback = callback;
         updated.refresh = refresh;
         updated.context = context;
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        configuration = std::move(updated);
-        if (receiver) PostMessageW(receiver, applyMessage, 0, 0);
+        auto &state = shared();
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.configuration = std::move(updated);
+        if (state.receiver) PostMessageW(state.receiver, applyMessage, 0, 0);
     } catch (const std::exception &) { return -1; }
     jsti_window_update(nullptr, nullptr, -1);
     return 0;
@@ -685,155 +385,10 @@ int jsti_window_set_action_shortcuts(const JSTIActionShortcut *rows, size_t coun
 
 void jsti_window_clear_action_shortcuts(void) {
     {
-        std::lock_guard<std::mutex> lock(configurationMutex);
-        configuration = Configuration();
-        if (receiver) PostMessageW(receiver, applyMessage, 0, 0);
+        auto &state = shared();
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.configuration = Configuration();
+        if (state.receiver) PostMessageW(state.receiver, applyMessage, 0, 0);
     }
     jsti_window_update(nullptr, nullptr, -1);
-}
-
-// ---- self-test -------------------------------------------------------------
-
-namespace {
-struct Fixture {
-    std::set<std::pair<UINT, UINT>> taken;
-    std::vector<std::pair<int, std::pair<UINT, UINT>>> registered;
-    int checks = 0, commits = 0;
-    bool refuse = false;
-    UINT committedKey = 0;
-} *fixture = nullptr;
-
-BOOL WINAPI fakeRegister(HWND, int id, UINT modifiers, UINT key) {
-    const auto combination = std::make_pair(modifiers & ~static_cast<UINT>(MOD_NOREPEAT), key);
-    if (fixture->taken.count(combination)) return FALSE;
-    for (const auto &entry : fixture->registered) if (entry.first == id || entry.second == combination) return FALSE;
-    fixture->registered.push_back({id, combination});
-    return TRUE;
-}
-
-BOOL WINAPI fakeUnregister(HWND, int id) {
-    auto &entries = fixture->registered;
-    const auto before = entries.size();
-    entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const auto &entry) { return entry.first == id; }),
-                  entries.end());
-    return entries.size() != before;
-}
-
-int fakeCheck(const JSTIActionShortcut *rows, size_t count, int commit, char *message, size_t capacity, void *) {
-    ++fixture->checks;
-    if (fixture->refuse) return jsti::fail("Refused by host.", message, capacity);
-    if (commit) {
-        ++fixture->commits;
-        fixture->committedKey = count ? rows[0].virtual_key : 0;
-    }
-    return 0;
-}
-
-void clickButton(HWND window, int id) {
-    SendMessageW(window, WM_COMMAND, MAKEWPARAM(id, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(window, id)));
-}
-} // namespace
-
-// Configuration checks, system-wide registration and the dialog's save path
-// against fake registration: no shortcut is taken and no key is read.
-bool jsti_action_shortcuts_self_test(HWND owner, std::string &error) {
-    const Configuration original = snapshot();
-    const std::vector<Row> originalRows = runtime.rows;
-    const HWND originalOwner = runtime.owner;
-    unregisterAll();
-    Fixture local;
-    fixture = &local;
-    runtime.registerKey = fakeRegister;
-    runtime.unregisterKey = fakeUnregister;
-    bool createdReceiver = false;
-    auto check = [&]() -> bool {
-        JSTIActionShortcut rows[] = {
-            {"startStopRecording", "Start or stop recording", nullptr, nullptr, JSTI_ACTION_RUN_RECORD,
-             MOD_CONTROL | MOD_SHIFT, 'S', 1, 1, 1},
-            {"showHistory", "Show History", nullptr, "history", JSTI_ACTION_RUN_PAGE, MOD_CONTROL, 'Y', 1, 1, 0},
-            {"speakClipboard", "Speak clipboard", "Mac only", nullptr, JSTI_ACTION_RUN_NONE, 0, 0, 1, 1, 0}};
-        const char *names[] = {"Standard"};
-        JSTIActionShortcut unsafe = rows[0];
-        unsafe.modifiers = MOD_WIN;
-        JSTIActionShortcut missingPage = rows[1];
-        missingPage.page = nullptr;
-        if (jsti_window_set_action_shortcuts(&unsafe, 1, nullptr, nullptr, 0, fakeCheck, nullptr, nullptr) != -1 ||
-            jsti_window_set_action_shortcuts(&missingPage, 1, nullptr, nullptr, 0, fakeCheck, nullptr, nullptr) != -1 ||
-            jsti_window_set_action_shortcuts(rows, 3, names, rows, 1, nullptr, nullptr, nullptr) != -1 ||
-            jsti_window_set_action_shortcuts(rows, 3, names, rows, 1, fakeCheck, nullptr, nullptr) != 0) {
-            error = "Action shortcut configuration accepted an unsafe row or rejected a valid one."; return false;
-        }
-        if (!receiver) {
-            std::string failure;
-            createdReceiver = true;
-            if (!jsti_action_shortcuts_start(owner, failure)) {
-                error = "Action shortcuts did not start: " + failure; return false;
-            }
-        } else {
-            runtime.owner = owner;
-            apply(false);
-        }
-        // Only the row that may work in other apps is registered.
-        if (local.registered.size() != 1 || local.registered.front().second != std::make_pair(
-                static_cast<UINT>(MOD_CONTROL | MOD_SHIFT), static_cast<UINT>('S'))) {
-            error = "Action shortcuts registered the wrong rows system-wide."; return false;
-        }
-        // A taken combination keeps the dialog open and the old registration.
-        local.taken.insert({MOD_CONTROL | MOD_ALT, 'R'});
-        Dialog dialog;
-        dialog.config = snapshot();
-        HWND window = createDialog(owner, dialog);
-        if (!window) { error = jsti::systemError("Creating the action shortcut fixture"); return false; }
-        SendDlgItemMessageW(window, keyID, HKM_SETHOTKEY, hotkeyValue(MOD_CONTROL | MOD_ALT, 'R'), 0);
-        readDetail(window, dialog);
-        clickButton(window, IDOK);
-        wchar_t status[512] = {};
-        GetDlgItemTextW(window, statusID, status, 512);
-        if (!IsWindow(window) || local.commits != 0 || local.registered.size() != 1 ||
-            local.registered.front().second.second != 'S' || std::wstring(status).find(L"already used") == std::wstring::npos) {
-            if (IsWindow(window)) DestroyWindow(window);
-            error = "A taken action shortcut was saved, changed registration or was not explained."; return false;
-        }
-        // The host may refuse; the registration stays as it was.
-        SendDlgItemMessageW(window, keyID, HKM_SETHOTKEY, hotkeyValue(MOD_CONTROL | MOD_ALT, 'J'), 0);
-        readDetail(window, dialog);
-        local.refuse = true;
-        clickButton(window, IDOK);
-        local.refuse = false;
-        if (!IsWindow(window) || local.commits != 0 || local.registered.front().second.second != 'S') {
-            if (IsWindow(window)) DestroyWindow(window);
-            error = "A refused action shortcut closed the dialog or changed registration."; return false;
-        }
-        // Presets restore the defaults, and an available combination saves.
-        SendDlgItemMessageW(window, presetID, CB_SETCURSEL, 0, 0);
-        SendMessageW(window, WM_COMMAND, MAKEWPARAM(presetID, CBN_SELCHANGE),
-                     reinterpret_cast<LPARAM>(GetDlgItem(window, presetID)));
-        if (dialog.config.rows[0].key != 'S' || dialog.config.rows[0].modifiers != static_cast<UINT>(MOD_CONTROL | MOD_SHIFT)) {
-            DestroyWindow(window);
-            error = "Choosing a preset did not restore its shortcuts."; return false;
-        }
-        SendDlgItemMessageW(window, keyID, HKM_SETHOTKEY, hotkeyValue(MOD_CONTROL | MOD_ALT, 'J'), 0);
-        readDetail(window, dialog);
-        clickButton(window, IDOK);
-        const bool saved = !IsWindow(window);
-        if (IsWindow(window)) DestroyWindow(window);
-        if (!saved || local.commits != 1 || local.committedKey != 'J' || local.registered.size() != 1 ||
-            local.registered.front().second.second != 'J') {
-            error = "An available action shortcut was not saved and registered."; return false;
-        }
-        return true;
-    };
-    bool passed = false;
-    try { passed = check(); }
-    catch (const std::exception &) { error = "Action shortcut self-test could not allocate its state."; }
-    unregisterAll();
-    if (createdReceiver) jsti_action_shortcuts_stop();
-    runtime.registerKey = RegisterHotKey;
-    runtime.unregisterKey = UnregisterHotKey;
-    fixture = nullptr;
-    { std::lock_guard<std::mutex> lock(configurationMutex); configuration = original; }
-    runtime.owner = createdReceiver ? nullptr : originalOwner;
-    runtime.rows = originalRows;
-    if (!createdReceiver) registerRows(runtime.rows);
-    return passed;
 }

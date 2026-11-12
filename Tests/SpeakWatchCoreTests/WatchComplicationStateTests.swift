@@ -242,4 +242,11 @@ final class WatchComplicationStateTests: XCTestCase {
 
         XCTAssertNil(WatchRecordingRequest.decode(from: data))
     }
+
+    func testWatchFaceLaunch_matchesOnlyTheComplicationRecordURL() throws {
+        XCTAssertTrue(WatchRecordingRequest.isWatchFaceLaunch(WatchRecordingRequest.watchFaceLaunchURL))
+        let otherPath = try XCTUnwrap(URL(string: "justspeaktoit-watch://history"))
+        XCTAssertFalse(WatchRecordingRequest.isWatchFaceLaunch(otherPath))
+        XCTAssertFalse(WatchRecordingRequest.isWatchFaceLaunch(try XCTUnwrap(URL(string: "https://record"))))
+    }
 }

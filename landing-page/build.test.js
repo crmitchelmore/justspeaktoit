@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { appendFile, cp, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { appendFile, cp, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { renderPage } from './chrome.mjs';
+import { renderStylesheet, styleSections } from './stylesheet.mjs';
 
 const source = fileURLToPath(new URL('.', import.meta.url));
 
@@ -18,14 +19,15 @@ test('deployed styles and clip script get new URLs only when their content chang
     filter: filename => !['dist', 'node_modules'].includes(path.relative(source, filename).split(path.sep)[0]),
   });
   await cp(path.join(source, '../Docs/manual-checks.yml'), path.join(directory, 'Docs/manual-checks.yml'));
+  const fixtureStylesheet = (await import(pathToFileURL(path.join(fixture, 'stylesheet.mjs')).href)).renderStylesheet;
   const build = async () => {
     execFileSync(process.execPath, [path.join(fixture, 'build.mjs')]);
     const html = await readFile(path.join(fixture, 'dist/index.html'), 'utf8');
     const stylesheet = html.match(/href="\/(site\.[a-f0-9]{12}\.css)"/)?.[1];
     assert.ok(stylesheet, 'Production HTML must reference a fingerprinted stylesheet');
     assert.ok(!html.includes('href="/site.css"'), 'Do not reuse the stale stylesheet URL');
-    assert.deepEqual(await readFile(path.join(fixture, 'dist', stylesheet)),
-      await readFile(path.join(fixture, 'site.css')), 'The referenced asset must contain current CSS');
+    assert.equal(await readFile(path.join(fixture, 'dist', stylesheet), 'utf8'),
+      await fixtureStylesheet(), 'The referenced asset must contain current CSS');
     assert.equal((html.match(/class="brand-wordmark"/g) || []).length, 2, 'Only the existing header/footer wordmarks are accented');
     assert.deepEqual(await readFile(path.join(fixture, 'dist/images/wordmark-white-1.5x.jpg')),
       await readFile(path.join(fixture, 'images/wordmark-white-1.5x.jpg')), 'Preserve the HDR gain map byte-for-byte');
@@ -39,7 +41,7 @@ test('deployed styles and clip script get new URLs only when their content chang
 
   const first = await build();
   assert.deepEqual(await build(), first, 'Unchanged assets should reuse their cache entries');
-  await appendFile(path.join(fixture, 'site.css'), '\n/* A new design revision. */\n');
+  await appendFile(path.join(fixture, 'styles/footer.css'), '\n/* A new design revision. */\n');
   const next = await build();
   assert.notEqual(next.stylesheet, first.stylesheet, 'A design change must invalidate the old cached URL');
   assert.equal(next.clips, first.clips, 'A CSS change should not invalidate the script');
@@ -47,6 +49,21 @@ test('deployed styles and clip script get new URLs only when their content chang
   const last = await build();
   assert.notEqual(last.clips, next.clips, 'A script change must invalidate the old script URL');
   assert.equal(last.stylesheet, next.stylesheet, 'A script change should not invalidate CSS');
+});
+
+
+test('the stylesheet publishes every section file once, in cascade order', async () => {
+  const files = (await readdir(path.join(source, 'styles'))).filter(name => name.endsWith('.css'));
+  assert.deepEqual([...files].sort(), styleSections.map(name => `${name}.css`).sort(),
+    'Every file in styles/ is listed in stylesheet.mjs, so none is silently dropped');
+  const css = await renderStylesheet();
+  let cursor = 0;
+  for (const name of styleSections) {
+    const section = await readFile(path.join(source, 'styles', `${name}.css`), 'utf8');
+    assert.equal(css.indexOf(section, cursor), cursor, `${name}.css follows the previous section`);
+    cursor += section.length + 1;
+  }
+  assert.equal(cursor - 1, css.length);
 });
 
 
@@ -64,7 +81,7 @@ function cssBlock(css, prelude) {
 }
 
 test('HDR wordmarks are narrowly gated and retain readable fallbacks', async () => {
-  const css = await readFile(path.join(source, 'site.css'), 'utf8');
+  const css = await renderStylesheet();
   const media = cssBlock(css, '@media screen and (dynamic-range: high) and (prefers-color-scheme: dark) and (forced-colors: none)');
   const supports = cssBlock(media, '@supports ((background-clip: text) or (-webkit-background-clip: text))');
   const wordmark = cssBlock(supports, '.brand-wordmark ');

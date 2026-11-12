@@ -26,7 +26,7 @@ Cache policy lives in `_headers`, including explicit HTML/CSS/JS revalidation. P
 - `index.html`: content and unified download section across Mac, iOS, Linux and Windows.
 - `chrome.mjs`: the header and footer of every page, the clip `<video>` markup and the Stable Mac version shown beside its download. `build.mjs` and `serve.ts` replace each page's `<!-- partial:… -->`, `<!-- clip:… -->` and `<!-- stable:… -->` markers from it. Update `stable` when a Stable Mac release is published; Alpha builds never change it.
 - `partials/document.css`: the shared reading-column style of the privacy and support pages.
-- `site.css`: responsive layout, design tokens, typography and reduced-motion support.
+- `styles/*.css`: the stylesheet, one file per page section (design tokens, base typography, then each section in page order). `stylesheet.mjs` lists them in cascade order; the build and preview server publish them concatenated as `/site.css`.
 - `download-architecture.js`: existing architecture detection and safe universal fallback.
 - `clips.js`: light/dark variant selection and deferred poster loading for narrated clips.
 - `images/`: actual Mac, iPhone, Linux and Windows captures and narrated clips.

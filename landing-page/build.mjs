@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { pages, renderPage } from './chrome.mjs';
+import { renderStylesheet } from './stylesheet.mjs';
 import { loadCatalogue } from './qa/manual-checks.mjs';
 import { renderQaPage } from './qa/render.mjs';
 
@@ -10,12 +11,14 @@ await mkdir(output, { recursive: true });
 // Keep preview builds complete, including clean privacy URLs and Apple associations.
 // Only Alpha endpoints invoke the Worker; Stable routes stay on static Pages.
 for (const asset of [
-  '_worker.js', '_routes.json', 'site.css', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png',
+  '_worker.js', '_routes.json', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png',
   'icon-192.png', 'icon-512.png', 'site.webmanifest',
   'download-architecture.js', 'clips.js', 'images', '.well-known', '_headers', '_redirects',
 ]) {
   await cp(new URL(asset, import.meta.url), new URL(asset, output), { recursive: true });
 }
+// The stylesheet is published as one file from its per-section sources.
+await writeFile(new URL('site.css', output), await renderStylesheet());
 // Pages share their chrome, clip markup and Stable version through chrome.mjs.
 for (const page of pages) {
   await writeFile(new URL(page, output), await renderPage(page));

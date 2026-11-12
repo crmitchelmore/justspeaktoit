@@ -32,9 +32,12 @@ permissions:
 # steady merges, cancelling meant no main run ever completed. GitHub keeps at
 # most one waiting run per group, so a newer push replaces an older waiting
 # one and main verifies the newest commit next. Only a successful main run
-# starts an Alpha. CI never runs for tags or releases.
+# starts an Alpha. CI never runs for tags or releases. A main re-run (the
+# auto-revert bot re-runs a flaky failure once) takes its own group: in the
+# shared one it waited behind the newest push and was replaced, so main never
+# learned whether the failure was a flake.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name != 'pull_request' && github.run_attempt != '1' && format('-attempt-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

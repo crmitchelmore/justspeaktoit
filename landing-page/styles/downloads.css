@@ -1,0 +1,59 @@
+/* ---------- Unified Downloads ---------- */
+
+.download-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+}
+
+@media (max-width: 820px) {
+  .download-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.download-card {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+.download-card--primary {
+  border-color: var(--line-strong);
+}
+
+.download-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem;
+}
+
+.download-head h3 { margin: 0; font-size: 1.35rem; }
+
+.platform-tag {
+  font-family: var(--mono);
+  font-size: .76rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: var(--wash);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: .18rem .65rem;
+}
+
+.platform-tag.is-stable {
+  color: var(--lagoon);
+  border-color: rgba(46, 212, 191, .32);
+  background: rgba(46, 212, 191, .09);
+}
+
+.download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem 1.1rem;
+  margin-top: auto;
+  padding-top: .45rem;
+}
+
+.download-card .download-meta { margin-top: 0; }

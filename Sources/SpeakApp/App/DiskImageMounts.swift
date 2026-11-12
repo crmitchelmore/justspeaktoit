@@ -29,4 +29,21 @@ enum DiskImageMounts {
             return entities.compactMap { $0["mount-point"] as? String }
         })
     }
+
+    /// The disk image file mounted at `mountPoint` in `hdiutil info -plist` output,
+    /// or nil when no attached image is mounted there. Throws when the output
+    /// is not a property list, so the caller can fall back to a plain eject.
+    static func imagePath(mountedAt mountPoint: String, from data: Data) throws -> String? {
+        guard let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let images = plist["images"] as? [[String: Any]]
+        else { return nil }
+        for image in images {
+            let entities = image["system-entities"] as? [[String: Any]] ?? []
+            if entities.contains(where: { $0["mount-point"] as? String == mountPoint }),
+               let imagePath = image["image-path"] as? String {
+                return imagePath
+            }
+        }
+        return nil
+    }
 }

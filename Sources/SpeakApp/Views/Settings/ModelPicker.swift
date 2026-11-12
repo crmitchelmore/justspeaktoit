@@ -1,8 +1,6 @@
-// swiftlint:disable file_length
 import SpeakCore
 import SwiftUI
 
-// swiftlint:disable:next type_body_length
 struct ModelPicker: View {
   let title: String
   let help: String?
@@ -12,238 +10,6 @@ struct ModelPicker: View {
   let usesDetailedChooser: Bool
   let allowsCustom: Bool
   @Binding var value: String
-
-  private struct ModelTagBadges: View {
-    let tags: [ModelCatalog.Tag]
-    let compact: Bool
-
-    var body: some View {
-      if tags.isEmpty {
-        EmptyView()
-      } else {
-        HStack(spacing: 6) {
-          ForEach(tags.prefix(compact ? 2 : tags.count), id: \.self) { tag in
-            Text(tag.displayName)
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(tagForegroundColor(tag))
-              .padding(.horizontal, 8)
-              .padding(.vertical, 3)
-              .background(
-                Capsule(style: .continuous)
-                  .fill(tagBackgroundColor(tag))
-              )
-          }
-        }
-      }
-    }
-
-    private func tagBackgroundColor(_ tag: ModelCatalog.Tag) -> Color {
-      switch tag {
-      case .fast: return Color.brandLagoon.opacity(0.12)
-      case .cheap: return Color.green.opacity(0.14)
-      case .quality: return Color.brandAccent.opacity(0.12)
-      case .leading: return Color.brandAccentWarm.opacity(0.14)
-      case .privacy: return Color.brandLagoon.opacity(0.14)
-      }
-    }
-
-    private func tagForegroundColor(_ tag: ModelCatalog.Tag) -> Color {
-      switch tag {
-      case .fast: return .brandLagoon
-      case .cheap: return .green
-      case .quality: return .brandAccent
-      case .leading: return .brandAccentWarm
-      case .privacy: return .brandLagoon
-      }
-    }
-  }
-
-  private struct ModelPricingBadges: View {
-    let option: ModelCatalog.Option
-    let compact: Bool
-
-    var body: some View {
-      if let pricing = option.pricing {
-        HStack(spacing: 8) {
-          if !compact, let contextLength = option.contextLength {
-            Text(formatContext(contextLength))
-              .font(.caption2.monospacedDigit())
-              .foregroundStyle(.secondary)
-          }
-          Text(pricing.compactDisplay)
-            .font(.caption2.monospacedDigit())
-            .foregroundStyle(.secondary)
-        }
-      }
-    }
-
-    private func formatContext(_ contextLength: Int) -> String {
-      if contextLength >= 1_000_000 {
-        return "\(Int(Double(contextLength) / 1_000_000.0))M ctx"
-      }
-      return "\(Int(Double(contextLength) / 1_000.0))k ctx"
-    }
-  }
-
-  private struct ModelChooserSheet: View {
-    let title: String
-    let options: [ModelCatalog.Option]
-    let credentialPurpose: ModelCredentialPurpose
-    let storedAPIKeyIdentifiers: Set<String>
-    let allowsCustom: Bool
-    @Binding var selection: String
-
-    @State private var selectedTag: ModelCatalog.Tag?
-    /// Native routes are listed first; OpenRouter is one row that opens its own list.
-    @State private var isBrowsingOpenRouter = false
-
-    private var groups: ModelPickerGrouping.Groups {
-      ModelPickerGrouping.groups(options, purpose: credentialPurpose)
-    }
-
-    /// Group only when both kinds exist, so single-route pickers stay unchanged.
-    private var isGrouped: Bool {
-      !groups.direct.isEmpty && !groups.openRouter.isEmpty
-    }
-
-    private var levelOptions: [ModelCatalog.Option] {
-      guard isGrouped else { return groups.direct + groups.openRouter }
-      return isBrowsingOpenRouter ? groups.openRouter : groups.direct
-    }
-
-    var body: some View {
-      LongListChooserSheet(
-        title: isBrowsingOpenRouter ? ModelPickerGrouping.openRouterTitle : title,
-        items: levelOptions, id: { $0.id }, selection: $selection,
-        searchText: { [$0.displayName, $0.id, $0.description ?? ""] },
-        includes: { option in selectedTag.map { option.tags.contains($0) } ?? true },
-        controls: {
-          AnyView(HStack {
-            if isBrowsingOpenRouter {
-              Button {
-                isBrowsingOpenRouter = false
-              } label: {
-                Label("Back", systemImage: "chevron.left")
-              }
-              .accessibilityIdentifier("modelPicker.openRouter.back")
-            }
-            Picker("Filter", selection: $selectedTag) {
-              Text("All").tag(ModelCatalog.Tag?.none)
-              ForEach(ModelCatalog.Tag.allCases, id: \.self) { tag in
-                Text(tag.displayName).tag(ModelCatalog.Tag?.some(tag))
-              }
-            }.pickerStyle(.segmented)
-          })
-        },
-        clearFilters: { selectedTag = nil },
-        footer: { select in
-          AnyView(Group {
-            if isGrouped && !isBrowsingOpenRouter {
-              openRouterRow
-            }
-            if allowsCustom {
-              Divider()
-              Button {
-                select(ModelCatalog.customOptionID)
-              } label: {
-                HStack {
-                  Text("Custom…")
-                  Spacer()
-                  ModelCredentialStatusView(
-                    availability: ModelCredentialResolver.availability(
-                      for: ModelCatalog.customOptionID,
-                      purpose: credentialPurpose,
-                      storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
-                    )
-                  )
-                }
-              }
-              .buttonStyle(.plain)
-            }
-          })
-        },
-        row: { option in
-        VStack(alignment: .leading, spacing: 4) {
-          HStack(spacing: 10) {
-            Text(option.displayName)
-              .font(.body)
-            Spacer()
-            if let contextLength = option.contextLength {
-              Text(formatContext(contextLength))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            }
-            if let pricing = option.pricing {
-              Text(pricing.compactDisplay)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            }
-            ModelCredentialStatusView(
-              availability: ModelCredentialResolver.availability(
-                for: option.id,
-                purpose: credentialPurpose,
-                storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
-              )
-            )
-            ModelTagBadges(tags: option.tags, compact: true)
-            LatencyBadgeCompact(option: option)
-          }
-
-          if let description = option.description, !description.isEmpty {
-            Text(description)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-      })
-      // A new identity per level resets the sheet's search text when drilling in or out.
-      .id(isBrowsingOpenRouter)
-    }
-
-    private var openRouterRow: some View {
-      Button {
-        isBrowsingOpenRouter = true
-      } label: {
-        HStack(spacing: 10) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text(ModelPickerGrouping.openRouterTitle)
-              .font(.body)
-            Text(openRouterRowSubtitle)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-          Spacer()
-          ModelCredentialStatusView(
-            availability: ModelCredentialResolver.availability(
-              for: groups.openRouter[0].id,
-              purpose: credentialPurpose,
-              storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
-            )
-          )
-          Image(systemName: "chevron.right")
-            .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-      }
-      .buttonStyle(.plain)
-      .accessibilityIdentifier("modelPicker.openRouter")
-    }
-
-    private var openRouterRowSubtitle: String {
-      if let selected = groups.openRouter.first(where: { $0.id == selection }) {
-        return "Selected: \(selected.displayName)"
-      }
-      return "\(groups.openRouter.count) models from many providers, with one OpenRouter key."
-    }
-
-    private func formatContext(_ contextLength: Int) -> String {
-      if contextLength >= 1_000_000 {
-        return "\(Int(Double(contextLength) / 1_000_000.0))M ctx"
-      }
-      return "\(Int(Double(contextLength) / 1_000.0))k ctx"
-    }
-  }
 
   @State var selection: String
   @State private var customValue: String
@@ -268,24 +34,13 @@ struct ModelPicker: View {
     self.allowsCustom = allowsCustom
     _value = value
 
-    let trimmed = value.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let match = options.first(where: { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }) {
-      _selection = State(initialValue: match.id)
-      _customValue = State(initialValue: "")
-    } else if trimmed.isEmpty, let first = options.first {
-      _selection = State(initialValue: first.id)
-      _customValue = State(initialValue: "")
-      Self.repair(value, from: value.wrappedValue, to: first.id)
-    } else if !allowsCustom, let first = options.first {
-      _selection = State(initialValue: first.id)
-      _customValue = State(initialValue: "")
-      Self.repair(value, from: value.wrappedValue, to: first.id)
-    } else if !allowsCustom {
-      _selection = State(initialValue: "")
-      _customValue = State(initialValue: "")
-    } else {
-      _selection = State(initialValue: ModelCatalog.customOptionID)
-      _customValue = State(initialValue: trimmed)
+    let initial = ModelPickerSelection.initial(
+      for: value.wrappedValue, options: options, allowsCustom: allowsCustom
+    )
+    _selection = State(initialValue: initial.selection)
+    _customValue = State(initialValue: initial.customValue)
+    if let replacement = initial.replacementValue {
+      Self.repair(value, from: value.wrappedValue, to: replacement)
     }
   }
 
@@ -498,40 +253,18 @@ struct ModelPicker: View {
     return "Choose which model Speak should use for this step."
   }
 
-  // swiftlint:disable:next cyclomatic_complexity
   private func syncSelection(with newValue: String, repairsInvalidValue: Bool) {
-    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let match = options.first(where: { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }) {
-      if selection != match.id {
-        selection = match.id
-      }
-      if !customValue.isEmpty {
-        customValue = ""
-      }
-    } else if allowsCustom {
-      if selection != ModelCatalog.customOptionID {
-        selection = ModelCatalog.customOptionID
-      }
-      if customValue != trimmed {
-        customValue = trimmed
-      }
-    } else if repairsInvalidValue, let first = options.first {
-      if selection != first.id {
-        selection = first.id
-      }
-      if !customValue.isEmpty {
-        customValue = ""
-      }
-      if value != first.id {
-        value = first.id
-      }
-    } else {
-      if !selection.isEmpty {
-        selection = ""
-      }
-      if !customValue.isEmpty {
-        customValue = ""
-      }
+    let synced = ModelPickerSelection.synced(
+      with: newValue, options: options, allowsCustom: allowsCustom, repairsInvalidValue: repairsInvalidValue
+    )
+    if selection != synced.selection {
+      selection = synced.selection
+    }
+    if customValue != synced.customValue {
+      customValue = synced.customValue
+    }
+    if let replacement = synced.replacementValue, value != replacement {
+      value = replacement
     }
   }
 }

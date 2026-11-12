@@ -1,4 +1,3 @@
-// swiftlint:disable file_length
 import SpeakCore
 @preconcurrency import AVFoundation
 import Foundation
@@ -37,10 +36,10 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
   /// proof that finalisation covered every accepted PCM frame (issue #679).
   private var receivedSessionFinal = false
   private var isStopping: Bool = false
-  private var sidecarOutputBuffer = ""
+  private var sidecarEvents = SherpaOnnxSidecarEventStream()
   /// Sink for the current process's stderr. Replaced on every start so stderr
   /// from a previous sidecar can never be attributed to this session.
-  private var sidecarErrorSink: SidecarErrorSink?
+  private var sidecarErrorSink: SherpaOnnxSidecarErrorSink?
   /// Set once `process.run()` succeeds; the pipes only reach EOF for a process
   /// that actually launched, so draining them is unsafe before this is true.
   private var processDidLaunch = false
@@ -88,9 +87,9 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     latestText = ""
     hasFinished = false
     receivedSessionFinal = false
-    sidecarOutputBuffer = ""
+    sidecarEvents = SherpaOnnxSidecarEventStream()
     processDidLaunch = false
-    let errorSink = SidecarErrorSink(maxByteCount: Self.maxSidecarErrorByteCount)
+    let errorSink = SherpaOnnxSidecarErrorSink(maxByteCount: Self.maxSidecarErrorByteCount)
     sidecarErrorSink = errorSink
     self.process = process
     self.stdinPipe = stdinPipe
@@ -252,12 +251,8 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 
   private func handleSidecarOutput(_ data: Data) {
     guard !hasFinished else { return }
-    guard let output = String(data: data, encoding: .utf8) else { return }
-    sidecarOutputBuffer += output
-    let lines = sidecarOutputBuffer.split(separator: "\n", omittingEmptySubsequences: false)
-    sidecarOutputBuffer = lines.last.map(String.init) ?? ""
-    for line in lines.dropLast() {
-      decodeSidecarEvent(String(line))
+    for event in sidecarEvents.append(data) {
+      handleSidecarEvent(event)
     }
   }
 
@@ -278,41 +273,24 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     stderrPipe?.fileHandleForReading.readabilityHandler = nil
     guard processDidLaunch, process?.isRunning == false else { return }
     if let stdout = stdoutPipe?.fileHandleForReading {
-      for chunk in Self.remainingData(on: stdout) {
+      for chunk in SherpaOnnxSidecarPipe.remainingData(on: stdout) {
         handleSidecarOutput(chunk)
       }
     }
     if let stderr = stderrPipe?.fileHandleForReading, let sink = sidecarErrorSink {
-      for chunk in Self.remainingData(on: stderr) {
+      for chunk in SherpaOnnxSidecarPipe.remainingData(on: stderr) {
         sink.append(chunk)
       }
     }
   }
 
-  /// Reads buffered bytes until EOF, bounded so a pipe that somehow still has a
-  /// writer attached can never spin the main actor indefinitely.
-  private static func remainingData(on handle: FileHandle) -> [Data] {
-    var chunks: [Data] = []
-    for _ in 0..<8 {
-      let chunk = handle.availableData
-      guard !chunk.isEmpty else { break }
-      chunks.append(chunk)
-    }
-    return chunks
-  }
-
   private func processRemainingSidecarOutput() {
-    let remaining = sidecarOutputBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-    sidecarOutputBuffer = ""
-    guard !remaining.isEmpty else { return }
-    decodeSidecarEvent(remaining)
+    guard let event = sidecarEvents.flush() else { return }
+    handleSidecarEvent(event)
   }
 
-  private func decodeSidecarEvent(_ line: String) {
+  private func handleSidecarEvent(_ event: SherpaOnnxSidecarEvent) {
     guard !hasFinished else { return }
-    guard let lineData = line.data(using: .utf8),
-      let event = try? JSONDecoder().decode(SidecarEvent.self, from: lineData)
-    else { return }
     switch event.type {
     case "partial", "session_final":
       if event.type == "session_final" { receivedSessionFinal = true }
@@ -396,159 +374,8 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     stdoutPipe = nil
     stderrPipe = nil
     streamingStartTime = nil
-    sidecarOutputBuffer = ""
+    sidecarEvents = SherpaOnnxSidecarEventStream()
     sidecarErrorSink = nil
-  }
-
-  private struct SidecarEvent: Decodable {
-    let type: String
-    let text: String?
-    let message: String?
-  }
-
-  /// Capped, lock-guarded store for one sidecar's stderr.
-  ///
-  /// The pipe's readability handler runs on its own dispatch queue and appends
-  /// here directly, so draining costs no task allocation per read and the
-  /// retained bytes stay bounded regardless of how chatty the process is.
-  /// Bytes are decoded only when read back: `availableData` can split a
-  /// multibyte UTF-8 sequence across two reads, which would make a per-chunk
-  /// decode drop the chunk.
-  private final class SidecarErrorSink: @unchecked Sendable {
-    private let lock = NSLock()
-    private var buffer = Data()
-    private let maxByteCount: Int
-
-    init(maxByteCount: Int) {
-      self.maxByteCount = maxByteCount
-    }
-
-    func append(_ data: Data) {
-      guard !data.isEmpty else { return }
-      lock.lock()
-      defer { lock.unlock() }
-      buffer.append(data)
-      guard buffer.count > maxByteCount else { return }
-      buffer.removeFirst(buffer.count - maxByteCount)
-      // Trimming the head can land mid-character; drop the orphaned
-      // continuation bytes so the log doesn't start with a replacement char.
-      while let first = buffer.first, first & 0xC0 == 0x80 {
-        buffer.removeFirst()
-      }
-    }
-
-    func drainText() -> String {
-      lock.lock()
-      let captured = buffer
-      buffer = Data()
-      lock.unlock()
-      // Deliberately lossy: a failable decode would throw away a whole log
-      // fragment because the head was trimmed mid-character.
-      // swiftlint:disable:next optional_data_string_conversion
-      return String(decoding: captured, as: UTF8.self)
-    }
-  }
-
-  private final class SherpaOnnxAudioProcessor: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.github.speakapp.sherpa-onnx.audioProcessing")
-    private let copyBufferPool = LivePCMBufferPool(
-      maximumBuffers: 4,
-      tapBufferSize: 4096,
-      label: "sherpa-onnx"
-    )
-    private var isRunning = false
-    private let converterCache = LiveConverterCache()
-    private var reusableOutputBuffer: AVAudioPCMBuffer?
-
-    func setRunning(_ running: Bool) {
-      queue.sync {
-        isRunning = running
-        if !running {
-          converterCache.reset()
-          reusableOutputBuffer = nil
-          copyBufferPool.removeAll()
-        }
-      }
-    }
-
-    /// Flushes the retained resampler's trailing frames to the sidecar before the
-    /// converter is released and stdin is closed (issue #849).
-    func drainConverterTail(to writer: FileHandle, logger: Logger) {
-      queue.sync {
-        guard let tail = converterCache.drainFloat32() else { return }
-        do {
-          try writer.write(contentsOf: tail)
-        } catch {
-          let description = error.localizedDescription
-          logger.error("Failed to write drained audio to sherpa-onnx: \(description, privacy: .public)")
-        }
-      }
-    }
-
-    func handleAudioTap(
-      _ buffer: AVAudioPCMBuffer,
-      inputFormat: AVAudioFormat,
-      outputFormat: AVAudioFormat,
-      writer: FileHandle,
-      logger: Logger
-    ) {
-      guard let copied = copyBufferPool.copy(buffer) else { return }
-      queue.async { [weak self] in
-        guard let self else { return }
-        defer { self.copyBufferPool.recycle(copied) }
-        guard self.isRunning else { return }
-        self.processAndWriteAudio(copied, from: inputFormat, to: outputFormat, writer: writer, logger: logger)
-      }
-    }
-
-    private func processAndWriteAudio(
-      _ buffer: AVAudioPCMBuffer,
-      from inputFormat: AVAudioFormat,
-      to outputFormat: AVAudioFormat,
-      writer: FileHandle,
-      logger: Logger
-    ) {
-      guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
-        logger.error("Failed to create sherpa-onnx audio converter")
-        return
-      }
-
-      let ratio = outputFormat.sampleRate / inputFormat.sampleRate
-      let capacity = AVAudioFrameCount(max(1, Double(buffer.frameLength) * ratio + 32))
-      let outputBuffer: AVAudioPCMBuffer
-      if let reusableOutputBuffer, reusableOutputBuffer.frameCapacity >= capacity {
-        reusableOutputBuffer.frameLength = 0
-        outputBuffer = reusableOutputBuffer
-      } else {
-        guard let newBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else { return }
-        reusableOutputBuffer = newBuffer
-        outputBuffer = newBuffer
-      }
-
-      var didProvideInput = false
-      var error: NSError?
-      let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
-        if didProvideInput {
-          outStatus.pointee = .noDataNow
-          return nil
-        }
-        didProvideInput = true
-        outStatus.pointee = .haveData
-        return buffer
-      }
-      guard status != .error, error == nil, let channelData = outputBuffer.floatChannelData else {
-        let errorDescription = error?.localizedDescription ?? "unknown"
-        logger.error("sherpa-onnx audio conversion failed: \(errorDescription, privacy: .public)")
-        return
-      }
-      let byteCount = Int(outputBuffer.frameLength) * MemoryLayout<Float>.size
-      let data = Data(bytes: channelData[0], count: byteCount)
-      do {
-        try writer.write(contentsOf: data)
-      } catch {
-        logger.error("Failed to write audio to sherpa-onnx: \(error.localizedDescription, privacy: .public)")
-      }
-    }
   }
 }
 // swiftlint:enable type_body_length

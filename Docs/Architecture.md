@@ -213,7 +213,9 @@ effects, state and shutdown), `Automation/`, `Comparison/`, `Credentials/`, `His
 
 ## macOS runtime
 
-[SpeakApp.swift](../Sources/SpeakApp/App/SpeakApp.swift) is the executable entry point. [WireUp.swift](../Sources/SpeakApp/App/WireUp.swift)
+[SpeakApp.swift](../Sources/SpeakApp/App/SpeakApp.swift) is the executable entry point; it declares the scene and
+hands its content to `SpeakLaunchContent`, its menu commands to `SpeakCommands` and launch housekeeping to
+`AppDelegate` and `DiskImageInstallCleanup`. [WireUp.swift](../Sources/SpeakApp/App/WireUp.swift)
 constructs the long-lived `AppEnvironment`, injects services, installs optional analytics and sync adapters, and makes
 the environment available to SwiftUI and App Intents. Feature assembly sits beside it in `WireUp+<Feature>.swift`
 (paid access, analytics, TTS, Send to Mac, credential sync, transcription defaults); `AppChrome` owns the status bar,

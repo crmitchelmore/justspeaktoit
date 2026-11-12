@@ -365,10 +365,16 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/KeyboardHandoffController.swift"),
             encoding: .utf8
         )
-        let rootView = try String(
-            contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/KeyboardRootView.swift"),
-            encoding: .utf8
-        )
+        // The keyboard surface is split into the root view, its control rows
+        // and the status copy it shows.
+        let rootView = try [
+            "JustSpeakKeyboard/KeyboardRootView.swift",
+            "JustSpeakKeyboard/KeyboardControlRow.swift",
+            "JustSpeakKeyboard/KeyboardPickupChipRow.swift",
+            "JustSpeakKeyboard/KeyboardStatusCopy.swift"
+        ].map {
+            try String(contentsOf: repositoryRoot.appendingPathComponent($0), encoding: .utf8)
+        }.joined(separator: "\n")
         // Instant Dictation: readiness session, idle-audio engine, hand-off recording and profile support.
         let instantCoordinator = try [
             "Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift",

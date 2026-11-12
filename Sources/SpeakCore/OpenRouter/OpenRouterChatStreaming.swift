@@ -27,19 +27,13 @@ extension OpenRouterChatClient {
         try Task.checkCancellation()
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw OpenRouterClientError.apiKeyMissing }
-        let target = try ChatCompletionTarget.resolve(model)
-        var request = URLRequest(url: target.url)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 60
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        if target.isOpenRouter { branding.apply(to: &request) }
-        request.httpBody = try JSONEncoder().encode(OpenRouterChatRequest(
+        var request = try OpenRouterChatRequest(
             model: model, temperature: temperature,
             messages: OpenRouterChatRequest.messages(systemPrompt: systemPrompt, messages: messages),
             stream: true, maxTokens: nil
-        ))
+        ).urlRequest(apiKey: key, branding: branding)
+        request.timeoutInterval = 60
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         let parser = OpenRouterCleanupStream(onUpdate: onUpdate)
         do {
             _ = try await OpenRouterBoundedResponseTransport.perform(

@@ -10,22 +10,13 @@ enum OpenRouterStreamingChat {
         model: String,
         temperature: Double
     ) throws -> URLRequest {
-        let target = try ChatCompletionTarget.resolve(model)
-        var request = URLRequest(url: target.url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        if target.isOpenRouter { branding.apply(to: &request) }
-
-        let payload = OpenRouterChatRequest(
+        try OpenRouterChatRequest(
             model: model,
             temperature: temperature,
             messages: messages,
             stream: true,
             maxTokens: nil
-        )
-        request.httpBody = try JSONEncoder().encode(payload)
-        return request
+        ).urlRequest(apiKey: apiKey, branding: branding)
     }
 
     /// Extracts the delta content from a single OpenRouter SSE line, or nil

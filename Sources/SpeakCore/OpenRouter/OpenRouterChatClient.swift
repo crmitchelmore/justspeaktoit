@@ -119,20 +119,13 @@ public actor OpenRouterChatClient: ChatLLMClient {
         try Task.checkCancellation()
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw OpenRouterClientError.apiKeyMissing }
-        let payload = OpenRouterChatRequest(
+        let request = try OpenRouterChatRequest(
             model: model,
             temperature: temperature,
             messages: OpenRouterChatRequest.messages(systemPrompt: systemPrompt, messages: messages),
             stream: nil,
             maxTokens: maxTokens
-        )
-        let target = try ChatCompletionTarget.resolve(model)
-        var request = URLRequest(url: target.url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        if target.isOpenRouter { branding.apply(to: &request) }
-        request.httpBody = try JSONEncoder().encode(payload)
+        ).urlRequest(apiKey: key, branding: branding)
 
         let data: Data
         let response: URLResponse
@@ -258,5 +251,18 @@ extension OpenRouterChatRequest {
         if let systemPrompt { payload.append(.init(role: "system", content: systemPrompt)) }
         payload += messages.map { .init(role: $0.role.rawValue, content: $0.content) }
         return payload
+    }
+
+    /// The POST to `model`'s chat endpoint: the provider's own for a native
+    /// selection, otherwise OpenRouter with its attribution headers.
+    func urlRequest(apiKey: String, branding: OpenRouterBranding) throws -> URLRequest {
+        let target = try ChatCompletionTarget.resolve(model)
+        var request = URLRequest(url: target.url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if target.isOpenRouter { branding.apply(to: &request) }
+        request.httpBody = try JSONEncoder().encode(self)
+        return request
     }
 }

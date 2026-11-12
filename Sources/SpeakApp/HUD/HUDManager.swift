@@ -2,39 +2,42 @@ import AppKit
 import Combine
 import Foundation
 import SpeakCore
-// @Implement: This file is the state manager for the Heads-Up display. It exposes lifecycle functions so that another class can notify it when recording has started, transcribing has started, post-processing has started, etc. It has an enum for all the states it can be in and is a state machine. It also has the ability to surface errors in any of those things and it has an internal timer that shows the duration of each step.
+// @Implement: This file is the state manager for the Heads-Up display. It exposes lifecycle functions so that another
+// class can notify it when recording has started, transcribing has started, post-processing has started, etc. It has
+// an enum for all the states it can be in and is a state machine. It also has the ability to surface errors in any of
+// those things and it has an internal timer that shows the duration of each step.
+
+enum HUDPhase: Equatable {
+  case hidden
+  /// Hands-free dictation is armed: the detector is listening, but nothing
+  /// is being captured until the user speaks.
+  case armed
+  case recording
+  case transcribing
+  case postProcessing
+  case delivering
+  case editing
+  case success(message: String)
+  case failure(message: String)
+
+  var isTerminal: Bool {
+    switch self {
+    case .success, .failure:
+      return true
+    default:
+      return false
+    }
+  }
+
+  var isVisible: Bool {
+    self != .hidden
+  }
+}
 
 @MainActor
 final class HUDManager: ObservableObject {
   struct Snapshot: Equatable {
-    enum Phase: Equatable {
-      case hidden
-      /// Hands-free dictation is armed: the detector is listening, but nothing
-      /// is being captured until the user speaks.
-      case armed
-      case recording
-      case transcribing
-      case postProcessing
-      case delivering
-      case editing
-      case success(message: String)
-      case failure(message: String)
-
-      var isTerminal: Bool {
-        switch self {
-        case .success, .failure:
-          return true
-        default:
-          return false
-        }
-      }
-
-      var isVisible: Bool {
-        self != .hidden
-      }
-    }
-
-    var phase: Phase
+    var phase: HUDPhase
     var headline: String
     var subheadline: String?
     var showRetryHint: Bool
@@ -98,7 +101,7 @@ final class HUDManager: ObservableObject {
   }
 
   static func accessibilityAnnouncement(
-    for phase: Snapshot.Phase,
+    for phase: HUDPhase,
     subheadline: String?
   ) -> String? {
     let detail = subheadline.map { ". \($0)" } ?? ""
@@ -262,7 +265,12 @@ final class HUDManager: ObservableObject {
 
   func finishFailure(headline: String, message: String, showRetryHint: Bool, displayDuration: TimeInterval? = nil) {
     transition(
-      .failure(message: message), headline: headline, subheadline: message, showsTimer: false, showRetryHint: showRetryHint)
+      .failure(message: message),
+      headline: headline,
+      subheadline: message,
+      showsTimer: false,
+      showRetryHint: showRetryHint
+    )
     let resolvedDuration = displayDuration
       ?? Self.failureDisplayDuration(shortenErrorDisplay: appSettings.shortenErrorDisplay)
     scheduleAutoHide(after: resolvedDuration)
@@ -284,7 +292,7 @@ final class HUDManager: ObservableObject {
   }
 
   private func transition(
-    _ phase: Snapshot.Phase,
+    _ phase: HUDPhase,
     headline: String,
     subheadline: String?,
     showsTimer: Bool = true,
@@ -321,7 +329,7 @@ final class HUDManager: ObservableObject {
       RunLoop.main.add(autoHideTimer, forMode: .common)
     }
   }
-  
+
   @objc private func autoHideTimerFired() {
     defer { autoHideTimer = nil }
     guard snapshot.phase.isTerminal else { return }
@@ -344,7 +352,6 @@ final class HUDManager: ObservableObject {
     ])
   }
 }
-// @Implement: This file is the state manager for the Heads-Up display. It exposes lifecycle functions so that another class can notify it when recording has started, transcribing has started, post-processing has started, etc. It has an enum for all the states it can be in and is a state machine. It also has the ability to surface errors in any of those things and it has an internal timer that shows the duration of each step.
 
 // MARK: - Waiting for audio
 

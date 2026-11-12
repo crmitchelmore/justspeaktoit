@@ -35,7 +35,8 @@ final class VoiceFormatProbe: @unchecked Sendable {
     func show(_ value: DesktopVoiceResultPresentation) { lock.withLock { presentation = value } }
     var counts: [Int] { lock.withLock { [checks, conversions, credentials, requests] } }
     func reset() { lock.withLock { checks = 0; conversions = 0; credentials = 0; requests = 0
-        unsupported = false; encodingFailure = false; held = nil; availability = nil; presentation = nil } }
+        unsupported = false; encodingFailure = false; held = nil; availability = nil; presentation = nil
+    } }
     func refuse(_ value: Bool) { lock.withLock { unsupported = value } }
     func hold(_ gate: VoiceFormatGate?) { lock.withLock { held = gate } }
     func holdAvailability(_ gate: VoiceFormatGate) { lock.withLock { availability = gate } }

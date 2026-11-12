@@ -8,8 +8,7 @@
 # Tooling/Package.resolved regardless of app/test dependency changes.
 #
 # All arguments are forwarded to the swiftlint binary, and swiftlint runs from
-# the repository root so relative paths in .swiftlint.yml and the path-keyed
-# .swiftlint-baseline.json keep working.
+# the repository root so relative paths in .swiftlint.yml keep working.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

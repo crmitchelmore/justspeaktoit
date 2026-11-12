@@ -3,7 +3,8 @@ import Foundation
 import SpeakCore
 import os.log
 
-// @Implement: This file persists history items to disc and is the interface to fetch a list of them, apply any filtering, sorting, or other standard functions, and surface them to the history view.
+// @Implement: This file persists history items to disc and is the interface to fetch a list of them, apply any
+// filtering, sorting, or other standard functions, and surface them to the history view.
 
 typealias HistoryFilter = HistorySearchQuery
 
@@ -103,7 +104,12 @@ final class HistoryManager: ObservableObject {
   private var migrationInProgress = false
   private var migrationWaiters: [CheckedContinuation<Void, Never>] = []
 
-  init(fileManager: FileManager = .default, flushInterval: TimeInterval = defaultFlushInterval, batchSizeThreshold: Int = defaultBatchSizeThreshold, pageSize: Int = 50) {
+  init(
+    fileManager: FileManager = .default,
+    flushInterval: TimeInterval = defaultFlushInterval,
+    batchSizeThreshold: Int = defaultBatchSizeThreshold,
+    pageSize: Int = 50
+  ) {
     self.pageSize = pageSize
     let supportURL =
       fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first

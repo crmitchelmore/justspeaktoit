@@ -9,18 +9,18 @@ import SpeakCore
 /// Manages post-processing of transcriptions: on device, through a native
 /// provider, or through OpenRouter, following the selected model's route.
 @MainActor
-public final class iOSPostProcessingManager: ObservableObject {
+public final class iOSPostProcessingManager: ObservableObject { // swiftlint:disable:this type_name
     public static let shared = iOSPostProcessingManager()
-    
+
     @Published public var isProcessing = false
     @Published public var processedText = ""
     @Published public var error: String?
     @Published public var streamingText = ""
-    
+
     private var streamTask: Task<Void, Never>?
-    
+
     private init() {}
-    
+
     /// Process text using the configured model and prompt.
     public func process(
         text: String,
@@ -34,15 +34,15 @@ public final class iOSPostProcessingManager: ObservableObject {
                 .errorDescription
             return
         }
-        
+
         isProcessing = true
         error = nil
         streamingText = ""
         processedText = ""
-        
+
         // Cancel any existing stream
         streamTask?.cancel()
-        
+
         streamTask = Task {
             do {
                 let effectivePrompt = Self.effectiveSystemPrompt()
@@ -64,7 +64,7 @@ public final class iOSPostProcessingManager: ObservableObject {
                         streamingText += chunk
                     }
                 }
-                
+
                 processedText = streamingText
                 isProcessing = false
             } catch {
@@ -75,7 +75,7 @@ public final class iOSPostProcessingManager: ObservableObject {
             }
         }
     }
-    
+
     /// Cancel any in-progress processing.
     public func cancel() {
         streamTask?.cancel()
@@ -147,7 +147,7 @@ public final class iOSPostProcessingManager: ObservableObject {
         ) { return providerName }
         return "OpenRouter"
     }
-    
+
     // MARK: - Remote API
 
     /// Streams a chat completion through the shared SpeakCore client. `apiKey` is
@@ -174,7 +174,7 @@ enum PostProcessingError: LocalizedError {
     case httpError(Int)
     case apiKeyMissing(providerName: String)
     case emptyResult
-    
+
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Invalid API URL"
@@ -194,18 +194,18 @@ public struct PostProcessingView: View {
     @Environment(\.appVisualDensity) private var density
     @StateObject private var processor = iOSPostProcessingManager.shared
     @ObservedObject private var settings = AppSettings.shared
-    
+
     @State private var inputText: String
     @State private var showingModelPicker = false
     @FocusState private var isTextFieldFocused: Bool
-    
+
     private let onComplete: (String) -> Void
-    
+
     public init(initialText: String, onComplete: @escaping (String) -> Void) {
         _inputText = State(initialValue: initialText)
         self.onComplete = onComplete
     }
-    
+
     public var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -223,7 +223,7 @@ public struct PostProcessingView: View {
                             Label("Input", systemImage: "text.alignleft")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            
+
                             TextEditor(text: $inputText)
                                 .font(.body)
                                 .frame(minHeight: density.isCompact ? 64 : 120)
@@ -234,9 +234,10 @@ public struct PostProcessingView: View {
                                 )
                                 .focused($isTextFieldFocused)
                         }
-                        
+
                         // Output section (shows during/after processing)
-                        if processor.isProcessing || !processor.streamingText.isEmpty || !processor.processedText.isEmpty {
+                        if processor.isProcessing || !processor.streamingText.isEmpty
+                            || !processor.processedText.isEmpty {
                             VStack(
                                 alignment: .leading,
                                 spacing: density.isCompact ? density.cardContentSpacing : 8
@@ -245,15 +246,15 @@ public struct PostProcessingView: View {
                                     Label("Output", systemImage: "wand.and.stars")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    
+
                                     Spacer()
-                                    
+
                                     if processor.isProcessing {
                                         ProgressView()
                                             .scaleEffect(0.8)
                                     }
                                 }
-                                
+
                                 Text(processor.isProcessing ? processor.streamingText : processor.processedText)
                                     .font(.body)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -265,7 +266,7 @@ public struct PostProcessingView: View {
                                     .textSelection(.enabled)
                             }
                         }
-                        
+
                         // Error display
                         if let error = processor.error {
                             Label(error, systemImage: "exclamationmark.triangle")
@@ -275,9 +276,9 @@ public struct PostProcessingView: View {
                     }
                     .padding(density.isCompact ? density.pagePadding : 16)
                 }
-                
+
                 Divider()
-                
+
                 // Model & Settings bar
                 VStack(spacing: density.isCompact ? density.cardContentSpacing : 12) {
                     // Model selector
@@ -301,7 +302,7 @@ public struct PostProcessingView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    
+
                     // Action buttons
                     HStack(spacing: density.isCompact ? 6 : 12) {
                         // Process button
@@ -329,7 +330,7 @@ public struct PostProcessingView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(inputText.isEmpty || !settings.hasPostProcessingKey || processor.isProcessing)
-                        
+
                         // Use result button
                         if !processor.processedText.isEmpty {
                             Button {
@@ -345,7 +346,7 @@ public struct PostProcessingView: View {
                             .accessibilityIdentifier("postProcessingUseResult")
                         }
                     }
-                    
+
                     // API key warning
                     if !settings.hasPostProcessingKey {
                         Label(
@@ -368,7 +369,7 @@ public struct PostProcessingView: View {
                         dismiss()
                     }
                 }
-                
+
                 ToolbarItem(placement: .confirmationAction) {
                     if !processor.processedText.isEmpty {
                         Button("Use") {
@@ -392,9 +393,9 @@ private extension PostProcessingView {
             for: model, displayName: ModelCatalog.friendlyName(for: model), purpose: .postProcessing
         )
     }
-    
+
     // MARK: - Model Picker Sheet
-    
+
     @ViewBuilder
     private var modelPickerSheet: some View {
         NavigationStack {
@@ -415,7 +416,7 @@ private extension PostProcessingView {
         }
         .presentationDetents([.medium])
     }
-    
+
 }
 
 #Preview {

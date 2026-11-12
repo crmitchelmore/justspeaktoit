@@ -170,10 +170,7 @@ final class AudioInputDeviceManager: ObservableObject {
     devices.first { $0.id == uid }
   }
 
-  private func refreshDevices() {
-    let defaultID = currentDefaultInputDeviceID()
-    var results: [Device] = []
-
+  private func allDeviceIDs() -> [AudioDeviceID]? {
     var propertyAddress = AudioObjectPropertyAddress(
       mSelector: kAudioHardwarePropertyDevices,
       mScope: kAudioObjectPropertyScopeGlobal,
@@ -189,7 +186,7 @@ final class AudioInputDeviceManager: ObservableObject {
       &dataSize
     ) == noErr else {
       logger.error("Unable to query audio device list size")
-      return
+      return nil
     }
 
     let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
@@ -203,38 +200,45 @@ final class AudioInputDeviceManager: ObservableObject {
       &deviceIDs
     ) == noErr else {
       logger.error("Unable to fetch audio device IDs")
-      return
+      return nil
     }
 
-    for identifier in deviceIDs {
-      let channelCount = inputChannelCount(for: identifier)
-      guard channelCount > 0 else { continue }
-      guard let uid = stringProperty(
-        selector: kAudioDevicePropertyDeviceUID,
-        deviceID: identifier
-      ) else { continue }
+    return deviceIDs
+  }
 
-      let name = stringProperty(selector: kAudioObjectPropertyName, deviceID: identifier) ?? "Unknown"
-      let manufacturer = stringProperty(
-        selector: kAudioObjectPropertyManufacturer,
-        deviceID: identifier
-      ) ?? ""
-      let sampleRate = doubleProperty(
-        selector: kAudioDevicePropertyNominalSampleRate,
-        deviceID: identifier
-      ) ?? 44_100
+  private func makeInputDevice(for identifier: AudioDeviceID, defaultID: AudioDeviceID?) -> Device? {
+    let channelCount = inputChannelCount(for: identifier)
+    guard channelCount > 0 else { return nil }
+    guard let uid = stringProperty(
+      selector: kAudioDevicePropertyDeviceUID,
+      deviceID: identifier
+    ) else { return nil }
 
-      let device = Device(
-        id: uid,
-        deviceID: identifier,
-        name: name,
-        manufacturer: manufacturer,
-        channelCount: channelCount,
-        nominalSampleRate: sampleRate,
-        isDefault: identifier == defaultID
-      )
-      results.append(device)
-    }
+    let name = stringProperty(selector: kAudioObjectPropertyName, deviceID: identifier) ?? "Unknown"
+    let manufacturer = stringProperty(
+      selector: kAudioObjectPropertyManufacturer,
+      deviceID: identifier
+    ) ?? ""
+    let sampleRate = doubleProperty(
+      selector: kAudioDevicePropertyNominalSampleRate,
+      deviceID: identifier
+    ) ?? 44_100
+
+    return Device(
+      id: uid,
+      deviceID: identifier,
+      name: name,
+      manufacturer: manufacturer,
+      channelCount: channelCount,
+      nominalSampleRate: sampleRate,
+      isDefault: identifier == defaultID
+    )
+  }
+
+  private func refreshDevices() {
+    let defaultID = currentDefaultInputDeviceID()
+    guard let deviceIDs = allDeviceIDs() else { return }
+    var results = deviceIDs.compactMap { makeInputDevice(for: $0, defaultID: defaultID) }
 
     results.sort { lhs, rhs in
       if lhs.isDefault != rhs.isDefault { return lhs.isDefault && !rhs.isDefault }

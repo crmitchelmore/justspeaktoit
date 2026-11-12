@@ -91,7 +91,8 @@ final class MistralAccountVoiceInventoryTests: DeepgramSpeechStubTestCase {
         XCTAssertTrue(inventory.voices.isEmpty)
         let count = StubURLProtocol.recordedRequests.count
         do { _ = try await MistralAccountVoiceInventory.fetch(session: session) { " " }
-            XCTFail("Missing key admitted") } catch {
+            XCTFail("Missing key admitted")
+        } catch {
             XCTAssertEqual(error as? VoiceAccountDiscoveryError, .missingCredential(.mistral))
         }
         XCTAssertEqual(StubURLProtocol.recordedRequests.count, count)

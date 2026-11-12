@@ -93,7 +93,7 @@ struct ModelPicker: View {
     let allowsCustom: Bool
     @Binding var selection: String
 
-    @State private var selectedTag: ModelCatalog.Tag? = nil
+    @State private var selectedTag: ModelCatalog.Tag?
     /// Native routes are listed first; OpenRouter is one row that opens its own list.
     @State private var isBrowsingOpenRouter = false
 

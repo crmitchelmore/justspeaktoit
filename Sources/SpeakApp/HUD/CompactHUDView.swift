@@ -24,7 +24,7 @@ struct CompactHUDContent: View {
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   private var snapshot: HUDManager.Snapshot { manager.snapshot }
-  private var phase: HUDManager.Snapshot.Phase { snapshot.phase }
+  private var phase: HUDPhase { snapshot.phase }
 
   var body: some View {
     VStack(spacing: 7) {
@@ -211,13 +211,13 @@ struct CompactHUDContent: View {
 
   /// The phases that carry live transcription text: active recording and the
   /// voice-edit listening phase. Matches the full HUD's transcript gating.
-  static func isLiveTranscriptPhase(_ phase: HUDManager.Snapshot.Phase) -> Bool {
+  static func isLiveTranscriptPhase(_ phase: HUDPhase) -> Bool {
     phase == .recording || phase == .editing
   }
 
   /// Pure decision for the transcript line, exposed at package scope for testing.
   static func showsLiveTranscript(
-    phase: HUDManager.Snapshot.Phase,
+    phase: HUDPhase,
     showLiveTranscriptInHUD: Bool
   ) -> Bool {
     isLiveTranscriptPhase(phase) && showLiveTranscriptInHUD

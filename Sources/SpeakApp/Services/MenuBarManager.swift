@@ -78,7 +78,27 @@ final class MenuBarManager {
 
         speakMenu.addItem(NSMenuItem.separator())
 
-        // Voice quick switch submenu
+        speakMenu.addItem(makeVoiceQuickSwitchItem())
+
+        speakMenu.addItem(NSMenuItem.separator())
+
+        // Navigation section
+        addMenuItem(
+            to: speakMenu,
+            title: "Show History",
+            action: ShortcutAction.showHistory,
+            selector: #selector(AppDelegate.showHistory)
+        )
+
+        addMenuItem(
+            to: speakMenu,
+            title: "Settings…",
+            action: ShortcutAction.openSettings,
+            selector: #selector(AppDelegate.openSettings)
+        )
+    }
+
+    private func makeVoiceQuickSwitchItem() -> NSMenuItem {
         let voiceSubmenu = NSMenu(title: "Quick Switch Voice")
         let voiceMenuItem = NSMenuItem(title: "Quick Switch Voice", action: nil, keyEquivalent: "")
         voiceMenuItem.submenu = voiceSubmenu
@@ -102,24 +122,7 @@ final class MenuBarManager {
             selector: #selector(AppDelegate.quickVoice3)
         )
 
-        speakMenu.addItem(voiceMenuItem)
-
-        speakMenu.addItem(NSMenuItem.separator())
-
-        // Navigation section
-        addMenuItem(
-            to: speakMenu,
-            title: "Show History",
-            action: ShortcutAction.showHistory,
-            selector: #selector(AppDelegate.showHistory)
-        )
-
-        addMenuItem(
-            to: speakMenu,
-            title: "Settings…",
-            action: ShortcutAction.openSettings,
-            selector: #selector(AppDelegate.openSettings)
-        )
+        return voiceMenuItem
     }
 
     private func addMenuItem(
@@ -254,7 +257,11 @@ final class ServicesProvider: NSObject {
     }
 
     /// Service handler for "Speak with Speak".
-    @objc func speakText(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>?) {
+    @objc func speakText(
+        _ pboard: NSPasteboard,
+        userData: String?,
+        error: AutoreleasingUnsafeMutablePointer<NSString?>?
+    ) {
         guard let text = pboard.string(forType: .string), !text.isEmpty else {
             error?.pointee = "No text selected" as NSString
             return
@@ -303,7 +310,7 @@ final class TouchBarProvider: NSObject, NSTouchBarDelegate {
             .speakRecord,
             .speakPlayPause,
             .flexibleSpace,
-            .speakVoiceSwitch,
+            .speakVoiceSwitch
         ]
         return touchBar
     }

@@ -128,7 +128,8 @@ final class AutomationAwaitSocketTests: XCTestCase {
             _ = try await Task.detached { try client.send(request, cancellation: token) }.value
             XCTFail("Cancelled")
         } catch {
-            XCTAssertEqual((error as? AutomationError)?.code, .appUnavailable) }
+            XCTAssertEqual((error as? AutomationError)?.code, .appUnavailable)
+        }
         XCTAssertEqual(self.handler.calls, 0)
     }
 

@@ -61,17 +61,10 @@ if [[ "$actual_checksum" != "$declared_checksum" ]]; then
 fi
 echo "✓ CTranscribe checksum verified: ${declared_checksum:0:12}..."
 
-# Enforce the current SwiftLint debt ceiling rather than merely warning.
+# SwiftLint runs with no baseline; a reintroduced one is debt the lint gate would hide.
 if [ -f .swiftlint-baseline.json ]; then
-  baseline_count=$(grep -o '"ruleIdentifier"' .swiftlint-baseline.json | wc -l | tr -d ' ')
-  baseline_ceiling=780
-  echo "→ SwiftLint baseline entries: $baseline_count (ceiling: $baseline_ceiling)"
-  if [ "$baseline_count" -gt "$baseline_ceiling" ]; then
-    echo "✗ SwiftLint baseline exceeds the allowed debt ceiling" >&2
-    exit 1
-  else
-    echo "✓ SwiftLint baseline is within the debt ceiling"
-  fi
+  echo "✗ .swiftlint-baseline.json must not exist; fix the violations instead" >&2
+  exit 1
 fi
 
 echo "✓ Checksum verification complete"

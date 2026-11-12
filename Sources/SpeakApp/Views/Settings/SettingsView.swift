@@ -14,7 +14,6 @@ struct SettingsView: View, AppSettingsBindingProviding, LocalModelRowPresenting 
   @ObservedObject var cliInstaller = SpeakCLIInstaller.shared
   let tab: SettingsTab
   @Binding var sidebarSelection: SidebarItem?
-  @State var isDeletingRecordings: Bool = false
   @State private var transcriptionProviders: [TranscriptionProviderMetadata] = []
   /// Voices only a keyed account lists — Mistral publishes no presets.
   @State var apiKeySearchText = ""
@@ -28,7 +27,6 @@ struct SettingsView: View, AppSettingsBindingProviding, LocalModelRowPresenting 
   @State var systemPromptPreview = ""
   @State var showingConfigTransfer = false
   @State var showingReleaseNotes = false
-  @State private var soundPreviewPlayer: RecordingSoundPlayer?
   /// Tracks the newest starter-preset download so a stale one cannot activate.
   @State var starterPresetActivationTask: Task<Void, Never>?
 
@@ -278,21 +276,6 @@ extension SettingsView {
     environment.settingsSearchTarget = nil
   }
 
-  var audioInputSelectionBinding: Binding<String> {
-    Binding(
-      get: {
-        audioDevices.selectedDeviceUID ?? AudioInputDeviceManager.systemDefaultToken
-      },
-      set: { newValue in
-        if newValue == AudioInputDeviceManager.systemDefaultToken {
-          audioDevices.selectSystemDefault()
-        } else {
-          audioDevices.selectDevice(uid: newValue)
-        }
-      }
-    )
-  }
-
   init(tab: SettingsTab = .general, sidebarSelection: Binding<SidebarItem?>) {
     self.tab = tab
     _sidebarSelection = sidebarSelection
@@ -315,13 +298,6 @@ extension SettingsView {
         settings.postProcessingModel = model
       }
     )
-  }
-
-  func previewRecordingSound(_ sound: RecordingSoundPlayer.RecordingSound) {
-    let player = RecordingSoundPlayer()
-    player.profile = settings.recordingSoundProfile
-    player.play(sound, volume: settings.recordingSoundVolume)
-    soundPreviewPlayer = player
   }
 
   private var keytermSync: AssemblyAIPronunciationKeytermSync {

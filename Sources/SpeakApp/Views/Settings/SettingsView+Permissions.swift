@@ -17,11 +17,6 @@ extension SettingsView {
   func statusLabel(for status: PermissionStatus) -> String {
     PermissionsSettingsContent.statusLabel(for: status)
   }
-
-  func volumeLabel(for volume: Float) -> String {
-    let percent = Int(volume * 100)
-    return "\(percent)%"
-  }
 }
 
 struct PermissionsSettingsContent: View {

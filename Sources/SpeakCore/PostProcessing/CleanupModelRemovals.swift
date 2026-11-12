@@ -76,6 +76,11 @@ public extension ModelCatalog {
     static func currentPostProcessingModel(_ identifier: String, at date: Date = Date()) -> String {
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         if let removal = CleanupModelRemovals.removal(for: trimmed) { return removal.successorID }
+        // A discovered OpenRouter choice of a removed model moves to the bundled OpenRouter successor.
+        if let slug = CleanupModelSelection.modelID(from: trimmed),
+           let removal = CleanupModelRemovals.removal(for: slug) {
+            return removal.successorID
+        }
         return ModelRetirements.successor(for: trimmed, mode: .postProcessing, at: date) ?? identifier
     }
 }

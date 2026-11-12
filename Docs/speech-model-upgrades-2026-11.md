@@ -294,7 +294,7 @@ Speech and voice catalogues need no change; cleanup models were pruned (see
 - **ElevenLabs** Eleven v4 Turbo is served only through the Text to Dialogue websocket
   ([models](https://elevenlabs.io/docs/overview/models)), not the text-to-speech endpoint
   Speak uses, so it is not added.
-- **Deepgram** launched Flux TTS ($0.045 per 1k characters); **AssemblyAI** lists TTS-1 and
+- **Deepgram** launched Flux TTS ($0.045 per 1k characters); **AssemblyAI** lists
   "STT 3.7 Realtime" as coming soon. Neither is integrated yet.
 - **Mistral** overview no longer labels Voxtral 3 as preview, but the
   [migration guide](https://docs.mistral.ai/studio/audio/migrate-from-voxtral-2) still

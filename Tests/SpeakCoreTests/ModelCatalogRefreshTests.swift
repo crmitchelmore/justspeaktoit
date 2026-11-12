@@ -70,6 +70,15 @@ final class ModelCatalogRefreshTests: XCTestCase {
         let profile = try JSONDecoder().decode(DictationProfile.self, from: Data(json.utf8))
         XCTAssertEqual(profile.polishModelID, "openai/gpt-6.1-sol")
 
+        let discovered = CleanupModelSelection.prefix + "openai/gpt-5-mini"
+        XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(discovered), "openai/gpt-6-luna")
+        let discoveredRequest = OpenRouterChatRequest(
+            model: discovered, temperature: 0, messages: [], stream: nil, maxTokens: nil
+        )
+        let discoveredBody = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(discoveredRequest)) as? [String: Any]
+        XCTAssertEqual(discoveredBody?["model"] as? String, "openai/gpt-6-luna")
+
         let request = OpenRouterChatRequest(
             model: "openai/gpt-5.6-terra", temperature: 0, messages: [], stream: nil, maxTokens: nil
         )

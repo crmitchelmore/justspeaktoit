@@ -895,6 +895,19 @@ sessions:
           - "With VoiceOver on, swipe through the Session details rows."
         expected: "Each entry lists its trigger (Button or Automation), friendly model names per phase, recording length, transcript and post-processing times and a total. The issue preview has relative timings but no transcript text or dates. VoiceOver reads each row's title and value."
         final_gate: true
+      - id: "owner-ios-upload-required-reason-apis"
+        issues:
+          - 1644
+        title: "iOS upload processes without ITMS-91053"
+        minutes: 3
+        core: false
+        build: "App Store Connect; the first Alpha iOS build that includes the active-keyboards privacy manifest fix"
+        steps:
+          - "In App Store Connect \u203a TestFlight, find the new iOS build and wait for processing to finish."
+          - "Confirm the build shows as ready to test rather than invalid."
+          - "Check the Apple email for the build, or the build upload's errors."
+        expected: "The build finishes processing and no ITMS-91053 (missing required-reason API declaration) is reported for the app, keyboard, widget or Share extension."
+        final_gate: false
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"

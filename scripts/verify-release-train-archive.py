@@ -78,7 +78,10 @@ def verify_submission_metadata(bundle, info, *, surface, main=False, watch=False
         "NSPrivacyAccessedAPICategoryFileTimestamp": {"C617.1", "3B52.1"},
         "NSPrivacyAccessedAPICategoryDiskSpace": {"E174.1"},
         "NSPrivacyAccessedAPICategorySystemBootTime": {"35F9.1"},
+        "NSPrivacyAccessedAPICategoryActiveKeyboards": {"54BD.1"},
     }
+    # UITextInputMode.activeInputModes is UIKit-only: the iOS app and keyboard read it.
+    ios_only = {"NSPrivacyAccessedAPICategoryActiveKeyboards"}
     categories = set()
     apis = privacy.get("NSPrivacyAccessedAPITypes")
     if not isinstance(apis, list):
@@ -93,9 +96,12 @@ def verify_submission_metadata(bundle, info, *, surface, main=False, watch=False
                        for reason in reasons)):
             raise SystemExit(f"Unaudited or invalid required-reason API declaration: {path}")
         categories.add(category)
-    if main and not approved_reasons.keys() <= categories:
+    required_main = approved_reasons.keys() - (set() if surface == "ios" else ios_only)
+    if main and not required_main <= categories:
         raise SystemExit(f"Missing app required-reason API categories: {path}")
     extension_point = info.get("NSExtension", {}).get("NSExtensionPointIdentifier")
+    if extension_point == "com.apple.keyboard-service" and not ios_only <= categories:
+        raise SystemExit(f"Missing keyboard active-keyboards API declaration: {path}")
     if extension_point in ["com.apple.keyboard-service", "com.apple.share-services"] or (
             extension_point == "com.apple.widgetkit-extension" and not watch):
         if "NSPrivacyAccessedAPICategoryUserDefaults" not in categories:

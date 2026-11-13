@@ -103,6 +103,18 @@ of hand-maintained structure documentation.
   the current parity matrix and performance/device acceptance gates. Preserve
   `Package.resolved` when the dependency-free portable graph removes it.
 
+## Cross-Platform Features
+
+- Build every user-facing feature for all platforms (macOS, iOS, Windows, Linux,
+  Android) in the same change where possible. Put the logic in `SpeakCore` (or
+  export it for Android, as `cloud_catalog.json` does) so each platform adds
+  only UI and native adapters.
+- When a platform can't get it in the same change, file **one** GitHub issue
+  covering every remaining platform (not one per platform) and link it from the
+  PR. Something the OS cannot support is N/A with a reason, not a gap.
+- [Docs/feature-parity.md](Docs/feature-parity.md) is the parity table. Check it
+  before starting a feature and update its row in the same PR.
+
 ## Accessibility and Computer Use
 
 Every control needs an accessible name, role, state and a stable automation ID,

@@ -1176,6 +1176,21 @@ sessions:
           - "With VoiceOver on, swipe through the Session details rows."
         expected: "Each entry lists its trigger (Button or Automation), friendly model names per phase, recording length, transcript and post-processing times and a total. The issue preview has relative timings but no transcript text or dates. VoiceOver reads each row's title and value."
         final_gate: true
+      - id: "iphone-history-filters"
+        issues:
+          - 1628
+        title: "History: search with model, errors-only and date filters"
+        minutes: 4
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes the #1628 History filters change"
+        steps:
+          - "Make History entries over at least two days with two different models, including one that failed (for example with flight mode on)."
+          - "In History search for a word from one transcript, then for part of a model name."
+          - "Tap the filter button: turn on Errors only, then choose one model, then turn on Limit by date and set From and To to yesterday."
+          - "Choose filters that match nothing and tap Clear Search and Filters. Then close the app and reopen History."
+          - "With VoiceOver on, swipe through the filter sheet."
+        expected: "Search matches transcript text and model names. Errors only shows only failed entries, the model filter shows only that model, and the date range includes entries from the whole of each chosen day, early morning and late evening alike. No matches offers Clear Search and Filters, which restores every entry. Every entry is still there after reopening. VoiceOver reads each toggle, picker and date with its name and state."
+        final_gate: false
       - id: "owner-ios-upload-required-reason-apis"
         issues:
           - 1644
@@ -1357,6 +1372,22 @@ sessions:
           - "Turn the setting off, dictate once more, then tap Clear and choose Keep recordings."
           - "Tap Clear again and choose Delete all."
         expected: "Each recording plays your own voice and Stop ends it at once; starting a dictation stops playback. The entry made with the setting off has no Play button and Clear with Keep recordings removes only it. Delete all empties History."
+        final_gate: false
+      - id: "android-history-filters"
+        issues:
+          - 1628
+        title: "Android: search History and filter by model, errors and date"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1628 History filters change"
+        steps:
+          - "Make History entries over at least two days in Cloud mode with two models and in On-device mode, including one that fails (for example Cloud in flight mode)."
+          - "Open History and search for a word from one transcript, then for part of a model name such as \"Whisper\"."
+          - "Clear the search. Choose a model from the Model button, then tap Errors only, then set From and To to the same earlier day."
+          - "Open From again and tap Any day; then tap Clear filters."
+          - "Rotate the phone with a filter set, then close the app and reopen History."
+          - "With TalkBack on, move through the search field, filter buttons and the summary line."
+        expected: "Search matches transcript text and model names, ignoring case. Each filter narrows the list, and the summary reads \"Showing N of M dictations\" or that nothing matches. A one-day range includes entries from early morning to late evening of that day only. Any day removes that end of the range and Clear filters shows every entry again. Rotating keeps the filters, and every entry is still there after reopening. TalkBack names every control and announces the summary as it changes."
         final_gate: false
       - id: "android-foreground-long-dictation"
         issues:

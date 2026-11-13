@@ -3,6 +3,7 @@ import Foundation
 import SpeakCore
 import SwiftUI
 
+/// History's view-only search and filter inputs. They narrow what is shown and never change stored entries.
 struct HistoryViewFilterKey: Equatable {
     let searchText: String
     let errorsOnly: Bool
@@ -10,6 +11,23 @@ struct HistoryViewFilterKey: Equatable {
     let dateRangeEnabled: Bool
     let startDate: Date
     let endDate: Date
+
+    /// Whether a model, error or date filter (not the search text) is narrowing the list.
+    var hasActiveFilters: Bool {
+        errorsOnly || selectedModel != nil || dateRangeEnabled
+    }
+
+    /// The shared query, with dates expanded to whole local days by the shared day policy.
+    func query(calendar: Calendar = .current) -> HistorySearchQuery {
+        HistorySearchQuery(
+            searchText: searchText,
+            modelIdentifiers: selectedModel.map { [$0] } ?? [],
+            includeErrorsOnly: errorsOnly,
+            dateRange: dateRangeEnabled
+                ? HistorySearchQuery.normalizedDayRange(from: startDate, through: endDate, calendar: calendar)
+                : nil
+        )
+    }
 }
 
 /// Derived rows belong to the view lifecycle and rebuild only from emitted rows or filter changes.

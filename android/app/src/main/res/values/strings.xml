@@ -272,6 +272,20 @@
     <string name="action_play_recording">Play</string>
     <string name="action_stop_playback">Stop</string>
     <string name="history_play_failed">This recording can\'t be played.</string>
+    <string name="history_search_label">Search transcripts or models</string>
+    <string name="history_search_clear">Clear History search</string>
+    <string name="history_filter_model">Model: %1$s</string>
+    <string name="history_filter_all_models">All models</string>
+    <string name="history_filter_errors_only">Errors only</string>
+    <string name="history_filter_from">From: %1$s</string>
+    <string name="history_filter_through">To: %1$s</string>
+    <string name="history_filter_any_day">Any day</string>
+    <string name="history_filter_clear">Clear filters</string>
+    <plurals name="history_filter_shown">
+        <item quantity="one">Showing %1$d of %2$d dictation</item>
+        <item quantity="other">Showing %1$d of %2$d dictations</item>
+    </plurals>
+    <string name="history_filter_no_matches">No dictations match your search and filters.</string>
     <string name="failure_missing_key">Add a cloud API key in Settings to transcribe audio files.</string>
     <string name="failure_audio_too_large">The audio file is larger than the 25 MB the cloud providers accept.</string>
     <string name="failure_unsupported_audio">This audio format is not supported. Share MP3, M4A, WAV, OGG, WebM or FLAC.</string>

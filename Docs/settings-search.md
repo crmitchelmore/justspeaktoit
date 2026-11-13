@@ -58,6 +58,23 @@ Hosts render from the catalogue. They don't keep their own lists:
 typo tolerance, completions, recents and catalogue invariants (unique IDs and
 titles, and each setting key owned once per platform).
 
+## Raw configuration schema
+
+`SettingsSchema` (`Sources/SpeakCore/SettingsConfiguration/`) describes every
+persisted macOS setting for the raw editor (Settings › General › Advanced ›
+**Edit raw configuration**) and the `get_configuration` / `set_configuration`
+automation tools. Its keys are the same property names as `settingKeys` here,
+and each field records the type, default, allowed values or range, platforms,
+and whether it is read-only or sensitive.
+
+When you add a persisted macOS setting, also add a `SettingsSchema+macOS.swift`
+field and an `AppSettingsConfiguration` binding.
+`Tests/SpeakAppTests/AppSettingsConfigurationTests.swift` fails when an
+`@Published` setting has no schema field (unless exempted there with a reason),
+a schema key has no binding, a default disagrees with a fresh install or an
+allowed value is rejected by the app. Secrets never enter the schema: API keys
+are exported only as `apiKeys.<id>: true|false`.
+
 ## Accessibility
 
 Result rows are single accessible buttons labelled with the title and page,

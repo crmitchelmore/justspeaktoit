@@ -388,6 +388,21 @@ sessions:
           - "Open each picker again."
         expected: "Neither picker has an OpenRouter drill-in row. Each Browse OpenRouter models\u2026 button opens a searchable list with provider and price filters and a Refresh button, each model opens a page with its pricing, and choosing one closes the sheet. Each picker then shows OpenRouter \u203a the chosen model, as the voice picker does."
         final_gate: true
+      - id: "mac-raw-configuration-editor"
+        issues:
+          - 1546
+        title: "Raw configuration editor and speak config tools validate and apply settings safely"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes #1546, with the speak CLI installed"
+        steps:
+          - "Open Settings \u203a General \u203a Advanced and click Edit raw configuration\u2026; check that apiKeys shows only true or false for each provider."
+          - "Change ttsSpeed to 9 and appearance to \"sepia\", click Apply, and listen with VoiceOver on: both errors are announced with their settings.<key> path and nothing changes."
+          - "Set ttsSpeed to 1.2, click Apply, close the sheet and check Voice Output shows speed 1.2. Export\u2026 to a file, Reset to Defaults, Apply, then Import\u2026 the file and Apply: your settings come back."
+          - "With automation on and Allow automation to change settings off, run speak config set ttsSpeed=1.1: it is refused. Run it again with --dry-run: it reports the change without applying it."
+          - "Turn Allow automation to change settings on, run speak config set ttsSpeed=1.1 showCompactHUD=true, then speak config get --prefix tts."
+        expected: "Invalid edits change nothing and every error is announced; valid edits, export/import and reset round-trip. CLI writes are refused until the opt-in is on, dry runs always work, and get shows the new values with no API key material."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"

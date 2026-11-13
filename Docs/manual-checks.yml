@@ -915,6 +915,23 @@ sessions:
           - "Deny microphone access on a test installation and confirm the app explains how to recover without claiming it is recording."
         expected: "Both devices expose the recording control, complete local and review-provider transcription, show recording state, stop cleanly and save one item per completed recording. Denied access is recoverable. This supplies device evidence for the historical July review findings, not App Store approval."
         final_gate: false
+      - id: "ipad-transcribe-control-first-run"
+        issues:
+          - 1598
+        title: "iPad: Transcribe is visible in every layout and works with no API key"
+        minutes: 6
+        core: true
+        build: "TestFlight Just Speak to It Alpha that includes the App Review iPad fix (labelled Transcribe button)"
+        prerequisites:
+          - "An iPad on iPadOS 26 or later with a fresh test installation (delete the app first); no API keys entered."
+        steps:
+          - "Open the app in portrait and look at the bottom of the main screen, then rotate to landscape."
+          - "Open Safari beside it in Split View (or Stage Manager), then resize the app to one-third and to half width."
+          - "Tap Transcribe, allow the Microphone and Speech Recognition prompts, say a fictional sentence and tap Stop."
+          - "Open Settings \u203a Recording & Shortcuts with Live Activities on, and Settings \u203a Transcription; read the footnotes."
+          - "In iOS Settings turn the app's Microphone access off, return and tap Transcribe."
+        expected: "A button labelled Transcribe with a microphone icon is visible at the bottom in portrait, landscape and every Split View width. With no API key the first recording uses on-device Apple Speech and produces text with no error (if Apple's speech assets are still downloading, the alert offers Prepare Apple Model, not a generic Error). No copy mentions this iPhone or the Dynamic Island. With access off, the alert is titled Can't Start Recording and offers Open Settings."
+        final_gate: true
       - id: "owner-iphone-store-privacy-and-review-metadata"
         issues:
           - 1468

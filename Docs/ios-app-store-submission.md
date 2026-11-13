@@ -211,7 +211,7 @@ the current provider list. Replace them with something like this:
 > Just Speak to It does not require an account, and no demo account is needed.
 >
 > Transcription without any API key: Apple Speech runs on device and is the
-> default. Tap the microphone button to start and stop a recording. Cloud providers are
+> default. Tap **Transcribe** at the bottom of the main screen to start, and Stop to finish. Cloud providers are
 > optional. Dedicated review credentials and the matching model selection steps
 > are supplied separately in private App Review information.
 >
@@ -340,6 +340,85 @@ For local release/reconciliation authentication, see the
 Authenticate CLI access with the configured service account or desktop-app
 integration before fresh readback; configured references alone do not prove
 credential or API access.
+
+## App Review rejection replies
+
+Paste these into Resolution Center for the matching submission. Each one
+describes the change made in the build being resubmitted, so upload a new
+build containing it first, and replace the App Review Information notes with the
+text in [App Review Information](#app-review-information) (iOS) or the
+`scripts/mac-review-notes.rb` text (Mac).
+
+### iOS 2.23.5, Guideline 4 — Design (Transcribe button on iPad)
+
+What changed: the build Apple reviewed put recording behind a single
+**Transcribe** tab. On iPadOS 18 and later a `TabView` draws its tabs as a
+floating bar at the top of the window, so the control Apple looked for was not
+where it sits on iPhone. The tab bar has since been removed. The main screen now
+has one primary button, labelled **Transcribe** with a microphone icon, pinned to
+the bottom of the screen. It is not inside a tab bar, so it stays there in every
+size class, in both orientations and in Split View and Stage Manager. Its title comes from the shared `ForegroundRecordControl`
+policy, which `ForegroundRecordControlTests` covers. The app no longer nests two
+`NavigationStack`s around the main screen. The fix has not yet been tried on an
+iPad: complete the `ipad-transcribe-control-first-run` manual check on the
+candidate build before you send either iOS reply.
+
+> Thank you for the review. In the build you reviewed, recording sat behind a
+> single "Transcribe" tab, which iPadOS draws as a tab bar at the top of the
+> window. We have removed the tab bar. The main screen now has one button,
+> labelled "Transcribe" with a microphone icon, fixed to the bottom of the screen
+> on iPhone and iPad, in portrait and landscape, and in Split View and Stage
+> Manager. To try it: open the app and tap Transcribe at the bottom of the
+> screen; tap Stop to finish.
+
+### iOS 2.23.5, Guideline 2.1(a) — App Completeness (error on Microphone tap)
+
+What changed: transcription needs no account or API key; on-device Apple Speech
+is the default model. The first tap asks for microphone and speech recognition
+access. If Apple's on-device speech assets are not installed yet, the app falls
+back to Apple's speech recogniser. If that recogniser is unavailable as well, the
+alert offers **Prepare Apple Model**, which downloads the assets. If access is
+denied, the alert explains this and offers **Open Settings**. Start-failure
+alerts are titled **Can't Start Recording**, not a bare "Error". iPad copy no
+longer mentions "this iPhone" or the Dynamic Island (#1598, fixed in #1645).
+
+> Thank you for the review. Just Speak to It needs no account or API key:
+> on-device Apple Speech is the default. To test: open the app, tap Transcribe
+> at the bottom of the screen, allow microphone and speech recognition access
+> when asked, speak a sentence, then tap Stop. The transcript appears on screen
+> and in History. If access is declined, the app explains why it cannot record
+> and offers a button to open Settings. If the device has not yet downloaded
+> Apple's on-device speech model, the app uses Apple's speech recogniser instead,
+> or offers a "Prepare Apple Model" button that downloads it. Optional cloud
+> providers, and the credentials for them, are described in App Review
+> Information.
+
+### Mac App Store — `com.apple.security.network.server`
+
+Applies to the stable record (`com.justspeaktoit.mac.appstore`) and the Alpha
+record. Apple documents the entitlement as allowing "other computers to
+initiate network connections to your sandboxed app"
+([network.server](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.network.server)).
+Only the direct-download build's **Send to Mac** receiver listened (a
+Network.framework Bonjour listener for `_speakalpha._tcp`), and no shipping
+iPhone build sends to it. The App Store build therefore drops the entitlement,
+`NSLocalNetworkUsageDescription` and `NSBonjourServices`, and compiles out the
+receiver, its Settings card and its search entry (`SendToMacAvailability`).
+`EntitlementsTests`, `AppStoreInfoPlistTests` and
+`scripts/verify-release-train-archive.py` fail if any of them returns. The local
+automation interface uses a UNIX domain socket in the app container, which needs
+no network entitlement. `scripts/mac-review-notes.rb` adds the network
+explanation below to the App Review Information notes and replaces the earlier
+listener note.
+
+> Thank you for the review. The new build removes the
+> com.apple.security.network.server entitlement. The Mac App Store version
+> accepts no incoming network connections: it has no network listener, Bonjour
+> service or "Send to Mac" receiver, which is a feature of the direct-download
+> version only. The app keeps com.apple.security.network.client for outgoing
+> HTTPS and WebSocket connections to the speech-to-text and text-processing
+> providers the user chooses in Settings. With the default on-device Apple Speech
+> model, transcription needs no account, API key or network connection.
 
 ## Regression cover
 

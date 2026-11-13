@@ -142,8 +142,8 @@ extension TranscriptionRecordingService {
         // Before the microphone opens: a named model this device cannot run —
         // no iOS route for the mode this run will use, or no credential for it
         // — refuses the whole capture rather than recording and failing later.
-        // Batch and live are both covered here; the live path additionally has
-        // its own on-device-fallback check below.
+        // Batch and live are both covered here; ordinary live runs are checked
+        // below, after offline routing.
         try refuseUnusableRequestedModel(
             runParameters.modelID,
             usesBatch: usesBatchTranscription,
@@ -163,7 +163,7 @@ extension TranscriptionRecordingService {
         )
 
         if !usesBatchTranscription && keyboardProfile == nil {
-            try resolveLiveModelHonouringRequest(
+            try requireLiveModelAvailable(
                 settings: settings,
                 // Either source counts as the caller naming a model: a
                 // Shortcut parameter (#1076) or a capture link's `model=`
@@ -182,9 +182,7 @@ extension TranscriptionRecordingService {
         let appIsActive = dependencies.applicationState() == .active
         let activityProvider = providerFallbackNotice == OfflineCaptureRouting.fallbackNotice
             ? "\(modelDisplayName) (Offline)"
-            : providerFallbackNotice == nil
-                ? modelDisplayName
-                : "\(modelDisplayName) (\(settings.credentialFallbackReason))"
+            : modelDisplayName
         let wantsActivity = appIsActive ? settings.liveActivitiesEnabled : requiresLiveActivity
         let activityStarted = wantsActivity
             ? activityManager.startActivity(provider: activityProvider, initialStatus: .arming)

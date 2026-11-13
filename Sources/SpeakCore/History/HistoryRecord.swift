@@ -175,6 +175,26 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
         )
     }
 
+    /// Replaces the session-detail metadata a platform recorded locally
+    /// (models by phase, phase timestamps and trigger), keeping every other field.
+    public func replacingSessionDetails(
+        modelUsages: [ApplicationModelUsage], phaseTimestamps: ApplicationPhaseTimestamps?,
+        trigger: ApplicationHistoryTrigger?
+    ) -> Self {
+        Self(
+            id: self.id, createdAt: self.createdAt, updatedAt: self.updatedAt,
+            modelsUsed: self.modelsUsed, modelUsages: modelUsages,
+            rawTranscription: self.rawTranscription, postProcessedTranscription: self.postProcessedTranscription,
+            recordingDuration: self.recordingDuration, cost: self.cost, audioFileURL: self.audioFileURL,
+            networkExchanges: self.networkExchanges, events: self.events, phaseTimestamps: phaseTimestamps,
+            trigger: trigger, personalCorrections: self.personalCorrections, errors: self.errors,
+            source: self.source, postProcessingPrompt: self.postProcessingPrompt,
+            diagnosticContext: self.diagnosticContext, latency: self.latency, desktopHistory: self.desktopHistory,
+            model: self.model, wordCount: self.wordCount, originPlatform: self.originPlatform,
+            errorMessage: self.errorMessage, requestContext: self.requestContext, requestFailure: self.requestFailure
+        )
+    }
+
     enum CodingKeys: String, CodingKey {
         case schemaVersion
         case id

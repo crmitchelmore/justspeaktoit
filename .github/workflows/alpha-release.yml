@@ -149,6 +149,94 @@ jobs:
     with:
       manifest: ${{ needs.allocate.outputs.tag }}
     secrets: inherit
+  # Sideloadable Android beta: an upload-key-signed release APK of the manifest
+  # source, attached to the Alpha and advertised through android-pointer.json on
+  # alpha-latest, which justspeaktoit.com/alpha/download/android resolves. It
+  # waits for mac-direct so the Alpha is public before the pointer moves to it.
+  android:
+    needs: [allocate, mac-direct]
+    if: needs.allocate.outputs.tag != '' && needs.allocate.outputs.green == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: android-release
+    concurrency:
+      group: android-alpha-pointer
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.allocate.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      APK: JustSpeakToIt-android.apk
+    steps:
+      - name: Resolve manifest source
+        id: source
+        run: |
+          gh release download "$TAG" --repo "$REPO" --pattern release-manifest.json --dir "$RUNNER_TEMP"
+          echo "sha=$(jq -er .source "$RUNNER_TEMP/release-manifest.json")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      # No shared cache in a job that holds the signing key.
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          validate-wrappers: true
+          cache-disabled: true
+      - name: Build signed release APK
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          JSTI_MAVEN_MIRROR: ${{ vars.JSTI_MAVEN_MIRROR }}
+          JSTI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          JSTI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          JSTI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        # Same version code scheme as android.yml, so sideloaded builds upgrade in place.
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::notice::No upload keystore in the android-release environment; no Android Alpha."
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload.jks"
+          export JSTI_ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/upload.jks"
+          export JSTI_ANDROID_VERSION_CODE=$(( $(date -u +%s) - 1767225600 ))
+          echo "::notice::versionCode $JSTI_ANDROID_VERSION_CODE"
+          ./gradlew --stacktrace assembleRelease
+          rm -f "$RUNNER_TEMP/upload.jks"
+          apk=app/build/outputs/apk/release/app-release.apk
+          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
+          certs="$("$apksigner" verify --print-certs "$apk")"
+          if grep -q 'CN=Android Debug' <<<"$certs"; then
+            echo "::error::$apk is signed with a debug certificate"
+            exit 1
+          fi
+          cp "$apk" "$RUNNER_TEMP/$APK"
+          echo "$JSTI_ANDROID_VERSION_CODE" > "$RUNNER_TEMP/version-code"
+      - name: Attach APK and advance the Android pointer
+        run: |
+          [ -f "$RUNNER_TEMP/$APK" ] || exit 0
+          gh release upload "$TAG" "$RUNNER_TEMP/$APK" --repo "$REPO" --clobber
+          mkdir -p "$RUNNER_TEMP/current"
+          current=0
+          if gh release download alpha-latest --repo "$REPO" --pattern android-pointer.json --dir "$RUNNER_TEMP/current" 2>/dev/null; then
+            current=$(jq -r '.tag // ""' "$RUNNER_TEMP/current/android-pointer.json" | sed -n 's/^alpha-build-\([0-9]*\)$/\1/p')
+          fi
+          if [ "${TAG#alpha-build-}" -le "${current:-0}" ]; then
+            echo "::notice::android-pointer.json already names alpha-build-$current; leaving it."
+            exit 0
+          fi
+          jq -n --arg tag "$TAG" --arg sha256 "$(sha256sum "$RUNNER_TEMP/$APK" | cut -d' ' -f1)" \
+            --argjson versionCode "$(cat "$RUNNER_TEMP/version-code")" \
+            '{schemaVersion: 1, tag: $tag, asset: env.APK, versionCode: $versionCode, sha256: $sha256}' \
+            > "$RUNNER_TEMP/android-pointer.json"
+          gh release upload alpha-latest "$RUNNER_TEMP/android-pointer.json" --repo "$REPO" --clobber
   # Keeps owner-nominated testers in Public Alpha after each iOS upload. The
   # address list is read only here, behind the main-only environment.
   ios-testers:

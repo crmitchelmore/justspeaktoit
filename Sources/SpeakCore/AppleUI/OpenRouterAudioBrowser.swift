@@ -3,9 +3,9 @@ import SwiftUI
 /// One live catalogue and selection flow for both apps. Discovery never uploads audio or text.
 @MainActor
 public struct OpenRouterAudioBrowser: View {
-    @Environment(\.dismiss) private var dismiss
     @StateObject private var catalog: OpenRouterAudioCatalog
-    @State private var filter: OpenRouterAudioFilter
+    @State private var capability: OpenRouterAudioCapability
+    @Environment(\.dismiss) private var dismiss
     private let apiKeyProvider: @Sendable () async -> String?
     private let selectedTranscriptionID: String?
     private let selectedSpeechID: String?
@@ -26,125 +26,74 @@ public struct OpenRouterAudioBrowser: View {
         self.onSelectTranscription = onSelectTranscription
         self.onSelectSpeech = onSelectSpeech
         _catalog = StateObject(wrappedValue: OpenRouterAudioCatalog(apiKeyProvider: apiKeyProvider))
-        _filter = State(initialValue: OpenRouterAudioFilter(
-            capability: onSelectTranscription == nil ? .speech : initialCapability
-        ))
+        _capability = State(initialValue: onSelectTranscription == nil ? .speech : initialCapability)
     }
 
     public var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                controls.padding()
-                List {
-                    status
-                    ForEach(catalog.models.filter(filter.matches).sorted { $0.name < $1.name }) { model in
-                        NavigationLink {
-                            OpenRouterAudioModelDetail(
-                                model: model,
-                                capability: filter.capability,
-                                apiKeyProvider: apiKeyProvider,
-                                selectedSpeechID: selectedSpeechID
-                            ) { identifier in
-                                if filter.capability == .transcription {
-                                    onSelectTranscription?(identifier)
-                                } else {
-                                    onSelectSpeech?(identifier)
-                                }
-                                dismiss()
-                            }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(model.name).font(.headline)
-                                Text(model.id).font(.caption).foregroundStyle(.secondary)
-                                if isSelected(model) {
-                                    Label("Selected", systemImage: "checkmark.circle.fill")
-                                        .font(.caption)
-                                }
-                            }
-                        }
+        OpenRouterModelBrowser(
+            title: "OpenRouter audio models",
+            intro: "Use your OpenRouter key for cloud transcription and speech. "
+                + "Browsing downloads model metadata only.",
+            items: catalog.models(for: capability).sorted { $0.name < $1.name },
+            status: OpenRouterBrowserStatus(
+                isRefreshing: catalog.isRefreshing, errorMessage: catalog.errorMessage,
+                lastUpdated: catalog.lastUpdated, isStale: catalog.isStale, missingSelection: missingSelection
+            ),
+            canRefresh: true,
+            embedded: false,
+            searchText: OpenRouterAudioFilter.searchText(for:),
+            provider: OpenRouterAudioFilter.provider(for:),
+            hasZeroPrices: OpenRouterAudioFilter.hasZeroPrices,
+            name: \.name,
+            subtitle: \.id,
+            isSelected: isSelected,
+            refresh: { force in await catalog.refresh(force: force) },
+            onBack: nil,
+            header: { capabilityPicker },
+            detail: { model in
+                OpenRouterAudioModelDetail(
+                    model: model,
+                    capability: capability,
+                    apiKeyProvider: apiKeyProvider,
+                    selectedSpeechID: selectedSpeechID
+                ) { identifier in
+                    if capability == .transcription {
+                        onSelectTranscription?(identifier)
+                    } else {
+                        onSelectSpeech?(identifier)
                     }
+                    dismiss()
                 }
             }
-            .navigationTitle("OpenRouter audio models")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Refresh", systemImage: "arrow.clockwise") {
-                        Task { await catalog.refresh(force: true) }
-                    }
-                    .disabled(catalog.isRefreshing)
-                }
-            }
-            .task { await catalog.refresh() }
-        }
-        #if os(macOS)
-        .frame(minWidth: 560, idealWidth: 720, minHeight: 500, idealHeight: 680)
-        #endif
-    }
-
-    private var controls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Use your OpenRouter key for cloud transcription and speech. Browsing downloads model metadata only.")
-                .font(.caption).foregroundStyle(.secondary)
-            Picker("Capability", selection: $filter.capability) {
-                if onSelectTranscription != nil {
-                    Text("Speech to text").tag(OpenRouterAudioCapability.transcription)
-                }
-                if onSelectSpeech != nil {
-                    Text("Text to speech").tag(OpenRouterAudioCapability.speech)
-                }
-            }
-            .pickerStyle(.segmented)
-            TextField("Search models", text: $filter.query).textFieldStyle(.roundedBorder)
-            HStack {
-                Picker("Provider", selection: $filter.provider) {
-                    Text("All providers").tag("")
-                    ForEach(providers, id: \.self) { Text($0).tag($0) }
-                }
-                Toggle("Zero listed prices", isOn: $filter.freeOnly)
-            }
-        }
+        )
     }
 
     @ViewBuilder
-    private var status: some View {
-        if catalog.isRefreshing { ProgressView("Refreshing models…") }
-        if let error = catalog.errorMessage { Text(error).foregroundStyle(.orange) }
-        if let updated = catalog.lastUpdated {
-            Text("\(catalog.isStale ? "Cached, refresh needed" : "Updated"): \(updated.formatted())")
-                .font(.caption).foregroundStyle(.secondary)
+    private var capabilityPicker: some View {
+        if onSelectTranscription != nil, onSelectSpeech != nil {
+            Picker("Capability", selection: $capability) {
+                Text("Speech to text").tag(OpenRouterAudioCapability.transcription)
+                Text("Text to speech").tag(OpenRouterAudioCapability.speech)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("openRouterBrowser.capability")
         }
-        if let missing = missingSelection {
-            Label("Selected model is unavailable in this catalogue: \(missing). Your selection is retained.",
-                  systemImage: "exclamationmark.triangle")
-                .font(.caption).foregroundStyle(.orange)
-        }
-        if !catalog.isRefreshing, catalog.models.filter(filter.matches).isEmpty {
-            Text("No matching models. Change the filters or refresh the catalogue.")
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var providers: [String] {
-        Array(Set(catalog.models.map(OpenRouterAudioFilter.provider))).sorted()
     }
 
     private func isSelected(_ model: OpenRouterAudioModel) -> Bool {
-        if filter.capability == .transcription { return selectedTranscriptionID == model.transcriptionSelectionID }
+        if capability == .transcription { return selectedTranscriptionID == model.transcriptionSelectionID }
         return selectedSpeechID.flatMap(OpenRouterSpeechSelection.init(id:))?.modelID == model.id
     }
 
     private var missingSelection: String? {
         let identifier: String?
-        if filter.capability == .transcription {
+        if capability == .transcription {
             identifier = selectedTranscriptionID.flatMap(OpenRouterTranscriptionSelection.modelID(from:))
         } else {
             identifier = selectedSpeechID.flatMap(OpenRouterSpeechSelection.init(id:))?.modelID
         }
         guard let identifier, catalog.lastUpdated != nil,
-              !catalog.models(for: filter.capability).contains(where: { $0.id == identifier }) else { return nil }
+              !catalog.models(for: capability).contains(where: { $0.id == identifier }) else { return nil }
         return identifier
     }
 }

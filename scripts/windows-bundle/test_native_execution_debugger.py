@@ -656,7 +656,9 @@ class DiagnosticBootstrapTests(unittest.TestCase):
                 os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
                 str(HERE / "test-failure-diagnostic-bootstrap.ps1")],
                 cwd=directory, env=environment, capture_output=True, timeout=30, check=False)
-        self.assertEqual(completed.returncode, 0, "actual PowerShell bootstrap fake checks failed")
+        self.assertEqual(completed.returncode, 0, "actual PowerShell bootstrap fake checks failed:\n"
+                         + completed.stdout.decode(errors="replace")[-4000:]
+                         + completed.stderr.decode(errors="replace")[-4000:])
         self.assertEqual(completed.stdout.strip(), b"Diagnostic bootstrap pure-fake checks passed.")
         self.assertEqual(completed.stderr, b"")
 

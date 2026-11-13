@@ -52,6 +52,43 @@ public enum AutomationCommandDispatcher {
         return speech
     }
 
+    private static func configurationHost(
+        _ host: some AutomationCommandHost
+    ) throws -> any AutomationConfigurationHost {
+        guard let configuration = host as? any AutomationConfigurationHost else {
+            throw AutomationError(code: .unsupportedCommand, message: "This app cannot read or change its settings.")
+        }
+        return configuration
+    }
+
+    private static func speechResult(
+        for request: AutomationRequest,
+        host: any AutomationSpeechHost
+    ) async throws -> AutomationResult {
+        if request.command == .speakText {
+            return try await host.automationSpeak(AutomationRequestPolicy.speech(for: request))
+        }
+        var listed = AutomationResult()
+        listed.voices = try await host.automationVoices().filter { voice in
+            request.provider.map {
+                voice.provider.caseInsensitiveCompare($0) == .orderedSame
+                    || voice.providerName.caseInsensitiveCompare($0) == .orderedSame
+            } ?? true
+        }
+        return listed
+    }
+
+    private static func configurationResult(
+        for request: AutomationRequest,
+        host: any AutomationConfigurationHost
+    ) async throws -> AutomationResult {
+        if request.command == .getConfiguration {
+            return try await host.automationConfiguration(keys: request.keys, prefix: request.prefix)
+        }
+        return try await host.automationSetConfiguration(
+            (request.changes ?? [:]).mapValues(\.storage), dryRun: request.dryRun ?? false)
+    }
+
     public static func response(
         to request: AutomationRequest,
         host: some AutomationCommandHost
@@ -74,17 +111,10 @@ public enum AutomationCommandDispatcher {
                 result = try await host.automationStartDictation()
             case .stopDictation:
                 result = try await host.automationStopDictation()
-            case .speakText:
-                result = try await Self.speechHost(host).automationSpeak(AutomationRequestPolicy.speech(for: request))
-            case .listVoices:
-                var listed = AutomationResult()
-                listed.voices = try await Self.speechHost(host).automationVoices().filter { voice in
-                    request.provider.map {
-                        voice.provider.caseInsensitiveCompare($0) == .orderedSame
-                            || voice.providerName.caseInsensitiveCompare($0) == .orderedSame
-                    } ?? true
-                }
-                result = listed
+            case .speakText, .listVoices:
+                result = try await Self.speechResult(for: request, host: Self.speechHost(host))
+            case .getConfiguration, .setConfiguration:
+                result = try await Self.configurationResult(for: request, host: Self.configurationHost(host))
             }
             return .success(id: request.id, command: request.command, result: result)
         } catch let error as AutomationError {

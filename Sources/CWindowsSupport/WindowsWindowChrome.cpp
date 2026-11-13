@@ -129,11 +129,33 @@ int appearance() { return chosenAppearance; }
 bool dark() { return chosenAppearance == 2 || (chosenAppearance == 0 && systemUsesDark()); }
 const Palette &palette() { return dark() ? darkPalette : lightPalette; }
 
+// A multiline edit asks for every key, so Tab never reaches dialog navigation
+// and a keyboard user is trapped in it. Read-only ones (transcripts, reports,
+// details) have nothing to type, so they give Tab back.
+static LRESULT CALLBACK readOnlyEditKeys(HWND control, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR,
+                                         DWORD_PTR) {
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(control, readOnlyEditKeys, 0);
+    LRESULT result = DefSubclassProc(control, message, wparam, lparam);
+    if (message == WM_GETDLGCODE && (GetWindowLongPtrW(control, GWL_STYLE) & ES_READONLY)) {
+        const MSG *key = reinterpret_cast<const MSG *>(lparam);
+        if (key && key->message == WM_KEYDOWN && key->wParam == VK_TAB)
+            result &= ~static_cast<LRESULT>(DLGC_WANTALLKEYS | DLGC_WANTTAB | DLGC_WANTMESSAGE);
+    }
+    return result;
+}
+
+bool releasesDialogKeys(HWND control) {
+    DWORD_PTR data = 0;
+    return GetWindowSubclass(control, readOnlyEditKeys, 0, &data) != FALSE;
+}
+
 void themeControl(HWND control) {
     if (!control) return;
     const bool useDark = dark();
     wchar_t kind[32] = {};
     GetClassNameW(control, kind, 32);
+    if (_wcsicmp(kind, L"EDIT") == 0 && (GetWindowLongPtrW(control, GWL_STYLE) & ES_MULTILINE))
+        SetWindowSubclass(control, readOnlyEditKeys, 0, 0);
     if (_wcsicmp(kind, L"COMBOBOX") == 0) {
         SetWindowTheme(control, useDark ? L"DarkMode_CFD" : nullptr, nullptr);
     } else if (_wcsicmp(kind, L"BUTTON") == 0) {
@@ -235,7 +257,8 @@ HWND createOwnedDialog(HWND owner, const wchar_t *className, WNDPROC procedure, 
 
 void rememberFocus(HWND window, WPARAM wparam, HWND &focus, int fallback) {
     if (LOWORD(wparam) == WA_INACTIVE) { focus = GetFocus(); return; }
-    SetFocus(focus && IsChild(window, focus) ? focus : GetDlgItem(window, fallback));
+    const bool usable = focus && IsChild(window, focus) && IsWindowVisible(focus) && IsWindowEnabled(focus);
+    SetFocus(usable ? focus : GetDlgItem(window, fallback));
 }
 
 void runModalDialog(HWND owner, HWND window, int focusID, void (*close)(HWND), const char *what,
@@ -260,7 +283,7 @@ void runModalDialog(HWND owner, HWND window, int focusID, void (*close)(HWND), c
 
 bool dialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT &result) {
     switch (message) {
-    case WM_CREATE: themeTitleBar(window); return false;
+    case WM_CREATE: themeTitleBar(window); jsti::accessibility::attach(window); return false;
     case WM_PARENTNOTIFY:
         if (LOWORD(wparam) == WM_CREATE) themeControl(reinterpret_cast<HWND>(lparam));
         return false;

@@ -76,6 +76,13 @@ public enum AppleLocalModels {
         return false
     }
 
+    /// Whether an audio format can carry audio at all. On macOS 27
+    /// `SpeechAnalyzer.bestAvailableAudioFormat` can return a non-nil format
+    /// with no channels and a zero sample rate (#1553); treat that as no format.
+    public static func isUsableAudioFormat(sampleRate: Double, channelCount: UInt32) -> Bool {
+        sampleRate > 0 && sampleRate.isFinite && channelCount > 0
+    }
+
     public static var supportsFoundationModels: Bool {
         #if canImport(FoundationModels) && !SPEAK_PORTABLE_CORE
         if #available(macOS 26.0, iOS 26.0, *) {
@@ -115,8 +122,8 @@ public enum AppleLocalModelError: LocalizedError {
         case .speechDetectorFailed:
             return "Apple's on-device speech detector stopped unexpectedly."
         case .speechDetectorUnavailable:
-            return "Hands-free dictation needs Apple's on-device speech detector, "
-                + "which isn't available on this device."
+            return "Hands-free dictation needs Apple's on-device speech recognition "
+                + "(macOS 26 or iOS 26 or later), which isn't available on this device."
         case .localeUnsupported(let identifier):
             return "Apple on-device speech recognition doesn't support the \(identifier) locale "
                 + "on this device."
@@ -141,7 +148,11 @@ public final class AppleSpeechAudioConverter: @unchecked Sendable {
     private let lock = NSLock()
 
     public init(sourceFormat: AVAudioFormat, targetFormat: AVAudioFormat) throws {
-        guard let converter = AVAudioConverter(from: sourceFormat, to: targetFormat) else {
+        guard AppleLocalModels.isUsableAudioFormat(
+            sampleRate: sourceFormat.sampleRate, channelCount: sourceFormat.channelCount
+        ), AppleLocalModels.isUsableAudioFormat(
+            sampleRate: targetFormat.sampleRate, channelCount: targetFormat.channelCount
+        ), let converter = AVAudioConverter(from: sourceFormat, to: targetFormat) else {
             throw AppleLocalModelError.compatibleAudioFormatUnavailable
         }
         self.converter = converter

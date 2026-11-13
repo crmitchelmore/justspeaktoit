@@ -139,6 +139,8 @@ public final class AppSettings: ObservableObject {
     let defaults: UserDefaults
     let secrets: AppSettingsSecrets
     @Published public private(set) var credentialsAvailable = false
+    var lastPublishedKeyboardAvailability: TranscriptionModelAvailability?
+    var keyboardAvailabilityObservation: AnyCancellable?
 
     /// Opt-in (issue #999): re-transcribe offline on-device captures with the
     /// selected cloud batch model once the network returns. Off by default
@@ -188,9 +190,9 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(autoStartRecording, forKey: DefaultsKey.autoStartRecording.rawValue) }
     }
 
-    /// Hands-free dictation: recording is driven by Apple's on-device speech
-    /// detector rather than the record button. Off by default, and inert below
-    /// iOS 26 where `SpeechDetector` does not exist. The defaults key matches
+    /// Hands-free dictation: recording is driven by an on-device voice-activity
+    /// gate rather than the record button. Off by default, and inert below
+    /// iOS 26 where on-device SpeechAnalyzer capture does not exist. The defaults key matches
     /// macOS so the two platforms stay in step.
     @Published public var handsFreeDictationEnabled: Bool {
         didSet {

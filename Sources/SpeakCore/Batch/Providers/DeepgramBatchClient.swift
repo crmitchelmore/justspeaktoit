@@ -146,30 +146,12 @@ public struct DeepgramBatchClient: TranscriptionProvider {
             )
         }
 
-        let text = alternative.transcript
-        let segments: [TranscriptionSegment]
-
-        if let words = alternative.words, !words.isEmpty {
-            segments = words.map { word in
-                TranscriptionSegment(
-                    startTime: word.start,
-                    endTime: word.end,
-                    text: word.word
-                )
-            }
-        } else {
-            segments = [TranscriptionSegment(startTime: 0, endTime: duration, text: text)]
+        let segments = (alternative.words ?? []).map { word in
+            TranscriptionSegment(startTime: word.start, endTime: word.end, text: word.word)
         }
-
-        return TranscriptionResult(
-            text: text,
-            segments: segments,
-            confidence: alternative.confidence,
-            duration: duration,
-            modelIdentifier: model,
-            cost: nil,
-            rawPayload: String(data: payload, encoding: .utf8),
-            debugInfo: nil
+        return .batch(
+            text: alternative.transcript, segments: segments, confidence: alternative.confidence,
+            duration: duration, model: model, payload: payload
         )
     }
 

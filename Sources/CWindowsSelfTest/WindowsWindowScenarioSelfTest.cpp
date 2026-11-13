@@ -3,6 +3,7 @@
 #include "WindowsWindowSelfTestInternal.hpp"
 #include "../CWindowsSupport/WindowsWindowHistoryPage.hpp"
 #include "../CWindowsSupport/WindowsWindowModelsPage.hpp"
+#include <commctrl.h>
 
 namespace jsti_window {
 
@@ -235,6 +236,82 @@ bool settingsSearchSelfTest(HWND window) {
     okay = okay && !visible(settingsNoMatchID) && visible(navBaseID);
     state.callback = originalCallback;
     state.context = originalContext;
+    if (originalFocus && IsWindowVisible(originalFocus)) SetFocus(originalFocus);
+    return okay;
+}
+
+// Issue #1400: announcements have a provider UI Automation delivers from, the
+// results list has a name, the search reports its count, a read-only transcript
+// does not trap Tab, a sidebar page change moves focus to the new page, and
+// activation never restores focus to a hidden control.
+bool screenReaderSelfTest(HWND window, std::string &failure) {
+    const int originalPage = state.page;
+    HWND originalFocus = GetFocus();
+    bool okay = true;
+    auto expect = [&](bool condition, const char *message) {
+        if (okay && !condition) { okay = false; failure = message; }
+    };
+    expect(jsti::accessibility::attached(window),
+           "The main window serves no UI Automation provider, so announcements are dropped.");
+    expect(settingsSearchSummary(0) == L"No settings match" && settingsSearchSummary(1) == L"1 setting found" &&
+               settingsSearchSummary(12) == L"12 settings found",
+           "Settings search does not summarise its results for screen readers.");
+    const JSTISettingsSearchResult rows[] = {
+        {"Microphone", "General - The input device.", "settingsSearchResult.general.microphone"}};
+    // The query stays here: the host would otherwise answer it with real results.
+    const auto originalCallback = state.callback;
+    void *const originalContext = state.context;
+    state.callback = [](int, const char *, int, void *) {};
+    state.context = nullptr;
+    SetWindowTextW(GetDlgItem(window, settingsSearchID), L"mic");
+    jsti_window_set_settings_search_results(rows, 1);
+    // An unfocused list must not be sent LB_SETCURSEL: even -1 raises a focus
+    // event for a row, and screen readers speak it over the search box.
+    HWND results = GetDlgItem(window, settingsResultsID);
+    int selections = 0;
+    const SUBCLASSPROC countSelections = [](HWND list, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR,
+                                            DWORD_PTR data) -> LRESULT {
+        if (message == LB_SETCURSEL && GetFocus() != list) ++*reinterpret_cast<int *>(data);
+        return DefSubclassProc(list, message, wparam, lparam);
+    };
+    if (GetFocus() == results) SetFocus(GetDlgItem(window, settingsSearchID));
+    SetWindowSubclass(results, countSelections, 0x1400, reinterpret_cast<DWORD_PTR>(&selections));
+    SendMessageW(window, settingsSearchMessage, 0, 0);
+    RemoveWindowSubclass(results, countSelections, 0x1400);
+    expect(selections == 0, "Settings search sent the unfocused results list a selection, which is announced.");
+    std::string auditFailure;
+    expect((GetWindowLongW(GetDlgItem(window, settingsResultsID), GWL_STYLE) & WS_VISIBLE) != 0,
+           "Settings results did not open for the name check.");
+    expect(jsti::accessibility::audit(window, auditFailure) > 0, "The open settings results list has no name.");
+    // The results replace the sidebar, so Tab out of the search must restore
+    // the page buttons and land on the first, or forward Tab never reaches them.
+    SetFocus(results);
+    MSG forward{};
+    forward.hwnd = results; forward.message = WM_KEYDOWN; forward.wParam = VK_TAB;
+    expect(settingsSearchKeyMessage(window, forward) && GetFocus() == GetDlgItem(window, navBaseID) &&
+               (GetWindowLongW(GetDlgItem(window, navBaseID), GWL_STYLE) & WS_VISIBLE) != 0,
+           "Tab out of settings search skipped the sidebar pages it had hidden.");
+    closeSettingsSearch(window, true);
+    state.callback = originalCallback;
+    state.context = originalContext;
+    HWND transcript = GetDlgItem(window, transcriptID);
+    MSG tab{};
+    tab.hwnd = transcript; tab.message = WM_KEYDOWN; tab.wParam = VK_TAB;
+    const LRESULT code = SendMessageW(transcript, WM_GETDLGCODE, VK_TAB, reinterpret_cast<LPARAM>(&tab));
+    expect(jsti::chrome::releasesDialogKeys(transcript) &&
+               !(code & (DLGC_WANTTAB | DLGC_WANTALLKEYS | DLGC_WANTMESSAGE)),
+           "The read-only transcript still keeps Tab, trapping keyboard focus.");
+    showPage(window, dashboardPage);
+    SetFocus(GetDlgItem(window, navBaseID + dashboardPage));
+    showPage(window, historyPage);
+    expect(GetFocus() == GetDlgItem(window, navBaseID + historyPage),
+           "A page shortcut left focus on the previous sidebar entry.");
+    HWND remembered = GetDlgItem(window, transcriptID);
+    showPage(window, aboutPage);
+    jsti::chrome::rememberFocus(window, WA_ACTIVE, remembered, navBaseID + aboutPage);
+    expect(GetFocus() == GetDlgItem(window, navBaseID + aboutPage),
+           "Activation restored focus to a control hidden on another page.");
+    showPage(window, originalPage);
     if (originalFocus && IsWindowVisible(originalFocus)) SetFocus(originalFocus);
     return okay;
 }

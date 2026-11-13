@@ -26,6 +26,40 @@ gboolean sidebar_navigation_self_test(void) {
         g_strcmp0(gtk_label_get_text(GTK_LABEL(hint)), "Ctrl+1") == 0;
     show_page(JSTI_PAGE_HISTORY);
     okay = okay && sidebar_navigate(GDK_KEY_9, GDK_CONTROL_MASK, NULL) && ui.page == JSTI_PAGE_PROFILES;
+    /* Choosing a page from the collapsed sidebar moves focus off the now-hidden sidebar. */
+    const gboolean collapsed = adw_navigation_split_view_get_collapsed(ui.split);
+    adw_navigation_split_view_set_collapsed(ui.split, TRUE);
+    adw_navigation_split_view_set_show_content(ui.split, FALSE);
+    GtkWidget *sidebar_row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_DASHBOARD));
+    gtk_widget_grab_focus(sidebar_row);
+    const gboolean on_sidebar = gtk_root_get_focus(GTK_ROOT(ui.window)) == sidebar_row;
+    show_page(JSTI_PAGE_DASHBOARD);
+    GtkWidget *moved = gtk_root_get_focus(GTK_ROOT(ui.window));
+    okay = okay && on_sidebar && moved != NULL &&
+        gtk_widget_is_ancestor(moved, gtk_stack_get_visible_child(ui.pages));
+    /* Beside the content, a shortcut pressed on a sidebar row moves focus to the new
+     * row, and a page opened from settings search moves focus into that page. */
+    adw_navigation_split_view_set_collapsed(ui.split, FALSE);
+    gtk_widget_grab_focus(sidebar_row);
+    okay = okay && sidebar_navigate(GDK_KEY_9, GDK_CONTROL_MASK, sidebar_row) &&
+        gtk_root_get_focus(GTK_ROOT(ui.window)) ==
+            GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_PROFILES));
+    /* Beside the content the sidebar is one Tab stop: Tab leaves it without opening the next
+     * page, and Shift+Tab comes back to the shown page's row. */
+    GtkWidget *profiles_row = GTK_WIDGET(gtk_list_box_get_row_at_index(ui.sidebar, JSTI_PAGE_PROFILES));
+    gtk_widget_child_focus(GTK_WIDGET(ui.window), GTK_DIR_TAB_FORWARD);
+    GtkWidget *tabbed = gtk_root_get_focus(GTK_ROOT(ui.window));
+    okay = okay && tabbed != NULL && !gtk_widget_is_ancestor(tabbed, GTK_WIDGET(ui.sidebar)) &&
+        ui.page == JSTI_PAGE_PROFILES;
+    gtk_widget_child_focus(GTK_WIDGET(ui.window), GTK_DIR_TAB_BACKWARD);
+    okay = okay && gtk_root_get_focus(GTK_ROOT(ui.window)) == profiles_row && ui.page == JSTI_PAGE_PROFILES;
+    jsti_settings_search_focus();
+    GtkWidget *searching = gtk_root_get_focus(GTK_ROOT(ui.window));
+    show_page(JSTI_PAGE_DASHBOARD);
+    moved = gtk_root_get_focus(GTK_ROOT(ui.window));
+    okay = okay && searching != NULL && searching != moved && moved != NULL &&
+        gtk_widget_is_ancestor(moved, gtk_stack_get_visible_child(ui.pages));
+    adw_navigation_split_view_set_collapsed(ui.split, collapsed);
     show_page(JSTI_PAGE_HISTORY);
     const GdkModifierType blocked[] = { 0, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GDK_CONTROL_MASK | GDK_ALT_MASK,
                                        GDK_CONTROL_MASK | GDK_SUPER_MASK };
@@ -140,6 +174,73 @@ gboolean action_execution_self_test(void) {
 static guint command_wait_milliseconds(gint64 remaining) {
     if (remaining <= 0) return 0;
     return (guint)((MIN(remaining, 15 * G_TIME_SPAN_SECOND) + 999) / 1000);
+}
+
+/* An idle status notice is announced once, recording notices are left to state changes and the HUD, and the
+   record buttons hand keyboard focus to Cancel while transcribing and take it back afterwards. */
+gboolean status_notice_self_test(void) {
+    if (ui.state_announcement != 0) g_source_remove(ui.state_announcement);
+    ui.state_announcement = 0;
+    gchar *saved = g_strdup(gtk_label_get_text(ui.status));
+    const gint32 state = ui.state;
+    const gint page = ui.page;
+    ui.state = JSTI_STATE_IDLE;
+    Update notice = { .status = (gchar *)"Whisper Tiny downloaded and verified.", .state = -1 };
+    update_apply(&notice);
+    gboolean announced = ui.state_announcement != 0;
+    if (ui.state_announcement != 0) g_source_remove(ui.state_announcement);
+    ui.state_announcement = 0;
+    update_apply(&notice);
+    gboolean repeated = ui.state_announcement != 0;
+    ui.state = JSTI_STATE_WORKING;
+    Update transcribing = { .status = (gchar *)"Transcribing", .state = -1 };
+    update_apply(&transcribing);
+    gboolean chatty = ui.state_announcement != 0;
+    /* A state change speaks its own status, even after a later status-only update. */
+    ui.state = JSTI_STATE_IDLE;
+    Update recording = { .status = (gchar *)"Recording…", .state = JSTI_STATE_RECORDING };
+    update_apply(&recording);
+    Update warning = { .status = (gchar *)"Recording sounds unavailable.", .state = -1 };
+    update_apply(&warning);
+    gboolean kept = g_strcmp0(ui.status_announcement, "Recording…") == 0;
+    /* Stopping disables the focused record button; focus moves to Cancel and back. */
+    GtkWidget *record = GTK_WIDGET(dashboard_page()->record), *cancel = GTK_WIDGET(dashboard_page()->cancel);
+    show_page(JSTI_PAGE_DASHBOARD);
+    gtk_window_set_focus(ui.window, record);
+    Update working = { .state = JSTI_STATE_WORKING };
+    update_apply(&working);
+    gboolean to_cancel = gtk_root_get_focus(GTK_ROOT(ui.window)) == cancel;
+    Update idle = { .state = JSTI_STATE_IDLE };
+    update_apply(&idle);
+    gboolean to_record = gtk_root_get_focus(GTK_ROOT(ui.window)) == record;
+    GtkWidget *header = GTK_WIDGET(ui.header_record);
+    gtk_window_set_focus(ui.window, header);
+    update_apply(&working);
+    gboolean header_to_cancel = gtk_root_get_focus(GTK_ROOT(ui.window)) == cancel;
+    update_apply(&idle);
+    gboolean header_back = gtk_root_get_focus(GTK_ROOT(ui.window)) == header;
+    /* Return on Start Recording that leaves focus in place (no API key) keeps the focus ring visible
+     * after GTK's focus-visible timeout; typing a space in a text field does not force it on. */
+    gtk_window_set_focus(ui.window, record);
+    gtk_window_set_focus_visible(ui.window, FALSE);
+    focus_ring_key_released(NULL, GDK_KEY_Return, 36, 0, NULL);
+    gboolean ring_kept = gtk_window_get_focus_visible(ui.window);
+    jsti_settings_search_focus();
+    GtkWidget *field = gtk_root_get_focus(GTK_ROOT(ui.window));
+    gtk_window_set_focus_visible(ui.window, FALSE);
+    focus_ring_key_released(NULL, GDK_KEY_space, 65, 0, NULL);
+    gboolean typing_quiet = GTK_IS_EDITABLE(field) && !gtk_window_get_focus_visible(ui.window);
+    if (ui.state_announcement != 0) g_source_remove(ui.state_announcement);
+    ui.state_announcement = 0;
+    g_clear_pointer(&ui.status_announcement, g_free);
+    ui.status_announcement_is_state = FALSE;
+    ui.state = state;
+    refresh_actions();
+    show_page(page);
+    gtk_label_set_text(ui.status, saved);
+    g_free(saved);
+    return announced && !repeated && !chatty && kept && to_cancel && to_record && header_to_cancel && header_back &&
+        ring_kept && typing_quiet;
 }
 
 gboolean command_forwarding_self_test(void) {

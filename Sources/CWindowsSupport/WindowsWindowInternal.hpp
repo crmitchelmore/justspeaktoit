@@ -319,6 +319,8 @@ struct WindowState {
     std::vector<HWND> controls;
     // Pages and presentation (UI thread).
     int page = dashboardPage;
+    // The control focused when the window was last deactivated; restored on activation.
+    HWND focus = nullptr;
     SidebarBindings sidebar;
     std::unordered_map<int, bool> wanted;
     std::wstring headerSubtitle;
@@ -454,6 +456,8 @@ void emitSettingsSearch(HWND window);
 void closeSettingsSearch(HWND window, bool clear);
 void leaveSettingsSearch(HWND window);
 void applySettingsResults(HWND window);
+// What a screen reader hears after a settings search: the result count or "No settings match".
+std::wstring settingsSearchSummary(size_t count);
 bool settingsSearchKeyMessage(HWND window, const MSG &message);
 bool settingsSearchMouseMessage(HWND window, MSG &message);
 bool navigateSidebar(HWND window, int digit, bool exactControl, HWND focused);

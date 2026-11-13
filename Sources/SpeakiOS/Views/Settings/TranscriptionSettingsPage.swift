@@ -143,10 +143,10 @@ struct TranscriptionSettingsPage: View {
         } else if !hidesModelSelection {
             Picker("Remote Batch Model", selection: $settings.batchTranscriptionModel) {
                 if let modelID = OpenRouterTranscriptionSelection.modelID(from: settings.batchTranscriptionModel) {
-                    Text("OpenRouter · \(modelID)")
+                    Text(ModelPickerGrouping.openRouterTitle + ModelPickerGrouping.openRouterSeparator + modelID)
                         .tag(settings.batchTranscriptionModel)
                 }
-                ForEach(BatchModelGroup.grouped(AppSettings.supportedBatchModels)) { group in
+                ForEach(BatchModelGroup.grouped(nativeBatchModels)) { group in
                     Section(group.title) {
                         ForEach(group.options) { option in
                             modelOption(
@@ -160,7 +160,7 @@ struct TranscriptionSettingsPage: View {
             }
             .pickerStyle(.navigationLink)
             .accessibilityIdentifier("remoteBatchModelPicker")
-            IOSOpenRouterAudioSettingsLink()
+            IOSOpenRouterTranscriptionBrowserLink(settings: settings)
         }
 
         SettingsFootnote(
@@ -168,6 +168,15 @@ struct TranscriptionSettingsPage: View {
                 ? "**Streaming:** text appears while audio streams to the provider."
                 : "**Batch:** audio uploads when you stop, for a more complete transcript."
         )
+    }
+
+    /// OpenRouter batch models live behind Browse OpenRouter models…, as in the
+    /// voice picker; the saved one stays listed so the picker can show it.
+    private var nativeBatchModels: [ModelCatalog.Option] {
+        AppSettings.supportedBatchModels.filter { option in
+            !ModelPickerGrouping.isOpenRouter(option.id, purpose: .batchTranscription)
+                || option.id == settings.batchTranscriptionModel
+        }
     }
 
     @ViewBuilder

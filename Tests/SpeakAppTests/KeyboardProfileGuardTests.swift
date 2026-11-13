@@ -28,7 +28,7 @@ final class KeyboardProfileGuardTests: XCTestCase {
     }
 
     func testProfileMenuShowsRouteAndIsDisabledWhileBusy() throws {
-        // The profile menu lives in the keyboard's control row.
+        // The profile menu lives in the control row the root view composes.
         let controlRow = try source("JustSpeakKeyboard/KeyboardControlRow.swift")
 
         XCTAssertTrue(controlRow.contains("Menu {"))

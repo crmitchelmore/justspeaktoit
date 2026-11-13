@@ -29,8 +29,16 @@
 
 namespace jsti {
 namespace accessibility {
-// UI thread: speaks `text` through UI Automation notifications (Narrator, NVDA, JAWS).
+// UI thread: speaks `text` through UI Automation notifications (Narrator, NVDA, JAWS),
+// raised from the provider `attach` gives the element's top-level window.
 void announce(HWND element, const std::wstring &text, bool important);
+// Window's own thread: makes top-level `window` serve the provider announcements
+// are raised from. Call at creation so clients see it before the first announcement.
+void attach(HWND window);
+bool attached(HWND window);
+// Gives `control` an accessible name of its own (an MSAA/UIA annotation) when
+// no static label can precede it; the audit accepts it as labelled.
+bool name(HWND control, const wchar_t *text);
 // UI thread: checks that every shown, focusable child of `root` has a unique
 // AutomationId and an accessible name. Returns the number checked, or -1 with `failure`.
 int audit(HWND root, std::string &failure);

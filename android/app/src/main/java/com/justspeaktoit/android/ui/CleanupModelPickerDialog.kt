@@ -1,6 +1,5 @@
 package com.justspeaktoit.android.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +28,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -156,14 +156,14 @@ private fun OpenRouterRow(count: Int, selected: CleanupModel?, onOpen: () -> Uni
         modifier = Modifier
             .fillMaxWidth()
             .testTag(AutomationIds.CLEANUP_PICKER_OPENROUTER)
-            .clickable(role = Role.Button, onClick = onOpen)
-            .semantics(mergeDescendants = true) {
-                contentDescription = CloudProvider.OpenRouter.displayName + ", " + detail
-            }
+            // Selected state lets screen readers say which choice is active when it is an OpenRouter model.
+            .selectable(selected = selected != null, role = Role.Button, onClick = onOpen)
+            .semantics { contentDescription = CloudProvider.OpenRouter.displayName + ", " + detail }
             .padding(vertical = 12.dp),
     ) {
         RadioButton(selected = selected != null, onClick = null)
-        Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+        // The row's description already speaks this text; merging it too would read it twice.
+        Column(modifier = Modifier.padding(start = 12.dp).weight(1f).clearAndSetSemantics {}) {
             Text(CloudProvider.OpenRouter.displayName, style = MaterialTheme.typography.bodyLarge)
             Text(
                 detail,
@@ -171,6 +171,6 @@ private fun OpenRouterRow(count: Int, selected: CleanupModel?, onOpen: () -> Uni
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Text("›", style = MaterialTheme.typography.titleLarge)
+        Text("›", style = MaterialTheme.typography.titleLarge, modifier = Modifier.clearAndSetSemantics {})
     }
 }

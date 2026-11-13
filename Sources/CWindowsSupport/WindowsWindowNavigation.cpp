@@ -49,10 +49,15 @@ void showPage(HWND window, int page) {
     const int previous = state.page;
     if (previous != page) retireCleanupPreview();
     state.page = page;
-    // A control on the page being left keeps no keyboard focus.
+    // A control on the page being left keeps no keyboard focus, and focus on the
+    // sidebar (or nowhere) follows the page so a screen reader announces it.
     HWND focus = GetFocus();
     layout(window);
-    if (focus && IsChild(window, focus) && !IsWindowVisible(focus)) SetFocus(GetDlgItem(window, navBaseID + page));
+    const bool sidebar = focus && GetDlgCtrlID(focus) >= navBaseID && GetDlgCtrlID(focus) < navBaseID + pageCount &&
+        GetParent(focus) == window;
+    const bool hidden = focus && IsChild(window, focus) && !IsWindowVisible(focus);
+    if (hidden || sidebar || ((!focus || focus == window) && GetActiveWindow() == window))
+        SetFocus(GetDlgItem(window, navBaseID + page));
     for (int index : {previous, page}) InvalidateRect(GetDlgItem(window, navBaseID + index), nullptr, TRUE);
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
 }
@@ -140,7 +145,10 @@ void applySettingsResults(HWND window) {
         if (added == LB_ERR || added == LB_ERRSPACE) break;
         settingsSearch.shown.push_back(std::move(row));
     }
-    SendMessageW(list, LB_SETCURSEL, listFocused && !settingsSearch.shown.empty() ? 0 : static_cast<WPARAM>(-1), 0);
+    // LB_RESETCONTENT already cleared the selection. LB_SETCURSEL(-1) on an
+    // unfocused list raises a focus event for a row, which screen readers then
+    // speak while the user is still typing in the search box.
+    if (listFocused && !settingsSearch.shown.empty()) SendMessageW(list, LB_SETCURSEL, 0, 0);
     SendMessageW(list, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(list, nullptr, TRUE);
     if (listFocused && settingsSearch.shown.empty()) {
@@ -149,6 +157,18 @@ void applySettingsResults(HWND window) {
         settingsSearch.suppress = false;
     }
     refreshSettingsSearch(window);
+    // Typing gives no other cue that the results changed, so a screen reader
+    // hears the count (or that nothing matches) for each finished query.
+    HWND edit = GetDlgItem(window, settingsSearchID), focus = GetFocus();
+    if (settingsSearch.active && (focus == edit || focus == list) && GetWindowTextLengthW(edit) > 0) {
+        const size_t count = settingsSearch.shown.size();
+        jsti::accessibility::announce(edit, settingsSearchSummary(count), false);
+    }
+}
+
+std::wstring settingsSearchSummary(size_t count) {
+    if (count == 0) return L"No settings match";
+    return std::to_wstring(count) + (count == 1 ? L" setting found" : L" settings found");
 }
 
 // Clears and closes the search, then reports the chosen row; the host opens its
@@ -187,6 +207,16 @@ bool settingsSearchKeyMessage(HWND window, const MSG &message) {
     if (control || alt || windows) return false;
     HWND edit = GetDlgItem(window, settingsSearchID), list = GetDlgItem(window, settingsResultsID);
     const bool listed = IsWindowVisible(list) != FALSE && !settingsSearch.shown.empty();
+    // The results replace the sidebar's pages, so Tab onward from the search
+    // would skip them and forward Tab could never reach the sidebar. Leaving
+    // the search restores the pages first; the query stays for Shift+Tab back.
+    if (message.wParam == VK_TAB && !shift && settingsSearchOpen(window) &&
+        ((message.hwnd == edit && !listed) || message.hwnd == list)) {
+        closeSettingsSearch(window, false);
+        HWND next = GetNextDlgTabItem(window, message.hwnd, FALSE);
+        SetFocus(next && next != message.hwnd ? next : GetDlgItem(window, navBaseID));
+        return true;
+    }
     if (message.hwnd == edit) {
         switch (message.wParam) {
         case VK_DOWN:

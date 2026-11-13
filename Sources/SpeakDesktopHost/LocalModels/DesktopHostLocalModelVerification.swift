@@ -6,7 +6,7 @@ import SpeakDesktop
 // pinned SHA-256. The receipt and size checks are cheap and run before every
 // recognition; the platform runtime hashes the very bytes it loads and refuses
 // them unused when they differ, so no later change to the file can reach it.
-extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
+extension DesktopHostLocalModelHost where Platform: DesktopHostLocalModelPlatform {
     /// The runtime refused `spec`'s bytes. Deletes the model so Local models
     /// offers the download again, and returns the error the recording keeps.
     func discardMismatchedModel(_ spec: WhisperCppModel) -> DesktopHostError {

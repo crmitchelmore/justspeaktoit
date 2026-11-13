@@ -151,6 +151,8 @@ struct VoiceOutputControlsCard: View {
               .foregroundStyle(.secondary)
           }
           Slider(value: self.$settings.ttsSpeed, in: 0.5...2.0, step: 0.1)
+            .accessibilityLabel("Speed")
+            .accessibilityValue(String(format: "%.2fx", self.settings.ttsSpeed))
         }
 
         VStack(alignment: .leading, spacing: 8) {
@@ -163,6 +165,8 @@ struct VoiceOutputControlsCard: View {
               .foregroundStyle(.secondary)
           }
           Slider(value: self.$settings.ttsPitch, in: -12...12, step: 1)
+            .accessibilityLabel("Pitch")
+            .accessibilityValue("\(Int(self.settings.ttsPitch)) semitones")
         }
 
         Divider()

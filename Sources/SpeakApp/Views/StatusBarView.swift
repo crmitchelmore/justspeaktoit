@@ -271,6 +271,8 @@ final class StatusBarController {
     let appearance = Self.appearance(for: state, handsFree: mainManager.handsFreeState)
     // A stable name plus a state value lets VoiceOver and agents find the item in either icon mode.
     button.setAccessibilityLabel("Just Speak to It")
+    // VoiceOver names a status item by its title, which is the state text in Labelled mode.
+    button.setAccessibilityTitle("Just Speak to It")
     button.setAccessibilityValue(appearance.label)
 
     if appSettings.compactStatusBarIcon {

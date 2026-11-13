@@ -15,6 +15,7 @@ struct WatchCaptureStatusWidget: Widget {
         StaticConfiguration(kind: Self.kind, provider: WatchComplicationProvider()) { entry in
             WatchCaptureStatusView(entry: entry)
                 .containerBackground(.clear, for: .widget)
+                .widgetURL(WatchRecordingRequest.watchFaceLaunchURL)
         }
         .configurationDisplayName("Just Speak to It")
         .description("Status of your latest watch capture, and a tap to record another.")

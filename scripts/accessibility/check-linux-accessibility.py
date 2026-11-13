@@ -7,7 +7,11 @@ GTK_ACCESSIBLE_PROPERTY_LABEL on the same widget.
 
 GtkDropDown labels itself by its selected value, which outranks
 GTK_ACCESSIBLE_PROPERTY_LABEL, so a drop-down is named with
-jsti_accessible_set_name or a mnemonic label instead. See Docs/accessibility.md.
+jsti_accessible_set_name or a mnemonic label instead.
+
+GTK drops an announcement from a widget whose accessibility context is not
+realised yet, which is usual for child widgets, so announcements go through
+jsti_accessible_announce, which speaks through the window. See Docs/accessibility.md.
 """
 from __future__ import annotations
 
@@ -24,6 +28,9 @@ DROP_DOWN = re.compile(
     r"(?:(?P<target>[\w.\->\[\]]+)\s*=\s*(?:GTK_\w+\()?\s*)?\bgtk_drop_down_new(?:_from_strings)?\s*\("
 )
 DROP_DOWN_NAMED = re.compile(r"\b(?:jsti_accessible_set_name|gtk_label_set_mnemonic_widget)\s*\((?P<arguments>[^;]*)\)\s*;")
+RAW_ANNOUNCE = re.compile(r"\bgtk_accessible_announce\s*\(")
+# The helper that wraps gtk_accessible_announce.
+ANNOUNCE_HELPER_FILE = "LinuxWindowStyle.c"
 # Lines after a drop-down's construction that may hold its naming call.
 DROP_DOWN_WINDOW = 10
 
@@ -66,6 +73,10 @@ def violations(path: Path) -> list[str]:
         window = "\n".join(lines[line:line + DROP_DOWN_WINDOW])
         if not drop_down_named(match.group("target"), window):
             found.append(f"{path}:{line + 1}: drop-down needs jsti_accessible_set_name or a mnemonic label")
+    if path.name != ANNOUNCE_HELPER_FILE:
+        for match in RAW_ANNOUNCE.finditer(source):
+            line = source.count("\n", 0, match.start()) + 1
+            found.append(f"{path}:{line}: announce with jsti_accessible_announce, not gtk_accessible_announce")
     return found
 
 

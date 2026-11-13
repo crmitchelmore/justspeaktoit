@@ -4,6 +4,7 @@ import com.justspeaktoit.android.settings.SettingsSearchAsset
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -72,6 +73,15 @@ class CloudCatalogParityTest {
         val actual = CloudCatalog.cleanupModels.map { listOf(it.selectionId, it.displayName, it.provider.id, it.apiName) }
         assertEquals(expected, actual)
         assertEquals(CloudCatalog.CLEANUP_MODEL, CloudCatalog.cleanupModel(null).selectionId)
+    }
+
+    @Test
+    fun testCleanupModelSuccessors_matchTheGeneratedCatalogue() {
+        val successors = asset.getJSONObject("cleanupModelSuccessors")
+        assertTrue(successors.length() > 0)
+        successors.keys().forEach { removed ->
+            assertEquals(successors.getString(removed), CloudCatalog.cleanupModel(removed).selectionId)
+        }
     }
 
     @Test

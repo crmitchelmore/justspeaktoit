@@ -65,6 +65,13 @@ enum OfflineTranscriptUpgradePolicy {
             wordCount: text.split(whereSeparator: \.isWhitespace).count,
             originPlatform: item.originPlatform,
             errorMessage: item.errorMessage
+        ).withSessionDetails(
+            // The on-device transcription timings no longer describe this text.
+            modelUsages: [ApplicationModelUsage(modelIdentifier: model, phase: .transcriptionBatch)],
+            phaseTimestamps: item.phaseTimestamps.map {
+                ApplicationPhaseTimestamps(recordingStarted: $0.recordingStarted, recordingEnded: $0.recordingEnded)
+            },
+            trigger: item.trigger
         )
     }
 }

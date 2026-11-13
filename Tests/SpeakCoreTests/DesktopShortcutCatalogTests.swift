@@ -10,7 +10,8 @@ final class DesktopShortcutCatalogTests: XCTestCase {
             "openTranscriptionSettings", "openPostProcessingSettings", "openDataMigrationSettings",
             "openProfilesSettings", "openVoiceOutputSettings", "openPronunciationSettings", "openAPIKeysSettings",
             "openKeyboardSettings", "openPermissionsSettings", "openCompareModelsSettings", "openAboutSettings",
-            "quickVoice1", "quickVoice2", "quickVoice3", "pasteLastHistoryItem", "editSelectionByVoice"
+            "quickVoice1", "quickVoice2", "quickVoice3", "pasteLastHistoryItem", "editSelectionByVoice",
+            "openCommandPalette"
         ])
         XCTAssertEqual(DesktopShortcutBindings.preferenceKey, "customShortcutBindings")
     }

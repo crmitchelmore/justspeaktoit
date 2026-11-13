@@ -12,9 +12,18 @@ enum IOSIssueReporter {
         // Legacy error presence may describe another phase. Keep both facts;
         // these bounded observations can overlap and are not request counts.
         if item.errorMessage != nil { failures.append(.init(domain: .unknown)) }
+        // Catalogue-safe identifiers and relative timings only, as on the Mac.
+        var models = [item.model]
+        for usage in item.modelUsages ?? [] where !models.contains(usage.modelIdentifier) {
+            models.append(usage.modelIdentifier)
+        }
         return IOSIssueReportSnapshot(
-            context: item.requestContext, recordedModels: [.project(item.model)], observedHandoff: nil,
-            failures: failures
+            context: item.requestContext, recordedModels: models.prefix(8).map { .project($0) },
+            observedHandoff: nil, failures: failures,
+            events: HistoryDetailFormatting.diagnosticTimeline(
+                item.phaseTimestamps,
+                isLive: item.modelUsages?.contains { $0.phase == .transcriptionLive } == true
+            )
         )
     }
 
@@ -42,13 +51,15 @@ struct IOSIssueReportSnapshot {
 
     init(
         context: RequestDiagnosticContext?, recordedModels: [RequestDiagnosticContext.ModelSelection] = [],
-        observedHandoff: RequestDiagnosticContext?, failures: [RequestDiagnosticContext.Failure]
+        observedHandoff: RequestDiagnosticContext?, failures: [RequestDiagnosticContext.Failure],
+        events: [RequestDiagnosticContext.Event] = []
     ) {
         self.full = IssueDiagnosticReport(
-            context: context, recordedModels: recordedModels, failures: failures, observedHandoff: observedHandoff
+            context: context, recordedModels: recordedModels, failures: failures, events: events,
+            observedHandoff: observedHandoff
         )
         self.withoutDetails = IssueDiagnosticReport(
-            context: context, recordedModels: recordedModels, failures: failures,
+            context: context, recordedModels: recordedModels, failures: failures, events: events,
             omittedSections: Set(IssueDiagnosticReport.Section.allCases), observedHandoff: observedHandoff
         )
     }

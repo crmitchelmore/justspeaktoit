@@ -136,9 +136,18 @@ final class TransportConnection {
             SpeakLogger.transport.warning("Dropping connection: authenticate arrived before hello")
             return false
         }
-        guard PairingManager.shared.validatePairingCode(auth.pairingCode) else {
+        switch PairingManager.shared.attemptPairing(with: auth.pairingCode) {
+        case .accepted:
+            break
+        case .rejected:
             await self.send(.authResult(AuthResultMessage(success: false, errorMessage: "Invalid pairing code")))
             SpeakLogger.transport.warning("Authentication failed")
+            return false
+        case .lockedOut(let retryAfter):
+            let seconds = Int(retryAfter.rounded(.up))
+            let message = "Too many failed pairing attempts. Try again in \(seconds) seconds."
+            await self.send(.authResult(AuthResultMessage(success: false, errorMessage: message)))
+            SpeakLogger.transport.warning("Authentication refused: pairing locked out for \(seconds)s")
             return false
         }
 

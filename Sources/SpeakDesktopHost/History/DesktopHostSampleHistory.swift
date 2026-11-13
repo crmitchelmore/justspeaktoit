@@ -31,7 +31,7 @@ package enum DesktopHostSampleHistory {
                 + "then give one clear example",
             processed: "The idea for the opening paragraph came to me on the walk home. Start with the question, then "
                 + "give one clear example.",
-            postProcessingModel: "openai/gpt-5-mini", duration: 27, cost: Decimal(string: "0.0021"), failure: nil,
+            postProcessingModel: "openai/gpt-6-luna", duration: 27, cost: Decimal(string: "0.0021"), failure: nil,
             profile: "Writing"
         ),
         Sample(

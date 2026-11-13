@@ -168,29 +168,27 @@ extension TranscriptionRecordingService {
         throw CaptureParameterFailure.modelUnavailable
     }
 
-    /// Resolves the live model, refusing a silent substitution when the caller
-    /// asked for a specific one.
+    /// Refuses a live run whose model cannot run here (unsupported route or
+    /// missing key) instead of substituting on-device speech. Runs after
+    /// offline routing, whose visible fallback needs no key.
     ///
-    /// The configured model may fall back to on-device when its key is
-    /// missing. That is acceptable for the global setting — it is the app's
-    /// own choice and `providerFallbackNotice` publishes it — but a caller
-    /// that *named* a model has to be told, not handed a different one it
-    /// cannot see.
-    func resolveLiveModelHonouringRequest(
+    /// A caller that named a model keeps its ``CaptureParameterFailure`` so
+    /// the intent reports it as a parameter; otherwise the error names the
+    /// model and why it is unavailable.
+    func requireLiveModelAvailable(
         settings: AppSettings,
         requestedModelID: String?,
         run: UUID
     ) throws {
-        let substituted = resolveLiveModel(settings: settings)
-        guard substituted, requestedModelID != nil else { return }
-        unwindCancelledStart(outcome: .failed, run: run)
-        SpeakLogger.transcription.error(
-            """
-            Refusing capture: no API key for \(requestedModelID ?? "", privacy: .public), \
-            and a named model must not be silently replaced
-            """
-        )
-        throw CaptureParameterFailure.modelUnavailable
+        do {
+            try settings.requireTranscriptionAvailable(currentModel, usesBatch: false)
+        } catch {
+            unwindCancelledStart(outcome: .failed, run: run)
+            SpeakLogger.transcription.error(
+                "Refusing capture: \(self.currentModel, privacy: .public) is unavailable; not substituting"
+            )
+            throw requestedModelID == nil ? error : CaptureParameterFailure.modelUnavailable
+        }
     }
 
     /// Applies only a known-offline live decision. The selected preference is
@@ -230,39 +228,14 @@ extension TranscriptionRecordingService {
         }
     }
 
-    /// - Returns: whether the resolved model differs from the requested one,
-    ///   i.e. whether a silent substitution happened.
-    @discardableResult
-    func resolveLiveModel(settings: AppSettings) -> Bool {
-        let requestedModel = currentModel
-        let route = LiveTranscriptionRouting.route(for: currentModel)
-        currentModel = LiveTranscriptionRouting.resolvedModelID(
-            for: currentModel,
-            apiKey: route.map { settings.liveAPIKey(for: $0) }
-        )
-        if currentModel != requestedModel {
-            // Make the silent on-device fallback visible: publish it for
-            // the UI and log it so a "worse than usual" session is
-            // diagnosable.
-            providerFallbackNotice = "Using \(modelDisplayName) (\(settings.credentialFallbackReason))"
-            SpeakLogger.transcription.warning(
-                """
-                \(settings.credentialFallbackReason, privacy: .public) for \(requestedModel, privacy: .public); \
-                falling back to \(self.currentModel, privacy: .public)
-                """
-            )
-            return true
-        }
-        return false
-    }
-
     func validateCredentialAvailability(
         settings: AppSettings,
         usesBatchTranscription: Bool,
         keyboardProfile: KeyboardDictationProfileOption?,
         run: UUID
     ) throws {
-        // Ordinary streaming retains its visible Apple Speech fallback.
+        // Ordinary streaming is checked after offline routing, in
+        // `requireLiveModelAvailable`, so an offline on-device run needs no key.
         guard usesBatchTranscription || keyboardProfile != nil else { return }
         do {
             try settings.requireAvailableCredentials(

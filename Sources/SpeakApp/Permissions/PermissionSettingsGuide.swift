@@ -24,7 +24,7 @@ final class PermissionSettingsGuide: NSObject, NSWindowDelegate {
                 suggestedAppURLs: [Bundle.main.bundleURL],
                 sourceFrameInScreen: CGRect(x: mouse.x - 16, y: mouse.y - 16, width: 32, height: 32)
             )
-            // PermissionFlow 2.11.2 creates its panel synchronously but exposes
+            // PermissionFlow 2.11.4 creates its panel synchronously but exposes
             // no dismissal callback. Observe only the panel this call created.
             if let dragPanel = NSApp.windows.first(where: {
                 $0 is NSPanel && !existingWindows.contains(ObjectIdentifier($0))

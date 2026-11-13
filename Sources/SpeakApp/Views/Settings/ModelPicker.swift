@@ -1,14 +1,19 @@
 import SpeakCore
 import SwiftUI
 
+/// Builds the live OpenRouter browser that a picker's separate Browse OpenRouter
+/// button opens, given a closure that applies the chosen model.
+typealias ModelPickerOpenRouterBrowser = (_ select: @escaping (String) -> Void) -> AnyView
+
 struct ModelPicker: View {
   let title: String
   let help: String?
-  let options: [ModelCatalog.Option]
+  let allOptions: [ModelCatalog.Option]
   let credentialPurpose: ModelCredentialPurpose
   let storedAPIKeyIdentifiers: Set<String>
   let usesDetailedChooser: Bool
   let allowsCustom: Bool
+  let openRouterBrowser: ModelPickerOpenRouterBrowser?
   @Binding var value: String
 
   @State var selection: String
@@ -23,15 +28,17 @@ struct ModelPicker: View {
     credentialPurpose: ModelCredentialPurpose,
     storedAPIKeyIdentifiers: Set<String>,
     usesDetailedChooser: Bool = false,
-    allowsCustom: Bool = true
+    allowsCustom: Bool = true,
+    openRouterBrowser: ModelPickerOpenRouterBrowser? = nil
   ) {
     self.title = title
     self.help = help
-    self.options = options
+    self.allOptions = options
     self.credentialPurpose = credentialPurpose
     self.storedAPIKeyIdentifiers = storedAPIKeyIdentifiers
     self.usesDetailedChooser = usesDetailedChooser
     self.allowsCustom = allowsCustom
+    self.openRouterBrowser = openRouterBrowser
     _value = value
 
     let initial = ModelPickerSelection.initial(
@@ -78,6 +85,7 @@ struct ModelPicker: View {
             credentialPurpose: credentialPurpose,
             storedAPIKeyIdentifiers: storedAPIKeyIdentifiers,
             allowsCustom: allowsCustom,
+            groupsOpenRouter: openRouterBrowser == nil,
             selection: $selection
           )
         }
@@ -107,6 +115,14 @@ struct ModelPicker: View {
         }
         .settingsMenuPicker()
         .speakTooltip(tooltipText)
+      }
+
+      if let openRouterBrowser {
+        ModelPickerOpenRouterButton(
+          identifier: "modelPicker.\(Self.accessibilityIdentifierComponent(for: title)).browseOpenRouter",
+          browser: openRouterBrowser,
+          value: $value
+        )
       }
 
       if let help {
@@ -180,6 +196,14 @@ struct ModelPicker: View {
     }
   }
 
+  /// With a Browse OpenRouter button, OpenRouter models live in the browser;
+  /// the picker lists native ones plus the saved OpenRouter choice, as the voice
+  /// picker does.
+  private var options: [ModelCatalog.Option] {
+    guard openRouterBrowser != nil else { return allOptions }
+    return ModelPickerSelection.nativeOptions(allOptions, selected: value, purpose: credentialPurpose)
+  }
+
   /// Replaces an invalid value on the next turn unless something else has
   /// changed it in the meantime.
   private static func repair(_ value: Binding<String>, from invalidValue: String, to replacement: String) {
@@ -219,18 +243,6 @@ struct ModelPicker: View {
     )
   }
 
-  /// Stable, UI-test friendly component derived from the picker's title,
-  /// e.g. "Post-processing model" -> "postProcessingModel".
-  static func accessibilityIdentifierComponent(for title: String) -> String {
-    let words = title
-      .components(separatedBy: CharacterSet.alphanumerics.inverted)
-      .filter { !$0.isEmpty }
-    guard let first = words.first else { return "model" }
-    return ([first.prefix(1).lowercased() + first.dropFirst()]
-      + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() })
-      .joined()
-  }
-
   private var selectedCredentialAvailability: ModelCredentialAvailability {
     credentialAvailability(for: selection == ModelCatalog.customOptionID ? customValue : selection)
   }
@@ -266,5 +278,19 @@ struct ModelPicker: View {
     if let replacement = synced.replacementValue, value != replacement {
       value = replacement
     }
+  }
+}
+
+extension ModelPicker {
+  /// Stable, UI-test friendly component derived from the picker's title,
+  /// e.g. "Post-processing model" -> "postProcessingModel".
+  static func accessibilityIdentifierComponent(for title: String) -> String {
+    let words = title
+      .components(separatedBy: CharacterSet.alphanumerics.inverted)
+      .filter { !$0.isEmpty }
+    guard let first = words.first else { return "model" }
+    return ([first.prefix(1).lowercased() + first.dropFirst()]
+      + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() })
+      .joined()
   }
 }

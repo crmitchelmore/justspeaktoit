@@ -135,3 +135,15 @@ final class TranscriptionResultRowTests: XCTestCase {
         XCTAssertEqual(decoded.resultCompletionID, Self.completionID)
     }
 }
+
+final class TranscriptionStatusStopActionTests: XCTestCase {
+    func testOnlyLiveCaptureOffersStopAndItsDoubleTapPrimaryAction() {
+        let stoppable: Set<TranscriptionActivityAttributes.TranscriptionStatus> = [.recording, .listening]
+        let all: [TranscriptionActivityAttributes.TranscriptionStatus] = [
+            .idle, .arming, .armed, .recording, .finalising, .listening, .processing, .paused, .error, .completed
+        ]
+        for status in all {
+            XCTAssertEqual(status.offersStopAction, stoppable.contains(status), "\(status)")
+        }
+    }
+}

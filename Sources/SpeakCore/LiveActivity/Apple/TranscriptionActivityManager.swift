@@ -306,52 +306,8 @@ extension TranscriptionActivityManager {
         return true
     }
 
-    /// Explicit outcome variant; the original entry point remains neutral and source-compatible.
-    ///
-    /// The completed row stays on screen for `resultRowDuration`. A primed
-    /// activity then returns to its idle label — unless a new recording has
-    /// taken the activity over in the meantime, in which case the reset was
-    /// superseded and never publishes.
-    public func completeActivity(
-        finalWordCount: Int,
-        duration: Int,
-        keepPrimed: Bool = false,
-        primedMessage: String = "Ready for the Action Button",
-        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
-        completionOutcome: TranscriptionCompletionOutcome,
-        resultPreview: String = "",
-        completionMessage: String? = nil,
-        resultCompletionID: String = ""
-    ) {
-        complete(TranscriptionActivityCompletion(
-            finalWordCount: finalWordCount, duration: duration, keepPrimed: keepPrimed,
-            primedMessage: primedMessage, primedStatus: primedStatus, outcome: completionOutcome,
-            resultPreview: resultPreview, message: completionMessage, resultCompletionID: resultCompletionID
-        ), owner: nil)
-    }
-
-    /// Associates only the retained active result surface with an in-process owner.
-    /// This identity is never encoded in Activity content or used to retrieve a transcript.
-    public func completeActivity(
-        finalWordCount: Int,
-        duration: Int,
-        keepPrimed: Bool = false,
-        primedMessage: String = "Ready for the Action Button",
-        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
-        completionOutcome: TranscriptionCompletionOutcome,
-        resultPreview: String = "",
-        completionMessage: String? = nil,
-        resultCompletionID: String = "",
-        surfaceOwnerID: UUID
-    ) {
-        complete(TranscriptionActivityCompletion(
-            finalWordCount: finalWordCount, duration: duration, keepPrimed: keepPrimed,
-            primedMessage: primedMessage, primedStatus: primedStatus, outcome: completionOutcome,
-            resultPreview: resultPreview, message: completionMessage, resultCompletionID: resultCompletionID
-        ), owner: surfaceOwnerID)
-    }
-
-    private func complete(_ completion: TranscriptionActivityCompletion, owner: UUID?) {
+    /// Every `completeActivity` entry point in the result-row extension ends here.
+    func complete(_ completion: TranscriptionActivityCompletion, owner: UUID?) {
         guard let activity else { return }
         let provider = (latestState ?? activity.transcriptionState).provider
         beginRun()

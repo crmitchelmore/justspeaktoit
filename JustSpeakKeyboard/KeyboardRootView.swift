@@ -40,6 +40,8 @@ struct KeyboardRootView: View {
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemGroupedBackground))
+        // The keyboard has a fixed height; larger accessibility sizes overlap the keys (#1399).
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
     private func transcriptStrip(_ surface: KeyboardSurfaceState) -> some View {

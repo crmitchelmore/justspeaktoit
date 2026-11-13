@@ -133,35 +133,10 @@ public enum ModelRetirements {
                 + "this selection is not moved automatically.")
     }
 
-    /// Cleanup chat models take the same OpenRouter request whatever the model,
-    /// so each moves automatically. GPT-5 Mini's named replacement, GPT-5.6
-    /// Terra, costs about eight times as much; GPT-5.6 Luna is the closest
-    /// price. Source: https://developers.openai.com/api/docs/deprecations
-    /// (checked 2026-11-11).
-    static let postProcessing: [ModelRetirement] = [
-        ModelRetirement(
-            id: "openai/gpt-5-mini", mode: .postProcessing, shutdownDay: "2026-12-11",
-            successorID: "openai/gpt-5.6-luna",
-            migrationNote: "moves to GPT-5.6 Luna ($0.20/$1.20 per million tokens, down from $0.25/$2). "
-                + "OpenAI names GPT-5.6 Terra ($2/$12) as the replacement; choose it for higher quality."),
-        ModelRetirement(
-            id: "openai/gpt-5.4-nano", mode: .postProcessing, shutdownDay: "2027-04-01",
-            successorID: "openai/gpt-6-luna",
-            migrationNote: "moves to GPT-6 Luna ($0.10/$0.50 per million tokens, down from $0.20/$1.25)."),
-        // The direct-OpenAI list has no GPT-5.6 Luna; GPT-6 Luna is its cheapest current model.
-        ModelRetirement(
-            id: NativeTextModels.selectionID(provider: NativeTextModels.openAI, model: "gpt-5-mini"),
-            mode: .postProcessing, shutdownDay: "2026-12-11",
-            successorID: NativeTextModels.selectionID(provider: NativeTextModels.openAI, model: "gpt-6-luna"),
-            migrationNote: "moves to GPT-6 Luna, direct from OpenAI ($0.10/$0.50 per million tokens)."),
-        // Groq shut Llama 3.1 8B Instant down for free and developer tiers on
-        // 2026-08-16 and names GPT-OSS 20B (https://console.groq.com/docs/deprecations).
-        ModelRetirement(
-            id: NativeTextModels.selectionID(provider: NativeTextModels.groq, model: "llama-3.1-8b-instant"),
-            mode: .postProcessing, shutdownDay: "2026-08-16",
-            successorID: NativeTextModels.selectionID(provider: NativeTextModels.groq, model: "openai/gpt-oss-20b"),
-            migrationNote: "moves to GPT-OSS 20B on Groq ($0.075/$0.30 per million tokens).")
-    ]
+    /// Announced cleanup shutdowns. Empty while every superseded cleanup model has
+    /// already been taken out of the catalogue: `CleanupModelRemovals` moves those
+    /// selections at once rather than on their shutdown day.
+    static let postProcessing: [ModelRetirement] = []
 
     public static func retirement(for id: String) -> ModelRetirement? {
         all.first { $0.id == id }

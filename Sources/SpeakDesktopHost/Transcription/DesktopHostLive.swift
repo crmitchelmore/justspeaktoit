@@ -10,7 +10,7 @@ extension DesktopHostController {
     ) async throws -> DesktopLiveSession? {
         if DesktopHostModels.isLocalLive(model) {
             // On-device streaming has no provider vocabulary, keyterms or endpoint.
-            guard let client = try await Platform.makeLocalLiveClient(model, language: language, controller: self)
+            guard let client = try await Platform.makeLocalLiveClient(model, language: language, host: self)
             else { return nil }
             return DesktopLiveSession(
                 client: client, id: id, keywordLimitation: nil, livePolish: makeLivePolish(polish, id: id)

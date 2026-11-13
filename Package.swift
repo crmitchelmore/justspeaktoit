@@ -441,7 +441,7 @@ let package = portableCoreBuild ? portablePackage : Package(
         // with swift-snapshot-testing's constraint (issue #677), and neither is
         // linked by any target, so keeping them here only made every app, iOS
         // and CLI build clone them. Run them via `make lint` / `make format`.
-        .package(url: "https://github.com/jaywcjlove/PermissionFlow.git", exact: "2.11.2"),
+        .package(url: "https://github.com/jaywcjlove/PermissionFlow.git", exact: "2.11.4"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0"),
         // Mirrored in Project.swift (`projectPackages`): Xcode resolves both
@@ -449,12 +449,21 @@ let package = portableCoreBuild ? portablePackage : Package(
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "1.1.0"),
         .package(
             url: "https://github.com/FluidInference/FluidAudio.git",
-            exact: "0.17.4"
+            exact: "0.18.3"
         ),
         .package(
             url: "https://github.com/pointfreeco/swift-snapshot-testing.git",
             from: "1.18.0"
-        )
+        ),
+        // swift-custom-dump 1.7.1+ and xctest-dynamic-overlay 1.13+ ship a
+        // tools-6.4 manifest that depends on swift-issue-reporting 2.x beside
+        // an older manifest that does not, so Package.resolved differed
+        // between Xcode 26 (CI) and Xcode 27 and CI's drift checks failed
+        // (issue #1560). These releases have a single manifest, so every
+        // toolchain resolves the same graph. Lift the pins once CI builds
+        // with Swift 6.4.
+        .package(url: "https://github.com/pointfreeco/swift-custom-dump", exact: "1.7.0"),
+        .package(url: "https://github.com/pointfreeco/xctest-dynamic-overlay", exact: "1.11.0")
     ],
     targets: [
         migrationArchiveTarget,
@@ -538,7 +547,12 @@ let package = portableCoreBuild ? portablePackage : Package(
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Sentry", package: "sentry-cocoa")
             ],
-            resources: [.copy("Resources/AppIcon.icns"), .copy("Resources/phonon-requirements.txt")]
+            exclude: ["Resources/AppStore"],
+            resources: [
+                .copy("Resources/AppIcon.icns"),
+                .copy("Resources/phonon-requirements.txt"),
+                .copy("Resources/Direct/PrivacyInfo.xcprivacy")
+            ]
         ),
         .executableTarget(
             name: "SpeakHotKeysDemo",
@@ -589,7 +603,10 @@ let package = portableCoreBuild ? portablePackage : Package(
             name: "SpeakAppSnapshotTests",
             dependencies: [
                 "SpeakApp",
-                .product(name: "SnapshotTesting", package: "swift-snapshot-testing")
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
+                // Linked only to apply the toolchain-stable pins above.
+                .product(name: "CustomDump", package: "swift-custom-dump"),
+                .product(name: "IssueReporting", package: "xctest-dynamic-overlay")
             ],
             exclude: ["__Snapshots__"]
         ),

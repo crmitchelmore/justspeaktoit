@@ -114,10 +114,14 @@ object CloudCatalog {
         )
     }
 
-    /** A saved choice, or the default when it is missing or no longer offered. */
-    fun cleanupModel(selectionId: String?): CleanupModel =
-        cleanupModels.firstOrNull { it.selectionId == selectionId }
+    /**
+     * A saved choice; a removed model's successor on the same route; otherwise the default.
+     */
+    fun cleanupModel(selectionId: String?): CleanupModel {
+        val current = selectionId?.let { GeneratedCloudCatalog.cleanupModelSuccessors[it] } ?: selectionId
+        return cleanupModels.firstOrNull { it.selectionId == current }
             ?: cleanupModels.first { it.selectionId == CLEANUP_MODEL }
+    }
 
     fun transcriptionModel(catalogId: String?): CloudModel =
         transcriptionModels.firstOrNull { it.catalogId == catalogId } ?: defaultTranscriptionModel

@@ -2,9 +2,12 @@
 
 This runbook qualifies the keyboard shape that ships today: the extension is
 included and uses Instant Dictation handoff to the containing app. The release
-worker sets `TUIST_IOS_KEYBOARD=1` and
+worker sets `TUIST_IOS_KEYBOARD=1` and, on every train,
 `TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0`; the keyboard extension does not capture
-audio or request microphone or Speech permission.
+audio or request microphone or Speech permission. Apple's
+[open-access rules](https://developer.apple.com/documentation/uikit/configuring-open-access-for-a-custom-keyboard)
+give a custom keyboard no microphone access, even with Full Access, so the
+Alpha direct-capture build (#1547) could only fail to record.
 
 Architecture and path selection are documented in
 [iOS Keyboard v2 design](ios-keyboard-v2-design.md). Instant Dictation behavior
@@ -45,8 +48,9 @@ A missing row remains PENDING. Never infer a pass.
 
 The reusable **Release iOS (TestFlight)** workflow accepts only a required
 `manifest`. It loads that immutable manifest, configures the selected release
-train, and fixes keyboard inclusion on and direct capture off. There are no
-`include_keyboard` or `enable_direct_capture` inputs.
+train, and fixes keyboard inclusion on. Direct capture is off for every train
+(see the experiment below, #661). There are no `include_keyboard` or
+`enable_direct_capture` inputs.
 
 For a local development build of the shipping shape:
 
@@ -173,11 +177,12 @@ must not be interpreted as Apple Speech running inside the extension.
    count. Controls must be disabled while a request is active where required.
 3. For each chosen profile, compare the request snapshot and History with the
    app's exact transcription model, language, and post-processing selection.
-4. Select a model whose credential or capability is unavailable. The keyboard
-   must report the profile unavailable and must not silently substitute another
-   model.
+4. Select a model whose credential or capability is unavailable. The profile
+   menu must mark the App profile unavailable with its reason (also read by
+   VoiceOver), the keyboard must report the profile unavailable on start, and
+   the app must not silently substitute another model.
 5. Confirm capability and profile records contain identifiers, display metadata, language,
-   and route only. They must contain no API key, token, custom prompt, audio, or
+   availability status and route only. They must contain no API key, token, custom prompt, audio, or
    surrounding host text.
 6. Kill and reopen the keyboard. A valid selection should survive; a retired
    choice must fall back visibly according to the published catalogue.

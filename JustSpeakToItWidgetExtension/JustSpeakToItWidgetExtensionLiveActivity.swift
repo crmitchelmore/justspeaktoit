@@ -89,7 +89,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
 
                         Spacer()
 
-                        if context.state.status == .recording || context.state.status == .listening {
+                        if context.state.status.offersStopAction {
                             if #available(iOS 18, *) {
                                 Button(intent: StopTranscriptionRecordingIntent()) {
                                     Label("Stop", systemImage: "stop.circle.fill")
@@ -105,7 +105,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
             } compactLeading: {
                 transcriptionStatusIndicator(for: context.state.status)
             } compactTrailing: {
-                if context.state.status == .recording || context.state.status == .listening {
+                if context.state.status.offersStopAction {
                     Circle()
                         .fill(.red)
                         .frame(width: 8, height: 8)
@@ -114,7 +114,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
                         .font(.caption2)
                 }
             } minimal: {
-                if context.state.status == .recording || context.state.status == .listening {
+                if context.state.status.offersStopAction {
                     Circle()
                         .fill(.red)
                         .frame(width: 8, height: 8)
@@ -169,7 +169,7 @@ private struct SmallTranscriptionActivityView: View {
 
             Spacer(minLength: 4)
 
-            if offersStop {
+            if state.status.offersStopAction {
                 Button(intent: StopTranscriptionRecordingIntent()) {
                     Text("Stop")
                         .font(.caption.weight(.semibold))
@@ -179,15 +179,12 @@ private struct SmallTranscriptionActivityView: View {
                 .buttonBorderShape(.capsule)
                 .tint(.red)
                 .accessibilityLabel("Stop recording")
+                .accessibilityIdentifier("liveActivitySmallStopRecording")
                 .handGestureShortcut(.primaryAction)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-    }
-
-    private var offersStop: Bool {
-        state.status == .recording || state.status == .listening
     }
 
     private var statusText: String {
@@ -335,7 +332,7 @@ struct LockScreenTranscriptionView: View {
                 }
             }
 
-            if state.status == .recording || state.status == .listening {
+            if state.status.offersStopAction {
                 if #available(iOS 18, *) {
                     Button(intent: StopTranscriptionRecordingIntent()) {
                         Image(systemName: "stop.circle.fill")

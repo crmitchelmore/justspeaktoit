@@ -232,9 +232,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(featureFlags.contains("static var watchCaptureEnabled: Bool"))
         XCTAssertTrue(app.contains("if FeatureFlags.watchCaptureEnabled {"))
 
-        // The watch app is a separate bundle id that still needs provisioning,
-        // so release signing must not pick it up yet.
-        XCTAssertFalse(releaseWorkflow.contains("TUIST_WATCH_APP"))
+        // #1552: only Alpha TestFlight builds sign the watch app; Stable stays off.
+        XCTAssertTrue(releaseWorkflow.contains("watch=0 share=0"))
+        XCTAssertTrue(releaseWorkflow.contains("watch_reason=\"Stable train\""))
+        XCTAssertTrue(releaseWorkflow.contains("exclude_target \"Watch app\" TUIST_WATCH_APP"))
         XCTAssertTrue(watchTarget.contains("bundleId: trainIdentifier(\"com.justspeaktoit.ios.watchkitapp\")"))
         XCTAssertTrue(
             watchTarget.contains("\"WKCompanionAppBundleIdentifier\": .string(trainValue(\"iosBundleIdentifier\"))")
@@ -266,9 +267,9 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(manifest.contains("environment[\"TUIST_WATCH_WIDGET_PROFILE_NAME\"]"))
         XCTAssertFalse(manifest.contains("environment[\"WATCH_PROFILE_NAME\"]"))
         XCTAssertFalse(manifest.contains("environment[\"WATCH_WIDGET_PROFILE_NAME\"]"))
-        XCTAssertFalse(releaseWorkflow.contains("JustSpeakWatchWidget"))
+        XCTAssertTrue(releaseWorkflow.contains("check_bundle \"Watch complication\""))
         XCTAssertTrue(
-            widgetTarget.contains("bundleId: trainIdentifier(\"com.justspeaktoit.ios.watchkitapp.complication\")")
+            widgetTarget.contains("bundleId: trainIdentifier(\"com.justspeaktoit.ios.watchkitapp.widget\")")
         )
         XCTAssertTrue(widgetTarget.contains("product: .appExtension"))
         XCTAssertTrue(watchTarget.contains(".target(name: \"JustSpeakWatchWidgetExtension\")"))
@@ -365,12 +366,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("JustSpeakKeyboard/KeyboardHandoffController.swift"),
             encoding: .utf8
         )
-        // The keyboard surface is split into the root view, its control rows
-        // and the status copy it shows.
+        // The keyboard surface is the root view plus the control row and the status copy it shows.
         let rootView = try [
             "JustSpeakKeyboard/KeyboardRootView.swift",
             "JustSpeakKeyboard/KeyboardControlRow.swift",
-            "JustSpeakKeyboard/KeyboardPickupChipRow.swift",
             "JustSpeakKeyboard/KeyboardStatusCopy.swift"
         ].map {
             try String(contentsOf: repositoryRoot.appendingPathComponent($0), encoding: .utf8)
@@ -448,11 +447,9 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("iCloud container mismatch"))
         XCTAssertTrue(workflow.contains("$IOS_CLOUD_CONTAINER"))
         XCTAssertTrue(workflow.contains("TUIST_IOS_KEYBOARD: \"1\""))
-        XCTAssertTrue(
-            workflow.contains(
-                "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: \"0\""
-            )
-        )
+        // #1577: every train ships the hand-off keyboard; no build carries direct capture.
+        XCTAssertFalse(workflow.contains("echo \"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=1\" >> \"$GITHUB_ENV\""))
+        XCTAssertTrue(workflow.contains("echo \"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0\" >> \"$GITHUB_ENV\""))
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
         XCTAssertTrue(workflow.contains("python3 scripts/verify-keyboard-purpose-strings.py"))
         XCTAssertFalse(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))

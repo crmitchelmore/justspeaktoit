@@ -20,6 +20,7 @@ extension TranscriptionRecordingService {
         let apiKey = settings.postProcessingAPIKey(for: model)
         let historyManager = self.historyManager
         let polish = self.polish
+        let startedAt = Date()
         let operation = AutomaticPolishOperation(
             isCurrent: { [weak self] in self?.polishLedger.isCurrent(completionID) == true },
             successAndWait: { [weak self] polished, current in
@@ -32,7 +33,8 @@ extension TranscriptionRecordingService {
                 if let historyItemID {
                     // A loss notice recorded at stop survives the polish (issue #950).
                     await historyManager.setPostProcessedAndWait(
-                        polished, for: historyItemID, preservingError: recordingWarning
+                        polished, for: historyItemID, preservingError: recordingWarning,
+                        details: .init(model: model, startedAt: startedAt, endedAt: Date())
                     )
                 }
             },

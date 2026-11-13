@@ -36,7 +36,7 @@ describe('canonical Best routing policy', () => {
   it('uses catalogue identifiers the Swift clients also know about', () => {
     expect(bestRoute('live_transcription').catalogueModelId).toBe('deepgram/nova-3-streaming');
     expect(bestRoute('batch_transcription').catalogueModelId).toBe('google/gemini-3.1-flash-lite');
-    expect(bestRoute('post_processing').catalogueModelId).toBe('openai/gpt-5.6-luna');
+    expect(bestRoute('post_processing').catalogueModelId).toBe('openai/gpt-6-luna');
   });
 
   it('rejects operations that are not part of the paid surface', () => {

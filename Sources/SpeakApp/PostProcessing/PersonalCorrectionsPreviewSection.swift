@@ -20,6 +20,7 @@ struct PersonalCorrectionsPreviewSection: View {
       Text("Preview")
         .font(density.isCompact ? .caption.weight(.semibold) : .title3.bold())
       TextEditor(text: $previewText)
+        .accessibilityLabel("Preview text")
         .frame(minHeight: density.isCompact ? 64 : 120)
         .padding(density.isCompact ? 5 : 12)
         .background(

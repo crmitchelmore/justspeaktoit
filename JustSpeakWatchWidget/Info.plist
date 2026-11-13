@@ -20,6 +20,10 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>SpeakReleaseTrain</key>
+	<string>$(SPEAK_RELEASE_TRAIN)</string>
+	<key>GitCommitSHA</key>
+	<string>$(SPEAK_GIT_COMMIT_SHA)</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>

@@ -28,30 +28,17 @@ struct DesktopElevenLabsSpeechSynthesis: Sendable {
               key.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
             throw ElevenLabsTTSAPIError.invalidCredential
         }
-        var pcm = Data()
-        for plan in plans {
-            try Task.checkCancellation()
-            let audio: DeepgramSpeechAudio
+        return try await DesktopSpeechHTTP.joinedWAV(plans, sampleRate: ElevenLabsTTSAPI.sampleRate) { plan in
             do {
-                audio = try await segment(plan, voice: preset, key: key)
+                return try await segment(plan, voice: preset, key: key)
             } catch ElevenLabsTTSAPIError.service(let status)
                 where plan.dialogue && ElevenLabsTTSAPI.permitsDialogueFallback(status: status) {
                 try Task.checkCancellation()
-                audio = try await segment(
+                return try await segment(
                     Plan(text: plan.text, model: ElevenLabsTTSModels.dialogueFallback, dialogue: false),
                     voice: preset, key: key)
             }
-            let payload = audio.wav.dropFirst(44)
-            guard payload.count <= DeepgramSpeechExport.maximumPCMBytes - pcm.count else {
-                throw DesktopSpeechSynthesisError.audioTooLarge
-            }
-            pcm.append(contentsOf: payload)
         }
-        try Task.checkCancellation()
-        guard !pcm.isEmpty, let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: ElevenLabsTTSAPI.sampleRate) else {
-            throw DesktopSpeechSynthesisError.invalidAudio
-        }
-        return wav
     }
 
     private static func plans(
@@ -103,47 +90,19 @@ struct DesktopElevenLabsSpeechSynthesis: Sendable {
     private func segment(_ plan: Plan, voice: ElevenLabsTTSVoice, key: String) async throws -> DeepgramSpeechAudio {
         try Task.checkCancellation()
         let request = try Self.request(plan, voice: voice, key: key)
-        let capture = VoiceSynthesisUsage.capture
-        let ticket = capture?.begin(voice: .elevenlabs(plan.model, voice),
-                                    inputCharacters: plan.text.unicodeScalars.count,
-                                    usesSSML: false, pricingCharacters: plan.text.count)
-        do {
-            let received = try await receive(request)
-            try Task.checkCancellation()
-            let audio: DeepgramSpeechAudio
-            do {
-                audio = try DeepgramSpeechWAV.canonical(
-                    received, sampleRate: ElevenLabsTTSAPI.sampleRate, requireComplete: true)
-            } catch { throw DesktopSpeechSynthesisError.invalidAudio }
-            if let ticket { capture?.finish(ticket, outcome: .completed, audioDuration: audio.duration) }
-            return audio
-        } catch {
-            if let ticket { capture?.finish(ticket, outcome: error is CancellationError ? .cancelled : .failed) }
-            throw error
-        }
+        return try await DesktopSpeechHTTP.measuredSegment(
+            sampleRate: ElevenLabsTTSAPI.sampleRate, requireComplete: true,
+            begin: {
+                $0.begin(voice: .elevenlabs(plan.model, voice), inputCharacters: plan.text.unicodeScalars.count,
+                         usesSSML: false, pricingCharacters: plan.text.count)
+            },
+            receive: { try await receive(request) }
+        )
     }
 
     private func receive(_ request: URLRequest) async throws -> Data {
-        do {
-            return try await OpenRouterBoundedResponseTransport.perform(
-                request, session: session, limit: DeepgramSpeechSynthesizer.defaultResponseLimit,
-                deadline: .seconds(120)
-            ) { response in
-                guard response.statusCode == 200 else { throw ElevenLabsTTSAPIError.service(response.statusCode) }
-            }.body
-        } catch {
-            if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
-                throw CancellationError()
-            }
-            if let service = error as? ElevenLabsTTSAPIError { throw service }
-            switch error as? OpenRouterBoundedResponseTransport.Failure {
-            case .responseTooLarge: throw DesktopSpeechSynthesisError.audioTooLarge
-            case .timedOut: throw DesktopSpeechSynthesisError.timedOut
-            case .invalidResponse: throw DesktopSpeechSynthesisError.invalidAudio
-            case nil:
-                throw (error as? URLError)?.code == .timedOut
-                    ? DesktopSpeechSynthesisError.timedOut : DesktopSpeechSynthesisError.transportFailure
-            }
+        try await DesktopSpeechHTTP.receive(request, session: session) { response in
+            guard response.statusCode == 200 else { throw ElevenLabsTTSAPIError.service(response.statusCode) }
         }
     }
 }

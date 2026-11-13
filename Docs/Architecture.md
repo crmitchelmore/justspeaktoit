@@ -93,8 +93,8 @@ and tests it without model inference, and fails if its `Package.resolved` drifts
 | `SpeakiOS` | iOS app, 17.0 | Always; sources are `SpeakiOSApp/**`; consumes `SpeakCore`, `SpeakiOSLib`, `SpeakSync` and the iOS widget. |
 | `JustSpeakToItWidgetExtension` | iOS extension, 17.0 | Always; consumes package `SpeakCore` and `SpeakiOSLib`. |
 | `JustSpeakKeyboard` | iOS extension, 17.0 | `TUIST_IOS_KEYBOARD`; consumes package `SpeakCore`. Direct capture has the separate `TUIST_IOS_KEYBOARD_DIRECT_CAPTURE` gate. |
-| `JustSpeakShare` | iOS extension, 17.0 | `TUIST_IOS_SHARE_EXTENSION`; consumes package `SpeakCore`. |
-| `JustSpeakWatchApp` | watchOS app, 10.0 | `TUIST_WATCH_APP`; embeds the watch widget and consumes package `SpeakWatchCore`. |
+| `JustSpeakShare` | iOS extension, 17.0 | `TUIST_IOS_SHARE_EXTENSION` (on for Alpha TestFlight only); consumes package `SpeakCore`. |
+| `JustSpeakWatchApp` | watchOS app, 10.0 | `TUIST_WATCH_APP` (on for Alpha TestFlight only); embeds the watch widget and consumes package `SpeakWatchCore`. |
 | `JustSpeakWatchWidgetExtension` | watchOS extension, 10.0 | Same Watch gate; compiles `JustSpeakWatchShared` adapters and consumes package `SpeakWatchCore`. |
 | `CoreJourneyFixtureApp` | macOS app | Always; fixture used by UI tests. |
 | `SpeakAppUITests` | macOS UI tests | Always; depends on `SpeakApp` and `CoreJourneyFixtureApp`. |
@@ -191,7 +191,7 @@ cross-cutting utilities stay at the top level.
 | `PostProcessing/`, `Vocabulary/`, `OpenRouter/` | Cleanup/polish policy, lexicon/auto-correction/pronunciation, OpenRouter chat and audio. |
 | `History/`, `Credentials/`, `Balance/`, `Sync/`, `DataMigration/`, `Automation/`, `Analytics/`, `Desktop/`, `App/` | History records and diagnostics, keys and validation, provider balances, settings/key/config transfer, migration, automation protocol, analytics, portable desktop configuration and app information. |
 | `ModelComparison/`, `PaidAccess/`, `SettingsSearch/`, `SpeechInsights/`, `Resources/` | Existing feature folders and bundled resources. |
-| `AppleUI/` | Apple-only SwiftUI views shared by the macOS and iOS apps (skeletons, release notes, credential status, provider fields, balances, OpenRouter audio browser). |
+| `AppleUI/` | Apple-only SwiftUI views shared by the macOS and iOS apps (skeletons, release notes, credential status, provider fields, balances, the shared OpenRouter discover-then-configure browser for speech, transcription and cleanup). |
 
 `appleCoreSources` in `Package.swift` lists Apple-only folders only, relative to `Sources/SpeakCore`. Each feature
 keeps its Apple adapters in an `Apple/` subfolder (for example `Keyboard/Apple/`, `Credentials/Apple/`); SwiftUI views

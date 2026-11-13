@@ -6,32 +6,37 @@ This project maintains **separate version tracks** for macOS and iOS:
 
 ### Version Discovery
 
-**CRITICAL: Always check the ACTUAL latest release before creating a new version.**
+Stable versions are explicit inputs to **Prepare Stable** (`mac_version`,
+`ios_version`), so look up the latest published release before choosing one;
+the `VERSION` file lags behind and is not a release source.
 
 ```bash
-# Find the latest macOS release version:
+# Latest Stable macOS release (the next Mac version must be higher;
+# scripts/release-train.mjs rejects one that does not advance):
 gh release list --repo crmitchelmore/justspeaktoit | grep "mac-v" | head -1
 
-# Or check GitHub releases page for mac-v* tags
-# Example: if latest is mac-v0.9.1 → next should be mac-v0.9.2
-
-# The VERSION file is NOT authoritative for releases - always check GitHub tags
+# Example: if latest is mac-v3.2.0 → next could be mac-v3.2.1 or mac-v3.3.0
+# iOS has no version tag: check the latest version in App Store Connect.
 ```
 
 ### Tag Conventions
 
-| Platform | Tag Format | Example | Workflow Triggered |
-|----------|------------|---------|-------------------|
-| macOS | `mac-v*` | `mac-v0.7.7` | `.github/workflows/release-mac.yml` |
-| iOS | `ios-v*` | `ios-v0.9.1` | `.github/workflows/release-ios.yml` (manual) |
-| Legacy | `v*` | `v0.7.5` | None (deprecated) |
+| Tag Format | Example | Created by |
+|------------|---------|------------|
+| `alpha-build-N` | `alpha-build-106` | `.github/workflows/alpha-release.yml` (Alpha manifest after a green main CI) |
+| `stable-candidate-N` | `stable-candidate-3` | `.github/workflows/prepare-stable.yml` (frozen Stable candidate manifest) |
+| `mac-v*` | `mac-v3.2.0` | `.github/workflows/publish-stable.yml` (published Stable direct macOS release) |
+| `v*` | `v0.9.0` | None (legacy) |
+
+`release-mac.yml` and `release-ios.yml` are reusable workers called with a
+manifest tag; a tag push does not trigger them.
 
 ### Alpha and Stable Release Process
 
 See [Docs/alpha-stable-release-trains.md](Docs/alpha-stable-release-trains.md).
-The previous conventional-commit Stable auto-publisher is retired. After the
-commissioning gate is enabled, every successful main CI creates an isolated
-Alpha build through `alpha-release.yml`. Alpha tags are `alpha-build-N` and are
+Commit types and tag pushes never trigger a release. Every successful main CI creates an
+isolated Alpha build through `alpha-release.yml` (enabled in
+`Config/ReleasePipeline.json`). Alpha tags are `alpha-build-N` and are
 never GitHub Latest. Website downloads, Homebrew and existing updates stay Stable.
 
 The owner selects a tested Alpha source through `prepare-stable.yml`, reviews
@@ -47,7 +52,7 @@ release job behaviour, data safety and content rating answers, and the owner set
 
 ### VERSION File
 
-The `VERSION` file is a **hint** used as fallback when no macOS tag is present. It does NOT control an iOS TestFlight release. Keep it updated, but verify macOS against actual tags and iOS against App Store Connect.
+The `VERSION` file is a **hint**: `Project.swift` reads it as the marketing version for local Tuist builds, and the release workers overwrite it with the manifest's version (`scripts/release-train.mjs`). It does not choose or control any release version; verify macOS against `mac-v*` releases and iOS against App Store Connect.
 
 ### Post-Release Support
 
@@ -58,12 +63,15 @@ When a user reports that a freshly shipped macOS release won't install or launch
 4. Verify launch locally (e.g. `open -n /Applications/JustSpeakToIt.app`) before asking the user to retry.
 5. If local install verification is requested, confirm `/Applications/JustSpeakToIt.app` exists, read `CFBundleShortVersionString`, and verify the process is running.
 
-## Owner Manual Checks
+## Human Checks Run on Alpha, After Merge
 
-When an issue is blocked only on an owner device check or decision, add it to
-`Docs/manual-checks.yml` (served at `justspeaktoit.com/qa`) instead of asking in
-the issue; results come back through the `manual-qa-results` workflow. See
-[Docs/manual-qa.md](Docs/manual-qa.md).
+Human or device validation never blocks a pull request or merge: do not ask the
+owner to check anything before merging, and do not leave a PR open waiting for
+one. Add the check to `Docs/manual-checks.yml` in the same PR as the change; it
+appears in the **Please test** section of the first Alpha's notes that contains
+it, and on `justspeaktoit.com/qa`. Use an `owner-` id prefix for owner-only setup
+tasks, which Alpha testers never see. Results come back through the
+`manual-qa-results` workflow. See [Docs/manual-qa.md](Docs/manual-qa.md).
 
 ## Project Structure & Module Organization
 
@@ -204,8 +212,27 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - If platform behaviour differs deliberately, document the capability rule next
   to the shared catalogue rather than encoding a second platform-owned list.
 
+## Apple documentation (Sosumi)
+
+Apple Developer documentation needs JavaScript, so agents can't read
+`developer.apple.com` directly. Use [Sosumi](https://sosumi.ai) instead, and
+check Apple APIs against it rather than relying on memory. That covers Swift,
+SwiftUI, UIKit, AppKit and Foundation, along with API availability, the Human
+Interface Guidelines and WWDC sessions.
+
+- **MCP:** `https://sosumi.ai/mcp` (Streamable HTTP). Tools:
+  `searchAppleDocumentation`, `fetchAppleDocumentation`,
+  `fetchAppleVideoTranscript` and `fetchExternalDocumentation`.
+- **HTTP:** swap the host, so `https://developer.apple.com/documentation/swiftui/view`
+  becomes `https://sosumi.ai/documentation/swiftui/view`. Use
+  `https://sosumi.ai/external/<url>` for other Swift-DocC sites.
+- **CLI:** `npx @nshipster/sosumi search "SwiftData"`, or
+  `npx @nshipster/sosumi fetch /documentation/swift/array`.
+- **Skill:** `https://sosumi.ai/SKILL.md`, installed in `~/.agents/skills/sosumi`
+  and `~/.claude/skills/sosumi`.
+
 ## Coding Style & Naming Conventions
-- Swift files use 4-space indentation and LF line endings (configured via `.swiftformat`)
+- New Swift files use 4-space indentation and LF line endings. `.swiftformat` sets these options but runs only the `braces`, `redundantRawValues` and `redundantReturn` rules, so existing 2-space files (for example `Sources/SpeakApp/Settings/AppSettings.swift`) are not reindented; match the indentation of the file you edit
 - Prefer expressive type names (`ContentView`, `SpeakApp`)
 - Keep new API surface `internal` unless exposure is required for cross-module use
 - Use `public` for types that need to be accessed from Xcode project or other modules
@@ -213,7 +240,7 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Apple UI controls need accessible names and stable identifiers; follow [Docs/accessibility.md](Docs/accessibility.md). `make lint` runs `scripts/accessibility/check-apple-accessibility.py`
 
 ## Testing Guidelines
-- Tests live under `Tests/SpeakAppTests` and rely on XCTest
+- Tests live in per-module XCTest targets under `Tests/` (for example `Tests/SpeakAppTests`, `Tests/SpeakCoreTests`, `Tests/SpeakDesktopTests`, `Tests/SpeakiOSTests`)
 - Name specs `test<Behaviour>_<Expectation>()` to mirror scenarios
 - Run `scripts/pre-pr` locally before PRs (see Pre-PR Checks); `make test` runs the whole suite
 - iOS testing requires device/simulator via Xcode
@@ -293,13 +320,11 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
 
 ## Commit & Pull Request Guidelines
 - **Never use `git add -A` or `git add .`** — always stage specific files (`git add <path>`) to avoid committing other agents' work
-- **Use Conventional Commits** — this is mandatory as commit types drive automated releases
-- Commit types that **trigger a release**: `feat:` (minor bump), `fix:` / `perf:` (patch bump), breaking changes via `!` suffix or `BREAKING CHANGE` footer (major bump)
-- Commit types that **do not release**: `chore:`, `docs:`, `ci:`, `style:`, `test:`, `refactor:`, `build:`
+- **Use Conventional Commits** — the type sorts each change into a release-notes section (`scripts/release-notes-lib.mjs`): `feat:` → New and improved, `fix:` → Fixes, `perf:` → Performance; `refactor:`, `build:`, `ci:`, `test:` and `chore:` → Under the hood; `docs:` → Documentation. Commit types do not trigger releases or choose version numbers (see Working with Release Trains)
 - Keep commits scoped to a single concern
 - Use platform tags in scope: `feat(mac):`, `fix(ios):` — these feed Sparkle release notes
 - Pull requests should describe motivation, note user-visible changes, and reference related issues
-- Include `make test` output or screenshots when UI shifts
+- Fill the PR template's **Pre-PR checks** section with the `scripts/pre-pr --markdown` output (see Pre-PR Checks); add screenshots when UI shifts
 - Direct pushes to `main` are blocked by branch protection; create a branch and PR even for small fixes, then merge through the normal repo gate.
 
 ### Working with Release Trains
@@ -361,17 +386,19 @@ version/baseline authority. `VERSION` is a build hint only.
 - Compare with existing cleanup paths in the same function to ensure consistency
 - Install taps with `installTapSafely` (SpeakCore), never `installTap`: AVFAudio rejects a tap by raising an Objective-C exception that aborts the app. Keep the call inside the block whose failure path removes the tap and stops the engine. SwiftLint `unsafe_audio_tap` enforces this.
 
-## AssemblyAI Universal-3.5 Pro Streaming
+## AssemblyAI Universal-3.6 Pro Streaming
+
+Live streaming uses Universal-3.6 Pro (`universal-3-6-pro`); saved Universal-3.5 Pro streaming selections migrate to it (`AssemblyAIModels.legacyUniversal3StreamingIDs`). Universal-3.5 Pro remains the batch model.
 
 ### Turn message semantics
-- Do not send `format_turns`; Universal-3.5 Pro always formats its single end-of-turn message.
+- Do not send `format_turns`; Universal-3.6 Pro always formats its single end-of-turn message.
 - Commit a turn only when both `end_of_turn=true` and `turn_is_formatted=true`.
 - Partial `transcript` values are complete replacements for the current turn, not deltas.
 - Track `turn_order` to replace (not append) segments for the same turn.
 - Interim text uses replacement semantics — AssemblyAI sends the full turn text each time, not deltas.
 
 ### Pre-processing prompt
-- Universal-3.5 Pro supports contextual `prompt` plus `keyterms_prompt`; neither is a transcript formatting control.
+- The streaming API accepts a contextual `prompt` plus `keyterms_prompt`; neither is a transcript formatting control.
 - `keyterms_prompt` entries are sourced from `assemblyAIKeyterms` (comma-separated, max 50 chars each, max 100 items).
 - The app currently sends keyterms only. `postProcessingSystemPrompt` remains post-transcription in `PostProcessingManager`.
 - When a pre-processing prompt is active, LLM post-processing is automatically skipped.
@@ -381,20 +408,22 @@ version/baseline authority. `VERSION` is a build hint only.
 - Keep style control in post-processing (`postProcessingSystemPrompt`); native `prompt` is for audio context.
 
 ### Connection reliability
-- Use EU host first (`streaming.eu.assemblyai.com`) and retry once on global host (`streaming.assemblyai.com`) only when failure occurs before `Begin`.
-- Guard shared live-stream state (`webSocketTask`, `isStopping`, callbacks, `sessionDidBegin`) with synchronisation when accessed from receive/send completions and lifecycle methods.
-- During delayed stop cleanup, clear `webSocketTask` only when it is the same task instance being terminated (`===`) to avoid wiping a newly-started session.
+- Use EU host first (`streaming.eu.assemblyai.com`) and retry once on global host (`streaming.assemblyai.com`) only when the attempt fails before `Begin` (`!attempt.didBegin`), no fallback has been tried, and the run is not finishing. A `Begin` that takes more than 8 seconds counts as a failure.
+- Keep shared live-stream state on the client's `LiveClientStateQueue`; receive/send completions and lifecycle methods must not touch it directly.
+- Every callback checks `isCurrent(active, attempt)` before acting, so a late completion from a stopped run or a superseded attempt cannot affect a newly started session.
 - Do not establish fallback/reconnect sockets after stopping has begun.
 - On failure cleanup, capture the active session before async cancellation so failed runs still persist to History.
 
 ### Live audio framing + shutdown guarantees
-- Live PCM chunk duration must be 50-1000ms (100ms preferred); sub-50ms frames can trigger close code 3007 (`Input Duration Violation`).
-- Stop sequencing must be: flush pending PCM, await pending WebSocket send completions (bounded timeout), send `ForceEndpoint`, then `Terminate`.
+- Live PCM chunk duration must be 50-1000ms (100ms preferred); sub-50ms frames can trigger close code 3007 (`Input Duration Violation`). `AssemblyAIPCMFramer` sends 100ms frames and pads a final short tail to 50ms.
+- Stop sequencing must be: drain every admitted audio frame, send `ForceEndpoint`, wait up to `postStopFinalizeBudget` for the trailing formatted turn, hold for the caller's stop grace, then send `Terminate`. The whole finish is bounded by `finishDeadline` (8 seconds) plus the grace.
 - If users report “batch-like” live behaviour (no live text), run a direct WebSocket probe first and capture close code/reason before changing app logic.
 
 ### Key files
-- `AssemblyAITranscriptionProvider.swift` — WebSocket client, response models
-- `TranscriptionManager.swift` (`AssemblyAILiveController`) — turn handling, audio processing
+- `Sources/SpeakCore/Live/Providers/AssemblyAI/` — shared streaming client (`AssemblyAILiveClient` plus its connection, run, sending, framer, transcript and keyterm files)
+- `Sources/SpeakCore/Transcription/Providers/AssemblyAIModels.swift` — model IDs, hosts and the streaming URL/keyterms query
+- `Sources/SpeakApp/Live/SharedClientLiveController.swift` — macOS adapter that drives the shared client
+- `Sources/SpeakApp/Transcription/AssemblyAITranscriptionProvider.swift` — batch (file) transcription
 
 ## OpenAI Realtime Transcription
 

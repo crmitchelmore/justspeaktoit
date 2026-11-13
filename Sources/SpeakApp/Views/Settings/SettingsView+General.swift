@@ -322,6 +322,8 @@ extension SettingsView {
               in: 1...30,
               step: 1
             )
+            .accessibilityLabel("History Flush Interval")
+            .accessibilityValue(String(format: "%.0f seconds", settings.historyFlushInterval))
             .speakTooltip(
               "Control how often Speak writes history to disk. "
                 + "Lower values save more frequently but may impact performance."
@@ -333,6 +335,10 @@ extension SettingsView {
               .font(.caption)
               .foregroundStyle(.secondary)
           }
+
+          Divider()
+
+          RawConfigurationButton()
         }
       }
       .speakTooltip("Fine-tune advanced performance settings for power users.")

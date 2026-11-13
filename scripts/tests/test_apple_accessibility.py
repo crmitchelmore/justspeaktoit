@@ -51,6 +51,13 @@ class AppleAccessibilityCheckTests(unittest.TestCase):
         self.assertEqual(["empty-control-label"], rules('Toggle("", isOn: $on)\n.labelsHidden()'))
         self.assertEqual([], rules('Toggle("", isOn: $on)\n.labelsHidden()\n.accessibilityLabel("Enabled")'))
 
+    def test_untitled_slider_and_text_editor_need_label(self):
+        self.assertEqual(["untitled-control"], rules('Slider(value: $speed, in: 0...2, step: 0.1)\n.help("Speed")'))
+        self.assertEqual(["untitled-control"], rules('TextEditor(text: $draft)\n.font(.body)'))
+        self.assertEqual([], rules('Slider(value: $speed, in: 0...2)\n.accessibilityLabel("Speed")'))
+        self.assertEqual([], rules('TextEditor(text: $draft)\n.accessibilityLabel("Draft")\n.font(.body)'))
+        self.assertEqual([], rules('Slider(value: $speed, in: 0...2) {\n  Text("Speed")\n}'))
+
     def test_ios_segmented_picker_needs_label_and_identifier(self):
         def ios_rules(body, path="Sources/SpeakiOS/V.swift"):
             source = "import SwiftUI\nstruct V: View { var body: some View {\n" + body + "\n}}\n"

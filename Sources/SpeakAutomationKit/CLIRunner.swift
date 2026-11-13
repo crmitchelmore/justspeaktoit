@@ -189,12 +189,15 @@ public struct CLIRunner {
 
     private func render(error original: AutomationError, plan: CLIPlan) -> CLIOutput {
         var error = original
-        // An app older than `say` cannot decode the new verb.
-        if plan.command == .speakText, error.code == .invalidArgument,
+        // An app older than `say` or `config` cannot decode the new verb.
+        let newerVerbs: [AutomationCommand: String] = [
+            .speakText: "speak text", .getConfiguration: "read its settings", .setConfiguration: "change its settings"
+        ]
+        if let ability = newerVerbs[plan.command], error.code == .invalidArgument,
            error.message == "Malformed automation request." {
             error = AutomationError(
                 code: .unsupportedCommand,
-                message: "This version of Just Speak To It cannot speak text. Update the app and try again."
+                message: "This version of Just Speak To It cannot \(ability). Update the app and try again."
             )
         }
         let exitCode = error.code == .appUnavailable ? CLIExitCode.appUnavailable : CLIExitCode.failed
@@ -224,6 +227,8 @@ public struct CLIRunner {
             return result.path.map { "Saved speech to \($0).\n" } ?? ""
         case .listVoices:
             return Self.voiceTable(result.voices ?? [])
+        case .getConfiguration, .setConfiguration:
+            return Self.configurationText(for: result, command: command)
         case .status:
             let version = result.appVersion.map { " \($0)" } ?? ""
             let state = (result.sessionActive ?? false) ? "dictating" : "idle"

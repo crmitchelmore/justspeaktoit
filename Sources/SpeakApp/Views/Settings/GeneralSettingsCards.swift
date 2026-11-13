@@ -119,6 +119,8 @@ struct RecordingSoundsSettingsCard: View, AppSettingsBindingProviding {
               in: 0.02...1.0,
               step: 0.02
             )
+            .accessibilityLabel("Volume")
+            .accessibilityValue(Self.volumeLabel(for: settings.recordingSoundVolume))
             Image(systemName: "speaker.wave.3.fill")
               .foregroundStyle(.secondary)
               .font(.caption)
@@ -194,6 +196,20 @@ struct AutomationServerSettingsCard: View, AppSettingsBindingProviding {
         .speakTooltip(
           "When enabled, Speak listens on a private socket in your home folder for automation commands."
         )
+
+        if settings.enableAutomationServer {
+          settingsToggle(
+            "Allow automation to change settings",
+            isOn: settingsBinding(\AppSettings.allowAutomationConfigurationChanges),
+            tint: Color.brandLagoon
+          )
+          .accessibilityIdentifier("automationAllowConfigurationChangesToggle")
+          .settingsSearchAnchor(title: "Allow automation to change settings")
+          .speakTooltip(
+            "Lets \"speak config set\" and the MCP set_configuration tool change settings. "
+              + "Reading settings and dry runs work without it."
+          )
+        }
       }
     }
     .speakTooltip("Control Speak from scripts, the terminal, or an AI agent over a local socket.")

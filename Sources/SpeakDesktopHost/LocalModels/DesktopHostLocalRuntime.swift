@@ -144,14 +144,14 @@ package extension DesktopHostLocalModelPlatform {
 
     static func makeLocalModelsState() -> LocalModelsState { DesktopHostLocalModelsState() }
 
-    static func localReadiness(_ model: String, controller: isolated DesktopHostController<Self>) -> String? {
-        controller.localReadiness(model)
+    static func localReadiness(_ model: String, host: isolated some DesktopHostLocalModelHost<Self>) -> String? {
+        host.localReadiness(model)
     }
 
     static func transcribeLocally(
-        _ audio: URL, model: String, language: String?, controller: isolated DesktopHostController<Self>
+        _ audio: URL, model: String, language: String?, host: isolated some DesktopHostLocalModelHost<Self>
     ) async throws -> TranscriptionResult {
-        try await controller.transcribeLocally(audio, model: model, language: language)
+        try await host.transcribeLocally(audio, model: model, language: language)
     }
 
     static func beginLocalUse(_ model: String, in state: inout LocalModelsState) -> String? {
@@ -165,8 +165,8 @@ package extension DesktopHostLocalModelPlatform {
     }
 
     static func makeLocalLiveClient(
-        _ model: String, language: String?, controller: isolated DesktopHostController<Self>
+        _ model: String, language: String?, host: isolated some DesktopHostLocalModelHost<Self>
     ) async throws -> (any FinalizingStreamingTranscriptionClient)? {
-        try await controller.makeLocalLiveClient(model, language: language)
+        try await host.makeLocalLiveClient(model, language: language)
     }
 }

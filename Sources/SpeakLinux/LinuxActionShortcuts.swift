@@ -35,7 +35,7 @@ enum LinuxActionShortcutRun: Equatable {
         case .openPermissionsSettings: self = .permissions
         case .pasteLastHistoryItem: self = .pasteLastHistory
         case .speakSelectedText: self = .selectedText
-        case .editSelectionByVoice: self = .unavailable
+        case .editSelectionByVoice, .openCommandPalette: self = .unavailable
         }
     }
 
@@ -214,7 +214,7 @@ extension LinuxActionShortcutRun {
             (.speakSelectedText, .selectedText)
         ]
         let unavailable: [DesktopShortcutAction] = [
-            .editSelectionByVoice
+            .editSelectionByVoice, .openCommandPalette
         ]
         guard expected.allSatisfy({ Self($0.0) == $0.1 }),
               unavailable.allSatisfy({ Self($0) == .unavailable }),

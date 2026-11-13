@@ -74,11 +74,33 @@ static gboolean actions_self_test(void) {
     return okay;
 }
 
+/* Tab must leave the transcript. GtkFlowBox reports that it took focus even when
+ * its children refused it, which traps Tab, unless the box is out of the focus chain. */
+static gboolean flow_focus_self_test(GtkWidget *widget) {
+    if (GTK_IS_FLOW_BOX(widget) && gtk_widget_child_focus(widget, GTK_DIR_TAB_FORWARD)) {
+        GtkWidget *focus = gtk_root_get_focus(gtk_widget_get_root(widget));
+        if (focus == NULL || !gtk_widget_is_ancestor(focus, widget)) return FALSE;
+    }
+    for (GtkWidget *child = gtk_widget_get_first_child(widget); child != NULL;
+         child = gtk_widget_get_next_sibling(child))
+        if (!flow_focus_self_test(child)) return FALSE;
+    return TRUE;
+}
+
+static gboolean dashboard_focus_self_test(void) {
+    GtkWidget *previous = gtk_root_get_focus(GTK_ROOT(ui.window));
+    if (previous != NULL) g_object_ref(previous);
+    gboolean okay = flow_focus_self_test(gtk_stack_get_child_by_name(ui.pages, page_name(JSTI_PAGE_DASHBOARD)));
+    gtk_root_set_focus(GTK_ROOT(ui.window), previous);
+    g_clear_object(&previous);
+    return okay;
+}
+
 /* Other units reach a page only through its LinuxWindow*Page.h functions;
  * they must agree with the state each page keeps to itself. */
 gboolean page_functions_self_test(void) {
     gint32 state = ui.state;
-    gboolean okay = names_self_test() && actions_self_test();
+    gboolean okay = names_self_test() && actions_self_test() && dashboard_focus_self_test();
     ui.state = state;
     refresh_actions();
     return okay;

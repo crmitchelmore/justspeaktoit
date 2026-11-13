@@ -10,6 +10,9 @@ struct ModelChooserSheet: View {
   let credentialPurpose: ModelCredentialPurpose
   let storedAPIKeyIdentifiers: Set<String>
   let allowsCustom: Bool
+  /// False when the picker has its own Browse OpenRouter button: the one
+  /// selected OpenRouter model is then listed inline, with no drill-in row.
+  var groupsOpenRouter = true
   @Binding var selection: String
 
   @State private var selectedTag: ModelCatalog.Tag?
@@ -22,7 +25,7 @@ struct ModelChooserSheet: View {
 
   /// Group only when both kinds exist, so single-route pickers stay unchanged.
   private var isGrouped: Bool {
-    !groups.direct.isEmpty && !groups.openRouter.isEmpty
+    groupsOpenRouter && !groups.direct.isEmpty && !groups.openRouter.isEmpty
   }
 
   private var levelOptions: [ModelCatalog.Option] {
@@ -36,6 +39,7 @@ struct ModelChooserSheet: View {
       items: levelOptions, id: { $0.id }, selection: $selection,
       searchText: { [$0.displayName, $0.id, $0.description ?? ""] },
       includes: { option in selectedTag.map { option.tags.contains($0) } ?? true },
+      filtersCurrentSelection: true,
       controls: {
         AnyView(HStack {
           if isBrowsingOpenRouter {
@@ -56,35 +60,34 @@ struct ModelChooserSheet: View {
       },
       clearFilters: { selectedTag = nil },
       footer: { select in
-        AnyView(Group {
-          if isGrouped && !isBrowsingOpenRouter {
-            openRouterRow
-          }
-          if allowsCustom {
-            Divider()
-            Button {
-              select(ModelCatalog.customOptionID)
-            } label: {
-              HStack {
-                Text("Custom…")
-                Spacer()
-                ModelCredentialStatusView(
-                  availability: ModelCredentialResolver.availability(
-                    for: ModelCatalog.customOptionID,
-                    purpose: credentialPurpose,
-                    storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
-                  )
+        if isGrouped && !isBrowsingOpenRouter {
+          openRouterRow
+        }
+        if allowsCustom {
+          Button {
+            select(ModelCatalog.customOptionID)
+          } label: {
+            HStack {
+              Text("Custom…")
+              Spacer()
+              ModelCredentialStatusView(
+                availability: ModelCredentialResolver.availability(
+                  for: ModelCatalog.customOptionID,
+                  purpose: credentialPurpose,
+                  storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
                 )
-              }
+              )
             }
-            .buttonStyle(.plain)
           }
-        })
+          .buttonStyle(.plain)
+        }
       },
       row: { option in
       VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 10) {
-          Text(option.displayName)
+          Text(groupsOpenRouter ? option.displayName : ModelPickerGrouping.selectionLabel(
+            for: option.id, displayName: option.displayName, purpose: credentialPurpose
+          ))
             .font(.body)
           Spacer()
           if let contextLength = option.contextLength {

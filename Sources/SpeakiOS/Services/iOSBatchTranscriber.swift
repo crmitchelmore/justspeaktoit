@@ -10,8 +10,9 @@ import SpeakCore
 public final class IOSBatchTranscriber {
     private let audioSessionManager: AudioSessionManager
     private let startup = RecordingStartupOperation()
-    private var ownsAudioSession = false
-    private var hasInputTap = false
+    /// The microphone input. A background keyboard hand-off records on the
+    /// running readiness engine it lends rather than starting another one.
+    private let captureInput: LiveCaptureInput
     /// Batch has no live partial result, so its input tap is the only signal
     /// that capture is really running. Replaced per start so a retired run's
     /// tap can never report input for the run that replaced it (issue #983).
@@ -31,18 +32,6 @@ public final class IOSBatchTranscriber {
         onFirstInputBuffer?()
     }
 
-    private func releaseAudioSession() {
-        guard ownsAudioSession else { return }
-        audioSessionManager.deactivate()
-        ownsAudioSession = false
-    }
-
-    private func removeInputTap() {
-        guard hasInputTap else { return }
-        audioEngine.inputNode.removeTap(onBus: 0)
-        hasInputTap = false
-    }
-    private let audioEngine = AVAudioEngine()
     let audioRecorder = AudioRecordingPersistence()
     let recordingLoss = RecordingLossReporting(isBatch: true)
     var startCaptureAudio: (() throws -> Void)?
@@ -72,6 +61,7 @@ public final class IOSBatchTranscriber {
         session: URLSession = .shared
     ) {
         self.audioSessionManager = audioSessionManager
+        self.captureInput = LiveCaptureInput(audioSessionManager: audioSessionManager)
         self.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         self.retainRecording = retainRecording
         self.client = IOSBatchTranscriptionClient(apiKey: apiKey, keywords: keywords, session: session)
@@ -100,8 +90,7 @@ public final class IOSBatchTranscriber {
         guard permissionGranted else {
             throw iOSTranscriptionError.permissionDenied(.microphone)
         }
-        ownsAudioSession = true
-        try await audioSessionManager.configureForRecording()
+        try await captureInput.claimAudioSession()
         onStartupObservation?(.stage(.audioSessionConfigured))
         try Task.checkCancellation()
 
@@ -110,44 +99,43 @@ public final class IOSBatchTranscriber {
             startTime = Date()
             return
         }
-        let inputNode = audioEngine.inputNode
+        let inputNode = captureInput.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         try audioRecorder.startRecording(format: format)
         let signal = firstInputSignal
 
         do {
-            try inputNode.installTapSafely(
-                onBus: 0, bufferSize: 1024, format: format
-            ) { [audioRecorder, weak self] buffer, _ in
-                audioRecorder.writeBuffer(buffer)
-                guard buffer.frameLength > 0, signal.markObserved() else { return }
-                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            try captureInput.installTap { node in
+                try node.installTapSafely(
+                    onBus: 0, bufferSize: 1024, format: format
+                ) { [audioRecorder, weak self] buffer, _ in
+                    audioRecorder.writeBuffer(buffer)
+                    guard buffer.frameLength > 0, signal.markObserved() else { return }
+                    Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+                }
             }
-            hasInputTap = true
-            audioEngine.prepare()
-            try audioEngine.start()
+            try captureInput.startEngine()
             // Only after the engine actually returned.
             onStartupObservation?(.stage(.engineStarted))
             startTime = Date()
         } catch {
-            removeInputTap()
+            captureInput.halt()
             audioRecorder.cancelRecording()
-            releaseAudioSession()
+            captureInput.releaseAudioSession()
             throw error
         }
     }
 
     public func stop(language: String?) async throws -> TranscriptionResult {
         let lossRun = recordingLoss.currentReport
-        audioEngine.stop()
-        removeInputTap()
+        captureInput.halt()
         activeCaptureID = nil
         startTime = nil
         guard let recording = recordingLoss.finish(recorder: audioRecorder, run: lossRun) else {
-            releaseAudioSession()
+            captureInput.releaseAudioSession()
             throw IOSBatchTranscriptionError.missingRecording
         }
-        releaseAudioSession()
+        captureInput.releaseAudioSession()
 
         // A non-retained recording is temporary, but it is still the only copy
         // of what the user said, and a transcript in hand is not a transcript
@@ -191,10 +179,9 @@ public final class IOSBatchTranscriber {
 
     private func cleanupCapture() {
         recordingLoss.cancel()
-        audioEngine.stop()
-        removeInputTap()
+        captureInput.halt()
         audioRecorder.cancelRecording()
-        releaseAudioSession()
+        captureInput.releaseAudioSession()
         activeCaptureID = nil
         startTime = nil
     }

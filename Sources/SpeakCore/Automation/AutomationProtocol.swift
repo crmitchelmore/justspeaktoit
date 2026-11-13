@@ -50,6 +50,8 @@ public enum AutomationCommand: String, Codable, Sendable, CaseIterable {
     case awaitTranscript = "await_transcript"
     case speakText = "speak_text"
     case listVoices = "list_voices"
+    case getConfiguration = "get_configuration"
+    case setConfiguration = "set_configuration"
 }
 
 /// Stable machine-readable failure codes.
@@ -116,6 +118,8 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     /// `speak_text` only (`provider` too): see `AutomationSpeechSelection`/`Settings`.
     public var text: String?, voice: String?, play: Bool?, model: String?, speed: Double?, pitch: Double?
     public var quality: String?, language: String?
+    /// `get_configuration` filters and `set_configuration` changes: see `AutomationConfiguration`.
+    public var keys: [String]?, prefix: String?, changes: [String: AnyCodable]?, dryRun: Bool?
 
     public init(
         schemaVersion: Int = AutomationSchema.currentVersion,
@@ -170,6 +174,7 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
             throw AutomationError(code: .invalidArgument, message: "Capture cursors require await_transcript.")
         }
         try self.validateSpeechFields()
+        try self.validateConfigurationFields()
         switch self.command {
         case .awaitTranscript:
             try self.validateAwait()
@@ -190,7 +195,8 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
                     message: "get_history limit must be between 1 and \(AutomationLimits.maxHistoryLimit)."
                 )
             }
-        case .status, .startDictation, .stopDictation, .speakText, .listVoices:
+        case .status, .startDictation, .stopDictation, .speakText, .listVoices, .getConfiguration,
+             .setConfiguration:
             break
         }
         return self
@@ -257,6 +263,8 @@ public struct AutomationResult: Codable, Sendable, Equatable {
     /// `speak_text`: the voice used, the file written and any `notice` worth
     /// telling a person (such as a fallback); `list_voices`: `voices`.
     public var voice: String?, path: String?, notice: String?, voices: [AutomationVoice]?
+    /// `get_configuration` and `set_configuration`: see `AutomationConfiguration`.
+    public var configuration: AnyCodable?
 
     public init(
         text: String? = nil,
@@ -310,91 +318,5 @@ public struct AutomationResponse: Codable, Sendable, Equatable {
         error: AutomationError
     ) -> AutomationResponse {
         AutomationResponse(id: id, command: command, ok: false, error: error)
-    }
-}
-
-// MARK: - Coding
-
-/// The single JSON coder pair used on the automation socket.
-///
-/// Dates are ISO-8601 on the wire so shell consumers (`jq`, agents) get a stable
-/// string rather than a floating-point reference date.
-public enum AutomationCoding {
-    public static func encoder() -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return encoder
-    }
-
-    public static func decoder() -> JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }
-}
-
-// MARK: - Framing
-
-/// Length-prefixed framing shared by the automation client and server.
-///
-/// Mirrors the 4-byte big-endian prefix the iOS transport already uses, so both
-/// local surfaces read the same way on the wire.
-public enum AutomationFraming {
-    public static let prefixLength = 4
-
-    public static func frame(_ payload: Data) throws -> Data {
-        guard payload.count <= AutomationLimits.maxFrameBytes else {
-            throw AutomationError(
-                code: .invalidArgument,
-                message: "Automation message of \(payload.count) bytes exceeds the "
-                    + "\(AutomationLimits.maxFrameBytes) byte limit."
-            )
-        }
-        var length = UInt32(payload.count).bigEndian
-        var framed = withUnsafeBytes(of: &length) { Data($0) }
-        framed.append(payload)
-        return framed
-    }
-
-    /// Reads the payload length from a 4-byte prefix, rejecting anything above
-    /// the frame limit before a single byte of body is allocated.
-    public static func payloadLength(from prefix: Data) throws -> Int {
-        guard prefix.count == self.prefixLength else {
-            throw AutomationError(code: .invalidArgument, message: "Truncated automation length prefix.")
-        }
-        let length = prefix.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).bigEndian }
-        guard length > 0, Int(length) <= AutomationLimits.maxFrameBytes else {
-            throw AutomationError(
-                code: .invalidArgument,
-                message: "Automation message length \(length) is out of bounds."
-            )
-        }
-        return Int(length)
-    }
-}
-
-// MARK: - Endpoint
-
-/// Resolves the local socket both ends use.
-public enum AutomationEndpoint {
-    /// Overrides the socket path; used by tests and by anyone running a second
-    /// app instance. Read by the app and the CLI alike so they cannot disagree.
-    public static let environmentKey = "SPEAK_AUTOMATION_SOCKET"
-
-    public static func socketPath(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
-    ) -> String {
-        if let override = environment[self.environmentKey], !override.isEmpty {
-            return override
-        }
-        let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-        return support
-            .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
-            .appendingPathComponent("Automation", isDirectory: true)
-            .appendingPathComponent("automation.sock")
-            .path
     }
 }

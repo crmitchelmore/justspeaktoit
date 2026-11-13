@@ -1,19 +1,19 @@
 // Hands-free ("armed") dictation: the pure arming state machine and the
 // voice-activity debounce that drives it. Both types are free of AV, Speech
 // and availability dependencies so they compile and unit-test on every OS.
-// The SpeechDetector bridge that feeds them lives in
-// AppleSpeechAnalyzerTranscriber.swift.
+// The energy-based voice-activity gate that feeds them lives in
+// HandsFreeVoiceActivity.swift.
 import Foundation
 
 /// Timings for hands-free dictation, kept in one pure place so the state
 /// machine, the detector session and the UI agree on the same budgets.
 public enum HandsFreeDictationPolicy {
     /// Target latency from the user starting to speak to capture running.
-    /// The detector reports speech itself, so this is the budget the audio tap
+    /// The voice-activity gate reports speech itself, so this is the budget the audio tap
     /// and session start have to fit inside — asserted on device, not in code.
     public static let speechStartBudgetSeconds: Double = 0.3
 
-    /// How long the detector must report silence before capture auto-stops.
+    /// How long the gate must report silence before capture auto-stops.
     /// Long enough to survive a mid-sentence breath, short enough that the
     /// transcript lands without the user reaching for the hotkey.
     public static let defaultSilenceHoldSeconds: Double = 2.0
@@ -118,7 +118,8 @@ public struct HandsFreeDictationMachine: Equatable, Sendable {
     }
 
     public enum Failure: String, Equatable, Sendable {
-        /// The OS or device has no SpeechDetector (below OS 26, or unsupported).
+        /// The OS has no on-device SpeechAnalyzer pipeline (below OS 26), or
+        /// the voice-activity gate stopped unexpectedly.
         case detectorUnavailable
         /// Detector or transcription assets could not be installed.
         case assetsUnavailable
@@ -126,6 +127,9 @@ public struct HandsFreeDictationMachine: Equatable, Sendable {
         case localeUnsupported
         /// The microphone or audio session could not be acquired.
         case audioUnavailable
+        /// Apple's on-device speech recognition offered no usable audio format
+        /// (for example an empty 0 Hz format), so nothing could be analysed.
+        case audioFormatUnavailable
         /// The transcription session failed while armed.
         case captureFailed
         /// A legacy, remote or batch transcription engine is selected.

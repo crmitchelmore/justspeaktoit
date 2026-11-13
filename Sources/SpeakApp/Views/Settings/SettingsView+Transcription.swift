@@ -184,21 +184,16 @@ extension SettingsView {
           title: "Remote Batch Model",
           help: """
           Remote transcription runs after recording stops. Built-in providers use their own keys; \
-          custom model identifiers are sent through OpenRouter.
+          Browse OpenRouter models… and custom model identifiers use OpenRouter.
           """,
-          options: ModelCatalog.batchTranscription,
+          options: batchTranscriptionOptions,
           value: remoteTranscriptionModelBinding(
             \AppSettings.batchTranscriptionModel,
             options: ModelCatalog.batchTranscription
           ),
           credentialPurpose: .batchTranscription,
-          storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
-        )
-        OpenRouterTranscriptionPickerButton(
-          selection: remoteTranscriptionModelBinding(
-            \AppSettings.batchTranscriptionModel, options: ModelCatalog.batchTranscription
-          ),
-          storage: environment.secureStorage
+          storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
+          openRouterBrowser: batchTranscriptionOpenRouterBrowser
         )
         if isCustomBatchTranscriptionModel {
           SettingsInlineInfo(

@@ -19,6 +19,16 @@ final class LiveTextInserter: ObservableObject {
     case clipboard(TextOutputError)
   }
 
+  /// What happened to streamed text when a recording was cancelled (issue #1561).
+  enum RollbackResult: Equatable {
+    /// Nothing from this session reached the field.
+    case nothingInserted
+    /// The streamed text was removed and the field matches its pre-recording text.
+    case removed
+    /// The text was left in place because removing it could not be proven safe.
+    case kept(reason: String)
+  }
+
   /// How live text reaches the target app during a session.
   enum InsertionStrategy {
     /// Rewrite the whole field value on every update (existing behaviour).
@@ -179,6 +189,27 @@ final class LiveTextInserter: ObservableObject {
     // Focus changed during AX reads. A pinned redirect may proceed, but if
     // focus raced back, copy instead of pasting a second copy over partial text.
     return appSwitchFinalizationOverride() ?? .clipboard(.destinationApplicationChanged)
+  }
+
+  /// Removes this session's streamed text after the user cancelled the
+  /// recording, and ends the session so no later partial can write again.
+  /// Removal happens only when the field still holds exactly its pre-recording
+  /// text plus what this session streamed; any other edit leaves it untouched.
+  func rollBackForCancellation() -> RollbackResult {
+    defer { isActive = false }
+    guard isActive, let writer else { return .nothingInserted }
+    let result = writer.rollBack()
+    insertedText = writer.insertedText
+    lastInsertedRange = nil
+    switch result {
+    case .nothingInserted:
+      break
+    case .removed:
+      logger.info("Cancelled recording: streamed text removed from the target")
+    case .kept(let reason):
+      logger.warning("Cancelled recording: streamed text kept, \(reason, privacy: .public)")
+    }
+    return result
   }
 
   /// Mirrors what the writer has put in the field, for delivery and Voice Edit.

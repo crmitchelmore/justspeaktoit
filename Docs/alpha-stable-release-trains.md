@@ -118,6 +118,18 @@ reports "An error occurred in retrieving update information". Hourly
 reconciliation dispatches with the workflow token (`actions: write`), not a
 personal token.
 
+### Please test (human checks)
+
+Human validation never blocks a pull request or merge; it happens on Alpha.
+Alpha notes (the GitHub release, Sparkle, the in-app catalogue and TestFlight
+"What to Test") end with a **Please test** section listing the
+[`Docs/manual-checks.yml`](manual-checks.yml) checks whose ids are new since the
+previous Alpha delivered on that surface (a `<surface>-receipt.json` asset), so
+checks from superseded or undelivered builds carry forward. Mac notes list Mac
+checks; iOS notes list iPhone and Watch checks. `owner-` items and decisions are
+never listed. `scripts/alpha-testing-notes-lib.mjs` builds the section; a
+catalogue that fails to parse omits it rather than failing the release.
+
 The local Codex Run action launches Alpha with `script/build_and_run.sh`.
 Alpha starts without a global recording hotkey; configure one in Settings.
 
@@ -257,6 +269,19 @@ disabled is the commissioning exception; Stable publication remains owner-only.
 Required Alpha signing secrets are selected in the reusable Apple workflows.
 No signing material belongs in source control. Use the existing secure API key
 and local Apple Developer authentication for provisioning.
+
+## Android Alpha APK
+
+The green phase's `android` job (after `mac-direct` has made the Alpha public)
+builds the manifest source's release APK in the main-only `android-release`
+environment, signs it with the Play upload key, refuses a debug certificate, and
+attaches it to the Alpha as `JustSpeakToIt-android.apk`. It then advances
+`android-pointer.json` on `alpha-latest` (`{schemaVersion: 1, tag, asset,
+versionCode, sha256}`), never to an older Alpha. The website's
+`/alpha/download/android` follows that pointer, so it lags the Alpha pointer
+until the job finishes and answers 503 until the first APK exists. Without the
+upload keystore the job builds nothing. The version code uses the same
+build-time scheme as `android.yml`, so each APK installs over the last one.
 
 ## Windows and Linux release qualification
 

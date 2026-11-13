@@ -21,6 +21,7 @@ final class ShortcutManager: ObservableObject {
     private var localMonitor: Any?
     private var recordingMonitor: Any?
     private var handlers: [ShortcutAction: () -> Void] = [:]
+    private var activeConditions: [ShortcutAction: () -> Bool] = [:]
     private let permissionsManager: PermissionsManager
 
     private let defaultsKey = "customShortcutBindings"
@@ -61,14 +62,38 @@ final class ShortcutManager: ObservableObject {
 
     /// Registers a handler for a specific shortcut action. Actions the current
     /// distribution channel cannot support are ignored, so they can never fire.
-    func register(action: ShortcutAction, handler: @escaping () -> Void) {
+    ///
+    /// `isActive` decides whether the shortcut applies right now. When it returns false
+    /// the key is not consumed, so a bare Space or Escape still reaches the focused control
+    /// or sheet.
+    func register(
+        action: ShortcutAction,
+        isActive: (() -> Bool)? = nil,
+        handler: @escaping () -> Void
+    ) {
         guard action.isAvailable(in: .current) else { return }
         handlers[action] = handler
+        activeConditions[action] = isActive
+    }
+
+    /// Whether `action` has a handler that applies right now.
+    func isActive(_ action: ShortcutAction) -> Bool {
+        handlers[action] != nil && (activeConditions[action]?() ?? true)
+    }
+
+    /// Runs an action's registered handler directly, as if its shortcut had been
+    /// pressed, so other entry points (the command palette) share one code path.
+    @discardableResult
+    func perform(_ action: ShortcutAction) -> Bool {
+        guard action.isAvailable(in: .current), let handler = handlers[action] else { return false }
+        handler()
+        return true
     }
 
     /// Unregisters a handler for a specific action.
     func unregister(action: ShortcutAction) {
         handlers[action] = nil
+        activeConditions[action] = nil
     }
 
     /// Updates the key binding for an action.
@@ -193,7 +218,7 @@ final class ShortcutManager: ObservableObject {
         localMonitor != nil || carbonHotKeys.isInstalled
     }
 
-    private func handleKeyEvent(_ event: NSEvent, isGlobal: Bool) -> Bool {
+    func handleKeyEvent(_ event: NSEvent, isGlobal: Bool) -> Bool {
         guard !isRecordingShortcut else { return false }
 
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
@@ -208,7 +233,7 @@ final class ShortcutManager: ObservableObject {
             guard binding.isGlobal == isGlobal || !isGlobal else { continue }
 
             if event.keyCode == binding.keyCode && modifiers == binding.modifiers {
-                if let handler = handlers[action] {
+                if isActive(action), let handler = handlers[action] {
                     handler()
                     return true
                 }
@@ -236,6 +261,7 @@ final class ShortcutManager: ObservableObject {
     private func handleGlobalHotKey(_ action: ShortcutAction) {
         guard !isRecordingShortcut, action.isAvailable(in: .current) else { return }
         guard let binding = bindings[action], binding.isEnabled && binding.isGlobal else { return }
+        guard isActive(action) else { return }
         handlers[action]?()
     }
 

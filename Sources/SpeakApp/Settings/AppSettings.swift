@@ -169,7 +169,7 @@ final class AppSettings: ObservableObject {
 
   /// Hands-free dictation: the hotkey arms a listening session instead of
   /// starting capture, and speech starts/stops recording. Off by default, and
-  /// inert below macOS 26 where `SpeechDetector` does not exist.
+  /// inert below macOS 26 where on-device SpeechAnalyzer capture does not exist.
   @Published var handsFreeDictationEnabled: Bool {
     didSet { persistence.store(handsFreeDictationEnabled, key: .handsFreeDictationEnabled) }
   }

@@ -74,7 +74,7 @@ public final class CleanupModelDiscoveryStore: @unchecked Sendable {
         guard let updated = state.lastUpdated,
               clock().timeIntervalSince(updated) <= Self.maximumCacheAge else { return [] }
         let bundled = Set(ModelCatalog.cloudPostProcessing.map(\.id))
-        return state.models.filter { !bundled.contains($0.id) }
+        return state.models.filter { !bundled.contains($0.id) && CleanupModelRemovals.removal(for: $0.id) == nil }
     }
 
     /// Bundled entries win metadata collisions; saved discoveries stay visible even offline or disabled.

@@ -26,7 +26,9 @@ extension AppEnvironment {
         }
       }
     }
-    shortcuts.register(action: .pauseResumeTTS) { [weak self] in
+    // Space and Escape apply only while there is speech to control.
+    let hasSpeech: () -> Bool = { [weak self] in self?.tts.hasControllableSpeech ?? false }
+    shortcuts.register(action: .pauseResumeTTS, isActive: hasSpeech) { [weak self] in
       guard let self else { return }
       if self.tts.isPlaying {
         self.tts.pause()
@@ -34,11 +36,12 @@ extension AppEnvironment {
         self.tts.resume()
       }
     }
-    shortcuts.register(action: .stopTTS) { [weak self] in
+    shortcuts.register(action: .stopTTS, isActive: hasSpeech) { [weak self] in
       self?.tts.stop()
     }
     shortcuts.register(action: .pasteLastHistoryItem) { [weak self] in self?.pasteLastHistoryItem() }
     shortcuts.register(action: .editSelectionByVoice) { [weak self] in self?.toggleVoiceEdit() }
+    shortcuts.register(action: .openCommandPalette) { [weak self] in self?.isSettingsSearchPresented = true }
     registerNavigationShortcutHandlers()
     registerQuickVoiceShortcutHandlers()
     #if DEBUG
@@ -134,6 +137,29 @@ extension AppEnvironment {
     if arrayIndex < favorites.count {
       settings.defaultTTSVoice = favorites[arrayIndex]
     }
+  }
+
+  /// Runs a command chosen in the "Search for anything" palette.
+  func runPaletteCommand(_ command: CommandPaletteCommand) {
+    switch command.run {
+    case .shortcut(let action):
+      shortcuts.perform(action)
+    case .copyLastTranscript:
+      copyLastHistoryItem()
+    }
+  }
+
+  /// Copies the most recent history item's text to the clipboard, preferring the
+  /// post-processed transcription over the raw one.
+  func copyLastHistoryItem() {
+    let text = history.items.first.flatMap { $0.postProcessedTranscription ?? $0.rawTranscription }
+    guard let text, PasteTextOutput.hasDeliverableText(text) else {
+      hud.finishFailure(headline: "Nothing to copy", message: "No history items with text yet.", displayDuration: 2.5)
+      return
+    }
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(text, forType: .string)
+    hud.finishSuccess(message: "Copied last transcript", displayDuration: 2)
   }
 
   /// Pastes the most recent history item's text into the frontmost app,

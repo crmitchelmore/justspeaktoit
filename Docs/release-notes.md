@@ -2,7 +2,7 @@
 
 macOS releases use `scripts/release-maintenance/generate-release-notes.mjs` to turn the commits and
 changed-file summary between adjacent `mac-v*` tags into detailed, user-facing
-notes. The generator calls the OpenAI Responses API with `gpt-5.6-luna` and
+notes. The generator calls the OpenAI Responses API with `gpt-6-luna` and
 medium reasoning effort.
 
 The release workflow writes three formats from the same source:

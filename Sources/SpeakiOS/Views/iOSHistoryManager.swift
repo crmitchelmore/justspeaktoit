@@ -243,11 +243,12 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
 
     func recordTranscriptionAndWait(
         text: String, model: String, duration: TimeInterval, errorMessage: String? = nil,
-        requestContext: RequestDiagnosticContext? = nil, requestFailure: RequestDiagnosticContext.Failure?
+        requestContext: RequestDiagnosticContext? = nil, requestFailure: RequestDiagnosticContext.Failure?,
+        captureDetails: IOSCaptureDetails? = nil
     ) async -> iOSHistoryItem? {
         guard let item = iOSHistoryItem.recordedTranscript(
             text: text, model: model, duration: duration, errorMessage: errorMessage,
-            requestContext: requestContext, requestFailure: requestFailure
+            requestContext: requestContext, requestFailure: requestFailure, captureDetails: captureDetails
         ), await upsertAndWait(item) else { return nil }
         return item
     }
@@ -307,12 +308,15 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         reprocessingIDs.insert(item.id)
         defer { reprocessingIDs.remove(item.id) }
         do {
+            let model = settings.postProcessingModel
+            let startedAt = Date()
             let polished = try await iOSPostProcessingManager.shared.polish(
-                text: item.transcription, model: settings.postProcessingModel,
-                apiKey: settings.postProcessingAPIKey(for: settings.postProcessingModel)
+                text: item.transcription, model: model, apiKey: settings.postProcessingAPIKey(for: model)
             )
             try Task.checkCancellation()
-            await setPostProcessedAndWait(polished, for: item.id)
+            await setPostProcessedAndWait(
+                polished, for: item.id, details: .init(model: model, startedAt: startedAt, endedAt: Date())
+            )
         } catch is CancellationError {
             // An unaccepted provider result has no history mutation to admit.
         } catch { await setErrorAndWait(error.localizedDescription, for: item.id) }
@@ -327,8 +331,10 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         _ = finishUpsert(performSynchronously(.processed(id, processed, preservingError)), id: id)
     }
 
-    func setPostProcessedAndWait(_ processed: String, for id: UUID, preservingError: String? = nil) async {
-        _ = finishUpsert(await performAndWait(.processed(id, processed, preservingError)), id: id)
+    func setPostProcessedAndWait(
+        _ processed: String, for id: UUID, preservingError: String? = nil, details: IOSPostProcessingDetails? = nil
+    ) async {
+        _ = finishUpsert(await performAndWait(.processed(id, processed, preservingError, details)), id: id)
         reprocessingIDs.remove(id)
     }
 

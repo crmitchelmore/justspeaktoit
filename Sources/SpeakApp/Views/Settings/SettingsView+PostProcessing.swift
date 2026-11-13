@@ -214,21 +214,18 @@ extension SettingsView {
 
   private var remotePostProcessingSection: some View {
     VStack(alignment: .leading, spacing: 12) {
-      CleanupModelDiscoveryView(
-        selection: settingsBinding(\AppSettings.postProcessingModel),
-        enabled: settingsBinding(\AppSettings.cleanupModelDiscoveryEnabled)
-      )
       ModelPicker(
         title: "Remote Post-processing Model",
         help: """
-        Native provider models are listed first and use that provider's own key. \
-        Choose OpenRouter to pick from its wider catalogue. Mini and Lite models are faster and cheaper.
+        Native provider models use that provider's own key. Use Browse OpenRouter models… to \
+        discover and configure models from OpenRouter's wider catalogue. Mini and Lite models are faster and cheaper.
         """,
         options: cloudPostProcessingOptions,
         value: cloudPostProcessingModelBinding,
         credentialPurpose: .postProcessing,
         storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
-        usesDetailedChooser: true
+        usesDetailedChooser: true,
+        openRouterBrowser: cleanupOpenRouterBrowser
       )
 
       SettingsInlineInfo(
@@ -276,15 +273,13 @@ extension SettingsView {
         HStack {
           Text("Temperature")
           Spacer()
-          Text(
-            settings.postProcessingTemperature,
-            format: .number.precision(.fractionLength(2))
-          )
-          .font(.caption.monospacedDigit())
-          .foregroundStyle(.secondary)
+          Text(settings.postProcessingTemperature, format: .number.precision(.fractionLength(2)))
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
         }
-        Slider(
-          value: settingsBinding(\AppSettings.postProcessingTemperature), in: 0...1, step: 0.05)
+        Slider(value: settingsBinding(\AppSettings.postProcessingTemperature), in: 0...1, step: 0.05)
+        .accessibilityLabel("Temperature")
+        .accessibilityValue(String(format: "%.2f", settings.postProcessingTemperature))
         .speakTooltip("Lower values stay close to your words; higher values let Speak be more creative.")
       }
     }

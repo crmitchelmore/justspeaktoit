@@ -85,7 +85,8 @@ Android and the website have their own sections below.
   `PageHeroStrip` make every label inside them white on the palette gradient,
   and `SpeakTextStyle` holds the fonts, on-tint colours and truncation
   (`speakSingleLine`, `speakLiveTranscriptLines`) for the whole app. Change
-  them there, not per page. SwiftLint rejects copies outside that folder:
+  them there, not per page. `PageHeroContrastTests` fails if any palette stop
+  or on-tint token drops below 4.5:1. SwiftLint rejects copies outside that folder:
   `hand_rolled_on_tint_text` (`.white` foregrounds), `hand_rolled_page_title`
   (`Text(…).font(.largeTitle)`) and `hand_rolled_gradient_surface`
   (`LinearGradient(`; use `.pageBackground(_:)` for page washes). The HUD is

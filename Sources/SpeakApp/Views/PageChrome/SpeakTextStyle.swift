@@ -16,12 +16,14 @@ enum SpeakTextStyle {
     static let badge = Font.callout.weight(.semibold)
 
     /// Text and symbols drawn on a saturated fill: hero gradients, prominent
-    /// tinted buttons and selected tiles.
+    /// tinted buttons and selected tiles. `PageHeroContrastTests` checks these
+    /// opacities against every `PageHeroPalette` stop for 4.5:1 contrast.
     static let onTint = Color.white
-    static let onTintSecondary = Color.white.opacity(0.85)
-    static let onTintTertiary = Color.white.opacity(0.7)
+    static let onTintSecondaryOpacity = 0.92
+    static let onTintSecondary = Color.white.opacity(onTintSecondaryOpacity)
     /// Chips, fields and capsules sitting on a saturated fill.
-    static let onTintFill = Color.white.opacity(0.14)
+    static let onTintFillOpacity = 0.10
+    static let onTintFill = Color.white.opacity(onTintFillOpacity)
     static let onTintStroke = Color.white.opacity(0.15)
 
     /// Shrink single-line text this far before truncating it.

@@ -71,7 +71,7 @@ struct HistoryHeroHeader: View {
     HStack(spacing: 16) {
       HStack(spacing: 10) {
         Image(systemName: "magnifyingglass")
-          .foregroundStyle(SpeakTextStyle.onTintTertiary)
+          .foregroundStyle(SpeakTextStyle.onTintSecondary)
         TextField("Search history", text: self.$list.searchText)
           .textFieldStyle(.plain)
           .speakTooltip(

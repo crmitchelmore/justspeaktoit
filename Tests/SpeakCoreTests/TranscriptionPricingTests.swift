@@ -117,9 +117,13 @@ final class TranscriptionPricingTests: XCTestCase {
             "speechmatics/enhanced-streaming",
             "speechmatics/enhanced",
             "speechmatics/standard",
-            // Reson8 Resonant-1 has no verified public USD quote.
+            // Reson8 publishes EUR rates only (Rumble-2 from €0.16/h prerecorded,
+            // €0.24/h realtime on Launch), not a USD quote; Resonant-1 has none.
+            // https://www.reson8.dev/pricing
             FileSpeechProvider.reson8.modelID,
             FileSpeechProvider.reson8LiveID,
+            Reson8Model.rumble2.batchID,
+            Reson8Model.rumble2.liveID,
             // StepAudio 3 publishes 2.8 CNY/hour, not a USD conversion.
             FileSpeechProvider.stepfun.modelID,
             "apple/local/Dictation"

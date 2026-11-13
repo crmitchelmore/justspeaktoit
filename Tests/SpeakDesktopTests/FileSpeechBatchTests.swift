@@ -14,8 +14,9 @@ final class FileSpeechBatchTests: XCTestCase {
     }
 
     func testCatalogueRoutesCredentialsNamesAndBillingStayInParity() throws {
-        for provider in FileSpeechProvider.allCases {
-            let model = provider.modelID
+        let models = FileSpeechProvider.allCases.flatMap { provider in provider.modelIDs.map { (provider, $0) } }
+        for (provider, model) in models {
+            XCTAssertEqual(FileSpeechProvider.provider(for: model), provider)
             XCTAssertEqual(ModelCatalog.batchTranscription.filter { $0.id == model }.count, 1)
             XCTAssertTrue(DesktopTranscription.batchModels.contains { $0.id == model })
             XCTAssertEqual(DesktopTranscription.provider(for: model)?.website, provider.metadata.website)
@@ -34,7 +35,12 @@ final class FileSpeechBatchTests: XCTestCase {
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: FileSpeechProvider.smallest.modelID),
                        Decimal(string: "0.004"))
         XCTAssertNil(TranscriptionPricing.pricePerMinuteUSD(modelID: FileSpeechProvider.stepfun.modelID))
-        XCTAssertNil(LiveTranscriptionRouting.route(for: FileSpeechProvider.reson8.modelID))
+        for model in Reson8Model.allCases {
+            XCTAssertNil(LiveTranscriptionRouting.route(for: model.batchID))
+            XCTAssertNil(TranscriptionPricing.pricePerMinuteUSD(modelID: model.batchID))
+        }
+        XCTAssertEqual(FileSpeechProvider.reson8.modelID, "reson8/resonant-1")
+        XCTAssertEqual(Reson8Model.rumble2.batchID, "reson8/rumble-2")
     }
 
     func testPulseProRawBytesLanguageWordsAndPrice() async throws {

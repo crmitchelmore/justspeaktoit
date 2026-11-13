@@ -20,21 +20,31 @@ public final class Reson8LiveClient: FinalizingStreamingTranscriptionClient,
     let lifecycle = NSRecursiveLock()
     var run = Reson8LiveRun()
     let apiKey: String
+    let model: Reson8Model
     let language: String?
     let sampleRate: Int
     let makeConnection: ConnectionFactory
     let schedule: Scheduler
     static let maximumFrames = 256
 
+    /// Streams with Resonant-1, the engine behind `FileSpeechProvider.reson8LiveID`.
     public convenience init(
         apiKey: String, language: String? = nil, sampleRate: Int = 16_000, session: URLSession = .shared
     ) {
+        self.init(apiKey: apiKey, model: .resonant1, language: language, sampleRate: sampleRate, session: session)
+    }
+
+    public convenience init(
+        apiKey: String, model: Reson8Model, language: String? = nil, sampleRate: Int = 16_000,
+        session: URLSession = .shared
+    ) {
         self.init(
-            apiKey: apiKey, language: language, sampleRate: sampleRate,
+            apiKey: apiKey, model: model, language: language, sampleRate: sampleRate,
             makeConnection: { URLSessionStreamingConnection(session: session, request: $0) }
         )
     }
 
+    /// Streams with Resonant-1, the engine behind `FileSpeechProvider.reson8LiveID`.
     public init(
         apiKey: String, language: String? = nil, sampleRate: Int = 16_000,
         makeConnection: @escaping ConnectionFactory,
@@ -43,6 +53,22 @@ public final class Reson8LiveClient: FinalizingStreamingTranscriptionClient,
         }
     ) {
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.model = .resonant1
+        self.language = language
+        self.sampleRate = sampleRate
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+    }
+
+    public init(
+        apiKey: String, model: Reson8Model, language: String? = nil, sampleRate: Int = 16_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.model = model
         self.language = language
         self.sampleRate = sampleRate
         self.makeConnection = makeConnection
@@ -74,7 +100,9 @@ public final class Reson8LiveClient: FinalizingStreamingTranscriptionClient,
                 guard (8_000...48_000).contains(sampleRate) else {
                     throw FileSpeechError.service("Reson8 requires a valid PCM sample rate.")
                 }
-                let request = try Self.request(apiKey: apiKey, language: language, sampleRate: sampleRate)
+                let request = try Self.request(
+                    apiKey: apiKey, model: model, language: language, sampleRate: sampleRate
+                )
                 connect(active, request: request)
                 deadline(10, active) { client, active in
                     if !active.open { client.fail(FileSpeechError.missingCompletion("Reson8 handshake"), active) }
@@ -170,17 +198,19 @@ public final class Reson8LiveClient: FinalizingStreamingTranscriptionClient,
         }
     }
 
-    static func request(apiKey: String, language: String?, sampleRate: Int) throws -> URLRequest {
+    static func request(
+        apiKey: String, model: Reson8Model, language: String?, sampleRate: Int
+    ) throws -> URLRequest {
         var components = URLComponents(string: "wss://api.reson8.dev/v1/speech-to-text/realtime")!
         components.queryItems = [
-            URLQueryItem(name: "model", value: FileSpeechProvider.reson8WireModel),
+            URLQueryItem(name: "model", value: model.rawValue),
             URLQueryItem(name: "encoding", value: "pcm_s16le"),
             URLQueryItem(name: "sample_rate", value: String(sampleRate)),
             URLQueryItem(name: "channels", value: "1"),
             URLQueryItem(name: "include_interim", value: "true"),
             URLQueryItem(name: "include_timestamps", value: "true")
         ]
-        if let code = try FileSpeechProvider.reson8Language(language) {
+        if let code = try model.language(language) {
             components.queryItems?.append(URLQueryItem(name: "language", value: code))
         }
         guard let url = components.url else { throw StreamingClientError.invalidURL }

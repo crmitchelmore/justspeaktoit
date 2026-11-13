@@ -243,7 +243,8 @@ refresh without changing an active recording or reusing an earlier model index.
 Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs,
 Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, three Azure live routes and xAI's
 dedicated speech-to-text live models use shared Swift clients with the native
-WinHTTP transport. Reson8 (`reson8/resonant-1-streaming`, 16 kHz PCM) also uses
+WinHTTP transport. Reson8 (`reson8/rumble-2-streaming` and
+`reson8/resonant-1-streaming`, 16 kHz PCM) also uses
 the shared native transport with handshake-gated audio and a bounded,
 correlated flush confirmation; Smallest AI Pulse Pro and StepAudio 3 ASR Max
 are file-only routes. Desktop hosts save new StepFun keys for the International

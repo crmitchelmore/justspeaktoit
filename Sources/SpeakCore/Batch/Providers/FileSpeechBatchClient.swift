@@ -21,7 +21,7 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
     }
 
     public func supportedModels() -> [ModelCatalog.Option] {
-        [provider.option] + (provider == .reson8 ? [FileSpeechProvider.reson8LiveOption] : [])
+        provider.options + (provider == .reson8 ? FileSpeechProvider.reson8LiveOptions : [])
     }
 
     public func requiresAPIKey(for model: String) -> Bool { true }
@@ -48,11 +48,10 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         try Task.checkCancellation()
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
-        guard model.trimmingCharacters(in: .whitespacesAndNewlines) == provider.modelID else {
-            throw FileSpeechError.unsupportedModel(model)
-        }
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard provider.modelIDs.contains(model) else { throw FileSpeechError.unsupportedModel(model) }
         let stepFunRegion = provider == .stepfun ? try StepFunCredential(credentials: key).region : nil
-        let request = try makeRequest(audioURL: url, apiKey: key, language: language)
+        let request = try makeRequest(audioURL: url, apiKey: key, language: language, model: model)
         let response: HTTPURLResponse
         let body: Data
         do {
@@ -76,7 +75,7 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         try Task.checkCancellation()
         switch provider {
         case .smallest: return try decodePulse(body, captureDuration: duration)
-        case .reson8: return try decodeReson8(body, captureDuration: duration)
+        case .reson8: return try decodeReson8(body, captureDuration: duration, model: model)
         case .stepfun:
             guard response.mimeType?.lowercased() == "text/event-stream" else {
                 throw TranscriptionProviderError.invalidResponse
@@ -85,7 +84,8 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         }
     }
 
-    func makeRequest(audioURL: URL, apiKey: String, language: String?) throws -> URLRequest {
+    /// `model` defaults to the provider's first-shipped ID.
+    func makeRequest(audioURL: URL, apiKey: String, language: String?, model: String? = nil) throws -> URLRequest {
         let format = audioURL.pathExtension.lowercased()
         let formats = provider == .stepfun
             ? ["ogg", "mp3", "wav", "m4a"] : ["wav", "mp3", "flac", "ogg", "opus", "m4a", "webm"]
@@ -99,7 +99,8 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         let stepFun = provider == .stepfun ? try StepFunCredential(credentials: apiKey) : nil
         let audio = try Self.readAudio(from: file)
         let (endpoint, body) = try makePayload(
-            audio: audio, format: format, language: language, stepFunRegion: stepFun?.region
+            audio: audio, format: format, language: language, model: model ?? provider.modelID,
+            stepFunRegion: stepFun?.region
         )
         var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 120)
         request.httpMethod = "POST"
@@ -125,7 +126,7 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
     }
 
     private func makePayload(
-        audio: Data, format: String, language: String?, stepFunRegion: StepFunCredential.Region?
+        audio: Data, format: String, language: String?, model: String, stepFunRegion: StepFunCredential.Region?
     ) throws -> (URL, Data) {
         let code = FileSpeechProvider.languageCode(language)
         var components: URLComponents
@@ -142,14 +143,15 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
                 URLQueryItem(name: "word_timestamps", value: "true")
             ]
         case .reson8:
+            guard let reson8 = Reson8Model(modelID: model) else { throw FileSpeechError.unsupportedModel(model) }
             components = URLComponents(string: "https://api.reson8.dev/v1/speech-to-text/prerecorded")!
             components.queryItems = [
-                URLQueryItem(name: "model", value: FileSpeechProvider.reson8WireModel),
+                URLQueryItem(name: "model", value: reson8.rawValue),
                 URLQueryItem(name: "include_timestamps", value: "true"),
                 URLQueryItem(name: "include_words", value: "true"),
                 URLQueryItem(name: "include_confidence", value: "true")
             ]
-            if let hint = try FileSpeechProvider.reson8Language(language) {
+            if let hint = try reson8.language(language) {
                 components.queryItems?.append(URLQueryItem(name: "language", value: hint))
             }
             if format == "m4a" { components.queryItems?.append(URLQueryItem(name: "encoding", value: "m4a")) }
@@ -204,7 +206,9 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         )
     }
 
-    private func decodeReson8(_ data: Data, captureDuration: TimeInterval) throws -> TranscriptionResult {
+    private func decodeReson8(
+        _ data: Data, captureDuration: TimeInterval, model: String
+    ) throws -> TranscriptionResult {
         struct Word: Decodable {
             let text: String
             let startMs: Double?
@@ -228,13 +232,14 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
                     startTime: start, endTime: start + ($0.durationMs ?? 0) / 1_000, text: $0.text
                 )
             },
-            duration: response.durationMs.map { $0 / 1_000 } ?? captureDuration, data: data
+            duration: response.durationMs.map { $0 / 1_000 } ?? captureDuration, data: data, model: model
         )
     }
 
     private func result(
         text: String, segments: [TranscriptionSegment], duration: TimeInterval,
-        confidence: Double? = nil, data: Data, costPerHour: Decimal? = nil, currency: String = "USD"
+        confidence: Double? = nil, data: Data, costPerHour: Decimal? = nil, currency: String = "USD",
+        model: String? = nil
     ) throws -> TranscriptionResult {
         guard duration.isFinite, duration >= 0, duration < Double(Int.max) else {
             throw TranscriptionProviderError.invalidResponse
@@ -248,7 +253,7 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         }
         return TranscriptionResult(
             text: text.trimmingCharacters(in: .whitespacesAndNewlines), segments: segments,
-            confidence: confidence, duration: duration, modelIdentifier: provider.modelID,
+            confidence: confidence, duration: duration, modelIdentifier: model ?? provider.modelID,
             cost: cost, rawPayload: String(data: data, encoding: .utf8), debugInfo: nil
         )
     }

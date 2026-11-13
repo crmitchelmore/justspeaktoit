@@ -7,15 +7,15 @@ public enum FileSpeechProvider: String, CaseIterable, Sendable {
     case reson8
     case stepfun
 
-    public static let reson8LiveID = "reson8/resonant-1-streaming"
-    /// Sent explicitly so a change to Reson8's default model cannot change the engine behind our IDs.
-    public static let reson8WireModel = "resonant-1"
+    public static let reson8LiveID = Reson8Model.resonant1.liveID
+    /// Resonant-1's wire value. Each Reson8 ID sends its own `Reson8Model`.
+    public static let reson8WireModel = Reson8Model.resonant1.rawValue
     public static let reson8FinishBudget: TimeInterval = 5
 
     public var modelID: String {
         switch self {
         case .smallest: return "smallest/pulse-pro"
-        case .reson8: return "reson8/resonant-1"
+        case .reson8: return Reson8Model.resonant1.batchID
         case .stepfun: return "stepfun/stepaudio-3-asr-max"
         }
     }
@@ -48,8 +48,7 @@ public enum FileSpeechProvider: String, CaseIterable, Sendable {
             name = "Smallest AI Pulse Pro"
             description = "English-only recorded speech. Automatic uses English; no live audio support."
         case .reson8:
-            name = "Reson8 Resonant-1"
-            description = "Recorded speech across ten European languages with Reson8's Resonant-1 model."
+            return Reson8Model.resonant1.batchOption
         case .stepfun:
             name = "StepFun StepAudio 3 ASR Max"
             description = "Upload one recording for StepAudio 3 recognition with streamed text responses. "
@@ -58,32 +57,27 @@ public enum FileSpeechProvider: String, CaseIterable, Sendable {
         return ModelCatalog.Option(id: modelID, displayName: name, description: description, latencyTier: .medium)
     }
 
-    public static var batchOptions: [ModelCatalog.Option] { allCases.map(\.option) }
+    /// Every batch model this provider serves; `modelID` is the first-shipped one.
+    public var options: [ModelCatalog.Option] {
+        self == .reson8 ? Reson8Model.allCases.map(\.batchOption) : [option]
+    }
 
-    public static let reson8LiveOption = ModelCatalog.Option(
-        id: reson8LiveID, displayName: "Reson8 Resonant-1 (Streaming)",
-        description: "Genuine live PCM streaming with interim and final transcripts across ten European languages "
-            + "with Reson8's Resonant-1 model.",
-        latencyTier: .fast
-    )
+    public var modelIDs: [String] { options.map(\.id) }
+
+    public static var batchOptions: [ModelCatalog.Option] { allCases.flatMap(\.options) }
+
+    public static let reson8LiveOption = Reson8Model.resonant1.liveOption
+    public static var reson8LiveOptions: [ModelCatalog.Option] { Reson8Model.allCases.map(\.liveOption) }
 
     public static func provider(for modelID: String) -> FileSpeechProvider? {
         let identifier = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
-        return allCases.first { $0.modelID == identifier }
+        return allCases.first { $0.modelIDs.contains(identifier) }
     }
 
     static func languageCode(_ language: String?) -> String? {
         let value = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !value.isEmpty, value.lowercased() != "automatic", value.lowercased() != "auto" else { return nil }
         return value.localeLanguageCode
-    }
-
-    static func reson8Language(_ language: String?) throws -> String? {
-        guard let code = languageCode(language) else { return nil }
-        guard ["de", "en", "es", "fr", "fy", "it", "nl", "pl", "pt", "sv"].contains(code) else {
-            throw FileSpeechError.unsupportedLanguage("Reson8", code)
-        }
-        return code
     }
 }
 

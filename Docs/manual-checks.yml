@@ -219,6 +219,23 @@ sessions:
           - "Open History."
         expected: "Every route transcribes the phrase once, streaming routes show words while you speak (Azure MAI Transcribe (Turn-based) shows each turn when you pause), and History names the model with its cost. Pulse refuses the non-English run before sending audio. Note any route that is unavailable to your account."
         final_gate: true
+      - id: "reson8-rumble-2"
+        issues:
+          - 1656
+        title: "Reson8 Rumble-2 batch and streaming, including Japanese"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Mac, first Alpha with Reson8 Rumble-2"
+        prerequisites:
+          - "A Reson8 API key saved in Settings \u203a API Keys"
+        steps:
+          - "Choose Reson8 Rumble-2 as the batch model, set the language to English, dictate \u201crumble two batch\u201d into TextEdit and stop."
+          - "Choose Reson8 Rumble-2 (Streaming) as the live model, dictate \u201crumble two live\u201d and stop."
+          - "Set the language to Japanese and repeat both runs with a short Japanese phrase, for example \u201c\u3053\u3093\u306b\u3061\u306f\u201d."
+          - "Choose Reson8 Resonant-1 with Japanese still selected and try once."
+          - "Open History."
+        expected: "All four Rumble-2 runs transcribe the phrase once, the streaming runs show words while you speak, and History names Reson8 Rumble-2 or Reson8 Rumble-2 (Streaming). Resonant-1 refuses Japanese before sending audio."
+        final_gate: false
       - id: "owner-stepfun-international-region"
         issues:
           - 1210

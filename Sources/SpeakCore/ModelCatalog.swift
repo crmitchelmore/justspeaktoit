@@ -153,7 +153,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "OpenAI API key.",
             estimatedLatencyMs: 280, latencyTier: .fast)
     ] + AzureTranscriptionModels.liveOptions + AlibabaSpeechModels.liveOptions
-        + [FileSpeechProvider.reson8LiveOption]
+        + FileSpeechProvider.reson8LiveOptions
 
     /// Every batch entry including shut-down ones, for routing a saved selection
     /// to the client that reports `ModelRetiredError`. Pickers use `batchTranscription`.

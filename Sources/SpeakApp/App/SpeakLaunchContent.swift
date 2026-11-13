@@ -74,6 +74,7 @@ struct SpeakLaunchContent: View {
                     "Share anonymous usage and reliability data. "
                         + "We never collect transcripts, audio, prompts, clipboard text, "
                         + "keystrokes, API keys, screen content, or personal identity. "
+                        + "Data goes to PostHog in the EU, which discards your IP address. "
                         + "You can turn this off at any time in Settings."
                 )
             }

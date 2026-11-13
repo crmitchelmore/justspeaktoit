@@ -118,7 +118,8 @@ extension SettingsView {
             Text(
               "Helps improve the app using typed usage and reliability events. "
                 + "Transcripts, audio, prompts, clipboard text, keystrokes, API keys, "
-                + "screen content and personal identity are never collected."
+                + "screen content and personal identity are never collected. "
+                + "Data goes to PostHog in the EU, which discards your IP address."
             )
               .font(.callout)
               .foregroundStyle(.secondary)

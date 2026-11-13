@@ -91,9 +91,11 @@ app/src/main/java/com/justspeaktoit/android/
 │   ├── DictationEngineSelector.kt # mode, cloud model, language, availability and the plan a session follows
 │   ├── DictationSessionController.kt  # session lifecycle, microphone hold and cleanup
 │   ├── SessionRequests.kt   # provider requests: key reads, deadlines and failure mapping
+│   ├── LiveDictation.kt     # the live-session factory the controller streams Cloud audio through
 │   ├── SharedAudioSource.kt # reads audio shared by other apps (content:// only)
 │   └── DictationViewModel.kt      # projects its owners into UI state; production wiring in Factory
 ├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
+│   └── live/                # streaming clients (Deepgram, AssemblyAI, OpenAI Realtime) over OkHttp WebSockets
 ├── corrections/             # personal corrections and the cloud vocabulary prompt
 ├── history/                 # transcript history, retention, atomic storage and usage insights
 ├── settings/                # non-secret preferences

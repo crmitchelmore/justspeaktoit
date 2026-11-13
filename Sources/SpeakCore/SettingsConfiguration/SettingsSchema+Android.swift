@@ -13,7 +13,9 @@ extension SettingsSchema {
     static let androidHistoryRetentions = ["Off", "Week", "Month", "Forever"]
 
     static let androidFields: [SettingsSchemaField] = {
-        let transcriptionModels = CloudCatalogAndroidExport.transcriptionModels.map(\.id)
+        // Mirrors the app's `CloudCatalog.transcriptionModels`: batch models first, then live ones.
+        let transcriptionModels = (CloudCatalogAndroidExport.transcriptionModels
+            + CloudCatalogAndroidExport.liveTranscriptionModels).map(\.id)
         let cleanupModels = CloudCatalogAndroidExport.cleanupModels.map(\.id)
         return [
             Field(key: "chosen_mode", kind: .optionalString,

@@ -1,18 +1,17 @@
 import SpeakCore
 import SwiftUI
 
-/// The live discover-then-configure browsers behind the OpenRouter entry of the
-/// cleanup and batch transcription pickers.
+/// The live discover-then-configure browsers behind the separate Browse OpenRouter
+/// buttons of the cleanup and batch transcription pickers.
 extension SettingsView {
   var cleanupOpenRouterBrowser: ModelPickerOpenRouterBrowser {
-    { select, back in
+    { select in
       AnyView(
         OpenRouterCleanupBrowser(
           selection: settings.postProcessingModel,
           discoveryEnabled: settingsBinding(\AppSettings.cleanupModelDiscoveryEnabled),
           options: { [settings] in CleanupModelDiscoveryStore.shared.options(selected: settings.postProcessingModel) },
           temperature: settingsBinding(\AppSettings.postProcessingTemperature),
-          onBack: back,
           onSelect: select
         )
       )
@@ -20,7 +19,7 @@ extension SettingsView {
   }
 
   var batchTranscriptionOpenRouterBrowser: ModelPickerOpenRouterBrowser {
-    { select, back in
+    { select in
       AnyView(
         OpenRouterTranscriptionBrowser(
           apiKeyProvider: { [storage = environment.secureStorage] in
@@ -28,7 +27,6 @@ extension SettingsView {
           },
           selection: settings.batchTranscriptionModel,
           bundled: ModelCatalog.batchTranscription,
-          onBack: back,
           onSelect: select
         )
       )

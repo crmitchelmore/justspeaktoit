@@ -133,6 +133,26 @@ final class LiveTextInserterCancelRollbackTests: XCTestCase {
     }
 
     @MainActor
+    func testCancelWhenAppEditsAfterRegionSelected_KeepsDocument() {
+        let field = FakeStreamingTextField(value: "Intro ", selection: CFRange(location: 6, length: 0))
+        let inserter = LiveTextInserterTestFactory.make(field: field)
+        inserter.update(with: "hello")
+        let writes = field.selectedTextWrites.count
+        // The user types at the region's start just after rollback selected it.
+        field.onSelectionWrite = { [unowned field] in
+            field.onSelectionWrite = nil
+            field.value = "Intro mine hello"
+        }
+
+        guard case .kept = inserter.rollBackForCancellation() else {
+            return XCTFail("A selection that no longer covers the streamed text must not be replaced")
+        }
+        XCTAssertEqual(field.value, "Intro mine hello")
+        XCTAssertEqual(field.selectedTextWrites.count, writes)
+        XCTAssertEqual(field.selection.length, 0, "The user's words must not be left selected")
+    }
+
+    @MainActor
     func testCancelWithNothingStreamed_IsNoOp() {
         let field = FakeStreamingTextField(value: "untouched", selection: CFRange(location: 9, length: 0))
         let inserter = LiveTextInserterTestFactory.make(field: field)

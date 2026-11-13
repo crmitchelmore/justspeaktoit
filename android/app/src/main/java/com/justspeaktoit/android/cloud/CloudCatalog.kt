@@ -21,6 +21,18 @@ internal data class CloudModelSpec(
     val supportsPrompt: Boolean,
 )
 
+/** A live (streaming) transcription row of `assets/cloud_catalog.json`, as written into [GeneratedCloudCatalog]. */
+internal data class LiveModelSpec(
+    val catalogId: String,
+    val displayName: String,
+    val providerId: String,
+    val apiName: String,
+    val sampleRate: Int,
+    val languageField: String,
+    val vocabularyField: String,
+    val postStopFinalizeBudgetMs: Int,
+)
+
 /** A language row of `assets/cloud_catalog.json` (SpeakCore's `TranscriptionLanguageCatalog`). */
 internal data class TranscriptionLanguageSpec(val id: String, val displayName: String)
 
@@ -37,6 +49,8 @@ enum class CloudProvider(val id: String, val displayName: String, val baseUrl: S
     Anthropic("anthropic", "Anthropic", "https://api.anthropic.com/v1"),
     Google("google", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai"),
     Mistral("mistral", "Mistral", "https://api.mistral.ai/v1"),
+    Deepgram("deepgram", "Deepgram", "wss://api.deepgram.com"),
+    AssemblyAI("assemblyai", "AssemblyAI", "wss://streaming.eu.assemblyai.com"),
     ;
 
     val credentialId: String
@@ -57,6 +71,20 @@ data class CloudModel(
     val languageField: String,
     /** Whether the model takes a vocabulary glossary as its `prompt` form field. */
     val supportsPrompt: Boolean = false,
+    /** Set for a streaming model: it transcribes while recording and cannot transcribe a file. */
+    val live: LiveRoute? = null,
+)
+
+/** How a live model is reached, from SpeakCore's `ModelCatalog.liveTranscription`. */
+data class LiveRoute(
+    /** The PCM rate the provider expects; recording is 16 kHz, so other rates are resampled. */
+    val sampleRate: Int,
+    /** The wire name of the language hint, or empty when the model takes none. */
+    val languageField: String,
+    /** The wire name of the vocabulary hint (`keyterm`, `keyterms_prompt`, `prompt`), or empty. */
+    val vocabularyField: String,
+    /** How long a stop waits for the provider's last formatted text after the end-of-audio signal. */
+    val finalizeBudgetMs: Long,
 )
 
 /** A cleanup route: a native provider's own API, or OpenRouter. */
@@ -79,7 +107,8 @@ data class CleanupModel(
  * `CloudCatalogAndroidExport`, which also decides which models Android offers).
  */
 object CloudCatalog {
-    val transcriptionModels: List<CloudModel> = GeneratedCloudCatalog.transcriptionModels.map {
+    /** Models that transcribe a finished recording. */
+    val batchTranscriptionModels: List<CloudModel> = GeneratedCloudCatalog.transcriptionModels.map {
         CloudModel(
             catalogId = it.catalogId,
             displayName = it.displayName,
@@ -90,7 +119,27 @@ object CloudCatalog {
         )
     }
 
-    val defaultTranscriptionModel: CloudModel = transcriptionModels.first()
+    /** Streaming models that show text while recording. */
+    val liveTranscriptionModels: List<CloudModel> = GeneratedCloudCatalog.liveTranscriptionModels.map {
+        CloudModel(
+            catalogId = it.catalogId,
+            displayName = it.displayName,
+            provider = CloudProvider.forId(it.providerId),
+            apiName = it.apiName,
+            languageField = "",
+            live = LiveRoute(
+                sampleRate = it.sampleRate,
+                languageField = it.languageField,
+                vocabularyField = it.vocabularyField,
+                finalizeBudgetMs = it.postStopFinalizeBudgetMs.toLong(),
+            ),
+        )
+    }
+
+    /** Every selectable cloud model: batch models first, then live ones. */
+    val transcriptionModels: List<CloudModel> = batchTranscriptionModels + liveTranscriptionModels
+
+    val defaultTranscriptionModel: CloudModel = batchTranscriptionModels.first()
 
     /** Matches `ModelCatalog.defaultPostProcessingModel` on the Mac (an OpenRouter route). */
     const val CLEANUP_MODEL = GeneratedCloudCatalog.CLEANUP_MODEL

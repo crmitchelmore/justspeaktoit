@@ -42,6 +42,7 @@ internal class SessionRequests(
      * Transcribes [file] with [model]. [missingKey] is the failure when no key is saved; [prepare]
      * runs after the key is read and before the upload (a shared file is copied in there) and returns
      * its format. Without it the file is the recorder's WAV. [prompt] is the vocabulary glossary.
+     * A live model cannot transcribe a file, and another model is never substituted for it.
      */
     suspend fun transcribe(
         model: CloudModel,
@@ -50,6 +51,35 @@ internal class SessionRequests(
         missingKey: DictationFailure,
         prompt: String? = null,
         prepare: suspend () -> SharedAudio.Format? = { null },
+    ): DictationEvent = if (model.live != null) {
+        DictationEvent.Error(DictationFailure.LiveOnlyModel)
+    } else {
+        upload(model, file, languageTag, missingKey, prompt, prepare)
+    }
+
+    /**
+     * Reads [provider]'s key for a live session off the main thread: the key, or the failure that ends
+     * the session ([missingKey] when none is saved). The caller reports the failure to [liveFailed].
+     */
+    suspend fun liveKey(provider: CloudProvider, missingKey: DictationFailure): Pair<String?, DictationFailure?> = try {
+        val key = withContext(io) { secrets.read(provider.credentialId) }
+        if (key == null) null to missingKey else key to null
+    } catch (e: GeneralSecurityException) {
+        null to DictationFailure.KeyUnavailable
+    } catch (e: ProviderException) {
+        null to DictationFailure.KeyUnavailable
+    }
+
+    /** A live session ended with [failure]; a rejected key is reported like an upload's. */
+    fun liveFailed(provider: CloudProvider, failure: DictationFailure) = noteKeyFailure(provider, failure)
+
+    private suspend fun upload(
+        model: CloudModel,
+        file: File,
+        languageTag: String,
+        missingKey: DictationFailure,
+        prompt: String?,
+        prepare: suspend () -> SharedAudio.Format?,
     ): DictationEvent = try {
         val key = withContext(io) { secrets.read(model.provider.credentialId) }
         if (key == null) {

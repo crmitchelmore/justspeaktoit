@@ -190,7 +190,8 @@ class SettingsSearchIndex(val entries: List<SettingsSearchEntry>, synonymGroups:
                     title = model.displayName,
                     sectionTitle = "Transcription",
                     summary = "Use ${model.displayName} for cloud dictation.",
-                    keywords = listOf(model.provider.displayName, "cloud transcription model", "model picker"),
+                    keywords = listOf(model.provider.displayName, "cloud transcription model", "model picker") +
+                        if (model.live != null) listOf("live", "streaming", "real-time") else emptyList(),
                     settingKeys = emptyList(),
                 )
             } + CloudCatalog.providers.map { provider ->

@@ -2,7 +2,10 @@ package com.justspeaktoit.android.dictation
 
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
+import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.RequestReleasedException
+import com.justspeaktoit.android.cloud.SharedAudio
+import com.justspeaktoit.android.cloud.live.LiveOutcome
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
@@ -43,6 +46,7 @@ class DictationSessionControllerTest {
     private val engine = FakeEngine()
     private val recorders = FakeRecorders()
     private val cloud = FakeCloud()
+    private val live = FakeLiveSessions()
     private val resources = SystemResourceRegistry()
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "test-main") }
     private val main = executor.asCoroutineDispatcher()
@@ -87,6 +91,7 @@ class DictationSessionControllerTest {
                 CUE_MS
             },
             publish = { states.value = it },
+            liveSessions = live,
         )
     }
 
@@ -259,6 +264,90 @@ class DictationSessionControllerTest {
         await(states) { it.cleanup == CleanupStatus.Applied }
         assertEquals("ship Kubernetes", cloud.cleanups.single())
         assertEquals("Ship Kubernetes.", states.value.dictation.text())
+    }
+
+    private fun startLive(provider: CloudProvider, awaitListening: Boolean = true): FakeLiveClient {
+        val model = CloudCatalog.liveTranscriptionModels.first { it.provider == provider }
+        onMain { controller.start(SessionPlan.Cloud(model, "en-GB")) }
+        if (awaitListening) await(states) { it.dictation is DictationState.Listening }
+        return live.last
+    }
+
+    @Test
+    fun testLiveModel_streamsCaptureShowsPartialsAndFinishesWithoutAnUpload() {
+        rules = listOf(CorrectionRule("Kubernetes", listOf("cooper netties")))
+        val client = startLive(CloudProvider.OpenAI)
+        ViewModelHarness.await(client.connected)
+        assertEquals("sk-test", client.key)
+        assertEquals(listOf("Kubernetes"), client.words)
+
+        checkNotNull(recorders.last.sink)(byteArrayOf(1, 2))
+        assertEquals(listOf(listOf<Byte>(1, 2)), client.appended.map { it.toList() })
+        client.listener.onPartial("hello")
+        await(states) { (it.dictation as? DictationState.Listening)?.partial == "hello" }
+
+        onMain { controller.stop() }
+        ViewModelHarness.await(client.finished)
+        assertEquals(
+            "a live session plays Stop once the microphone has stopped",
+            listOf(RecordingCue.Start to 0, RecordingCue.Stop to 1),
+            cues.toList(),
+        )
+        client.listener.onEnd(LiveOutcome.Completed("hello cooper netties"))
+
+        val done = await(states) { it.dictation is DictationState.Done }.dictation
+        assertEquals(DictationState.Done(RecognitionMode.Cloud, "hello Kubernetes"), done)
+        assertTrue("a live session never falls back to an upload", cloud.transcriptions.isEmpty())
+        assertEquals(client.model.catalogId, await(history) { it.isNotEmpty() }.single().model)
+        assertFalse(recorders.last.file.exists())
+    }
+
+    @Test
+    fun testLiveFailureWhileRecording_keepsTheHeardTextAndReleasesTheMicrophone() {
+        val client = startLive(CloudProvider.OpenAI)
+        ViewModelHarness.await(client.connected)
+
+        client.listener.onEnd(LiveOutcome.Failed(DictationFailure.Network, "half a sentence"))
+
+        val failed = await(states) { it.dictation is DictationState.Failed }.dictation
+        assertEquals(DictationState.Failed(RecognitionMode.Cloud, DictationFailure.Network, "half a sentence"), failed)
+        await(states) { !it.releasingMicrophone }
+        assertTrue(holds(SystemResourceKind.Microphone).isEmpty())
+        assertTrue(client.cancelled)
+        assertTrue(cloud.transcriptions.isEmpty())
+        assertEquals(HistoryStatus.Failed, await(history) { it.isNotEmpty() }.single().status)
+    }
+
+    @Test
+    fun testLiveModelWithoutAKey_failsAtOnceWithoutConnecting() {
+        // The key read is quick, so the session may already have failed by the time Listening is checked.
+        val client = startLive(CloudProvider.Deepgram, awaitListening = false)
+
+        val failed = await(states) { it.dictation is DictationState.Failed }.dictation
+        assertEquals(DictationState.Failed(RecognitionMode.Cloud, DictationFailure.MissingKey, ""), failed)
+        assertNull(client.key)
+        assertTrue(client.cancelled)
+    }
+
+    @Test
+    fun testCancellingALiveSession_cancelsTheStream() {
+        val client = startLive(CloudProvider.OpenAI)
+
+        onMain { controller.cancel() }
+
+        assertEquals(DictationState.Idle, states.value.dictation)
+        assertTrue(client.cancelled)
+    }
+
+    @Test
+    fun testSharedAudioWithALiveModel_failsRatherThanSubstitutingABatchModel() {
+        val model = CloudCatalog.liveTranscriptionModels.first { it.provider == CloudProvider.OpenAI }
+
+        onMain { controller.transcribeSharedAudio(model, "en-GB") { SharedAudio.Format("mp3", "audio/mpeg") } }
+
+        val failed = await(states) { it.dictation is DictationState.Failed }.dictation
+        assertEquals(DictationState.Failed(RecognitionMode.Cloud, DictationFailure.LiveOnlyModel, ""), failed)
+        assertTrue(cloud.transcriptions.isEmpty())
     }
 
     private fun DictationState.text() = (this as? DictationState.Done)?.transcript

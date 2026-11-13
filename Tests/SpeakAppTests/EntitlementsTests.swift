@@ -151,10 +151,11 @@ final class AppStoreEntitlementsTests: XCTestCase {
             "Outbound network is required to reach transcription/post-processing providers")
     }
 
-    func testNetworkServerEntitlement_isPresent() {
-        let value = entitlements["com.apple.security.network.server"] as? Bool
-        XCTAssertEqual(value, true,
-            "The user-enabled Send to Mac NWListener accepts inbound Bonjour connections")
+    func testNetworkServerEntitlement_isAbsent() {
+        // App Review rejected the Store build for this entitlement without
+        // matching functionality; Send to Mac is compiled out of APP_STORE.
+        XCTAssertNil(entitlements["com.apple.security.network.server"],
+            "The Store build accepts no incoming connections; keep network.server out")
     }
 
     // MARK: - Forbidden on App Store
@@ -189,7 +190,6 @@ final class AppStoreEntitlementsTests: XCTestCase {
             "com.apple.security.app-sandbox",
             "com.apple.security.device.audio-input",
             "com.apple.security.network.client",
-            "com.apple.security.network.server",
             "com.apple.security.files.user-selected.read-write",
             "keychain-access-groups",
             "com.apple.developer.ubiquity-kvstore-identifier",

@@ -28,16 +28,17 @@ final class AppStoreInfoPlistTests: XCTestCase {
         XCTAssertNil(appStorePlist["PostHogHost"])
     }
 
-    func testAppStorePlist_declaresLocalNetworkUsage() {
-        let value = appStorePlist["NSLocalNetworkUsageDescription"] as? String
-        let expected = "Just Speak to It uses your local network to connect iPhone and Mac "
-            + "for Send to Mac transcription transfer."
-        XCTAssertEqual(value, expected)
+    /// The Store build compiles Send to Mac out and has no network-server
+    /// entitlement, so it must not declare the local network or a Bonjour service.
+    func testAppStorePlist_omitsLocalNetworkDeclarations() {
+        XCTAssertNil(appStorePlist["NSLocalNetworkUsageDescription"])
+        XCTAssertNil(appStorePlist["NSBonjourServices"])
     }
 
-    func testAppStorePlist_declaresBonjourService() {
-        let services = appStorePlist["NSBonjourServices"] as? [String]
+    func testDirectPlist_declaresSendToMacBonjourService() {
+        let services = directPlist["NSBonjourServices"] as? [String]
         XCTAssertEqual(services, ["_speaktransport._tcp"])
+        XCTAssertNotNil(directPlist["NSLocalNetworkUsageDescription"])
     }
 
     func testAppStorePlist_matchesDirectPlistExceptSparkleKeys() {
@@ -50,7 +51,10 @@ final class AppStoreInfoPlistTests: XCTestCase {
             // exemption it needs exist for Sparkle alone, so they stay off the
             // App Store build, which updates through the store.
             "SpeakSparkleSmokeSupported",
-            "NSAppTransportSecurity"
+            "NSAppTransportSecurity",
+            // Send to Mac's receiver is Direct-only.
+            "NSLocalNetworkUsageDescription",
+            "NSBonjourServices"
         ]
         var directWithoutSparkle = directPlist!
         sparkleKeys.forEach { directWithoutSparkle.removeValue(forKey: $0) }

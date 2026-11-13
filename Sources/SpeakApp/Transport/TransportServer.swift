@@ -65,6 +65,7 @@ public final class TransportServer: ObservableObject {
 
     /// Start advertising and accepting connections.
     public func start() throws {
+        guard SendToMacAvailability.isAvailable else { return }
         try self.start(on: .any, advertisesService: true)
     }
 

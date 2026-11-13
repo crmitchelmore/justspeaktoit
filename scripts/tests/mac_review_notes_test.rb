@@ -145,6 +145,18 @@ class MacReviewNotesTest < Minitest::Test
     Delivery.new(client: client, manifest: manifest, surface: surface)
   end
 
+  def test_append_replaces_the_superseded_listener_note_and_keeps_owner_text
+    client = Client.new
+    owner = client.review['attributes']['notes']
+    legacy = format(AppleRelease::MacReviewNotes::SUPERSEDED.first, service: '_speaktransport._tcp').strip
+    client.review['attributes']['notes'] = owner + "\n\n" + legacy
+    record = repair(client)
+    after = client.review['attributes']['notes']
+    assert_equal owner + "\n\n" + AppleRelease::MacReviewNotes::CANONICAL.strip, after
+    refute_includes after, 'NWListener'
+    assert record[:canonical_present]
+  end
+
   def test_audit_default_is_read_only_and_outputs_only_allowlisted_fields
     client = Client.new
     output = StringIO.new
@@ -165,8 +177,8 @@ class MacReviewNotesTest < Minitest::Test
     record = repair(client)
     after = client.review['attributes']
     assert after['notes'].start_with?(original['notes'] + "\n\n")
-    assert_includes after['notes'], '_speaktransport._tcp'
-    assert_includes after['notes'], 'A shipping iOS sender screen is not currently available'
+    assert_includes after['notes'], 'does not include com.apple.security.network.server'
+    refute_includes after['notes'], '_speaktransport._tcp'
     assert_equal original.reject { |key, _| key == 'notes' }, after.reject { |key, _| key == 'notes' }
     assert record[:canonical_present]
     helper(client).repair(version_id: 'selected-version', expected_notes_hash: record[:notes_sha256])
@@ -177,7 +189,7 @@ class MacReviewNotesTest < Minitest::Test
     client = Client.new
     client.review['attributes']['notes'] = nil
     repair(client)
-    assert client.review['attributes']['notes'].start_with?('The macOS app')
+    assert client.review['attributes']['notes'].start_with?('Network entitlements:')
     assert_equal true, client.review['attributes']['demoAccountRequired']
   end
 
@@ -307,14 +319,14 @@ class MacReviewNotesTest < Minitest::Test
     end
   end
 
-  def test_new_mac_beta_notes_are_verified_before_review_and_use_alpha_service
+  def test_new_mac_beta_notes_are_verified_before_review
     client = Client.new(train: 'alpha')
     before = client.deep_copy(client.beta_review['attributes'])
     delivery(client, train: 'alpha').distribute(wait_seconds: 0)
     notes_patch = client.calls.index { |call| call[0] == :patch && call[1] == '/v1/betaAppReviewDetails/beta-review' }
     submission = client.calls.index { |call| call[0] == :post && call[1] == '/v1/betaAppReviewSubmissions' }
     assert notes_patch < submission
-    assert_includes client.beta_review['attributes']['notes'], '_speakalpha._tcp'
+    assert_includes client.beta_review['attributes']['notes'], 'accepts no incoming network connections'
     assert client.calls[(notes_patch + 1)...submission].any? { |call| call[0] == :get && call[1].include?('fields[betaAppReviewDetails]=notes') }
     assert_equal before.reject { |key, _| key == 'notes' }, client.beta_review['attributes'].reject { |key, _| key == 'notes' }
   end

@@ -4,6 +4,7 @@ import SpeakCore
 /// "Send to Mac": the local listener that receives transcripts from iOS.
 extension WireUp {
   static func configureSendToMac(environment: AppEnvironment, settings: AppSettings) {
+    guard SendToMacAvailability.isAvailable else { return }
     let transportServer = environment.transportServer
     transportServer.onTranscriptReceived = { _, text in
       Task { @MainActor in

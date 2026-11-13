@@ -192,6 +192,11 @@ test('macOS archives require their own correctly placed privacy manifest and san
    copyFileSync('Sources/SpeakApp/Resources/AppStore/PrivacyInfo.xcprivacy',join(resources,'PrivacyInfo.xcprivacy'));
    plist(join(app,'signed.plist'),{...entitlements,'com.apple.security.app-sandbox':false});
    assert.throws(verify,error=>error.stderr.toString().includes('not sandboxed'));
+   plist(join(app,'signed.plist'),{...entitlements,'com.apple.security.network.server':true});
+   assert.throws(verify,error=>error.stderr.toString().includes('network.server without a listener'));
+   plist(join(app,'signed.plist'),entitlements);
+   plist(infoPath,{...info,SpeakReleaseTrain:'stable',GitCommitSHA:source,CFBundleShortVersionString:item.version,CFBundleVersion:item.build,NSBonjourServices:['_speaktransport._tcp']});
+   assert.throws(verify,error=>error.stderr.toString().includes('unavailable local-network feature'));
   }
  }
 });

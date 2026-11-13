@@ -5,6 +5,8 @@ import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.RequestReleasedException
 import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
+import com.justspeaktoit.android.cloud.live.LiveOutcome
+import com.justspeaktoit.android.cloud.live.LiveTranscriptListener
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.history.Retention
@@ -49,6 +51,10 @@ internal interface SessionSettings {
  * microphone in [resources] while a session captures and until a Cloud recorder has really stopped;
  * provider requests are held by [CloudCapture.call] while they run. Every ended session is recorded in
  * [history]. Call from the main thread of [scope]; each change is handed to [publish].
+ *
+ * A live model also streams the recording to its provider through [liveSessions], showing partial
+ * text while the user speaks. Its failure ends the session with that text kept as unfinished; no
+ * batch upload is substituted for it.
  */
 internal class DictationSessionController(
     private val engine: SpeechEngine,
@@ -60,6 +66,7 @@ internal class DictationSessionController(
     private val cacheDir: File,
     private val settings: SessionSettings,
     private val publish: (SessionState) -> Unit,
+    private val liveSessions: LiveSessions = LiveSessions.Default,
 ) {
     var state = SessionState()
         private set
@@ -77,6 +84,9 @@ internal class DictationSessionController(
 
     /** The Cloud session's plan, so its upload uses the model and language the recording started with. */
     private var cloudPlan: SessionPlan.Cloud? = null
+
+    /** The live session streaming the current Cloud recording, when its model is live. */
+    private var live: LiveRun? = null
 
     val isCapturing: Boolean
         get() = state.dictation is DictationState.Starting || state.dictation is DictationState.Listening
@@ -106,6 +116,7 @@ internal class DictationSessionController(
             state.dictation.modeOrNull() == RecognitionMode.Cloud && capture.current != null
         engine.cancel()
         work?.cancel()
+        cancelLive()
         if (keep) keepCancelledRecording() else discardRecording()
         change { it.copy(cleanup = if (it.cleanup == CleanupStatus.Running) CleanupStatus.None else it.cleanup) }
         dispatch(DictationEvent.Cancelled)
@@ -118,6 +129,7 @@ internal class DictationSessionController(
     fun leaveApp() {
         if (!isCapturing) return
         engine.cancel()
+        cancelLive()
         discardRecording()
         dispatch(DictationEvent.Error(DictationFailure.LeftApp))
     }
@@ -183,21 +195,79 @@ internal class DictationSessionController(
 
     /** Ends the session's holds when its owner goes away; a recording still owned is retired off this thread. */
     fun close() {
+        cancelLive()
         microphoneHold?.end()
         microphoneHold = null
         capture.close()
     }
 
     private fun startCloud() {
+        val run = cloudPlan?.takeIf { it.model.live != null }?.let(::startLive)
         val started = capture.start(
             onLevel = { _level.value = it },
             onLimitReached = { rec -> scope.launch { if (capture.owns(rec)) stop() } },
             onCaptureFailed = { rec -> scope.launch { if (capture.owns(rec)) failCapture() } },
+            onPcm = run?.let { it.client::append },
         )
+        if (!started) cancelLive()
         dispatch(if (started) DictationEvent.Ready else DictationEvent.Error(DictationFailure.Audio))
+        if (started && run != null) connectLive(run)
+    }
+
+    private fun startLive(plan: SessionPlan.Cloud): LiveRun {
+        val run = LiveRun(plan.model)
+        val listener = object : LiveTranscriptListener {
+            override fun onPartial(text: String) {
+                scope.launch { if (live === run && state.dictation.isActive) dispatch(DictationEvent.Partial(text)) }
+            }
+
+            override fun onEnd(outcome: LiveOutcome) {
+                run.outcome.complete(outcome)
+                scope.launch { if (live === run && isCapturing && outcome is LiveOutcome.Failed) failLive(outcome) }
+            }
+        }
+        run.client = liveSessions.create(plan.model, plan.languageTag, settings.corrections.map { it.writeAs }, listener)
+        live = run
+        return run
+    }
+
+    /** Reads the key off the main thread, then opens the stream; audio captured meanwhile is held. */
+    private fun connectLive(run: LiveRun) {
+        scope.launch {
+            val (key, failure) = requests.liveKey(run.model.provider, DictationFailure.MissingKey)
+            if (live !== run) return@launch
+            if (key != null) {
+                run.client.connect(key)
+                return@launch
+            }
+            val outcome = LiveOutcome.Failed(failure ?: DictationFailure.MissingKey, "")
+            run.client.cancel()
+            if (isCapturing) {
+                failLive(outcome)
+            } else {
+                // A finish already waiting on the outcome ends with it.
+                run.outcome.complete(outcome)
+            }
+        }
+    }
+
+    /** The stream failed while recording: stop, keeping what was heard as unfinished text. */
+    private fun failLive(outcome: LiveOutcome.Failed) {
+        val run = live ?: return
+        cancelLive()
+        requests.liveFailed(run.model.provider, outcome.failure)
+        discardRecording()
+        if (outcome.recoveredText.isNotBlank()) dispatch(DictationEvent.Partial(outcome.recoveredText))
+        dispatch(DictationEvent.Error(outcome.failure))
+    }
+
+    private fun cancelLive() {
+        live?.client?.cancel()
+        live = null
     }
 
     private fun failCapture() {
+        cancelLive()
         discardRecording()
         dispatch(DictationEvent.Error(DictationFailure.Audio))
     }
@@ -205,6 +275,7 @@ internal class DictationSessionController(
     private fun finishCloud() {
         val rec = capture.current ?: return
         val plan = cloudPlan ?: return
+        live?.let { return finishLive(rec, it) }
         val file = rec.file
         val modelId = sessionModelId
         work = scope.launch {
@@ -237,6 +308,42 @@ internal class DictationSessionController(
                 if (!kept) capture.delete(file)
             }
             // A cancelled upload must not deliver a late result into a newer session.
+            ensureActive()
+            onEngineEvent(event)
+        }
+    }
+
+    /**
+     * Stops the recorder, so every captured chunk has been appended, then asks the provider to
+     * finalise. The client's own deadline bounds the wait; the recording is only a local copy.
+     */
+    private fun finishLive(rec: CloudCapture.Recording, run: LiveRun) {
+        work = scope.launch {
+            val event = try {
+                val bytes = capture.stop(rec)
+                reconcileMicrophoneHold()
+                if (bytes < 0) {
+                    cancelLive()
+                    DictationEvent.Error(DictationFailure.Audio)
+                } else {
+                    run.client.finish()
+                    when (val outcome = run.outcome.await()) {
+                        is LiveOutcome.Completed -> DictationEvent.Final(outcome.text)
+                        is LiveOutcome.Failed -> {
+                            requests.liveFailed(run.model.provider, outcome.failure)
+                            if (live === run && outcome.recoveredText.isNotBlank()) {
+                                dispatch(DictationEvent.Partial(outcome.recoveredText))
+                            }
+                            DictationEvent.Error(outcome.failure)
+                        }
+                    }
+                }
+            } finally {
+                if (live === run) live = null
+                capture.release(rec)
+                reconcileMicrophoneHold()
+                capture.delete(rec.file)
+            }
             ensureActive()
             onEngineEvent(event)
         }

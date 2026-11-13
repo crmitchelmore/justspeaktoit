@@ -33,6 +33,8 @@ enum class DictationFailure {
     MissingKey,
     AudioTooLarge,
     UnsupportedAudio,
+    /** A live (streaming) model was asked to transcribe a file, which only batch models can do. */
+    LiveOnlyModel,
     Unknown,
 }
 

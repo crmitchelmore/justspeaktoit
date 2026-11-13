@@ -61,6 +61,9 @@ interface AudioRecorder {
 
     /** Stops capture and returns the audio bytes recorded, or -1 if capture failed. Idempotent; may block. */
     fun stop(): Long
+
+    /** Also hands each captured chunk of 16 kHz PCM16 to [sink], on the capture thread. Call before [start]. */
+    fun tap(sink: (ByteArray) -> Unit) = Unit
 }
 
 /** Creates the recorder for each Cloud session. */
@@ -88,8 +91,14 @@ class WavRecorder(
     @Volatile private var running = false
 
     @Volatile private var failed = false
+
+    @Volatile private var sink: ((ByteArray) -> Unit)? = null
     private var thread: Thread? = null
     private var record: AudioRecord? = null
+
+    override fun tap(sink: (ByteArray) -> Unit) {
+        this.sink = sink
+    }
 
     /** Returns false when the microphone cannot be opened. Requires RECORD_AUDIO. */
     @SuppressLint("MissingPermission")
@@ -162,6 +171,7 @@ class WavRecorder(
                 bytes.clear()
                 bytes.asShortBuffer().put(chunk, 0, read)
                 out.write(bytes.array(), 0, read * 2)
+                sink?.invoke(bytes.array().copyOf(read * 2))
                 written += read * 2
                 onLevel(WavFormat.level(chunk, read))
                 if (written >= limit) {

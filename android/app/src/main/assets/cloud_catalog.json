@@ -232,6 +232,68 @@
       "id" : "ru_RU"
     }
   ],
+  "liveTranscriptionModels" : [
+    {
+      "apiName" : "nova-3",
+      "catalogId" : "deepgram/nova-3-streaming",
+      "displayName" : "Deepgram Nova-3 (Streaming)",
+      "languageField" : "language",
+      "postStopFinalizeBudgetMs" : 0,
+      "provider" : "deepgram",
+      "sampleRate" : 16000,
+      "vocabularyField" : "keyterm"
+    },
+    {
+      "apiName" : "flux-general-en",
+      "catalogId" : "deepgram/flux-general-en-streaming",
+      "displayName" : "Deepgram Flux (English Streaming)",
+      "languageField" : "",
+      "postStopFinalizeBudgetMs" : 0,
+      "provider" : "deepgram",
+      "sampleRate" : 16000,
+      "vocabularyField" : "keyterm"
+    },
+    {
+      "apiName" : "flux-general-multi",
+      "catalogId" : "deepgram/flux-general-multi-streaming",
+      "displayName" : "Deepgram Flux (Multilingual Streaming)",
+      "languageField" : "language_hint",
+      "postStopFinalizeBudgetMs" : 0,
+      "provider" : "deepgram",
+      "sampleRate" : 16000,
+      "vocabularyField" : "keyterm"
+    },
+    {
+      "apiName" : "universal-3-6-pro",
+      "catalogId" : "assemblyai/universal-3-6-pro-streaming",
+      "displayName" : "AssemblyAI Universal-3.6 Pro (Streaming)",
+      "languageField" : "",
+      "postStopFinalizeBudgetMs" : 2000,
+      "provider" : "assemblyai",
+      "sampleRate" : 16000,
+      "vocabularyField" : "keyterms_prompt"
+    },
+    {
+      "apiName" : "gpt-live-transcribe",
+      "catalogId" : "openai/gpt-live-transcribe-streaming",
+      "displayName" : "OpenAI GPT Live Transcribe (Streaming)",
+      "languageField" : "languages",
+      "postStopFinalizeBudgetMs" : 500,
+      "provider" : "openai",
+      "sampleRate" : 24000,
+      "vocabularyField" : "prompt"
+    },
+    {
+      "apiName" : "gpt-realtime-whisper",
+      "catalogId" : "openai/gpt-realtime-whisper-streaming",
+      "displayName" : "OpenAI GPT Realtime Whisper (Streaming)",
+      "languageField" : "language",
+      "postStopFinalizeBudgetMs" : 500,
+      "provider" : "openai",
+      "sampleRate" : 24000,
+      "vocabularyField" : ""
+    }
+  ],
   "providers" : [
     {
       "chatCompletionsURL" : "https://api.openai.com/v1/chat/completions",
@@ -242,6 +304,14 @@
       "chatCompletionsURL" : "https://api.groq.com/openai/v1/chat/completions",
       "credentialId" : "groq.apiKey",
       "id" : "groq"
+    },
+    {
+      "credentialId" : "deepgram.apiKey",
+      "id" : "deepgram"
+    },
+    {
+      "credentialId" : "assemblyai.apiKey",
+      "id" : "assemblyai"
     },
     {
       "credentialId" : "openrouter.apiKey",

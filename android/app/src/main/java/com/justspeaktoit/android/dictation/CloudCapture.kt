@@ -77,11 +77,13 @@ internal class CloudCapture(
     /**
      * Opens the microphone. The callbacks receive their own recording so the caller can ignore one
      * that has since been replaced or stopped. Returns false (and leaves nothing behind) on failure.
+     * [onPcm] also receives the captured audio as it is recorded, on the capture thread.
      */
     fun start(
         onLevel: (Float) -> Unit,
         onLimitReached: (Recording) -> Unit,
         onCaptureFailed: (Recording) -> Unit,
+        onPcm: ((ByteArray) -> Unit)? = null,
     ): Boolean {
         // Orphans are still holding microphones that have not been released.
         if (!retirement.admitsNewRecording()) return false
@@ -94,6 +96,7 @@ internal class CloudCapture(
             onCaptureFailed = { onCaptureFailed(recording) },
         )
         recording = Recording(recorder, file)
+        onPcm?.let(recorder::tap)
         if (!recorder.start()) {
             file.delete()
             return false

@@ -10,6 +10,11 @@ import Foundation
 /// Android has no saved-selection migration, so it never starts offering a model that is about to
 /// shut down.
 ///
+/// Android also streams the live routes whose protocols it implements natively (Deepgram,
+/// AssemblyAI Universal-3.6 Pro and OpenAI Realtime), with the canonical identifiers, sample rates,
+/// language-hint and vocabulary fields and post-stop finalise budgets, so the Kotlin clients never
+/// keep a second list. Retired live models are not offered, for the same reason as batch models.
+///
 /// `CloudCatalogAndroidExportTests` fails when the committed asset is stale; regenerate it with
 /// `UPDATE_CLOUD_CATALOG_ANDROID=1 swift test --filter CloudCatalogAndroidExportTests`.
 public enum CloudCatalogAndroidExport {
@@ -24,6 +29,19 @@ public enum CloudCatalogAndroidExport {
             if provider == "openai", !OpenAITranscriptionModels.directBatchModelIDs.contains(option.id) {
                 return false
             }
+            return ModelRetirements.retirement(for: option.id) == nil
+        }
+    }
+
+    /// Live providers whose WebSocket protocol Android implements, in catalogue order.
+    static let liveProviderIDs: Set<LiveTranscriptionProviderID> = [.deepgram, .assemblyai, .openai]
+
+    /// The live models Android streams, in catalogue order: every current route of an Android live
+    /// provider. A new route of one of these providers appears on Android without edits here.
+    static var liveTranscriptionModels: [ModelCatalog.Option] {
+        ModelCatalog.liveTranscription.filter { option in
+            guard let route = LiveTranscriptionRouting.route(for: option.id),
+                  liveProviderIDs.contains(route.provider) else { return false }
             return ModelRetirements.retirement(for: option.id) == nil
         }
     }
@@ -57,6 +75,18 @@ public enum CloudCatalogAndroidExport {
         let supportsPrompt: Bool
     }
 
+    private struct LiveModel: Encodable {
+        let catalogId, displayName, provider, apiName: String
+        let sampleRate: Int
+        /// The wire field for the spoken-language hint, or empty when the route takes none.
+        let languageField: String
+        /// The wire field for the vocabulary (`prompt`, `keyterm`, `keywords`, `keyterms_prompt`),
+        /// or empty when the route takes none.
+        let vocabularyField: String
+        /// `LiveModelCapabilities.postStopFinalizeBudget`, in milliseconds.
+        let postStopFinalizeBudgetMs: Int
+    }
+
     private struct Language: Encodable {
         let id, displayName: String
     }
@@ -78,6 +108,7 @@ public enum CloudCatalogAndroidExport {
         let version: Int
         let providers: [Provider]
         let transcriptionModels: [Model]
+        let liveTranscriptionModels: [LiveModel]
         let cleanup: Cleanup
         let cleanupModels: [CleanupModel]
         /// Removed cleanup selections and the offered model each now uses.
@@ -92,6 +123,7 @@ public enum CloudCatalogAndroidExport {
             version: 1,
             providers: providers,
             transcriptionModels: transcriptionModels.map(exported),
+            liveTranscriptionModels: liveTranscriptionModels.compactMap(exportedLive),
             cleanup: Cleanup(
                 provider: OpenRouterService.providerID,
                 model: ModelCatalog.defaultPostProcessingModel,
@@ -114,7 +146,9 @@ public enum CloudCatalogAndroidExport {
 
     /// Transcription providers, then OpenRouter, then the remaining native text providers.
     private static var providers: [Provider] {
-        var ids = transcriptionProviderIDs + [OpenRouterService.providerID]
+        var ids = transcriptionProviderIDs
+        ids += liveTranscriptionModels.map { providerID(of: $0.id) }.filter { !ids.contains($0) }
+        ids.append(OpenRouterService.providerID)
         ids += NativeTextModels.providers.map(\.id).filter { !ids.contains($0) }
         return ids.map { id in
             Provider(
@@ -133,6 +167,32 @@ public enum CloudCatalogAndroidExport {
             apiName: apiName,
             languageField: OpenAITranscriptionModels.batchLanguageFieldName(for: apiName),
             supportsPrompt: OpenAITranscriptionModels.supportsBatchPrompt(apiName)
+        )
+    }
+
+    private static func exportedLive(_ option: ModelCatalog.Option) -> LiveModel? {
+        guard let route = LiveTranscriptionRouting.route(for: option.id) else { return nil }
+        let capabilities = ModelCatalog.liveCapabilities(for: option.id)
+        let api = route.apiModelName
+        let languageField: String
+        let vocabularyField: String
+        switch route.provider {
+        case .openai:
+            languageField = OpenAITranscriptionModels.usesLanguageHintsArray(api) ? "languages" : "language"
+            vocabularyField = OpenAITranscriptionModels.supportsRealtimePrompt(api) ? "prompt" : ""
+        case .deepgram:
+            languageField = api == "flux-general-multi" ? "language_hint" : "language"
+            vocabularyField = TranscriptionKeywordPolicy.deepgramQuery(model: api, words: ["x"]).first?.name ?? ""
+        default:
+            languageField = ""
+            vocabularyField = "keyterms_prompt"
+        }
+        return LiveModel(
+            catalogId: option.id, displayName: option.displayName, provider: route.provider.rawValue,
+            apiName: api, sampleRate: route.sampleRate,
+            languageField: capabilities.supportsLanguageHint ? languageField : "",
+            vocabularyField: vocabularyField,
+            postStopFinalizeBudgetMs: Int((capabilities.postStopFinalizeBudget * 1000).rounded())
         )
     }
 

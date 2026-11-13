@@ -80,6 +80,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
@@ -124,6 +125,18 @@ abstract class GenerateCloudCatalog : DefaultTask() {
                 "            supportsPrompt = ${it["supportsPrompt"] as Boolean},\n" +
                 "        ),\n"
         }
+        val liveModels = objects("liveTranscriptionModels").joinToString("") {
+            "        LiveModelSpec(\n" +
+                "            catalogId = ${lit(it["catalogId"])},\n" +
+                "            displayName = ${lit(it["displayName"])},\n" +
+                "            providerId = ${lit(it["provider"])},\n" +
+                "            apiName = ${lit(it["apiName"])},\n" +
+                "            sampleRate = ${it["sampleRate"] as Int},\n" +
+                "            languageField = ${lit(it["languageField"])},\n" +
+                "            vocabularyField = ${lit(it["vocabularyField"])},\n" +
+                "            postStopFinalizeBudgetMs = ${it["postStopFinalizeBudgetMs"] as Int},\n" +
+                "        ),\n"
+        }
         val cleanupModels = objects("cleanupModels").joinToString("") {
             "        CleanupModelSpec(\n" +
                 "            selectionId = ${lit(it["selectionId"])},\n" +
@@ -155,6 +168,10 @@ abstract class GenerateCloudCatalog : DefaultTask() {
             |
             |    val transcriptionModels: List<CloudModelSpec> = listOf(
             |${models.trimEnd('\n')}
+            |    )
+            |
+            |    val liveTranscriptionModels: List<LiveModelSpec> = listOf(
+            |${liveModels.trimEnd('\n')}
             |    )
             |
             |    val cleanupModels: List<CleanupModelSpec> = listOf(

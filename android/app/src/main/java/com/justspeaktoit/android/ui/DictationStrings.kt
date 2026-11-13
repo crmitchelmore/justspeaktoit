@@ -35,5 +35,6 @@ internal fun DictationFailure.message(): Int = when (this) {
     DictationFailure.MissingKey -> R.string.failure_missing_key
     DictationFailure.AudioTooLarge -> R.string.failure_audio_too_large
     DictationFailure.UnsupportedAudio -> R.string.failure_unsupported_audio
+    DictationFailure.LiveOnlyModel -> R.string.failure_live_only_model
     DictationFailure.Unknown -> R.string.failure_unknown
 }

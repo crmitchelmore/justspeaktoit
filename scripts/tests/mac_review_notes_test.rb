@@ -157,6 +157,17 @@ class MacReviewNotesTest < Minitest::Test
     assert record[:canonical_present]
   end
 
+  def test_append_removes_every_copy_of_a_superseded_note
+    client = Client.new
+    owner = client.review['attributes']['notes']
+    legacy = format(AppleRelease::MacReviewNotes::SUPERSEDED.first, service: '_speaktransport._tcp').strip
+    client.review['attributes']['notes'] = legacy + "\n\n" + owner + "\n\n" + legacy + "\n\n" + legacy
+    repair(client)
+    after = client.review['attributes']['notes']
+    assert_equal owner + "\n\n" + AppleRelease::MacReviewNotes::CANONICAL.strip, after
+    refute_includes after, 'NWListener'
+  end
+
   def test_append_keeps_leading_blank_lines_in_owner_text_without_a_superseded_note
     client = Client.new
     owner = "\n\nOwner instructions"

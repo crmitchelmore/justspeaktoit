@@ -83,6 +83,12 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.privacy", title: "Privacy", section: .about, systemImage: "hand.raised",
+            summary: "Choose whether to share anonymous analytics and crash reports. Both start off.",
+            keywords: ["privacy", "telemetry", "analytics", "crash reports", "diagnostics", "consent", "opt out"],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.analytics", title: "Share anonymous analytics", section: .about,
             systemImage: "chart.bar",
             summary: "Off until you turn it on. Sends typed usage events to PostHog EU, never transcripts or audio.",
@@ -110,6 +116,14 @@ extension SettingsSearchCatalog {
             platforms: .android
         )
     ]
+
+    /// Android groups these entries under a heading other than their section's title, so search
+    /// results name the heading people see on screen.
+    static let androidSectionTitles: [String: String] = [
+        "android.privacy": "Privacy",
+        "android.analytics": "Privacy",
+        "android.diagnostics": "Privacy"
+    ]
 }
 
 /// The catalogue the Android app reads, as JSON. `SettingsSearchAndroidExportTests`
@@ -131,7 +145,8 @@ public enum SettingsSearchAndroidExport {
             synonyms: SettingsSearchSynonyms.groups,
             entries: SettingsSearchCatalog.entries(for: .android).map {
                 Entry(
-                    id: $0.id, title: $0.title, section: $0.section.rawValue, sectionTitle: $0.section.title,
+                    id: $0.id, title: $0.title, section: $0.section.rawValue,
+                    sectionTitle: SettingsSearchCatalog.androidSectionTitles[$0.id] ?? $0.section.title,
                     summary: $0.summary, keywords: $0.keywords, settingKeys: $0.settingKeys
                 )
             }

@@ -304,9 +304,9 @@ fun SettingsScreen(
 
             HorizontalDivider()
             Text(
-                stringResource(R.string.settings_privacy_heading),
+                stringResource(R.string.settings_privacy_title),
                 style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.semantics { heading() },
+                modifier = anchor("android.privacy").semantics { heading() },
             )
             ConsentSwitchRow(
                 R.string.settings_analytics_title,

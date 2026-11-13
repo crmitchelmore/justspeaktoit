@@ -124,6 +124,16 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.setupGuide", title: "Setup guide", section: .general,
+            systemImage: "sparkles",
+            summary: "Run the first-run setup again: microphone, speech route, keyboard, tile and a test dictation.",
+            keywords: [
+                "onboarding", "setup", "first run", "welcome", "tutorial", "get started", "permissions",
+                "keyboard", "quick settings tile", "test dictation"
+            ],
+            settingKeys: ["hasCompletedOnboarding"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.privacyPolicy", title: "Privacy policy", section: .about,
             systemImage: "hand.raised",
             summary: "Open the Just Speak to It privacy policy on the website.",

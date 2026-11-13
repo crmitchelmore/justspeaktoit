@@ -47,6 +47,16 @@ object AutomationIds {
     const val SETTINGS_SILENCE = "settings.silenceDetection"
     const val SETTINGS_SILENCE_DURATION = "settings.silenceDuration"
     const val SETTINGS_SILENCE_THRESHOLD = "settings.silenceThreshold"
+
+    const val SETTINGS_RUN_SETUP = "settings.runSetup"
+    const val ONBOARDING_PROGRESS = "onboarding.progress"
+    const val ONBOARDING_NEXT = "onboarding.next"
+    const val ONBOARDING_BACK = "onboarding.back"
+    const val ONBOARDING_SKIP = "onboarding.skip"
+    const val ONBOARDING_ALLOW_MIC = "onboarding.allowMicrophone"
+    const val ONBOARDING_OPEN_APP_SETTINGS = "onboarding.openAppSettings"
+    const val ONBOARDING_KEYBOARD_SETTINGS = "onboarding.keyboardSettings"
+    const val ONBOARDING_ADD_TILE = "onboarding.addTile"
     const val RESOURCES_HEADLINE = "settings.resources.headline"
     const val RESOURCES_RELEASE_EVERYTHING = "settings.resources.releaseEverything"
 

@@ -35,6 +35,9 @@ import com.justspeaktoit.android.telemetry.OptInSurface
 import com.justspeaktoit.android.telemetry.Telemetry
 import com.justspeaktoit.android.tips.PlayBillingTipStore
 import com.justspeaktoit.android.ui.ConsentDialog
+import com.justspeaktoit.android.onboarding.OnboardingGuide
+import com.justspeaktoit.android.onboarding.SetupSystem
+import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.ui.DictationActions
 import com.justspeaktoit.android.ui.DictationScreen
 import com.justspeaktoit.android.ui.HistoryActions
@@ -42,11 +45,14 @@ import com.justspeaktoit.android.ui.HistoryScreen
 import com.justspeaktoit.android.ui.HistoryTranscription
 import com.justspeaktoit.android.ui.MicPermission
 import com.justspeaktoit.android.ui.PrivacyChoices
+import com.justspeaktoit.android.ui.OnboardingActions
+import com.justspeaktoit.android.ui.OnboardingScreen
+import com.justspeaktoit.android.ui.OnboardingStatus
 import com.justspeaktoit.android.ui.SettingsActions
 import com.justspeaktoit.android.ui.SettingsScreen
 import com.justspeaktoit.android.ui.theme.JustSpeakTheme
 
-private enum class Screen { Dictation, Settings, History }
+private enum class Screen { Dictation, Settings, History, Onboarding }
 
 class MainActivity : ComponentActivity() {
     private val viewModel: DictationViewModel by viewModels { DictationViewModel.Factory }
@@ -56,6 +62,11 @@ class MainActivity : ComponentActivity() {
     private val privacy = mutableStateOf(PrivacyChoices())
     private val consentPending = mutableStateOf(false)
     private lateinit var tipStore: PlayBillingTipStore
+    private val setupStatus = mutableStateOf(OnboardingStatus(MicPermission.NotRequested, false, false))
+    private val prefs by lazy { AppPreferences(this) }
+
+    // The guide asks for the microphone without starting a recording; every other request starts one.
+    private var startAfterGrant = true
 
     private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permission.value = when {
@@ -63,10 +74,11 @@ class MainActivity : ComponentActivity() {
             shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) -> MicPermission.Denied
             else -> MicPermission.DeniedPermanently
         }
-        if (granted) {
+        if (granted && startAfterGrant) {
             requestNotifications()
             viewModel.requestAutoStart()
         }
+        startAfterGrant = true
     }
 
     // The answer does not matter: without it the recording notification is only hidden from the shade.
@@ -81,8 +93,13 @@ class MainActivity : ComponentActivity() {
         savedInstanceState?.getString(KEY_SCREEN)?.let { name ->
             Screen.entries.firstOrNull { it.name == name }?.let { screenState.value = it }
         }
+        startAfterGrant = savedInstanceState?.getBoolean(KEY_START_AFTER_GRANT, true) ?: true
         // A recreated Activity has already acted on its launch intent.
-        if (savedInstanceState == null) handleIntent(intent)
+        if (savedInstanceState == null) {
+            if (shouldShowOnboarding()) screenState.value = Screen.Onboarding
+            // Dictate and share intents go straight to dictation; the guide waits for the next launch.
+            handleIntent(intent)
+        }
         tipStore = PlayBillingTipStore(this)
         refreshPrivacy()
         val actions = DictationActions(
@@ -105,7 +122,9 @@ class MainActivity : ComponentActivity() {
             val tips by tipStore.state.collectAsStateWithLifecycle()
             LaunchedEffect(screen) { if (screen == Screen.Settings) tipStore.connect() }
             JustSpeakTheme {
-                if (screen != Screen.Dictation) BackHandler { screen = Screen.Dictation }
+                if (screen != Screen.Dictation) {
+                    BackHandler { if (screen == Screen.Onboarding) finishOnboarding() else screen = Screen.Dictation }
+                }
                 // Back leaves a session running in the background rather than closing it with the screen.
                 if (screen == Screen.Dictation && state.dictation.isActive) BackHandler { moveTaskToBack(true) }
                 // Expose test tags as resource IDs so UiAutomator and accessibility-driven agents can find controls.
@@ -141,9 +160,16 @@ class MainActivity : ComponentActivity() {
                                 onApplyConfiguration = viewModel::applyConfiguration,
                                 onRecordingSoundsChanged = viewModel::setRecordingSounds,
                                 onPreviewRecordingSound = viewModel::previewRecordingSound,
+                                onRunSetup = { screen = Screen.Onboarding },
                             ),
                             privacy = privacyChoices,
                             tips = tips,
+                        )
+                        Screen.Onboarding -> OnboardingScreen(
+                            state = state,
+                            level = viewModel.level,
+                            status = setupStatus.value.copy(mic = mic),
+                            actions = onboardingActions(actions),
                         )
                         Screen.History -> HistoryScreen(
                             entries = state.history,
@@ -196,6 +222,7 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_SCREEN, screenState.value.name)
+        outState.putBoolean(KEY_START_AFTER_GRANT, startAfterGrant)
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -228,6 +255,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         viewModel.onEnteredApp()
         if (hasMic()) permission.value = MicPermission.Granted
+        setupStatus.value = setupStatus.value.copy(keyboardEnabled = SetupSystem.isKeyboardEnabled(this))
         viewModel.refreshAvailability()
         viewModel.refreshHistory()
         telemetry.analytics.appBecameActive()
@@ -267,12 +295,50 @@ class MainActivity : ComponentActivity() {
         if (!granted) requestNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    private fun shouldShowOnboarding(): Boolean {
+        val completed = prefs.hasCompletedOnboarding
+        val show = OnboardingGuide.shouldShow(
+            completed,
+            hasChosenMode = prefs.chosenMode != null,
+            micGranted = hasMic(),
+        )
+        // Record the decision for installs that predate the guide, so granting later never reopens it.
+        if (completed == null && !show) prefs.hasCompletedOnboarding = true
+        return show
+    }
+
+    private fun finishOnboarding() {
+        prefs.hasCompletedOnboarding = true
+        screenState.value = Screen.Dictation
+    }
+
+    private fun onboardingActions(dictation: DictationActions) = OnboardingActions(
+        onRequestMic = {
+            startAfterGrant = false
+            requestMic.launch(Manifest.permission.RECORD_AUDIO)
+        },
+        onOpenAppSettings = ::openAppSettings,
+        onOpenKeyboardSettings = { startActivity(SetupSystem.keyboardSettingsIntent()) },
+        onAddTile = if (SetupSystem.canRequestTile) {
+            {
+                SetupSystem.requestTile(this) { added ->
+                    setupStatus.value = setupStatus.value.copy(tileAdded = added)
+                }
+            }
+        } else {
+            null
+        },
+        onFinish = ::finishOnboarding,
+        dictation = dictation,
+    )
+
     private fun hasMic() =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     companion object {
         private const val DICTATE_ENTRY = "com.justspeaktoit.android.DictateEntry"
         private const val KEY_SCREEN = "screen"
+        private const val KEY_START_AFTER_GRANT = "startAfterGrant"
 
         fun dictateIntent(context: Context): Intent =
             Intent(Intent.ACTION_MAIN).setClassName(context, DICTATE_ENTRY)

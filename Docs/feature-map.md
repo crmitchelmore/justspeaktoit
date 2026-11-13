@@ -115,7 +115,7 @@ The flags live in `Project.swift`; release selection is in
 | F27 | Resources-in-use status | Yes | Yes | Yes | Yes | Yes | | |
 | F28 | Report an issue with diagnostics | Yes | Yes | Yes | Yes | Yes | | |
 | F29 | Troubleshooting page | Yes | Partial | Yes | Yes | No | #1634 | iOS has Capture Health only. |
-| F30 | Onboarding and permissions guide | Yes | Yes | Yes | Yes | Partial | #1639 | |
+| F30 | Onboarding and permissions guide | Yes | Yes | Yes | Yes | Yes | | |
 | F31 | API keys page | Yes | Yes | Yes | Yes | Yes | | |
 | F32 | Provider credit balances | Yes | Yes | No | No | No | #1621 | |
 | F33 | Configuration export/import and backup | Yes | Yes | Partial | Partial | No | #1635 | |
@@ -401,13 +401,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Re-read permission state after the user returns; a click is not proof of a grant.
 
 ### F30 Onboarding and permissions guide
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1639.
+- **Gaps:** none
 - **How:** First run asks for each permission in context with the native prompt first, then a guide on denial; completion is stored once.
-- **Refs:** `Sources/SpeakCore/Desktop/DesktopOnboarding.swift`, `Sources/SpeakApp/Permissions/PermissionSettingsGuide.swift`, `Sources/SpeakiOS/Views/FirstRunOnboardingView.swift`, `Sources/SpeakWindows/WindowsOnboarding.swift`, `Sources/SpeakLinux/LinuxOnboarding.swift`
+- **Refs:** `Sources/SpeakCore/Desktop/DesktopOnboarding.swift`, `Sources/SpeakApp/Permissions/PermissionSettingsGuide.swift`, `Sources/SpeakiOS/Views/FirstRunOnboardingView.swift`, `Sources/SpeakWindows/WindowsOnboarding.swift`, `Sources/SpeakLinux/LinuxOnboarding.swift`, `android/app/src/main/java/com/justspeaktoit/android/ui/OnboardingScreen.kt`
 - **Sunset:** none
-- **Nuances:** Mac guide rules per permission: [Mac permission guides](mac-permission-guides.md).
+- **Nuances:** Mac guide rules per permission: [Mac permission guides](mac-permission-guides.md). Android stores completion under the same `hasCompletedOnboarding` key and re-runs from Settings > Setup guide; installs that already chose a mode or allowed the microphone skip it. The Dictate tile is offered in a system dialog on Android 13+, with instructions on older versions.
 
 ### F31 API keys page
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

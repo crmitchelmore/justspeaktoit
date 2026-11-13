@@ -39,6 +39,7 @@ class RawConfigurationTest {
         "silenceDetectionEnabled" to "Silence detection is edited in Settings only for now.",
         "silenceThreshold" to "Silence detection is edited in Settings only for now.",
         "silenceDuration" to "Silence detection is edited in Settings only for now.",
+        "hasCompletedOnboarding" to "First-run state, reopened from Settings > Setup guide, not a preference.",
     )
 
     private fun validate(settings: String, current: Map<String, Any?> = fresh) =

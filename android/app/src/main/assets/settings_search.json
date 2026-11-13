@@ -321,6 +321,28 @@
       "title" : "Support development"
     },
     {
+      "id" : "android.setupGuide",
+      "keywords" : [
+        "onboarding",
+        "setup",
+        "first run",
+        "welcome",
+        "tutorial",
+        "get started",
+        "permissions",
+        "keyboard",
+        "quick settings tile",
+        "test dictation"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "hasCompletedOnboarding"
+      ],
+      "summary" : "Run the first-run setup again: microphone, speech route, keyboard, tile and a test dictation.",
+      "title" : "Setup guide"
+    },
+    {
       "id" : "android.privacyPolicy",
       "keywords" : [
         "privacy",

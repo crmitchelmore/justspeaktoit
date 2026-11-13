@@ -15,13 +15,17 @@ extension CommandLineParser {
         .transcribeFile: [.json, .timeout],
         .speakText: [
             .json, .timeout, .voice, .output, .play, .file, .provider, .model, .speed, .pitch, .quality, .language
-        ]
+        ],
+        .getConfiguration: [.json, .prefix],
+        .setConfiguration: [.json, .dryRun]
     ]
 
     /// The argument a command's positional words supply.
     static let positionalArgument: [AutomationCommand: AutomationToolArguments.CodingKeys] = [
         .transcribeFile: .path,
-        .speakText: .text
+        .speakText: .text,
+        .getConfiguration: .keys,
+        .setConfiguration: .changes
     ]
 }
 
@@ -43,6 +47,8 @@ extension CommandLineParser.Option {
         case .pitch: .pitch
         case .quality: .quality
         case .language: .language
+        case .prefix: .prefix
+        case .dryRun: .dryRun
         }
     }
 }
@@ -66,6 +72,10 @@ extension CLIPlan {
             arguments.speed = self.speed
             arguments.pitch = self.pitch
             arguments.play = self.play
+            arguments.keys = self.keys
+            arguments.prefix = self.prefix
+            arguments.changes = self.changes
+            arguments.dryRun = self.dryRun
             return arguments
         }
         set {
@@ -83,6 +93,10 @@ extension CLIPlan {
             self.speed = newValue.speed
             self.pitch = newValue.pitch
             self.play = newValue.play
+            self.keys = newValue.keys
+            self.prefix = newValue.prefix
+            self.changes = newValue.changes
+            self.dryRun = newValue.dryRun
         }
     }
 }

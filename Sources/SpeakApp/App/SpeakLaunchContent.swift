@@ -45,23 +45,7 @@ struct SpeakLaunchContent: View {
             .environmentObject(environment.tts)
             .environmentObject(environment.shortcuts)
             .environmentObject(environment.recordingControl)
-            .onAppear {
-                appDelegate.environment = environment
-                environment.configureShortcutHandlers()
-                environment.installMenuBar()
-                environment.installDockMenu()
-                environment.installServices()
-                if #available(macOS 10.12.2, *) {
-                    environment.installTouchBar()
-                }
-                // Crash-report consent comes first; the analytics question
-                // follows once it is answered, as only one alert shows at a time.
-                if DiagnosticsConsent.shared.needsDecision {
-                    showingDiagnosticsConsent = true
-                } else {
-                    offerAnalyticsConsent(environment)
-                }
-            }
+            .onAppear { mainContentAppeared(environment) }
             .onChange(of: showingDiagnosticsConsent) { _, showing in
                 if !showing { offerAnalyticsConsent(environment) }
             }
@@ -93,6 +77,24 @@ struct SpeakLaunchContent: View {
                         + "You can turn this off at any time in Settings."
                 )
             }
+    }
+
+    private func mainContentAppeared(_ environment: AppEnvironment) {
+        appDelegate.environment = environment
+        environment.configureShortcutHandlers()
+        environment.installMenuBar()
+        environment.installDockMenu()
+        environment.installServices()
+        if #available(macOS 10.12.2, *) {
+            environment.installTouchBar()
+        }
+        // Crash-report consent comes first; the analytics question
+        // follows once it is answered, as only one alert shows at a time.
+        if DiagnosticsConsent.shared.needsDecision {
+            showingDiagnosticsConsent = true
+        } else {
+            offerAnalyticsConsent(environment)
+        }
     }
 
     private func offerAnalyticsConsent(_ environment: AppEnvironment) {

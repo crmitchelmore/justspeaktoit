@@ -173,7 +173,7 @@ extension SettingsSearchCatalog {
             summary: "Crash reports and diagnostics, anonymous analytics and the privacy policy.",
             keywords: [
                 "send crash reports and diagnostics", "crash reports", "diagnostics", "sentry",
-                "share anonymous analytics", "telemetry", "tracking", "privacy policy", "opt out",
+                "share anonymous analytics", "telemetry", "tracking", "privacy policy", "opt out"
             ],
             settingKeys: ["diagnosticsConsent", "analyticsEnabled"], platforms: .macOS
         ),

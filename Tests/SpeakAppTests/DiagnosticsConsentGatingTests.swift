@@ -76,12 +76,12 @@ final class DiagnosticsConsentGatingTests: XCTestCase {
         let own = [
             storage.directory.appendingPathComponent("envelopes/1.envelope"),
             caches.appendingPathComponent("io.sentry/\(hash)/envelopes/2.envelope"),
-            caches.appendingPathComponent("SentryCrash/Example/Reports/report.json"),
+            caches.appendingPathComponent("SentryCrash/Example/Reports/report.json")
         ]
         let others = [
             caches.appendingPathComponent("io.sentry/someoneelse/envelopes/3.envelope"),
             caches.appendingPathComponent("SentryCrash/Other/Reports/report.json"),
-            caches.appendingPathComponent("unrelated.txt"),
+            caches.appendingPathComponent("unrelated.txt")
         ]
         for file in own + others { try write(file) }
 

@@ -70,7 +70,10 @@ private final class PolishJourney {
         self.app.launchEnvironment["SPEAK_CORE_JOURNEY_PROFILE"] = identifier.uuidString
         self.app.launchEnvironment["SPEAK_CORE_JOURNEY_DIRECTORY"] = self.directory.path
         self.app.launchEnvironment["SPEAK_CORE_JOURNEY_SCENARIO"] = scenario
-        self.app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES", "-diagnosticsConsent", "declined"]
+        self.app.launchArguments = [
+            "-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES",
+            "-diagnosticsConsent", "declined"
+        ]
         self.registerCleanup(suite: suite)
         NSPasteboard.general.clearContents()
         XCTAssertTrue(NSPasteboard.general.setString(self.initialClipboard, forType: .string))

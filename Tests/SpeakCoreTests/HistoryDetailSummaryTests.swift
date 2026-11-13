@@ -46,6 +46,31 @@ final class HistoryDetailSummaryTests: XCTestCase {
         ])
     }
 
+    func testFormatCurrency_keepsSubCentCostsVisible() {
+        func usd(_ text: String) -> String {
+            HistoryDetailFormatting.formatCurrency(Decimal(string: text)!, currency: "USD")
+        }
+        XCTAssertTrue(usd("0.0042").contains("0.0042"))
+        XCTAssertTrue(usd("0.005").contains("0.005"))
+        XCTAssertFalse(usd("0.005").contains("0.0050"))
+        XCTAssertTrue(usd("0.00001").hasPrefix("< "))
+        XCTAssertTrue(usd("0.00001").contains("0.0001"))
+        XCTAssertTrue(usd("0.12").contains("0.12"))
+        XCTAssertFalse(usd("0.12").contains("0.120"))
+        XCTAssertTrue(usd("0").contains("0.00"))
+    }
+
+    func testTrigger_labelsComparisonButtonWithoutHotKeyOrRawName() {
+        let comparison = ApplicationHistoryTrigger(
+            gesture: .uiButton, hotKeyDescription: ModelComparisonHistory.triggerDescription, outputMethod: .none
+        )
+        XCTAssertEqual(comparison.gestureLabel, "Button")
+        XCTAssertFalse(comparison.isHotKeyGesture)
+        XCTAssertEqual(comparison.historySummary, "Button · Compare Models")
+        let hold = ApplicationHistoryTrigger(gesture: .hold, hotKeyDescription: "Right Option", outputMethod: .none)
+        XCTAssertTrue(hold.isHotKeyGesture)
+    }
+
     func testFormatLatency_coversEachScaleAndRejectsNegative() {
         XCTAssertEqual(HistoryDetailFormatting.formatLatency(0.85), "850 ms")
         XCTAssertEqual(HistoryDetailFormatting.formatLatency(2.4), "2.4 s")

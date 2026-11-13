@@ -1,4 +1,4 @@
-"""The machine-wide lock that serialises pre-pr runs for one user."""
+"""The machine-wide lock that serialises the heavy part of pre-pr runs for one user."""
 from __future__ import annotations
 
 import contextlib
@@ -6,9 +6,11 @@ import os
 import time
 from pathlib import Path
 
-# One pre-pr at a time per user on this machine, across every worktree: several
+# One heavy phase at a time per user on this machine, across every worktree: several
 # agents running the macOS build, Lint tooling tests and Swift tests at once
 # drove load past 300 and turned timing-sensitive tests into false failures.
+# Only checks marked exclusive (runner.Check) take it; autofix, cheap checks and
+# remote GitHub runs never wait for it.
 # JSTI_PRE_PR_LOCK=off disables it; any other value is the lock file path.
 LOCK_PATH = Path.home() / '.cache' / 'jsti-pre-pr.lock'
 

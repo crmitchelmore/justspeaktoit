@@ -3,6 +3,7 @@ files: the routes in scripts/ci/routing.json decide the areas, and each area
 adds the CI job's own command."""
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -62,9 +63,11 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
             checks.append(Check('portable-linux', 'swift', title, [], skip_reason='--no-linux', incomplete=True))
         else:
             mode = [] if linux == 'auto' else [f'--{linux}']
+            # auto uses a container when docker or podman runs; an installed one counts, to stay on the safe side.
+            local = linux == 'container' or (linux == 'auto' and any(map(shutil.which, ('docker', 'podman'))))
             checks.append(Check('portable-linux', 'swift', title,
                                 ['python3', 'scripts/linux-precheck', *mode, '--tree', str(environment.ROOT),
-                                 '--base', base], background=True))
+                                 '--base', base], background=True, exclusive=local))
     if apple:
         # Lint: exactly the ci.yml Lint job (whole-repo strict SwiftLint, accessibility, tooling pins and tests).
         checks.append(Check('ci-lint', 'ci-lint', 'CI Lint job (make ci-lint)', ['make', 'ci-lint'],
@@ -73,7 +76,8 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
             # CI runs Lint on Ubuntu, where Apple-only tooling tests skip and others behave differently.
             checks.append(Check('ci-lint-linux', 'ci-lint', 'CI Lint job on Ubuntu (make ci-lint), remote',
                                 ['python3', 'scripts/linux-precheck', '--job', 'lint',
-                                 '--tree', str(environment.ROOT), '--base', base], background=True))
+                                 '--tree', str(environment.ROOT), '--base', base], background=True,
+                                exclusive=False))
         elif linux == 'skip' and not sys.platform.startswith('linux'):
             checks.append(Check('ci-lint-linux', 'ci-lint', 'CI Lint job on Ubuntu (make ci-lint)', [],
                                 skip_reason='--no-linux', incomplete=True))
@@ -132,7 +136,7 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
         # Zero violations, as CI's Lint job enforces with `scripts/quality check --all`.
         kinds = ', '.join(k for k in ('swift', 'python', 'shell', 'workflows') if owned[k])
         checks.append(Check('quality', 'quality', f'Code quality: scripts/quality check ({kinds})',
-                            ['python3', 'scripts/quality', 'check', *linted]))
+                            ['python3', 'scripts/quality', 'check', *linted], exclusive=False))
     if android:
         # The Android CI job's script. Locally only with a working JDK and an approved feed
         # (android/settings.gradle.kts refuses public registries off GitHub-hosted runners);
@@ -143,16 +147,18 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
         else:
             checks.append(Check('android', 'android', f'{title}, remote',
                                 ['python3', 'scripts/linux-precheck', '--job', 'android',
-                                 '--tree', str(environment.ROOT), '--base', base], background=True))
+                                 '--tree', str(environment.ROOT), '--base', base], background=True,
+                                exclusive=False))
     if worker:
         directory = environment.ROOT / 'workers' / 'paid-access'
         checks.append(Check('worker-install', 'paid-access-worker', 'npm ci',
-                            ['npm', 'ci', '--no-audit', '--no-fund'], cwd=directory, requires='npm'))
+                            ['npm', 'ci', '--no-audit', '--no-fund'], cwd=directory, requires='npm',
+                            exclusive=False))
         for script in ('typecheck', 'lint', 'test'):
             checks.append(Check(f'worker-{script}', 'paid-access-worker', f'npm run {script}',
-                                ['npm', 'run', script], cwd=directory, requires='npm'))
+                                ['npm', 'run', script], cwd=directory, requires='npm', exclusive=False))
     if landing:
         checks.append(Check('landing-tests', 'landing-page', 'Landing page tests', ['npm', 'test'],
-                            cwd=environment.ROOT / 'landing-page', requires='npm'))
+                            cwd=environment.ROOT / 'landing-page', requires='npm', exclusive=False))
     checks.sort(key=lambda check: (not check.background, COST.get(check.id, 3)))
     return checks, areas

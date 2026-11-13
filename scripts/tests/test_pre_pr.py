@@ -1,4 +1,5 @@
 """Planner and summary tests for scripts/pre-pr."""
+import contextlib
 import importlib.machinery
 import importlib.util
 import json
@@ -7,6 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -390,6 +392,23 @@ class RunTests(unittest.TestCase):
         self.assertEqual(runner.tests_executed(log), 19)
         self.assertEqual(runner.tests_executed('No matching test cases were run'), 0)
 
+    def test_a_hung_exclusive_check_is_killed_with_its_children(self):
+        pidfile = Path(self.tmp.name) / 'grandchild.pid'
+        hang = ['sh', '-c', f'sleep 60 & echo $! > {pidfile}; wait']
+        with mock.patch.dict(os.environ, {'JSTI_PRE_PR_CHECK_TIMEOUT': '1'}):
+            started = time.monotonic()
+            check = self.run_check(command=hang)
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertEqual(check.status, 'fail')
+        self.assertIn('timed out after 1s', check.note)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(pidfile.read_text()), 0)
+
+    def test_remote_checks_are_not_timed_out(self):
+        with mock.patch.dict(os.environ, {'JSTI_PRE_PR_CHECK_TIMEOUT': '1'}):
+            check = self.run_check(command=['sleep', '2'], exclusive=False)
+        self.assertEqual(check.status, 'pass')
+
 
 class EvidenceTests(unittest.TestCase):
     head = 'c' * 40
@@ -453,6 +472,61 @@ class MachineLockTests(unittest.TestCase):
     def test_off_disables_the_lock(self):
         with lock.machine_lock('off'), lock.machine_lock('off'):
             pass
+
+
+class LockScopeTests(unittest.TestCase):
+    def test_only_local_heavy_checks_take_the_machine_lock(self):
+        swift = 'Sources/SpeakCore/Credentials/Apple/SecureStorage.swift'
+        with mock.patch.object(environment, 'IS_MAC', True), mock.patch.object(sys, 'platform', 'darwin'), \
+                mock.patch.object(environment, 'pr_title_env', lambda: {}):
+            remote = {c.id: c for c in planner.plan([swift, 'scripts/pre-pr'], False, linux='remote')[0]}
+            container = {c.id: c for c in planner.plan([swift], False, linux='container')[0]}
+        self.assertFalse(any(remote[i].exclusive for i in ('portable-linux', 'ci-lint-linux', 'quality')))
+        self.assertTrue(all(remote[i].exclusive for i in ('ci-lint', 'apple-build', 'api-compatibility')))
+        self.assertTrue(container['portable-linux'].exclusive)
+
+    def run_execute(self, checks, failing=()):
+        events, held = [], []
+
+        @contextlib.contextmanager
+        def fake_lock():
+            held.append(True)
+            events.append('lock')
+            yield
+            events.append('unlock')
+            held.pop()
+
+        def fake_run(check, verbose):
+            events.append((check.id, bool(held)))
+            check.status = 'fail' if check.id in failing else 'pass'
+
+        def fake_finish(check, process, verbose, restore=True):
+            if process is not None:
+                check.status = 'pass'
+
+        args = mock.Mock(keep_going=False, verbose=False, markdown=False, base='origin/main', full=False)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(environment, 'OUT', Path(tmp)), \
+                mock.patch.object(cli, 'machine_lock', fake_lock), mock.patch.object(cli, 'run', fake_run), \
+                mock.patch.object(cli, 'launch', lambda c: events.append((c.id, bool(held))) or object()), \
+                mock.patch.object(cli, 'finish', fake_finish), mock.patch('builtins.print'):
+            cli.execute(args, checks, {}, [], 'base', 'head', 'tree', False)
+        return events
+
+    def test_the_lock_covers_only_the_exclusive_checks(self):
+        Check = runner.Check
+        checks = [Check('linux', 'swift', 'Linux', ['x'], background=True, exclusive=False),
+                  Check('quality', 'quality', 'Quality', ['x'], exclusive=False),
+                  Check('ci-lint', 'ci-lint', 'Lint', ['x']), Check('apple-build', 'swift', 'Build', ['x'])]
+        self.assertEqual(self.run_execute(checks), [('linux', False), ('quality', False), 'lock',
+                                                    ('ci-lint', True), ('apple-build', True), 'unlock'])
+        self.assertEqual([c.status for c in checks], ['pass'] * 4)
+
+    def test_an_early_failure_never_waits_for_the_lock(self):
+        Check = runner.Check
+        checks = [Check('quality', 'quality', 'Quality', ['x'], exclusive=False),
+                  Check('apple-build', 'swift', 'Build', ['x'])]
+        self.assertEqual(self.run_execute(checks, failing={'quality'}), [('quality', False)])
+        self.assertEqual(checks[1].status, 'skip')
 
 
 if __name__ == '__main__':

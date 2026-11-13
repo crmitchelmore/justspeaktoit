@@ -333,7 +333,7 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
   failures whose head had a passing record. The target is under 1%.
 - The machine-readable result is `.build/pre-pr/summary.json`; per-check logs
   are in `.build/pre-pr/logs/`.
-- Runs are serialised machine-wide per user (`~/.cache/jsti-pre-pr.lock`) so parallel agents don't overload the Mac into timing flakes; a waiting run says who holds the lock. `JSTI_PRE_PR_LOCK=off` disables it.
+- The heavy local checks (SwiftPM build and tests, API compatibility, `make ci-lint`, local Android or container Linux runs) are serialised machine-wide per user (`~/.cache/jsti-pre-pr.lock`) so parallel agents don't overload the Mac into timing flakes; a waiting run says who holds the lock. Autofix, quick checks and the remote GitHub Linux/Android runs never wait for it. `JSTI_PRE_PR_LOCK=off` disables it. Each of those checks is killed (with its children) after `JSTI_PRE_PR_CHECK_TIMEOUT` seconds (default 1800; `0` disables), so a hung test fails its run instead of holding the lock for everyone. `scripts/swiftformat.sh` shares one built SwiftFormat per user (`~/.cache/jsti-tooling`), so new worktrees don't recompile it; `JSTI_TOOLING_CACHE=off` builds in place.
 - Opt in to running it on every push with `scripts/install-pre-pr-hook`
   (`make install-hooks`). Bypass once with `JSTI_SKIP_PRE_PR=1`.
 

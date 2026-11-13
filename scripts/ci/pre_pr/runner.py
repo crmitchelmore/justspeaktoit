@@ -3,9 +3,11 @@ once), wait for it, classify the result through scripts/ci/pre_pr_outcome.py
 and undo any tracked-file side effects it left behind."""
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -30,6 +32,7 @@ class Check:
     failure: str = ''          # a planning failure: the check fails without running
     counts_tests: bool = False  # fail when the run executes zero tests
     background: bool = False    # started first and awaited last (the remote/container Linux run)
+    exclusive: bool = True      # loads this machine (builds, tests), so it runs under the machine-wide lock
     forbid_drift: tuple[str, ...] = ()  # tracked files the check must not modify (CI's drift checks)
     incomplete: bool = False    # a required check deliberately not run: the result is 'incomplete'
     status: str = 'pending'
@@ -93,10 +96,47 @@ def launch(check: Check) -> subprocess.Popen | None:
         log.close()
 
 
+def check_timeout() -> float | None:
+    """Seconds an exclusive check may run (and so hold the machine lock); JSTI_PRE_PR_CHECK_TIMEOUT=0 disables it."""
+    try:
+        seconds = float(os.environ.get('JSTI_PRE_PR_CHECK_TIMEOUT', '1800'))
+    except ValueError:
+        seconds = 1800.0
+    return seconds if seconds > 0 else None
+
+
+def descendants(pid: int) -> list[int]:
+    found = subprocess.run(['pgrep', '-P', str(pid)], capture_output=True, text=True).stdout.split()
+    tree = []
+    for child in map(int, found):
+        tree += [child, *descendants(child)]
+    return tree
+
+
+def stop_tree(process: subprocess.Popen) -> None:
+    """End a hung check and everything it started (swift test → xctest), politely and then not."""
+    tree = [process.pid, *descendants(process.pid)]
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in tree:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, sig)
+        try:
+            process.wait(timeout=15)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
 def finish(check: Check, process: subprocess.Popen | None, verbose: bool, restore: bool = True) -> None:
     if process is None:
         return
-    code = process.wait()
+    limit = check_timeout() if check.exclusive else None
+    try:
+        code = process.wait(timeout=None if limit is None else max(0.0, check.started + limit - time.monotonic()))
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        stop_tree(process)
+        code, timed_out = process.wait(), True
     check.duration = time.monotonic() - check.started
     text = check.log.read_text(encoding='utf-8', errors='replace')
     if verbose:
@@ -105,6 +145,8 @@ def finish(check: Check, process: subprocess.Popen | None, verbose: bool, restor
     drifted = () if check.background else set(check.forbid_drift) & (dirty_tracked() - check.dirty_before)
     settle(check, outcomes().after_exit(advisory=check.advisory, exit_code=code, tests_executed=executed,
                                         drifted=drifted, log=display(check.log)))
+    if timed_out:
+        check.note = f'timed out after {limit:.0f}s (JSTI_PRE_PR_CHECK_TIMEOUT), likely a hung test; {check.note}'
     if restore and not check.background:
         restore_side_effects(check, check.dirty_before)
 

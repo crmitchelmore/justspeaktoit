@@ -9,6 +9,7 @@ import com.justspeaktoit.android.history.Retention
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -46,11 +47,14 @@ class DictationHistoryTest {
     private val recordingsDir by lazy { folder.newFolder("recordings") }
     private val published = CopyOnWriteArrayList<Pair<List<HistoryEntry>, Boolean>>()
 
+    private val localChanges = AtomicInteger()
+
     private fun CoroutineScope.history() = DictationHistory(
         store,
         recordingsDir,
         scope = this,
         io = Dispatchers.IO,
+        onLocalChange = { localChanges.incrementAndGet() },
         publish = { entries, failed -> published += entries to failed },
         now = { clock.incrementAndGet() },
         newId = { "id-${ids.incrementAndGet()}" },
@@ -126,6 +130,46 @@ class DictationHistoryTest {
         assertEquals("openai/gpt-transcribe", entry.model)
         assertEquals(HistoryStatus.Completed, entry.status)
         assertEquals(listOf(1, 1, 1), published.map { it.first.size })
+    }
+
+    @Test
+    fun testCleanup_keepsTheOriginalTranscriptAsRawText() = runBlocking {
+        val history = history()
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "hello"), null, Retention.Month)
+        history.replaceSessionText("Hello.", cleanedUp = true, Retention.Month)
+        history.replaceSessionText("Hello!", cleanedUp = true, Retention.Month)?.join()
+        assertEquals("hello", latest.single().rawText)
+
+        history.replaceSessionText("hello", cleanedUp = false, Retention.Month)?.join()
+        assertNull(latest.single().rawText)
+    }
+
+    @Test
+    fun testSyncUpdate_publishesWithoutReportingALocalChange() = runBlocking {
+        val history = history()
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "hello"), null, Retention.Month)?.join()
+        assertEquals(1, localChanges.get())
+
+        val count = history.syncUpdate(Retention.Month) { entries ->
+            (entries + entries.single().copy(id = "remote", text = "from the mac")) to entries.size
+        }
+        // The publish is posted to this scope, so let it run.
+        yield()
+        assertEquals(1, count)
+        assertEquals(1, localChanges.get())
+        assertEquals(setOf("hello", "from the mac"), latest.map { it.text }.toSet())
+        assertEquals(2, history.syncSnapshot(Retention.Month).size)
+    }
+
+    @Test
+    fun testImportEntries_reportsALocalChangeSoSyncUploadsIt() = runBlocking {
+        val history = history()
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "hello"), null, Retention.Month)?.join()
+        assertEquals(1, localChanges.get())
+
+        history.importEntries(Retention.Month) { entries -> entries + entries.single().copy(id = "imported") }
+        assertEquals(2, localChanges.get())
+        assertEquals(2, latest.size)
     }
 
     @Test

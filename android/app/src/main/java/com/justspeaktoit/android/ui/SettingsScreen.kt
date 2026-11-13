@@ -77,6 +77,8 @@ import com.justspeaktoit.android.settings.SettingsSearchEntry
 import com.justspeaktoit.android.settings.SettingsSearchIndex
 import com.justspeaktoit.android.settings.SettingsSearchRecents
 import com.justspeaktoit.android.settings.SettingsSearchResult
+import com.justspeaktoit.android.sync.HistorySyncAvailability
+import com.justspeaktoit.android.sync.HistorySyncStatus
 import com.justspeaktoit.android.tips.TipJarUiState
 import com.justspeaktoit.android.ui.theme.supportsDynamicColor
 
@@ -125,6 +127,9 @@ class SettingsActions(
     val onOpenKeyboardSettings: () -> Unit = {},
     /** Opens the dictation screen, where the mode is chosen and the on-device model downloaded. */
     val onChooseMode: () -> Unit = {},
+    val onSignInToHistorySync: () -> Unit = {},
+    val onSignOutOfHistorySync: () -> Unit = {},
+    val onSyncHistoryNow: () -> Unit = {},
 )
 
 /** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
@@ -148,6 +153,7 @@ fun SettingsScreen(
     appearance: AppearanceChoice = AppearanceChoice(),
     tips: TipJarUiState = TipJarUiState(),
     troubleshooting: TroubleshootingFacts = TroubleshootingFacts(),
+    historySync: HistorySyncStatus = HistorySyncStatus(HistorySyncAvailability.MissingToken),
 ) {
     val context = LocalContext.current
     val searchIndex = remember {
@@ -410,6 +416,10 @@ fun SettingsScreen(
                 Switch(checked = state.handsFreeEnabled, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_hands_free_note), style = MaterialTheme.typography.bodyMedium)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_history_sync_title, anchor("android.historySync"))
+            HistorySyncSection(historySync, actions)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_corrections_title, anchor("android.personalCorrections"))

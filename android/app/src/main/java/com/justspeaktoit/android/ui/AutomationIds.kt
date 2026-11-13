@@ -123,6 +123,11 @@ object AutomationIds {
     const val RAW_CONFIG_RESET_CONFIRM = "rawConfigurationResetConfirm"
     const val RAW_CONFIG_STATUS = "rawConfigurationStatus"
 
+    const val SETTINGS_HISTORY_SYNC_STATUS = "settings.historySync.status"
+    const val SETTINGS_HISTORY_SYNC_SIGN_IN = "settings.historySync.signIn"
+    const val SETTINGS_HISTORY_SYNC_SIGN_OUT = "settings.historySync.signOut"
+    const val SETTINGS_HISTORY_SYNC_NOW = "settings.historySync.syncNow"
+
     const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
     const val SETTINGS_CLEANUP_PROMPT = "settings.cleanupPrompt"
     const val SETTINGS_CLEANUP_PROMPT_RESET = "settings.cleanupPrompt.reset"

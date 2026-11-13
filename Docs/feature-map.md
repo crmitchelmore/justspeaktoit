@@ -102,7 +102,7 @@ The flags live in `Project.swift`; release selection is in
 | F14 | History list and search | Yes | Yes | Yes | Yes | Yes | | |
 | F15 | History filters (model, errors, dates) | Yes | Yes | Yes | Yes | Yes | | Android filters by Cloud model or recognition mode. |
 | F16 | History retry and audio playback | Yes | Yes | Yes | Yes | Yes | | Android keeps recordings only when "Keep recordings in History" is on. |
-| F17 | History sync | Yes | Yes | Yes | Yes | No | #1630 | Desktops use CloudKit Web Services. |
+| F17 | History sync | Yes | Yes | Yes | Yes | Yes | | Desktops and Android use CloudKit Web Services. |
 | F18 | Settings search | Yes | Yes | Yes | Yes | Yes | | |
 | F19 | Command palette | Yes | N/A | Yes | Yes | N/A | | Windows and Linux also list recent History. |
 | F20 | Compare models | Yes | N/A | Yes | Yes | N/A | #1622 | Desktop-only by owner decision. |
@@ -284,13 +284,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Windows playback notes: [Windows History playback](windows-history-playback.md). Android deletes a transcribed Cloud recording unless **Keep recordings in History** (`keepRecordingsInHistory`, off by default) is on; Speech service sessions have no recording. Android recordings live only inside History, so its Clear History "Keep recordings" keeps the entries that hold audio, where desktop keeps the files on disk.
 
 ### F17 History sync
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1630.
-- **How:** Apple platforms use CloudKit; Windows and Linux use CloudKit Web Services with the same record shape. A synced copy keeps its `originPlatform`; a local or imported record leaves it nil.
-- **Refs:** `Sources/SpeakSync/HistoryChangeReconciler.swift`, `Sources/SpeakDesktopSync/DesktopHistorySyncStore.swift`, `Sources/SpeakDesktopHost/History/DesktopHostCloudSync.swift`, `Sources/SpeakApp/App/AppCloudSync.swift`, `Sources/SpeakWindows/WindowsCloudSync.swift`
+- **Gaps:** none
+- **How:** Apple platforms use CloudKit; Windows, Linux and Android use CloudKit Web Services with the same record shape. A synced copy keeps its `originPlatform`; a local or imported record leaves it nil. Android is a Kotlin port of `SpeakDesktopSync` (opt-in sign-in through the browser and the same loopback callback, deletion tickets, tombstones and the comparison pass); records are audio-free on every platform.
+- **Refs:** `Sources/SpeakSync/HistoryChangeReconciler.swift`, `Sources/SpeakDesktopSync/DesktopHistorySyncStore.swift`, `Sources/SpeakDesktopHost/History/DesktopHostCloudSync.swift`, `Sources/SpeakApp/App/AppCloudSync.swift`, `Sources/SpeakWindows/WindowsCloudSync.swift`, `android/app/src/main/java/com/justspeaktoit/android/sync/`
 - **Sunset:** iPhone has moved into the shared `iCloud.com.justspeaktoit` container with a one-time migration from the legacy iPhone container. After the #1119 device checks pass on Stable, drop the legacy entitlement entry, `SyncContainerFamily.iOS`, the migration, the deprecated `SyncConfiguration.legacyFamily` properties and the `IOS_SHARED_CLOUD_CONTAINER` variable ([shared container](cloudkit-shared-container.md)).
-- **Nuances:** Never set `originPlatform` on migration imports: `removeSyncedCopy` may delete audio-free records that carry it. Mac/iPhone sync stays unqualified until the #1119 checks pass; the direct-download Mac build has no CloudKit entitlement yet ([Windows CloudKit sync](windows-cloudkit-sync.md)).
+- **Nuances:** Never set `originPlatform` on migration imports: `removeSyncedCopy` may delete audio-free records that carry it. Mac/iPhone sync stays unqualified until the #1119 checks pass; the direct-download Mac build has no CloudKit entitlement yet ([Windows CloudKit sync](windows-cloudkit-sync.md)). Android sync needs the `CLOUDKIT_WEB_API_TOKEN` build secret; without it Settings says sync is not set up, which is every build until the release workflows pass it (#1741). Android cannot check which app opened the loopback callback, so it relies on the browser checks alone.
 
 ### F18 Settings search
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

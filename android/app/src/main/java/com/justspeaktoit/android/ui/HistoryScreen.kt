@@ -353,12 +353,27 @@ private fun FilterSummary(shown: Int, total: Int) {
 
 @Composable
 private fun sourceLabel(entry: HistoryEntry): String? {
+    // Only entries received through History sync carry an origin.
+    val origin = entry.originPlatform
+    if (origin != null) {
+        return stringResource(R.string.history_synced_from, platformName(origin))
+    }
     val mode = RecognitionMode.entries.firstOrNull { it.name == entry.mode } ?: return null
     if (mode == RecognitionMode.Cloud) {
         return CloudCatalog.transcriptionModels.firstOrNull { it.catalogId == entry.model }?.displayName
             ?: entry.model
     }
     return stringResource(mode.label())
+}
+
+@Composable
+private fun platformName(origin: String): String = when (origin) {
+    "macos" -> stringResource(R.string.history_platform_mac)
+    "ios" -> stringResource(R.string.history_platform_ios)
+    "windows" -> stringResource(R.string.history_platform_windows)
+    "linux" -> stringResource(R.string.history_platform_linux)
+    "android" -> stringResource(R.string.history_platform_android)
+    else -> origin
 }
 
 /** Recent dictation totals, the Android counterpart of the Mac's usage insights. */

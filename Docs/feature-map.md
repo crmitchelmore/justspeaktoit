@@ -131,7 +131,7 @@ The flags live in `Project.swift`; release selection is in
 | F43 | Recording start/stop sounds | Yes | Yes | Yes | Yes | No | #1638 | |
 | F44 | Per-app output target (profiles) / Focus overrides | Yes | Yes | Yes | Limited | N/A | | |
 | F45 | Recording audio housekeeping | Yes | Yes | Yes | Yes | Partial | #1629 | |
-| F46 | Send transcripts from phone to desktop | Yes | Partial | No | No | No | #1640 | iOS: Handoff and History sync, no direct sender. |
+| F46 | Send transcripts from phone to desktop | Yes | Partial | No | No | No | #1640 | iOS: Handoff and History sync, no direct sender. macOS: direct build only; the Mac App Store build has no receiver. |
 | F47 | Accessible names, IDs and recording announcements | Yes | Yes | Yes | Yes | Yes | | |
 | F48 | Learned auto-corrections | Yes | No | Yes | Yes | No | #1651 | |
 | F49 | Appearance settings | Yes | Yes | Yes | Yes | No | #1652 | |
@@ -549,9 +549,9 @@ The flags live in `Project.swift`; release selection is in
 - **Excluded:** none
 - **Gaps:** iOS, Windows, Linux, Android #1640.
 - **How:** The Mac runs a user-enabled, paired, encrypted WebSocket receiver (`SpeakTransportWire` v2 over Bonjour) that inserts at the cursor. A phone sender must use the same protocol.
-- **Refs:** `Sources/SpeakCore/Sync/Apple/TransportChannel.swift`, `Sources/SpeakApp/Transport/TransportServer.swift`, `Sources/SpeakiOS/Services/TranscriptHandoffPublisher.swift`, `Docs/MACOS_RECEIVER.md`
+- **Refs:** `Sources/SpeakCore/Sync/Apple/TransportChannel.swift`, `Sources/SpeakApp/Transport/TransportServer.swift`, `Sources/SpeakApp/Transport/SendToMacAvailability.swift`, `Sources/SpeakiOS/Services/TranscriptHandoffPublisher.swift`, `Docs/MACOS_RECEIVER.md`
 - **Sunset:** none
-- **Nuances:** iPhone has no direct sender: it reaches the Mac through Handoff ("Continue on Mac") and History sync. v1 plaintext peers are refused.
+- **Nuances:** iPhone has no direct sender: it reaches the Mac through Handoff ("Continue on Mac") and History sync. v1 plaintext peers are refused. The receiver ships only in the direct macOS build: the Mac App Store build has no `network.server` entitlement or Bonjour service and hides Send to Mac (`SendToMacAvailability`).
 
 ### F47 Accessible names, IDs and recording announcements
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

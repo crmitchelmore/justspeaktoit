@@ -22,6 +22,8 @@ public struct ContentView: View {
     @State var issueErrorSnapshot = IOSIssueReporter.failedRequest()
     @State var errorMessage = ""
     @State var startFailureRecovery: CaptureStartFailureRecovery?
+    /// Titles the error alert; start failures without a recovery still count.
+    @State var errorIsStartFailure = false
     @State var recoveryDestination: CaptureStartFailureRecovery?
     /// The background session failure already alerted on, identified by its
     /// publication rather than its text, so the change observer and the

@@ -157,6 +157,14 @@ class MacReviewNotesTest < Minitest::Test
     assert record[:canonical_present]
   end
 
+  def test_append_keeps_leading_blank_lines_in_owner_text_without_a_superseded_note
+    client = Client.new
+    owner = "\n\nOwner instructions"
+    client.review['attributes']['notes'] = owner
+    repair(client)
+    assert_equal owner + "\n\n" + AppleRelease::MacReviewNotes::CANONICAL.strip, client.review['attributes']['notes']
+  end
+
   def test_audit_default_is_read_only_and_outputs_only_allowlisted_fields
     client = Client.new
     output = StringIO.new

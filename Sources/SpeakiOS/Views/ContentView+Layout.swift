@@ -200,7 +200,7 @@ extension ContentView {
 
     /// Names what went wrong instead of a bare "Error".
     var errorAlertTitle: String {
-        startFailureRecovery == nil ? "Recording Problem" : "Can't Start Recording"
+        errorIsStartFailure ? "Can't Start Recording" : "Recording Problem"
     }
 
     func presentations(_ content: some View) -> some View {
@@ -284,6 +284,7 @@ extension ContentView {
                 if let error = newError {
                     self.issueErrorSnapshot = coordinator.issueFailureSnapshot
                     self.startFailureRecovery = nil
+                    self.errorIsStartFailure = false
                     errorMessage = error
                     showingError = true
                 }
@@ -300,6 +301,7 @@ extension ContentView {
                 if let newError {
                     self.issueErrorSnapshot = IOSIssueReporter.failedRequest()
                     self.startFailureRecovery = nil
+                    self.errorIsStartFailure = false
                     errorMessage = newError
                     showingError = true
                 }
@@ -310,6 +312,7 @@ extension ContentView {
                 guard case .failed = outcome, let outcome else { return }
                 self.issueErrorSnapshot = IOSIssueReporter.failedRequest()
                 self.startFailureRecovery = nil
+                self.errorIsStartFailure = false
                 errorMessage = outcome.message
                 showingError = true
                 sharedImporter.acknowledgeOutcome()

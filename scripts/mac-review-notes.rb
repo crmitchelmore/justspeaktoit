@@ -168,7 +168,11 @@ module AppleRelease
 
     def without_superseded(notes)
       @superseded.reduce(notes) do |text, old|
-        text.sub("\n\n" + old, '').sub(old, '').sub(/\A\n\n/, '')
+        next text unless text.include?(old)
+        next text.sub("\n\n" + old, '') if text.include?("\n\n" + old)
+        # Only a note removed from the very start leaves separators to trim;
+        # owner text keeps its own leading blank lines.
+        text.sub(old, '').sub(/\A\n\n/, '')
       end
     end
 

@@ -79,3 +79,13 @@ API breakage: enumelement APIKeyStatusFilter.errors has been added as a new enum
 # Model retirements gain a cleanup (post-processing) mode so retired chat models
 # such as GPT-5 Mini move to their successor. Existing cases are retained.
 API breakage: enumelement ModelRetirement.Mode.postProcessing has been added as a new enum case
+# Raw settings configuration (#1546) adds the get/set configuration commands,
+# their tool arguments and the automation write opt-in. Existing cases, raw
+# values and Codable fields are unchanged.
+API breakage: enumelement ApplicationPreferenceKey.allowAutomationConfigurationChanges has been added as a new enum case
+API breakage: enumelement AutomationCommand.getConfiguration has been added as a new enum case
+API breakage: enumelement AutomationCommand.setConfiguration has been added as a new enum case
+API breakage: enumelement AutomationToolArguments.CodingKeys.keys has been added as a new enum case
+API breakage: enumelement AutomationToolArguments.CodingKeys.prefix has been added as a new enum case
+API breakage: enumelement AutomationToolArguments.CodingKeys.changes has been added as a new enum case
+API breakage: enumelement AutomationToolArguments.CodingKeys.dryRun has been added as a new enum case

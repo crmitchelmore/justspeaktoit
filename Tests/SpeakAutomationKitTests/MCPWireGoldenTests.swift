@@ -29,7 +29,7 @@ final class MCPWireGoldenTests: XCTestCase {
         XCTAssertEqual(self.handler.handle(line: request), expected, request, file: file, line: line)
     }
 
-    func testInitializeAndToolsList_keepTheirBytes() {
+    func testInitialize_keepsItsBytes() {
         self.assertReply(
             #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
             #"{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{"listChanged":false}},"instructions":"Dic"#
@@ -37,6 +37,9 @@ final class MCPWireGoldenTests: XCTestCase {
             + #"dentials; this server never sees them.","protocolVersion":"2025-06-18","serverInfo":{"name":"justspe"#
             + #"aktoit","version":"9.9.9"}}}"#
         )
+    }
+
+    func testToolsList_keepsItsBytes() {
         self.assertReply(
             #"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
             #"{"id":2,"jsonrpc":"2.0","result":{"tools":[{"description":"Await an identified active local Mac capt"#
@@ -68,7 +71,18 @@ final class MCPWireGoldenTests: XCTestCase {
             + #"e on-device voice.","type":"string"}},"required":["text"],"type":"object"},"name":"speak_text"},{"de"#
             + #"scription":"List the providers, voices and models speak_text can use: the app's selected voice, conf"#
             + #"igured cloud voices and on-device voices.","inputSchema":{"properties":{"provider":{"description":"O"#
-            + #"nly this provider's voices.","type":"string"}},"type":"object"},"name":"list_voices"}]}}"#
+            + #"nly this provider's voices.","type":"string"}},"type":"object"},"name":"list_voices"},{"description""#
+            + #":"Read the app's settings with their schema (type, default, allowed values, range, platforms). API k"#
+            + #"eys report only whether they are set; secrets are never returned. Needs automation turned on in the "#
+            + #"app.","inputSchema":{"properties":{"keys":{"description":"Only these setting keys.","items":{"type":"#
+            + #""string"},"maxItems":256,"type":"array"},"prefix":{"description":"Only setting keys starting with th"#
+            + #"is prefix.","type":"string"}},"type":"object"},"name":"get_configuration"},{"description":"Change on"#
+            + #"e or more settings at once. Every change is validated against the schema and applied all together or"#
+            + #" not at all. dry_run only validates. Writes also need \"Allow automation to change settings\" turned"#
+            + #" on in the app.","inputSchema":{"properties":{"changes":{"description":"Setting key to new value, e."#
+            + #"g. {\"ttsSpeed\": 1.2}. Use get_configuration for keys and allowed values.","type":"object"},"dry_ru"#
+            + #"n":{"description":"Validate without changing anything.","type":"boolean"}},"required":["changes"],"t"#
+            + #"ype":"object"},"name":"set_configuration"}]}}"#
         )
     }
 

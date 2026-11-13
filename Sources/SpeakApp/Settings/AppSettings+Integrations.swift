@@ -37,6 +37,18 @@ final class IntegrationPreferences: ObservableObject {
     didSet { persistence.store(enableAutomationServer, key: .enableAutomationServer) }
   }
 
+  /// Lets `set_configuration` (and `speak config set`) change settings over the
+  /// automation socket (#1546).
+  ///
+  /// Off by default and separate from `enableAutomationServer`: reading settings
+  /// and dry runs only need automation, but a write can redirect transcripts or
+  /// output, so it needs this second, explicit opt-in. Never transferred.
+  @Published var allowAutomationConfigurationChanges: Bool {
+    didSet {
+      persistence.store(allowAutomationConfigurationChanges, key: .allowAutomationConfigurationChanges)
+    }
+  }
+
   /// Paste a freshly arrived phone or watch transcript straight at the cursor
   /// instead of only posting a notification with a Paste action (#1007).
   ///
@@ -56,6 +68,7 @@ final class IntegrationPreferences: ObservableObject {
     simpleModelChoices = persistence.flag(.simpleModelChoices, default: false)
     enableSendToMac = persistence.flag(.enableSendToMac, default: false)
     enableAutomationServer = persistence.flag(.enableAutomationServer, default: false)
+    allowAutomationConfigurationChanges = persistence.flag(.allowAutomationConfigurationChanges, default: false)
     pasteRemoteTranscriptsAtCursor = persistence.flag(.pasteRemoteTranscriptsAtCursor, default: false)
   }
 
@@ -64,6 +77,7 @@ final class IntegrationPreferences: ObservableObject {
     simpleModelChoices = restored.simpleModelChoices
     enableSendToMac = restored.enableSendToMac
     enableAutomationServer = restored.enableAutomationServer
+    allowAutomationConfigurationChanges = restored.allowAutomationConfigurationChanges
     pasteRemoteTranscriptsAtCursor = restored.pasteRemoteTranscriptsAtCursor
   }
 }
@@ -87,6 +101,11 @@ extension AppSettings {
   var enableAutomationServer: Bool {
     get { integrations.enableAutomationServer }
     set { integrations.enableAutomationServer = newValue }
+  }
+
+  var allowAutomationConfigurationChanges: Bool {
+    get { integrations.allowAutomationConfigurationChanges }
+    set { integrations.allowAutomationConfigurationChanges = newValue }
   }
 
   var pasteRemoteTranscriptsAtCursor: Bool {

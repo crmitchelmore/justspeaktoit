@@ -156,7 +156,12 @@ class DictationSessionControllerTest {
         assertTrue("no cue before the recogniser is ready", cues.isEmpty())
         onMain { checkNotNull(engine.onEvent)(DictationEvent.Ready) }
         onMain { controller.stop() }
-        assertEquals(listOf(RecordingCue.Start, RecordingCue.Stop), cues.map { it.first })
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("done")) }
+        assertEquals(
+            "the final after a stop plays no second Stop",
+            listOf(RecordingCue.Start, RecordingCue.Stop),
+            cues.map { it.first },
+        )
 
         cues.clear()
         onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }

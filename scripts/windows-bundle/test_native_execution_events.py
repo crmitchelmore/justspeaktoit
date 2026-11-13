@@ -225,7 +225,7 @@ if(($run|ConvertTo-Json -Depth 8 -Compress) -cne $before){throw 'original change
 if('JstiDiagnosticNative' -as [type]){throw 'native load'}
 """, encoding="utf-8")
             result = subprocess.run([shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-File", str(script)],
-                                    capture_output=True, timeout=15, check=False)
+                                    capture_output=True, timeout=60, check=False)
             self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
 
 

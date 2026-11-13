@@ -6,11 +6,11 @@ class ReleaseAppleTest < Minitest::Test
     attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id
     attr_reader :posts, :calls
     attr_accessor :auto_notify, :observe_notify_write, :detail_id, :detail_states
-    attr_accessor :beta_locales, :review_contact, :stable_contact, :store_contact
+    attr_accessor :beta_locales, :review_contact, :stable_contact, :store_contact, :uploads, :build_missing
     def initialize
       @detail_states=[]
       @calls=[]; @auto_notify=false; @observe_notify_write=true; @detail_id='beta-detail-not-build-id'
-      @bundle_id='com.justspeaktoit.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false; @posts=[]; @beta_locales=[]; @review_contact={'contactFirstName'=>'Owner','contactLastName'=>'Tester','contactPhone'=>'+441234567890','contactEmail'=>'owner@example.com'}; @stable_contact=@review_contact.dup; @store_contact=@review_contact.dup
+      @bundle_id='com.justspeaktoit.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false; @posts=[]; @beta_locales=[]; @review_contact={'contactFirstName'=>'Owner','contactLastName'=>'Tester','contactPhone'=>'+441234567890','contactEmail'=>'owner@example.com'}; @stable_contact=@review_contact.dup; @store_contact=@review_contact.dup; @uploads=[]; @build_missing=false
     end
     def build
       {'id'=>'apple-build','attributes'=>{'processingState'=>processing,'expired'=>false,'expirationDate'=>'2026-12-01T00:00:00Z'}}
@@ -30,9 +30,10 @@ class ReleaseAppleTest < Minitest::Test
       return [{'id'=>'stable-version'}] if path == '/v1/apps/6758528955/appStoreVersions?limit=200'
       raise 'Unexpected Store app source' if path.include?('/appStoreVersions')
       return beta_locales if path.end_with?('/betaAppLocalizations')
+      return uploads if path.include?('/buildUploads?')
       if path.start_with?('/v1/builds?')
         return review_busy ? [build] : [] if path.include?('betaAppReviewSubmission')
-        return [build]
+        return build_missing ? [] : [build]
       end
       return [] if path.end_with?('/betaBuildLocalizations')
       return [{'id'=>'public-alpha','attributes'=>{'name'=>'Public Alpha','isInternalGroup'=>false,'publicLink'=>'https://testflight.apple.com/join/example'}}] if path.include?('/apps/')
@@ -309,6 +310,35 @@ class ReleaseAppleTest < Minitest::Test
     assert_raises(RuntimeError){d.distribute(wait_seconds:0)}
     assert_equal 'beta_rejected',d.receipts.last.first
     refute client.assigned
+  end
+  def upload(state, uploaded, errors=[])
+    {'id'=>"upload-#{uploaded}",'attributes'=>{'cfBundleVersion'=>'1000.0.1','uploadedDate'=>uploaded,
+      'state'=>{'state'=>state,'errors'=>errors}}}
+  end
+  def test_failed_build_upload_fails_with_apple_errors_instead_of_waiting
+    client=FakeClient.new;client.build_missing=true
+    error={'code'=>'ITMS-90626','description'=>'Invalid Siri Support.'}
+    client.uploads=[upload('FAILED','2026-11-13T09:00:00Z',[error])];d=delivery(client)
+    raised=assert_raises(RuntimeError){d.distribute(wait_seconds:60)}
+    assert_match 'ITMS-90626: Invalid Siri Support.',raised.message
+    assert_equal 'invalid',d.receipts.last.first
+    assert_equal [{code:'ITMS-90626',description:'Invalid Siri Support.'}],d.receipts.last.last[:appleErrors]
+    query=client.calls.find{|call|call[:path].include?('/buildUploads?')}[:path]
+    %w[filter%5BcfBundleVersion%5D=1000.0.1 filter%5BcfBundleShortVersionString%5D=3.2.0 filter%5Bplatform%5D=IOS].each{|part|assert_includes query,part}
+    assert_empty client.posts
+  end
+  def test_newest_build_upload_decides_and_processing_upload_keeps_waiting
+    client=FakeClient.new;client.build_missing=true
+    client.uploads=[upload('FAILED','2026-11-12T09:00:00Z'),upload('PROCESSING','2026-11-13T09:00:00Z')];d=delivery(client)
+    d.distribute(wait_seconds:0)
+    assert_equal 'processing',d.receipts.last.first
+    client.uploads[0]['attributes']['uploadedDate']='2026-11-14T09:00:00Z'
+    assert_equal '2026-11-14T09:00:00Z',d.failed_upload.dig('attributes','uploadedDate')
+  end
+  def test_mac_store_build_upload_queries_mac_platform
+    client=FakeClient.new;client.build_missing=true;client.bundle_id='com.justspeaktoit.mac.appstore.alpha'
+    d=delivery(client,surface:'mac-store');d.distribute(wait_seconds:0)
+    assert client.calls.any?{|call|call[:path].include?('filter%5Bplatform%5D=MAC_OS')}
   end
   def test_invalid_upload_requires_a_new_build_number
     client=FakeClient.new;client.processing='INVALID';d=delivery(client)

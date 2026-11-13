@@ -28,7 +28,8 @@ selected.each do |manifest|
   AppleRelease::APPLE_SURFACES.each do |surface|
     begin
       delivery=AppleRelease::Delivery.new(client:client,manifest:manifest,surface:surface)
-      delivery.distribute(wait_seconds:0) if delivery.build
+      # A processing failure leaves no build record, only a FAILED buildUpload.
+      delivery.distribute(wait_seconds:0) if delivery.build || delivery.failed_upload
       delivery.observe_publication if manifest['train'] == 'stable'
     rescue StandardError => error
       warn "#{tag} #{surface}: #{error.message}"

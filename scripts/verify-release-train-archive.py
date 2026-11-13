@@ -173,10 +173,11 @@ def main():
     verify_submission_metadata(app, info, surface=surface, main=True)
     if surface != 'mac-direct':
         entitlements = signed_entitlements(app)
-        cloud = [config['iosCloudContainer' if surface == 'ios' else 'macCloudContainer']]
-        if surface == 'ios' and info.get('SpeakSharedCloudContainer') is True:
-            cloud.append(config['macCloudContainer'])  # #1119: iPhone joins the Mac container
-        if entitlements.get('com.apple.developer.icloud-container-identifiers') != cloud:
+        # #1119: every surface uses the train's shared container; the iPhone
+        # also keeps its legacy container so the one-time migration can read it.
+        cloud = {config['cloudContainer']} | ({config['iosCloudContainer']} if surface == 'ios' else set())
+        signed_cloud = entitlements.get('com.apple.developer.icloud-container-identifiers')
+        if not isinstance(signed_cloud, list) or len(signed_cloud) != len(cloud) or set(signed_cloud) != cloud:
             raise SystemExit('Signed archive has the wrong CloudKit containers')
         kv = config['iosKVStoreIdentifier' if surface == 'ios' else 'macKVStoreIdentifier']
         if entitlements.get('com.apple.developer.ubiquity-kvstore-identifier', '').split('.', 1)[-1] != kv:

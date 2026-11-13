@@ -35,8 +35,16 @@ public enum ReleaseTrain: String, Codable, CaseIterable, Sendable {
     public var displayName: String { value("displayName") }
     public var iosAppGroup: String { value("iosAppGroup") }
     public var watchAppGroup: String { value("watchAppGroup") }
-    public var iosCloudContainer: String { value("iosCloudContainer") }
-    public var macCloudContainer: String { value("macCloudContainer") }
+    /// The one CloudKit container that every platform's History and encrypted
+    /// API-key sync uses (#1119).
+    public var cloudContainer: String { value("cloudContainer") }
+    /// The container iPhone builds used before they joined `cloudContainer`.
+    /// Only the one-time migration still reads it.
+    public var legacyIOSCloudContainer: String { value("iosCloudContainer") }
+    @available(*, deprecated, message: "Use legacyIOSCloudContainer; only the #1119 migration reads it")
+    public var iosCloudContainer: String { legacyIOSCloudContainer }
+    @available(*, deprecated, renamed: "cloudContainer")
+    public var macCloudContainer: String { cloudContainer }
     public var urlScheme: String { value("urlScheme") }
     public var bonjourService: String { value("transportServiceType") }
     public var feedURL: String { value("feedURL") }

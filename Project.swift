@@ -30,7 +30,7 @@ func trainPlistPath(_ original: String) -> String {
         if let string = value as? String {
             var result = string
             let keys = ["iosBundleIdentifier", "iosAppGroup", "watchAppGroup", "iosCloudContainer",
-                        "macCloudContainer", "macKVStoreIdentifier", "iosKVStoreIdentifier", "transportServiceType", "feedURL", "arm64FeedURL"]
+                        "cloudContainer", "macKVStoreIdentifier", "iosKVStoreIdentifier", "transportServiceType", "feedURL", "arm64FeedURL"]
             for key in keys.sorted(by: { stableConfiguration[$0]!.count > stableConfiguration[$1]!.count }) {
                 let old = stableConfiguration[key]!
                 // Whole identifiers, including entitlement team-prefix variables.
@@ -118,31 +118,6 @@ let shareExtensionFlag = (
     ProcessInfo.processInfo.environment["TUIST_IOS_SHARE_EXTENSION"] ?? ""
 ).lowercased()
 let isShareExtensionEnabled = ["1", "true", "yes"].contains(shareExtensionFlag)
-// `TUIST_IOS_SHARED_CLOUD_CONTAINER=1 tuist generate` moves iPhone sync into
-// the Mac CloudKit container (#1119): the app gains that container's
-// entitlement and the matching Info.plist flag that SyncConfiguration reads.
-// Off by default because signing fails until the container is assigned to
-// the iOS App ID and its profiles (Docs/cloudkit-shared-container.md).
-let sharedCloudContainerFlag = (
-    ProcessInfo.processInfo.environment["TUIST_IOS_SHARED_CLOUD_CONTAINER"] ?? ""
-).lowercased()
-let isSharedCloudContainerEnabled = ["1", "true", "yes"].contains(sharedCloudContainerFlag)
-// Stable-identifier source for the iOS app entitlements; trainPlistPath then
-// maps both containers to the Alpha pair.
-func iosEntitlementsSource() -> String {
-    let original = "SpeakiOS.entitlements"
-    guard isSharedCloudContainerEnabled else { return original }
-    let data = try! Data(contentsOf: manifestRoot.appendingPathComponent(original))
-    var plist = try! PropertyListSerialization.propertyList(from: data, format: nil) as! [String: Any]
-    let key = "com.apple.developer.icloud-container-identifiers"
-    let containers = plist[key] as? [String] ?? []
-    plist[key] = containers + [stableConfiguration["macCloudContainer"]!]
-    let relative = ".build/shared-cloud-container/" + original
-    let target = manifestRoot.appendingPathComponent(relative)
-    try! FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try! PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: target)
-    return relative
-}
 var iosActiveCompilationConditions: [String] = []
 var iosTestSettings: [String: SettingValue] = [:]
 var iosTestResourceElements: [ResourceFileElement] = [
@@ -429,7 +404,6 @@ var iosAppInfoPlist: [String: Plist.Value] = [
     // dependency graph contains no third-party cryptographic implementation.
     // Apple's OS-encryption documentation exemption applies (see submission docs).
     "ITSAppUsesNonExemptEncryption": false,
-    "SpeakSharedCloudContainer": .boolean(isSharedCloudContainerEnabled),
     "NSSupportsLiveActivities": true,
     // The "Continue on Mac" Handoff pointer (issue #1006). The payload is
     // the History entry id, never the transcript itself.
@@ -474,7 +448,7 @@ let iosAppTarget: Target = .target(
         "SpeakiOSApp/Resources/LaunchScreen.storyboard",
         "SpeakiOSApp/PrivacyInfo.xcprivacy"
     ],
-    entitlements: .file(path: .relativeToRoot(trainPlistPath(iosEntitlementsSource()))),
+    entitlements: .file(path: .relativeToRoot(trainPlistPath("SpeakiOS.entitlements"))),
     dependencies: iosAppDependencies,
     settings: .settings(base: iosAppSettings)
 )

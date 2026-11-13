@@ -10,30 +10,43 @@ import Security
 /// Schema names forward to the portable `SyncSchema`, which the CloudKit Web
 /// Services transport shares; this type adds the native container and database.
 public enum SyncConfiguration {
-    /// Info.plist Boolean set by `TUIST_IOS_SHARED_CLOUD_CONTAINER=1`. It is
-    /// written together with the entitlement for the shared container, so the
-    /// app never opens a container it is not entitled to.
+    /// The CloudKit container identifier: one value for every platform (#1119).
+    public static let containerIdentifier = ReleaseTrain.current.cloudContainer
+
+    /// The container this platform used before `containerIdentifier`, which
+    /// the one-time migration copies from; `nil` where nothing moved.
+    #if os(iOS)
+    public static let legacyContainerIdentifier: String? = ReleaseTrain.current.legacyIOSCloudContainer
+    #else
+    public static let legacyContainerIdentifier: String? = nil
+    #endif
+
+    @available(*, deprecated, message: "Every build uses the shared container (#1119)")
     public static let sharedContainerInfoKey = "SpeakSharedCloudContainer"
 
-    /// The container family this build syncs with (#1119). The Mac family is
-    /// the shared container; iOS joins it only in builds entitled to it.
+    @available(*, deprecated, message: "Use containerIdentifier; every platform uses the shared container (#1119)")
+    public static let family = SyncContainerFamily.macOS
+
     #if os(iOS)
-    public static let family = resolveFamily(
-        legacy: .iOS,
-        sharedContainerEnabled: Bundle.main.object(forInfoDictionaryKey: sharedContainerInfoKey) as? Bool == true
-    )
-    /// The container iOS builds used before joining the shared one.
+    @available(*, deprecated, message: "Use legacyContainerIdentifier")
     public static let legacyFamily = SyncContainerFamily.iOS
     #else
-    public static let family = SyncContainerFamily.macOS
+    @available(*, deprecated, message: "Use legacyContainerIdentifier")
     public static let legacyFamily = SyncContainerFamily.macOS
     #endif
 
-    /// The CloudKit container identifier.
-    public static let containerIdentifier = family.containerIdentifier(in: .current)
+    /// The legacy container, or `nil` where nothing moved. The legacy
+    /// identifier stays in the iOS entitlements until the move is verified,
+    /// so this container can still be opened.
+    static var legacyContainer: CKContainer? {
+        guard let legacy = legacyContainerIdentifier, legacy != containerIdentifier,
+              hasCloudKitEntitlement else { return nil }
+        return CKContainer(identifier: legacy)
+    }
 
-    static func resolveFamily(legacy: SyncContainerFamily, sharedContainerEnabled: Bool) -> SyncContainerFamily {
-        sharedContainerEnabled ? .macOS : legacy
+    /// The legacy container's private database, or `nil` where nothing moved.
+    static var legacyPrivateDatabase: CKDatabase? {
+        legacyContainer?.privateCloudDatabase
     }
 
     /// The custom zone name for transcription history.

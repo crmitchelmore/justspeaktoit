@@ -81,6 +81,21 @@ final class HandsFreeEnergyVoiceActivityTests: XCTestCase {
         XCTAssertFalse(after.last?.speechDetected ?? true, "Speech ends once the room is quiet again")
     }
 
+    func testSpeechAsTheMicrophoneOpens_StillTriggers() {
+        var detector = HandsFreeEnergyVoiceActivityDetector()
+        // Steady speech with no syllable dips, so calibration never sees the room.
+        let steadyVoice = { (time: Double) -> Float in 0.1 * Float(sin(2 * Double.pi * 180 * time)) }
+        let updates = feed(&detector, seconds: 1, tone: steadyVoice)
+
+        let firstSpeech = updates.first { $0.speechDetected }
+        XCTAssertNotNil(firstSpeech, "Speech already under way when arming must not be learned as room noise")
+        XCTAssertLessThanOrEqual(
+            firstSpeech?.seconds ?? .infinity,
+            detector.configuration.calibrationSeconds + HandsFreeDictationPolicy.speechStartBudgetSeconds,
+            "Speech is reported within the start budget once calibration ends"
+        )
+    }
+
     func testShortClicks_DoNotTriggerSpeech() {
         var detector = HandsFreeEnergyVoiceActivityDetector()
         _ = feed(&detector, seconds: 1)

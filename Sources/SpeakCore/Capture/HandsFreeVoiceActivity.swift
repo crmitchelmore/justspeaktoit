@@ -62,6 +62,10 @@ public struct HandsFreeEnergyVoiceActivityDetector: Sendable {
         public var releaseHangSeconds: Double
         /// Audio used to seed the noise floor before speech can be reported.
         public var calibrationSeconds: Double
+        /// Highest noise floor calibration may seed. Someone already speaking as
+        /// the microphone opens would otherwise be learned as room noise and
+        /// never trigger; a genuinely louder room is learned as the floor rises.
+        public var maximumCalibratedNoiseFloorDB: Double
         /// Time constant for the noise floor rising while nobody speaks.
         public var noiseFloorRiseSeconds: Double
         /// Time constant for the noise floor rising during speech, so a steady
@@ -82,6 +86,7 @@ public struct HandsFreeEnergyVoiceActivityDetector: Sendable {
             minimumSpeechSeconds: Double = 0.12,
             releaseHangSeconds: Double = 0.25,
             calibrationSeconds: Double = 0.2,
+            maximumCalibratedNoiseFloorDB: Double = -45,
             noiseFloorRiseSeconds: Double = 4,
             noiseFloorRiseWhileSpeakingSeconds: Double = 8,
             noiseFloorFallSeconds: Double = 0.15,
@@ -95,6 +100,7 @@ public struct HandsFreeEnergyVoiceActivityDetector: Sendable {
             self.minimumSpeechSeconds = minimumSpeechSeconds
             self.releaseHangSeconds = releaseHangSeconds
             self.calibrationSeconds = calibrationSeconds
+            self.maximumCalibratedNoiseFloorDB = maximumCalibratedNoiseFloorDB
             self.noiseFloorRiseSeconds = noiseFloorRiseSeconds
             self.noiseFloorRiseWhileSpeakingSeconds = noiseFloorRiseWhileSpeakingSeconds
             self.noiseFloorFallSeconds = noiseFloorFallSeconds
@@ -185,7 +191,7 @@ public struct HandsFreeEnergyVoiceActivityDetector: Sendable {
     private mutating func observeFrame(levelDB: Double, duration: Double) {
         timelineSeconds += duration
         guard let floor = noiseFloorDB else {
-            noiseFloorDB = levelDB
+            noiseFloorDB = min(levelDB, configuration.maximumCalibratedNoiseFloorDB)
             calibratedSeconds = duration
             return
         }

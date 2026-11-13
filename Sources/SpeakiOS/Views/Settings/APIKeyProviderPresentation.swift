@@ -94,6 +94,10 @@ struct APIKeyProviderPresentation: Equatable {
         "anthropic": APIKeyProviderPresentation(
             title: "Anthropic", systemImage: "text.badge.checkmark",
             help: "Get your key from platform.claude.com. Used for Claude cleanup models."
+        ),
+        "groq": APIKeyProviderPresentation(
+            title: "Groq", systemImage: "bolt.horizontal",
+            help: "Get your key from console.groq.com. Used for Groq Whisper batch transcription."
         )
     ]
 }

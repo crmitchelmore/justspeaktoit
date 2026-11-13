@@ -13,8 +13,8 @@ Text-to-Speech.
 | --- | --- | --- | --- | --- |
 | `cartesia/ink-whisper` | Cartesia Ink Whisper (Batch) | `cartesia.apiKey` | yes | yes |
 | `gladia/solaria-1` | Gladia Solaria-1 (Batch) | `gladia.apiKey` | yes | yes |
-| `speechmatics/enhanced` | Speechmatics Enhanced (Batch) | `speechmatics.apiKey` | yes | no |
-| `speechmatics/standard` | Speechmatics Standard (Batch) | `speechmatics.apiKey` | yes | no |
+| `speechmatics/enhanced` | Speechmatics Enhanced (Batch) | `speechmatics.apiKey` | yes | yes |
+| `speechmatics/standard` | Speechmatics Standard (Batch) | `speechmatics.apiKey` | yes | yes |
 | `smallest/pulse-pro` | Smallest AI Pulse Pro | `smallest.apiKey` | yes | yes |
 | `reson8/rumble-2` | Reson8 Rumble-2 | `reson8.apiKey` | yes | yes |
 | `reson8/resonant-1` | Reson8 Resonant-1 | `reson8.apiKey` | yes | yes |
@@ -191,18 +191,17 @@ host the existing key validator probes — with `Authorization: Bearer`:
 
 Cancelling issues a best-effort `DELETE /v2/jobs/{id}?force=true`.
 
-## Platform restriction: Speechmatics batch is macOS-only
+## iOS upload paths
 
-The iOS app now stores `speechmatics.apiKey` — the Speechmatics live provider
-added the field and its API-keys row — so the credential is no longer what
-holds the batch entries back. What does is the upload path:
-`IOSBatchTranscriptionRoute` has no Speechmatics case, so a visible entry would
-fall through to the OpenRouter route and send the audio to the wrong service.
-The batch entries are therefore filtered out of the iOS Batch picker.
-`PlatformFeatureVisibilityTests.testSpeechmaticsBatchIsHiddenOnIOSBecauseThereIsNoUploadRoute`
-pins that behaviour. Lifting the restriction means adding a `.speechmatics`
-route and its `transcribeWithSpeechmatics` client call, at which point the
-filter line and that test change together.
+iOS lists every catalogue batch model it can upload. Deepgram, AssemblyAI,
+ElevenLabs, Groq, Mistral, Modulate, Rev AI, Soniox and Speechmatics go through
+the same shared SpeakCore clients Mac and the desktop hosts use
+(`IOSBatchTranscriptionRoute.shared`, issue #1636), with the provider's own
+key. `BatchTranscriptionRouting.iosSharedClientProviderIDs` is the list; a
+provider joins it only once iOS stores its key, so no entry falls through to
+OpenRouter. iOS gained a Groq key card for this.
+`PlatformFeatureVisibilityTests.testSharedClientBatchProvidersAreListedAndRoutedToTheirOwnClient`
+pins it.
 
 Cartesia and Gladia are wired on both platforms:
 `IOSBatchTranscriptionRoute` sends each identifier to its own shared client, and

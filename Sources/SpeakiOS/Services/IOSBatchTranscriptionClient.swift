@@ -29,6 +29,10 @@ struct IOSBatchTranscriptionClient {
                     await resolvedTranscriptionDuration(reported: nil, lastSegmentEnd: nil, audioURL: url)
                 }
             ).transcribeFile(at: url, apiKey: try requireAPIKey(), model: model, language: language)
+        case .shared(let provider):
+            return try await transcribeWithSharedClient(
+                provider, at: url, model: model, language: language, apiKey: try requireAPIKey()
+            )
         case .appleSpeechAnalyzer:
             if #available(iOS 26.0, *) {
                 return try await AppleSpeechAnalyzerTranscriber.transcribeFile(

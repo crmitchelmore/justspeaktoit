@@ -85,6 +85,9 @@ enum APIKeyListEntries {
                 isStored: settings.hasMistralKey
             ),
             APIKeyListEntry(
+                id: "groq", title: "Groq", category: "Transcription", isStored: settings.hasGroqKey
+            ),
+            APIKeyListEntry(
                 id: "azure", title: "Azure Speech", category: "Transcription", isStored: settings.hasAzureKey
             ),
             APIKeyListEntry(

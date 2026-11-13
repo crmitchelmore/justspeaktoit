@@ -6,9 +6,8 @@ final class BatchTranscriptionRoutingTests: XCTestCase {
     func testCatalogueRowsKeepExplicitPlatformCapabilityDifferences() throws {
         let iosDirect = Set(["openai", "cartesia", "gladia", "azure", "alibaba", "meta", "google", "xai"])
             .union(FileSpeechProvider.allCases.map(\.rawValue))
-        let macOnly: Set<String> = [
-            "assemblyai", "deepgram", "elevenlabs", "groq", "mistral", "modulate", "revai", "soniox", "speechmatics"
-        ]
+            .union(BatchTranscriptionRouting.iosSharedClientProviderIDs)
+        let macOnly: Set<String> = []
         for model in ModelCatalog.batchTranscription {
             let mac = try XCTUnwrap(BatchTranscriptionRouting.route(for: model.id, platform: .macOS))
             let ios = try XCTUnwrap(BatchTranscriptionRouting.route(for: model.id, platform: .iOS))
@@ -72,7 +71,7 @@ final class BatchTranscriptionRoutingTests: XCTestCase {
         let apiModel: String?
     }
 
-    func testKnownMacOnlyBatchModelsDoNotBecomeDirectIOSCapabilities() throws {
+    func testSharedClientBatchModelsRouteToTheirOwnProviderOnIOS() throws {
         let cases = [
             ("elevenlabs/scribe_v2", "elevenlabs"),
             ("groq/whisper-large-v3-turbo", "groq"),
@@ -84,11 +83,9 @@ final class BatchTranscriptionRoutingTests: XCTestCase {
             let mac = try XCTUnwrap(BatchTranscriptionRouting.route(for: model, platform: .macOS))
             XCTAssertEqual(mac.providerID, provider)
             XCTAssertEqual(mac.transport, .directProvider)
+            XCTAssertTrue(BatchTranscriptionRouting.iosSharedClientProviderIDs.contains(provider), model)
             let ios = try XCTUnwrap(BatchTranscriptionRouting.route(for: model, platform: .iOS))
-            XCTAssertEqual(ios.providerID, "openrouter")
-            XCTAssertEqual(ios.transport, .openRouter)
-            XCTAssertEqual(ios.apiKeyIdentifier, "openrouter.apiKey")
-            XCTAssertEqual(ios.apiModelName, model)
+            XCTAssertEqual(ios, mac, "iOS calls the same shared client with the provider's own key")
         }
     }
 

@@ -89,7 +89,7 @@ The flags live in `Project.swift`; release selection is in
 | F01 | Global record hotkey (hold, toggle, double-tap) | Yes | N/A | Yes | Limited | N/A | | Linux depends on the Wayland portal. |
 | F02 | Custom action shortcuts | Yes | N/A | Yes | Yes | N/A | | |
 | F03 | Live streaming cloud transcription | Yes | Yes | Yes | Yes | Partial | #1590 | Android partials come only from the platform recogniser. |
-| F04 | Batch cloud provider catalogue | Yes | Partial | Yes | Yes | Partial | #1636 | iOS and Android list a subset. |
+| F04 | Batch cloud provider catalogue | Yes | Yes | Yes | Yes | Partial | #1636 | Android lists a subset. |
 | F05 | Downloaded local transcription models | Yes | No | Yes | Yes | No | #1650 | iOS has Apple on-device only (F06). |
 | F06 | Platform on-device recogniser | Yes | Yes | N/A | N/A | Yes | | |
 | F07 | Remote cleanup (OpenRouter and native LLMs) | Yes | Yes | Yes | Yes | Yes | | |
@@ -167,13 +167,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** OpenRouter cannot stream transcription, so it never appears in streaming pickers ([OpenRouter audio](openrouter-audio.md)). Provider-specific protocol rules (AssemblyAI, OpenAI Realtime, xAI) are in AGENTS.md. Install audio taps only with `installTapSafely`.
 
 ### F04 Batch cloud provider catalogue
-- **Platforms:** macOS Yes · iOS Partial · Windows Yes · Linux Yes · Android Partial
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
 - **Excluded:** none
-- **Gaps:** iOS, Android #1636 (iOS: Apple, OpenAI, Azure, Alibaba, Gemini and OpenRouter; Android: OpenAI and Groq).
+- **Gaps:** Android #1636 (OpenAI and Groq only).
 - **How:** One catalogue (`ModelCatalog`) lists batch providers and models; platforms show a filtered projection of routes their host can run. Saved IDs are `provider/model`.
 - **Refs:** `Sources/SpeakCore/ModelCatalog.swift`, `Sources/SpeakCore/Batch/BatchTranscriptionRouting.swift`, `Sources/SpeakCore/CloudCatalogAndroidExport.swift`, `Sources/SpeakiOS/Settings/AppSettings+Models.swift`, `android/app/src/main/java/com/justspeaktoit/android/cloud/CloudCatalog.kt`
 - **Sunset:** OpenAI `whisper-1` and GPT-4o transcribe models 2027-02-26, `mistral/voxtral-mini-latest` 2027-04-30 and OpenRouter `openai/gpt-audio` 2027-01-20 (`ModelRetirements`). Legacy AssemblyAI and ElevenLabs batch IDs migrate (`legacyUniversal3BatchIDs`, `legacyElevenLabsBatchIDs`).
-- **Nuances:** Android's catalogue is generated; `CloudCatalogParityTest` fails when it drifts from the export (`android/app/src/test/java/com/justspeaktoit/android/cloud/CloudCatalogParityTest.kt`). Catalogue membership alone is not support: a platform lists only routes it implements. A provider with several engines behind one endpoint pins the engine per ID: Reson8's Rumble-2 and Resonant-1 batch and streaming IDs each send their own `model` and check their own language list (`Sources/SpeakCore/Batch/Reson8Model.swift`); Android has no Reson8 route (#1636).
+- **Nuances:** iOS calls the shared SpeakCore clients for Deepgram, AssemblyAI, ElevenLabs, Groq, Mistral, Modulate, Rev AI, Soniox and Speechmatics (`BatchTranscriptionRouting.iosSharedClientProviderIDs`, `Sources/SpeakiOS/Services/IOSBatchTranscriptionClient+SharedProviders.swift`), each with the provider's own key. Android's catalogue is generated; `CloudCatalogParityTest` fails when it drifts from the export (`android/app/src/test/java/com/justspeaktoit/android/cloud/CloudCatalogParityTest.kt`). Catalogue membership alone is not support: a platform lists only routes it implements. A provider with several engines behind one endpoint pins the engine per ID: Reson8's Rumble-2 and Resonant-1 batch and streaming IDs each send their own `model` and check their own language list (`Sources/SpeakCore/Batch/Reson8Model.swift`); Android has no Reson8 route (#1636).
 
 ### F05 Downloaded local transcription models
 - **Platforms:** macOS Yes · iOS No · Windows Yes · Linux Yes · Android No

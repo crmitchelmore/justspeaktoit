@@ -29,6 +29,12 @@ public struct BatchTranscriptionRoute: Equatable, Sendable {
 /// provider clients. iOS deliberately retains its legacy unknown-ID OpenRouter
 /// fallback. Mac unknown/non-batch ownership stays with the registered instance.
 public enum BatchTranscriptionRouting {
+    /// Providers whose shared SpeakCore batch client the iOS app calls with the
+    /// provider's own key. Every catalogue batch model they own is listed on iOS.
+    public static let iosSharedClientProviderIDs: Set<String> = [
+        "assemblyai", "deepgram", "elevenlabs", "groq", "mistral", "modulate", "revai", "soniox", "speechmatics"
+    ]
+
     public static func route(for modelID: String, platform: BatchTranscriptionPlatform) -> BatchTranscriptionRoute? {
         let model = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         if AppleLocalModels.isSpeechAnalyzerModel(model) {
@@ -58,8 +64,9 @@ public enum BatchTranscriptionRouting {
         }
     }
 
-    /// The established iOS capability projection and precedence. Do not enable
-    /// another direct provider solely because it has a shared client on Mac.
+    /// The established iOS capability projection and precedence. A provider
+    /// joins `iosSharedClientProviderIDs` only once iOS stores its key and
+    /// `IOSBatchTranscriptionClient` calls its shared client.
     private static func iosRoute(_ model: String) -> BatchTranscriptionRoute {
         if OpenAITranscriptionModels.directBatchModelIDs.contains(model) { return direct(model, provider: "openai") }
         if model == CartesiaBatchClient.catalogID { return direct(model, provider: "cartesia") }
@@ -71,6 +78,10 @@ public enum BatchTranscriptionRouting {
         if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return direct(model, provider: "google") }
         if model == XAISpeechToText.batchCatalogID { return direct(model, provider: "xai") }
         if let provider = FileSpeechProvider.provider(for: model) { return direct(model, provider: provider.rawValue) }
+        if let shared = macRoute(model), shared.transport == .directProvider,
+           iosSharedClientProviderIDs.contains(shared.providerID) {
+            return shared
+        }
         return openRouter(model)
     }
 

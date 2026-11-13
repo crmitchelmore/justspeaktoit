@@ -1973,9 +1973,8 @@ Swift/native build, test or device check has run for this source.
   arrivals stay in History, and there is no notification with Paste and Copy
   actions. Two limits make it rarely active. Desktop sync polls every 300 s with
   no push, so a capture is pasted only if a pass lands within 60 s of it. Desktop
-  sync also joins only the Mac container, so iPhone History in
-  `iCloud.com.justspeaktoit.ios` never arrives; only phone or watch records in
-  the Mac container, the ones the Mac would act on, qualify.
+  sync joins the shared container, which iPhones write since #1119; only phone
+  or watch records there, the ones the Mac would act on, qualify.
 - **`historyFlushInterval`.** Stored and transferred only. The Mac batches
   History writes on this interval. Windows and Linux save each History record
   durably as its operation completes, so a timed flush would only delay

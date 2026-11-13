@@ -230,12 +230,19 @@ owner action in App Store Connect.
    own candidate receipt verified; an unverified Apple candidate is skipped and
    keeps its previous Stable. Publication receipts advance Apple note baselines
    only after the exact build is publicly available.
+6. After publication, `submit-microsoft-store` builds the unsigned Microsoft
+   Store bundle from the candidate's qualified Windows runtime bundles and
+   submits it with the `microsoft-store` environment's Partner Center
+   credentials (`windows-store.yml`). It skips with a notice when the candidate
+   has no desktop qualification or the environment has no credentials. See
+   [Microsoft Store package](windows-installer.md#microsoft-store-package).
 
 For `ios-only`, only the selected Alpha's iOS delivery receipt is required.
 Prepare Stable builds only iOS; Mac builds and desktop qualification are skipped.
 Publish Stable requires a matching verified iOS candidate receipt and the same
-exact-hash owner approval, then submits only iOS. It creates no Mac release and
-does not update Homebrew, Sparkle or website downloads. The manifest retains
+exact-hash owner approval, then submits only iOS. It creates no Mac release,
+submits nothing to the Microsoft Store and does not update Homebrew, Sparkle or
+website downloads. The manifest retains
 unselected surface metadata for compatibility, but its frozen `publicationScope`
 limits workers and publication. Historical manifests without this field keep
 the combined-release behavior. Changing scope requires a new candidate and

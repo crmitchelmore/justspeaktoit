@@ -9,11 +9,14 @@
     </array>
 
     <!-- iCloud: Enables settings (KVS) sync plus CloudKit private database for
-         transcription history sync and encrypted API-key sync -->
+         transcription history sync and encrypted API-key sync. History and keys
+         live in the container the Mac uses (#1119); the legacy iPhone container
+         stays listed so the one-time migration can read it. -->
     <key>com.apple.developer.ubiquity-kvstore-identifier</key>
     <string>$(TeamIdentifierPrefix)com.justspeaktoit.ios</string>
     <key>com.apple.developer.icloud-container-identifiers</key>
     <array>
+        <string>iCloud.com.justspeaktoit</string>
         <string>iCloud.com.justspeaktoit.ios</string>
     </array>
     <key>com.apple.developer.icloud-services</key>

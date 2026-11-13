@@ -156,7 +156,7 @@ if(command === 'allocate' || command === 'prepare') {
         CLI_VERSION:manifest.train === "alpha" ? `${item.version}-alpha.${manifest.ordinal}` : item.version,
         BUNDLE_ID:config[surface==='ios'?'iosBundleIdentifier':surface==='mac-store'?'storeMacBundleIdentifier':'directMacBundleIdentifier'],
         PRODUCT_NAME:surface==='ios'?config.directMacProductName:config[surface==='mac-store'?'storeMacProductName':'directMacProductName'],
-        IOS_APP_GROUP:config.iosAppGroup,IOS_CLOUD_CONTAINER:config.iosCloudContainer,MAC_CLOUD_CONTAINER:config.macCloudContainer,
+        IOS_APP_GROUP:config.iosAppGroup,IOS_CLOUD_CONTAINER:config.iosCloudContainer,MAC_CLOUD_CONTAINER:config.cloudContainer,
         FEED_URL:config.feedURL,ARM64_FEED_URL:config.arm64FeedURL,TRAIN_DISPLAY_NAME:config.displayName,TRANSPORT_SERVICE:config.transportServiceType};
     if(!process.env.GITHUB_ENV) throw Error('Configure runs inside a release job');
     for(const [key,value] of Object.entries(values)) writeFileSync(process.env.GITHUB_ENV,`${key}=${value}\n`,{flag:'a'});

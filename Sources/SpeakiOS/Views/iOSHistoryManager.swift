@@ -388,6 +388,7 @@ public final class iOSHistoryManager: ObservableObject { // swiftlint:disable:th
         Task {
             if let startSync { await startSync(self) } else {
                 await HistorySyncEngine.shared.initialize(delegate: self)
+                await HistorySyncEngine.shared.migrateLegacyContainerHistoryIfNeeded()
                 await HistorySyncEngine.shared.sync()
             }
         }

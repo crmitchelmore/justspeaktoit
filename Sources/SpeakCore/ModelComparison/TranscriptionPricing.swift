@@ -107,6 +107,7 @@ public enum TranscriptionPricing {
         AssemblyAIModels.universal35ProStreamingID: perHour("0.45"),
         AssemblyAIModels.universal35ProBatchID: perHour("0.21"),
         AssemblyAIModels.universal2BatchID: perHour("0.15"),
+        // OpenRouter removed the free Inkling routes; History recorded on them stays free.
         "thinkingmachines/inkling:free": .zero,
         "thinkingmachines/inkling-small:free": .zero,
         // Paid audio-chat routes are token-billed: no per-minute estimate without usage.

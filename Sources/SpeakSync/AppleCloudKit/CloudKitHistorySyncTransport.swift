@@ -3,8 +3,16 @@ import Foundation
 
 @MainActor
 final class CloudKitHistorySyncTransport: HistorySyncTransport {
+    private let database: () -> CKDatabase?
+
+    /// `database` defaults to this build's container; the #1119 migration
+    /// passes the legacy container's database to read from it.
+    init(database: @escaping () -> CKDatabase? = { SyncConfiguration.privateDatabase }) {
+        self.database = database
+    }
+
     func fetchChanges(after tokenData: Data?) async throws -> HistoryChangePage {
-        guard let database = SyncConfiguration.privateDatabase else {
+        guard let database = database() else {
             throw SyncError.cloudUnavailable
         }
         let page = try await CloudKitZoneChangeFetch.page(
@@ -20,7 +28,7 @@ final class CloudKitHistorySyncTransport: HistorySyncTransport {
     }
 
     func upload(entries: [SyncableHistoryEntry]) async -> HistoryUploadResult {
-        guard let database = SyncConfiguration.privateDatabase else {
+        guard let database = database() else {
             return HistoryUploadResult(
                 acknowledgedIDs: [],
                 remoteEntries: [],
@@ -66,7 +74,7 @@ final class CloudKitHistorySyncTransport: HistorySyncTransport {
     }
 
     func delete(entryID: UUID) async throws {
-        guard let database = SyncConfiguration.privateDatabase else {
+        guard let database = database() else {
             throw SyncError.cloudUnavailable
         }
         let recordID = CKRecord.ID(

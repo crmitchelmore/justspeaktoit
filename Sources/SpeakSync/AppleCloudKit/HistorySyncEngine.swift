@@ -44,7 +44,7 @@ public final class HistorySyncEngine: ObservableObject {
 
     private weak var delegate: HistorySyncDelegate?
     private let coordinator: HistorySyncCoordinator
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
     private let log = SpeakLogger.logger(category: "HistorySync")
 
     private convenience init() {

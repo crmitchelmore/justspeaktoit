@@ -1,4 +1,4 @@
-"""Dependency-free helpers for the Windows MSIX packages (developer and beta channels, x64 or ARM64).
+"""Dependency-free helpers for the Windows MSIX packages (developer, beta and store channels, x64 or ARM64).
 
 The layout builder, the package verifier and the lifecycle test support share
 this module. It never runs Windows tooling: MakeAppx, SignTool and the
@@ -47,7 +47,10 @@ from msix_identity import (
     IDENTITY_PATH,
     IDENTITY_PATHS,
     REPOSITORY,
+    STORE_IDENTITY_PATH,
+    STORE_RESERVATION,
     PackageError,
+    fixed_publisher,
     load_identity,
     package_identity,
     processor_architecture,
@@ -77,8 +80,9 @@ __all__ = [
     "APPX_MANIFEST", "BETA_IDENTITY_PATH", "BLOCKMAP_NAMESPACE", "BLOCKMAP_PART", "BLOCK_SIZE", "BUNDLE",
     "CHANNEL_IDENTITIES", "CODE_INTEGRITY_PART", "CONTENT_TYPES_PART", "IDENTITY_PATH", "IDENTITY_PATHS",
     "NAMESPACES", "PACKAGE_MANIFEST", "PNG_SIGNATURE", "REPOSITORY", "SHA256_METHOD", "SIGNATURE_PART",
+    "STORE_IDENTITY_PATH", "STORE_RESERVATION",
     "TEMPLATE_PATH", "PackageError", "_area_weights", "_blockmap_entries", "_rounded_quotient", "block_hashes",
-    "build_layout", "check_manifest", "decode_png", "encode_png", "load_identity", "package_identity", "pe_subsystem",
+    "build_layout", "check_manifest", "decode_png", "encode_png", "fixed_publisher", "load_identity", "package_identity", "pe_subsystem",
     "processor_architecture", "publisher_id", "render_assets", "render_manifest", "resample_rgba", "sha256",
     "validate_name", "validate_publisher", "validate_version", "verify_bundle", "verify_layout", "verify_package",
     "version_tuple", "windows_pe", "windows_targets",

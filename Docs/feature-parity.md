@@ -23,10 +23,10 @@ row F35.
 | F02 | Custom action shortcuts | Yes | N/A | Yes | Yes | N/A | | No background key handling on iOS/Android. |
 | F03 | Live streaming cloud transcription | Yes | Yes | Yes | Yes | Partial | #1590 | Android partials come only from the platform recogniser. |
 | F04 | Batch cloud provider catalogue | Yes | Yes | Yes | Yes | Partial | #1636 | Android: OpenAI and Groq only. |
-| F05 | Downloaded local transcription models | Yes | Partial | Yes | Yes | No | #1650 | iOS: WhisperKit/Apple on-device, no Hugging Face import. Android runtime assessment: #1593. |
+| F05 | Downloaded local transcription models | Yes | Partial | Yes | Yes | No | #1650 | iOS: WhisperKit/Apple on-device, no Hugging Face import. Android: whisper.cpp (#1658), see [android-on-device-models.md](android-on-device-models.md). |
 | F06 | Platform on-device recogniser | Yes | Yes | N/A | N/A | Yes | | Apple Speech and Android `SpeechRecognizer` only; desktops use local models. |
 | F07 | Remote cleanup (OpenRouter and native LLMs) | Yes | Yes | Yes | Yes | Yes | | |
-| F08 | Local LLM cleanup | Yes | No | Yes | Yes | No | #1650 | |
+| F08 | Local LLM cleanup | Yes | No | Yes | Yes | No | #1650 | Android: Gemini Nano (#1659) and llama.cpp (#1660), see [android-on-device-models.md](android-on-device-models.md). |
 | F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | Yes | | |
 | F10 | Browse OpenRouter models picker | Yes | Yes | No | No | Partial | #1618 | Android has a searchable cleanup list only. |
 | F11 | Dictation profiles | Yes | Limited | Yes | Yes | Limited | | iOS cannot see the frontmost app; profiles apply through keyboard handoff. Android also cannot; the user chooses the profile in the app or keyboard. |

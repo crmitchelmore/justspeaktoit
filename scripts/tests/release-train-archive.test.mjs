@@ -22,7 +22,7 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
  copyFileSync('SpeakiOSApp/PrivacyInfo.xcprivacy',join(app,'PrivacyInfo.xcprivacy'));
  copyFileSync('JustSpeakKeyboard/PrivacyInfo.xcprivacy',join(ext,'PrivacyInfo.xcprivacy'));
  const intentMetadata=writeIntents(app);
- const entitlements={'com.apple.developer.icloud-container-identifiers':['iCloud.com.justspeaktoit.ios.alpha'],'com.apple.developer.ubiquity-kvstore-identifier':'TEAM.com.justspeaktoit.ios.alpha','com.apple.security.application-groups':['group.com.justspeaktoit.ios.alpha']};
+ const entitlements={'com.apple.developer.icloud-container-identifiers':['iCloud.com.justspeaktoit.alpha','iCloud.com.justspeaktoit.ios.alpha'],'com.apple.developer.ubiquity-kvstore-identifier':'TEAM.com.justspeaktoit.ios.alpha','com.apple.security.application-groups':['group.com.justspeaktoit.ios.alpha']};
  plist(join(app,'signed.plist'),entitlements);plist(join(ext,'signed.plist'),{'com.apple.security.application-groups':entitlements['com.apple.security.application-groups']});
  const catalogue={entries:[{platform:'ios',train:'alpha',build:item.build,markdown:notes}]};
  for(const dir of [app,ext])writeFileSync(join(dir,'ReleaseNotes.json'),JSON.stringify(catalogue));
@@ -92,13 +92,13 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
  plist(join(watch,'Info.plist'),{...info,CFBundleIdentifier:info.CFBundleIdentifier+'.watchkitapp',WKCompanionAppBundleIdentifier:'com.justspeaktoit.ios'});
  assert.throws(verify,error=>error.stderr.toString().includes('wrong companion identity'));
  rmSync(join(app,'Watch'),{recursive:true});
- const shared={...entitlements,'com.apple.developer.icloud-container-identifiers':['iCloud.com.justspeaktoit.ios.alpha','iCloud.com.justspeaktoit.alpha']};
- plist(join(app,'signed.plist'),shared);
- assert.throws(verify,error=>error.stderr.toString().includes('wrong CloudKit containers'));
- plist(join(app,'Info.plist'),{...info,SpeakSharedCloudContainer:true});assert.match(verify().toString(),/Verified ios alpha/);
- plist(join(app,'signed.plist'),entitlements);
- assert.throws(verify,error=>error.stderr.toString().includes('wrong CloudKit containers'));
- plist(join(app,'Info.plist'),info);
+ // #1119: the shared container is required and the order is irrelevant.
+ const reordered={...entitlements,'com.apple.developer.icloud-container-identifiers':['iCloud.com.justspeaktoit.ios.alpha','iCloud.com.justspeaktoit.alpha']};
+ plist(join(app,'signed.plist'),reordered);assert.match(verify().toString(),/Verified ios alpha/);
+ for(const containers of [['iCloud.com.justspeaktoit.ios.alpha'],['iCloud.com.justspeaktoit.alpha','iCloud.com.justspeaktoit']]){
+  plist(join(app,'signed.plist'),{...entitlements,'com.apple.developer.icloud-container-identifiers':containers});
+  assert.throws(verify,error=>error.stderr.toString().includes('wrong CloudKit containers'));
+ }
  plist(join(app,'signed.plist'),{...entitlements,'com.apple.developer.ubiquity-kvstore-identifier':'TEAM.com.justspeaktoit.ios'});
  assert.throws(verify,error=>error.stderr.toString().includes('wrong iCloud key-value store'));
  plist(join(app,'signed.plist'),entitlements);catalogue.entries[0].markdown='Changed';writeFileSync(join(ext,'ReleaseNotes.json'),JSON.stringify(catalogue));
@@ -116,7 +116,7 @@ test('Stable archive accepts the actual widget and keyboard source plists',t=>{
  plist(join(app,'Info.plist'),info);
  copyFileSync('SpeakiOSApp/PrivacyInfo.xcprivacy',join(app,'PrivacyInfo.xcprivacy'));
  writeIntents(app);
- plist(join(app,'signed.plist'),{'com.apple.developer.icloud-container-identifiers':[config.iosCloudContainer],'com.apple.developer.ubiquity-kvstore-identifier':'TEAM.'+config.iosKVStoreIdentifier,'com.apple.security.application-groups':[config.iosAppGroup]});
+ plist(join(app,'signed.plist'),{'com.apple.developer.icloud-container-identifiers':[config.cloudContainer,config.iosCloudContainer],'com.apple.developer.ubiquity-kvstore-identifier':'TEAM.'+config.iosKVStoreIdentifier,'com.apple.security.application-groups':[config.iosAppGroup]});
  writeFileSync(join(app,'ReleaseNotes.json'),JSON.stringify({entries:[{platform:'ios',train:'stable',build:item.build,markdown:notes}]}));
  for(const [directory,suffix] of [['JustSpeakToItWidgetExtension','JustSpeakToItWidgetExtension'],['JustSpeakKeyboard','keyboard'],['JustSpeakShare','share']]){
   const ext=join(app,'PlugIns',directory+'.appex');mkdirSync(ext,{recursive:true});
@@ -172,7 +172,7 @@ test('macOS archives require their own correctly placed privacy manifest and san
   copyFileSync('Sources/SpeakApp/Resources/'+channel+'/PrivacyInfo.xcprivacy',join(resources,'PrivacyInfo.xcprivacy'));
   writeIntents(resources);
   writeFileSync(join(resources,'ReleaseNotes.json'),JSON.stringify({entries:[{platform:'mac',train:'stable',build:item.build,markdown:notes}]}));
-  const entitlements={'com.apple.developer.icloud-container-identifiers':[config.macCloudContainer],'com.apple.developer.ubiquity-kvstore-identifier':'TEAM.'+config.macKVStoreIdentifier,'com.apple.security.app-sandbox':true};
+  const entitlements={'com.apple.developer.icloud-container-identifiers':[config.cloudContainer],'com.apple.developer.ubiquity-kvstore-identifier':'TEAM.'+config.macKVStoreIdentifier,'com.apple.security.app-sandbox':true};
   if(surface==='mac-store')plist(join(app,'signed.plist'),entitlements);
   const verify=()=>execFileSync('python3',['scripts/verify-release-train-archive.py',app,manifest,surface],{env:{...process.env,PATH:root+':'+process.env.PATH},stdio:'pipe'});
   assert.match(verify().toString(),new RegExp('Verified '+surface+' stable'));

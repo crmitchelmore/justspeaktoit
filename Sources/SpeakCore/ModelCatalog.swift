@@ -263,16 +263,6 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Smaller hosted Inkling model for recorded audio, up to 20 minutes as 16 kHz WAV.",
             latencyTier: .medium, tags: [.cheap]),
         Option(
-            id: "thinkingmachines/inkling:free", displayName: "Inkling Free (OpenRouter)",
-            description: "Free hosted Inkling audio-chat route, up to 20 minutes. "
-                + "Subject to availability and rate limits.",
-            latencyTier: .medium, tags: [.cheap]),
-        Option(
-            id: "thinkingmachines/inkling-small:free", displayName: "Inkling Small Free (OpenRouter)",
-            description: "Free hosted Inkling Small audio-chat route, up to 20 minutes. "
-                + "Availability and rate limits apply.",
-            latencyTier: .medium, tags: [.cheap]),
-        Option(
             id: "google/gemini-3.1-pro-preview", displayName: "Gemini 3.1 Pro Preview (OpenRouter)",
             description: "Gemini Pro audio understanding for recorded-audio transcription. "
                 + "Uses OpenRouter, not Google's dedicated Transcribe API.",
@@ -388,6 +378,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         AssemblyAIModels.legacyUniversal3BatchIDs.map { ($0, AssemblyAIModels.universal35ProBatchID) }
             + legacyElevenLabsBatchIDs.map { ($0, elevenLabsScribeV2BatchID) }
             + [("openai/gpt-4o-audio-preview-2024-12-17", "openai/gpt-audio"),
+               // OpenRouter removed the free Inkling routes (HTTP 404, #1655); the
+               // paid routes run the same model through the same key, now token-billed.
+               ("thinkingmachines/inkling:free", "thinkingmachines/inkling"),
+               ("thinkingmachines/inkling-small:free", "thinkingmachines/inkling-small"),
                ("soniox/stt-async-v3", "soniox/stt-async-v6"),
                ("soniox/stt-async-v4", "soniox/stt-async-v6"),
                ("soniox/stt-async-v5", "soniox/stt-async-v6")],

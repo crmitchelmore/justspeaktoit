@@ -11,6 +11,8 @@ struct KeySyncFetchResult {
 
 struct CloudKitKeySyncDatabase {
     let live: CKDatabase?
+    /// Names the container in tests, where `live` is nil.
+    var container: String?
 }
 
 struct PendingKeySyncMutation: Codable, Equatable, Sendable {
@@ -47,6 +49,11 @@ struct CloudKitKeySyncDependencies {
     let saveRecord: ((CKRecord, CloudKitKeySyncDatabase) async throws -> CKRecord)?
     let fetchChanges: ((CloudKitKeySyncDatabase, Data?) async throws -> KeySyncFetchResult)?
     let makeFetchOperation: ((CloudKitKeySyncDatabase, Data?) -> any KeySyncFetchOperationRunning)?
+    /// The pre-#1119 container this platform used, which the one-time key
+    /// carry-over reads; `nil` where nothing moved.
+    var legacyDatabase: (() -> CloudKitKeySyncDatabase?)?
+    /// The iCloud user record name in the legacy container.
+    var legacyAccountRecordName: (() async throws -> String)?
 
     static let live = CloudKitKeySyncDependencies(
         defaults: .standard,
@@ -73,6 +80,17 @@ struct CloudKitKeySyncDependencies {
         fetchRecord: nil,
         saveRecord: nil,
         fetchChanges: nil,
-        makeFetchOperation: nil
+        makeFetchOperation: nil,
+        legacyDatabase: {
+            SyncConfiguration.legacyPrivateDatabase.map {
+                CloudKitKeySyncDatabase(live: $0, container: SyncConfiguration.legacyContainerIdentifier)
+            }
+        },
+        legacyAccountRecordName: {
+            guard let container = SyncConfiguration.legacyContainer else {
+                throw CloudKitKeySyncError.cloudUnavailable
+            }
+            return try await container.userRecordID().recordName
+        }
     )
 }

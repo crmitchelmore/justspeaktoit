@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for the Windows beta installer helpers; no downloads, caches or Windows APIs."""
+"""Unit tests for the Windows beta and Store installer helpers; no downloads, caches or Windows APIs."""
 import hashlib
 import io
 import pathlib
@@ -63,12 +63,59 @@ class BetaIdentityTests(unittest.TestCase):
             with self.assertRaises(windows_msix.PackageError):
                 windows_msix.load_identity(path)
 
-    def test_native_cli_alias_lookup_names_both_channel_families(self):
+    def test_native_cli_alias_lookup_names_every_channel_family(self):
         native = (windows_msix.REPOSITORY / "Sources/CWindowsSupport/WindowsAutomationSettings.cpp").read_text(
             encoding="utf-8")
-        for channel in (self.beta, self.developer):
+        store = windows_msix.load_identity(windows_msix.STORE_IDENTITY_PATH)
+        for channel in (self.beta, self.developer, store):
             self.assertIn('L"%s_"' % channel["identity"]["name"], native)
             self.assertIn('L"%s"' % channel["cli"]["executionAlias"], native)
+
+
+class StoreIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.store = windows_msix.load_identity(windows_msix.STORE_IDENTITY_PATH)
+        self.raw = windows_msix.STORE_IDENTITY_PATH.read_text(encoding="utf-8")
+
+    def test_store_identity_is_the_partner_center_reservation(self):
+        publisher = windows_msix.fixed_publisher(self.store)
+        self.assertEqual(publisher, "CN=4F44EE59-E9FC-48C5-A032-B34982E6C0CB")
+        identity = windows_msix.package_identity(self.store, VERSION, publisher, "x64")
+        self.assertEqual(identity["packageFamilyName"], "ChrisMitchelmore.JustSpeaktoIt_wqe2sjac9b4k8")
+        text = windows_msix.render_manifest(self.store, VERSION, publisher, architecture="arm64")
+        self.assertIn(b'Name="ChrisMitchelmore.JustSpeaktoIt"', text)
+        self.assertIn(b'Publisher="CN=4F44EE59-E9FC-48C5-A032-B34982E6C0CB"', text)
+        self.assertIn(b"<PublisherDisplayName>Chris Mitchelmore</PublisherDisplayName>", text)
+
+    def test_store_layout_refuses_another_publisher(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            with self.assertRaisesRegex(windows_msix.PackageError, "Partner Center publisher"):
+                windows_msix.build_layout(pathlib.Path(scratch), pathlib.Path(scratch) / "out", VERSION,
+                                          publisher=PUBLISHER, identity=self.store)
+
+    def test_a_store_identity_that_drifts_from_the_reservation_is_refused(self):
+        import json
+        for path, value in ((("identity", "publisher"), "CN=Example Ltd"),
+                            (("identity", "packageFamilyName"), "ChrisMitchelmore.JustSpeaktoIt_0000000000000"),
+                            (("presentation", "publisherDisplayName"), "Example Ltd"),
+                            (("identity", "developerPublisher"), "CN=Just Speak to It Developer")):
+            data = json.loads(self.raw)
+            data[path[0]][path[1]] = value
+            with tempfile.TemporaryDirectory() as scratch:
+                target = pathlib.Path(scratch) / "identity.json"
+                target.write_text(json.dumps(data), encoding="utf-8")
+                with self.assertRaises(windows_msix.PackageError, msg=path):
+                    windows_msix.load_identity(target)
+
+    def test_only_the_store_channel_states_a_store_publisher(self):
+        import json
+        data = json.loads(windows_msix.BETA_IDENTITY_PATH.read_text(encoding="utf-8"))
+        data["identity"]["publisher"] = self.store["identity"]["publisher"]
+        with tempfile.TemporaryDirectory() as scratch:
+            target = pathlib.Path(scratch) / "identity.json"
+            target.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(windows_msix.PackageError):
+                windows_msix.load_identity(target)
 
 
 class VersionTests(unittest.TestCase):

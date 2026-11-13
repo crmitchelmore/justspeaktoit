@@ -6,8 +6,23 @@ import SwiftUI
 // scheme, so a label added later cannot fall back to black on the gradient.
 // Fonts and colours come from `SpeakTextStyle`.
 
+/// One opaque sRGB gradient stop.
+struct HeroColorStop {
+    let red: Double
+    let green: Double
+    let blue: Double
+
+    init(_ red: Double, _ green: Double, _ blue: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+
+    var color: Color { Color(.sRGB, red: red, green: green, blue: blue) }
+}
+
 /// The gradient and page tint for each main-window page.
-enum PageHeroPalette {
+enum PageHeroPalette: CaseIterable {
     case dashboard
     case history
     case voiceOutput
@@ -15,20 +30,24 @@ enum PageHeroPalette {
     case troubleshooting
     case settings
 
-    var colors: [Color] {
+    /// Opaque sRGB gradient stops, darkened from the brand hues so every
+    /// `SpeakTextStyle` on-tint token keeps 4.5:1 contrast across the gradient.
+    var stops: [HeroColorStop] {
         switch self {
         case .dashboard, .history:
-            return [Color.brandAccentDeep, Color.brandAccentWarm.opacity(0.9)]
+            return [HeroColorStop(0.66, 0.24, 0.13), HeroColorStop(0.60, 0.25, 0.14)]
         case .voiceOutput:
-            return [Color.green, Color.mint.opacity(0.8)]
+            return [HeroColorStop(0.10, 0.42, 0.19), HeroColorStop(0.04, 0.40, 0.36)]
         case .corrections:
-            return [Color.brandAccentWarm, Color.brandAccent.opacity(0.85)]
+            return [HeroColorStop(0.60, 0.25, 0.14), HeroColorStop(0.50, 0.30, 0.14)]
         case .troubleshooting:
-            return [Color.brandLagoonDeep, Color.blue.opacity(0.75)]
+            return [HeroColorStop(0.06, 0.40, 0.36), HeroColorStop(0.00, 0.34, 0.72)]
         case .settings:
-            return [Color.orange, Color.orange.opacity(0.7)]
+            return [HeroColorStop(0.52, 0.30, 0.00), HeroColorStop(0.48, 0.28, 0.00)]
         }
     }
+
+    var colors: [Color] { stops.map(\.color) }
 
     /// The hero's glow and the faint wash behind the page.
     var glow: Color {
@@ -238,7 +257,7 @@ struct HeroStatChip: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title.uppercased())
                     .font(SpeakTextStyle.chipTitle)
-                    .foregroundStyle(SpeakTextStyle.onTintTertiary)
+                    .foregroundStyle(SpeakTextStyle.onTintSecondary)
                     .lineLimit(1)
                 Text(value)
                     .font(SpeakTextStyle.chipValue)

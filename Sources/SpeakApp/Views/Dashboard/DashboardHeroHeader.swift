@@ -102,7 +102,7 @@ struct DashboardHeroHeader: View {
         VStack(alignment: .leading, spacing: 6) {
           Text("Live preview")
             .font(.caption.bold())
-            .foregroundStyle(SpeakTextStyle.onTintTertiary)
+            .foregroundStyle(SpeakTextStyle.onTintSecondary)
           Text(preview)
             .font(.body.monospaced())
             .speakLiveTranscriptLines(3)

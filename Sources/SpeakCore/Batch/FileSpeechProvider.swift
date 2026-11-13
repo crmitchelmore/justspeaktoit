@@ -8,6 +8,8 @@ public enum FileSpeechProvider: String, CaseIterable, Sendable {
     case stepfun
 
     public static let reson8LiveID = "reson8/resonant-1-streaming"
+    /// Sent explicitly so a change to Reson8's default model cannot change the engine behind our IDs.
+    public static let reson8WireModel = "resonant-1"
     public static let reson8FinishBudget: TimeInterval = 5
 
     public var modelID: String {
@@ -47,8 +49,7 @@ public enum FileSpeechProvider: String, CaseIterable, Sendable {
             description = "English-only recorded speech. Automatic uses English; no live audio support."
         case .reson8:
             name = "Reson8 Resonant-1"
-            description = "Recorded speech across ten European languages. Uses Reson8's server-selected engine; "
-                + "the public API does not expose a base-model selector."
+            description = "Recorded speech across ten European languages with Reson8's Resonant-1 model."
         case .stepfun:
             name = "StepFun StepAudio 3 ASR Max"
             description = "Upload one recording for StepAudio 3 recognition with streamed text responses. "
@@ -61,8 +62,8 @@ public enum FileSpeechProvider: String, CaseIterable, Sendable {
 
     public static let reson8LiveOption = ModelCatalog.Option(
         id: reson8LiveID, displayName: "Reson8 Resonant-1 (Streaming)",
-        description: "Genuine live PCM streaming with interim and final transcripts across ten European languages. "
-            + "Uses Reson8's server-selected engine.",
+        description: "Genuine live PCM streaming with interim and final transcripts across ten European languages "
+            + "with Reson8's Resonant-1 model.",
         latencyTier: .fast
     )
 

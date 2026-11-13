@@ -226,6 +226,7 @@ class DictationViewModelTest {
         val request = h.cloud.transcriptions.single()
         assertEquals(groq.catalogId, request.model)
         assertEquals("es-ES", request.languageTag)
+        assertEquals(listOf(RecognitionMode.Cloud to groq), h.successes.toList())
 
         h.onMain { h.viewModel.deleteProfile(profile.id) }
         val cleared = h.awaitState { it.profile == null && it.profiles.isEmpty() }

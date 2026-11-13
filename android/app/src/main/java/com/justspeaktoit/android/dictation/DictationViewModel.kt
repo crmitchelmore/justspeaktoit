@@ -128,7 +128,8 @@ class DictationViewModel internal constructor(
             onSessionChanged(s)
             val finished = s.dictation as? DictationState.Done
             if (finished != null && _state.value.dictation !is DictationState.Done) {
-                onTranscriptionSucceeded(finished.mode, _state.value.cloudModel)
+                // The session's own model: a profile can override the Settings one for a single session.
+                onTranscriptionSucceeded(finished.mode, CloudCatalog.transcriptionModel(session.sessionModelId))
             }
             _state.update {
                 it.copy(

@@ -236,6 +236,7 @@
     <string name="tip_jar_unavailable">Tips are available in the Google Play version of the app.</string>
     <string name="tip_jar_thanks">Thank you for your support!</string>
     <string name="tip_jar_pending">Your tip is pending. Google Play will finish it once payment clears.</string>
+    <string name="tip_jar_unconfirmed">Thank you! Google Play hasn\'t finished your tip yet; the app will try again.</string>
     <string name="tip_jar_failed">The tip didn\'t go through. Please try again later.</string>
     <string name="consent_title">Help improve Just Speak to It?</string>
     <string name="consent_body">Both are optional and off. You can change them at any time in Settings.</string>

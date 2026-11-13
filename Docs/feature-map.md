@@ -122,8 +122,8 @@ The flags live in `Project.swift`; release selection is in
 | F34 | Raw settings editor and config tools | Yes | No | No | No | No | #1608 | |
 | F35 | Automation (CLI, MCP, App Intents) | Yes | Yes | Yes | Yes | Limited | | |
 | F36 | Usage insights dashboard | Yes | No | Yes | Yes | Partial | #1623 | Android: 7-day card on History. |
-| F37 | Opt-in analytics and crash reporting | Yes | Yes | No | No | No | #1624 | |
-| F38 | Tip jar / paid access | Yes | Yes | No | No | No | #1625 | Paid access is compiled dark. |
+| F37 | Opt-in analytics and crash reporting | Yes | Yes | No | No | Yes | #1624 | |
+| F38 | Tip jar / paid access | Yes | Yes | No | No | Partial | #1625 | Paid access is compiled dark. Android: tip jar only. |
 | F39 | Audio file import | Yes | Yes | Yes | Yes | Yes | | |
 | F40 | Launch at login | Yes | N/A | Yes | Yes | N/A | | |
 | F41 | Updates | Yes | N/A | Yes | Yes | N/A | | |
@@ -464,22 +464,22 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Count only completed entries with text, as `HistoryInsights` does.
 
 ### F37 Opt-in analytics and crash reporting
-- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android Yes
 - **Excluded:** none
-- **Gaps:** Windows, Linux, Android #1624.
-- **How:** Nothing is sent until the user opts in; crash events are scrubbed before upload.
-- **Refs:** `Sources/SpeakApp/Analytics/AnalyticsLocalPolicy.swift`, `Sources/SpeakApp/Analytics/PostHogAnalytics.swift`, `Sources/SpeakApp/Analytics/SentryManager.swift`, `Sources/SpeakApp/Analytics/SentryEventScrubber.swift`
+- **Gaps:** Windows, Linux #1624.
+- **How:** Nothing is sent until the user opts in; crash events are scrubbed before upload. Withdrawing consent drops queued analytics events (cancelling one in flight) and deletes queued crash reports without sending them.
+- **Refs:** `Sources/SpeakApp/Analytics/AnalyticsLocalPolicy.swift`, `Sources/SpeakApp/Analytics/PostHogAnalytics.swift`, `Sources/SpeakApp/Analytics/SentryManager.swift`, `Sources/SpeakApp/Analytics/SentryEventScrubber.swift`, `android/app/src/main/java/com/justspeaktoit/android/telemetry/ProductAnalytics.kt`, `android/app/src/main/java/com/justspeaktoit/android/telemetry/SentryCrashReporter.kt`
 - **Sunset:** none
 - **Nuances:** Sentry is EU-hosted; PostHog covers product events only ([analytics plan](analytics-plan.md), [PostHog maintenance](posthog-maintenance.md)).
 
 ### F38 Tip jar / paid access
-- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android Partial
 - **Excluded:** none
-- **Gaps:** Windows, Linux, Android #1625.
-- **How:** The tip jar uses StoreKit. Paid access proxies requests through a Cloudflare Worker (`workers/paid-access`) that holds vendor keys, so subscribers need no API keys; it is entitlement-checked at routing time.
-- **Refs:** `Sources/SpeakApp/App/TipStore.swift`, `Sources/SpeakApp/Views/TipJarView.swift`, `Sources/SpeakApp/PaidAccess/PaidAccessManager.swift`, `workers/paid-access`
+- **Gaps:** Windows, Linux, Android #1625 (Android: tip jar only, no paid access).
+- **How:** The tip jar uses StoreKit, and Google Play Billing consumables with the same product IDs on Android. Paid access proxies requests through a Cloudflare Worker (`workers/paid-access`) that holds vendor keys, so subscribers need no API keys; it is entitlement-checked at routing time.
+- **Refs:** `Sources/SpeakApp/App/TipStore.swift`, `Sources/SpeakApp/Views/TipJarView.swift`, `Sources/SpeakApp/PaidAccess/PaidAccessManager.swift`, `workers/paid-access`, `android/app/src/main/java/com/justspeaktoit/android/tips/PlayBillingTipStore.kt`
 - **Sunset:** Paid access stays compiled dark (`TUIST_PAID_ACCESS`) until the owner launches it ([paid access](paid-access.md)).
-- **Nuances:** Use `@ObservedObject` for `TipStore.shared`, never `@StateObject`. Stale preferences can't enable paid access in a public build.
+- **Nuances:** Use `@ObservedObject` for `TipStore.shared`, never `@StateObject`. Stale preferences can't enable paid access in a public build. Android thanks the user only after Play confirms the consume, and retries a failed one so the tier can be bought again and isn't refunded.
 
 ### F39 Audio file import
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

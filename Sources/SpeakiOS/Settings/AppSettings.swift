@@ -139,6 +139,8 @@ public final class AppSettings: ObservableObject {
     let defaults: UserDefaults
     let secrets: AppSettingsSecrets
     @Published public private(set) var credentialsAvailable = false
+    var lastPublishedKeyboardAvailability: TranscriptionModelAvailability?
+    var keyboardAvailabilityObservation: AnyCancellable?
 
     /// Opt-in (issue #999): re-transcribe offline on-device captures with the
     /// selected cloud batch model once the network returns. Off by default

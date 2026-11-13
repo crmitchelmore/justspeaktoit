@@ -1,18 +1,17 @@
 import SpeakCore
 import SwiftUI
 
-/// The live discover-then-configure browsers behind the OpenRouter entry of the
-/// cleanup and batch transcription pickers.
+/// The live discover-then-configure browsers behind the separate Browse OpenRouter
+/// buttons of the cleanup and batch transcription pickers.
 extension SettingsView {
   var cleanupOpenRouterBrowser: ModelPickerOpenRouterBrowser {
-    { select, back in
+    { select in
       AnyView(
         OpenRouterCleanupBrowser(
           selection: settings.postProcessingModel,
           discoveryEnabled: settingsBinding(\AppSettings.cleanupModelDiscoveryEnabled),
           options: { [settings] in CleanupModelDiscoveryStore.shared.options(selected: settings.postProcessingModel) },
           temperature: settingsBinding(\AppSettings.postProcessingTemperature),
-          onBack: back,
           onSelect: select
         )
       )
@@ -20,7 +19,7 @@ extension SettingsView {
   }
 
   var batchTranscriptionOpenRouterBrowser: ModelPickerOpenRouterBrowser {
-    { select, back in
+    { select in
       AnyView(
         OpenRouterTranscriptionBrowser(
           apiKeyProvider: { [storage = environment.secureStorage] in
@@ -28,7 +27,6 @@ extension SettingsView {
           },
           selection: settings.batchTranscriptionModel,
           bundled: ModelCatalog.batchTranscription,
-          onBack: back,
           onSelect: select
         )
       )
@@ -45,5 +43,23 @@ extension SettingsView {
     return ModelCatalog.batchTranscription + [
       .init(id: selected, displayName: modelID, description: "Discovered OpenRouter speech-to-text model.")
     ]
+  }
+}
+
+/// The separate Browse OpenRouter models button below a model picker, matching
+/// the voice section's Browse OpenRouter Speech… button.
+struct ModelPickerOpenRouterButton: View {
+  let identifier: String
+  let browser: ModelPickerOpenRouterBrowser
+  @Binding var value: String
+  @State private var isPresented = false
+
+  var body: some View {
+    Button("Browse OpenRouter models…") { isPresented = true }
+      .buttonStyle(.bordered)
+      .accessibilityIdentifier(identifier)
+      .sheet(isPresented: $isPresented) {
+        browser { value = $0 }
+      }
   }
 }

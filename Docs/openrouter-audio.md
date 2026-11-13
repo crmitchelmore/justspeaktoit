@@ -6,18 +6,18 @@ chat route. Direct provider and local models keep their existing settings.
 
 ## Choose a model
 
-In Remote Batch transcription settings, open **Browse OpenRouter Audio** (on Mac,
-open the Remote Batch Model picker and choose its **OpenRouter** row, which lists the
-bundled OpenRouter models first and then the live catalogue). In voice-output
-settings, open the OpenRouter speech browser. Search by name or description, filter
-by provider, and inspect model-specific voices, capabilities, retirement dates, and
-pricing.
+Cleanup, batch transcription and voice output share one layout on Mac and iPhone.
+The main model picker lists native-provider models, and a separate **Browse
+OpenRouter models…** button (on Mac voice output, **Browse OpenRouter Speech…**)
+opens the shared discover-then-configure browser (`OpenRouterModelBrowser` in
+`SpeakCore/AppleUI`). A chosen OpenRouter model then appears in the picker as
+**OpenRouter › model**. Search by name or description, filter by provider and listed
+price, and inspect each model's pricing, voices, capabilities and retirement dates.
 
-Remote cleanup (post-processing) uses the same discover-then-configure browser
-(`OpenRouterModelBrowser` in `SpeakCore/AppleUI`): its picker's **OpenRouter** row
-lists bundled OpenRouter cleanup models and, with discovery turned on, newer OpenAI
-models, each with a details page that shows pricing and the cleanup temperature
-before **Use for cleanup**. Native-provider models stay first in every picker.
+The transcription browser lists bundled OpenRouter batch models first, then the live
+speech-to-text catalogue. The cleanup browser lists bundled OpenRouter cleanup models
+and, with discovery turned on, newer OpenAI models. Each cleanup model's page shows
+its pricing and (on Mac) the cleanup temperature before **Use for cleanup**.
 
 Selecting a model updates the normal batch or speech preference. A missing model
 remains selected and appears unavailable in the browser; it is never silently

@@ -9,6 +9,24 @@ final class ModelPickerSelectionTests: XCTestCase {
     ModelCatalog.Option(id: "openai/gpt-4o", displayName: "GPT-4o")
   ]
 
+  func testNativeOptions_keepNativeRoutesAndOnlyTheSelectedOpenRouterModel() {
+    let options: [ModelCatalog.Option] = [
+      .init(id: "native/openai/gpt-5-mini", displayName: "GPT-5 mini"),
+      .init(id: "openai/gpt-5-mini", displayName: "GPT-5 mini"),
+      .init(id: "anthropic/claude-haiku", displayName: "Claude Haiku")
+    ]
+    XCTAssertEqual(
+      ModelPickerSelection.nativeOptions(options, selected: "native/openai/gpt-5-mini", purpose: .postProcessing)
+        .map(\.id),
+      ["native/openai/gpt-5-mini"]
+    )
+    XCTAssertEqual(
+      ModelPickerSelection.nativeOptions(options, selected: " Anthropic/Claude-Haiku ", purpose: .postProcessing)
+        .map(\.id),
+      ["native/openai/gpt-5-mini", "anthropic/claude-haiku"]
+    )
+  }
+
   func testInitial_matchesAnOptionCaseInsensitivelyWithoutRepair() {
     let state = ModelPickerSelection.initial(for: " OpenAI/GPT-4o ", options: options, allowsCustom: true)
     XCTAssertEqual(state, .init(selection: "openai/gpt-4o", customValue: ""))

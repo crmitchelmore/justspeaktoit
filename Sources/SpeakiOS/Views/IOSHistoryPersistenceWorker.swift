@@ -20,7 +20,7 @@ actor IOSHistoryPersistence {
         case upsert(iOSHistoryItem)
         /// Offline upgrade (issue #999): replaces only a row still exactly as filed.
         case replaceIfUntouched(iOSHistoryItem, fingerprint: String, filedAt: Date)
-        case processed(UUID, String, String?)
+        case processed(UUID, String, String?, IOSPostProcessingDetails? = nil)
         case error(UUID, String)
         case remove(UUID), clear
         case remote(iOSHistoryItem), remoteDelete(UUID)
@@ -202,9 +202,9 @@ private final class IOSHistoryPersistenceWorker: @unchecked Sendable {
 
     private func updateFields(_ operation: IOSHistoryPersistence.Operation) -> Effects {
         switch operation {
-        case let .processed(id, text, error):
+        case let .processed(id, text, error, details):
             guard let item = rows.first(where: { $0.id == id }) else { return Effects(durable: state.isReady) }
-            upsert(item.withPostProcessed(text).withError(error))
+            upsert(item.withPostProcessed(text).withError(error).withPostProcessingDetails(details))
         case let .error(id, message):
             guard let index = rows.firstIndex(where: { $0.id == id }) else { return Effects(durable: state.isReady) }
             rows[index] = rows[index].withError(message)
@@ -217,8 +217,9 @@ private final class IOSHistoryPersistenceWorker: @unchecked Sendable {
     private func receiveRemote(_ item: iOSHistoryItem) -> Effects {
         if let index = rows.firstIndex(where: { $0.id == item.id }) {
             if item.updatedAt > rows[index].updatedAt {
-                rows[index] = item
-                state.remember(item)
+                let merged = item.retainingLocalSessionDetails(of: rows[index])
+                rows[index] = merged
+                state.remember(merged)
             } else if item.updatedAt < rows[index].updatedAt {
                 return Effects(durable: false, remoteNewerLocalIDs: [item.id])
             }

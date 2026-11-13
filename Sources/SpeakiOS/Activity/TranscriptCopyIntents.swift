@@ -84,9 +84,9 @@ public struct CopyLastTranscriptIntent: LiveActivityIntent {
 
 /// App Intent to copy the last transcribed sentence to clipboard.
 /// Can be triggered from Live Activity, Shortcuts, or Siri.
-struct CopyLastSentenceIntent: AppIntent {
-    static var title: LocalizedStringResource = "Copy Last Sentence"
-    static var description = IntentDescription(
+public struct CopyLastSentenceIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Copy Last Sentence"
+    public static var description = IntentDescription(
         """
         Copies the last sentence of the current or most recent recording to the clipboard. \
         Recordings saved to History only aren't available here.
@@ -95,11 +95,13 @@ struct CopyLastSentenceIntent: AppIntent {
     )
 
     // Make this available from Live Activity
-    static var openAppWhenRun: Bool = false
+    public static var openAppWhenRun: Bool = false
     /// Returns and copies private transcript data, so never run on a locked device.
-    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
-    func perform() async throws -> some IntentResult {
+    public init() {}
+
+    public func perform() async throws -> some IntentResult {
         let lastSentence = SharedTranscriptionState.shared.lastTranscribedSentence
 
         guard !lastSentence.isEmpty else {
@@ -119,9 +121,9 @@ struct CopyLastSentenceIntent: AppIntent {
 }
 
 /// App Intent to copy the full transcript to clipboard.
-struct CopyFullTranscriptIntent: AppIntent {
-    static var title: LocalizedStringResource = "Copy Full Transcript"
-    static var description = IntentDescription(
+public struct CopyFullTranscriptIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Copy Full Transcript"
+    public static var description = IntentDescription(
         """
         Copies the full text of the current or most recent recording to the clipboard. \
         Recordings saved to History only aren't available here; use Get Last Transcription.
@@ -129,11 +131,13 @@ struct CopyFullTranscriptIntent: AppIntent {
         categoryName: "Transcripts"
     )
 
-    static var openAppWhenRun: Bool = false
+    public static var openAppWhenRun: Bool = false
     /// Returns and copies private transcript data, so never run on a locked device.
-    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
-    func perform() async throws -> some IntentResult {
+    public init() {}
+
+    public func perform() async throws -> some IntentResult {
         let fullText = SharedTranscriptionState.shared.currentTranscriptText
 
         guard !fullText.isEmpty else {

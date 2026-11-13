@@ -356,3 +356,27 @@ test('a body that stalls after its headers ends at the deadline as unavailable',
   assert.equal(response.status, 503);
   assert.equal(await response.text(), 'Alpha build not yet available');
 });
+
+test('Android route follows its own pointer and refuses a missing or malformed one', async () => {
+  const originalFetch = globalThis.fetch;
+  const serveAndroid = async pointer => {
+    globalThis.fetch = async url => {
+      assert.ok(url.endsWith('/alpha-latest/android-pointer.json'), `unexpected fetch ${url}`);
+      return pointer ? Response.json(pointer) : new Response('Not Found', {status: 404});
+    };
+    return worker.fetch(new Request('https://justspeaktoit.com/alpha/download/android'), {});
+  };
+  try {
+    const valid = {schemaVersion: 1, tag: 'alpha-build-12', asset: 'JustSpeakToIt-android.apk', versionCode: 1};
+    const found = await serveAndroid(valid);
+    assert.equal(found.status, 302);
+    assert.equal(found.headers.get('Location'), `${release}/alpha-build-12/JustSpeakToIt-android.apk`);
+    for (const pointer of [null, {...valid, tag: 'mac-v3.2.0'}, {...valid, asset: 'other.apk'}, {...valid, schemaVersion: 2}]) {
+      const response = await serveAndroid(pointer);
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('Location'), null);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -117,7 +117,7 @@ final class TranscriptionPricingTests: XCTestCase {
             "speechmatics/enhanced-streaming",
             "speechmatics/enhanced",
             "speechmatics/standard",
-            // Reson8's engine is server-selected; no verified public USD quote.
+            // Reson8 Resonant-1 has no verified public USD quote.
             FileSpeechProvider.reson8.modelID,
             FileSpeechProvider.reson8LiveID,
             // StepAudio 3 publishes 2.8 CNY/hour, not a USD conversion.

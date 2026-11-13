@@ -173,6 +173,7 @@ public final class Reson8LiveClient: FinalizingStreamingTranscriptionClient,
     static func request(apiKey: String, language: String?, sampleRate: Int) throws -> URLRequest {
         var components = URLComponents(string: "wss://api.reson8.dev/v1/speech-to-text/realtime")!
         components.queryItems = [
+            URLQueryItem(name: "model", value: FileSpeechProvider.reson8WireModel),
             URLQueryItem(name: "encoding", value: "pcm_s16le"),
             URLQueryItem(name: "sample_rate", value: String(sampleRate)),
             URLQueryItem(name: "channels", value: "1"),

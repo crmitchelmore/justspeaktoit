@@ -65,7 +65,7 @@ final class FileSpeechBatchTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
     }
 
-    func testReson8UsesApiKeyAndNoInventedModelSelector() async throws {
+    func testReson8UsesApiKeyAndPinsResonant1() async throws {
         let audio = try fixture(extension: "m4a")
         defer { try? FileManager.default.removeItem(at: audio) }
         StubURLProtocol.handler = { request in
@@ -73,7 +73,7 @@ final class FileSpeechBatchTests: XCTestCase {
             XCTAssertEqual(request.url?.path, "/v1/speech-to-text/prerecorded")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "ApiKey synthetic")
             let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            XCTAssertFalse(items.contains { $0.name == "model" })
+            XCTAssertEqual(items.filter { $0.name == "model" }, [URLQueryItem(name: "model", value: "resonant-1")])
             XCTAssertTrue(items.contains(URLQueryItem(name: "language", value: "nl")))
             XCTAssertTrue(items.contains(URLQueryItem(name: "encoding", value: "m4a")))
             return .ok(Data("""

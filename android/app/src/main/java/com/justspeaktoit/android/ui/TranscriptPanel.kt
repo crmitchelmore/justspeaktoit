@@ -91,7 +91,7 @@ private fun CleanupNote(cleanup: CleanupStatus) {
     )
 }
 
-/** What can be done with a finished or unfinished transcript: copy, share, show original, clear. */
+/** What can be done with a finished or unfinished transcript: copy, share, show original, clear, read aloud. */
 @Composable
 internal fun ResultActions(state: DictationUiState, snackbar: SnackbarHostState, actions: DictationActions) {
     val dictation = state.dictation
@@ -136,6 +136,7 @@ internal fun ResultActions(state: DictationUiState, snackbar: SnackbarHostState,
             Text(stringResource(R.string.action_clear))
         }
     }
+    if (final && text.isNotBlank()) ReadAloudButton(text, snackbar)
 }
 
 @Composable

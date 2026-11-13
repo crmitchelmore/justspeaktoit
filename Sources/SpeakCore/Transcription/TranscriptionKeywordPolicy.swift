@@ -18,12 +18,16 @@ public enum TranscriptionKeywordPolicy {
             .prefix(count))
     }
 
+    /// UTF-8 byte budget and term count for `prompt`, shared with the Android export.
+    public static let promptMaximumCharacters = 224
+    public static let promptMaximumTerms = 100
+
     /// A glossary, never a post-processing or style instruction.
-    public static func prompt(_ words: [String], maximumCharacters: Int = 224) -> String? {
+    public static func prompt(_ words: [String], maximumCharacters: Int = promptMaximumCharacters) -> String? {
         var result = ""
         let usable = words.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { $0.utf8.count <= maximumCharacters }
-        for word in bounded(usable, count: 100, length: maximumCharacters) {
+        for word in bounded(usable, count: promptMaximumTerms, length: maximumCharacters) {
             let next = result.isEmpty ? word : result + ", " + word
             guard next.utf8.count <= maximumCharacters else { break }
             result = next

@@ -70,4 +70,20 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         XCTAssertTrue(ids.contains(ModelCatalog.defaultPostProcessingModel))
         XCTAssertTrue(models.allSatisfy { !($0["selectionId"] ?? "").hasPrefix("local/") })
     }
+
+    func testDocumentCarriesLanguagesAndVocabularyPromptRules() throws {
+        let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
+        let languages = try XCTUnwrap(object?["languages"] as? [[String: String]])
+        XCTAssertEqual(languages.map { $0["id"] }, TranscriptionLanguageCatalog.options.map(\.id))
+        XCTAssertEqual(languages.first?["id"], TranscriptionLanguageCatalog.automaticIdentifier)
+        let prompt = try XCTUnwrap(object?["keywordPrompt"] as? [String: Int])
+        XCTAssertEqual(prompt["maximumBytes"], TranscriptionKeywordPolicy.promptMaximumCharacters)
+        XCTAssertEqual(prompt["maximumTerms"], TranscriptionKeywordPolicy.promptMaximumTerms)
+        let models = try XCTUnwrap(object?["transcriptionModels"] as? [[String: Any]])
+        for model in models {
+            let apiName = try XCTUnwrap(model["apiName"] as? String)
+            let expected = OpenAITranscriptionModels.supportsBatchPrompt(apiName)
+            XCTAssertEqual(model["supportsPrompt"] as? Bool, expected, apiName)
+        }
+    }
 }

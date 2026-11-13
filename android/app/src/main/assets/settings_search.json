@@ -19,6 +19,47 @@
       "title" : "Cloud transcription model"
     },
     {
+      "id" : "android.language",
+      "keywords" : [
+        "language",
+        "locale",
+        "spoken language",
+        "accent",
+        "english",
+        "spanish",
+        "french",
+        "german"
+      ],
+      "section" : "transcription",
+      "sectionTitle" : "Transcription",
+      "settingKeys" : [
+        "preferredLocale"
+      ],
+      "summary" : "The language you speak. Automatic uses the phone's language.",
+      "title" : "Dictation language"
+    },
+    {
+      "id" : "android.personalCorrections",
+      "keywords" : [
+        "vocabulary",
+        "dictionary",
+        "custom words",
+        "names",
+        "spelling",
+        "replace",
+        "lexicon",
+        "keyterms",
+        "jargon"
+      ],
+      "section" : "corrections",
+      "sectionTitle" : "Corrections",
+      "settingKeys" : [
+        "personal_corrections"
+      ],
+      "summary" : "Words the recogniser gets wrong and how to write them; also sent to cloud models as vocabulary.",
+      "title" : "Personal corrections"
+    },
+    {
       "id" : "android.cleanup",
       "keywords" : [
         "post-processing",

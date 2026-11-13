@@ -48,9 +48,9 @@ final class AppSettingsConfigurationTests: XCTestCase {
 
     /// Persisted settings deliberately left out of the raw configuration, with the reason.
     private static let unschemedSettings: [String: String] = [
-        "trackedAPIKeyIdentifiers": "Bookkeeping for stored keys; exported as apiKeys.<id>: true|false.",
-        "recoveredTranscriptionKeywords": "Competing keyword edits kept until restored or discarded in Settings; not set directly.",
-        "assemblyAIKeyterms": "Older alias of transcriptionKeywords, which the schema carries.",
+        "trackedAPIKeyIdentifiers": "Bookkeeping for stored keys; exported as apiKeys.<id>.isSet.",
+        "recoveredTranscriptionKeywords": "Competing keyword edits awaiting restore or discard in Settings.",
+        "assemblyAIKeyterms": "Older alias of transcriptionKeywords, which the schema carries."
     ]
 
     func testEveryPersistedMacSettingHasASchemaField() throws {
@@ -105,7 +105,7 @@ final class AppSettingsConfigurationTests: XCTestCase {
         let report = configuration.validate(changes: [
             "ttsSpeed": .double(1.5),
             "appearance": .string("sepia"),
-            "silenceDuration": .string("long"),
+            "silenceDuration": .string("long")
         ])
         XCTAssertEqual(report.errors.map(\.path).sorted(), ["settings.appearance", "settings.silenceDuration"])
         XCTAssertThrowsError(try configuration.apply(report))
@@ -205,7 +205,7 @@ final class AppSettingsConfigurationTests: XCTestCase {
         let configuration = makeConfiguration(settings)
         let compact = !settings.showCompactHUD
         let changes: [String: JSONValue] = [
-            "ttsSpeed": .double(1.5), "showCompactHUD": .bool(compact), "livePolishDebounceMs": .int(400),
+            "ttsSpeed": .double(1.5), "showCompactHUD": .bool(compact), "livePolishDebounceMs": .int(400)
         ]
         let result = try configuration.automationSet(changes, dryRun: false, writesAllowed: true)
         XCTAssertEqual(object(result)["applied"], .bool(true))
@@ -238,7 +238,7 @@ final class AppSettingsConfigurationTests: XCTestCase {
         let configuration = makeConfiguration(settings)
         try configuration.apply(configuration.validate(changes: [
             "transcriptionMode": .string("liveNative"), "liveTranscriptionModel": .string(model.id),
-            "postProcessingEnabled": .bool(false),
+            "postProcessingEnabled": .bool(false)
         ]))
     }
 

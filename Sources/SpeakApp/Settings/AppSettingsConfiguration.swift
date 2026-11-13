@@ -67,7 +67,7 @@ final class AppSettingsConfiguration {
       additionalModelIDs: [
         .localTranscription: [settings.localTranscriptionModel],
         .postProcessing: [settings.postProcessingModel],
-        .livePolish: [settings.livePolishModel],
+        .livePolish: [settings.livePolishModel]
       ],
       ignoresReadOnlyChanges: ignoringReadOnly
     )

@@ -73,7 +73,7 @@ field and an `AppSettingsConfiguration` binding.
 `@Published` setting has no schema field (unless exempted there with a reason),
 a schema key has no binding, a default disagrees with a fresh install or an
 allowed value is rejected by the app. Secrets never enter the schema: API keys
-are exported only as `apiKeys.<id>: true|false`.
+are exported only as `apiKeys.<id>.isSet` (true or false).
 
 ## Accessibility
 

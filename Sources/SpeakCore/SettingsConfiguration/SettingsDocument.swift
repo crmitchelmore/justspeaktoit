@@ -100,23 +100,7 @@ public struct SettingsDocument: Equatable, Sendable {
             issues.append(.init(path: key, message: "Unknown top-level key."))
         }
 
-        var version = SettingsSchema.version
-        switch object["schemaVersion"] {
-        case .int(let value)?:
-            version = value
-            if value > SettingsSchema.version {
-                issues.append(.init(
-                    path: "schemaVersion",
-                    message: "Version \(value) is newer than this app supports (\(SettingsSchema.version)). "
-                        + "Update the app first."))
-            } else if value < 1 {
-                issues.append(.init(path: "schemaVersion", message: "Must be 1 or later."))
-            }
-        case nil:
-            issues.append(.init(path: "schemaVersion", message: "Required."))
-        default:
-            issues.append(.init(path: "schemaVersion", message: "Expected an integer."))
-        }
+        let version = Self.parseVersion(object["schemaVersion"], issues: &issues)
 
         var platform: String?
         switch object["platform"] {
@@ -132,10 +116,38 @@ public struct SettingsDocument: Equatable, Sendable {
         default: issues.append(.init(path: "settings", message: "Expected an object."))
         }
 
+        let apiKeys = Self.parseAPIKeys(object["apiKeys"], issues: &issues)
+
+        guard issues.isEmpty else { return .failure(.init(issues: issues)) }
+        return .success(.init(schemaVersion: version, platform: platform, settings: settings, apiKeys: apiKeys))
+    }
+
+    private static func parseVersion(_ value: JSONValue?, issues: inout [SettingsIssue]) -> Int {
+        var version = SettingsSchema.version
+        switch value {
+        case .int(let number)?:
+            version = number
+            if number > SettingsSchema.version {
+                issues.append(.init(
+                    path: "schemaVersion",
+                    message: "Version \(number) is newer than this app supports (\(SettingsSchema.version)). "
+                        + "Update the app first."))
+            } else if number < 1 {
+                issues.append(.init(path: "schemaVersion", message: "Must be 1 or later."))
+            }
+        case nil:
+            issues.append(.init(path: "schemaVersion", message: "Required."))
+        default:
+            issues.append(.init(path: "schemaVersion", message: "Expected an integer."))
+        }
+        return version
+    }
+
+    private static func parseAPIKeys(_ value: JSONValue?, issues: inout [SettingsIssue]) -> [String: Bool] {
         var apiKeys: [String: Bool] = [:]
-        switch object["apiKeys"] {
-        case .object(let value)?:
-            for (id, entry) in value {
+        switch value {
+        case .object(let entries)?:
+            for (id, entry) in entries {
                 if case .object(let fields) = entry, fields.count == 1, case .bool(let isSet)? = fields["isSet"] {
                     apiKeys[id] = isSet
                 } else {
@@ -147,9 +159,7 @@ public struct SettingsDocument: Equatable, Sendable {
         case nil: break
         default: issues.append(.init(path: "apiKeys", message: "Expected an object."))
         }
-
-        guard issues.isEmpty else { return .failure(.init(issues: issues)) }
-        return .success(.init(schemaVersion: version, platform: platform, settings: settings, apiKeys: apiKeys))
+        return apiKeys
     }
 
     /// The document narrowed to `keys` and/or settings starting with `prefix`.

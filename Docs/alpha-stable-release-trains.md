@@ -270,6 +270,19 @@ Required Alpha signing secrets are selected in the reusable Apple workflows.
 No signing material belongs in source control. Use the existing secure API key
 and local Apple Developer authentication for provisioning.
 
+## Android Alpha APK
+
+The green phase's `android` job (after `mac-direct` has made the Alpha public)
+builds the manifest source's release APK in the main-only `android-release`
+environment, signs it with the Play upload key, refuses a debug certificate, and
+attaches it to the Alpha as `JustSpeakToIt-android.apk`. It then advances
+`android-pointer.json` on `alpha-latest` (`{schemaVersion: 1, tag, asset,
+versionCode, sha256}`), never to an older Alpha. The website's
+`/alpha/download/android` follows that pointer, so it lags the Alpha pointer
+until the job finishes and answers 503 until the first APK exists. Without the
+upload keystore the job builds nothing. The version code uses the same
+build-time scheme as `android.yml`, so each APK installs over the last one.
+
 ## Windows and Linux release qualification
 
 New Alpha and Stable candidate manifests carry `desktopQualification: 1`.

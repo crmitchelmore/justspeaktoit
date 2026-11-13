@@ -64,6 +64,7 @@ extension HistoryRecord {
     private enum IOSLegacyKeys: String, CodingKey {
         case id, createdAt, updatedAt, transcription, postProcessedTranscription
         case model, duration, wordCount, originPlatform, errorMessage, requestContext, requestFailure
+        case modelUsages, phaseTimestamps, trigger
     }
 
     private static func decodeIOSLegacy(_ values: KeyedDecodingContainer<IOSLegacyKeys>) throws -> Self {
@@ -72,9 +73,13 @@ extension HistoryRecord {
             id: try values.decode(UUID.self, forKey: .id),
             createdAt: createdAt,
             updatedAt: try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt,
+            // Optional session details; an unreadable one never hides the transcript.
+            modelUsages: (try? values.decodeIfPresent([ApplicationModelUsage].self, forKey: .modelUsages)) ?? [],
             rawTranscription: try values.decode(String.self, forKey: .transcription),
             postProcessedTranscription: try values.decodeIfPresent(String.self, forKey: .postProcessedTranscription),
             recordingDuration: try values.decode(TimeInterval.self, forKey: .duration),
+            phaseTimestamps: try? values.decodeIfPresent(ApplicationPhaseTimestamps.self, forKey: .phaseTimestamps),
+            trigger: try? values.decodeIfPresent(ApplicationHistoryTrigger.self, forKey: .trigger),
             model: try values.decode(String.self, forKey: .model),
             wordCount: try values.decode(Int.self, forKey: .wordCount),
             originPlatform: try values.decodeIfPresent(String.self, forKey: .originPlatform) ?? "ios",

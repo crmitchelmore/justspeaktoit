@@ -65,7 +65,8 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
   [m=>{m.actions.Record.descriptionMetadata.descriptionText.key='Records speech';},'must end with a period'],
   [m=>{m.actions.Record.descriptionMetadata.descriptionText.alternatives=['Unexpected schema'];},'Unsupported localized'],
   [m=>{m.autoShortcuts=Array.from({length:11},()=>({phraseTemplates:[{key:'Record with ${applicationName}'}]}));},'maximum ten'],
-  [m=>{m.autoShortcuts=[{phraseTemplates:[{key:'Record speech'}]}];},'must include the application name']
+  [m=>{m.autoShortcuts=[{phraseTemplates:[{key:'Record speech'}]}];},'must include the application name'],
+  [m=>{m.autoShortcuts=[];},'registers no App Shortcuts']
  ]){
   const changed=structuredClone(intentMetadata);change(changed);writeFileSync(metadataPath,JSON.stringify(changed));
   assert.throws(verify,error=>error.stderr.toString().includes(message));

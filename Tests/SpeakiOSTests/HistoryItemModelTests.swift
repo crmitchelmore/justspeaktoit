@@ -62,5 +62,44 @@ final class HistoryItemModelTests: XCTestCase {
         XCTAssertEqual(item.bestText, "hello")
         XCTAssertEqual(item.updatedAt, item.createdAt)
     }
+
+    func testCaptureDetailsPersistAndSurviveLaterEdits() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let item = try XCTUnwrap(iOSHistoryItem.recordedTranscript(
+            text: "hello world", model: "deepgram/nova-3", duration: 2, errorMessage: nil,
+            captureDetails: IOSCaptureDetails(
+                trigger: .shortcut, isBatch: false, recordingStarted: start,
+                recordingEnded: start.addingTimeInterval(2), transcriptionEnded: start.addingTimeInterval(2.5)
+            )
+        ))
+        let polished = item.withPostProcessingDetails(IOSPostProcessingDetails(
+            model: "synthetic/polish", startedAt: start.addingTimeInterval(3), endedAt: start.addingTimeInterval(4)
+        )).withPostProcessed("Hello world.")
+
+        let decoded = try JSONDecoder().decode(iOSHistoryItem.self, from: JSONEncoder().encode(polished))
+        XCTAssertEqual(decoded.trigger?.gesture, .automation)
+        XCTAssertEqual(decoded.modelUsages?.map(\.phase), [.transcriptionLive, .postProcessing])
+        XCTAssertEqual(decoded.phaseTimestamps?.recordingStarted, start)
+        XCTAssertEqual(decoded.phaseTimestamps?.postProcessingEnded, start.addingTimeInterval(4))
+        XCTAssertEqual(decoded.model, "deepgram/nova-3")
+        let ids = decoded.sessionDetails.rows.map(\.id)
+        XCTAssertEqual(ids, [
+            "trigger", "model-live", "model-post-processing", "recording",
+            "transcript-latency", "post-processing-latency", "total"
+        ])
+    }
+
+    func testRemoteRowWithoutDetailsKeepsLocalSessionDetails() {
+        let local = iOSHistoryItem(transcription: "t", model: "m", duration: 1, wordCount: 1).withSessionDetails(
+            modelUsages: nil, phaseTimestamps: nil,
+            trigger: .init(gesture: .uiButton, hotKeyDescription: "In-app button", outputMethod: .none)
+        )
+        let remote = local.withPostProcessed("remote")
+            .withSessionDetails(modelUsages: nil, phaseTimestamps: nil, trigger: nil)
+        XCTAssertNil(remote.trigger)
+        let merged = remote.retainingLocalSessionDetails(of: local)
+        XCTAssertEqual(merged.trigger?.gesture, .uiButton)
+        XCTAssertEqual(merged.postProcessedTranscription, "remote")
+    }
 }
 #endif

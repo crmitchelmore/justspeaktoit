@@ -1,16 +1,14 @@
 import SpeakCore
 import SwiftUI
 
-/// Builds the live OpenRouter browser a picker's OpenRouter entry opens: it is
-/// given a closure that applies a choice and one that returns to the native list.
-typealias ModelPickerOpenRouterBrowser = (
-  _ select: @escaping (String) -> Void, _ back: @escaping () -> Void
-) -> AnyView
+/// Builds the live OpenRouter browser that a picker's separate Browse OpenRouter
+/// button opens, given a closure that applies the chosen model.
+typealias ModelPickerOpenRouterBrowser = (_ select: @escaping (String) -> Void) -> AnyView
 
 struct ModelPicker: View {
   let title: String
   let help: String?
-  let options: [ModelCatalog.Option]
+  let allOptions: [ModelCatalog.Option]
   let credentialPurpose: ModelCredentialPurpose
   let storedAPIKeyIdentifiers: Set<String>
   let usesDetailedChooser: Bool
@@ -35,7 +33,7 @@ struct ModelPicker: View {
   ) {
     self.title = title
     self.help = help
-    self.options = options
+    self.allOptions = options
     self.credentialPurpose = credentialPurpose
     self.storedAPIKeyIdentifiers = storedAPIKeyIdentifiers
     self.usesDetailedChooser = usesDetailedChooser
@@ -55,7 +53,7 @@ struct ModelPicker: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if usesDetailedChooser || openRouterBrowser != nil || LongListPickerPolicy.usesSheet(count: options.count) {
+      if usesDetailedChooser || LongListPickerPolicy.usesSheet(count: options.count) {
         Button {
           isShowingChooser = true
         } label: {
@@ -87,7 +85,7 @@ struct ModelPicker: View {
             credentialPurpose: credentialPurpose,
             storedAPIKeyIdentifiers: storedAPIKeyIdentifiers,
             allowsCustom: allowsCustom,
-            openRouterBrowser: openRouterBrowser,
+            groupsOpenRouter: openRouterBrowser == nil,
             selection: $selection
           )
         }
@@ -117,6 +115,14 @@ struct ModelPicker: View {
         }
         .settingsMenuPicker()
         .speakTooltip(tooltipText)
+      }
+
+      if let openRouterBrowser {
+        ModelPickerOpenRouterButton(
+          identifier: "modelPicker.\(Self.accessibilityIdentifierComponent(for: title)).browseOpenRouter",
+          browser: openRouterBrowser,
+          value: $value
+        )
       }
 
       if let help {
@@ -190,6 +196,14 @@ struct ModelPicker: View {
     }
   }
 
+  /// With a Browse OpenRouter button, OpenRouter models live in the browser;
+  /// the picker lists native ones plus the saved OpenRouter choice, as the voice
+  /// picker does.
+  private var options: [ModelCatalog.Option] {
+    guard openRouterBrowser != nil else { return allOptions }
+    return ModelPickerSelection.nativeOptions(allOptions, selected: value, purpose: credentialPurpose)
+  }
+
   /// Replaces an invalid value on the next turn unless something else has
   /// changed it in the meantime.
   private static func repair(_ value: Binding<String>, from invalidValue: String, to replacement: String) {
@@ -229,18 +243,6 @@ struct ModelPicker: View {
     )
   }
 
-  /// Stable, UI-test friendly component derived from the picker's title,
-  /// e.g. "Post-processing model" -> "postProcessingModel".
-  static func accessibilityIdentifierComponent(for title: String) -> String {
-    let words = title
-      .components(separatedBy: CharacterSet.alphanumerics.inverted)
-      .filter { !$0.isEmpty }
-    guard let first = words.first else { return "model" }
-    return ([first.prefix(1).lowercased() + first.dropFirst()]
-      + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() })
-      .joined()
-  }
-
   private var selectedCredentialAvailability: ModelCredentialAvailability {
     credentialAvailability(for: selection == ModelCatalog.customOptionID ? customValue : selection)
   }
@@ -276,5 +278,19 @@ struct ModelPicker: View {
     if let replacement = synced.replacementValue, value != replacement {
       value = replacement
     }
+  }
+}
+
+extension ModelPicker {
+  /// Stable, UI-test friendly component derived from the picker's title,
+  /// e.g. "Post-processing model" -> "postProcessingModel".
+  static func accessibilityIdentifierComponent(for title: String) -> String {
+    let words = title
+      .components(separatedBy: CharacterSet.alphanumerics.inverted)
+      .filter { !$0.isEmpty }
+    guard let first = words.first else { return "model" }
+    return ([first.prefix(1).lowercased() + first.dropFirst()]
+      + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() })
+      .joined()
   }
 }

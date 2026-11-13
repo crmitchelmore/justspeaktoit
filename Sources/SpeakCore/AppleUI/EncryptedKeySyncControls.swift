@@ -64,12 +64,15 @@ public struct EncryptedKeySyncControls: View {
                         Label("Sync Keys Now", systemImage: "arrow.triangle.2.circlepath")
                     }
                     .disabled(status.isSyncing)
-                    .accessibilityIdentifier("keySync.syncNow")
+                    .accessibilityIdentifier("keySyncNow")
 
                     Button("Disable", role: .destructive) {
-                        Task { await disable() }
+                        Task {
+                            await disable()
+                            syncError = nil
+                        }
                     }
-                    .accessibilityIdentifier("keySync.disable")
+                    .accessibilityIdentifier("keySyncDisable")
                 }
             } else {
                 passphraseEntry
@@ -88,7 +91,7 @@ public struct EncryptedKeySyncControls: View {
         let field = SecureField("Sync passphrase", text: $passphrase)
             .textContentType(.password)
             .privacySensitive()
-            .accessibilityIdentifier("keySync.passphrase")
+            .accessibilityIdentifier("keySyncPassphrase")
         let button = Button {
             let entered = passphrase
             run {
@@ -99,7 +102,7 @@ public struct EncryptedKeySyncControls: View {
             Label("Enable API-Key Sync", systemImage: "lock.open")
         }
         .disabled(passphrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .accessibilityIdentifier("keySync.enable")
+        .accessibilityIdentifier("keySyncEnable")
         #if os(macOS)
         field.textFieldStyle(.roundedBorder)
         button.buttonStyle(.borderedProminent)

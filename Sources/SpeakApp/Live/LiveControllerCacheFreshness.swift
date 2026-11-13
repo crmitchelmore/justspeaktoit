@@ -2,17 +2,17 @@ import AppKit
 import Foundation
 
 struct LiveTranscriptionControllerReusePolicy {
-  static let idleResetThreshold: TimeInterval = 10 * 60
+    static let idleResetThreshold: TimeInterval = 10 * 60
 
-  static func shouldResetControllers(
-    invalidateBeforeNextStart: Bool,
-    lastStopDate: Date?,
-    now: Date
-  ) -> Bool {
-    guard !invalidateBeforeNextStart else { return true }
-    guard let lastStopDate else { return false }
-    return now.timeIntervalSince(lastStopDate) >= idleResetThreshold
-  }
+    static func shouldResetControllers(
+        invalidateBeforeNextStart: Bool,
+        lastStopDate: Date?,
+        now: Date
+    ) -> Bool {
+        guard !invalidateBeforeNextStart else { return true }
+        guard let lastStopDate else { return false }
+        return now.timeIntervalSince(lastStopDate) >= idleResetThreshold
+    }
 }
 
 /// Decides when the cached live controllers must be rebuilt before the next
@@ -21,68 +21,68 @@ struct LiveTranscriptionControllerReusePolicy {
 /// the sleep/wake observers, so their tokens live and die with this state.
 @MainActor
 final class LiveControllerCacheFreshness {
-  private let nowProvider: () -> Date
-  private(set) var isStale = false
-  private var lastStopDate: Date?
-  private var willSleepObserver: NSObjectProtocol?
-  private var didWakeObserver: NSObjectProtocol?
+    private let nowProvider: () -> Date
+    private(set) var isStale = false
+    private var lastStopDate: Date?
+    private var willSleepObserver: NSObjectProtocol?
+    private var didWakeObserver: NSObjectProtocol?
 
-  init(nowProvider: @escaping () -> Date) {
-    self.nowProvider = nowProvider
-    let notificationCenter = NSWorkspace.shared.notificationCenter
-    willSleepObserver = notificationCenter.addObserver(
-      forName: NSWorkspace.willSleepNotification,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      Task { @MainActor [weak self] in
-        self?.markStale()
-      }
+    init(nowProvider: @escaping () -> Date) {
+        self.nowProvider = nowProvider
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        willSleepObserver = notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.markStale()
+            }
+        }
+        didWakeObserver = notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.markStale()
+            }
+        }
     }
-    didWakeObserver = notificationCenter.addObserver(
-      forName: NSWorkspace.didWakeNotification,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      Task { @MainActor [weak self] in
-        self?.markStale()
-      }
+
+    deinit {
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        if let willSleepObserver {
+            notificationCenter.removeObserver(willSleepObserver)
+        }
+        if let didWakeObserver {
+            notificationCenter.removeObserver(didWakeObserver)
+        }
     }
-  }
 
-  deinit {
-    let notificationCenter = NSWorkspace.shared.notificationCenter
-    if let willSleepObserver {
-      notificationCenter.removeObserver(willSleepObserver)
+    var shouldResetBeforeStart: Bool {
+        LiveTranscriptionControllerReusePolicy.shouldResetControllers(
+            invalidateBeforeNextStart: isStale,
+            lastStopDate: lastStopDate,
+            now: nowProvider()
+        )
     }
-    if let didWakeObserver {
-      notificationCenter.removeObserver(didWakeObserver)
+
+    func markStale() {
+        isStale = true
     }
-  }
 
-  var shouldResetBeforeStart: Bool {
-    LiveTranscriptionControllerReusePolicy.shouldResetControllers(
-      invalidateBeforeNextStart: isStale,
-      lastStopDate: lastStopDate,
-      now: nowProvider()
-    )
-  }
+    func recordSuccessfulStart() {
+        isStale = false
+    }
 
-  func markStale() {
-    isStale = true
-  }
+    func recordStop() {
+        lastStopDate = nowProvider()
+    }
 
-  func recordSuccessfulStart() {
-    isStale = false
-  }
-
-  func recordStop() {
-    lastStopDate = nowProvider()
-  }
-
-  /// Fresh controllers were just built: nothing is stale and no stop is old.
-  func recordReset() {
-    isStale = false
-    lastStopDate = nil
-  }
+    /// Fresh controllers were just built: nothing is stale and no stop is old.
+    func recordReset() {
+        isStale = false
+        lastStopDate = nil
+    }
 }

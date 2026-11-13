@@ -150,6 +150,113 @@
       "readOnly" : false,
       "sensitive" : false,
       "type" : "enumeration"
+    },
+    {
+      "default" : false,
+      "description" : "Keep finished cloud recordings in History to play back or transcribe again.",
+      "key" : "keepRecordingsInHistory",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "boolean"
+    },
+    {
+      "default" : false,
+      "description" : "Stop a cloud recording after silence.",
+      "key" : "silenceDetectionEnabled",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "boolean"
+    },
+    {
+      "default" : 0.05,
+      "description" : "Level below which audio counts as silence.",
+      "key" : "silenceThreshold",
+      "maximum" : 0.2,
+      "minimum" : 0.01,
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "number"
+    },
+    {
+      "default" : 2,
+      "description" : "Seconds of silence before stopping.",
+      "key" : "silenceDuration",
+      "maximum" : 5,
+      "minimum" : 0.5,
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "number"
+    },
+    {
+      "default" : true,
+      "description" : "Learn corrections from edits to text the keyboard inserted.",
+      "key" : "autoCorrectionsEnabled",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "boolean"
+    },
+    {
+      "default" : 2,
+      "description" : "Edits before a correction is learned.",
+      "key" : "autoCorrectionsPromotionThreshold",
+      "maximum" : 10,
+      "minimum" : 2,
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "integer"
+    },
+    {
+      "default" : true,
+      "description" : "Play start and stop sounds.",
+      "key" : "recordingSoundsEnabled",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "boolean"
+    },
+    {
+      "allowedValues" : [
+        "classic",
+        "bubbly",
+        "futuristic",
+        "soft"
+      ],
+      "default" : "classic",
+      "description" : "Start and stop sound set.",
+      "key" : "recordingSoundProfile",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "enumeration"
+    },
+    {
+      "default" : 0.7,
+      "description" : "Start and stop sound volume.",
+      "key" : "recordingSoundVolume",
+      "maximum" : 1,
+      "minimum" : 0.02,
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "number"
+    },
+    {
+      "allowedValues" : [
+        "system",
+        "light",
+        "dark"
+      ],
+      "default" : "system",
+      "description" : "Light, dark or follow the phone.",
+      "key" : "appearance",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "enumeration"
+    },
+    {
+      "default" : false,
+      "description" : "Use wallpaper colours instead of the app's palette (Android 12 and later).",
+      "key" : "dynamicColor",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "boolean"
     }
   ],
   "otherPlatformKeys" : [
@@ -160,13 +267,10 @@
     "analyticsEnabled",
     "appSwitchDelivery",
     "appVisibility",
-    "appearance",
     "assemblyAIIgnoredPronunciationTerms",
     "assemblyAIKeyterms",
     "audioPreWarmingEnabled",
     "autoCorrectionCandidates",
-    "autoCorrectionsEnabled",
-    "autoCorrectionsPromotionThreshold",
     "autoPostProcess",
     "autoStartRecording",
     "autoStopOnSilenceEnabled",
@@ -181,7 +285,6 @@
     "diagnosticsConsent",
     "dictationProfiles",
     "doubleTapWindow",
-    "dynamicColor",
     "enableAutomationServer",
     "enableSendToMac",
     "hardwareTriggerDestination",
@@ -191,7 +294,6 @@
     "hotKeyActivation",
     "hotKeyActivationStyle",
     "hudSizePreference",
-    "keepRecordingsInHistory",
     "liveActivitiesEnabled",
     "livePolishDebounceMs",
     "livePolishMinDeltaChars",
@@ -224,9 +326,6 @@
     "postRecordingTailDuration",
     "preferredAudioInputUID",
     "preferredLocaleIdentifier",
-    "recordingSoundProfile",
-    "recordingSoundVolume",
-    "recordingSoundsEnabled",
     "recordingsDirectory",
     "recoveredTranscriptionKeywords",
     "rememberedLocalTranscriptionSource",
@@ -243,9 +342,6 @@
     "showLiveTranscriptInHUD",
     "showSidebarShortcutHints",
     "showStatusBarIconInDockOnly",
-    "silenceDetectionEnabled",
-    "silenceDuration",
-    "silenceThreshold",
     "simpleModelChoices",
     "skipPostProcessingWithLivePolish",
     "sonioxTTSRegion",

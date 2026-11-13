@@ -33,19 +33,7 @@ class RawConfigurationTest {
         "analyticsConsent" to "Analytics opt-in is a consent choice.",
         "diagnosticsConsent" to "Crash-report consent is a consent choice.",
         "autoCorrectionCandidates" to "Learned suggestions are app state, reviewed in Settings.",
-        // Not in the Android schema yet; binding them is tracked in #1700.
-        "recordingSoundsEnabled" to "Recording sounds are edited in Settings only for now.",
-        "recordingSoundProfile" to "Recording sounds are edited in Settings only for now.",
-        "recordingSoundVolume" to "Recording sounds are edited in Settings only for now.",
-        "silenceDetectionEnabled" to "Silence detection is edited in Settings only for now.",
-        "silenceThreshold" to "Silence detection is edited in Settings only for now.",
-        "silenceDuration" to "Silence detection is edited in Settings only for now.",
         "hasCompletedOnboarding" to "First-run state, reopened from Settings > Setup guide, not a preference.",
-        "appearance" to "Appearance is edited in Settings only for now.",
-        "dynamicColor" to "Appearance is edited in Settings only for now.",
-        "autoCorrectionsEnabled" to "Learned corrections are edited in Settings only for now.",
-        "autoCorrectionsPromotionThreshold" to "Learned corrections are edited in Settings only for now.",
-        "keepRecordingsInHistory" to "Keeping recordings is edited in Settings only for now.",
         "preferredAudioInputUID" to "A device ID only means something on the phone that saved it.",
     )
 
@@ -72,6 +60,8 @@ class RawConfigurationTest {
         assertEquals(CloudCatalog.transcriptionModels.map { it.catalogId }, schema.field("cloud_model")?.allowedValues)
         assertEquals(CloudCatalog.cleanupModels.map { it.selectionId }, schema.field("cleanup_model")?.allowedValues)
         assertEquals(DictationLanguages.all.map { it.id }, schema.field("preferredLocale")?.allowedValues)
+        assertEquals(RecordingSoundProfile.entries.map { it.id }, schema.field("recordingSoundProfile")?.allowedValues)
+        assertEquals(AppAppearance.entries.map { it.rawValue }, schema.field("appearance")?.allowedValues)
     }
 
     @Test

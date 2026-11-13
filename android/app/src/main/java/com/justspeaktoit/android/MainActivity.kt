@@ -73,9 +73,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var tipStore: PlayBillingTipStore
     private val setupStatus = mutableStateOf(OnboardingStatus(MicPermission.NotRequested, false, false))
     private val prefs by lazy { AppPreferences(this) }
-    private val appearanceState by lazy {
-        mutableStateOf(AppearanceChoice(prefs.appearance, prefs.dynamicColor))
-    }
 
     // The guide and Troubleshooting ask for the microphone without starting a recording; every other request starts one.
     private var startAfterGrant = true
@@ -156,7 +153,7 @@ class MainActivity : ComponentActivity() {
                     viewModel.refreshBalances()
                 }
             }
-            var appearance by appearanceState
+            val appearance = AppearanceChoice(state.appearance, state.dynamicColor)
             val dark = appearance.appearance.isDark(isSystemInDarkTheme())
             // Bar icons follow the chosen appearance, not the phone's, so they stay readable.
             DisposableEffect(dark) {
@@ -216,11 +213,7 @@ class MainActivity : ComponentActivity() {
                                 onAudioInputChanged = viewModel::setAudioInput,
                                 onPreviewRecordingSound = viewModel::previewRecordingSound,
                                 onRunSetup = { screen = Screen.Onboarding },
-                                onAppearanceChanged = { choice ->
-                                    prefs.appearance = choice.appearance
-                                    prefs.dynamicColor = choice.dynamicColor
-                                    appearance = choice
-                                },
+                                onAppearanceChanged = { viewModel.setAppearance(it.appearance, it.dynamicColor) },
                                 onExportConfiguration = {
                                     exportConfiguration.launch("JustSpeakToIt-config-${LocalDate.now()}.zip")
                                 },

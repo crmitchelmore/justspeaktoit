@@ -15,6 +15,7 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceHold
+import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
@@ -96,6 +97,10 @@ data class DictationUiState(
     /** The microphone Cloud recordings use; null is the system default. */
     val audioInputId: String? = null,
     val audioInputs: List<AudioInput> = emptyList(),
+    /** Light, dark or the phone's; the Activity themes itself from this. */
+    val appearance: AppAppearance = AppAppearance.System,
+    /** Wallpaper colours instead of the brand palette, where the phone supports them. */
+    val dynamicColor: Boolean = false,
     /** Exporting and importing the configuration archive. */
     val transfer: ConfigTransferState = ConfigTransferState(),
 ) {

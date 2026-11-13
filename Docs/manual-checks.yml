@@ -1727,6 +1727,20 @@ sessions:
           - "Turn on cleanup with a provider whose key is not saved and tap Turn off cleanup; then repeat with TalkBack on."
         expected: "Problems are listed first with a matching summary line, and every row turns OK after its fix without reopening the page. The microphone fix opens the permission prompt or app settings, the keyboard fix opens the phone's keyboard list, the missing key row names the provider and jumps to API keys, and Turn off cleanup removes the cleanup key row. TalkBack reads each row with its severity, each fix button with its row, and announces the summary when it changes."
         final_gate: false
+      - id: "android-raw-configuration-newer-settings"
+        issues:
+          - 1700
+        title: "Android raw configuration carries the newer Settings choices"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1700"
+        steps:
+          - "Open Settings \u203a Edit raw configuration and tap Show current. Check it lists appearance, dynamicColor, recordingSoundsEnabled, recordingSoundProfile, recordingSoundVolume, silenceDetectionEnabled, silenceThreshold, silenceDuration, autoCorrectionsEnabled, autoCorrectionsPromotionThreshold and keepRecordingsInHistory with the values Settings shows."
+          - "Set \"silenceDuration\" to 9 and tap Validate: an error says it must be between 0.5 and 5, and nothing changes."
+          - "Set \"appearance\" to \"dark\", \"recordingSoundProfile\" to \"soft\", \"silenceDetectionEnabled\" to true and \"autoCorrectionsPromotionThreshold\" to 4, then tap Apply: the app turns dark at once and Settings shows the Soft sounds, Stop recording after silence on and 4 edits."
+          - "Drag the recording-sound volume slider to its lowest point and tap Show current: recordingSoundVolume is 0.02, not 0."
+        expected: "Every listed setting appears with its current value, out-of-range values are refused, applied values show in Settings and the theme at once, and the volume never drops below the shared 2% floor."
+        final_gate: false
   - id: "windows"
     device: "Windows"
     title: "Windows"

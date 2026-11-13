@@ -24,6 +24,7 @@ import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.SecretStore
+import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.DictationPreferences
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
@@ -322,6 +323,8 @@ internal class MemoryPrefs(
     override var audioInputId: String? = null,
     override var silence: SilenceSettings = SilenceSettings(),
     override var handsFreeEnabled: Boolean = false,
+    override var appearance: AppAppearance = AppAppearance.System,
+    override var dynamicColor: Boolean = false,
 ) : DictationPreferences
 
 internal class MemoryHistoryFile : HistoryFile {

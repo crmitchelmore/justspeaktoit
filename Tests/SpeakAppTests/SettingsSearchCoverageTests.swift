@@ -90,16 +90,30 @@ final class SettingsSearchCoverageTests: XCTestCase {
     }
 
     /// The iOS raw configuration (#1608) covers every persisted iPhone setting
-    /// except secrets and the derived state the search guard also exempts.
+    /// except secrets and the derived state the search guard also exempts,
+    /// including the Read aloud store (#1671).
     func testEveryPersistedIOSSettingHasARawConfigurationField() throws {
+        let readAloudStore = "IOSVoiceOutputSettings.swift"
         let sources = try swiftFiles(under: "Sources/SpeakiOS/Settings")
             .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
+            + swiftFiles(under: "Sources/SpeakiOS/Services")
+            .filter { ($0.0 as NSString).lastPathComponent == readAloudStore }
+        XCTAssertTrue(sources.contains { $0.0.hasSuffix(readAloudStore) }, "The Read aloud store moved")
         let declarations = sources.flatMap { publishedProperties(in: $0.1) }
-        let published = Set(declarations.filter { !$0.hasSuffix("APIKey") })
+        let keys = declarations.filter { !$0.hasSuffix("APIKey") }.map { Self.iOSRawConfigurationKeys[$0] ?? $0 }
+        let published = Set(keys)
             .subtracting(Self.unindexedIOSSettings.keys)
+            .subtracting(Self.iOSSettingsWithoutRawConfigurationField.keys)
         XCTAssertGreaterThan(published.count, 10, "The scan no longer finds iOS AppSettings properties")
         XCTAssertEqual(published, Set(SettingsSchema.keys(for: .iOS)))
     }
+
+    /// iOS properties stored under the key the Mac uses for the same setting.
+    private static let iOSRawConfigurationKeys = ["sonioxRegion": "sonioxTTSRegion"]
+
+    private static let iOSSettingsWithoutRawConfigurationField: [String: String] = [
+        "ttsVoiceName": "Display name derived from ttsVoice when the raw configuration applies."
+    ]
 
     func testEverySettingsTabHasASearchableRoot() {
         let roots = Set(SettingsSearchCatalog.entries(for: .macOS).filter(\.isSectionRoot).map(\.section))

@@ -607,6 +607,7 @@ sessions:
       - id: "iphone-raw-configuration-editor"
         issues:
           - 1608
+          - 1671
         title: "iPhone raw configuration editor validates, applies all or none, imports and exports"
         minutes: 5
         core: false
@@ -615,7 +616,8 @@ sessions:
           - "Open Settings \u203a General \u203a Edit raw configuration \u203a Raw configuration. Check no API key value appears; \"apiKeys\" lists only true or false."
           - "Change \"autoStopSilenceSeconds\" to 30 and tap Validate, then Apply: an error names settings.autoStopSilenceSeconds and nothing is saved."
           - "Set it to 5 and \"hardwareTriggerDestination\" to \"historyOnly\", tap Apply, go back to Recording & Shortcuts: both show the new values."
-          - "Tap Export, save to Files, tap Reset to Defaults and confirm, Apply, then Import the saved file and Apply: your values come back."
+          - "Check the document lists the Read aloud settings (\"ttsProvider\", \"ttsModel\", \"ttsVoice\", \"ttsSpeed\", \"ttsLanguageIdentifier\", \"sonioxTTSRegion\"). With \"ttsProvider\" \"deepgram\", set \"ttsSpeed\" to 3 and tap Validate: an error names settings.ttsSpeed. Set it to 1.5 and \"ttsLanguageIdentifier\" to \"en_GB\" and tap Apply: no error."
+          - "Tap Export, save to Files, tap Reset to Defaults and confirm, Apply, then Import the saved file and Apply: your values come back, including \"ttsSpeed\" 1.5 and \"ttsLanguageIdentifier\" \"en_GB\"."
           - "With VoiceOver on, tap Validate on an invalid document: VoiceOver reads the result and the first error."
           - "Search Settings for \"raw\" or \"json\": Edit raw configuration is a result and opens General."
         expected: "Errors name each bad key and nothing changes until every value is valid; applied values show on their Settings pages at once; export, reset and import round-trip; results are announced to VoiceOver."

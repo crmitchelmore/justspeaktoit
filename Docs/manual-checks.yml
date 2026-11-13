@@ -504,6 +504,21 @@ sessions:
           - "Turn Allow automation to change settings on, run speak config set ttsSpeed=1.1 showCompactHUD=true, then speak config get --prefix tts."
         expected: "Invalid edits change nothing and every error is announced; valid edits, export/import and reset round-trip. CLI writes are refused until the opt-in is on, dry runs always work, and get shows the new values with no API key material."
         final_gate: false
+      - id: "owner-desktop-speak-config"
+        issues:
+          - 1608
+        title: "Windows and Linux: speak config reads and changes preferences safely"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Windows or Linux, the first Alpha build that includes the #1608 desktop configuration tools, with automation on and the speak CLI set up"
+        steps:
+          - "Run speak config get --prefix show and check the output lists showHUD and every API key only as set or not set."
+          - "With Preferences \u203a General \u203a Allow automation to change settings off, run speak config set showHUD=false: it is refused. Run it again with --dry-run: it reports the change without applying it."
+          - "Turn Allow automation to change settings on with a screen reader running (Narrator or Orca) and check it reads the switch name and state."
+          - "Run speak config set showHUD=false holdThreshold=9: both are refused and nothing changes. Then run speak config set showHUD=false and open Preferences: Show recording HUD is off."
+          - "Export preferences, turn the allow switch off, import the file: the switch stays off."
+        expected: "Reads never show key material, writes are refused until the local switch is on and are all-or-nothing, Preferences shows the change at once, and importing a file never turns the switch on."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"

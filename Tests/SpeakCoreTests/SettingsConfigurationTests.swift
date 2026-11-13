@@ -195,4 +195,59 @@ final class SettingsConfigurationTests: XCTestCase {
         XCTAssertEqual(report.changes, [:])
         XCTAssertEqual(report.warnings.first?.path, "platform")
     }
+
+    // MARK: - Windows and Linux (#1608)
+
+    private func desktopContext(_ platform: SettingsSchemaPlatform = .windows) -> SettingsValidationContext {
+        var context = SettingsValidationContext(currentValues: Dictionary(uniqueKeysWithValues:
+            SettingsSchema.fields(for: platform).compactMap { field in field.defaultValue.map { (field.key, $0) } }))
+        context.platform = platform
+        return context
+    }
+
+    func testDesktopSchema_coversEveryPortablePreferenceAndItsDefaultsPass() {
+        let keys = Set(SettingsSchema.keys(for: .windows))
+        XCTAssertEqual(SettingsSchema.keys(for: .linux), SettingsSchema.keys(for: .windows))
+        XCTAssertEqual(keys.count, SettingsSchema.keys(for: .windows).count)
+        XCTAssertEqual(
+            keys.subtracting([ApplicationPreferenceKey.enableAutomationServer.rawValue]),
+            Set(DesktopConfiguration.fields.map(\.key)).subtracting([DesktopConnectionPreWarming.approvalProjectionKey])
+        )
+        let context = self.desktopContext()
+        let report = SettingsValidator.validate(settings: context.currentValues, context: context)
+        XCTAssertEqual(report.errors, [])
+        XCTAssertEqual(report.changes, [:])
+        XCTAssertTrue(SettingsSchema.fields(for: .windows).allSatisfy { !$0.isSensitive })
+        XCTAssertTrue(try DesktopConfiguration(values: context.currentValues.mapValues(AnyCodable.init)).values
+            .keys.contains("showHUD"))
+    }
+
+    func testDesktopSchema_grantAndConsentAreReadOnlyAndRangesMatchTheDesktopCatalogue() throws {
+        for key in ["allowAutomationConfigurationChanges", "enableAutomationServer", "analyticsEnabled"] {
+            XCTAssertEqual(SettingsSchema.field(forKey: key, platform: .linux)?.isReadOnly, true, key)
+        }
+        let report = SettingsValidator.validate(
+            settings: ["holdThreshold": .double(9), "showHUD": .string("yes"),
+                       "autoCorrectionsPromotionThreshold": .double(3.5)],
+            context: self.desktopContext())
+        XCTAssertEqual(Set(self.errorPaths(report)), [
+            "settings.holdThreshold", "settings.showHUD", "settings.autoCorrectionsPromotionThreshold"
+        ])
+        let modulate = try XCTUnwrap(DesktopConfiguration.modulatePreferenceKeys.first)
+        XCTAssertEqual(SettingsSchema.field(forKey: modulate, platform: .windows)?.kind, .boolean)
+    }
+
+    func testDesktopSchema_macOnlyKeysAreKeptButIgnoredAndDesktopsShareDocuments() throws {
+        let macOnly = try XCTUnwrap(Set(SettingsSchema.keys(for: .macOS))
+            .subtracting(SettingsSchema.keys(for: .windows)).sorted().first)
+        let fromLinux = SettingsValidator.validate(
+            SettingsDocument(platform: "linux", settings: [macOnly: .bool(true)]), context: self.desktopContext())
+        XCTAssertTrue(fromLinux.isValid)
+        XCTAssertEqual(fromLinux.ignoredKeys, [macOnly])
+        XCTAssertNotEqual(fromLinux.warnings.first?.path, "platform")
+        let fromMac = SettingsValidator.validate(
+            SettingsDocument(platform: "macOS", settings: [:]), context: self.desktopContext(.linux))
+        XCTAssertEqual(fromMac.warnings.first?.path, "platform")
+        XCTAssertTrue(SettingsSchema.platforms(forKey: "showHUD").contains(.windows))
+    }
 }

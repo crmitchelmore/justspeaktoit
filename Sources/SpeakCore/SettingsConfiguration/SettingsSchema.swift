@@ -97,55 +97,113 @@ public struct SettingsSchemaField: Hashable, Sendable {
     }
 }
 
+/// A host that implements the raw configuration. The raw value is the
+/// document's `platform` and the name automation reports.
+public enum SettingsSchemaPlatform: String, CaseIterable, Codable, Sendable {
+    case macOS
+    case iOS
+    case windows
+    case linux
+    case android
+
+    public var searchPlatform: SettingsSearchPlatforms {
+        switch self {
+        case .macOS: return .macOS
+        case .iOS: return .iOS
+        case .windows: return .windows
+        case .linux: return .linux
+        case .android: return .android
+        }
+    }
+
+    /// Windows and Linux share one settings model, so documents move between
+    /// them without a cross-platform warning.
+    public func sharesSettings(with other: SettingsSchemaPlatform) -> Bool {
+        self == other || (self.isDesktop && other.isDesktop)
+    }
+
+    var isDesktop: Bool { self == .windows || self == .linux }
+}
+
 /// The versioned raw-configuration schema.
 ///
 /// One definition, in SpeakCore, describes every persisted setting a host's raw
 /// editor and the `get_configuration`/`set_configuration` automation tools read
-/// and write. Hosts bind these keys to their own settings model and prove, with
-/// coverage tests, that every persisted setting has an entry here.
+/// and write. Each platform has its own field list over the shared keys; hosts
+/// bind those keys to their own settings model and prove, with coverage tests,
+/// that every persisted setting has an entry here.
 public enum SettingsSchema {
     /// Bumped when a document written by this version could be misread by an
     /// older one. Newer documents are refused rather than half-applied.
     public static let version = 1
 
+    /// The Mac's fields; see `fields(for:)` for other platforms.
     public static let fields: [SettingsSchemaField] = macOSFields
 
-    private static let fieldsByKey: [String: SettingsSchemaField] = Dictionary(
-        fields.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first }
+    public static func fields(for platform: SettingsSchemaPlatform) -> [SettingsSchemaField] {
+        switch platform {
+        case .macOS: return macOSFields
+        case .windows, .linux: return desktopFields
+        // No raw configuration on these hosts yet (#1608).
+        case .iOS, .android: return []
+        }
+    }
+
+    private static let fieldsByPlatform: [SettingsSchemaPlatform: [String: SettingsSchemaField]] = Dictionary(
+        uniqueKeysWithValues: SettingsSchemaPlatform.allCases.map { platform in
+            (platform, Dictionary(fields(for: platform).map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first }))
+        }
     )
 
     public static func field(forKey key: String) -> SettingsSchemaField? {
-        fieldsByKey[key]
+        field(forKey: key, platform: .macOS)
+    }
+
+    public static func field(forKey key: String, platform: SettingsSchemaPlatform) -> SettingsSchemaField? {
+        fieldsByPlatform[platform]?[key]
     }
 
     public static var keys: [String] { fields.map(\.key) }
+
+    public static func keys(for platform: SettingsSchemaPlatform) -> [String] {
+        fields(for: platform).map(\.key)
+    }
 
     /// Setting keys the search catalogue lists for any host. A key here without a
     /// schema field belongs to another platform's settings model; documents keep
     /// it so a configuration moved between platforms loses nothing.
     public static let catalogueKeys: Set<String> = Set(SettingsSearchCatalog.entries.flatMap(\.settingKeys))
 
-    /// The hosts that show `key`, from every search entry listing it. Keys the
-    /// catalogue does not list default to the Mac, the only host that implements
-    /// this schema so far.
+    /// Every key some platform's settings model owns: the search catalogue's
+    /// keys plus each platform's schema. A document key outside this set is a typo.
+    public static let knownKeys: Set<String> = catalogueKeys.union(
+        SettingsSchemaPlatform.allCases.flatMap { keys(for: $0) }
+    )
+
+    /// The hosts that show `key`: every search entry listing it, plus every
+    /// platform whose schema has it. Keys neither lists default to the Mac.
     public static func platforms(forKey key: String) -> SettingsSearchPlatforms {
-        let platforms = SettingsSearchCatalog.entries
+        var platforms = SettingsSearchCatalog.entries
             .filter { $0.settingKeys.contains(key) }
             .reduce(into: SettingsSearchPlatforms()) { $0.formUnion($1.platforms) }
+        for platform in SettingsSchemaPlatform.allCases where fieldsByPlatform[platform]?[key] != nil {
+            platforms.formUnion(platform.searchPlatform)
+        }
         return platforms.isEmpty ? .macOS : platforms
     }
 
     public static func platformNames(_ platforms: SettingsSearchPlatforms) -> [String] {
-        let names: [(SettingsSearchPlatforms, String)] = [
-            (.macOS, "macOS"), (.iOS, "iOS"), (.windows, "windows"), (.linux, "linux"), (.android, "android")
-        ]
-        return names.filter { platforms.contains($0.0) }.map(\.1)
+        SettingsSchemaPlatform.allCases.filter { platforms.contains($0.searchPlatform) }.map(\.rawValue)
     }
 
     /// Fields as automation describes them, keyed by setting.
     public static func describe(keys: [String]? = nil) -> [String: AnyCodable.JSONValue] {
+        describe(keys: keys, platform: .macOS)
+    }
+
+    public static func describe(keys: [String]?, platform: SettingsSchemaPlatform) -> [String: AnyCodable.JSONValue] {
         let selected = keys.map { Set($0) }
-        return fields.reduce(into: [:]) { result, field in
+        return fields(for: platform).reduce(into: [:]) { result, field in
             guard selected?.contains(field.key) ?? true else { return }
             result[field.key] = field.schemaDescription
         }

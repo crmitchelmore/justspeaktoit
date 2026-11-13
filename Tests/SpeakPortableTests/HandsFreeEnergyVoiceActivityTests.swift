@@ -82,18 +82,23 @@ final class HandsFreeEnergyVoiceActivityTests: XCTestCase {
     }
 
     func testSpeechAsTheMicrophoneOpens_StillTriggers() {
-        var detector = HandsFreeEnergyVoiceActivityDetector()
-        // Steady speech with no syllable dips, so calibration never sees the room.
-        let steadyVoice = { (time: Double) -> Float in 0.1 * Float(sin(2 * Double.pi * 180 * time)) }
-        let updates = feed(&detector, seconds: 1, tone: steadyVoice)
+        // Steady speech with no syllable dips, so calibration never sees the room:
+        // about -23 dBFS, and about -40 dBFS for quiet speech.
+        for amplitude: Float in [0.1, 0.014] {
+            for sensitivity in AppleSpeechDetectorSensitivity.allCases {
+                var detector = HandsFreeEnergyVoiceActivityDetector(sensitivity: sensitivity)
+                let steadyVoice = { (time: Double) -> Float in amplitude * Float(sin(2 * Double.pi * 180 * time)) }
+                let updates = feed(&detector, seconds: 1, tone: steadyVoice)
 
-        let firstSpeech = updates.first { $0.speechDetected }
-        XCTAssertNotNil(firstSpeech, "Speech already under way when arming must not be learned as room noise")
-        XCTAssertLessThanOrEqual(
-            firstSpeech?.seconds ?? .infinity,
-            detector.configuration.calibrationSeconds + HandsFreeDictationPolicy.speechStartBudgetSeconds,
-            "Speech is reported within the start budget once calibration ends"
-        )
+                let firstSpeech = updates.first { $0.speechDetected }
+                XCTAssertNotNil(firstSpeech, "Speech under way when arming must not be learned as room noise")
+                XCTAssertLessThanOrEqual(
+                    firstSpeech?.seconds ?? .infinity,
+                    detector.configuration.calibrationSeconds + HandsFreeDictationPolicy.speechStartBudgetSeconds,
+                    "\(sensitivity) at \(amplitude): speech is reported within the start budget after calibration"
+                )
+            }
+        }
     }
 
     func testShortClicks_DoNotTriggerSpeech() {

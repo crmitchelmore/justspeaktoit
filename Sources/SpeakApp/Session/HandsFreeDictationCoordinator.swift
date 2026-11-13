@@ -244,6 +244,7 @@ final class HandsFreeDictationCoordinator {
       engine.stop()
       inputNode.removeTap(onBus: 0)
       session.cancel()
+      if error is CancellationError { throw error }
       throw HandsFreeMicrophoneUnavailable()
     }
   }

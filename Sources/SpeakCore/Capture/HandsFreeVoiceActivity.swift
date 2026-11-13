@@ -65,7 +65,12 @@ public struct HandsFreeEnergyVoiceActivityDetector: Sendable {
         /// Highest noise floor calibration may seed. Someone already speaking as
         /// the microphone opens would otherwise be learned as room noise and
         /// never trigger; a genuinely louder room is learned as the floor rises.
+        /// Defaults to `quietestSpeechAtOpenDB - onsetMarginDB`.
         public var maximumCalibratedNoiseFloorDB: Double
+
+        /// Steady speech at least this loud while the microphone opens still
+        /// triggers. Only a room louder than this can cause one false start.
+        public static let quietestSpeechAtOpenDB: Double = -42
         /// Time constant for the noise floor rising while nobody speaks.
         public var noiseFloorRiseSeconds: Double
         /// Time constant for the noise floor rising during speech, so a steady
@@ -86,7 +91,7 @@ public struct HandsFreeEnergyVoiceActivityDetector: Sendable {
             minimumSpeechSeconds: Double = 0.12,
             releaseHangSeconds: Double = 0.25,
             calibrationSeconds: Double = 0.2,
-            maximumCalibratedNoiseFloorDB: Double = -45,
+            maximumCalibratedNoiseFloorDB: Double? = nil,
             noiseFloorRiseSeconds: Double = 4,
             noiseFloorRiseWhileSpeakingSeconds: Double = 8,
             noiseFloorFallSeconds: Double = 0.15,
@@ -101,6 +106,7 @@ public struct HandsFreeEnergyVoiceActivityDetector: Sendable {
             self.releaseHangSeconds = releaseHangSeconds
             self.calibrationSeconds = calibrationSeconds
             self.maximumCalibratedNoiseFloorDB = maximumCalibratedNoiseFloorDB
+                ?? Self.quietestSpeechAtOpenDB - onsetMarginDB
             self.noiseFloorRiseSeconds = noiseFloorRiseSeconds
             self.noiseFloorRiseWhileSpeakingSeconds = noiseFloorRiseWhileSpeakingSeconds
             self.noiseFloorFallSeconds = noiseFloorFallSeconds

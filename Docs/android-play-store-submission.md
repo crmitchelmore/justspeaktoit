@@ -173,8 +173,9 @@ account JSON, and never paste them into an issue.
    default language English (United Kingdom), App, Free. Accept the
    declarations. The package name is fixed by the first upload:
    `com.justspeaktoit.android`.
-Steps 2 and 3 are done: an RSA 4096 PKCS12 upload key (alias `upload`, SHA-256
-certificate fingerprint `A9:2E:3F:3A:69:2A:F9:D0:12:E2:28:9D:F7:7F:9B:33:CA:64:D9:1C:1B:42:E3:BE:38:CF:E5:8D:CC:DD:0E:31`)
+Steps 2 and 3 are done: a keytool RSA 4096 PKCS12 upload key (alias `upload`,
+SHA-256 certificate fingerprint
+`BF:2D:AC:AF:10:23:36:23:F2:D8:8A:AA:79:02:83:8E:2B:FA:4B:F2:AC:33:28:FF:19:6B:35:E7:C8:DC:82:49`)
 is in the `android-release` secrets, with a copy in the owner Mac's login
 Keychain under service `justspeaktoit-android-upload` (accounts
 `upload-keystore-base64` and `upload-keystore-password`; the key password is

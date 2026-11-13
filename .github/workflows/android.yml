@@ -147,7 +147,8 @@ jobs:
             echo "::error::$aab is not signed with the upload key"
             exit 1
           fi
-          jarsigner -verify -strict "$aab" >/dev/null
+          # Not -strict: upload keys are self-signed, which -strict always rejects (exit 4).
+          jarsigner -verify "$aab" | grep -q '^jar verified'
           rm -f "$RUNNER_TEMP/upload.jks"
 
       - name: Upload release bundle

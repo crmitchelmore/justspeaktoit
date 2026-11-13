@@ -62,6 +62,7 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
  for(const [change,message] of [
   [m=>{m.actions.Record.descriptionMetadata.descriptionText.key='Records on an iPhOnE.';},'ITMS-90626'],
   [m=>{m.actions.Record.descriptionMetadata.descriptionText.key='Records with Siri.';},'ITMS-90626'],
+  [m=>{m.actions.Record.parameters=[{title:{key:'Apple Watch',alternatives:[]}}];},'ITMS-90626'],
   [m=>{m.actions.Record.descriptionMetadata.descriptionText.key='Records speech';},'must end with a period'],
   [m=>{m.actions.Record.descriptionMetadata.descriptionText.alternatives=['Unexpected schema'];},'Unsupported localized'],
   [m=>{m.autoShortcuts=Array.from({length:11},()=>({phraseTemplates:[{key:'Record with ${applicationName}'}]}));},'maximum ten'],

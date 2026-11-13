@@ -154,6 +154,84 @@
       "selectionId" : "anthropic/claude-sonnet-5.5"
     }
   ],
+  "keywordPrompt" : {
+    "maximumBytes" : 224,
+    "maximumTerms" : 100
+  },
+  "languages" : [
+    {
+      "displayName" : "Automatic",
+      "id" : "automatic"
+    },
+    {
+      "displayName" : "English (United States)",
+      "id" : "en_US"
+    },
+    {
+      "displayName" : "English (United Kingdom)",
+      "id" : "en_GB"
+    },
+    {
+      "displayName" : "English (Australia)",
+      "id" : "en_AU"
+    },
+    {
+      "displayName" : "English (Canada)",
+      "id" : "en_CA"
+    },
+    {
+      "displayName" : "Spanish (Spain)",
+      "id" : "es_ES"
+    },
+    {
+      "displayName" : "Spanish (Mexico)",
+      "id" : "es_MX"
+    },
+    {
+      "displayName" : "French (France)",
+      "id" : "fr_FR"
+    },
+    {
+      "displayName" : "German (Germany)",
+      "id" : "de_DE"
+    },
+    {
+      "displayName" : "Hindi (India)",
+      "id" : "hi_IN"
+    },
+    {
+      "displayName" : "Japanese (Japan)",
+      "id" : "ja_JP"
+    },
+    {
+      "displayName" : "Korean (South Korea)",
+      "id" : "ko_KR"
+    },
+    {
+      "displayName" : "Portuguese (Brazil)",
+      "id" : "pt_BR"
+    },
+    {
+      "displayName" : "Portuguese (Portugal)",
+      "id" : "pt_PT"
+    },
+    {
+      "displayName" : "Chinese (Simplified)",
+      "id" : "zh_CN"
+    },
+    {
+      "displayName" : "Chinese (Traditional)",
+      "id" : "zh_TW"
+    },
+    {
+      "displayName" : "Arabic (Saudi Arabia)",
+      "id" : "ar_SA"
+    },
+    {
+      "displayName" : "Russian (Russia)",
+      "id" : "ru_RU"
+    }
+  ],
   "providers" : [
     {
       "chatCompletionsURL" : "https://api.openai.com/v1/chat/completions",
@@ -191,14 +269,16 @@
       "catalogId" : "openai/gpt-transcribe",
       "displayName" : "GPT Transcribe (OpenAI)",
       "languageField" : "languages[]",
-      "provider" : "openai"
+      "provider" : "openai",
+      "supportsPrompt" : true
     },
     {
       "apiName" : "whisper-large-v3-turbo",
       "catalogId" : "groq/whisper-large-v3-turbo",
       "displayName" : "Whisper Large v3 Turbo (Groq)",
       "languageField" : "language",
-      "provider" : "groq"
+      "provider" : "groq",
+      "supportsPrompt" : true
     }
   ],
   "version" : 1

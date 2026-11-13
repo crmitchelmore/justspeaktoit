@@ -91,29 +91,56 @@ struct KeyboardControlRow: View {
     private func profileMenu(label: String) -> some View {
         Menu {
             ForEach(model.profileOptions) { profile in
-                Button {
-                    model.selectProfile(profile.id)
-                } label: {
-                    Label(
-                        "\(profile.displayName) · \(profile.route.displayName)",
-                        systemImage: profile.id == model.selectedProfileIdentifier ? "checkmark" : "circle"
-                    )
-                }
+                profileMenuItem(profile)
             }
         } label: {
-            Text(label)
-                .font(.footnote.weight(.semibold))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .padding(.horizontal, 8)
-                .frame(minWidth: 44, minHeight: 46)
+            HStack(spacing: 4) {
+                if model.profileUnavailableNote != nil {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .accessibilityHidden(true)
+                }
+                Text(label)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .padding(.horizontal, 8)
+            .frame(minWidth: 44, minHeight: 46)
         }
         .background(keyBackground)
         .disabled(surface.isBusy)
-        .accessibilityLabel(
-            "Dictation profile \(model.profileDisplayName), \(model.profileRouteDisplayName). Choose profile."
-        )
+        .accessibilityLabel(profileChipAccessibilityLabel)
         .accessibilityIdentifier("keyboardProfileChip")
+    }
+
+    private var profileChipAccessibilityLabel: String {
+        let base = "Dictation profile \(model.profileDisplayName), \(model.profileRouteDisplayName)."
+        guard let note = model.profileUnavailableNote else { return base + " Choose profile." }
+        return base + " \(note). Choose profile."
+    }
+
+    /// An unavailable profile stays selectable (the app may gain the key
+    /// later) but says why it cannot run, so a checkmark never implies it will.
+    private func profileMenuItem(_ profile: KeyboardDictationProfileOption) -> some View {
+        let title = "\(profile.displayName) · \(profile.route.displayName)"
+        let isSelected = profile.id == model.selectedProfileIdentifier
+        let note = profile.unavailableNote
+        let symbol = isSelected ? "checkmark" : note == nil ? "circle" : "exclamationmark.triangle"
+        return Button {
+            model.selectProfile(profile.id)
+        } label: {
+            Label {
+                Text(title)
+                if let note {
+                    Text(note)
+                }
+            } icon: {
+                Image(systemName: symbol)
+            }
+        }
+        .accessibilityLabel([title, isSelected ? "Selected" : nil, note].compactMap { $0 }.joined(separator: ". "))
+        .accessibilityIdentifier("keyboardProfileOption-\(profile.id)")
     }
 
     private var micButton: some View {

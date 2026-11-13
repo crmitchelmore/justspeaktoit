@@ -3,8 +3,8 @@ import Foundation
 import SpeakCore
 
 /// The model a foreground run records with, decided once before its session
-/// exists: the offline on-device fallback (issue #999), then the live route's
-/// resolved model.
+/// exists: the offline on-device fallback (issue #999), then a check that the
+/// resulting model can run. A model that cannot is reported, never replaced.
 struct ForegroundCaptureRoute: Equatable {
     var modelID: String
     /// The cloud model this run would have used online, tagged for a later upgrade.
@@ -14,14 +14,15 @@ struct ForegroundCaptureRoute: Equatable {
     var requiresStrictOnDeviceRecognition: Bool
 
     /// Throws ``iOSTranscriptionError/offlineLocalRecognitionUnavailable``
-    /// when the run can neither reach its provider nor recognise on device.
+    /// when the run can neither reach its provider nor recognise on device,
+    /// and whatever `requireAvailable` throws for the model the run would use.
     /// `localCapability` is only asked when the decision depends on it.
     static func resolve(
         requestedModelID: String,
         usesBatch: Bool,
         connectivity: CaptureConnectivitySnapshot,
         localCapability: () -> AppleLocalRecognitionCapability,
-        resolveLiveModel: (String) -> String
+        requireAvailable: (String) throws -> Void
     ) throws -> Self {
         let capability = OfflineCaptureRouting.needsLocalCapability(
             usesBatch: usesBatch, requestedModelID: requestedModelID, connectivity: connectivity
@@ -36,8 +37,9 @@ struct ForegroundCaptureRoute: Equatable {
         guard case .use(let offline) = decision else {
             throw iOSTranscriptionError.offlineLocalRecognitionUnavailable
         }
+        try requireAvailable(offline.modelID)
         return Self(
-            modelID: usesBatch ? offline.modelID : resolveLiveModel(offline.modelID),
+            modelID: offline.modelID,
             offlineIntendedModelID: offline.notice == nil ? nil : requestedModelID,
             notice: offline.notice,
             requiresStrictOnDeviceRecognition: offline.requiresStrictOnDeviceRecognition
@@ -55,12 +57,7 @@ struct ForegroundCaptureRoute: Equatable {
         return try resolve(
             requestedModelID: requestedModelID, usesBatch: usesBatch, connectivity: connectivity,
             localCapability: { localCapability(localeIdentifier) },
-            resolveLiveModel: { modelID in
-                LiveTranscriptionRouting.resolvedModelID(
-                    for: modelID,
-                    apiKey: LiveTranscriptionRouting.route(for: modelID).map { settings.liveAPIKey(for: $0) }
-                )
-            }
+            requireAvailable: { try settings.requireTranscriptionAvailable($0, usesBatch: usesBatch) }
         )
     }
 

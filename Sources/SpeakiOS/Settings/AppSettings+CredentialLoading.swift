@@ -54,6 +54,7 @@ extension AppSettings {
     /// selection runs afterwards so it sees the loaded keys.
     func startLoadingCredentials() {
         observeSecureStorageChanges()
+        observeKeyboardProfileAvailability()
         secrets.protectedDataObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.protectedDataDidBecomeAvailableNotification,
             object: nil,

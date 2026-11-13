@@ -33,7 +33,10 @@ final class CoreJourneyHotKeyUITests: XCTestCase {
         app.launchEnvironment["SPEAK_CORE_JOURNEY_PROFILE"] = identifier.uuidString
         app.launchEnvironment["SPEAK_CORE_JOURNEY_DIRECTORY"] = directory.path
         app.launchEnvironment["SPEAK_CORE_JOURNEY_HOTKEY_PROBE"] = "1"
-        app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
+        app.launchArguments = [
+            "-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES",
+            "-diagnosticsConsent", "declined"
+        ]
         registerCleanup(app: app, fixture: fixture, suiteName: suiteName, directory: directory)
 
         app.launch()

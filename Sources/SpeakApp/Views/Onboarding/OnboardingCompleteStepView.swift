@@ -27,6 +27,10 @@ struct CompleteStepView: View {
                 Text("\(ReleaseTrain.current.displayName) is ready to use")
                     .foregroundColor(.secondary)
 
+                DiagnosticsConsentToggle(accessibilityIdentifier: "onboardingDiagnosticsConsentToggle")
+                    .toggleStyle(.switch)
+                    .frame(maxWidth: 440)
+
                 if AppEnvironment.shared?.analyticsAvailable == true {
                     Toggle(
                         "Share anonymous analytics",

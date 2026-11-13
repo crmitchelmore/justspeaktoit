@@ -21,7 +21,7 @@ final class SiteMediaCaptureUITests: XCTestCase {
         }
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_GB"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_GB", "-diagnosticsConsent", "declined"]
         app.launchEnvironment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"] = Self.transcript
     }
 

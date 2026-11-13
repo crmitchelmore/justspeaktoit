@@ -130,7 +130,13 @@ the candidate privacy report and disclosure review.
 | Audio Data | App Functionality | Recordings go to the transcription provider chosen in Settings |
 | Other User Content | App Functionality | Post-processing sends transcript text to a language model; voice output sends it to a speech provider |
 
-**Data linked to you: four diagnostic/identifier types.** Sentry's
+**Data linked to you: four diagnostic/identifier types.** Collection is
+optional and off until the user agrees to **Send crash reports and
+diagnostics** (first-run onboarding, a one-time prompt for existing users, and
+Settings › Privacy); `SentryManager.start()` does nothing before that, and
+turning it off closes the SDK and deletes its on-device queue, crash reports and
+installation ID. Apple's label still declares the types, because a consenting
+user's data is collected. Sentry's
 `SentryClient` supplies a random installation ID when the app has not assigned
 a user, and `SentryHub` puts that ID in release-health sessions. Neither
 `sendDefaultPii = false` nor credential scrubbing removes that linkage.
@@ -154,9 +160,10 @@ answers:
   Keychain and only sends it to a paired Mac over the local network.
 - **Usage Data and Diagnostics.** The iOS app initialises no product-analytics SDK, so
   Usage Data stays No until issue #776 ships opt-in PostHog to iOS. The app
-  (not its extensions) does run Sentry, sharing the Mac's `SentryManager`
-  configuration and credential scrubber, so Diagnostics declares Crash Data,
-  Performance Data and Other Diagnostic Data as above.
+  (not its extensions) runs Sentry after the diagnostics opt-in, sharing the
+  Mac's `SentryManager` consent gate, configuration and credential scrubber, so
+  Diagnostics declares Crash Data, Performance Data and Other Diagnostic Data as
+  above.
 - **History and API keys in iCloud.** History, including transcript text,
   syncs to the user's own private CloudKit database automatically when the
   device is signed in to iCloud, unless the user turns off iCloud History Sync
@@ -267,8 +274,8 @@ localisation and App Information.
 > private iCloud, unless you turn that off. Already use the Mac app? Scan its QR code to
 > copy your settings and keys across.
 >
-> No ads, no cross-app tracking, no product analytics. Installation-linked crash
-> and performance diagnostics are disclosed in our privacy policy. Open source
+> No ads, no cross-app tracking, no product analytics. Crash reports are sent only
+> if you agree, and you can turn them off at any time. Open source
 > under the MIT licence.
 
 ## Screenshots
@@ -368,9 +375,10 @@ Existing Store compilation guards exclude Sparkle and external executable
 model runtimes. The keyboard's blocked Full Access state disables dictation,
 not its editing keys or next-keyboard control. Real-device microphone,
 locked/background recording and consent/withdrawal behavior still need
-release-candidate evidence. In particular, default-on Sentry diagnostics
-must not be mistaken for the separate Direct-only product-analytics opt-in:
-its disclosure/consent and retention need explicit release review. Static
+release-candidate evidence. Sentry diagnostics have their own opt-in, separate
+from the Direct-only product-analytics opt-in; unit tests cover the gate and
+withdrawal, but the signed candidate's network behaviour, on-device deletion and
+Sentry's retention setting are owner checks in `Docs/manual-checks.yml`. Static
 metadata tests cannot close those gates or the App Store Connect findings.
 
 The July rejection remains an `UNRESOLVED_ISSUES` submission. After the owner

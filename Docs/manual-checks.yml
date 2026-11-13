@@ -417,6 +417,19 @@ sessions:
           - "Open each picker again."
         expected: "Neither picker has an OpenRouter drill-in row. Each Browse OpenRouter models\u2026 button opens a searchable list with provider and price filters and a Refresh button, each model opens a page with its pricing, and choosing one closes the sheet. Each picker then shows OpenRouter \u203a the chosen model, as the voice picker does."
         final_gate: true
+      - id: "mac-diagnostics-consent"
+        issues:
+          - 1468
+        title: "Crash reports are asked once, off until agreed, and can be turned off"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes diagnostics consent"
+        steps:
+          - "Open the app after updating; read the Send crash reports and diagnostics prompt and choose Don't Send."
+          - "Quit and reopen the app."
+          - "Open Settings \u203a About \u203a Privacy, search Settings for crash reports, then turn Send crash reports and diagnostics on and off again."
+        expected: "The prompt appears once before the analytics question (if any) and explains what is sent; it does not return after relaunch. Search finds the Privacy card, the switch reflects your choice, and turning it on or off needs no restart."
+        final_gate: false
       - id: "mac-raw-configuration-editor"
         issues:
           - 1546
@@ -803,7 +816,7 @@ sessions:
         build: "The exact signed iOS candidate selected for resubmission, plus App Store Connect"
         prerequisites:
           - "Read Docs/ios-app-store-submission.md; static archive checks do not prove consent, retention, support-site deployment or App Store Connect answers."
-          - "Default-on Sentry diagnostics are separate from product-analytics consent; resolve that consent/withdrawal policy before marking this Pass."
+          - "Sentry diagnostics are opt-in (Send crash reports and diagnostics, off until agreed) and separate from product-analytics consent; run owner-diagnostics-consent-signed-candidate first."
         steps:
           - "Generate the exact archive's Privacy Report in Xcode Organizer and compare it with the app, all SDKs and enabled extension data flows."
           - "In App Store Connect declare Audio Data and Other User Content for App Functionality, and installation-linked Crash Data, Performance Data, Other Diagnostic Data and Device ID for App Functionality; reconcile any additional SDK types in the report rather than answering No automatically."
@@ -812,6 +825,48 @@ sessions:
           - "Add dedicated provider credentials and reproducible device steps only to private App Review information; confirm screenshots and export-compliance answers match the candidate."
           - "Re-read Resolution Center, resolve every remaining review finding and approve the frozen candidate through the normal Stable process."
         expected: "The exact candidate's device evidence, SDK privacy report, nutrition labels, published policy, consent/withdrawal behavior, support URLs and private review information agree. No credentials enter public issues or screenshots, and no submission is approved solely because the archive builds."
+        final_gate: false
+      - id: "iphone-app-shortcuts-phrases"
+        issues:
+          - 1595
+        title: "Siri and Spotlight offer the app's built-in shortcut phrases"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes #1595"
+        steps:
+          - "Open the Shortcuts app and find Just Speak to It under App Shortcuts; count the shortcuts listed."
+          - "Search Spotlight for Just Speak and look for its Toggle Recording and Dictate actions."
+          - "Say \"Hey Siri, toggle recording with Just Speak to It\", speak a short made-up sentence, then say \"Hey Siri, stop recording with Just Speak to It\"."
+        expected: "Shortcuts lists the app's eight built-in shortcuts without any setup, Spotlight shows its actions, and the Siri phrases start and stop a recording that appears in History."
+        final_gate: false
+      - id: "iphone-diagnostics-consent"
+        issues:
+          - 1468
+        title: "Crash reports are asked once, off until agreed, and can be turned off"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes diagnostics consent"
+        steps:
+          - "Open the app after updating; read the Send crash reports and diagnostics prompt and choose Don't Send."
+          - "Close and reopen the app."
+          - "Open Settings \u203a Privacy & Diagnostics \u203a Privacy Information, then turn Send crash reports and diagnostics on and off again; check the Network Activity row each time."
+        expected: "The prompt appears once and explains what is sent; it does not return. The switch reflects your choice, and the Crash and Performance Diagnostics row reads Off whenever the switch is off."
+        final_gate: false
+      - id: "owner-diagnostics-consent-signed-candidate"
+        issues:
+          - 1468
+        title: "Store candidate: no Sentry traffic before consent; withdrawal deletes unsent reports"
+        minutes: 15
+        core: false
+        build: "The exact signed iOS and Mac App Store candidates selected for resubmission"
+        prerequisites:
+          - "A test installation and a proxy or network log (for example Charles or the iOS Network privacy report) that shows requests to ingest.de.sentry.io."
+        steps:
+          - "Fresh-install each candidate and complete onboarding without agreeing to crash reports; use the app for a minute and check the network log and the app container's Caches folder."
+          - "Turn Send crash reports and diagnostics on, use the app, then turn it off; check the network log and that Caches/<bundle id>/Sentry, io.sentry and the INSTALLATION file are gone."
+          - "In Sentry (de.sentry.io, org tally-lz) confirm the event data retention for the justspeaktoit projects is 90 days or less, matching Docs/PRIVACY.md."
+          - "Answer the App Store Connect privacy label as in Docs/ios-app-store-submission.md (installation-linked Crash Data, Performance Data, Other Diagnostic Data and Device ID for App Functionality)."
+        expected: "No request reaches Sentry and no Sentry files exist before consent; after withdrawal no further request is made and the on-device Sentry data is deleted. Sentry retention is 90 days or less and the published policy, in-app text and nutrition label agree."
         final_gate: false
       - id: "iphone-openrouter-cleanup-discover-configure"
         issues:

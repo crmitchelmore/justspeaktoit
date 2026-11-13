@@ -203,6 +203,16 @@ extension ContentView {
             } message: {
                 Text(recovery.recoverable.first.map(recovery.promptMessage) ?? "")
             }
+            // Asked once before any crash report is collected; "Don't send"
+            // is a decision too, so the prompt never returns.
+            .alert(DiagnosticsConsent.title + "?", isPresented: $showingDiagnosticsConsent) {
+                Button("Send") { DiagnosticsConsent.shared.record(granted: true) }
+                    .accessibilityIdentifier("diagnosticsConsentAllowButton")
+                Button("Don't Send", role: .cancel) { DiagnosticsConsent.shared.record(granted: false) }
+                    .accessibilityIdentifier("diagnosticsConsentDeclineButton")
+            } message: {
+                Text(DiagnosticsConsent.explanation + " You can change this in Settings > Privacy & Diagnostics.")
+            }
             .navigationDestination(isPresented: Binding(
                 get: { self.historyRouter.pendingHistoryID != nil },
                 set: { if !$0 { self.historyRouter.pendingHistoryID = nil } }
@@ -267,6 +277,7 @@ extension ContentView {
                 if onboarding.shouldPresentFirstRun {
                     showingFirstRun = true
                 } else {
+                    showingDiagnosticsConsent = DiagnosticsConsent.shared.needsDecision
                     await autoStartIfEnabled()
                 }
             }
@@ -323,6 +334,7 @@ extension ContentView {
             // by then, and `coordinator.start()` is single-flight regardless.
             .sheet(isPresented: $showingFirstRun, onDismiss: {
                 onboarding.completeFirstRun()
+                showingDiagnosticsConsent = DiagnosticsConsent.shared.needsDecision
                 Task { await autoStartIfEnabled() }
             }, content: {
                 FirstRunOnboardingView(

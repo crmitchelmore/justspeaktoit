@@ -38,6 +38,7 @@ public struct ContentView: View {
     /// here comes from `CaptureOnboardingPolicy`; this layer only renders it.
     @ObservedObject var onboarding = CaptureOnboardingStore.shared
     @State var showingFirstRun = false
+    @State var showingDiagnosticsConsent = false
     /// Recordings handed over by the Share extension (issue #1020). Drained on
     /// every foreground because that is the first moment the app has the keys,
     /// the batch client and the memory budget the extension does not.

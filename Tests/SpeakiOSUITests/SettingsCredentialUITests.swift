@@ -62,7 +62,8 @@ final class SettingsCredentialUITests: XCTestCase {
 
     private func launch(_ app: XCUIApplication, region: String) throws {
         app.launchArguments = [
-            "-AppleLanguages", "(en)", "-AppleLocale", "en_GB", "-visualDensity", "normal",
+            "-AppleLanguages", "(en)", "-AppleLocale", "en_GB", "-diagnosticsConsent", "declined",
+            "-visualDensity", "normal",
             "-alibaba.newKey.region", region, "-alibaba.newKey.workspace", "synthetic-settings"
         ]
         app.launch()

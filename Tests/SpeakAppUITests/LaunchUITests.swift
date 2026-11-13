@@ -21,7 +21,10 @@ final class LaunchUITests: XCTestCase {
         app.launchEnvironment["SPEAK_CORE_JOURNEY_DIRECTORY"] = directory.path
         // AppStorage reads these through UserDefaults' typed boolean accessor.
         // AppSettings' typed defaults are supplied by the DEBUG launch profile.
-        app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
+        app.launchArguments = [
+            "-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES",
+            "-diagnosticsConsent", "declined"
+        ]
         registerCleanup(app: app, fixture: fixture, suiteName: suiteName)
 
         app.launch()

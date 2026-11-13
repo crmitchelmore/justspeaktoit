@@ -13,6 +13,7 @@ struct SpeakLaunchContent: View {
     @Binding var hasAnsweredAnalyticsConsent: Bool
     @Binding var showingAnalyticsConsent: Bool
     let openMainWindow: () -> Void
+    @State private var showingDiagnosticsConsent = false
 
     var body: some View {
         Group {
@@ -44,19 +45,17 @@ struct SpeakLaunchContent: View {
             .environmentObject(environment.tts)
             .environmentObject(environment.shortcuts)
             .environmentObject(environment.recordingControl)
-            .onAppear {
-                appDelegate.environment = environment
-                environment.configureShortcutHandlers()
-                environment.installMenuBar()
-                environment.installDockMenu()
-                environment.installServices()
-                if #available(macOS 10.12.2, *) {
-                    environment.installTouchBar()
-                }
-                if environment.analyticsAvailable,
-                   !hasAnsweredAnalyticsConsent {
-                    showingAnalyticsConsent = true
-                }
+            .onAppear { mainContentAppeared(environment) }
+            .onChange(of: showingDiagnosticsConsent) { _, showing in
+                if !showing { offerAnalyticsConsent(environment) }
+            }
+            .alert("\(DiagnosticsConsent.title)?", isPresented: $showingDiagnosticsConsent) {
+                Button("Send Crash Reports") { DiagnosticsConsent.shared.record(granted: true) }
+                    .accessibilityIdentifier("diagnosticsConsentAllowButton")
+                Button("Don't Send", role: .cancel) { DiagnosticsConsent.shared.record(granted: false) }
+                    .accessibilityIdentifier("diagnosticsConsentDeclineButton")
+            } message: {
+                Text(DiagnosticsConsent.explanation + " You can change this in Settings > About > Privacy.")
             }
             .alert(
                 "Help improve \(ReleaseTrain.current.displayName)?",
@@ -78,6 +77,30 @@ struct SpeakLaunchContent: View {
                         + "You can turn this off at any time in Settings."
                 )
             }
+    }
+
+    private func mainContentAppeared(_ environment: AppEnvironment) {
+        appDelegate.environment = environment
+        environment.configureShortcutHandlers()
+        environment.installMenuBar()
+        environment.installDockMenu()
+        environment.installServices()
+        if #available(macOS 10.12.2, *) {
+            environment.installTouchBar()
+        }
+        // Crash-report consent comes first; the analytics question
+        // follows once it is answered, as only one alert shows at a time.
+        if DiagnosticsConsent.shared.needsDecision {
+            showingDiagnosticsConsent = true
+        } else {
+            offerAnalyticsConsent(environment)
+        }
+    }
+
+    private func offerAnalyticsConsent(_ environment: AppEnvironment) {
+        if environment.analyticsAvailable, !hasAnsweredAnalyticsConsent {
+            showingAnalyticsConsent = true
+        }
     }
 
     private func onboardingContent(_ environment: AppEnvironment) -> some View {

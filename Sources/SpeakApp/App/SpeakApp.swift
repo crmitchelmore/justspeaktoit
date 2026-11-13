@@ -16,8 +16,9 @@ struct SpeakApp: App {
         // throw-away: no crash reporting, no windows, no onboarding. Bail out
         // before anything else initialises.
         guard !SparkleSmokeSession.isActive else { return }
-        // Initialize Sentry as early as possible
+        // Crash reporting starts as early as possible, but only with consent.
         SentryManager.start()
+        SentryManager.observeConsent()
     }
 
     var body: some Scene {

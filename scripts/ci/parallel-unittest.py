@@ -10,6 +10,11 @@ batches so one slow class doesn't set the wall time on its own.
     parallel-unittest.py -s DIR [-p PATTERN] [-v] [-j JOBS]
 
 JSTI_TEST_JOBS=1 (or -j 1) runs plain serial discovery instead.
+
+JSTI_TEST_RETRY=1 (pre-pr's local Lint run, on a machine other agents load)
+reruns each failed test once, serially, after the parallel run; it passes
+only if every rerun passes, and names the tests that needed one. CI leaves
+it off, so a test that only fails under load still fails there.
 """
 from __future__ import annotations
 
@@ -46,8 +51,19 @@ def run_batch(ids: list[str], verbosity: int):
     result = unittest.TextTestResult(unittest.runner._WritelnDecorator(stream), True, verbosity)
     suite(result)
     result.printErrors()
-    return (result.testsRun, len(result.failures) + len(result.errors) + len(result.unexpectedSuccesses),
-            len(result.skipped), stream.getvalue(), time.monotonic() - started)
+    # Only real test ids can be rerun; a setUpClass error or an unexpected success cannot.
+    rerunnable = [test.id() for test, _ in result.failures + result.errors
+                  if isinstance(test, unittest.TestCase)]
+    failed = len(result.failures) + len(result.errors) + len(result.unexpectedSuccesses)
+    return (result.testsRun, failed, len(result.skipped), stream.getvalue(), time.monotonic() - started,
+            rerunnable if len(rerunnable) == failed else None)
+
+
+def rerun(ids: list[str], verbosity: int) -> bool:
+    sys.stderr.write(f'\nparallel-unittest: rerunning {len(ids)} failed test(s) serially (JSTI_TEST_RETRY=1)\n')
+    suite = unittest.defaultTestLoader.loadTestsFromNames(ids)
+    result = unittest.TextTestRunner(verbosity=verbosity).run(suite)
+    return result.wasSuccessful() and result.testsRun == len(ids)
 
 
 def batches(tests: list[unittest.TestCase]) -> list[list[str]]:
@@ -78,19 +94,27 @@ def main() -> int:
 
     started = time.monotonic()
     ran = failed = skipped = 0
+    retry: list[str] | None = [] if os.environ.get('JSTI_TEST_RETRY') == '1' else None
     if broken:
         result = unittest.TextTestRunner(verbosity=args.verbosity).run(unittest.TestSuite(broken))
         ran, failed = result.testsRun, len(result.failures) + len(result.errors)
+        retry = None
     with ProcessPoolExecutor(max_workers=args.jobs, initializer=init_worker, initargs=(start,)) as pool:
         futures = [pool.submit(run_batch, ids, args.verbosity) for ids in batches(runnable)]
         for future in as_completed(futures):
-            count, failures, skips, output, _ = future.result()
+            count, failures, skips, output, _, rerunnable = future.result()
             ran, failed, skipped = ran + count, failed + failures, skipped + skips
+            if failures and retry is not None:
+                retry = None if rerunnable is None else retry + rerunnable
             if args.verbosity > 1 or failures:
                 sys.stderr.write(output)
                 sys.stderr.flush()
     elapsed = time.monotonic() - started
     sys.stderr.write(f'\n{"-" * 70}\nRan {ran} tests in {elapsed:.3f}s across {args.jobs} processes\n\n')
+    if failed and retry and rerun(retry, args.verbosity):
+        sys.stderr.write(f'parallel-unittest: passed on a serial rerun (failed only under load): '
+                         f'{", ".join(retry)}\n')
+        failed = 0
     if failed or not ran:
         sys.stderr.write(f'FAILED (failures+errors={failed}{", no tests ran" if not ran else ""})\n')
         return 1

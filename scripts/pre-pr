@@ -27,6 +27,15 @@ graph (`swift package dump-package`): every test file, in a test target that
 depends on the changed module, that names a type the changed file declares or
 extends. Unmatched changes fall back to the module's whole test target.
 
+Speed: the machine-heavy checks run in lanes side by side under the machine
+lock (build then unit tests; public API; make ci-lint); JSTI_PRE_PR_LANES=off
+runs them one at a time. The SwiftPM checks build the checked snapshot in a
+persistent build mirror (scripts/ci/pre_pr/mirror.py), so a new worktree's
+build is incremental rather than cold; JSTI_PRE_PR_MIRROR=off builds in place.
+JSTI_PRE_PR_SLOTS runs (default 2) hold the lock at once, each with its own
+mirror and Linux container volume. Portable Swift (Linux) runs in a local
+docker, podman or Apple container when one runs (scripts/linux-precheck).
+
 Safety: it never runs UI tests, xcodebuild, the core-journey harness, app
 launches or other foreground automation. Swift tests use a private file
 Keychain (JSTI_TEST_KEYCHAIN=1) in a separate scratch path, so the developer's
@@ -38,18 +47,20 @@ import argparse
 import contextlib
 import datetime as dt
 import json
+import os
 import sys
+import threading
 import time
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent / 'ci'))
 # The checks live in scripts/ci/pre_pr/; this file owns the command line, the autofix pass and the run order.
-from pre_pr import environment
+from pre_pr import environment, mirror
 from pre_pr.environment import ROOT, changed_files, display, git, outcomes, worktree_tree
 from pre_pr.lock import machine_lock
 from pre_pr.planner import plan
-from pre_pr.runner import Check, finish, launch, run, settle
+from pre_pr.runner import Check, finish, launch, relocate, run, settle
 from pre_pr.summary import SCHEMA_VERSION, markdown
 
 
@@ -64,7 +75,7 @@ def main() -> int:
     linux.add_argument('--remote-linux', dest='linux', action='store_const', const='remote',
                        help='run Portable Swift (Linux) on a precheck/** branch even if a container runtime exists')
     linux.add_argument('--container-linux', dest='linux', action='store_const', const='container',
-                       help='run Portable Swift (Linux) with local docker or podman')
+                       help='run Portable Swift (Linux) with local docker, podman or Apple container')
     linux.add_argument('--no-linux', dest='linux', action='store_const', const='skip',
                        help="skip Portable Swift (Linux); the result is then 'incomplete', which CI rejects")
     parser.add_argument('--plan', action='store_true', help='print the selected checks and exit')
@@ -134,29 +145,79 @@ def run_autofix(args, files: list[str]) -> Check:
 def execute(args, checks, areas, files, merge_base, head, tree, dirty) -> int:
     started = time.monotonic()
     failed = False
+    output = threading.Lock()  # lanes report from their own threads
 
     def report(check: Check) -> None:
         nonlocal failed
         mark = outcomes().ICONS[check.status]
-        print(f'  {mark} [{check.area}] {check.title}: {check.status} in {check.duration:.0f}s'
-              f'{" — " + check.note if check.note else ""}', flush=True)
-        if check.status == 'fail':
-            failed = True
-            if check.log.exists():
-                tail = check.log.read_text(encoding='utf-8', errors='replace').splitlines()[-40:]
-                print('\n'.join(f'    │ {line}' for line in tail))
+        with output:
+            print(f'  {mark} [{check.area}] {check.title}: {check.status} in {check.duration:.0f}s'
+                  f'{" — " + check.note if check.note else ""}', flush=True)
+            if check.status == 'fail':
+                failed = True
+                if check.log.exists():
+                    tail = check.log.read_text(encoding='utf-8', errors='replace').splitlines()[-40:]
+                    print('\n'.join(f'    │ {line}' for line in tail), flush=True)
 
     def stopped(check: Check) -> bool:
         return failed and not args.keep_going and not check.advisory
 
-    def run_foreground(check: Check) -> None:
+    def run_foreground(check: Check, cancel: threading.Event | None = None) -> None:
         if stopped(check):
             settle(check, outcomes().not_run('earlier failure'))
-            print(f'⏭️  [{check.area}] {check.title} — skipped after an earlier failure')
+            with output:
+                print(f'⏭️  [{check.area}] {check.title} — skipped after an earlier failure', flush=True)
             return
-        print(f'▶ [{check.area}] {check.title}', flush=True)
-        run(check, args.verbose)
+        with output:
+            print(f'▶ [{check.area}] {check.title}', flush=True)
+        run(check, args.verbose, None if check.advisory or args.keep_going else cancel)
         report(check)
+
+    def run_lanes(group: list[Check]) -> None:
+        """Each lane's checks in order, the lanes side by side; a failure stops the other lanes."""
+        lanes: dict[str, list[Check]] = {}
+        for check in group:
+            lanes.setdefault(check.lane or check.id, []).append(check)
+        if len(lanes) < 2 or os.environ.get('JSTI_PRE_PR_LANES', '').lower() in ('off', '0', 'no', 'false'):
+            for check in group:
+                run_foreground(check)
+            return
+        cancel = threading.Event()
+
+        def lane(checks: list[Check]) -> None:
+            for check in checks:
+                run_foreground(check, cancel)
+                if failed and not args.keep_going:
+                    cancel.set()
+
+        threads = [threading.Thread(target=lane, args=(checks,), daemon=True) for checks in lanes.values()]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    def use_slot(group: list[Check], slot: int) -> None:
+        """Give the run its lock slot's own build mirror and Linux container volume."""
+        if slot:
+            for check in group:
+                if check.id == 'portable-linux':
+                    check.env = {**check.env, 'JSTI_PORTABLE_VOLUME': f'jsti-portable-build-{slot}'}
+        use_mirror(group, slot)
+
+    def use_mirror(group: list[Check], slot: int) -> None:
+        """Move the SwiftPM checks into the slot's warm build mirror (one run owns it at a time)."""
+        movable = [c for c in group if c.mirror and c.command and not c.skip_reason and not c.failure]
+        if not movable:
+            return
+        begun = time.monotonic()
+        path = mirror.sync(tree, head, slot)
+        if path is None:
+            print('pre-pr: no build mirror (JSTI_PRE_PR_MIRROR=off or it could not be set up); building in place')
+            return
+        for check in movable:
+            relocate(check, path)
+        print(f'pre-pr: SwiftPM checks build in the warm mirror {path} '
+              f'(synced in {time.monotonic() - begun:.1f}s)', flush=True)
 
     def start_background(group):
         launched = []
@@ -192,11 +253,11 @@ def execute(args, checks, areas, files, merge_base, head, tree, dirty) -> int:
         if not check.background:
             run_foreground(check)
     runnable = any(c.command and not c.skip_reason and not c.failure and not stopped(c) for c in exclusive)
-    with machine_lock() if runnable else contextlib.nullcontext():
+    with machine_lock() if runnable else contextlib.nullcontext() as slot:
+        if runnable:
+            use_slot(exclusive, slot or 0)
         local = start_background([c for c in exclusive if c.background])
-        for check in exclusive:
-            if not check.background:
-                run_foreground(check)
+        run_lanes([c for c in exclusive if not c.background])
         await_background(local)
     await_background(remote)
     result = outcomes().run_result((c.status for c in checks), any(c.incomplete for c in checks))

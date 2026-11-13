@@ -10,11 +10,12 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pre_pr import environment
+from pre_pr import environment, mirror
 from pre_pr.environment import ROOT, display, git, outcomes
 
 
@@ -35,6 +36,9 @@ class Check:
     exclusive: bool = True      # loads this machine (builds, tests), so it runs under the machine-wide lock
     forbid_drift: tuple[str, ...] = ()  # tracked files the check must not modify (CI's drift checks)
     incomplete: bool = False    # a required check deliberately not run: the result is 'incomplete'
+    lane: str = ''              # exclusive checks in one lane run in order; lanes run side by side (default: own)
+    mirror: bool = False        # a SwiftPM check that may build in the warm build mirror (pre_pr/mirror.py)
+    mirrored: Path | None = None  # the mirror it runs in, once relocated
     status: str = 'pending'
     duration: float = 0.0
     note: str = ''
@@ -50,15 +54,27 @@ def settle(check: Check, outcome) -> None:
     check.status, check.note = outcome.status, outcome.note
 
 
-def dirty_tracked() -> set[str]:
-    return set(filter(None, git('diff', '--name-only', 'HEAD').splitlines()))
+def dirty_tracked(cwd: Path = ROOT) -> set[str]:
+    return set(filter(None, git('diff', '--name-only', 'HEAD', cwd=cwd).splitlines()))
+
+
+def workdir(check: Check) -> Path:
+    """The checkout the check runs in: the build mirror or this worktree."""
+    return check.mirrored or ROOT
+
+
+def relocate(check: Check, path: Path) -> None:
+    """Run the check in the build mirror at path instead of this worktree."""
+    check.command = mirror.relocate(check.command, path)
+    check.cwd = path / check.cwd.relative_to(ROOT) if check.cwd.is_relative_to(ROOT) else check.cwd
+    check.mirrored = path
 
 
 def restore_side_effects(check: Check, dirty_before: set[str]) -> None:
     """Undo tracked-file changes a check made (the portable graph deletes Package.resolved)."""
-    touched = sorted(dirty_tracked() - dirty_before)
+    touched = sorted(dirty_tracked(workdir(check)) - dirty_before)
     if touched:
-        git('checkout', 'HEAD', '--', *touched)
+        git('checkout', 'HEAD', '--', *touched, cwd=workdir(check))
         restored = f'restored {", ".join(touched[:3])}{"…" if len(touched) > 3 else ""}'
         check.note = f'{check.note}; {restored}' if check.note else restored
 
@@ -80,7 +96,7 @@ def launch(check: Check) -> subprocess.Popen | None:
         return None
     check.log.parent.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', **check.env}
-    check.dirty_before = dirty_tracked() if not check.background else set()
+    check.dirty_before = dirty_tracked(workdir(check)) if not check.background else set()
     check.started = time.monotonic()
     log = check.log.open('w', encoding='utf-8')
     log.write(f'$ {" ".join(check.command)}\n')
@@ -127,29 +143,51 @@ def stop_tree(process: subprocess.Popen) -> None:
             continue
 
 
-def finish(check: Check, process: subprocess.Popen | None, verbose: bool, restore: bool = True) -> None:
+def wait(check: Check, process: subprocess.Popen, cancel: threading.Event | None) -> tuple[int, str]:
+    """The exit code, and 'timeout' or 'cancelled' when the check was stopped (its process tree killed)."""
+    limit = check_timeout() if check.exclusive else None
+    deadline = None if limit is None else check.started + limit
+    while True:
+        remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+        step = remaining if cancel is None else min(remaining if remaining is not None else 1.0, 1.0)
+        try:
+            return process.wait(timeout=step), ''
+        except subprocess.TimeoutExpired:
+            if deadline is not None and time.monotonic() >= deadline:
+                stop_tree(process)
+                return process.wait(), 'timeout'
+            if cancel is not None and cancel.is_set():
+                stop_tree(process)
+                return process.wait(), 'cancelled'
+
+
+def finish(check: Check, process: subprocess.Popen | None, verbose: bool, restore: bool = True,
+           cancel: threading.Event | None = None) -> None:
+    """Wait for the check and settle it; cancel, once set, stops it as not run (another lane failed)."""
     if process is None:
         return
-    limit = check_timeout() if check.exclusive else None
-    try:
-        code = process.wait(timeout=None if limit is None else max(0.0, check.started + limit - time.monotonic()))
-        timed_out = False
-    except subprocess.TimeoutExpired:
-        stop_tree(process)
-        code, timed_out = process.wait(), True
+    code, stopped = wait(check, process, cancel)
     check.duration = time.monotonic() - check.started
     text = check.log.read_text(encoding='utf-8', errors='replace')
+    if check.mirrored:
+        text = mirror.unmirror(text, check.mirrored)
+        check.log.write_text(text, encoding='utf-8')
     if verbose:
         sys.stdout.write(''.join(f'    {line}\n' for line in text.splitlines()))
-    executed = tests_executed(text) if check.counts_tests else None
-    drifted = () if check.background else set(check.forbid_drift) & (dirty_tracked() - check.dirty_before)
-    settle(check, outcomes().after_exit(advisory=check.advisory, exit_code=code, tests_executed=executed,
-                                        drifted=drifted, log=display(check.log)))
-    if timed_out:
+    if stopped == 'cancelled':
+        settle(check, outcomes().not_run('stopped after an earlier failure'))
+    else:
+        executed = tests_executed(text) if check.counts_tests else None
+        drifted = () if check.background else (set(check.forbid_drift)
+                                                & (dirty_tracked(workdir(check)) - check.dirty_before))
+        settle(check, outcomes().after_exit(advisory=check.advisory, exit_code=code, tests_executed=executed,
+                                            drifted=drifted, log=display(check.log)))
+    if stopped == 'timeout':
+        limit = check_timeout()
         check.note = f'timed out after {limit:.0f}s (JSTI_PRE_PR_CHECK_TIMEOUT), likely a hung test; {check.note}'
     if restore and not check.background:
         restore_side_effects(check, check.dirty_before)
 
 
-def run(check: Check, verbose: bool) -> None:
-    finish(check, launch(check), verbose)
+def run(check: Check, verbose: bool, cancel: threading.Event | None = None) -> None:
+    finish(check, launch(check), verbose, cancel=cancel)

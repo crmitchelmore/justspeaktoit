@@ -42,7 +42,8 @@ struct CompleteStepView: View {
                     .accessibilityIdentifier("onboardingAnalyticsConsentToggle")
                     Text(
                         "Optional. Never includes transcripts, audio, prompts, clipboard text, "
-                            + "keystrokes, API keys, screen content or personal identity."
+                            + "keystrokes, API keys, screen content or personal identity. "
+                            + "Sent to PostHog in the EU, which discards your IP address."
                     )
                     .font(.caption)
                     .foregroundColor(.secondary)

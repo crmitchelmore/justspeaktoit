@@ -238,19 +238,17 @@ sessions:
         issues:
           - 776
           - 814
-        title: "PostHog: purge key, deletion and production evidence"
-        minutes: 30
+        title: "PostHog: production evidence before the inspection week"
+        minutes: 20
         core: false
-        build: "PostHog EU Production and GitHub settings; current main with PR #1370"
+        build: "PostHog EU Production; current Alpha with analytics opted in"
         prerequisites:
-          - "Steps: Docs/posthog-maintenance.md (12-month retention purge)"
+          - "Steps: Docs/posthog-maintenance.md (Rollout gate and 12-month retention)"
         steps:
-          - "Create a PostHog personal API key for the Production project with only Data deletion write access; add it as POSTHOG_PURGE_API_KEY, and the project id as POSTHOG_PROJECT_ID, in a new GitHub environment posthog-purge limited to main."
-          - "Run the PostHog retention purge workflow with mode geoip-test-events, first as a dry run (expect 7), then for real; then run mode retention as a dry run."
-          - "Screenshot PostHog Production settings showing EU hosting, GeoIP off and IP discarding, and add them to #776."
           - "Rotate the PostHog project API key once, let an agent ship the new key in an Alpha, and confirm opted-in events still arrive."
           - "Approve one Release-build network capture with analytics opted in, for an agent to inspect."
-        expected: "Purge runs succeed, the 7 GeoIP-tagged events are gone, and the settings, rotation and capture evidence is on #776. One clean inspection week then unblocks #814."
+          - "When PostHog support enables self-service deletion for project 254700, run the retention purge as a dry run. This does not block rollout."
+        expected: "Rotation and capture evidence is on #776 (EU hosting and IP-discard screenshots were added on 13 Nov 2026). One clean inspection week then unblocks #814. Retention deletion does not block rollout; if self-service deletion is still unavailable, delete through PostHog support or the UI before the date in Docs/posthog-maintenance.md."
         final_gate: false
       - id: "owner-stripe-setup"
         issues:
@@ -989,6 +987,19 @@ sessions:
           - "With VoiceOver on, swipe through the Session details rows."
         expected: "Each entry lists its trigger (Button or Automation), friendly model names per phase, recording length, transcript and post-processing times and a total. The issue preview has relative timings but no transcript text or dates. VoiceOver reads each row's title and value."
         final_gate: true
+      - id: "owner-ios-upload-required-reason-apis"
+        issues:
+          - 1644
+        title: "iOS upload processes without ITMS-91053"
+        minutes: 3
+        core: false
+        build: "App Store Connect; the first Alpha iOS build that includes the active-keyboards privacy manifest fix"
+        steps:
+          - "In App Store Connect \u203a TestFlight, find the new iOS build and wait for processing to finish."
+          - "Confirm the build shows as ready to test rather than invalid."
+          - "Check the Apple email for the build, or the build upload's errors."
+        expected: "The build finishes processing and no ITMS-91053 (missing required-reason API declaration) is reported for the app, keyboard, widget or Share extension."
+        final_gate: false
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"

@@ -16,11 +16,12 @@ import {pathToFileURL} from 'node:url';
 export const ALLOWED_HOSTS = new Set(['eu.posthog.com', 'us.posthog.com']);
 export const DEFAULT_HOST = 'https://eu.posthog.com';
 export const DEFAULT_RETENTION_DAYS = 365;
-export const MODES = new Set(['retention', 'geoip-test-events']);
+// The one-off geoip-test-events mode was retired on 13 Nov 2026: the owner kept GeoIP on and
+// disclosed it, and the retention mode deletes those events once they pass 12 months.
+export const MODES = new Set(['retention']);
 export const MAX_LIST_PAGES = 10;
 export const LIST_PAGE_SIZE = 100;
 export const REQUEST_TIMEOUT_MS = 30_000;
-export const DEFAULT_GEOIP_MAX_EVENTS = 7;
 const STATUSES = new Set(['draft', 'pending', 'approved', 'in_progress', 'queued', 'completed', 'failed']);
 const DAY_MS = 86_400_000;
 // PostHog creates HogQL event-deletion requests as pending with requires_approval=True, and
@@ -71,10 +72,6 @@ export function buildQuery(mode, cutoff) {
     const iso = cutoff.toISOString().replace('.000Z', 'Z');
     if (!/^\d{4}-\d{2}-\d{2}T00:00:00Z$/.test(iso)) throw new PurgeError('invalid cutoff');
     return `SELECT uuid FROM events WHERE timestamp < toDateTime('${iso}')`;
-  }
-  if (mode === 'geoip-test-events') {
-    return 'SELECT uuid FROM events WHERE properties.$geoip_city_name IS NOT NULL'
-      + ' OR properties.$geoip_postal_code IS NOT NULL';
   }
   throw new PurgeError('unknown mode');
 }
@@ -152,11 +149,9 @@ export async function run({env = process.env, fetch: fetchImpl = globalThis.fetc
     if (!/^\d{1,12}$/.test(projectId)) throw new PurgeError('POSTHOG_PROJECT_ID must be numeric');
     const origin = resolveHost(env.POSTHOG_HOST);
     const mode = (env.PURGE_MODE || 'retention').trim();
-    if (!MODES.has(mode)) throw new PurgeError('PURGE_MODE must be retention or geoip-test-events');
+    if (!MODES.has(mode)) throw new PurgeError('PURGE_MODE must be retention');
     const dryRun = parseBoolean(env.DRY_RUN, true);
     const retentionDays = parseRetentionDays(env.RETENTION_DAYS);
-    const geoipMax = env.GEOIP_MAX_EVENTS ? Number(env.GEOIP_MAX_EVENTS) : DEFAULT_GEOIP_MAX_EVENTS;
-    if (!isCount(geoipMax)) throw new PurgeError('GEOIP_MAX_EVENTS must be a whole number');
     const attemptText = (env.PURGE_ATTEMPT ?? '').trim() || '1';
     if (!/^[1-9]\d{0,2}$/.test(attemptText)) throw new PurgeError('PURGE_ATTEMPT must be a whole number from 1 to 999');
     const attempt = Number(attemptText);
@@ -165,7 +160,7 @@ export async function run({env = process.env, fetch: fetchImpl = globalThis.fetc
     const query = buildQuery(mode, cutoff);
     const base = `${origin}/api/projects/${projectId}/data_deletion_requests/`;
     log(`Mode: ${mode}; dry run: ${dryRun}; host: ${new URL(origin).hostname}`);
-    if (mode === 'retention') log(`Cutoff: events before ${cutoff.toISOString()} (${retentionDays} days)`);
+    log(`Cutoff: events before ${cutoff.toISOString()} (${retentionDays} days)`);
 
     const existing = await listStatuses(fetchImpl, origin, projectId, key);
     const summary = Object.keys(existing).sort().map((s) => `${s}=${existing[s]}`).join(', ');
@@ -179,9 +174,6 @@ export async function run({env = process.env, fetch: fetchImpl = globalThis.fetc
     }
     const count = preview.json.count;
     log(`Matching events: ${count}`);
-    if (mode === 'geoip-test-events' && count > geoipMax) {
-      throw new PurgeError(`refusing: ${count} GeoIP-tagged events exceeds expected maximum ${geoipMax}`);
-    }
     if (count === 0) {
       log('Nothing to delete.');
       return 0;

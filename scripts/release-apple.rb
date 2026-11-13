@@ -92,6 +92,34 @@ module AppleRelease
       items.first
     end
 
+    # Apple rejects some binaries only after the upload succeeded (for example
+    # ITMS-90626). Such an upload never becomes a /v1/builds record, so its
+    # outcome is read from the app's buildUploads (App Store Connect API 4.1).
+    def latest_upload
+      platform = @surface == 'ios' ? 'IOS' : 'MAC_OS'
+      query = URI.encode_www_form('filter[cfBundleVersion]' => @item.fetch('build'),
+        'filter[cfBundleShortVersionString]' => @item.fetch('version'), 'filter[platform]' => platform, 'limit' => 50)
+      @client.list("/v1/apps/#{@app}/buildUploads?#{query}").max_by do |upload|
+        upload.dig('attributes', 'uploadedDate') || upload.dig('attributes', 'createdDate') || ''
+      end
+    end
+
+    def failed_upload
+      upload = latest_upload
+      upload if upload&.dig('attributes', 'state', 'state') == 'FAILED'
+    end
+
+    def reject_failed_upload!(upload)
+      errors = Array(upload.dig('attributes', 'state', 'errors')).map do |error|
+        {code: error['code'], description: error['description']}
+      end
+      receipt('invalid', nil, appleBuildUploadID: upload['id'], appleErrors: errors)
+      details = errors.map { |error| [error[:code], error[:description]].compact.join(': ') }
+      details = ['Apple reported no error detail'] if details.empty?
+      raise "Apple processing FAILED for #{@surface} #{@item.fetch('version')} (#{@item.fetch('build')}); " \
+        "allocate a new build attempt after fixing:\n#{details.join("\n")}"
+    end
+
     def receipt(status, build, extra = {})
       data = {source: @manifest.fetch('source'), build: @item.fetch('build'), notesHash: @item.fetch('notesHash'),
         status: status, assets: {}, appleBuildID: build&.fetch('id'), checkedAt: Time.now.utc.iso8601}.merge(extra)
@@ -120,6 +148,10 @@ module AppleRelease
         if found && %w[FAILED INVALID].include?(found.dig('attributes', 'processingState'))
           receipt('invalid', found)
           raise 'Apple rejected the uploaded binary; allocate a new build attempt'
+        end
+        unless found
+          upload = failed_upload
+          reject_failed_upload!(upload) if upload
         end
         if Time.now >= deadline
           receipt('processing', found)
@@ -387,6 +419,13 @@ if $PROGRAM_NAME == __FILE__
     existing = delivery.build
     if existing && %w[INVALID FAILED].include?(existing.dig('attributes','processingState'))
       abort 'Existing Apple upload failed; allocate a new attempt instead of uploading duplicate build numbers'
+    end
+    # Re-uploading a frozen binary Apple already rejected fails the same way.
+    upload = delivery.failed_upload unless existing
+    begin
+      delivery.reject_failed_upload!(upload) if upload
+    rescue RuntimeError => error
+      abort error.message
     end
     File.open(ENV.fetch('GITHUB_OUTPUT'), 'a') { |file| file.puts("skip_upload=#{!existing.nil?}") }
   when 'observe' then delivery.observe_publication

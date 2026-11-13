@@ -206,6 +206,11 @@ Each Mac uses a separate random identifier that is not synced through iCloud and
 is not linked to Sentry. Raw product events are retained for no more than 12
 months and are not used for advertising or cross-company tracking.
 
+PostHog receives your IP address with each event and discards it rather than
+storing it. Before discarding it, PostHog's location lookup (GeoIP) can add an
+approximate location, such as country, region and city, to the event. The Mac
+app asks PostHog to skip this lookup for its events (`$geoip_disable`).
+
 The Mac App Store build and all iOS/keyboard targets compile this transport out.
 
 Apple may separately provide aggregated App Store and crash diagnostics under

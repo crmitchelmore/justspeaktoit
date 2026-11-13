@@ -128,10 +128,14 @@ npx wrangler d1 create paid-access-staging
 
 ### Stripe
 
-- [ ] Create the product and its recurring prices — one per term you sell (monthly, yearly).
-- [ ] Copy every price id into `STRIPE_PRICE_IDS` in `wrangler.toml`, comma-separated, replacing the `price_REPLACE_ME_*` placeholders, for each environment. The first is what Checkout opens with by default. A price missing from this list has its subscription webhooks ignored as another product's, so never remove one that still has subscribers on it.
+Staging uses the Stripe **test-mode** account "Just Speak To It" (`acct_14l64KH397Rbu4Mb`): product `prod_VafDXp6h99n48a`, monthly `price_1UZTtTH397Rbu4MbLbPBRYEg` and yearly `price_1UZTtTH397Rbu4MbamVYW6hq` (already in `[env.staging] STRIPE_PRICE_IDS`) and portal configuration `bpc_1UZTtUH397Rbu4MbzQQiuj8V`. Its test secret key is in 1Password ("Stripe — Just Speak To It test secret key") and the `paid-access` GitHub environment.
+
+- [x] Staging: create the test-mode product, prices and Customer Portal configuration.
+- [ ] Staging: once the staging Worker is deployed, create a test-mode webhook endpoint at `https://justspeaktoit-paid-access-staging.<account-subdomain>.workers.dev/v1/webhooks/stripe` (never `api.justspeaktoit.com`) with the three events below, then pipe its signing secret straight into `npx wrangler secret put STRIPE_WEBHOOK_SECRET --env staging`.
+- [ ] Production: create the product and its recurring prices — one per term you sell (monthly, yearly).
+- [ ] Production: copy every price id into `STRIPE_PRICE_IDS` in `wrangler.toml`, comma-separated, replacing the `price_REPLACE_ME_*` placeholders, for each environment. The first is what Checkout opens with by default. A price missing from this list has its subscription webhooks ignored as another product's, so never remove one that still has subscribers on it.
 - [ ] Enable the Customer Portal in Stripe billing settings.
-- [ ] Create a webhook endpoint pointing at `https://api.justspeaktoit.com/v1/webhooks/stripe`, subscribed to `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`.
+- [ ] Production: create a live-mode webhook endpoint pointing at `https://api.justspeaktoit.com/v1/webhooks/stripe`, subscribed to `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`.
 - [ ] Copy the endpoint signing secret into `STRIPE_WEBHOOK_SECRET`.
 
 ### App Store Connect
@@ -144,7 +148,7 @@ npx wrangler d1 create paid-access-staging
 ### Apple Developer
 
 - [ ] Separately commission supported native Sign in with Apple for App Store builds, including authorised App IDs, matching provisioning profiles and signed-artifact verification. Ordinary shipping entitlements currently omit this capability.
-- [x] Create the Services ID `com.justspeaktoit.mac.signin` (primary App ID `com.justspeaktoit.mac`, domain `api.justspeaktoit.com`, return URL `https://api.justspeaktoit.com/v1/auth/apple/callback`) for the Developer ID web flow.
+- [x] Create the Services ID `com.justspeaktoit.mac.signin` (primary App ID `com.justspeaktoit.mac`, domain `api.justspeaktoit.com`, return URL `https://api.justspeaktoit.com/v1/auth/apple/callback`) for the Developer ID web flow. The website URLs were attached to the Services ID in the developer portal on #648; Apple's authorize endpoint now accepts that return URL and rejects unregistered ones. The return URL is production-only, so a staging sign-in needs either a staging return URL registered here and in the app, or a staging route on `api.justspeaktoit.com`.
 - [ ] Qualify the web sign-in on staging with a Developer ID build before enabling paid access for it.
 - [x] Create the Sign in with Apple `.p8` key (Key ID in `APPLE_SIGNIN_KEY_ID`, key in `APPLE_SIGNIN_PRIVATE_KEY`).
 - [ ] Run the **Paid Access Worker secrets** workflow for each Worker environment once it exists.

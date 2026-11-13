@@ -112,8 +112,14 @@ of hand-maintained structure documentation.
 - When a platform can't get it in the same change, file **one** GitHub issue
   covering every remaining platform (not one per platform) and link it from the
   PR. Something the OS cannot support is N/A with a reason, not a gap.
-- [Docs/feature-parity.md](Docs/feature-parity.md) is the parity table. Check it
-  before starting a feature and update its row in the same PR.
+- [Docs/feature-map.md](Docs/feature-map.md) is the feature map: which platforms
+  have each feature, which are excluded and why (OS limit or owner decision),
+  how it should work, what is scheduled for removal and known gotchas. Check it
+  before building, changing or removing a feature. When you add, remove or
+  change a feature on any platform, update its summary row and entry in the same
+  PR, then run `python3 scripts/check-feature-map.py` (CI Lint runs it too).
+- Never build a feature for a platform the map marks N/A by owner decision (for
+  example Compare models on iOS and Android) without a new owner decision.
 
 ## Accessibility and Computer Use
 

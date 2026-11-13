@@ -39,6 +39,8 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
  for(const [change,message] of [
   [p=>{p.NSPrivacyTracking=true;},'Unexpected tracking'],
   [p=>{p.NSPrivacyAccessedAPITypes=p.NSPrivacyAccessedAPITypes.filter(a=>a.NSPrivacyAccessedAPIType!=='NSPrivacyAccessedAPICategorySystemBootTime');},'Missing app required-reason'],
+  [p=>{p.NSPrivacyAccessedAPITypes=p.NSPrivacyAccessedAPITypes.filter(a=>a.NSPrivacyAccessedAPIType!=='NSPrivacyAccessedAPICategoryActiveKeyboards');},'Missing app required-reason'],
+  [p=>{p.NSPrivacyAccessedAPITypes.find(a=>a.NSPrivacyAccessedAPIType==='NSPrivacyAccessedAPICategoryActiveKeyboards').NSPrivacyAccessedAPITypeReasons=['3EC4.1'];},'Unaudited or invalid'],
   [p=>{p.NSPrivacyAccessedAPITypes[0].NSPrivacyAccessedAPITypeReasons=['not-approved'];},'Unaudited or invalid'],
   [p=>{p.NSPrivacyAccessedAPITypes[0].NSPrivacyAccessedAPITypeReasons='CA92.1';},'Unaudited or invalid'],
   [p=>{p.NSPrivacyCollectedDataTypes[0].NSPrivacyCollectedDataTypeLinked='false';},'Invalid collected-data'],
@@ -62,6 +64,7 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
  for(const [change,message] of [
   [m=>{m.actions.Record.descriptionMetadata.descriptionText.key='Records on an iPhOnE.';},'ITMS-90626'],
   [m=>{m.actions.Record.descriptionMetadata.descriptionText.key='Records with Siri.';},'ITMS-90626'],
+  [m=>{m.actions.Record.parameters=[{title:{key:'Apple Watch',alternatives:[]}}];},'ITMS-90626'],
   [m=>{m.actions.Record.descriptionMetadata.descriptionText.key='Records speech';},'must end with a period'],
   [m=>{m.actions.Record.descriptionMetadata.descriptionText.alternatives=['Unexpected schema'];},'Unsupported localized'],
   [m=>{m.autoShortcuts=Array.from({length:11},()=>({phraseTemplates:[{key:'Record with ${applicationName}'}]}));},'maximum ten'],
@@ -141,6 +144,10 @@ test('Stable archive accepts the actual widget and keyboard source plists',t=>{
  plist(sharePrivacy,{NSPrivacyTracking:false,NSPrivacyTrackingDomains:[],NSPrivacyCollectedDataTypes:[],NSPrivacyAccessedAPITypes:[]});
  assert.throws(verify,error=>error.stderr.toString().includes('Missing extension defaults API declaration'));
  copyFileSync('JustSpeakShare/PrivacyInfo.xcprivacy',sharePrivacy);
+ const keyboardPrivacy=join(app,'PlugIns/JustSpeakKeyboard.appex/PrivacyInfo.xcprivacy');
+ plist(keyboardPrivacy,{NSPrivacyTracking:false,NSPrivacyTrackingDomains:[],NSPrivacyCollectedDataTypes:[],NSPrivacyAccessedAPITypes:[{NSPrivacyAccessedAPIType:'NSPrivacyAccessedAPICategoryUserDefaults',NSPrivacyAccessedAPITypeReasons:['1C8F.1']}]});
+ assert.throws(verify,error=>error.stderr.toString().includes('Missing keyboard active-keyboards API declaration'));
+ copyFileSync('JustSpeakKeyboard/PrivacyInfo.xcprivacy',keyboardPrivacy);
  plist(join(complication,'signed.plist'),{'com.apple.security.application-groups':[config.iosAppGroup]});
  assert.throws(verify,error=>error.stderr.toString().includes('wrong App Groups'));
  plist(join(complication,'signed.plist'),{'com.apple.security.application-groups':[config.watchAppGroup]});

@@ -1,12 +1,24 @@
 #!/usr/bin/env python3
 """Verify identity, submission metadata, privacy and notes in shipped bundles."""
 import hashlib
+import importlib.util
 import json
 import plistlib
 import subprocess
 import sys
 from pathlib import Path
 from xml.parsers.expat import ExpatError
+
+
+def _intent_terms():
+    path = Path(__file__).resolve().parent / "ios/check-app-intents-terms.py"
+    spec = importlib.util.spec_from_file_location("check_app_intents_terms", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+INTENT_TERMS = _intent_terms()
 
 
 def bundle_info(bundle):
@@ -39,10 +51,12 @@ def verify_intent_metadata(resources, *, main, require_shortcuts=False):
                 or resource.get("alternatives") != []):
             raise SystemExit(f"Unsupported localized App Intent description: {identifier}: {path}")
         text = resource["key"].strip()
-        if any(term in text.casefold() for term in ["iphone", "siri"]):
-            raise SystemExit(f"ITMS-90626: prohibited App Intent description term: {identifier}: {path}")
         if not text.endswith("."):
             raise SystemExit(f"App Intent description must end with a period: {identifier}: {path}")
+    # Titles, parameters, entities and phrases are validated as well as descriptions.
+    findings = INTENT_TERMS.metadata_findings(metadata)
+    if findings:
+        raise SystemExit(f"ITMS-90626: prohibited App Intents metadata term: {path}: {'; '.join(findings)}")
     shortcuts = metadata.get("autoShortcuts")
     if not isinstance(shortcuts, list) or len(shortcuts) > 10:
         raise SystemExit(f"Invalid App Shortcuts list (maximum ten): {path}")
@@ -78,7 +92,10 @@ def verify_submission_metadata(bundle, info, *, surface, main=False, watch=False
         "NSPrivacyAccessedAPICategoryFileTimestamp": {"C617.1", "3B52.1"},
         "NSPrivacyAccessedAPICategoryDiskSpace": {"E174.1"},
         "NSPrivacyAccessedAPICategorySystemBootTime": {"35F9.1"},
+        "NSPrivacyAccessedAPICategoryActiveKeyboards": {"54BD.1"},
     }
+    # UITextInputMode.activeInputModes is UIKit-only: the iOS app and keyboard read it.
+    ios_only = {"NSPrivacyAccessedAPICategoryActiveKeyboards"}
     categories = set()
     apis = privacy.get("NSPrivacyAccessedAPITypes")
     if not isinstance(apis, list):
@@ -93,9 +110,12 @@ def verify_submission_metadata(bundle, info, *, surface, main=False, watch=False
                        for reason in reasons)):
             raise SystemExit(f"Unaudited or invalid required-reason API declaration: {path}")
         categories.add(category)
-    if main and not approved_reasons.keys() <= categories:
+    required_main = approved_reasons.keys() - (set() if surface == "ios" else ios_only)
+    if main and not required_main <= categories:
         raise SystemExit(f"Missing app required-reason API categories: {path}")
     extension_point = info.get("NSExtension", {}).get("NSExtensionPointIdentifier")
+    if extension_point == "com.apple.keyboard-service" and not ios_only <= categories:
+        raise SystemExit(f"Missing keyboard active-keyboards API declaration: {path}")
     if extension_point in ["com.apple.keyboard-service", "com.apple.share-services"] or (
             extension_point == "com.apple.widgetkit-extension" and not watch):
         if "NSPrivacyAccessedAPICategoryUserDefaults" not in categories:

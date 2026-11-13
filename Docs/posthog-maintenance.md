@@ -86,9 +86,38 @@ Owner setup:
    self-service event deletion request; re-run with `dry_run` true later to
    confirm its status moved on.
 
-GeoIP one-off: the seven historical test events carrying GeoIP city/postcode
-data are deleted with the same API. Run the workflow with mode
-`geoip-test-events`, first with `dry_run` true (expect `Matching events: 7`),
-then false, and request approval as in step 5. The script selects events
-whose properties contain `$geoip_city_name` or `$geoip_postal_code` and
-refuses if more than seven match.
+Status (13 Nov 2026): steps 1 to 3 are done, but every run fails with
+`unexpected list response (HTTP 403)` because PostHog has not enabled
+self-service data deletion for project 254700. A support request is open
+(in-app ticket `01a1d544-c7e8-0000-0b93-4f748c9b3f1c`). Re-run step 4 after
+PostHog replies.
+
+Manual fallback: if the purge still cannot run, delete events older than 12
+months through PostHog support or the PostHog UI before any event reaches 12
+months old. Deadline: **TBD: 12 months after the earliest Production event.**
+Find that date with the PostHog MCP or a HogQL query on the Production project
+(`SELECT min(timestamp) FROM events`), then replace this placeholder with it.
+
+## Location data (GeoIP)
+
+Owner decision, 13 Nov 2026: the Production project keeps PostHog's **GeoIP**
+transformation on, with **Discard client IP data** on, in EU Cloud. GeoIP looks
+up an approximate location (country, region, city and similar fields) from the
+IP at ingestion, and the IP is then discarded. The transformation skips events
+that carry `$geoip_disable`, and the Mac client sets
+`$geoip_disable = true` on every event, so app events should carry no
+`$geoip_*` properties. The privacy policy and in-app copy disclose both points.
+
+The one-off `geoip-test-events` purge mode is retired. With GeoIP kept on and
+disclosed, its "expect 7 events" guard no longer meant anything and could block
+on legitimately enriched events. The seven historical test events are removed
+by the retention purge (or the manual fallback) when they pass 12 months.
+
+## Rollout gate
+
+Owner decision, 13 Nov 2026: retention deletion no longer blocks rollout; the
+manual fallback above covers it. The remaining gate (`owner-posthog-gates` in
+[manual-checks.yml](manual-checks.yml)) is production evidence, meaning the
+ingestion-key rotation drill and one Release-build network capture, followed by
+one clean phase-one inspection week. That week unblocks #814. EU hosting and
+IP-discard screenshots were added to #776 on 13 Nov 2026.

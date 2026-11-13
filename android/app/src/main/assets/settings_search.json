@@ -1,6 +1,25 @@
 {
   "entries" : [
     {
+      "id" : "general.rawConfiguration",
+      "keywords" : [
+        "raw settings",
+        "json",
+        "config file",
+        "export settings",
+        "import settings",
+        "reset to defaults",
+        "advanced editor"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+
+      ],
+      "summary" : "View, validate, import or export every setting as JSON.",
+      "title" : "Edit raw configuration"
+    },
+    {
       "id" : "android.cloudModel",
       "keywords" : [
         "transcription model",

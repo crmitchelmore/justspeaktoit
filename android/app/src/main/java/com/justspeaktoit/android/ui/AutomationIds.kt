@@ -46,8 +46,8 @@ object AutomationIds {
     /** One per language in the picker, keyed by its catalogue ID (for example `en_GB`). */
     fun languageOption(id: String) = "languagePicker.language.$id"
 
-    /** One per correction, keyed by its spelling. */
-    fun correctionRemove(writeAs: String) = "settings.corrections.remove.$writeAs"
+    /** One per correction, keyed by its position in the list, never by the user's own text. */
+    fun correctionRemove(index: Int) = "settings.corrections.remove.$index"
     const val CLEANUP_PICKER_BACK = "cleanupPicker.back"
     const val CLEANUP_PICKER_SEARCH = "cleanupPicker.search"
     const val CLEANUP_PICKER_OPENROUTER = "cleanupPicker.openRouter"

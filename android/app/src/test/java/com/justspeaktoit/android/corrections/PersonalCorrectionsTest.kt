@@ -52,4 +52,11 @@ class PersonalCorrectionsTest {
             PersonalCorrections.decode("""[1, {"writeAs": ""}, {"writeAs": "Ok"}]"""),
         )
     }
+
+    @Test
+    fun testAccentedLetters_countAsPartOfTheWord() {
+        val rules = listOf(CorrectionRule("CAF", listOf("caf")))
+        assertEquals("café and CAF", PersonalCorrections.apply("café and caf", rules))
+        assertEquals("naïve", PersonalCorrections.apply("naïve", listOf(CorrectionRule("X", listOf("na")))))
+    }
 }

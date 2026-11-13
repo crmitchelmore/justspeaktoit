@@ -314,7 +314,12 @@ internal class DictationSessionController(
     private fun runCleanup(done: DictationState.Done, model: CleanupModel) {
         change { it.copy(cleanup = CleanupStatus.Running) }
         work = scope.launch {
-            val outcome = requests.cleanup(model, done.transcript)
+            // Cleanup can restore a misheard word, so corrections run again on its output.
+            val outcome = when (val cleaned = requests.cleanup(model, done.transcript)) {
+                is CleanupOutcome.Applied ->
+                    CleanupOutcome.Applied(PersonalCorrections.apply(cleaned.text, settings.corrections))
+                else -> cleaned
+            }
             if (state.dictation != done) return@launch
             change {
                 when (outcome) {

@@ -21,7 +21,7 @@ object PersonalCorrections {
             if (trimmed.isEmpty()) {
                 inner
             } else {
-                Regex("""(?<!\w)${Regex.escape(trimmed)}(?!\w)""", setOf(RegexOption.IGNORE_CASE))
+                Regex("""(?<!$WORD)${Regex.escape(trimmed)}(?!$WORD)""", setOf(RegexOption.IGNORE_CASE))
                     .replace(inner) { rule.writeAs }
             }
         }
@@ -82,6 +82,9 @@ object PersonalCorrections {
             rule(item.optString("writeAs"), (0 until aliases.length()).map { aliases.optString(it) })
         }
     }
+
+    /** A letter, mark, digit or underscore in any script, so `café` is one word, not `caf` + `é`. */
+    private const val WORD = """[\p{L}\p{M}\p{N}_]"""
 
     private fun String.utf8Size(): Int = toByteArray(Charsets.UTF_8).size
 }

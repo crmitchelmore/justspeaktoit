@@ -115,7 +115,7 @@ internal fun CorrectionsEditor(rules: List<CorrectionRule>, onChange: (List<Corr
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        rules.forEach { rule ->
+        rules.forEachIndexed { index, rule ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 val heard = rule.heardAs.joinToString(", ").ifEmpty {
                     stringResource(R.string.corrections_vocabulary_only)
@@ -127,7 +127,7 @@ internal fun CorrectionsEditor(rules: List<CorrectionRule>, onChange: (List<Corr
                 )
                 IconButton(
                     onClick = { onChange(rules - rule) },
-                    modifier = Modifier.testTag(AutomationIds.correctionRemove(rule.writeAs)),
+                    modifier = Modifier.testTag(AutomationIds.correctionRemove(index)),
                 ) {
                     Icon(
                         painterResource(R.drawable.ic_close),

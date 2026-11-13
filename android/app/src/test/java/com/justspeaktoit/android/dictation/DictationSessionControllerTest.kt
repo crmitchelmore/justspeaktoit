@@ -49,11 +49,15 @@ class DictationSessionControllerTest {
     private val history = MutableStateFlow<List<HistoryEntry>>(emptyList())
     private var keepAudio = false
     private var rules = emptyList<CorrectionRule>()
+    private var cleanup: CleanupModel? = null
 
     private val controller by lazy {
         val cacheDir = folder.newFolder("cache")
         val capture = CloudCapture(recorders, cacheDir, Dispatchers.IO, RecorderRetirement(Dispatchers.IO), resources)
-        val secrets = MemorySecrets("openai.apiKey" to "sk-test")
+        val secrets = MemorySecrets(
+            "openai.apiKey" to "sk-test",
+            CloudCatalog.cleanupModels.first().provider.credentialId to "sk-cleanup",
+        )
         DictationSessionController(
             engine = engine,
             capture = capture,
@@ -70,7 +74,7 @@ class DictationSessionControllerTest {
             settings = object : SessionSettings {
                 override val retention = Retention.Month
                 override val keepAudioOnCancel get() = keepAudio
-                override val cleanupModel: CleanupModel? = null
+                override val cleanupModel get() = cleanup
                 override val corrections get() = rules
             },
             publish = { states.value = it },
@@ -186,6 +190,18 @@ class DictationSessionControllerTest {
         onMain { controller.stop() }
         await(states) { it.dictation.text() == "Kubernetes works" }
         assertEquals("Kubernetes", cloud.transcriptions.single().prompt)
+    }
+
+    @Test
+    fun testCleanupThatRestoresAMisheardWord_isCorrectedAgain() {
+        rules = listOf(CorrectionRule("Kubernetes", listOf("cooper netties")))
+        cleanup = CloudCatalog.cleanupModels.first()
+        cloud.onCleanup = { "Ship Cooper Netties." }
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("ship cooper netties")) }
+        await(states) { it.cleanup == CleanupStatus.Applied }
+        assertEquals("ship Kubernetes", cloud.cleanups.single())
+        assertEquals("Ship Kubernetes.", states.value.dictation.text())
     }
 
     private fun DictationState.text() = (this as? DictationState.Done)?.transcript

@@ -58,6 +58,7 @@ private class ReadAloudEngine(
     private var ready = false
     private var pending: String? = null
     private var onUnavailable: (() -> Unit)? = null
+    @Volatile private var lastUtterance: String? = null
 
     fun speak(text: String, unavailable: () -> Unit) {
         onUnavailable = unavailable
@@ -97,7 +98,8 @@ private class ReadAloudEngine(
             }
 
             override fun onDone(utteranceId: String?) {
-                main.post { onSpeaking(false) }
+                // Long text is queued as several utterances; only the last one ends the reading.
+                if (utteranceId == lastUtterance) main.post { onSpeaking(false) }
             }
 
             @Deprecated("Deprecated in Java")
@@ -110,11 +112,41 @@ private class ReadAloudEngine(
     }
 
     private fun say(engine: TextToSpeech, text: String) {
-        val result = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_ID)
-        if (result == TextToSpeech.ERROR) onUnavailable?.invoke() else onSpeaking(true)
+        val chunks = speechChunks(text, TextToSpeech.getMaxSpeechInputLength())
+        if (chunks.isEmpty()) return
+        lastUtterance = "$UTTERANCE_PREFIX${chunks.lastIndex}"
+        val failed = chunks.withIndex().any { (index, chunk) ->
+            val queue = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            engine.speak(chunk, queue, null, "$UTTERANCE_PREFIX$index") == TextToSpeech.ERROR
+        }
+        if (failed) {
+            engine.stop()
+            onUnavailable?.invoke()
+        } else {
+            onSpeaking(true)
+        }
     }
 
     private companion object {
-        const val UTTERANCE_ID = "jsti.readAloud"
+        const val UTTERANCE_PREFIX = "jsti.readAloud."
     }
+}
+
+/**
+ * Splits [text] into pieces of at most [maxLength] characters for `TextToSpeech.speak`, which
+ * rejects longer input. Breaks after a sentence end or space where it can, so words stay whole.
+ */
+internal fun speechChunks(text: String, maxLength: Int): List<String> {
+    require(maxLength > 0)
+    val chunks = mutableListOf<String>()
+    var rest = text.trim()
+    while (rest.length > maxLength) {
+        val window = rest.substring(0, maxLength + 1)
+        val sentence = window.lastIndexOfAny(charArrayOf('.', '!', '?', '\n')).takeIf { it > 0 && it < maxLength }
+        val cut = sentence?.plus(1) ?: window.lastIndexOf(' ').takeIf { it > 0 } ?: maxLength
+        chunks += rest.substring(0, cut).trim()
+        rest = rest.substring(cut).trim()
+    }
+    if (rest.isNotEmpty()) chunks += rest
+    return chunks.filter { it.isNotEmpty() }
 }

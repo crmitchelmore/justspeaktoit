@@ -32,7 +32,7 @@ public enum FileSpeechProvider: String, CaseIterable, Sendable {
             website = "https://console.reson8.dev"
         case .stepfun:
             name = "StepFun"
-            website = "https://platform.stepfun.com"
+            website = "https://platform.stepfun.ai"
         }
         return TranscriptionProviderMetadata(
             id: rawValue, displayName: name, systemImage: "waveform",
@@ -53,7 +53,7 @@ public enum FileSpeechProvider: String, CaseIterable, Sendable {
         case .stepfun:
             name = "StepFun StepAudio 3 ASR Max"
             description = "Upload one recording for StepAudio 3 recognition with streamed text responses. "
-                + "Not live microphone streaming."
+                + "Not live microphone streaming. Uses the region saved with your StepFun key."
         }
         return ModelCatalog.Option(id: modelID, displayName: name, description: description, latencyTier: .medium)
     }

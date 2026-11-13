@@ -219,6 +219,21 @@ sessions:
           - "Open History."
         expected: "Every route transcribes the phrase once, streaming routes show words while you speak (Azure MAI Transcribe (Turn-based) shows each turn when you pause), and History names the model with its cost. Pulse refuses the non-English run before sending audio. Note any route that is unavailable to your account."
         final_gate: true
+      - id: "owner-stepfun-international-region"
+        issues:
+          - 1210
+        title: "StepFun International key region"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Mac, first Alpha with the StepFun region setting"
+        prerequisites:
+          - "A StepFun API key from platform.stepfun.ai (International)"
+        steps:
+          - "Settings \u203a API Keys: set StepFun region for new keys to International, then save the StepFun key."
+          - "Choose StepFun StepAudio 3 ASR Max, dictate \u201cstep fun international\u201d into TextEdit and stop."
+          - "Set the region to China, save the same key again, and dictate once more."
+        expected: "The International run transcribes the phrase. The China run fails with a message that StepFun rejected the key for the China region; it does not silently succeed through the International endpoint."
+        final_gate: false
       - id: "owner-cloudkit-shared-container"
         issues:
           - 1119

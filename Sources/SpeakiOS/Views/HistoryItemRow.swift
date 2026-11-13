@@ -17,6 +17,7 @@ struct HistoryItemRow: View {
     var onDelete: () -> Void = {}
     var onReport: () -> Void = {}
     @State private var isExpanded = false
+    @State private var showsSessionDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: density.isCompact ? density.cardContentSpacing : 8) {
@@ -37,6 +38,13 @@ struct HistoryItemRow: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .lineLimit(isExpanded ? nil : 2)
+                    .accessibilityLabel("Error: \(error)")
+                    .accessibilityIdentifier("historyRowError-\(item.id)")
+            }
+
+            let details = item.sessionDetails
+            if !details.rows.isEmpty {
+                sessionDetailsSection(details)
             }
 
             metadataFooter
@@ -210,6 +218,31 @@ struct HistoryItemRow: View {
         }
     }
 
+    private func sessionDetailsSection(_ details: HistoryDetailSummary) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showsSessionDetails.toggle() }
+            } label: {
+                Label("Session details", systemImage: showsSessionDetails ? "chevron.up" : "info.circle")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44, alignment: .leading)
+            .accessibilityValue(showsSessionDetails ? "Expanded" : "Collapsed")
+            .accessibilityHint("Shows trigger, models, timings and cost")
+            .accessibilityIdentifier("historySessionDetailsButton-\(item.id)")
+
+            if showsSessionDetails {
+                ForEach(details.rows) { row in
+                    LabeledContent(row.title, value: row.value)
+                        .font(.caption)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("historySessionDetail-\(row.id)-\(item.id)")
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private func transcriptSection(title: String, text: String) -> some View {
         if usesInlineDensityLayout {
@@ -246,14 +279,7 @@ struct HistoryItemRow: View {
     }
 
     private var modelDisplayName: String {
-        if item.model.contains("deepgram") {
-            return "Deepgram"
-        } else if item.model.contains("elevenlabs") {
-            return "ElevenLabs"
-        } else if item.model.contains("apple") {
-            return "Apple Speech"
-        }
-        return item.model
+        ModelCatalog.friendlyName(for: item.model)
     }
 
     private var platformDisplayName: String {

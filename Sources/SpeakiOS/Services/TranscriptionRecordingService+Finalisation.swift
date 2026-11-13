@@ -88,6 +88,8 @@ extension TranscriptionRecordingService {
         // claimed, before the drain; the transcript is committed below.
         sharedState.clearRecordingState()
         let duration = elapsedSeconds
+        let recordingEnded = Date()
+        let recordingStarted = startTime
         let completionID = polishLedger.beginCompletion()
 
         // Keep the (often headless / backgrounded) process alive long enough for
@@ -137,6 +139,10 @@ extension TranscriptionRecordingService {
         if let currentTrigger {
             dependencies.recordDictation(currentTrigger, text)
         }
+        let captureDetails = IOSCaptureDetails(
+            trigger: currentTrigger, isBatch: isBatch, recordingStarted: recordingStarted,
+            recordingEnded: recordingEnded, transcriptionEnded: Date()
+        )
         currentTrigger = nil
         // The overrides belong to the run that just ended; the next capture
         // starts from the global settings again unless it brings its own.
@@ -160,7 +166,8 @@ extension TranscriptionRecordingService {
                 errorMessage: endingSession?.recordingLossSummary.map { warning in
                     [warning, lastSessionError?.localizedDescription].compactMap { $0 }.joined(separator: " ")
                 },
-                requestContext: completedRequestContext, requestFailure: completedRequestFailure
+                requestContext: completedRequestContext, requestFailure: completedRequestFailure,
+                captureDetails: captureDetails
             )
             : nil
         if let historyItem, let intended = offlineIntendedModel,

@@ -25,6 +25,11 @@ public struct iOSHistoryItem: Identifiable, Codable, Sendable { // swiftlint:dis
     public let requestContext: RequestDiagnosticContext?
     /// Original typed capture outcome; not a post-processing result or provider claim.
     public let requestFailure: RequestDiagnosticContext.Failure?
+    /// Local session details shown in History (models by phase, timings, trigger).
+    /// Persisted under HistoryRecord's key names; never synchronized.
+    public let modelUsages: [ApplicationModelUsage]?
+    public let phaseTimestamps: ApplicationPhaseTimestamps?
+    public let trigger: ApplicationHistoryTrigger?
 
     // Rich display metadata remains in memory only. Local admission and typed
     // failure keys persist separately; nil keeps the original ten-key encoding.
@@ -98,6 +103,9 @@ public struct iOSHistoryItem: Identifiable, Codable, Sendable { // swiftlint:dis
         self.requestFailure = requestFailure.map {
             .init(stage: $0.stage, code: $0.code, domain: $0.domain, httpStatus: $0.httpStatus)
         }
+        self.modelUsages = nil
+        self.phaseTimestamps = nil
+        self.trigger = nil
         self.sourceHistoryRecord = nil
     }
 
@@ -169,6 +177,9 @@ public struct iOSHistoryItem: Identifiable, Codable, Sendable { // swiftlint:dis
         case errorMessage
         case requestContext
         case requestFailure
+        case modelUsages
+        case phaseTimestamps
+        case trigger
     }
 
     public init(from decoder: Decoder) throws {
@@ -187,6 +198,11 @@ public struct iOSHistoryItem: Identifiable, Codable, Sendable { // swiftlint:dis
             try? container.decodeIfPresent(RequestDiagnosticContext.self, forKey: .requestContext)
         )
         requestFailure = try? container.decodeIfPresent(RequestDiagnosticContext.Failure.self, forKey: .requestFailure)
+        // Optional session details; an unreadable one never hides the transcript.
+        let usages = try? container.decodeIfPresent([ApplicationModelUsage].self, forKey: .modelUsages)
+        modelUsages = usages?.isEmpty == false ? usages : nil
+        phaseTimestamps = try? container.decodeIfPresent(ApplicationPhaseTimestamps.self, forKey: .phaseTimestamps)
+        trigger = try? container.decodeIfPresent(ApplicationHistoryTrigger.self, forKey: .trigger)
         sourceHistoryRecord = nil
     }
 }
@@ -212,33 +228,114 @@ extension iOSHistoryItem {
         self.errorMessage = record.errorMessage
         self.requestContext = RequestDiagnosticContext.admissionOnly(record.requestContext)
         self.requestFailure = record.requestFailure
+        self.modelUsages = record.modelUsages.isEmpty ? nil : record.modelUsages
+        self.phaseTimestamps = record.phaseTimestamps
+        self.trigger = record.trigger
         self.sourceHistoryRecord = record
     }
 
     public var historyRecord: HistoryRecord {
         self.sourceHistoryRecord ?? HistoryRecord(
-            id: self.id, createdAt: self.createdAt, updatedAt: self.updatedAt,
+            id: self.id, createdAt: self.createdAt, updatedAt: self.updatedAt, modelUsages: self.modelUsages ?? [],
             rawTranscription: self.transcription, postProcessedTranscription: self.postProcessedTranscription,
-            recordingDuration: self.duration, model: self.model, wordCount: self.wordCount,
+            recordingDuration: self.duration, phaseTimestamps: self.phaseTimestamps, trigger: self.trigger,
+            model: self.model, wordCount: self.wordCount,
             originPlatform: self.originPlatform, errorMessage: self.errorMessage, requestContext: self.requestContext,
             requestFailure: self.requestFailure
         )
     }
 
     var presentationItem: HistoryPresentationItem { self.historyRecord.iosPresentation }
+
+    /// The "Session details" rows History shows for this entry.
+    var sessionDetails: HistoryDetailSummary { HistoryDetailSummary(record: self.historyRecord) }
+
+    /// Returns a copy carrying new session details without advancing its timestamp.
+    func withSessionDetails(
+        modelUsages: [ApplicationModelUsage]?, phaseTimestamps: ApplicationPhaseTimestamps?,
+        trigger: ApplicationHistoryTrigger?
+    ) -> iOSHistoryItem {
+        iOSHistoryItem(retaining: self.historyRecord.replacingSessionDetails(
+            modelUsages: modelUsages ?? [], phaseTimestamps: phaseTimestamps, trigger: trigger
+        ), wordCount: self.wordCount)
+    }
+
+    /// Records which model polished this entry and how long it took.
+    func withPostProcessingDetails(_ details: IOSPostProcessingDetails?) -> iOSHistoryItem {
+        guard let details else { return self }
+        let usages = (self.modelUsages ?? []).filter { $0.phase != .postProcessing }
+            + [ApplicationModelUsage(modelIdentifier: details.model, phase: .postProcessing)]
+        let times = self.phaseTimestamps
+        return self.withSessionDetails(
+            modelUsages: usages,
+            phaseTimestamps: ApplicationPhaseTimestamps(
+                recordingStarted: times?.recordingStarted, recordingEnded: times?.recordingEnded,
+                transcriptionStarted: times?.transcriptionStarted, transcriptionEnded: times?.transcriptionEnded,
+                postProcessingStarted: details.startedAt, postProcessingEnded: details.endedAt,
+                outputDelivered: times?.outputDelivered
+            ),
+            trigger: self.trigger
+        )
+    }
+
+    /// A remote copy replacing this row keeps the session details only this device recorded.
+    func retainingLocalSessionDetails(of local: iOSHistoryItem) -> iOSHistoryItem {
+        guard self.modelUsages == nil, self.phaseTimestamps == nil, self.trigger == nil else { return self }
+        guard local.modelUsages != nil || local.phaseTimestamps != nil || local.trigger != nil else { return self }
+        return self.withSessionDetails(
+            modelUsages: local.modelUsages, phaseTimestamps: local.phaseTimestamps, trigger: local.trigger
+        )
+    }
+}
+
+/// What a finished capture observed about itself, recorded with its History entry.
+struct IOSCaptureDetails: Sendable {
+    var trigger: CaptureTrigger?
+    var isBatch: Bool
+    var recordingStarted: Date?
+    var recordingEnded: Date
+    var transcriptionEnded: Date
+
+    func sessionDetails(model: String) -> (
+        modelUsages: [ApplicationModelUsage], phaseTimestamps: ApplicationPhaseTimestamps,
+        trigger: ApplicationHistoryTrigger?
+    ) {
+        let usages = model.isEmpty ? [] : [ApplicationModelUsage(
+            modelIdentifier: model, phase: self.isBatch ? .transcriptionBatch : .transcriptionLive
+        )]
+        // Matches the Mac: a live transcript streams while recording, so its
+        // measured interval is the finalisation after stop.
+        let times = ApplicationPhaseTimestamps(
+            recordingStarted: self.recordingStarted, recordingEnded: self.recordingEnded,
+            transcriptionStarted: self.recordingEnded, transcriptionEnded: self.transcriptionEnded
+        )
+        return (usages, times, self.trigger.map(ApplicationHistoryTrigger.init(captureTrigger:)))
+    }
+}
+
+/// The polish that produced an entry's post-processed text.
+struct IOSPostProcessingDetails: Sendable {
+    let model: String
+    let startedAt: Date
+    let endedAt: Date
 }
 
 extension iOSHistoryItem {
     /// A new History row for a finished recording; `nil` when it produced no text.
     static func recordedTranscript(
         text: String, model: String, duration: TimeInterval, errorMessage: String?,
-        requestContext: RequestDiagnosticContext? = nil, requestFailure: RequestDiagnosticContext.Failure? = nil
+        requestContext: RequestDiagnosticContext? = nil, requestFailure: RequestDiagnosticContext.Failure? = nil,
+        captureDetails: IOSCaptureDetails? = nil
     ) -> iOSHistoryItem? {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        return iOSHistoryItem(
+        let item = iOSHistoryItem(
             transcription: text, model: model, duration: duration,
             wordCount: text.split(separator: " ").count, errorMessage: errorMessage, requestContext: requestContext,
             requestFailure: requestFailure
+        )
+        guard let details = captureDetails?.sessionDetails(model: model) else { return item }
+        return item.withSessionDetails(
+            modelUsages: details.modelUsages, phaseTimestamps: details.phaseTimestamps, trigger: details.trigger
         )
     }
 }

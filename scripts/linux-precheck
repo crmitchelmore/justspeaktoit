@@ -3,7 +3,7 @@
 
 Usage:
     scripts/linux-precheck                 # auto: a local container if one runs, else --remote
-    scripts/linux-precheck --container     # docker or podman with the CI image
+    scripts/linux-precheck --container     # docker, podman or Apple container with the CI image
     scripts/linux-precheck --remote        # a throwaway precheck/** branch run on GitHub's Ubuntu runners
     scripts/linux-precheck --tree DIR      # check another worktree (merge-batch uses this)
     scripts/linux-precheck --job android   # the Android CI job (scripts/ci-android.sh), always remote
@@ -11,15 +11,23 @@ Usage:
 
 Both modes run scripts/ci-portable-linux.sh, the same script ci.yml's Portable Swift (Linux)
 job runs, in the same swift:6.2.3-jammy image (override with JSTI_SWIFT_IMAGE, e.g. a registry
-mirror). --remote snapshots the working tree, including uncommitted and untracked files, as a
-commit on top of HEAD, merges it into --base exactly as GitHub builds a pull request's merge commit,
-pushes that to precheck/<user>-<sha>, waits for .github/workflows/precheck.yml and deletes the branch. It never uses macOS. A tree that predates precheck.yml or
+mirror). Both snapshot the working tree, including uncommitted and untracked files, as a commit
+on top of HEAD and merge it into --base exactly as GitHub builds a pull request's merge commit.
+--remote pushes that to precheck/<user>-<sha>, waits for .github/workflows/precheck.yml and deletes the branch. It never uses macOS. A tree that predates precheck.yml or
 ci-portable-linux.sh gets this checkout's copies, so older commits can be checked too.
+
+--container streams the commit into a persistent volume (JSTI_PORTABLE_VOLUME, default
+jsti-portable-build) and syncs it over the previous run's sources by content, so unchanged
+files keep their timestamps and the build is incremental, not cold. One run uses the volume at
+a time. Tests run across processes and only failures rerun serially (JSTI_SWIFT_TEST_PARALLEL=1).
+Apple container (brew install container; container system start) gets JSTI_CONTAINER_CPUS
+(default: all cores) and JSTI_CONTAINER_MEMORY (default 12g); its default VM is too small.
 Exit status 0 means the Linux job would pass.
 """
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import shutil
@@ -36,7 +44,8 @@ REMOTE = os.environ.get('JSTI_PRECHECK_REMOTE', 'origin')
 IMAGE = os.environ.get('JSTI_SWIFT_IMAGE',
                        'swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6')
 WORKFLOW = 'precheck.yml'
-OVERLAY = ('.github/workflows/precheck.yml', 'scripts/ci-portable-linux.sh', 'scripts/ci-android.sh')
+OVERLAY = ('.github/workflows/precheck.yml', 'scripts/ci-portable-linux.sh', 'scripts/ci-android.sh',
+           'scripts/ci/sync-tree.py')
 JOBS = ('portable', 'android', 'lint')
 TIMEOUT_MINUTES = float(os.environ.get('JSTI_PRECHECK_TIMEOUT_MINUTES', '45'))
 
@@ -151,18 +160,65 @@ def remote(tree: Path, base: str | None = None, poll: float = 20.0, job: str = '
 
 
 def container_runtime() -> str | None:
-    for name in ('docker', 'podman'):
+    """A running docker or podman, else a running Apple container system."""
+    for name, probe in (('docker', ['info']), ('podman', ['info']), ('container', ['system', 'status'])):
         path = shutil.which(name)
-        if path and subprocess.run([path, 'info'], capture_output=True).returncode == 0:
+        if path and subprocess.run([path, *probe], capture_output=True).returncode == 0:
             return path
     return None
 
 
-def container(tree: Path, runtime: str) -> int:
-    command = [runtime, 'run', '--rm', '-v', f'{tree}:/src', '-w', '/src',
-               '-e', 'JSTI_SCRATCH_PATH=/src/.build/pre-pr/linux', IMAGE, 'bash', 'scripts/ci-portable-linux.sh']
-    print('linux-precheck: ' + ' '.join(command), flush=True)
-    return subprocess.run(command).returncode
+def apple(runtime: str) -> bool:
+    return Path(runtime).name == 'container'
+
+
+# Inside the container: unpack the commit, sync it over the volume's sources (unchanged files keep
+# their timestamps, so SwiftPM rebuilds only what changed) and run the CI job's script.
+IN_CONTAINER = ('set -e; rm -rf /build/incoming; mkdir -p /build/incoming; tar -x -C /build/incoming; '
+                'python3 /build/incoming/scripts/ci/sync-tree.py /build/incoming /build/src; '
+                'rm -rf /build/incoming; cd /build/src; exec bash scripts/ci-portable-linux.sh')
+
+
+def container(tree: Path, runtime: str, base: str | None = None) -> int:
+    commit = snapshot(tree)
+    if base:
+        commit = merged_with(tree, commit, base)
+    volume = os.environ.get('JSTI_PORTABLE_VOLUME', 'jsti-portable-build')
+    if subprocess.run([runtime, 'volume', 'inspect', volume], capture_output=True).returncode != 0:
+        subprocess.run([runtime, 'volume', 'create', *(['-s', '128G'] if apple(runtime) else []), volume],
+                       check=True, capture_output=True)
+    resources = (['--cpus', os.environ.get('JSTI_CONTAINER_CPUS', str(os.cpu_count() or 4)),
+                  '--memory', os.environ.get('JSTI_CONTAINER_MEMORY', '12g')] if apple(runtime) else [])
+    name = f'jsti-portable-{os.getpid()}'
+    command = [runtime, 'run', '--rm', '-i', '--name', name, *resources, '-v', f'{volume}:/build',
+               '-e', 'JSTI_SCRATCH_PATH=/build/scratch', '-e', 'JSTI_SWIFT_TEST_PARALLEL=1',
+               IMAGE, 'bash', '-c', IN_CONTAINER]
+    lock_path = Path.home() / '.cache' / 'jsti-pre-pr' / f'{volume}.lock'
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, 'w') as lock:
+        if not _try_lock(lock):
+            print(f'linux-precheck: waiting for another run using the {volume} volume', flush=True)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        print(f'linux-precheck: {commit[:12]} in ' + ' '.join(command[:-1]) + ' ...', flush=True)
+        archive = subprocess.Popen(['git', 'archive', '--format=tar', commit], cwd=tree, stdout=subprocess.PIPE)
+        try:
+            code = subprocess.run(command, stdin=archive.stdout).returncode
+        finally:
+            archive.stdout.close()
+            archive.wait()
+            # A stopped run (pre-pr's SIGTERM) must not leave the container holding the volume.
+            subprocess.run([runtime, 'rm' if not apple(runtime) else 'delete', '--force', name],
+                           capture_output=True)
+    # A truncated archive must not pass; a failed run already exits non-zero.
+    return 1 if code == 0 and archive.returncode != 0 else code
+
+
+def _try_lock(lock) -> bool:
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -180,10 +236,10 @@ def main(argv: list[str] | None = None) -> int:
     # Only the portable job has a container form; Android and Lint need GitHub's Ubuntu image.
     runtime = None if args.remote or args.job != 'portable' else container_runtime()
     if args.container and not runtime:
-        print('linux-precheck: no running docker or podman', file=sys.stderr)
+        print('linux-precheck: no running docker, podman or Apple container', file=sys.stderr)
         return 1
     if runtime:
-        return container(tree, runtime)
+        return container(tree, runtime, args.base or None)
     return remote(tree, args.base or None, job=args.job)
 
 

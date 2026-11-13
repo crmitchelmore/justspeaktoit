@@ -433,7 +433,7 @@ test('tooling gate delegates to the complete local discovery target', () => {
   assert.match(makefile, /^\tnode --test \.github\/scripts\/dependabot-merge\.test\.mjs$/m);
   assert.match(makefile, /ruby scripts\/tests\/release_apple_test\.rb/);
   assert.match(makefile, /ruby scripts\/tests\/create_ios_app_store_profile_test\.rb/);
-  assert.match(makefile, /python3 -m unittest discover -s scripts\/tests -p 'test_\*\.py' -v/);
+  assert.match(makefile, /^\tpython3 scripts\/ci\/parallel-unittest\.py -s scripts\/tests -p 'test_\*\.py' -v$/m);
   assert.match(makefile, /python3 scripts\/generate-release-train-config\.py --check/);
   assert.doesNotMatch(workflow, /Tests\/ReleaseNotesTests|scripts\/release-train\.test\.mjs/);
 });
@@ -442,7 +442,7 @@ const platformPythonTestRoots = [
   'scripts/linux-local-runtime', 'scripts/windows-local-runtime', 'scripts/windows-bundle',
   'scripts/windows-cross', 'scripts/windows-cloudkit', 'scripts/windows-package', 'scripts/migration',
 ];
-const platformPythonCommand = root => `\tpython3 -B -m unittest discover -s ${root} -p 'test_*.py' -v\n`;
+const platformPythonCommand = root => `\tpython3 -B scripts/ci/parallel-unittest.py -s ${root} -p 'test_*.py' -v\n`;
 
 function toolingTestIsDiscovered(path, trackedFiles, makefileText) {
   const toolingRecipe = makefileText.match(/^test-tooling:[^\n]*\n((?:\t[^\n]*\n)*)/m)?.[1] ?? '';

@@ -44,7 +44,7 @@ test-release: ## Run tests in release configuration
 test-all: test test-release ## Run tests in both debug and release
 
 .PHONY: test-tooling
-test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
+test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests (Python across processes; JSTI_TEST_JOBS=1 for serial)
 	node --test scripts/tests/*.test.mjs
 	node --test .github/scripts/dependabot-merge.test.mjs
 	ruby scripts/tests/release_apple_test.rb
@@ -54,14 +54,14 @@ test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
 	ruby scripts/tests/create_ios_app_store_profile_test.rb
 	ruby scripts/tests/ensure_ios_app_store_profile_test.rb
 	ruby scripts/tests/testflight_testers_test.rb
-	python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/linux-local-runtime -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/windows-local-runtime -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/windows-bundle -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/windows-cross -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/windows-cloudkit -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/windows-package -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/migration -p 'test_*.py' -v
+	python3 scripts/ci/parallel-unittest.py -s scripts/tests -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/linux-local-runtime -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-local-runtime -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-bundle -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-cross -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-cloudkit -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-package -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/migration -p 'test_*.py' -v
 	python3 scripts/generate-release-train-config.py --check
 
 .PHONY: release

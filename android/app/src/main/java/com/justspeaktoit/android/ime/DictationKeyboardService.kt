@@ -357,7 +357,7 @@ class DictationKeyboardService : InputMethodService() {
         profileKey?.apply {
             val name = activeProfile?.name ?: getString(R.string.profile_none)
             visibility = if (profiles.isEmpty()) View.GONE else View.VISIBLE
-            text = getString(R.string.keyboard_profile, name)
+            this.text = getString(R.string.keyboard_profile, name)
             contentDescription = getString(R.string.keyboard_profile_description, name)
             isEnabled = !state.isActive && !checking
             alpha = if (isEnabled) 1f else 0.4f

@@ -335,6 +335,10 @@ extension SettingsView {
               .font(.caption)
               .foregroundStyle(.secondary)
           }
+
+          Divider()
+
+          RawConfigurationButton()
         }
       }
       .speakTooltip("Fine-tune advanced performance settings for power users.")

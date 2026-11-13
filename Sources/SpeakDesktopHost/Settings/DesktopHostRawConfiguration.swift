@@ -111,9 +111,9 @@ extension DesktopHostController {
             )
             context.platform = Self.settingsSchemaPlatform
             let report = SettingsValidator.validate(document, context: context)
-            let status = report.isValid
-                ? (report.changes.isEmpty ? "Valid. Nothing to change." : "Valid. \(report.changes.count) change(s) ready.")
-                : "The configuration is not valid. Nothing was saved."
+            let count = report.changes.count
+            let ready = count == 0 ? "Valid. Nothing to change." : "Valid. \(count) change(s) ready."
+            let status = report.isValid ? ready : "The configuration is not valid. Nothing was saved."
             return RawValidation(report: report, outcome: DesktopRawConfigurationOutcome(
                 status: status, errors: report.errors.map(\.description), warnings: report.warnings.map(\.description)
             ))
@@ -189,6 +189,10 @@ extension DesktopHostController {
     }
 
     private static func rawJSON(_ document: SettingsDocument) throws -> String {
-        String(decoding: try document.encodedJSON(), as: UTF8.self)
+        let data = try document.encodedJSON()
+        guard let text = String(bytes: data, encoding: .utf8) else {
+            throw CocoaError(.fileWriteInapplicableStringEncoding)
+        }
+        return text
     }
 }

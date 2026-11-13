@@ -597,7 +597,7 @@ sessions:
       - id: "owner-desktop-raw-configuration-editor"
         issues:
           - 1670
-        title: "Windows and Linux: Edit raw configuration validates, applies all or none, imports and exports"
+        title: "Windows and Linux: Edit raw configuration validates, applies all or none, round-trips"
         minutes: 6
         core: false
         build: "Just Speak to It for Windows or Linux, the first Alpha build that includes the #1670 raw configuration editor"

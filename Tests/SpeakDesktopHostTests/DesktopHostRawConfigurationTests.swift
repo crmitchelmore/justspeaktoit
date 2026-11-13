@@ -122,6 +122,6 @@ final class DesktopHostRawConfigurationTests: XCTestCase {
         let loaded = await controller.rawConfiguration(.load, text: "")
         var document = try SettingsDocument.parse(Data(try XCTUnwrap(loaded.text).utf8)).get()
         for (key, value) in changes { document.settings[key] = value }
-        return String(decoding: try document.encodedJSON(), as: UTF8.self)
+        return try XCTUnwrap(String(bytes: try document.encodedJSON(), encoding: .utf8))
     }
 }

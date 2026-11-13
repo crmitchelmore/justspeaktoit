@@ -1,16 +1,14 @@
 import SpeakCore
 import SwiftUI
 
-/// Builds the live OpenRouter browser a picker's OpenRouter entry opens: it is
-/// given a closure that applies a choice and one that returns to the native list.
-typealias ModelPickerOpenRouterBrowser = (
-  _ select: @escaping (String) -> Void, _ back: @escaping () -> Void
-) -> AnyView
+/// Builds the live OpenRouter browser that a picker's separate Browse OpenRouter
+/// button opens, given a closure that applies the chosen model.
+typealias ModelPickerOpenRouterBrowser = (_ select: @escaping (String) -> Void) -> AnyView
 
 struct ModelPicker: View {
   let title: String
   let help: String?
-  let options: [ModelCatalog.Option]
+  let allOptions: [ModelCatalog.Option]
   let credentialPurpose: ModelCredentialPurpose
   let storedAPIKeyIdentifiers: Set<String>
   let usesDetailedChooser: Bool
@@ -21,6 +19,7 @@ struct ModelPicker: View {
   @State var selection: String
   @State private var customValue: String
   @State private var isShowingChooser: Bool = false
+  @State private var isShowingOpenRouterBrowser = false
 
   init(
     title: String,
@@ -35,7 +34,7 @@ struct ModelPicker: View {
   ) {
     self.title = title
     self.help = help
-    self.options = options
+    self.allOptions = options
     self.credentialPurpose = credentialPurpose
     self.storedAPIKeyIdentifiers = storedAPIKeyIdentifiers
     self.usesDetailedChooser = usesDetailedChooser
@@ -55,7 +54,7 @@ struct ModelPicker: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if usesDetailedChooser || openRouterBrowser != nil || LongListPickerPolicy.usesSheet(count: options.count) {
+      if usesDetailedChooser || LongListPickerPolicy.usesSheet(count: options.count) {
         Button {
           isShowingChooser = true
         } label: {
@@ -87,7 +86,7 @@ struct ModelPicker: View {
             credentialPurpose: credentialPurpose,
             storedAPIKeyIdentifiers: storedAPIKeyIdentifiers,
             allowsCustom: allowsCustom,
-            openRouterBrowser: openRouterBrowser,
+            groupsOpenRouter: openRouterBrowser == nil,
             selection: $selection
           )
         }
@@ -117,6 +116,15 @@ struct ModelPicker: View {
         }
         .settingsMenuPicker()
         .speakTooltip(tooltipText)
+      }
+
+      if let openRouterBrowser {
+        Button("Browse OpenRouter models…") { isShowingOpenRouterBrowser = true }
+          .buttonStyle(.bordered)
+          .accessibilityIdentifier("modelPicker.\(Self.accessibilityIdentifierComponent(for: title)).browseOpenRouter")
+          .sheet(isPresented: $isShowingOpenRouterBrowser) {
+            openRouterBrowser { value = $0 }
+          }
       }
 
       if let help {
@@ -187,6 +195,18 @@ struct ModelPicker: View {
     }
     .onChange(of: options.map(\.id)) { _, _ in
       syncSelection(with: value, repairsInvalidValue: true)
+    }
+  }
+
+  /// With a Browse OpenRouter button, OpenRouter models live in the browser;
+  /// the picker lists native ones plus the saved OpenRouter choice, as the voice
+  /// picker does.
+  private var options: [ModelCatalog.Option] {
+    guard openRouterBrowser != nil else { return allOptions }
+    let current = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return allOptions.filter { option in
+      !ModelPickerGrouping.isOpenRouter(option.id, purpose: credentialPurpose)
+        || option.id.caseInsensitiveCompare(current) == .orderedSame
     }
   }
 

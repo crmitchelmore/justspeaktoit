@@ -3,15 +3,16 @@ import SwiftUI
 
 /// The searchable model list `ModelPicker` presents for long or detailed
 /// choices. Native routes are listed first; OpenRouter routes sit behind one
-/// drill-in row so a single key's hundreds of models never bury them. When the
-/// picker supplies a live browser, that row opens it instead of a static list.
+/// drill-in row so a single key's hundreds of models never bury them.
 struct ModelChooserSheet: View {
   let title: String
   let options: [ModelCatalog.Option]
   let credentialPurpose: ModelCredentialPurpose
   let storedAPIKeyIdentifiers: Set<String>
   let allowsCustom: Bool
-  var openRouterBrowser: ModelPickerOpenRouterBrowser?
+  /// False when the picker has its own Browse OpenRouter button: the one
+  /// selected OpenRouter model is then listed inline, with no drill-in row.
+  var groupsOpenRouter = true
   @Binding var selection: String
 
   @State private var selectedTag: ModelCatalog.Tag?
@@ -24,7 +25,7 @@ struct ModelChooserSheet: View {
 
   /// Group only when both kinds exist, so single-route pickers stay unchanged.
   private var isGrouped: Bool {
-    !groups.direct.isEmpty && (!groups.openRouter.isEmpty || openRouterBrowser != nil)
+    groupsOpenRouter && !groups.direct.isEmpty && !groups.openRouter.isEmpty
   }
 
   private var levelOptions: [ModelCatalog.Option] {
@@ -32,16 +33,7 @@ struct ModelChooserSheet: View {
     return isBrowsingOpenRouter ? groups.openRouter : groups.direct
   }
 
-  @ViewBuilder
   var body: some View {
-    if isBrowsingOpenRouter, let openRouterBrowser {
-      openRouterBrowser({ selection = $0 }, { isBrowsingOpenRouter = false })
-    } else {
-      chooser
-    }
-  }
-
-  private var chooser: some View {
     LongListChooserSheet(
       title: isBrowsingOpenRouter ? ModelPickerGrouping.openRouterTitle : title,
       items: levelOptions, id: { $0.id }, selection: $selection,
@@ -95,7 +87,9 @@ struct ModelChooserSheet: View {
       row: { option in
       VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 10) {
-          Text(option.displayName)
+          Text(groupsOpenRouter ? option.displayName : ModelPickerGrouping.selectionLabel(
+            for: option.id, displayName: option.displayName, purpose: credentialPurpose
+          ))
             .font(.body)
           Spacer()
           if let contextLength = option.contextLength {
@@ -145,7 +139,7 @@ struct ModelChooserSheet: View {
         Spacer()
         ModelCredentialStatusView(
           availability: ModelCredentialResolver.availability(
-            for: groups.openRouter.first?.id ?? ModelCatalog.customOptionID,
+            for: groups.openRouter[0].id,
             purpose: credentialPurpose,
             storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
           )
@@ -163,13 +157,6 @@ struct ModelChooserSheet: View {
   private var openRouterRowSubtitle: String {
     if let selected = groups.openRouter.first(where: { $0.id == selection }) {
       return "Selected: \(selected.displayName)"
-    }
-    if openRouterBrowser != nil {
-      if ModelPickerGrouping.isOpenRouter(selection, purpose: credentialPurpose),
-        !groups.direct.contains(where: { $0.id == selection }) {
-        return "Selected: \(OpenRouterCatalogOptions.modelSlug(for: selection))"
-      }
-      return "Browse and configure models from many providers, with one OpenRouter key."
     }
     return "\(groups.openRouter.count) models from many providers, with one OpenRouter key."
   }

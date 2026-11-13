@@ -147,7 +147,9 @@ public enum CloudCatalogAndroidExport {
     /// Transcription providers, then OpenRouter, then the remaining native text providers.
     private static var providers: [Provider] {
         var ids = transcriptionProviderIDs
-        ids += liveTranscriptionModels.map { providerID(of: $0.id) }.filter { !ids.contains($0) }
+        for id in liveTranscriptionModels.map({ providerID(of: $0.id) }) where !ids.contains(id) {
+            ids.append(id)
+        }
         ids.append(OpenRouterService.providerID)
         ids += NativeTextModels.providers.map(\.id).filter { !ids.contains($0) }
         return ids.map { id in

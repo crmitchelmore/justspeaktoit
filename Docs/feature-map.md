@@ -131,7 +131,7 @@ The flags live in `Project.swift`; release selection is in
 | F43 | Recording start/stop sounds | Yes | Yes | Yes | Yes | Yes | | |
 | F44 | Per-app output target (profiles) / Focus overrides | Yes | Yes | Yes | Limited | N/A | | |
 | F45 | Recording audio housekeeping | Yes | Yes | Yes | Yes | Partial | #1629 | |
-| F46 | Send transcripts from phone to desktop | Yes | Partial | No | No | No | #1640 | iOS: Handoff and History sync, no direct sender. macOS: direct build only; the Mac App Store build has no receiver. |
+| F46 | Send transcripts from phone to desktop | Yes | Yes | No | No | No | #1640 | iOS: pair in Settings › Sync & Transfer › Send to Mac, then send from History; no auto-send. macOS: direct build only; the Mac App Store build has no receiver. |
 | F47 | Accessible names, IDs and recording announcements | Yes | Yes | Yes | Yes | Yes | | |
 | F48 | Learned auto-corrections | Yes | No | Yes | Yes | Limited | #1651 | Android learns only from edits made while its keyboard is in the field. |
 | F49 | Appearance settings | Yes | Yes | Yes | Yes | Yes | | |
@@ -545,13 +545,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Clean up audio resources started before any failing guard (stop the engine, remove the tap).
 
 ### F46 Send transcripts from phone to desktop
-- **Platforms:** macOS Yes · iOS Partial · Windows No · Linux No · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android No
 - **Excluded:** none
-- **Gaps:** iOS, Windows, Linux, Android #1640.
-- **How:** The Mac runs a user-enabled, paired, encrypted WebSocket receiver (`SpeakTransportWire` v2 over Bonjour) that inserts at the cursor. A phone sender must use the same protocol.
-- **Refs:** `Sources/SpeakCore/Sync/Apple/TransportChannel.swift`, `Sources/SpeakApp/Transport/TransportServer.swift`, `Sources/SpeakApp/Transport/SendToMacAvailability.swift`, `Sources/SpeakiOS/Services/TranscriptHandoffPublisher.swift`, `Docs/MACOS_RECEIVER.md`
+- **Gaps:** Windows, Linux, Android #1640 (no sender or pairing screen; Android needs an NSD browser and a Kotlin port of `SpeakTransportWire` v2, the desktop hosts a Swift `SendToMacSender` on their own transport).
+- **How:** The Mac runs a user-enabled, paired, encrypted WebSocket receiver (`SpeakTransportWire` v2 over Bonjour) that pastes each received final transcript at the cursor. A sender browses for the train's Bonjour service, pairs once with the six-digit code the Mac shows, keeps the issued device credential in secure storage, and authenticates every later send with that credential only. Each send is one connection: one final chunk, wait for the Mac's acknowledgement, disconnect, and show success or the failure. Reuse `SendToMacSender`, `MacDiscovery` and `MacConnection.deliverTranscript`.
+- **Refs:** `Sources/SpeakCore/Sync/Apple/SendToMacSender.swift`, `Sources/SpeakCore/Sync/Apple/MacDiscovery.swift`, `Sources/SpeakCore/Sync/Apple/SendToMacPairingStore.swift`, `Sources/SpeakCore/Sync/Apple/MacConnection.swift`, `Sources/SpeakCore/Sync/Apple/TransportChannel.swift`, `Sources/SpeakApp/Transport/TransportServer.swift`, `Sources/SpeakApp/App/WireUp+SendToMac.swift`, `Sources/SpeakApp/Transport/SendToMacAvailability.swift`, `Sources/SpeakiOS/Views/Settings/SendToMacSettingsRows.swift`, `Sources/SpeakiOS/Views/HistoryView.swift`, `Docs/MACOS_RECEIVER.md`
 - **Sunset:** none
-- **Nuances:** iPhone has no direct sender: it reaches the Mac through Handoff ("Continue on Mac") and History sync. v1 plaintext peers are refused. The receiver ships only in the direct macOS build: the Mac App Store build has no `network.server` entitlement or Bonjour service and hides Send to Mac (`SendToMacAvailability`).
+- **Nuances:** Never fall back to the pairing code after pairing: a revoked credential is an error until the user forgets the Mac and pairs again (#1643). The credential lives in its own Keychain item so iCloud key sync and the configuration QR code never carry it. There is no automatic send of each finished transcript: Polish rewrites text after finalisation, background App Intents may lack the local network, and the keyboard already inserts its text; the hook would be `publishHandoff` in the iOS finalisation. A Mac that is asleep or has the receiver off fails the send after ten seconds; nothing is queued. Handoff ("Continue on Mac") and History sync remain separate paths. The iOS app needs `NSLocalNetworkUsageDescription` and its train's service in `NSBonjourServices`; the archive verifier checks both. v1 plaintext peers are refused. The receiver ships only in the direct macOS build: the Mac App Store build has no `network.server` entitlement or Bonjour service and hides Send to Mac (`SendToMacAvailability`).
 
 ### F47 Accessible names, IDs and recording announcements
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

@@ -2,8 +2,8 @@ import AppKit
 import SpeakCore
 import SwiftUI
 
-/// This Mac's local transport receiver for protocol clients, its pairing code
-/// and the devices connected to it.
+/// This Mac's Send to Mac receiver, its pairing code and the devices
+/// connected to it. The iOS app pairs and sends from Settings › Sync & Transfer.
 struct SendToMacSettingsCard: View, AppSettingsBindingProviding {
   @EnvironmentObject private var environment: AppEnvironment
   @EnvironmentObject var settings: AppSettings
@@ -11,8 +11,8 @@ struct SendToMacSettingsCard: View, AppSettingsBindingProviding {
   var body: some View {
     SettingsCard(title: "Send to Mac", systemImage: "iphone.and.arrow.forward", tint: Color.green) {
       VStack(alignment: .leading, spacing: 12) {
-        Text("Enable this Mac's local transport receiver for protocol clients. The iPhone app has no "
-          + "Bonjour sender; iPhone-to-Mac transcript delivery is unavailable.")
+        Text("Receive finished transcripts from Just Speak to It on iPhone or iPad over the local network. "
+          + "They're pasted where your cursor is.")
           .font(.callout)
           .foregroundStyle(.secondary)
 
@@ -38,7 +38,7 @@ struct SendToMacSettingsCard: View, AppSettingsBindingProviding {
           tint: .green
         )
         .speakTooltip(
-          "Advertise the local transport receiver. The iPhone app has no Bonjour pairing or sending flow."
+          "Let iPhone and iPad pair with this Mac and send it transcripts over the local network."
         )
 
         if let transportError = environment.transportServer.error,
@@ -70,7 +70,8 @@ struct SendToMacSettingsCard: View, AppSettingsBindingProviding {
               .speakTooltip("Copy pairing code to clipboard")
             }
 
-            Text("Protocol clients authenticate with this code. The iPhone app has no pairing screen.")
+            Text("Enter this code on iPhone or iPad in Settings › Sync & Transfer › Send to Mac. "
+              + "It's used once; the device then keeps its own key.")
               .font(.caption)
               .foregroundStyle(.secondary)
 
@@ -147,6 +148,6 @@ struct SendToMacSettingsCard: View, AppSettingsBindingProviding {
         }
       }
     }
-    .speakTooltip("Use your iPhone as a wireless microphone. Transcribe on iPhone, text appears on Mac.")
+    .speakTooltip("Send transcripts from iPhone or iPad to this Mac, where they are pasted at the cursor.")
   }
 }

@@ -14,11 +14,12 @@ needs it and where the data goes.
 | `NSMicrophoneUsageDescription` | Recording for transcription; discloses that audio reaches the chosen provider |
 | `NSSpeechRecognitionUsageDescription` | Apple speech recognition, including its server-side path |
 | `NSCameraUsageDescription` | `QRScannerCoordinator`, reading the configuration QR code the Mac app shows |
+| `NSLocalNetworkUsageDescription` | **Send to Mac** (#1640): finding the user's Mac over Bonjour and sending it a transcript |
 
-The iPhone app has no local-network gateway, Bonjour transcript sender, or
-browser, so its generated Info.plist declares neither
-`NSLocalNetworkUsageDescription` nor `NSBonjourServices`. Public archive
-verification rejects both unused declarations; the Mac receiver is separate.
+`NSBonjourServices` lists only the train's Send to Mac service
+(`transportServiceType` in `ReleaseTrains.json`, for example `_speakalpha._tcp`).
+`scripts/verify-release-train-archive.py` fails an iOS archive whose purpose
+string is missing or whose Bonjour list differs from that one service.
 
 Two failure modes to avoid. A string that denies using the capability at all
 ("a linked library requires this declaration") is a rejection. So is one that
@@ -219,8 +220,11 @@ the current provider list. Replace them with something like this:
 > - Microphone and Speech Recognition: recording and transcribing dictation.
 > - Camera: Settings > Sync > Import from QR Code scans a QR code shown by the Mac app to
 >   copy settings across. The camera is used for nothing else.
-> - Local Network: there is no shipping Send to Mac sender or pairing screen on
->   iOS. Do not claim an available iPhone-to-Mac transfer workflow.
+> - Local Network: Settings > Sync & Transfer > Send to Mac finds the user's Mac on the
+>   local network and pairs with the six-digit code the Mac shows. A History
+>   item's context menu then sends that transcript to the paired Mac. It needs
+>   the free direct-download Mac app from justspeaktoit.com with Send to Mac
+>   turned on; nothing else is sent over the local network.
 > - Background audio: recording continues when the screen locks, which is the
 >   point of a dictation app.
 >
@@ -400,8 +404,8 @@ record. Apple documents the entitlement as allowing "other computers to
 initiate network connections to your sandboxed app"
 ([network.server](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.network.server)).
 Only the direct-download build's **Send to Mac** receiver listened (a
-Network.framework Bonjour listener for `_speakalpha._tcp`), and no shipping
-iPhone build sends to it. The App Store build therefore drops the entitlement,
+Network.framework Bonjour listener for `_speakalpha._tcp`); the iPhone and iPad
+sender (#1640) pairs only with that direct-download build. The App Store build therefore drops the entitlement,
 `NSLocalNetworkUsageDescription` and `NSBonjourServices`, and compiles out the
 receiver, its Settings card and its search entry (`SendToMacAvailability`).
 `EntitlementsTests`, `AppStoreInfoPlistTests` and

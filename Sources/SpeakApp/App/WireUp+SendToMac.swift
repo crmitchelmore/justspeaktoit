@@ -6,9 +6,15 @@ extension WireUp {
   static func configureSendToMac(environment: AppEnvironment, settings: AppSettings) {
     guard SendToMacAvailability.isAvailable else { return }
     let transportServer = environment.transportServer
+    let permissions = environment.permissions
+    // A finished transcript from a paired phone or tablet is pasted where the
+    // cursor is, like a Handoff continuation. The live inserter only accepts
+    // text during a Mac recording, so routing it there dropped every send.
     transportServer.onTranscriptReceived = { _, text in
       Task { @MainActor in
-        environment.liveTextInserter.update(with: text)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        _ = SmartTextOutput(permissionsManager: permissions, appSettings: settings)
+          .output(text: text, target: nil)
       }
     }
 

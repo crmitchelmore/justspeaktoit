@@ -68,6 +68,7 @@ import com.justspeaktoit.android.settings.SettingsSearchEntry
 import com.justspeaktoit.android.settings.SettingsSearchIndex
 import com.justspeaktoit.android.settings.SettingsSearchRecents
 import com.justspeaktoit.android.settings.SettingsSearchResult
+import com.justspeaktoit.android.tips.TipJarUiState
 
 class SettingsActions(
     val onBack: () -> Unit,
@@ -84,6 +85,9 @@ class SettingsActions(
     val onCleanupPromptChanged: (String) -> Unit = {},
     val onSaveProfile: (DictationProfile) -> Unit = {},
     val onDeleteProfile: (String) -> Unit = {},
+    val onAnalyticsChanged: (Boolean) -> Unit = {},
+    val onDiagnosticsChanged: (Boolean) -> Unit = {},
+    val onTip: (String) -> Unit = {},
 )
 
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
@@ -95,7 +99,12 @@ private fun anchorFor(entry: SettingsSearchEntry): String = when {
 }
 
 @Composable
-fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
+fun SettingsScreen(
+    state: DictationUiState,
+    actions: SettingsActions,
+    privacy: PrivacyChoices = PrivacyChoices(),
+    tips: TipJarUiState = TipJarUiState(),
+) {
     val context = LocalContext.current
     val searchIndex = remember {
         context.assets.open("settings_search.json").bufferedReader().use {
@@ -292,6 +301,31 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
                     anchor("${SettingsSearchIndex.KEY_PREFIX}${provider.id}"),
                 )
             }
+
+            HorizontalDivider()
+            Text(
+                stringResource(R.string.settings_privacy_heading),
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() },
+            )
+            ConsentSwitchRow(
+                R.string.settings_analytics_title,
+                privacy.analytics,
+                actions.onAnalyticsChanged,
+                anchor("android.analytics").testTag(AutomationIds.SETTINGS_ANALYTICS),
+            )
+            Text(stringResource(R.string.settings_analytics_note), style = MaterialTheme.typography.bodyMedium)
+            ConsentSwitchRow(
+                R.string.settings_diagnostics_title,
+                privacy.diagnostics,
+                actions.onDiagnosticsChanged,
+                anchor("android.diagnostics").testTag(AutomationIds.SETTINGS_DIAGNOSTICS),
+            )
+            Text(stringResource(R.string.settings_diagnostics_note), style = MaterialTheme.typography.bodyMedium)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_support_title, anchor("android.tipJar"))
+            TipJarSection(tips, actions.onTip)
 
             HorizontalDivider()
             val uriHandler = LocalUriHandler.current

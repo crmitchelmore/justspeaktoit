@@ -62,8 +62,8 @@ Status key:
 | iCloud / CloudKit sync | **Not applicable** | Apple-only; cross-device sync would need a separate design. |
 | Sparkle updates, DMG, Homebrew | **Not applicable** | Distribution is through Google Play or sideloaded APKs. |
 | Automation CLI (`speak`) | **Not applicable** | Desktop-only; Android intents and shortcuts cover automation. |
-| Tip jar / paid access | **Planned (assess)** | Requires Google Play Billing and owner account setup. |
-| Analytics / crash reporting | **Planned (assess)** | Only with the same consent model as the Mac app. |
+| Tip jar | **Done** (#1594) | Google Play Billing consumables with the Apple product IDs from SpeakCore's `TipCatalog`; the owner creates the products in Play Console. Paid access is not planned. |
+| Analytics / crash reporting | **Done, opt-in** (#1594) | Both off until the user opts in. PostHog EU sends the Mac's `app_active_daily`, `analytics_opt_in` and `first_transcription_succeeded`; Sentry EU receives crash reports from release builds only. |
 
 ## Evidence still required on physical devices
 

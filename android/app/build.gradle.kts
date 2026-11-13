@@ -5,6 +5,11 @@ import groovy.json.JsonSlurper
 val uploadKeystore = providers.environmentVariable("JSTI_ANDROID_KEYSTORE_PATH").orNull
 // Play rejects a version code it has seen, so CI supplies a monotonically increasing one.
 val ciVersionCode = providers.environmentVariable("JSTI_ANDROID_VERSION_CODE").orNull?.toInt()
+// PostHog's public project key, from the POSTHOG_PROJECT_KEY secret in the release workflows. Without
+// it (local and PR builds) product analytics has no destination and never opens a connection.
+val postHogProjectKey = providers.environmentVariable("POSTHOG_PROJECT_KEY").orNull?.trim()
+    ?.takeIf { Regex("[A-Za-z0-9_]+").matches(it) }
+    .orEmpty()
 
 plugins {
     // AGP 9 compiles Kotlin itself, so the separate Kotlin Android plugin is no longer applied.
@@ -23,6 +28,7 @@ android {
         targetSdk = 36
         versionCode = ciVersionCode ?: 1
         versionName = "0.1.0"
+        buildConfigField("String", "POSTHOG_PROJECT_KEY", "\"$postHogProjectKey\"")
     }
 
     signingConfigs {
@@ -55,6 +61,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     lint {
@@ -79,6 +86,9 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.android.billing)
+    implementation(libs.androidx.fragment)
+    implementation(libs.sentry.android.core)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)

@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -30,12 +31,17 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justspeaktoit.android.dictation.DictationViewModel
+import com.justspeaktoit.android.telemetry.OptInSurface
+import com.justspeaktoit.android.telemetry.Telemetry
+import com.justspeaktoit.android.tips.PlayBillingTipStore
+import com.justspeaktoit.android.ui.ConsentDialog
 import com.justspeaktoit.android.ui.DictationActions
 import com.justspeaktoit.android.ui.DictationScreen
 import com.justspeaktoit.android.ui.HistoryActions
 import com.justspeaktoit.android.ui.HistoryScreen
 import com.justspeaktoit.android.ui.HistoryTranscription
 import com.justspeaktoit.android.ui.MicPermission
+import com.justspeaktoit.android.ui.PrivacyChoices
 import com.justspeaktoit.android.ui.SettingsActions
 import com.justspeaktoit.android.ui.SettingsScreen
 import com.justspeaktoit.android.ui.theme.JustSpeakTheme
@@ -46,6 +52,10 @@ class MainActivity : ComponentActivity() {
     private val viewModel: DictationViewModel by viewModels { DictationViewModel.Factory }
     private val permission = mutableStateOf(MicPermission.NotRequested)
     private val screenState = mutableStateOf(Screen.Dictation)
+    private val telemetry: Telemetry get() = (application as JustSpeakApplication).telemetry
+    private val privacy = mutableStateOf(PrivacyChoices())
+    private val consentPending = mutableStateOf(false)
+    private lateinit var tipStore: PlayBillingTipStore
 
     private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permission.value = when {
@@ -73,6 +83,8 @@ class MainActivity : ComponentActivity() {
         }
         // A recreated Activity has already acted on its launch intent.
         if (savedInstanceState == null) handleIntent(intent)
+        tipStore = PlayBillingTipStore(this)
+        refreshPrivacy()
         val actions = DictationActions(
             onRecordTapped = ::startWithPermission,
             onStop = viewModel::stop,
@@ -88,6 +100,10 @@ class MainActivity : ComponentActivity() {
             val state by viewModel.state.collectAsStateWithLifecycle()
             val mic by permission
             var screen by screenState
+            val privacyChoices by privacy
+            val askConsent by consentPending
+            val tips by tipStore.state.collectAsStateWithLifecycle()
+            LaunchedEffect(screen) { if (screen == Screen.Settings) tipStore.connect() }
             JustSpeakTheme {
                 if (screen != Screen.Dictation) BackHandler { screen = Screen.Dictation }
                 // Back leaves a session running in the background rather than closing it with the screen.
@@ -112,7 +128,18 @@ class MainActivity : ComponentActivity() {
                                 onCleanupPromptChanged = viewModel::setCleanupPrompt,
                                 onSaveProfile = viewModel::saveProfile,
                                 onDeleteProfile = viewModel::deleteProfile,
+                                onAnalyticsChanged = { optedIn ->
+                                    telemetry.analytics.setOptedIn(optedIn, OptInSurface.Settings)
+                                    refreshPrivacy()
+                                },
+                                onDiagnosticsChanged = { granted ->
+                                    telemetry.crashes.setGranted(granted)
+                                    refreshPrivacy()
+                                },
+                                onTip = { productId -> tipStore.purchase(this@MainActivity, productId) },
                             ),
+                            privacy = privacyChoices,
+                            tips = tips,
                         )
                         Screen.History -> HistoryScreen(
                             entries = state.history,
@@ -142,6 +169,15 @@ class MainActivity : ComponentActivity() {
                                 onChooseProfile = viewModel::chooseProfile,
                             ),
                         )
+                    }
+                    // Asked once, on the main screen, never over a recording or another dialog.
+                    if (askConsent && screen == Screen.Dictation && !state.dictation.isActive &&
+                        state.sharedAudio == null
+                    ) {
+                        ConsentDialog(onDone = { analytics, diagnostics ->
+                            telemetry.recordFirstRunChoices(analytics, diagnostics)
+                            refreshPrivacy()
+                        })
                     }
                 }
             }
@@ -190,6 +226,17 @@ class MainActivity : ComponentActivity() {
         if (hasMic()) permission.value = MicPermission.Granted
         viewModel.refreshAvailability()
         viewModel.refreshHistory()
+        telemetry.analytics.appBecameActive()
+    }
+
+    override fun onDestroy() {
+        tipStore.close()
+        super.onDestroy()
+    }
+
+    private fun refreshPrivacy() {
+        privacy.value = PrivacyChoices(telemetry.analyticsEnabled, telemetry.diagnosticsEnabled)
+        consentPending.value = telemetry.needsConsentPrompt
     }
 
     override fun onStop() {

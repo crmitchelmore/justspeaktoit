@@ -1,3 +1,4 @@
+import SpeakCore
 import StoreKit
 import SwiftUI
 
@@ -78,14 +79,7 @@ private struct TipButton: View {
     let product: Product
     let isPurchasing: Bool
 
-    private var emoji: String {
-        switch product.id {
-        case "com.justspeaktoit.tip.small": return "☕"
-        case "com.justspeaktoit.tip.medium": return "🍔"
-        case "com.justspeaktoit.tip.large": return "💪"
-        default: return "💝"
-        }
-    }
+    private var emoji: String { TipCatalog.emoji(for: product.id) }
 
     var body: some View {
         Button {

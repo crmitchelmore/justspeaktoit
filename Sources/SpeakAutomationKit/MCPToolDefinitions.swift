@@ -108,6 +108,43 @@ extension MCPRequestHandler {
                 "type": "object",
                 "properties": ["provider": ["type": "string", "description": "Only this provider's voices."]]
             ]
+        ),
+        MCPToolDefinition(
+            name: AutomationCommand.getConfiguration.rawValue,
+            description: "Read the app's settings with their schema (type, default, allowed values, range, "
+                + "platforms). API keys report only whether they are set; secrets are never returned. "
+                + "Needs automation turned on in the app.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "keys": [
+                        "type": "array", "items": ["type": "string"],
+                        "maxItems": .integer(Int64(AutomationLimits.maxConfigurationKeys)),
+                        "description": "Only these setting keys."
+                    ],
+                    "prefix": ["type": "string", "description": "Only setting keys starting with this prefix."]
+                ]
+            ]
+        ),
+        MCPToolDefinition(
+            name: AutomationCommand.setConfiguration.rawValue,
+            description: "Change one or more settings at once. Every change is validated against the schema "
+                + "and applied all together or not at all. dry_run only validates. Writes also need "
+                + "\"Allow automation to change settings\" turned on in the app.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "changes": [
+                        "type": "object",
+                        "description": .string(
+                            "Setting key to new value, e.g. {\"ttsSpeed\": 1.2}. "
+                                + "Use get_configuration for keys and allowed values."
+                        )
+                    ],
+                    "dry_run": ["type": "boolean", "description": "Validate without changing anything."]
+                ],
+                "required": ["changes"]
+            ]
         )
     ]
 }

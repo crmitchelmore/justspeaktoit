@@ -82,3 +82,13 @@ API breakage: enumelement ModelRetirement.Mode.postProcessing has been added as 
 # Hands-free dictation reports an unusable SpeechAnalyzer audio format (macOS 27
 # returns 0 ch/0 Hz) separately from a microphone failure (#1553).
 API breakage: enumelement HandsFreeDictationMachine.Failure.audioFormatUnavailable has been added as a new enum case
+# Raw settings configuration (#1546) adds the get/set configuration commands,
+# their tool arguments and the automation write opt-in. Existing cases, raw
+# values and Codable fields are unchanged.
+API breakage: enumelement ApplicationPreferenceKey.allowAutomationConfigurationChanges has been added as a new enum case
+API breakage: enumelement AutomationCommand.getConfiguration has been added as a new enum case
+API breakage: enumelement AutomationCommand.setConfiguration has been added as a new enum case
+API breakage: enumelement AutomationToolArguments.CodingKeys.keys has been added as a new enum case
+API breakage: enumelement AutomationToolArguments.CodingKeys.prefix has been added as a new enum case
+API breakage: enumelement AutomationToolArguments.CodingKeys.changes has been added as a new enum case
+API breakage: enumelement AutomationToolArguments.CodingKeys.dryRun has been added as a new enum case

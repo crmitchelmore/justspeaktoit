@@ -17,19 +17,27 @@ final class AppAutomationHandler: AutomationCommandHandling, AutomationSpeechHos
     private let transcription: TranscriptionManager
     let tts: TextToSpeechManager
     private let appVersion: String
+    /// Settings read and written by `get_configuration` / `set_configuration`.
+    let configuration: AppSettingsConfiguration?
+    /// Whether the user allowed automation to change settings.
+    let allowsConfigurationChanges: @MainActor () -> Bool
 
     init(
         main: MainManager,
         history: HistoryManager,
         transcription: TranscriptionManager,
         tts: TextToSpeechManager,
-        appVersion: String
+        appVersion: String,
+        configuration: AppSettingsConfiguration? = nil,
+        allowsConfigurationChanges: @escaping @MainActor () -> Bool = { false }
     ) {
         self.main = main
         self.history = history
         self.transcription = transcription
         self.tts = tts
         self.appVersion = appVersion
+        self.configuration = configuration
+        self.allowsConfigurationChanges = allowsConfigurationChanges
     }
 
     private lazy var transcriptWaiter = AutomationTranscriptWaiter(history: self.history) { [weak self] in

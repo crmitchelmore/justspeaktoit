@@ -20,6 +20,10 @@ public struct AutomationToolArguments: Codable, Equatable, Sendable {
     public var speed: Double?
     public var pitch: Double?
     public var play: Bool?
+    public var keys: [String]?
+    public var prefix: String?
+    public var changes: [String: AnyCodable]?
+    public var dryRun: Bool?
 
     public init() {}
 
@@ -33,6 +37,8 @@ public struct AutomationToolArguments: Codable, Equatable, Sendable {
         case play
         case limit
         case timeoutSeconds = "timeout_seconds"
+        case keys, prefix, changes
+        case dryRun = "dry_run"
     }
 
     /// Decodes in the order the arguments were always checked, so the first
@@ -59,6 +65,10 @@ public struct AutomationToolArguments: Codable, Equatable, Sendable {
         if let seconds = self.timeoutSeconds, !(seconds > 0) {
             throw AutomationError(code: .invalidArgument, message: "\"timeout_seconds\" \(timeout).")
         }
+        self.keys = try fields.argument([String].self, .keys, "must be an array of strings")
+        self.prefix = try fields.argument(String.self, .prefix, "must be a string")
+        self.changes = try fields.argument([String: AnyCodable].self, .changes, "must be an object")
+        self.dryRun = try fields.argument(Bool.self, .dryRun, "must be a boolean")
     }
 
     /// Copies every argument given onto `request`, leaving the rest unchanged.
@@ -66,7 +76,7 @@ public struct AutomationToolArguments: Codable, Equatable, Sendable {
         let strings: [(KeyPath<Self, String?>, WritableKeyPath<AutomationRequest, String?>)] = [
             (\.path, \.path), (\.captureID, \.captureID), (\.sinceID, \.sinceID), (\.text, \.text),
             (\.voice, \.voice), (\.provider, \.provider), (\.model, \.model), (\.quality, \.quality),
-            (\.language, \.language)
+            (\.language, \.language), (\.prefix, \.prefix)
         ]
         for (argument, field) in strings { if let value = self[keyPath: argument] { request[keyPath: field] = value } }
         let numbers: [(KeyPath<Self, Double?>, WritableKeyPath<AutomationRequest, Double?>)] = [
@@ -75,6 +85,9 @@ public struct AutomationToolArguments: Codable, Equatable, Sendable {
         for (argument, field) in numbers { if let value = self[keyPath: argument] { request[keyPath: field] = value } }
         if let limit { request.limit = limit }
         if let play { request.play = play }
+        if let keys { request.keys = keys }
+        if let changes { request.changes = changes }
+        if let dryRun { request.dryRun = dryRun }
     }
 
     /// The request for `command` carrying these arguments.

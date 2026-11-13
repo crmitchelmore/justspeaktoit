@@ -72,6 +72,7 @@ public enum ApplicationPreferenceKey: String, CaseIterable, Sendable {
     case clipboardInsertionTriggers
     case enableSendToMac
     case enableAutomationServer
+    case allowAutomationConfigurationChanges
     case pasteRemoteTranscriptsAtCursor
     case autoCorrectionsEnabled
     case autoCorrectionsPromotionThreshold

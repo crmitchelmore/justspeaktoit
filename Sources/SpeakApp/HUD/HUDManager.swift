@@ -7,33 +7,6 @@ import SpeakCore
 // an enum for all the states it can be in and is a state machine. It also has the ability to surface errors in any of
 // those things and it has an internal timer that shows the duration of each step.
 
-enum HUDPhase: Equatable {
-  case hidden
-  /// Hands-free dictation is armed: the detector is listening, but nothing
-  /// is being captured until the user speaks.
-  case armed
-  case recording
-  case transcribing
-  case postProcessing
-  case delivering
-  case editing
-  case success(message: String)
-  case failure(message: String)
-
-  var isTerminal: Bool {
-    switch self {
-    case .success, .failure:
-      return true
-    default:
-      return false
-    }
-  }
-
-  var isVisible: Bool {
-    self != .hidden
-  }
-}
-
 @MainActor
 final class HUDManager: ObservableObject {
   struct Snapshot: Equatable {
@@ -299,20 +272,6 @@ final class HUDManager: ObservableObject {
     postAccessibilityAnnouncement("HUD dismissed")
   }
 
-  /// The presenter has put the HUD panel on screen; post the announcement
-  /// that was waiting for it.
-  func hudWindowDidPresent() {
-    isWindowPresented = true
-    guard let announcement = pendingAccessibilityAnnouncement else { return }
-    pendingAccessibilityAnnouncement = nil
-    postAccessibilityAnnouncement(announcement)
-  }
-
-  /// The presenter has taken the HUD panel off screen.
-  func hudWindowDidDismiss() {
-    isWindowPresented = false
-  }
-
   func updateCaptureHealth(_ health: CaptureHealthSnapshot) {
     captureHealth = health
   }
@@ -380,6 +339,24 @@ final class HUDManager: ObservableObject {
       .announcement: announcement,
       .priority: NSAccessibilityPriorityLevel.high.rawValue
     ])
+  }
+}
+
+// MARK: - Window presentation
+
+extension HUDManager {
+  /// The presenter has put the HUD panel on screen; post the announcement
+  /// that was waiting for it.
+  func hudWindowDidPresent() {
+    isWindowPresented = true
+    guard let announcement = pendingAccessibilityAnnouncement else { return }
+    pendingAccessibilityAnnouncement = nil
+    postAccessibilityAnnouncement(announcement)
+  }
+
+  /// The presenter has taken the HUD panel off screen.
+  func hudWindowDidDismiss() {
+    isWindowPresented = false
   }
 }
 

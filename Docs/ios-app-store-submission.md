@@ -342,12 +342,30 @@ and the final period, and fails unsupported description expressions rather
 than silently omitting them. It does **not** establish sentence case,
 shortness, localized compiler metadata, or every App Store validation rule.
 
+The same notice came back for builds 1000.1.4 onward, which re-uploaded a
+source from before the fix. Apple publishes no list of the terms it rejects,
+so `scripts/ios/check-app-intents-terms.py` (run by `make lint`) applies a
+conservative one: Siri and Apple device names (iPhone, iPad, iPod, Apple
+Watch, Apple TV, Apple Vision, Vision Pro, AirPods, HomePod, CarPlay). It
+checks every App Intents title, description, parameter, entity, enum case,
+parameter summary and App Shortcut phrase in Swift sources that import
+`AppIntents`. With `--metadata`, it checks every localized string in the
+compiled `Metadata.appintents` instead; CI's iOS build runs it on the
+simulator products, and the archive verifier applies it before upload. Say
+"a locked device" or "voice commands" instead.
+
+When Apple rejects an upload during processing, no build record appears.
+`scripts/release-apple.rb` therefore reads the app's `buildUploads`
+(`GET /v1/apps/{id}/buildUploads`). A `FAILED` state fails `distribute`,
+`upload-status` and the hourly reconciler with Apple's error codes, and
+writes an `invalid` receipt, so the same binary is not uploaded again.
+
 `scripts/verify-release-train-archive.py`, already invoked before release
 export/upload, checks the **actual bundled** privacy manifests, their audited
 required reasons, collected-data field types, microphone/speech purpose
 strings and excluded Store product analytics. It also reads the compiler's
-`Metadata.appintents/extract.actionsdata`: description keys are checked for
-the rejected terms and final period; App Shortcuts are limited to ten,
+`Metadata.appintents/extract.actionsdata`: every localized string is checked
+for the rejected terms, and description keys for the final period; App Shortcuts are limited to ten,
 phrases must contain the application-name placeholder, and the iOS app must
 register at least one. Xcode merges a static library's actions into the app
 but drops its `autoShortcuts`, so `TranscriptionShortcuts` lives in the app

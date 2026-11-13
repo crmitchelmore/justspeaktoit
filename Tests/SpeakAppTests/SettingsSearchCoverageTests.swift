@@ -87,6 +87,22 @@ final class SettingsSearchCoverageTests: XCTestCase {
         assertIndexed(published, platform: .iOS, exemptions: Self.unindexedIOSSettings)
     }
 
+    /// The iOS raw configuration (#1608) covers every persisted iPhone setting
+    /// except secrets and the derived state the search guard also exempts.
+    func testEveryPersistedIOSSettingHasARawConfigurationField() throws {
+        let sources = try swiftFiles(under: "Sources/SpeakiOS/Settings")
+            .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
+        // iOS AppSettings declares its properties `public`, which `publishedProperties` does not match.
+        let declarations = sources.flatMap {
+            matches(of: #"@Published\s+public\s+(?:private\(set\)\s+)?var\s+(\w+)"#, in: $0.1)
+                + publishedProperties(in: $0.1)
+        }
+        let published = Set(declarations.filter { !$0.hasSuffix("APIKey") })
+            .subtracting(Self.unindexedIOSSettings.keys)
+        XCTAssertGreaterThan(published.count, 10, "The scan no longer finds iOS AppSettings properties")
+        XCTAssertEqual(published, Set(SettingsSchema.keys(for: .iOS)))
+    }
+
     func testEverySettingsTabHasASearchableRoot() {
         let roots = Set(SettingsSearchCatalog.entries(for: .macOS).filter(\.isSectionRoot).map(\.section))
         for tab in SettingsTab.allCases {

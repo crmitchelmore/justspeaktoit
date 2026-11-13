@@ -76,6 +76,7 @@ final class SettingsSearchCoverageTests: XCTestCase {
         let sources = try swiftFiles(under: "Sources/SpeakApp/Settings")
             .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
         let published = sources.flatMap { publishedProperties(in: $0.1) }
+        XCTAssertGreaterThan(published.count, 10, "The scan no longer finds macOS AppSettings properties")
         assertIndexed(published, platform: .macOS, exemptions: Self.unindexedMacSettings)
     }
 
@@ -84,6 +85,7 @@ final class SettingsSearchCoverageTests: XCTestCase {
             .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
         let published = sources.flatMap { publishedProperties(in: $0.1) }
             .filter { !$0.hasSuffix("APIKey") }  // Each key is indexed at runtime from the API Keys list.
+        XCTAssertGreaterThan(published.count, 10, "The scan no longer finds iOS AppSettings properties")
         assertIndexed(published, platform: .iOS, exemptions: Self.unindexedIOSSettings)
     }
 
@@ -92,11 +94,7 @@ final class SettingsSearchCoverageTests: XCTestCase {
     func testEveryPersistedIOSSettingHasARawConfigurationField() throws {
         let sources = try swiftFiles(under: "Sources/SpeakiOS/Settings")
             .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
-        // iOS AppSettings declares its properties `public`, which `publishedProperties` does not match.
-        let declarations = sources.flatMap {
-            matches(of: #"@Published\s+public\s+(?:private\(set\)\s+)?var\s+(\w+)"#, in: $0.1)
-                + publishedProperties(in: $0.1)
-        }
+        let declarations = sources.flatMap { publishedProperties(in: $0.1) }
         let published = Set(declarations.filter { !$0.hasSuffix("APIKey") })
             .subtracting(Self.unindexedIOSSettings.keys)
         XCTAssertGreaterThan(published.count, 10, "The scan no longer finds iOS AppSettings properties")
@@ -120,6 +118,24 @@ final class SettingsSearchCoverageTests: XCTestCase {
         }
     }
 
+    func testPublishedPropertiesMatchesEveryModifierForm() {
+        let source = """
+            @Published var plain = 1
+            @Published private(set) var privateSetter = 1
+            @Published public var publicVar = 1
+            @Published public private(set) var publicPrivateSetter = 1
+            @Published  internal   var spaced = 1
+            @MainActor @Published fileprivate(set) var attributed = 1
+            @Published
+            public var nextLine = 1
+            var notPublished = 1
+            """
+        XCTAssertEqual(
+            publishedProperties(in: source),
+            ["plain", "privateSetter", "publicVar", "publicPrivateSetter", "spaced", "attributed", "nextLine"]
+        )
+    }
+
     // MARK: - Helpers
 
     private func assertIndexed(
@@ -134,7 +150,7 @@ final class SettingsSearchCoverageTests: XCTestCase {
     }
 
     private func publishedProperties(in source: String) -> [String] {
-        matches(of: #"@Published\s+(?:private\(set\)\s+)?var\s+(\w+)"#, in: source)
+        PublishedPropertyScanner.propertyNames(in: source)
     }
 
     private var repositoryRoot: URL {

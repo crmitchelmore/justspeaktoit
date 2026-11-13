@@ -372,12 +372,19 @@ extension RangedStreamingInserter {
     }
 
     let region = CFRange(location: prefix.utf16.count, length: insertedText.utf16.count)
+    let regionEnd = CFRange(location: region.location + region.length, length: 0)
     guard host.capturedTargetAllowsWrite(), field.setSelectedRange(region) == .success else {
       return .kept(reason: "the streamed region could not be selected")
     }
+    // The app may have edited the field since it was read; replace only while
+    // the selection still covers exactly the streamed text.
+    guard selection(on: field, covers: region, expecting: current, in: document) else {
+      _ = field.setSelectedRange(regionEnd)
+      return .kept(reason: "the document changed before the streamed text could be removed")
+    }
     guard host.capturedTargetAllowsWrite(), field.setSelectedText(replaced) == .success else {
       // Never leave the streamed words highlighted for the next keystroke.
-      _ = field.setSelectedRange(CFRange(location: original.location + insertedText.utf16.count, length: 0))
+      _ = field.setSelectedRange(regionEnd)
       return .kept(reason: "the target app refused to remove the streamed text")
     }
     _ = field.setSelectedRange(original)
@@ -388,5 +395,13 @@ extension RangedStreamingInserter {
       return .kept(reason: "the removal could not be confirmed by reading the field back")
     }
     return .removed
+  }
+
+  private func selection(
+    on field: StreamingTextField, covers region: CFRange, expecting text: String, in document: String
+  ) -> Bool {
+    guard let selected = field.readSelectedRange(), let value = field.readValue() else { return false }
+    return selected.location == region.location && selected.length == region.length
+      && value.utf16.elementsEqual(text.utf16) && field.readDocumentIdentity() == document
   }
 }

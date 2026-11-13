@@ -76,14 +76,29 @@ class CloudCaptureTest {
     }
 
     @Test
-    fun testClose_stopsAndDeletesAnOwnedRecordingOffTheCallingThread() {
+    fun testClose_stopsAnOwnedRecordingOffTheCallingThread_andKeepsItForRecovery() = runBlocking {
         val recording = start()
-        capture.close()
+        assertTrue("a live recording is never recovered", capture.recoverable().isEmpty())
+        val teardown = checkNotNull(capture.close())
         assertNull(capture.current)
-        ViewModelHarness.await(recorders.last.stopped)
-        val end = System.currentTimeMillis() + ViewModelHarness.TIMEOUT_MS
-        while (recording.file.exists() && System.currentTimeMillis() < end) Thread.sleep(5)
-        assertFalse(recording.file.exists())
+        withTimeout(ViewModelHarness.TIMEOUT_MS) { teardown.join() }
+        assertEquals(1, recorders.last.stops)
+        assertTrue(recording.file.exists())
+        assertEquals(listOf(recording.file), capture.recoverable())
+        assertTrue("each file is handed over once", capture.recoverable().isEmpty())
+    }
+
+    @Test
+    fun testRecoverable_listsAnEarlierProcesssRecordingsButNotThisOnesOrOtherFiles() {
+        val earlier = folder.newFile("dictation-0000aaaa-1.wav")
+        val legacy = folder.newFile("dictation-123.wav")
+        folder.newFile("shared-1")
+        val live = start()
+
+        assertEquals(setOf(earlier, legacy), capture.recoverable().toSet())
+        assertTrue(live.file.exists())
+        capture.abandon(live.file)
+        assertEquals(listOf(live.file), capture.recoverable().filter { it == live.file })
     }
 
     @Test
@@ -106,7 +121,7 @@ class CloudCaptureTest {
 
         gate.countDown()
         withTimeout(ViewModelHarness.TIMEOUT_MS) { teardown.join() }
-        assertFalse(recording.file.exists())
+        assertEquals(listOf(recording.file), capture.recoverable())
     }
 
     @Test
@@ -131,7 +146,7 @@ class CloudCaptureTest {
         gate.countDown()
         orphans.forEach { (recording, teardown) ->
             withTimeout(ViewModelHarness.TIMEOUT_MS) { teardown.join() }
-            assertFalse("stopped, then deleted", recording.file.exists())
+            assertTrue("stopped, then kept for recovery", recording.file.exists())
         }
         assertEquals(listOf(1, 1), recorders.created.map { it.stops })
         assertEquals(0, retirement.pendingOrphans)
@@ -194,7 +209,7 @@ class CloudCaptureTest {
         assertEquals(recorders.bytes, withTimeout(ViewModelHarness.TIMEOUT_MS) { capture.stop(recording) })
         teardown.join()
         assertEquals(1, recorders.last.stops)
-        assertFalse(recording.file.exists())
+        assertEquals("the orphan keeps the file", listOf(recording.file), capture.recoverable())
     }
 
     @Test

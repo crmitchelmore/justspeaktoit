@@ -143,7 +143,8 @@ internal fun ResultActions(state: DictationUiState, snackbar: SnackbarHostState,
 private fun statusText(state: DictationUiState): String = when (val dictation = state.dictation) {
     DictationState.Idle -> stringResource(R.string.state_ready)
     is DictationState.Starting -> stringResource(R.string.state_starting)
-    is DictationState.Listening -> stringResource(R.string.state_listening)
+    is DictationState.Listening ->
+        stringResource(if (state.paused) R.string.state_paused else R.string.state_listening)
     is DictationState.Finishing -> if (dictation.mode == RecognitionMode.Cloud) {
         stringResource(R.string.state_transcribing, state.cloudModel.provider.displayName)
     } else {

@@ -29,6 +29,10 @@ internal fun DictationFailure.message(): Int = when (this) {
     DictationFailure.LanguageNotSupported -> R.string.failure_language_not_supported
     DictationFailure.LanguageUnavailable -> R.string.failure_language_unavailable
     DictationFailure.LeftApp -> R.string.failure_left_app
+    DictationFailure.InterruptedByCall -> R.string.failure_interrupted_by_call
+    DictationFailure.AudioFocusLost -> R.string.failure_audio_focus_lost
+    DictationFailure.AudioDeviceChanged -> R.string.failure_audio_device_changed
+    DictationFailure.RecordingRecovered -> R.string.failure_recording_recovered
     DictationFailure.Unavailable -> R.string.failure_unavailable
     DictationFailure.InvalidKey -> R.string.failure_invalid_key
     DictationFailure.KeyUnavailable -> R.string.failure_key_unavailable

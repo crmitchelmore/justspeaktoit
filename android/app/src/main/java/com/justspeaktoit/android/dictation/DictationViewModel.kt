@@ -44,6 +44,10 @@ import java.security.ProviderException
  * History, [HistoryRetry] transcribes kept audio and [SharedAudioImporter] copies shared audio. Every
  * collaborator is injected ([Factory] wires the production ones), and all calls run on the main thread
  * of [scope]; blocking work moves to [io] through [CloudCapture].
+ *
+ * While a session captures or saves its audio, [foreground] runs a microphone foreground service so
+ * the session keeps going with the screen off or another app in front, and [interruptions] reports
+ * calls, audio focus changes and microphone route changes.
  */
 class DictationViewModel internal constructor(
     private val engine: SpeechEngine,
@@ -63,6 +67,8 @@ class DictationViewModel internal constructor(
     retirement: RecorderRetirement = RecorderRetirement.shared,
     // Process-wide, so Settings and the keyboard list every hold the app has.
     private val resources: SystemResourceRegistry = SystemResourceRegistry.shared,
+    private val interruptions: AudioInterruptions = NoAudioInterruptions,
+    private val foreground: ForegroundSession = NoForegroundSession,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     private val capture = CloudCapture(recorders, cacheDir, io, retirement, resources)
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
@@ -111,12 +117,15 @@ class DictationViewModel internal constructor(
             override val corrections: List<CorrectionRule> get() = _state.value.corrections
         },
         publish = { s ->
+            // Before the screen sees the change, so the service and watching are in step with it.
+            onSessionChanged(s)
             _state.update {
                 it.copy(
                     dictation = s.dictation,
                     cleanup = s.cleanup,
                     originalTranscript = s.originalTranscript,
                     releasingMicrophone = s.releasingMicrophone,
+                    paused = s.paused,
                 )
             }
         },
@@ -127,11 +136,28 @@ class DictationViewModel internal constructor(
 
     private var autoStartPending = false
 
+    private var appVisible = true
+    private var watchingInterruptions = false
+    private var foregroundPhase: ForegroundPhase? = null
+
+    /** True while Android lets the foreground service keep the session running off screen. */
+    private var foregroundActive = false
+
+    private val foregroundListener = object : ForegroundDictation.Listener {
+        override fun onStopRequested() = stop()
+
+        override fun onForegroundRefused() {
+            foregroundActive = false
+            foreground.hide()
+            if (!appVisible) session.leaveApp()
+        }
+    }
+
     init {
         scope.launch {
             resources.holds.collect { holds -> _state.update { it.copy(resourcesInUse = holds) } }
         }
-        historyOwner.load(prefs.retention)
+        historyOwner.load(prefs.retention, capture::recoverable)
     }
 
     /** Called whenever the screen starts, so newly installed models, services or keys are noticed. */
@@ -265,7 +291,7 @@ class DictationViewModel internal constructor(
     fun setRetention(retention: Retention) {
         prefs.retention = retention
         _state.update { it.copy(retention = retention) }
-        historyOwner.refresh(retention)
+        historyOwner.refresh(retention, capture::recoverable)
     }
 
     fun deleteHistoryEntry(id: String) {
@@ -278,13 +304,22 @@ class DictationViewModel internal constructor(
 
     /** Re-reads and prunes history so the retention cutoff holds while the app stays open. */
     fun refreshHistory() {
-        historyOwner.refresh(_state.value.retention)
+        historyOwner.refresh(_state.value.retention, capture::recoverable)
     }
 
-    /** Capture cannot continue once the app is hidden; see [DictationSessionController.leaveApp]. */
+    fun onEnteredApp() {
+        appVisible = true
+    }
+
+    /**
+     * A session protected by the foreground service carries on; without it, capture cannot continue
+     * once the app is hidden (see [DictationSessionController.leaveApp]).
+     */
     fun onLeftApp() {
+        appVisible = false
         // A tile or shortcut start that has not happened yet must not start once the app is hidden.
         autoStartPending = false
+        if (foregroundActive) return
         session.leaveApp()
     }
 
@@ -316,7 +351,45 @@ class DictationViewModel internal constructor(
         }
     }
 
+    /** Keeps the foreground service and interruption watching in step with the session. */
+    private fun onSessionChanged(s: SessionState) {
+        val capturing = s.dictation is DictationState.Starting || s.dictation is DictationState.Listening
+        if (capturing != watchingInterruptions) {
+            watchingInterruptions = capturing
+            if (capturing) {
+                interruptions.start(requestFocus = s.dictation.modeOrNull() == RecognitionMode.Cloud, ::onInterruption)
+            } else {
+                interruptions.stop()
+            }
+        }
+        val phase = foregroundPhase(s)
+        if (phase == foregroundPhase) return
+        foregroundPhase = phase
+        if (phase == null) {
+            foregroundActive = false
+            foreground.hide()
+            if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
+        } else {
+            ForegroundDictation.listener = foregroundListener
+            foregroundActive = foreground.show(phase)
+        }
+    }
+
+    private fun onInterruption(signal: InterruptionSignal) {
+        if (!session.isCapturing) return
+        val mode = session.state.dictation.modeOrNull() ?: return
+        when (val action = InterruptionPolicy.decide(signal, mode, session.state.paused)) {
+            InterruptionAction.None -> Unit
+            InterruptionAction.Pause -> session.pause()
+            InterruptionAction.Resume -> session.resume()
+            is InterruptionAction.Stop -> session.interrupt(action.failure)
+        }
+    }
+
     override fun onCleared() {
+        interruptions.stop()
+        if (foregroundPhase != null) foreground.hide()
+        if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
         engine.close()
         session.close()
     }
@@ -345,6 +418,8 @@ class DictationViewModel internal constructor(
             sharedAudioSource = ContentSharedAudioSource(application),
             cacheDir = application.cacheDir,
             recordingsDir = File(application.filesDir, "recordings"),
+            interruptions = AndroidAudioInterruptions(application),
+            foreground = AndroidForegroundSession(application),
         )
     }
 }

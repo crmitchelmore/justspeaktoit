@@ -61,6 +61,9 @@ interface AudioRecorder {
 
     /** Stops capture and returns the audio bytes recorded, or -1 if capture failed. Idempotent; may block. */
     fun stop(): Long
+
+    /** While paused the microphone stays open but nothing is written, so the file holds no gap noise. */
+    fun setPaused(paused: Boolean) = Unit
 }
 
 /** Creates the recorder for each Cloud session. */
@@ -88,6 +91,8 @@ class WavRecorder(
     @Volatile private var running = false
 
     @Volatile private var failed = false
+
+    @Volatile private var paused = false
     private var thread: Thread? = null
     private var record: AudioRecord? = null
 
@@ -159,6 +164,10 @@ class WavRecorder(
                     }
                     continue
                 }
+                if (paused) {
+                    onLevel(WavFormat.level(chunk, 0))
+                    continue
+                }
                 bytes.clear()
                 bytes.asShortBuffer().put(chunk, 0, read)
                 out.write(bytes.array(), 0, read * 2)
@@ -171,6 +180,10 @@ class WavRecorder(
             }
         }
         RandomAccessFile(file, "rw").use { it.write(WavFormat.header(written)) }
+    }
+
+    override fun setPaused(paused: Boolean) {
+        this.paused = paused
     }
 
     /**
@@ -189,5 +202,34 @@ class WavRecorder(
         thread = null
         if (failed) return -1
         return (file.length() - WavFormat.HEADER_BYTES).coerceAtLeast(0)
+    }
+}
+
+/**
+ * Recordings that outlived their session: the screen closed mid-recording, or the process died before
+ * the recorder wrote its header.
+ */
+object RecordingRecovery {
+    /** About a quarter of a second; shorter recordings cannot contain a word. */
+    const val MIN_AUDIO_BYTES = WavFormat.BYTES_PER_SECOND / 4
+
+    /**
+     * Rewrites [file]'s WAV header from its length and returns the audio bytes, or -1 when it is too
+     * short to hold a word or cannot be read, in which case the caller deletes it.
+     */
+    fun finalise(file: File): Long {
+        val length = file.length()
+        // Odd trailing bytes are a sample cut off mid-write.
+        val audio = (length - WavFormat.HEADER_BYTES).let { it - it % 2 }
+        if (audio < MIN_AUDIO_BYTES || audio > UInt.MAX_VALUE.toLong() - 36) return -1
+        return try {
+            RandomAccessFile(file, "rw").use {
+                it.write(WavFormat.header(audio))
+                it.setLength(WavFormat.HEADER_BYTES + audio)
+            }
+            audio
+        } catch (e: java.io.IOException) {
+            -1
+        }
     }
 }

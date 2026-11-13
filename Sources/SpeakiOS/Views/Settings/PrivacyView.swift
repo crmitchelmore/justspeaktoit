@@ -198,7 +198,8 @@ extension AppSettings {
         let universalClipboard = self.transcriptAllowsUniversalClipboard
             ? "Universal Clipboard is on, allowing copying between your Apple devices."
             : "Universal Clipboard is off. Enable it to allow copying between your Apple devices."
-        return "Transcript copies expire on this iPhone after \(self.transcriptClipboardLifetime.displayName). "
+        let lifetime = self.transcriptClipboardLifetime.displayName
+        return "Transcript copies expire on \(DeviceCopy.thisDevice) after \(lifetime). "
             + universalClipboard
             + " Expiry does not delete History or copies already pasted elsewhere. "
             + "Expiry on another device is not guaranteed."

@@ -175,9 +175,9 @@ struct SyncSettingsPage: View {
             }
 
             SettingsFootnote(
-                "History syncs through **iCloud** when it's on; otherwise it stays on this iPhone. "
+                "History syncs through **iCloud** when it's on; otherwise it stays on \(DeviceCopy.thisDevice). "
                     + "Settings don't sync: use **Share to Another Device** to copy them. "
-                    + "The iPhone app has no Bonjour transcript sender."
+                    + "The iOS app has no Bonjour transcript sender."
             )
         }
     }
@@ -241,7 +241,7 @@ struct PrivacyDiagnosticsSettingsPage: View {
 
             SettingsFootnote(
                 "**Start here if recording fails.** Checks permissions, runs a microphone self-test and "
-                    + "recovers interrupted recordings. Nothing leaves this iPhone."
+                    + "recovers interrupted recordings. Nothing leaves \(DeviceCopy.thisDevice)."
             )
         }
 

@@ -184,13 +184,20 @@ private struct RecommendedSetupCard: View {
                 .font(.headline)
                 .foregroundStyle(Color.accentColor)
             step(1, "In **Transcription**, choose **Remote → Streaming** for live text, "
-                + "or **Local** to keep audio on this iPhone.")
+                + "or **Local** to keep audio on \(DeviceCopy.thisDevice).")
             step(2, "For Remote, **add the provider's key** in **Providers & API Keys**.")
-            step(3, "In **Recording & Shortcuts**, set the **Action Button** to **Transcribe Voice**.")
+            step(3, triggerStep)
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("settingsRecommendedSetup")
+    }
+
+    /// iPads and older iPhones have no Action Button, so they get the Control Center route.
+    private var triggerStep: String {
+        CaptureHardwareProfile.current().hasActionButton
+            ? "In **Recording & Shortcuts**, set the **Action Button** to **Transcribe Voice**."
+            : "In **Recording & Shortcuts**, add **Transcribe Voice** to **Control Center**."
     }
 
     private func step(_ number: Int, _ markdown: String) -> some View {

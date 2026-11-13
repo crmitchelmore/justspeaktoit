@@ -442,6 +442,20 @@ sessions:
       - "iOS Settings \u203a Action Button \u203a Controls: choose Transcribe Voice (Just Speak to It Alpha)."
       - "Have Notes open on a scratch note, AirPods in their case, and your Mac (same Apple ID, Handoff on) nearby."
     items:
+      - id: "iphone-ipad-device-copy"
+        issues:
+          - 1598
+        title: "iPad Settings never says \"this iPhone\" or mentions the Dynamic Island"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes the #1598 device-copy fix, on an iPad and an iPhone"
+        steps:
+          - "On an iPad, open Settings and read the Recommended setup card."
+          - "Open Transcription, Recording & Shortcuts (with Live Activities on), Sync and Privacy & Diagnostics and read their footnotes."
+          - "Start a recording, open Settings \u203a System resources in use and read the Live Activity row."
+          - "Repeat the Recommended setup and Live Activity checks on an iPhone."
+        expected: "On iPad, copy says \"this iPad\" or \"your iPad\", the setup card suggests Control Center rather than the Action Button, and nothing mentions the Dynamic Island. On iPhone, copy says \"this iPhone\" and the Live Activity text says \"on supported iPhones, in the Dynamic Island\"."
+        final_gate: false
       - id: "iphone-clipboard-e2e"
         issues:
           - 934

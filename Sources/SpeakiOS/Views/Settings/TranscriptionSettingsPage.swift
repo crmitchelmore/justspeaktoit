@@ -30,7 +30,7 @@ struct GeneralSettingsPage: View {
 
             SettingsFootnote(
                 "**Automatic** lets remote providers detect the language; "
-                    + "Apple on-device transcription then uses your iPhone's language."
+                    + "Apple on-device transcription then uses \(DeviceCopy.yourDevice)'s language."
             )
         }
     }
@@ -61,7 +61,7 @@ struct TranscriptionSettingsPage: View {
 
             SettingsFootnote(
                 "**Recommended:** **Remote** with **Streaming** shows text as you speak. "
-                    + "Choose **Local** to keep audio on this iPhone with no API key."
+                    + "Choose **Local** to keep audio on \(DeviceCopy.thisDevice) with no API key."
             )
 
             if hidesModelSelection {
@@ -110,7 +110,7 @@ struct TranscriptionSettingsPage: View {
         }
 
         SettingsFootnote(
-            "Transcribes on this iPhone without uploading audio. "
+            "Transcribes on \(DeviceCopy.thisDevice) without uploading audio. "
                 + "If on-device recognition is unavailable or fails, transcription stops."
         )
     }

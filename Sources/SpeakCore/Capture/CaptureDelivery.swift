@@ -162,7 +162,7 @@ public enum MacLaneOutcome: Equatable, Sendable {
         case .queuedForICloud:
             return "Queued for iCloud History, where a Mac signed in to the same account can pick it up."
         case .iCloudUnavailable:
-            return "Not sent to iCloud \u{2014} iCloud is unavailable on this iPhone."
+            return "Not sent to iCloud \u{2014} iCloud is unavailable on this device."
         case .uploadFailed:
             return "The iCloud upload did not go through; it will be retried."
         }
@@ -331,7 +331,7 @@ public enum CaptureReceiptBuilder {
         mentionHistory: Bool
     ) {
         if mentionHistory, outcome.savedToHistory {
-            clauses.append("Also in History on this iPhone.")
+            clauses.append("Also in History on this device.")
         }
         if let macClause = outcome.mac.receiptClause {
             clauses.append(macClause)

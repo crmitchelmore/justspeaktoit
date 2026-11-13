@@ -98,7 +98,7 @@ struct CloudKitSyncSettingsSection: View {
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Sign in to iCloud in Settings to sync History across your devices. "
-                    + "Until iCloud History Sync is available, History stays on this iPhone.")
+                    + "Until iCloud History Sync is available, History stays on \(DeviceCopy.thisDevice).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

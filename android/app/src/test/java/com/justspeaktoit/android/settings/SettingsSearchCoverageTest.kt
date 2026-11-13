@@ -21,6 +21,7 @@ class SettingsSearchCoverageTest {
     private val unindexedPreferences = mapOf(
         "history_retention" to "Chosen on the History screen.",
         "chosen_mode" to "Chosen on the Dictation screen.",
+        "raw_configuration_other_platform_settings" to "Other platforms' settings the raw editor keeps.",
     )
 
     @Test

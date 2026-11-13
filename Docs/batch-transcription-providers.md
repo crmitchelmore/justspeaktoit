@@ -50,7 +50,17 @@ Source recordings are never deleted by these clients.
   change the engine behind the identifier, and the language allow-list above
   is Resonant-1's. Rumble-2 is not offered yet: it needs its own routes and
   language list (#1656). No unverified price is displayed.
-- **StepAudio 3**: `POST https://api.stepfun.com/v1/audio/asr/sse`,
+- **StepAudio 3**: `POST https://api.stepfun.ai/v1/audio/asr/sse`
+  (International, platform.stepfun.ai) or `POST https://api.stepfun.com/v1/audio/asr/sse`
+  (China, platform.stepfun.com). Keys are region-bound, so the region is saved
+  with the key (`StepFunCredential`, a small JSON value in `stepfun.apiKey`) and
+  only that region's endpoint is called: a 401 or 403 reports which region
+  rejected the key and is **never retried in the other region**. API Keys ›
+  **StepFun region for new keys** chooses the region for the next saved key on
+  macOS and iOS (default International); a pasted or transferred value that
+  already carries a region keeps it. Plain keys saved before region support are
+  treated as China, the only endpoint older versions called. Desktop hosts have
+  no region picker yet and save new keys as International.
   Bearer authorization, JSON containing one base64-encoded recording and
   `audio.input.transcription.model=stepaudio-3-asr-max`. Supports WAV, M4A,
   MP3 and OGG containers. The SSE `transcript.text.done` text is authoritative.
@@ -73,7 +83,7 @@ five-second whole-finish budget. Timeout, stalled sends or early closure report
 an error before releasing confirmed text as recovery material. Cancellation,
 replacement sessions and late callbacks cannot affect a new run.
 
-Official contracts checked 2026-10-13:
+Official contracts checked 2026-10-13 (StepFun regions re-checked 2026-11-13):
 [Pulse Pro quickstart](https://docs.smallest.ai/models/speech-to-text/pre-recorded/quickstart),
 [model card](https://docs.smallest.ai/model-cards/speech-to-text/pulse-pro),
 [audio formats](https://docs.smallest.ai/models/speech-to-text/pre-recorded/audio-formats),
@@ -83,6 +93,7 @@ Official contracts checked 2026-10-13:
 [models](https://docs.reson8.dev/speech-to-text/models/) (checked 2026-11-13),
 [Resonant-1 announcement](https://www.reson8.dev/blog/benchmarks),
 [models](https://docs.reson8.dev/speech-to-text/models/) (checked 2026-11-13),
+[StepFun International SSE](https://platform.stepfun.ai/docs/en/api-reference/audio/asr-sse),
 [StepFun SSE](https://platform.stepfun.com/docs/zh/api-reference/audio/asr-sse.md),
 [pricing](https://platform.stepfun.com/docs/zh/guides/pricing/details.md).
 

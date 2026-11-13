@@ -394,13 +394,19 @@ extension APIKeyGuidance {
         APIKeyProviderGuide(
             providerName: "StepFun",
             identifiers: ["stepfun.apiKey"],
-            creationURL: url("https://platform.stepfun.com/interface-key"),
-            steps: ["账户管理 (Account Management)", "接口密钥 (API Keys)", "创建密钥 (Create Key)"],
+            creationURL: url("https://platform.stepfun.ai/interface-key"),
+            steps: ["Sign in to the StepFun Open Platform", "Interface Keys", "Create Key"],
             scopes: .none("StepFun documents no key permissions."),
             requirements: [APIKeyPermissionRequirement(.transcription, permissions: [], endpoints: ["/v1/audio/asr/sse"])],
             expiry: APIKeyExpiryGuidance(.notDocumented),
-            notes: [],
-            sources: [url("https://platform.stepfun.com/docs/zh/quickstart/create-api-key")]
+            notes: [
+                "Keys are region-bound: platform.stepfun.ai keys work only internationally and platform.stepfun.com "
+                    + "(China) keys only in China. Choose the matching region before saving."
+            ],
+            sources: [
+                url("https://platform.stepfun.ai/docs/en/quickstart/overview.md"),
+                url("https://platform.stepfun.com/docs/zh/quickstart/create-api-key")
+            ]
         ),
         APIKeyProviderGuide(
             providerName: "Meta",

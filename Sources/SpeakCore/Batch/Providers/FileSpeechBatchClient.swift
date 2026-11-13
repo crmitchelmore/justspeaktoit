@@ -30,6 +30,13 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         guard !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .failure(message: "API key is empty.")
         }
+        if provider == .stepfun {
+            guard let credential = try? StepFunCredential(credentials: key) else {
+                return .failure(message: StepFunCredentialError.invalid.localizedDescription)
+            }
+            return .success(message: "Key saved for StepFun \(credential.region.displayName); "
+                + "access is checked when transcribing.")
+        }
         // No documented free entitlement probe for these STT APIs. Do not
         // upload audio just to validate a credential or claim it was verified.
         return .success(message: "Key saved; \(metadata.displayName) access is checked when transcribing.")
@@ -44,6 +51,7 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         guard model.trimmingCharacters(in: .whitespacesAndNewlines) == provider.modelID else {
             throw FileSpeechError.unsupportedModel(model)
         }
+        let stepFunRegion = provider == .stepfun ? try StepFunCredential(credentials: key).region : nil
         let request = try makeRequest(audioURL: url, apiKey: key, language: language)
         let response: HTTPURLResponse
         let body: Data
@@ -56,6 +64,10 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         }
         try Task.checkCancellation()
         guard (200..<300).contains(response.statusCode) else {
+            // Keys are region-bound; report the region rather than trying the other one.
+            if let stepFunRegion, [401, 403].contains(response.statusCode) {
+                throw StepFunCredentialError.rejected(stepFunRegion, response.statusCode)
+            }
             throw TranscriptionProviderError.httpError(
                 response.statusCode, String(data: body, encoding: .utf8) ?? "<non-text response>"
             )
@@ -84,12 +96,16 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         try Task.checkCancellation()
         let file = try FileHandle(forReadingFrom: audioURL)
         defer { try? file.close() }
+        let stepFun = provider == .stepfun ? try StepFunCredential(credentials: apiKey) : nil
         let audio = try Self.readAudio(from: file)
-        let (endpoint, body) = try makePayload(audio: audio, format: format, language: language)
+        let (endpoint, body) = try makePayload(
+            audio: audio, format: format, language: language, stepFunRegion: stepFun?.region
+        )
         var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 120)
         request.httpMethod = "POST"
         request.setValue(
-            provider == .reson8 ? "ApiKey \(apiKey)" : "Bearer \(apiKey)", forHTTPHeaderField: "Authorization"
+            provider == .reson8 ? "ApiKey \(apiKey)" : "Bearer \(stepFun?.apiKey ?? apiKey)",
+            forHTTPHeaderField: "Authorization"
         )
         request.setValue(
             provider == .stepfun ? "application/json" : "application/octet-stream",
@@ -108,7 +124,9 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         }
     }
 
-    private func makePayload(audio: Data, format: String, language: String?) throws -> (URL, Data) {
+    private func makePayload(
+        audio: Data, format: String, language: String?, stepFunRegion: StepFunCredential.Region?
+    ) throws -> (URL, Data) {
         let code = FileSpeechProvider.languageCode(language)
         var components: URLComponents
         var body = audio
@@ -136,7 +154,11 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
             }
             if format == "m4a" { components.queryItems?.append(URLQueryItem(name: "encoding", value: "m4a")) }
         case .stepfun:
-            components = URLComponents(string: "https://api.stepfun.com/v1/audio/asr/sse")!
+            guard let stepFunRegion,
+                  let url = URLComponents(url: stepFunRegion.asrURL, resolvingAgainstBaseURL: false) else {
+                throw StepFunCredentialError.invalid
+            }
+            components = url
             var transcription: [String: Any] = [
                 "model": "stepaudio-3-asr-max", "enable_itn": true, "enable_timestamp": true
             ]

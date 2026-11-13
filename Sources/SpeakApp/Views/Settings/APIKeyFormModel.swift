@@ -163,6 +163,23 @@ final class APIKeyFormModel: ObservableObject {
     }
   }
 
+  /// Region-bound providers store their draft region with the key.
+  private static func credentialsForSaving(_ enteredValue: String, providerID: String) throws -> String {
+    switch providerID {
+    case "alibaba": return try AlibabaSpeechConfiguration.credentialsForSaving(enteredValue)
+    case FileSpeechProvider.stepfun.rawValue: return try StepFunCredential.credentialsForSaving(enteredValue)
+    default: return enteredValue
+    }
+  }
+
+  private static func savedMessage(providerID: String, validatedMessage: String) -> String {
+    switch providerID {
+    case "alibaba": return "Alibaba key, region and workspace saved. Access is checked when transcribing."
+    case FileSpeechProvider.stepfun.rawValue: return validatedMessage
+    default: return "API key saved and validated successfully"
+    }
+  }
+
   // Keep the configuration capture, validation and secure write in one save lifecycle.
   // swiftlint:disable:next function_body_length
   func saveProviderKey(_ provider: TranscriptionProviderMetadata, in environment: AppEnvironment) {
@@ -172,8 +189,7 @@ final class APIKeyFormModel: ObservableObject {
 
     let value: String
     do {
-      value = provider.id == "alibaba"
-        ? try AlibabaSpeechConfiguration.credentialsForSaving(enteredValue) : enteredValue
+      value = try Self.credentialsForSaving(enteredValue, providerID: provider.id)
     } catch {
       providerStates[provider.id] = .finished(.failure(message: error.localizedDescription))
       return
@@ -193,7 +209,7 @@ final class APIKeyFormModel: ObservableObject {
       let validation = await providerInstance.validateAPIKey(value)
 
       switch validation.outcome {
-      case .success:
+      case .success(let validatedMessage):
         do {
           try await environment.secureStorage.storeSecret(
             value,
@@ -201,11 +217,8 @@ final class APIKeyFormModel: ObservableObject {
             label: provider.apiKeyLabel
           )
 
-          let result = validation.updatingOutcome(
-            .success(message: provider.id == "alibaba"
-              ? "Alibaba key, region and workspace saved. Access is checked when transcribing."
-              : "API key saved and validated successfully")
-          )
+          let message = Self.savedMessage(providerID: provider.id, validatedMessage: validatedMessage)
+          let result = validation.updatingOutcome(.success(message: message))
 
           await MainActor.run {
             providerDrafts[provider.id] = ""

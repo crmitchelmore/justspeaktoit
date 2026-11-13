@@ -64,7 +64,7 @@ enum IOSSettingsPage: String, CaseIterable, Identifiable, Hashable {
     /// The `SearchableSettingsSection` titles this page renders.
     var sectionTitles: [String] {
         switch self {
-        case .general: return ["Appearance", "Language"]
+        case .general: return ["Appearance", "Language", "Edit raw configuration"]
         case .transcription: return ["Transcription"]
         case .postProcessing: return ["Post-Processing"]
         case .apiKeys: return ["Subscription", "API Keys"]

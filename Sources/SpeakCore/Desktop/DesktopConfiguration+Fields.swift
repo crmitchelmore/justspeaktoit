@@ -39,6 +39,7 @@ extension DesktopConfiguration {
     public static let fields: [Field] = {
         // Appended step by step: one chained `+` expression exceeds the type checker's time limit.
         var all = Self.baseFields
+        all += [Self.automationConfigurationChangesField]
         all += [.init(key: CleanupModelSelection.preferenceKey,
                       title: CleanupModelSelection.settingTitle + " (metadata only; refresh on Apply)",
                       group: "Post-processing", kind: .boolean, defaultValue: AnyCodable(.bool(false)))]
@@ -50,6 +51,13 @@ extension DesktopConfiguration {
         all += Self.modulateFields
         return all
     }()
+
+    /// The local grant `speak config set` and MCP `set_configuration` need. File
+    /// imports keep the current value, and automation can never change it.
+    public static let automationConfigurationChangesField = Field(
+        key: ApplicationPreferenceKey.allowAutomationConfigurationChanges.rawValue,
+        title: "Allow automation to change settings (speak config set and MCP set_configuration)",
+        group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(false)))
 
     private static let baseFields: [Field] = [
         .init(key: AppSwitchDelivery.preferenceKey, title: AppSwitchDelivery.settingName,

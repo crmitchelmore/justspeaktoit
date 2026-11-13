@@ -16,6 +16,8 @@ public struct SettingsValidationContext: Sendable {
     /// unchanged with a warning instead of failing, so a whole exported
     /// document (for example from another Mac) can still be imported.
     public var ignoresReadOnlyChanges: Bool
+    /// The host whose schema the settings are checked against.
+    public var platform: SettingsSchemaPlatform = .macOS
 
     public init(
         currentValues: [String: JSONValue],
@@ -67,7 +69,8 @@ public enum SettingsValidator {
         context: SettingsValidationContext
     ) -> SettingsValidationReport {
         var report = self.validate(settings: document.settings, context: context)
-        if let platform = document.platform, platform != "macOS" {
+        if let platform = document.platform,
+           SettingsSchemaPlatform(rawValue: platform).map({ !$0.sharesSettings(with: context.platform) }) ?? true {
             report.warnings.insert(
                 .init(path: "platform", message: "Written by \(platform); settings it does not share are ignored."),
                 at: 0)
@@ -83,8 +86,8 @@ public enum SettingsValidator {
         for key in settings.keys.sorted() {
             guard let value = settings[key] else { continue }
             let path = "settings.\(key)"
-            guard let field = SettingsSchema.field(forKey: key) else {
-                if SettingsSchema.catalogueKeys.contains(key) {
+            guard let field = SettingsSchema.field(forKey: key, platform: context.platform) else {
+                if SettingsSchema.knownKeys.contains(key) {
                     report.ignoredKeys.append(key)
                     report.warnings.append(
                         .init(path: path, message: "Not a setting on this platform; kept but ignored."))

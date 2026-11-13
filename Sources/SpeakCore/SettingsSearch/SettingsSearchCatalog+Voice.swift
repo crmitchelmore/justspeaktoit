@@ -63,6 +63,13 @@ extension SettingsSearchCatalog {
             platforms: .apple
         ),
         SettingsSearchEntry(
+            id: "apiKeys.stepfun", title: "StepFun region for new keys", section: .apiKeys, systemImage: "globe",
+            summary: "Whether new StepFun keys come from platform.stepfun.ai (International) or "
+                + "platform.stepfun.com (China).",
+            keywords: ["stepfun", "stepaudio", "region", "international", "china", "stepfun.ai", "stepfun.com"],
+            platforms: .apple
+        ),
+        SettingsSearchEntry(
             id: "apiKeys.azure", title: "Azure Speech resource", section: .apiKeys, systemImage: "cloud",
             summary: "The Azure Speech endpoint or region your key belongs to.",
             keywords: ["azure", "endpoint", "region", "microsoft speech"],

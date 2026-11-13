@@ -2,6 +2,7 @@ package com.justspeaktoit.android.telemetry
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -16,7 +17,18 @@ class PostHogTransportTest {
         timestamp = Instant.parse("2026-07-01T10:00:00Z"),
     )
 
-    private fun transport(key: String) = PostHogTransport(key, { queued += it }, { posted += it })
+    private var onPost: (PostHogTransport, PostCancellation) -> Unit = { _, _ -> }
+    private val cancellations = mutableListOf<PostCancellation>()
+
+    private fun transport(key: String): PostHogTransport {
+        lateinit var transport: PostHogTransport
+        transport = PostHogTransport(key, { queued += it }) { body, call ->
+            cancellations += call
+            onPost(transport, call)
+            if (!call.isCancelled) posted += body
+        }
+        return transport
+    }
 
     @Test
     fun testBlankKey_neverQueuesOrPosts() {
@@ -34,6 +46,44 @@ class PostHogTransportTest {
         queued.forEach(Runnable::run)
 
         assertTrue(posted.isEmpty())
+    }
+
+    @Test
+    fun testPurge_cancelsTheRequestInFlight() {
+        var disconnected = false
+        onPost = { transport, call ->
+            call.onCancel { disconnected = true }
+            transport.purge()
+        }
+        val transport = transport("phc_test")
+        transport.send(payload)
+        queued.forEach(Runnable::run)
+
+        assertTrue(cancellations.single().isCancelled)
+        assertTrue(disconnected)
+        assertTrue(posted.isEmpty())
+    }
+
+    @Test
+    fun testCancelledCall_refusesALateCancelAction() {
+        val call = PostCancellation()
+        call.cancel()
+
+        assertFalse(call.onCancel { error("must not run") })
+    }
+
+    @Test
+    fun testPurgeAfterASend_leavesLaterSendsAlone() {
+        val transport = transport("phc_test")
+        transport.send(payload)
+        queued.forEach(Runnable::run)
+        queued.clear()
+        transport.purge()
+        transport.send(payload)
+        queued.forEach(Runnable::run)
+
+        assertEquals(2, posted.size)
+        assertFalse(cancellations.last().isCancelled)
     }
 
     @Test

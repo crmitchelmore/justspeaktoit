@@ -45,8 +45,24 @@ class TipJarTest {
 
         assertEquals(TipMessage.Thanks, TipJarReducer.finished(buying, TipOutcome.Purchased).message)
         assertEquals(TipMessage.Pending, TipJarReducer.finished(buying, TipOutcome.Pending).message)
+        assertEquals(TipMessage.Unconfirmed, TipJarReducer.finished(buying, TipOutcome.Unconfirmed).message)
         assertEquals(null, TipJarReducer.finished(buying, TipOutcome.Cancelled).message)
         assertEquals(null, TipJarReducer.finished(buying, TipOutcome.Failed).purchasingProductId)
+    }
+
+    @Test
+    fun testConsumptions_keepAFailedConsumeForRetry() {
+        val consumptions = TipConsumptions()
+        consumptions.add(listOf("a", "b"))
+        consumptions.finished("a", consumed = true)
+        consumptions.finished("b", consumed = false)
+        assertEquals(listOf("b"), consumptions.pending())
+
+        consumptions.add(listOf("c"))
+        assertEquals(listOf("b", "c"), consumptions.pending())
+        consumptions.finished("b", consumed = true)
+        consumptions.finished("c", consumed = true)
+        assertEquals(emptyList<String>(), consumptions.pending())
     }
 
     @Test

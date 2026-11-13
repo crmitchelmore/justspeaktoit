@@ -80,7 +80,8 @@ internal class DictationSessionController(
     private var microphoneHold: SystemResourceToken? = null
 
     // The model is fixed when the session starts, so later Settings changes cannot relabel it.
-    private var sessionModelId: String? = null
+    var sessionModelId: String? = null
+        private set
 
     /** The Cloud session's plan, so its upload uses the model and language the recording started with. */
     private var cloudPlan: SessionPlan.Cloud? = null

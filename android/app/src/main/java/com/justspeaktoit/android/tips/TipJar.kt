@@ -62,7 +62,14 @@ enum class TipJarStatus {
     Ready,
 }
 
-enum class TipMessage { Thanks, Pending, Failed }
+enum class TipMessage {
+    Thanks,
+    Pending,
+
+    /** Paid, but Play hasn't confirmed the tip as consumed yet; the store retries. */
+    Unconfirmed,
+    Failed,
+}
 
 data class TipJarUiState(
     val status: TipJarStatus = TipJarStatus.Loading,
@@ -71,8 +78,8 @@ data class TipJarUiState(
     val message: TipMessage? = null,
 )
 
-/** How a purchase attempt ended. */
-enum class TipOutcome { Purchased, Pending, Cancelled, Failed }
+/** How a purchase attempt ended. [Purchased] means Play also confirmed consuming it. */
+enum class TipOutcome { Purchased, Pending, Unconfirmed, Cancelled, Failed }
 
 object TipJarReducer {
     fun loaded(state: TipJarUiState, offers: List<TipOffer>): TipJarUiState =
@@ -92,8 +99,31 @@ object TipJarReducer {
         message = when (outcome) {
             TipOutcome.Purchased -> TipMessage.Thanks
             TipOutcome.Pending -> TipMessage.Pending
+            TipOutcome.Unconfirmed -> TipMessage.Unconfirmed
             TipOutcome.Failed -> TipMessage.Failed
             TipOutcome.Cancelled -> null
         },
     )
+}
+
+/**
+ * Purchase tokens Play confirmed that are not yet consumed. A tip stays here until a consume succeeds, so a
+ * failed one is retried: unconsumed, its tier cannot be bought again, and Play refunds it after three days.
+ */
+class TipConsumptions {
+    private val pending = LinkedHashSet<String>()
+
+    @Synchronized
+    fun add(tokens: Collection<String>) {
+        pending += tokens
+    }
+
+    /** Every token still waiting, to (re)try now. */
+    @Synchronized
+    fun pending(): List<String> = pending.toList()
+
+    @Synchronized
+    fun finished(token: String, consumed: Boolean) {
+        if (consumed) pending -= token
+    }
 }

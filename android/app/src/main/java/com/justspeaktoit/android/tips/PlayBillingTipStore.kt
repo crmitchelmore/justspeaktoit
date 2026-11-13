@@ -21,8 +21,9 @@ import java.io.IOException
 
 /**
  * The tip jar on Google Play Billing. Tips are consumable one-time products with the same IDs as the Apple tip
- * jar, consumed as soon as Play confirms them so the same tip can be bought again; they unlock nothing. Billing
- * callbacks can arrive on any thread, so state changes go through [MutableStateFlow.update].
+ * jar, consumed as soon as Play confirms them so the same tip can be bought again; they unlock nothing. The
+ * user is thanked only once the consume succeeds; a failed one is retried on the next connection or purchase.
+ * Billing callbacks can arrive on any thread, so state changes go through [MutableStateFlow.update].
  */
 class PlayBillingTipStore(context: Context) : PurchasesUpdatedListener {
     private val appContext = context.applicationContext
@@ -42,6 +43,7 @@ class PlayBillingTipStore(context: Context) : PurchasesUpdatedListener {
         .build()
 
     @Volatile private var details: Map<String, ProductDetails> = emptyMap()
+    private val consumptions = TipConsumptions()
 
     /** Connects and loads prices. Safe to call each time the tip jar is shown. */
     fun connect() {
@@ -51,6 +53,7 @@ class PlayBillingTipStore(context: Context) : PurchasesUpdatedListener {
         }
         if (client.isReady) {
             loadProducts()
+            retryConsumption()
             return
         }
         client.startConnection(object : BillingClientStateListener {
@@ -76,6 +79,7 @@ class PlayBillingTipStore(context: Context) : PurchasesUpdatedListener {
             TipJarReducer.purchaseStarted(current, productId).also { started = it != current }
         }
         if (!started) return
+        retryConsumption()
         val params = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(
                 listOf(BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(product).build()),
@@ -83,6 +87,7 @@ class PlayBillingTipStore(context: Context) : PurchasesUpdatedListener {
             .build()
         val result = client.launchBillingFlow(activity, params)
         if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+            if (result.responseCode == BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED) consumeLeftovers()
             _state.update { TipJarReducer.finished(it, TipOutcome.Failed) }
         }
     }
@@ -91,14 +96,28 @@ class PlayBillingTipStore(context: Context) : PurchasesUpdatedListener {
         val outcome = when (result.responseCode) {
             BillingClient.BillingResponseCode.OK -> {
                 val tips = purchases.orEmpty()
-                tips.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }.forEach(::consume)
-                when {
-                    tips.any { it.purchaseState == Purchase.PurchaseState.PURCHASED } -> TipOutcome.Purchased
-                    tips.any { it.purchaseState == Purchase.PurchaseState.PENDING } -> TipOutcome.Pending
-                    else -> TipOutcome.Failed
+                val bought = tips.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+                if (bought.isNotEmpty()) {
+                    // The spinner stays until Play confirms the consume, so "thanks" is never premature.
+                    val confirming = bought.first().purchaseToken
+                    consume(bought.map { it.purchaseToken }) { token, consumed ->
+                        if (token != confirming) return@consume
+                        val outcome = if (consumed) TipOutcome.Purchased else TipOutcome.Unconfirmed
+                        _state.update { TipJarReducer.finished(it, outcome) }
+                    }
+                    return
+                }
+                if (tips.any { it.purchaseState == Purchase.PurchaseState.PENDING }) {
+                    TipOutcome.Pending
+                } else {
+                    TipOutcome.Failed
                 }
             }
             BillingClient.BillingResponseCode.USER_CANCELED -> TipOutcome.Cancelled
+            BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> {
+                consumeLeftovers()
+                TipOutcome.Failed
+            }
             else -> TipOutcome.Failed
         }
         _state.update { TipJarReducer.finished(it, outcome) }
@@ -139,12 +158,28 @@ class PlayBillingTipStore(context: Context) : PurchasesUpdatedListener {
         val params = QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.INAPP).build()
         client.queryPurchasesAsync(params) { result, purchases ->
             if (result.responseCode != BillingClient.BillingResponseCode.OK) return@queryPurchasesAsync
-            purchases.orEmpty().filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }.forEach(::consume)
+            val bought = purchases.orEmpty().filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+            consume(bought.map { it.purchaseToken })
         }
     }
 
-    private fun consume(purchase: Purchase) {
-        val params = ConsumeParams.newBuilder().setPurchaseToken(purchase.purchaseToken).build()
-        client.consumeAsync(params) { _, _ -> }
+    /** Retries consumes that failed earlier in this process; [consumeLeftovers] covers earlier processes. */
+    private fun retryConsumption() {
+        consume(emptyList())
+    }
+
+    /** Consumes [tokens] and any earlier tokens still waiting; [onResult] hears about each one. */
+    private fun consume(tokens: List<String>, onResult: (String, Boolean) -> Unit = { _, _ -> }) {
+        consumptions.add(tokens)
+        consumptions.pending().forEach { token ->
+            val params = ConsumeParams.newBuilder().setPurchaseToken(token).build()
+            client.consumeAsync(params) { result, _ ->
+                // Not owned means an earlier attempt already consumed it.
+                val consumed = result.responseCode == BillingClient.BillingResponseCode.OK ||
+                    result.responseCode == BillingClient.BillingResponseCode.ITEM_NOT_OWNED
+                consumptions.finished(token, consumed)
+                onResult(token, consumed)
+            }
+        }
     }
 }

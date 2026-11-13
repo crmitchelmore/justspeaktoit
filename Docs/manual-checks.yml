@@ -238,19 +238,17 @@ sessions:
         issues:
           - 776
           - 814
-        title: "PostHog: purge key, deletion and production evidence"
-        minutes: 30
+        title: "PostHog: production evidence before the inspection week"
+        minutes: 20
         core: false
-        build: "PostHog EU Production and GitHub settings; current main with PR #1370"
+        build: "PostHog EU Production; current Alpha with analytics opted in"
         prerequisites:
-          - "Steps: Docs/posthog-maintenance.md (12-month retention purge)"
+          - "Steps: Docs/posthog-maintenance.md (Rollout gate and 12-month retention)"
         steps:
-          - "Create a PostHog personal API key for the Production project with only Data deletion write access; add it as POSTHOG_PURGE_API_KEY, and the project id as POSTHOG_PROJECT_ID, in a new GitHub environment posthog-purge limited to main."
-          - "Run the PostHog retention purge workflow with mode geoip-test-events, first as a dry run (expect 7), then for real; then run mode retention as a dry run."
-          - "Screenshot PostHog Production settings showing EU hosting, GeoIP off and IP discarding, and add them to #776."
           - "Rotate the PostHog project API key once, let an agent ship the new key in an Alpha, and confirm opted-in events still arrive."
           - "Approve one Release-build network capture with analytics opted in, for an agent to inspect."
-        expected: "Purge runs succeed, the 7 GeoIP-tagged events are gone, and the settings, rotation and capture evidence is on #776. One clean inspection week then unblocks #814."
+          - "When PostHog support enables self-service deletion for project 254700, run the retention purge as a dry run. This does not block rollout."
+        expected: "Rotation and capture evidence is on #776 (EU hosting and IP-discard screenshots were added on 13 Nov 2026). One clean inspection week then unblocks #814. Retention deletion does not block rollout; if self-service deletion is still unavailable, delete through PostHog support or the UI before the date in Docs/posthog-maintenance.md."
         final_gate: false
       - id: "owner-stripe-setup"
         issues:
@@ -561,6 +559,22 @@ sessions:
           - "Wait 20 seconds, unlock and paste into Notes."
         expected: "Paste is the raw \"locked stop\"; History has one polished item. No placeholder. Add your iOS version and whether Stop needed an unlock to any Fail note."
         final_gate: true
+      - id: "iphone-interrupted-recording-prompt"
+        issues:
+          - 1617
+        title: "Recording interrupted prompt: only after a real interruption, and every answer sticks"
+        minutes: 6
+        core: false
+        build: "TestFlight Just Speak to It Alpha that includes the #1617 fix"
+        steps:
+          - "If \"Recording interrupted\" appears on the first launch after updating, tap Not now once (older recordings may still be listed)."
+          - "In the app, record \"normal recording\" and stop. Force-quit the app and reopen it."
+          - "In the app, start recording, say \"interrupted test\", and while it is recording force-quit the app. Reopen it and tap Transcribe it."
+          - "Repeat the interrupted recording, reopen, tap Not now, then force-quit and reopen again."
+          - "Repeat the interrupted recording once more, reopen and tap Discard recording."
+          - "Turn on Airplane Mode, repeat the interrupted recording, reopen and tap Transcribe it."
+        expected: "No prompt after the normal recording. Transcribe it shows a \"Transcribing interrupted recording\u2026\" banner, then opens the new History item containing \"interrupted test\" and the prompt does not return. After Not now the prompt does not come back on the next launch. Discard recording removes it with no prompt on the next launch. In Airplane Mode a \"Couldn't transcribe recording\" alert offers Try again, Discard recording and Keep for later; nothing is deleted unless you choose Discard."
+        final_gate: false
       - id: "iphone-siri-interruption"
         issues:
           - 1117
@@ -989,6 +1003,19 @@ sessions:
           - "With VoiceOver on, swipe through the Session details rows."
         expected: "Each entry lists its trigger (Button or Automation), friendly model names per phase, recording length, transcript and post-processing times and a total. The issue preview has relative timings but no transcript text or dates. VoiceOver reads each row's title and value."
         final_gate: true
+      - id: "owner-ios-upload-required-reason-apis"
+        issues:
+          - 1644
+        title: "iOS upload processes without ITMS-91053"
+        minutes: 3
+        core: false
+        build: "App Store Connect; the first Alpha iOS build that includes the active-keyboards privacy manifest fix"
+        steps:
+          - "In App Store Connect \u203a TestFlight, find the new iOS build and wait for processing to finish."
+          - "Confirm the build shows as ready to test rather than invalid."
+          - "Check the Apple email for the build, or the build upload's errors."
+        expected: "The build finishes processing and no ITMS-91053 (missing required-reason API declaration) is reported for the app, keyboard, widget or Share extension."
+        final_gate: false
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"
@@ -1113,6 +1140,36 @@ sessions:
           - "During a dictation, leave the app."
         expected: "Denial shows a rationale, then a Settings link, and dictation works once granted. A call or route change ends the session with a clear reason or carries on with correct text; leaving the app reports that dictation stopped and History keeps the unfinished words as unfinished."
         final_gate: true
+      - id: "android-foreground-long-dictation"
+        issues:
+          - 1592
+        title: "Long dictation keeps going in the background, and Stop works from the notification"
+        minutes: 15
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the foreground dictation change"
+        steps:
+          - "On Android 13 or later, start the first dictation after installing and allow notifications when asked."
+          - "Choose Cloud and dictate for about five minutes: after a minute open another app, then turn the screen off for a minute, then come back and keep talking."
+          - "Check the notification while recording, then tap Stop in the notification."
+          - "Repeat in Speech service mode with another app in front for 30 seconds, and note whether words spoken there arrive."
+          - "Start a Cloud dictation, talk for 20 seconds, then swipe the app away from Recents. Open the app again and go to History."
+        expected: "A silent \"Just Speak to It is dictating\" notification with Stop shows for the whole session. Cloud returns every word, including those spoken with another app in front and with the screen off. Stop in the notification finishes the session like the Stop button and the notification goes once the transcript is in. Speech service either keeps listening in the background or ends with a clear reason and keeps its unfinished words. After swiping the app away, History has a failed entry saying the recording ended before it could be transcribed, whose Transcribe returns the 20 seconds of speech."
+        final_gate: true
+      - id: "android-interruptions-focus-route"
+        issues:
+          - 1592
+        title: "Calls, other apps' audio and headset changes never lose a recording"
+        minutes: 12
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the foreground dictation change"
+        steps:
+          - "During a Cloud dictation, receive a phone call (answer it or let it ring), then go to History."
+          - "During a Cloud dictation, start a voice note or the Google Assistant for a few seconds, then return."
+          - "During a Cloud dictation, start music or a video in another app."
+          - "During a Cloud dictation, connect a Bluetooth headset; during another, unplug or disconnect a headset that was connected before you started."
+          - "Repeat the call and headset steps in Speech service mode after saying a few words."
+        expected: "A call ends the session with \"Dictation stopped for a call\"; a headset change ends it saying a headset or Bluetooth microphone was connected or disconnected. Each keeps everything said before: Cloud saves the recording with the failed History entry and Transcribe returns its words; Speech service keeps the unfinished words. A short assistant or voice note pauses the Cloud recording (the screen and notification say Paused) and it resumes by itself afterwards. Music taking over for good stops the session with a clear reason and keeps the audio."
+        final_gate: true
       - id: "android-cloud-keys-cleanup"
         issues:
           - 1328
@@ -1181,6 +1238,22 @@ sessions:
           - "Say \"I deploy to cooper netties\" in On-device mode and in Cloud with GPT Transcribe."
           - "Tap Read aloud on the finished transcript, then Stop reading."
         expected: "French is recognised in each mode and Automatic follows the phone language again. Both transcripts read \"I deploy to Kubernetes\". Read aloud speaks the transcript and Stop reading silences it."
+        final_gate: true
+      - id: "android-profiles-cleanup-prompt"
+        issues:
+          - 1591
+        title: "Dictation profiles and the custom cleanup prompt"
+        minutes: 8
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes dictation profiles"
+        steps:
+          - "With an OpenAI and an OpenRouter key saved and Clean up transcripts on, set Settings \u203a Cleanup prompt to \"Rewrite the transcript in capital letters.\" and dictate one sentence in Cloud mode."
+          - "Tap Use the built-in prompt and dictate again."
+          - "Settings \u203a Dictation profiles: add a profile named Spanish with Cloud model Whisper Large v3 Turbo (Groq key saved), Language Spanish (Spain) and Cleanup prompt \"End every sentence with an exclamation mark.\""
+          - "On the dictation screen choose Profile: Spanish, check the privacy line names Groq, and dictate a Spanish sentence in Cloud mode; then switch to On-device and dictate again."
+          - "Open the keyboard in a messaging app, tap the Profile key until it shows No profile and then Spanish, and dictate a Spanish sentence; repeat with TalkBack on."
+          - "Delete the Spanish profile in Settings."
+        expected: "The first transcript is in capitals and the second is normal cleanup. With the profile, Cloud uses Groq, recognises Spanish and ends sentences with exclamation marks, and On-device stays on the phone in Spanish. The keyboard key cycles profiles, TalkBack announces the profile name, and the key is disabled while listening. Deleting the profile hides the chooser and restores your own settings."
         final_gate: true
       - id: "android-battery-latency"
         issues:

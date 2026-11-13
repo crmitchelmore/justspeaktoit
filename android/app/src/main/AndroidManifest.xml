@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Only used for bring-your-own-key cloud transcription and cleanup. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Keeps a dictation the user started running while another app is in front or the screen is off. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Shows the ongoing dictation notification and its Stop action (Android 13+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature
         android:name="android.hardware.microphone"
@@ -69,6 +74,12 @@
                 android:name="android.view.im"
                 android:resource="@xml/dictation_keyboard" />
         </service>
+
+        <!-- Runs only while a dictation captures or finishes; see DictationForegroundService. -->
+        <service
+            android:name=".dictation.DictationForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <service
             android:name=".surfaces.DictateTileService"

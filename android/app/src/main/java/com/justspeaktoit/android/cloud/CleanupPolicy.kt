@@ -7,7 +7,15 @@ import org.json.JSONObject
  * (exported from SpeakCore), so both platforms clean transcripts identically.
  */
 object CleanupPolicy {
-    fun systemPrompt(): String = GeneratedCloudCatalog.CLEANUP_SYSTEM_PROMPT
+    /**
+     * The built-in prompt, or [customBasePrompt] in place of the built-in instructions, ended the way
+     * SpeakCore ends a custom prompt. A blank custom prompt means the built-in one.
+     */
+    fun systemPrompt(customBasePrompt: String? = null): String {
+        val custom = customBasePrompt?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return GeneratedCloudCatalog.CLEANUP_SYSTEM_PROMPT
+        return custom + "\n\n" + GeneratedCloudCatalog.CLEANUP_CUSTOM_PROMPT_CLOSING
+    }
 
     /** Wraps the transcript as JSON data so its contents never become prompt structure. */
     fun userMessage(transcript: String): String =

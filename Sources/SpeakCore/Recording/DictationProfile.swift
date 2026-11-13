@@ -208,7 +208,7 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
         )
     }
 
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case id
         case name
         case matchers

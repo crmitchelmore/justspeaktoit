@@ -1,5 +1,6 @@
 package com.justspeaktoit.android.dictation
 
+import com.justspeaktoit.android.cloud.WavFormat
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryFile
 import com.justspeaktoit.android.history.HistoryStatus
@@ -63,6 +64,52 @@ class DictationHistoryTest {
         history().load(Retention.Month).join()
         assertFalse(orphan.exists())
         assertEquals(emptyList<HistoryEntry>(), latest)
+    }
+
+    /** A recording whose header was never written, as a process that died mid-recording leaves it. */
+    private fun unfinishedRecording(name: String, audioBytes: Int) =
+        File(folder.root, name).apply { writeBytes(ByteArray(WavFormat.HEADER_BYTES + audioBytes)) }
+
+    @Test
+    fun testLoad_recoversUnfinishedRecordingsWithARepairedHeader_andDeletesTooShortOnes() = runBlocking {
+        val second = WavFormat.BYTES_PER_SECOND
+        val recording = unfinishedRecording("dictation-a.wav", second + 1)
+        val blip = unfinishedRecording("dictation-b.wav", 100)
+
+        history().load(Retention.Month) { listOf(recording, blip) }.join()
+
+        val entry = latest.single()
+        assertEquals(HistoryStatus.Failed, entry.status)
+        assertEquals(DictationFailure.RecordingRecovered.name, entry.failure)
+        assertEquals(RecognitionMode.Cloud.name, entry.mode)
+        val kept = File(checkNotNull(entry.audioPath))
+        assertEquals("the odd trailing byte is dropped", (WavFormat.HEADER_BYTES + second).toLong(), kept.length())
+        assertEquals(WavFormat.header(second.toLong()).toList(), kept.readBytes().take(WavFormat.HEADER_BYTES))
+        assertFalse(recording.exists())
+        assertFalse(blip.exists())
+    }
+
+    @Test
+    fun testRecoveredRecording_withHistoryOff_isDeleted() = runBlocking {
+        val recording = unfinishedRecording("dictation-a.wav", WavFormat.BYTES_PER_SECOND)
+        history().refresh(Retention.Off) { listOf(recording) }.join()
+        assertTrue(latest.isEmpty())
+        assertTrue(recordingsDir.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun testAttachAudio_movesAnInterruptedRecordingBesideItsFailedEntry() = runBlocking {
+        val history = history()
+        val failed = DictationState.Failed(RecognitionMode.Cloud, DictationFailure.InterruptedByCall, "")
+        history.recordSession(failed, "openai/gpt-transcribe", Retention.Month)
+        val recording = unfinishedRecording("dictation-a.wav", WavFormat.BYTES_PER_SECOND)
+        history.attachAudio(recording, history.latestSession, Retention.Month).join()
+
+        val entry = latest.single()
+        assertEquals(DictationFailure.InterruptedByCall.name, entry.failure)
+        assertEquals("openai/gpt-transcribe", entry.model)
+        assertTrue(File(checkNotNull(entry.audioPath)).exists())
+        assertFalse(recording.exists())
     }
 
     @Test

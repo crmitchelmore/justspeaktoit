@@ -1,7 +1,7 @@
 import Foundation
 
 /// The cloud catalogue the Android app offers, as JSON, so Android never keeps its own copy of
-/// model identifiers, names, wire fields or the cleanup prompt.
+/// model identifiers, names, wire fields, the cleanup prompt or the dictation profile format.
 ///
 /// Android implements OpenAI-compatible `/audio/transcriptions` uploads for OpenAI and Groq, and
 /// OpenAI-compatible chat for cleanup through every native text provider and OpenRouter. It
@@ -98,6 +98,17 @@ public enum CloudCatalogAndroidExport {
 
     private struct Cleanup: Encodable {
         let provider, model, systemPrompt: String
+        /// The section that ends a prompt built on the user's own base prompt.
+        let customPromptClosing: String
+    }
+
+    /// Where and how Android stores `DictationProfile`s, so its profiles keep the shared shape.
+    private struct Profiles: Encodable {
+        let storageKey: String
+        /// The routing Android writes for a profile's cloud model: it only uploads finished recordings.
+        let cloudTranscriptionRouting: String
+        /// `DictationProfile`'s JSON field names; Android writes only these.
+        let fields: [String]
     }
 
     private struct CleanupModel: Encodable {
@@ -116,6 +127,7 @@ public enum CloudCatalogAndroidExport {
         /// `TranscriptionLanguageCatalog.options`; the first is Automatic.
         let languages: [Language]
         let keywordPrompt: KeywordPrompt
+        let profiles: Profiles
     }
 
     public static func json() throws -> Data {
@@ -127,7 +139,8 @@ public enum CloudCatalogAndroidExport {
             cleanup: Cleanup(
                 provider: OpenRouterService.providerID,
                 model: ModelCatalog.defaultPostProcessingModel,
-                systemPrompt: TranscriptCleanupPolicy.systemPrompt()
+                systemPrompt: TranscriptCleanupPolicy.systemPrompt(),
+                customPromptClosing: TranscriptCleanupPolicy.customPromptClosing
             ),
             cleanupModels: cleanupModels.map(exportedCleanup),
             cleanupModelSuccessors: cleanupModelSuccessors,
@@ -135,6 +148,11 @@ public enum CloudCatalogAndroidExport {
             keywordPrompt: KeywordPrompt(
                 maximumBytes: TranscriptionKeywordPolicy.promptMaximumCharacters,
                 maximumTerms: TranscriptionKeywordPolicy.promptMaximumTerms
+            ),
+            profiles: Profiles(
+                storageKey: DataMigrationProfileCatalog.defaultsKey,
+                cloudTranscriptionRouting: DictationProfileTranscriptionRouting.remoteBatch.rawValue,
+                fields: DictationProfile.CodingKeys.allCases.map(\.rawValue)
             )
         )
         let encoder = JSONEncoder()

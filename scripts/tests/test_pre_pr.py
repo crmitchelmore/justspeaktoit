@@ -1,4 +1,5 @@
 """Planner and summary tests for scripts/pre-pr."""
+import contextlib
 import importlib.machinery
 import importlib.util
 import json
@@ -7,13 +8,14 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts' / 'ci'))
-from pre_pr import environment, lock, planner, runner, swift_tests
+from pre_pr import environment, lock, mirror, planner, runner, swift_tests
 from pre_pr import summary as record
 
 _loader = importlib.machinery.SourceFileLoader('pre_pr_cli', str(ROOT / 'scripts' / 'pre-pr'))
@@ -43,7 +45,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(selected, ['ci-lint'])
         self.assertEqual(checks[0].command, ['make', 'ci-lint'])
         self.assertEqual(checks[0].forbid_drift, ('Tooling/Package.resolved',))
-        self.assertEqual(checks[0].env, {'JSTI_LINT_BASELINE_BASE': 'origin/main'})
+        self.assertEqual(checks[0].env, {'JSTI_LINT_BASELINE_BASE': 'origin/main', 'JSTI_TEST_RETRY': '1'})
 
     def test_workflow_change_adds_the_required_quality_check(self):
         selected, _, checks = ids(['.github/workflows/ci.yml'])
@@ -97,6 +99,10 @@ class PlanTests(unittest.TestCase):
             api = {c.id: c for c in checks}['api-compatibility']
             self.assertEqual(api.command[:2], ['bash', 'scripts/ci-api-compatibility.sh'])
             self.assertEqual(api.command[2], environment.merge_base_or('origin/main'))
+            # make ci-lint runs the gate's own tests, so the API job skips its copy of them.
+            self.assertIn('ci-lint', {c.id for c in checks})
+            self.assertEqual(api.env.get('JSTI_API_SELFTEST'), '0')
+            self.assertTrue(api.mirror)
             self.assertIn('public-api', areas)
             for path in ('Sources/SpeakApp/AppDelegate.swift', 'Sources/SpeakDesktop/X.swift', 'Docs/x.md'):
                 ids_ = [c.id for c in planner.plan([path], False)[0]]
@@ -380,7 +386,7 @@ class RunTests(unittest.TestCase):
 
     def test_modifying_a_ci_checked_file_fails(self):
         states = iter([set(), {'Package.resolved'}])
-        with mock.patch.object(runner, 'dirty_tracked', lambda: next(states)):
+        with mock.patch.object(runner, 'dirty_tracked', lambda *_: next(states)):
             check = self.run_check(forbid_drift=('Package.resolved',))
         self.assertEqual(check.status, 'fail')
         self.assertIn('Package.resolved', check.note)
@@ -389,6 +395,23 @@ class RunTests(unittest.TestCase):
         log = 'Executed 4 tests\nExecuted 12 tests, with 0 failures\n✔ Test run with 7 tests in 2 suites passed'
         self.assertEqual(runner.tests_executed(log), 19)
         self.assertEqual(runner.tests_executed('No matching test cases were run'), 0)
+
+    def test_a_hung_exclusive_check_is_killed_with_its_children(self):
+        pidfile = Path(self.tmp.name) / 'grandchild.pid'
+        hang = ['sh', '-c', f'sleep 60 & echo $! > {pidfile}; wait']
+        with mock.patch.dict(os.environ, {'JSTI_PRE_PR_CHECK_TIMEOUT': '1'}):
+            started = time.monotonic()
+            check = self.run_check(command=hang)
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertEqual(check.status, 'fail')
+        self.assertIn('timed out after 1s', check.note)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(pidfile.read_text()), 0)
+
+    def test_remote_checks_are_not_timed_out(self):
+        with mock.patch.dict(os.environ, {'JSTI_PRE_PR_CHECK_TIMEOUT': '1'}):
+            check = self.run_check(command=['sleep', '2'], exclusive=False)
+        self.assertEqual(check.status, 'pass')
 
 
 class EvidenceTests(unittest.TestCase):
@@ -437,11 +460,11 @@ class MachineLockTests(unittest.TestCase):
             order, entered = [], threading.Event()
 
             def second():
-                with lock.machine_lock(path):
+                with lock.machine_lock(path, slots=1, poll=0.05):
                     order.append('second')
                 entered.set()
 
-            with lock.machine_lock(path):
+            with lock.machine_lock(path, slots=1):
                 waiter = threading.Thread(target=second)
                 waiter.start()
                 self.assertFalse(entered.wait(0.5), 'the second run must wait for the lock')
@@ -450,9 +473,234 @@ class MachineLockTests(unittest.TestCase):
             waiter.join(10)
             self.assertEqual(order, ['first', 'second'])
 
+    def test_two_slots_admit_two_runs_and_the_third_waits(self):
+        import threading
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / 'pre-pr.lock')
+            entered = threading.Event()
+            got = []
+
+            def third():
+                with lock.machine_lock(path, slots=2, poll=0.05) as slot:
+                    got.append(slot)
+                entered.set()
+
+            with lock.machine_lock(path, slots=2) as first:
+                with lock.machine_lock(path, slots=2) as second:
+                    self.assertEqual((first, second), (0, 1))
+                    waiter = threading.Thread(target=third)
+                    waiter.start()
+                    self.assertFalse(entered.wait(0.3), 'a third run must wait for a free slot')
+                self.assertTrue(entered.wait(10))
+            waiter.join(10)
+            self.assertEqual(got, [1])
+
     def test_off_disables_the_lock(self):
         with lock.machine_lock('off'), lock.machine_lock('off'):
             pass
+
+
+class LockScopeTests(unittest.TestCase):
+    def test_only_local_heavy_checks_take_the_machine_lock(self):
+        swift = 'Sources/SpeakCore/Credentials/Apple/SecureStorage.swift'
+        with mock.patch.object(environment, 'IS_MAC', True), mock.patch.object(sys, 'platform', 'darwin'), \
+                mock.patch.object(environment, 'pr_title_env', lambda: {}):
+            remote = {c.id: c for c in planner.plan([swift, 'scripts/pre-pr'], False, linux='remote')[0]}
+            container = {c.id: c for c in planner.plan([swift], False, linux='container')[0]}
+            with mock.patch.object(planner.shutil, 'which', lambda name: name == 'container' and '/bin/container'):
+                apple = {c.id: c for c in planner.plan([swift], False)[0]}
+        self.assertTrue(apple['portable-linux'].exclusive)
+        self.assertFalse(any(remote[i].exclusive for i in ('portable-linux', 'ci-lint-linux', 'quality')))
+        self.assertTrue(all(remote[i].exclusive for i in ('ci-lint', 'apple-build', 'api-compatibility')))
+        self.assertTrue(container['portable-linux'].exclusive)
+
+    def run_execute(self, checks, failing=(), slot=0):
+        events, held = [], []
+
+        @contextlib.contextmanager
+        def fake_lock():
+            held.append(True)
+            events.append('lock')
+            yield slot
+            events.append('unlock')
+            held.pop()
+
+        def fake_run(check, verbose, cancel=None):
+            events.append((check.id, bool(held)))
+            check.status = 'fail' if check.id in failing else 'pass'
+
+        def fake_finish(check, process, verbose, restore=True):
+            if process is not None:
+                check.status = 'pass'
+
+        args = mock.Mock(keep_going=False, verbose=False, markdown=False, base='origin/main', full=False)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(environment, 'OUT', Path(tmp)), \
+                mock.patch.object(cli, 'machine_lock', fake_lock), mock.patch.object(cli, 'run', fake_run), \
+                mock.patch.object(cli, 'launch', lambda c: events.append((c.id, bool(held))) or object()), \
+                mock.patch.object(cli, 'finish', fake_finish), mock.patch('builtins.print'):
+            cli.execute(args, checks, {}, [], 'base', 'head', 'tree', False)
+        return events
+
+    def test_a_second_slot_uses_its_own_linux_volume(self):
+        Check = runner.Check
+        checks = [Check('portable-linux', 'swift', 'Linux', ['x'], background=True),
+                  Check('ci-lint', 'ci-lint', 'Lint', ['x'])]
+        with mock.patch.object(mirror, 'sync', return_value=None):
+            self.run_execute(checks, slot=1)
+        self.assertEqual(checks[0].env['JSTI_PORTABLE_VOLUME'], 'jsti-portable-build-1')
+
+    def test_the_lock_covers_only_the_exclusive_checks(self):
+        Check = runner.Check
+        checks = [Check('linux', 'swift', 'Linux', ['x'], background=True, exclusive=False),
+                  Check('quality', 'quality', 'Quality', ['x'], exclusive=False),
+                  Check('ci-lint', 'ci-lint', 'Lint', ['x']), Check('apple-build', 'swift', 'Build', ['x'])]
+        events = self.run_execute(checks)
+        # ci-lint and the build are separate lanes, so their order is not fixed.
+        self.assertEqual(events[:3], [('linux', False), ('quality', False), 'lock'])
+        self.assertCountEqual(events[3:5], [('ci-lint', True), ('apple-build', True)])
+        self.assertEqual(events[5:], ['unlock'])
+        self.assertEqual([c.status for c in checks], ['pass'] * 4)
+
+    def test_an_early_failure_never_waits_for_the_lock(self):
+        Check = runner.Check
+        checks = [Check('quality', 'quality', 'Quality', ['x'], exclusive=False),
+                  Check('apple-build', 'swift', 'Build', ['x'])]
+        self.assertEqual(self.run_execute(checks, failing={'quality'}), [('quality', False)])
+        self.assertEqual(checks[1].status, 'skip')
+
+
+class LaneTests(unittest.TestCase):
+    """The exclusive checks run in lanes side by side, for real, without the machine lock."""
+
+    def execute(self, checks, **env):
+        args = mock.Mock(keep_going=False, verbose=False, markdown=False, base='origin/main', full=False)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(environment, 'OUT', Path(tmp)), \
+                mock.patch.object(cli, 'machine_lock', contextlib.nullcontext), \
+                mock.patch.object(runner, 'dirty_tracked', lambda *_: set()), \
+                mock.patch.dict(os.environ, env), mock.patch('builtins.print'):
+            started = time.monotonic()
+            cli.execute(args, checks, {}, [], 'base', 'head', 'tree', False)
+            return time.monotonic() - started
+
+    def test_lanes_run_side_by_side_and_in_order_within_a_lane(self):
+        Check = runner.Check
+        with tempfile.TemporaryDirectory() as tmp:
+            order = Path(tmp) / 'order'
+            step = ['sh', '-c', f'sleep 1; echo "$0" >> {order}']
+            checks = [Check('build', 'swift', 'Build', [*step, 'build'], lane='swift'),
+                      Check('tests', 'swift', 'Tests', [*step, 'tests'], lane='swift'),
+                      Check('api', 'public-api', 'API', [*step, 'api']),
+                      Check('lint', 'ci-lint', 'Lint', [*step, 'lint'])]
+            elapsed = self.execute(checks)
+            lines = order.read_text().split()
+        self.assertEqual([c.status for c in checks], ['pass'] * 4)
+        self.assertLess(lines.index('build'), lines.index('tests'))
+        self.assertLess(elapsed, 3.8, 'three lanes of at most two 1s steps run side by side')
+
+    def test_lanes_off_runs_one_check_at_a_time(self):
+        Check = runner.Check
+        checks = [Check(name, 'x', name, ['sleep', '0.5']) for name in ('a', 'b', 'c')]
+        self.assertGreaterEqual(self.execute(checks, JSTI_PRE_PR_LANES='off'), 1.5)
+
+    def test_a_failure_stops_the_other_lanes(self):
+        Check = runner.Check
+        checks = [Check('build', 'swift', 'Build', ['sh', '-c', 'sleep 0.5; exit 1'], lane='swift'),
+                  Check('tests', 'swift', 'Tests', ['true'], lane='swift'),
+                  Check('lint', 'ci-lint', 'Lint', ['sleep', '60'])]
+        self.assertLess(self.execute(checks), 20)
+        self.assertEqual([c.status for c in checks], ['fail', 'skip', 'skip'])
+        self.assertIn('earlier failure', checks[2].note)
+
+
+class MirrorTests(unittest.TestCase):
+    """The warm build mirror, against a throwaway repository."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        base = Path(self.tmp.name).resolve()
+        self.repo, self.mirror = base / 'repo', base / 'cache' / 'mirror'
+        self.repo.mkdir()
+        self.git('init', '-q')
+        (self.repo / '.gitignore').write_text('.build/\n')
+        (self.repo / 'kept.swift').write_text('let kept = 1\n')
+        (self.repo / 'edited.swift').write_text('let edited = 1\n')
+        self.git('add', '-A')
+        self.git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'base')
+        patches = [mock.patch.object(environment, 'ROOT', self.repo), mock.patch.object(mirror, 'ROOT', self.repo),
+                   mock.patch.object(runner, 'ROOT', self.repo),
+                   mock.patch.dict(os.environ, {'JSTI_PRE_PR_MIRROR': str(self.mirror)})]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.repo, check=True, capture_output=True, text=True).stdout.strip()
+
+    def sync(self):
+        path = mirror.sync(environment.worktree_tree(), self.git('rev-parse', 'HEAD'))
+        self.assertEqual(path, self.mirror)
+        return path
+
+    def test_mirror_holds_the_working_tree_and_keeps_unchanged_files_untouched(self):
+        (self.repo / 'edited.swift').write_text('let edited = 2\n')
+        (self.repo / 'new.swift').write_text('let new = 1\n')
+        (self.repo / 'ignored.local').write_text('secret\n')  # not ignored: untracked files count
+        (self.repo / '.build').mkdir()
+        (self.repo / '.build' / 'junk').write_text('x')
+        path = self.sync()
+        self.assertEqual((path / 'edited.swift').read_text(), 'let edited = 2\n')
+        self.assertTrue((path / 'new.swift').exists())
+        self.assertFalse((path / '.build' / 'junk').exists(), 'ignored files stay out, as in CI')
+        (path / '.build').mkdir()
+        (path / '.build' / 'warm').write_text('cache')
+        (path / 'leftover.txt').write_text('a check made this')
+        kept = (path / 'kept.swift').stat().st_mtime_ns
+        time.sleep(0.05)
+        (self.repo / 'edited.swift').write_text('let edited = 3\n')
+        (self.repo / 'new.swift').unlink()
+        self.sync()
+        self.assertEqual((path / 'kept.swift').stat().st_mtime_ns, kept, 'an unchanged file is not rewritten')
+        self.assertEqual((path / 'edited.swift').read_text(), 'let edited = 3\n')
+        self.assertFalse((path / 'new.swift').exists())
+        self.assertFalse((path / 'leftover.txt').exists())
+        self.assertEqual((path / '.build' / 'warm').read_text(), 'cache', 'the warm build survives')
+
+    def test_a_broken_mirror_is_recreated_with_its_build_kept(self):
+        path = self.sync()
+        (path / '.build').mkdir()
+        (path / '.build' / 'warm').write_text('cache')
+        (path / '.git').unlink()
+        self.sync()
+        self.assertEqual((path / '.build' / 'warm').read_text(), 'cache')
+        self.assertTrue((path / 'kept.swift').exists())
+
+    def test_each_lock_slot_has_its_own_mirror(self):
+        first = self.sync()
+        second = mirror.sync(environment.worktree_tree(), self.git('rev-parse', 'HEAD'), slot=1)
+        self.assertEqual(second, Path(f'{self.mirror}-1'))
+        self.assertNotEqual(first, second)
+        self.assertTrue((second / 'kept.swift').exists())
+
+    def test_off_builds_in_place(self):
+        with mock.patch.dict(os.environ, {'JSTI_PRE_PR_MIRROR': 'off'}):
+            self.assertIsNone(mirror.sync(environment.worktree_tree(), self.git('rev-parse', 'HEAD')))
+
+    def test_a_mirrored_check_runs_there_but_reports_worktree_paths(self):
+        path = self.sync()
+        scratch = self.repo / '.build' / 'pre-pr' / 'apple-build'
+        check = runner.Check('apple-build', 'swift', 'Build', ['sh', '-c', 'echo "$PWD/x.swift:1: error $0"',
+                                                                 str(scratch)], cwd=self.repo, mirror=True)
+        runner.relocate(check, path)
+        self.assertEqual(check.command[-1], str(path / '.build' / 'pre-pr' / 'apple-build'))
+        with mock.patch.object(environment, 'OUT', Path(self.tmp.name) / 'out'):
+            runner.run(check, verbose=False)
+            log = check.log.read_text()
+        self.assertEqual(check.status, 'pass')
+        self.assertIn(f'{self.repo}/x.swift:1: error {scratch}', log)
+        self.assertNotIn(str(path), log)
 
 
 if __name__ == '__main__':

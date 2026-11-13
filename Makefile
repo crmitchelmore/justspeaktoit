@@ -44,7 +44,7 @@ test-release: ## Run tests in release configuration
 test-all: test test-release ## Run tests in both debug and release
 
 .PHONY: test-tooling
-test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
+test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests (Python across processes; JSTI_TEST_JOBS=1 for serial)
 	node --test scripts/tests/*.test.mjs
 	node --test .github/scripts/dependabot-merge.test.mjs
 	ruby scripts/tests/release_apple_test.rb
@@ -54,14 +54,14 @@ test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
 	ruby scripts/tests/create_ios_app_store_profile_test.rb
 	ruby scripts/tests/ensure_ios_app_store_profile_test.rb
 	ruby scripts/tests/testflight_testers_test.rb
-	python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/linux-local-runtime -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/windows-local-runtime -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/windows-bundle -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/windows-cross -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/windows-cloudkit -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/windows-package -p 'test_*.py' -v
-	python3 -B -m unittest discover -s scripts/migration -p 'test_*.py' -v
+	python3 scripts/ci/parallel-unittest.py -s scripts/tests -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/linux-local-runtime -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-local-runtime -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-bundle -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-cross -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-cloudkit -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-package -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/migration -p 'test_*.py' -v
 	python3 scripts/generate-release-train-config.py --check
 
 .PHONY: release
@@ -88,10 +88,11 @@ install-verify: release ## Build release, install to /Applications, launch and v
 preflight: test-all verify ## Full pre-release check (tests + launch verification)
 
 .PHONY: lint
-lint: ## Run strict SwiftLint (isolated Tooling graph), accessibility and iOS device-copy checks
+lint: ## Run strict SwiftLint (isolated Tooling graph), accessibility, iOS device-copy and App Intents term checks
 	./scripts/swiftlint.sh lint --strict
 	python3 scripts/accessibility/check-apple-accessibility.py
 	python3 scripts/ios/check-device-copy.py
+	python3 scripts/ios/check-app-intents-terms.py
 
 # CI parity: ci.yml's Lint job and scripts/pre-pr both run exactly this target.
 .PHONY: ci-lint

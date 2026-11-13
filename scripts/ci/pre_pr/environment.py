@@ -16,8 +16,8 @@ OUT = Path(os.environ.get('JSTI_PRE_PR_OUT') or ROOT / '.build' / 'pre-pr')
 IS_MAC = sys.platform == 'darwin'
 
 
-def git(*args: str, check: bool = True) -> str:
-    result = subprocess.run(['git', *args], cwd=ROOT, text=True, capture_output=True)
+def git(*args: str, check: bool = True, cwd: Path = ROOT) -> str:
+    result = subprocess.run(['git', *args], cwd=cwd, text=True, capture_output=True)
     if check and result.returncode != 0:
         raise SystemExit(f'pre-pr: git {" ".join(args)} failed: {result.stderr.strip()}')
     return result.stdout.strip()

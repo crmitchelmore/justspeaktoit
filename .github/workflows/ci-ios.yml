@@ -41,6 +41,7 @@ jobs:
             -skipPackagePluginValidation \
             2>&1 | tee "$RUNNER_TEMP/ios-build-tests.log" | tail -50
           python3 scripts/ios/check-app-shortcuts.py "$RUNNER_TEMP/SpeakiOS.xctestproducts"
+          python3 scripts/ios/check-app-intents-terms.py --metadata "$RUNNER_TEMP/SpeakiOS.xctestproducts"
           python3 scripts/ios/ios-test-products.py pack \
             "$RUNNER_TEMP/SpeakiOS.xctestproducts" "$RUNNER_TEMP/ios-test-products.tar.gz"
       - name: Upload immutable test products

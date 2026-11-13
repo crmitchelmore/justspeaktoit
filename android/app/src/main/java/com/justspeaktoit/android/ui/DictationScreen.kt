@@ -49,6 +49,8 @@ data class DictationActions(
     val onShowHistory: () -> Unit = {},
     val onConfirmSharedAudio: () -> Unit = {},
     val onDismissSharedAudio: () -> Unit = {},
+    /** Makes a profile active, or none with null; applies from the next session. */
+    val onChooseProfile: (String?) -> Unit = {},
 )
 
 @Composable
@@ -69,6 +71,7 @@ fun DictationScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             DictationTopBar(sessionActive = state.dictation.isActive, actions = actions)
+            ProfileChooser(state.profiles, state.profile, state.dictation.isActive, actions.onChooseProfile)
             ModeSection(state, actions)
             TranscriptCard(state)
             PermissionNotice(permission, actions)
@@ -120,8 +123,8 @@ private fun SharedAudioDialog(state: DictationUiState, actions: DictationActions
             Text(
                 stringResource(
                     R.string.shared_audio_body,
-                    state.cloudModel.provider.displayName,
-                    state.cloudModel.displayName,
+                    state.sessionCloudModel.provider.displayName,
+                    state.sessionCloudModel.displayName,
                 ),
             )
         },

@@ -112,8 +112,14 @@ of hand-maintained structure documentation.
 - When a platform can't get it in the same change, file **one** GitHub issue
   covering every remaining platform (not one per platform) and link it from the
   PR. Something the OS cannot support is N/A with a reason, not a gap.
-- [Docs/feature-parity.md](Docs/feature-parity.md) is the parity table. Check it
-  before starting a feature and update its row in the same PR.
+- [Docs/feature-map.md](Docs/feature-map.md) is the feature map: which platforms
+  have each feature, which are excluded and why (OS limit or owner decision),
+  how it should work, what is scheduled for removal and known gotchas. Check it
+  before building, changing or removing a feature. When you add, remove or
+  change a feature on any platform, update its summary row and entry in the same
+  PR, then run `python3 scripts/check-feature-map.py` (CI Lint runs it too).
+- Never build a feature for a platform the map marks N/A by owner decision (for
+  example Compare models on iOS and Android) without a new owner decision.
 
 ## Accessibility and Computer Use
 
@@ -284,9 +290,14 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
   every changed file is docs, website, Android or Workers.
 - **Portable Swift (Linux):** `scripts/ci-portable-linux.sh` in the CI image
   (`swift:6.2.3-jammy`), via `scripts/linux-precheck`. That uses a local
-  Docker or Podman if one runs, otherwise a throwaway `precheck/**` branch run
+  Docker, Podman or Apple `container` if one runs, otherwise a throwaway `precheck/**` branch run
   on GitHub's Ubuntu runners (`.github/workflows/precheck.yml`, never macOS).
-  It starts first and runs alongside the local checks. Force a mode with
+  It starts first and runs alongside the local checks. A container run builds
+  in a persistent volume (`jsti-portable-build`), so it is incremental rather than cold
+  (about 1–2 minutes warm, against about 6.5 on GitHub), and runs the tests in
+  parallel, rerunning only failures serially. Set up Apple's runtime once with
+  `brew install container && container system start --enable-kernel-install`;
+  `JSTI_CONTAINER_CPUS`/`JSTI_CONTAINER_MEMORY` size its VM (default all cores, 12g). Force a mode with
   `--remote-linux` or `--container-linux`. `--no-linux` makes the result
   `incomplete`, which the evidence check rejects.
 - **macOS job:** the SwiftPM build, then the unit-test targets that
@@ -327,7 +338,7 @@ Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
   failures whose head had a passing record. The target is under 1%.
 - The machine-readable result is `.build/pre-pr/summary.json`; per-check logs
   are in `.build/pre-pr/logs/`.
-- Runs are serialised machine-wide per user (`~/.cache/jsti-pre-pr.lock`) so parallel agents don't overload the Mac into timing flakes; a waiting run says who holds the lock. `JSTI_PRE_PR_LOCK=off` disables it.
+- The heavy local checks (SwiftPM build and tests, API compatibility, `make ci-lint`, local Android or container Linux runs) take a machine-wide per-user lock (`~/.cache/jsti-pre-pr.lock`) so parallel agents don't overload the Mac into timing flakes; `JSTI_PRE_PR_SLOTS` runs (default 2) hold it at once, each with its own build mirror and Linux container volume, and a waiting run says who holds it. Autofix, quick checks and the remote GitHub Linux/Android runs never wait for it. `JSTI_PRE_PR_LOCK=off` disables it. Each of those checks is killed (with its children) after `JSTI_PRE_PR_CHECK_TIMEOUT` seconds (default 1800; `0` disables), so a hung test fails its run instead of holding the lock for everyone. Inside the lock, independent checks run side by side in lanes (the SwiftPM build and tests share one lane; `JSTI_PRE_PR_LANES=off` runs them one at a time), and a failure stops the rest unless `--keep-going`. The SwiftPM checks build in a persistent per-repository build mirror (`~/.cache/jsti-pre-pr/mirror-*`, a git worktree of the exact snapshot under test), so a new worktree's build is incremental, not cold; logs still name your worktree's files. `JSTI_PRE_PR_MIRROR=off` builds in place. Because other agents load the Mac, the local `make ci-lint` reruns a Python tooling test that fails once, serially (`JSTI_TEST_RETRY=1`), and passes only if the rerun does; the remote Ubuntu Lint run and CI stay strict. API compatibility skips its own tooling selftest when `make ci-lint` already runs it (`JSTI_API_SELFTEST=0`). `scripts/swiftformat.sh` shares one built SwiftFormat per user (`~/.cache/jsti-tooling`), so new worktrees don't recompile it; `JSTI_TOOLING_CACHE=off` builds in place.
 - Opt in to running it on every push with `scripts/install-pre-pr-hook`
   (`make install-hooks`). Bypass once with `JSTI_SKIP_PRE_PR=1`.
 

@@ -33,6 +33,8 @@ import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.resources.SystemResourceToken
 import com.justspeaktoit.android.settings.AppPreferences
+import com.justspeaktoit.android.settings.DictationProfile
+import com.justspeaktoit.android.settings.DictationProfiles
 import com.justspeaktoit.android.ui.label
 import com.justspeaktoit.android.ui.message
 
@@ -42,7 +44,8 @@ import com.justspeaktoit.android.ui.message
  * session removes only its own composing text. Dictation inserts after a selection rather than
  * replacing it, so a failure can never lose the user's existing text. The
  * keyboard never uses the app's Cloud (BYOK) providers; the phone's speech service, which may send
- * audio to its provider, is used only after the user has been told so.
+ * audio to its provider, is used only after the user has been told so. The profile key switches the
+ * shared active profile; here only its language applies, since the keyboard never uses the cloud.
  */
 class DictationKeyboardService : InputMethodService() {
     private lateinit var engine: AndroidSpeechEngine
@@ -72,6 +75,11 @@ class DictationKeyboardService : InputMethodService() {
     private var status: TextView? = null
     private var microphoneHold: SystemResourceToken? = null
     private var mic: ImageButton? = null
+    private var profileKey: Button? = null
+
+    /** Read when the keyboard is shown or the profile changes, not on every partial result. */
+    private var profiles: List<DictationProfile> = emptyList()
+    private var activeProfile: DictationProfile? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -114,6 +122,13 @@ class DictationKeyboardService : InputMethodService() {
             isAllCaps = false
             setOnClickListener { onClick() }
         }
+        val profileButton = key(R.id.keyboard_profile, R.string.profile_none) { cycleProfile() }.apply {
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { gravity = Gravity.CENTER_HORIZONTAL }
+        }
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -125,12 +140,15 @@ class DictationKeyboardService : InputMethodService() {
         }
         status = statusView
         mic = micButton
+        profileKey = profileButton
+        loadProfiles()
         render()
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             // The IME window is transparent, so without this the app behind shows through the keys.
             setBackgroundColor(themeColor(android.R.attr.colorBackground, Color.BLACK))
             addView(statusView)
+            addView(profileButton)
             addView(row)
             // Android 15 draws the keyboard edge to edge: keep the keys clear of the navigation bar.
             ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
@@ -154,6 +172,8 @@ class DictationKeyboardService : InputMethodService() {
         abandonForNewInput()
         editorAllowsDictation = KeyboardPolicy.allowsDictation(info.inputType)
         inputVisible = true
+        // The profile may have changed in the app since the keyboard was last shown.
+        loadProfiles()
         render()
     }
 
@@ -187,7 +207,8 @@ class DictationKeyboardService : InputMethodService() {
         checking = true
         render()
         val caps = engine.capabilities()
-        val tag = DictationLanguages.languageTag(AppPreferences(this).languageId)
+        val prefs = AppPreferences(this)
+        val tag = DictationLanguages.languageTag(DictationProfiles.active(prefs)?.language ?: prefs.languageId)
         val generation = inputGeneration
         engine.checkOnDeviceLanguage(tag) { resolution ->
             // Only the editor that was tapped, if still eligible, may start capture.
@@ -333,6 +354,30 @@ class DictationKeyboardService : InputMethodService() {
             setImageResource(if (state.isActive) R.drawable.ic_stop else R.drawable.ic_mic)
             contentDescription = getString(if (state.isActive) R.string.action_stop else R.string.action_start)
         }
+        profileKey?.apply {
+            val name = activeProfile?.name ?: getString(R.string.profile_none)
+            visibility = if (profiles.isEmpty()) View.GONE else View.VISIBLE
+            this.text = getString(R.string.keyboard_profile, name)
+            contentDescription = getString(R.string.keyboard_profile_description, name)
+            isEnabled = !state.isActive && !checking
+            alpha = if (isEnabled) 1f else 0.4f
+        }
+    }
+
+    private fun loadProfiles() {
+        val prefs = AppPreferences(this)
+        profiles = prefs.profiles
+        activeProfile = DictationProfiles.active(prefs)
+    }
+
+    /** Steps through no profile, then each profile in the user's order; a running session keeps its own. */
+    private fun cycleProfile() {
+        if (state.isActive || checking) return
+        val ids = listOf<String?>(null) + profiles.map { it.id }
+        val next = ids[(ids.indexOf(activeProfile?.id) + 1) % ids.size]
+        AppPreferences(this).activeProfileId = next
+        loadProfiles()
+        render()
     }
 
     private fun switchKeyboard() {

@@ -7,6 +7,13 @@ import UIKit
 public struct ContentView: View {
     @StateObject var recovery = CaptureRecoveryCoordinator.shared
     @State var showingRecoveryPrompt = false
+    /// The interrupted capture the launch prompt is asking about.
+    @State var recoveryPromptFinding: CaptureRecoveryFinding?
+    /// The capture this screen started transcribing, so only its progress
+    /// and outcome are shown here rather than one started in Capture Health.
+    @State var recoveryInFlight: UUID?
+    @State var recoveryFailure: CaptureRecoveryFinding?
+    @State var recoveryFailureMessage = ""
     @StateObject var coordinator: TranscriberCoordinator
     @StateObject var handsFree: IOSHandsFreeDictationCoordinator
     @ObservedObject var settings = AppSettings.shared

@@ -3,6 +3,7 @@ files: the routes in scripts/ci/routing.json decide the areas, and each area
 adds the CI job's own command."""
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -62,18 +63,26 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
             checks.append(Check('portable-linux', 'swift', title, [], skip_reason='--no-linux', incomplete=True))
         else:
             mode = [] if linux == 'auto' else [f'--{linux}']
+            # auto uses a container when docker, podman or Apple container runs; an installed one counts,
+            # to stay on the safe side.
+            local = linux == 'container' or (linux == 'auto'
+                                             and any(map(shutil.which, ('docker', 'podman', 'container'))))
             checks.append(Check('portable-linux', 'swift', title,
                                 ['python3', 'scripts/linux-precheck', *mode, '--tree', str(environment.ROOT),
-                                 '--base', base], background=True))
+                                 '--base', base], background=True, exclusive=local))
     if apple:
         # Lint: exactly the ci.yml Lint job (whole-repo strict SwiftLint, accessibility, tooling pins and tests).
+        # JSTI_TEST_RETRY: other agents load this machine, so a Python tooling test that fails here is rerun
+        # once serially; the remote Ubuntu run (ci-lint-linux) and CI stay strict.
         checks.append(Check('ci-lint', 'ci-lint', 'CI Lint job (make ci-lint)', ['make', 'ci-lint'],
-                            env={'JSTI_LINT_BASELINE_BASE': base}, forbid_drift=('Tooling/Package.resolved',)))
+                            env={'JSTI_LINT_BASELINE_BASE': base, 'JSTI_TEST_RETRY': '1'},
+                            forbid_drift=('Tooling/Package.resolved',)))
         if not sys.platform.startswith('linux') and linux != 'skip':
             # CI runs Lint on Ubuntu, where Apple-only tooling tests skip and others behave differently.
             checks.append(Check('ci-lint-linux', 'ci-lint', 'CI Lint job on Ubuntu (make ci-lint), remote',
                                 ['python3', 'scripts/linux-precheck', '--job', 'lint',
-                                 '--tree', str(environment.ROOT), '--base', base], background=True))
+                                 '--tree', str(environment.ROOT), '--base', base], background=True,
+                                exclusive=False))
         elif linux == 'skip' and not sys.platform.startswith('linux'):
             checks.append(Check('ci-lint-linux', 'ci-lint', 'CI Lint job on Ubuntu (make ci-lint)', [],
                                 skip_reason='--no-linux', incomplete=True))
@@ -83,7 +92,7 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
     elif swift:
         checks.append(Check('apple-build', 'swift', 'macOS job: SwiftPM build incl. tests',
                             ['swift', 'build', '--build-tests', *scratch], env=test_env, requires='swift',
-                            forbid_drift=('Package.resolved',)))
+                            forbid_drift=('Package.resolved',), lane='swift', mirror=True))
         skipped = sorted({Path(f).parts[1] for f in swift_changes if Path(f).parts[1] in UI_TEST_TARGETS})
         if skipped:
             print(f'pre-pr: never runs UI test targets: {", ".join(skipped)} (CI covers them)')
@@ -103,7 +112,8 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
                 checks.append(Check('apple-unit-tests', 'swift', test_title(selection, 'macOS job:'),
                                     ['python3', 'scripts/with-test-keychain.py', 'swift', 'test', '--skip-build',
                                      *scratch, '--filter', '|'.join(selection.filters)],
-                                    env=test_env, requires='swift', counts_tests=True))
+                                    env=test_env, requires='swift', counts_tests=True, lane='swift',
+                                    mirror=True))
             graphs = [g for g in (graph, swift_tests.load_graph(True) if swift_changes else None) if g]
             missing = uncovered_modules(swift_changes, graphs)
             if missing:
@@ -120,9 +130,12 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
         # The Public API compatibility job's own script, against the merge base (CI's PR baseline).
         title = 'Public API compatibility (scripts/ci-api-compatibility.sh)'
         if environment.IS_MAC:
+            env = environment.pr_title_env()
+            if any(c.id == 'ci-lint' for c in checks):
+                env['JSTI_API_SELFTEST'] = '0'  # make ci-lint's test-tooling already runs the gate's own tests
             checks.append(Check('api-compatibility', 'public-api', title,
                                 ['bash', 'scripts/ci-api-compatibility.sh', environment.merge_base_or(base)],
-                                env=environment.pr_title_env(), requires='swift', forbid_drift=('Package.resolved',)))
+                                env=env, requires='swift', forbid_drift=('Package.resolved',), mirror=True))
         else:
             checks.append(Check('api-compatibility', 'public-api', title, [], skip_reason='macOS only',
                                 incomplete=True))
@@ -132,7 +145,7 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
         # Zero violations, as CI's Lint job enforces with `scripts/quality check --all`.
         kinds = ', '.join(k for k in ('swift', 'python', 'shell', 'workflows') if owned[k])
         checks.append(Check('quality', 'quality', f'Code quality: scripts/quality check ({kinds})',
-                            ['python3', 'scripts/quality', 'check', *linted]))
+                            ['python3', 'scripts/quality', 'check', *linted], exclusive=False))
     if android:
         # The Android CI job's script. Locally only with a working JDK and an approved feed
         # (android/settings.gradle.kts refuses public registries off GitHub-hosted runners);
@@ -143,16 +156,18 @@ def plan(files: list[str], full: bool, quick: bool = False, linux: str = 'auto',
         else:
             checks.append(Check('android', 'android', f'{title}, remote',
                                 ['python3', 'scripts/linux-precheck', '--job', 'android',
-                                 '--tree', str(environment.ROOT), '--base', base], background=True))
+                                 '--tree', str(environment.ROOT), '--base', base], background=True,
+                                exclusive=False))
     if worker:
         directory = environment.ROOT / 'workers' / 'paid-access'
         checks.append(Check('worker-install', 'paid-access-worker', 'npm ci',
-                            ['npm', 'ci', '--no-audit', '--no-fund'], cwd=directory, requires='npm'))
+                            ['npm', 'ci', '--no-audit', '--no-fund'], cwd=directory, requires='npm',
+                            exclusive=False))
         for script in ('typecheck', 'lint', 'test'):
             checks.append(Check(f'worker-{script}', 'paid-access-worker', f'npm run {script}',
-                                ['npm', 'run', script], cwd=directory, requires='npm'))
+                                ['npm', 'run', script], cwd=directory, requires='npm', exclusive=False))
     if landing:
         checks.append(Check('landing-tests', 'landing-page', 'Landing page tests', ['npm', 'test'],
-                            cwd=environment.ROOT / 'landing-page', requires='npm'))
+                            cwd=environment.ROOT / 'landing-page', requires='npm', exclusive=False))
     checks.sort(key=lambda check: (not check.background, COST.get(check.id, 3)))
     return checks, areas

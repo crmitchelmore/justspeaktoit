@@ -94,6 +94,13 @@ class CloudCatalogParityTest {
         assertEquals(cleanup.getString("model"), CloudCatalog.CLEANUP_MODEL)
         assertEquals(cleanup.getString("provider"), CloudCatalog.cleanupProvider.id)
         assertEquals(cleanup.getString("systemPrompt"), CleanupPolicy.systemPrompt())
+        assertEquals(cleanup.getString("systemPrompt"), CleanupPolicy.systemPrompt("  "))
+    }
+
+    @Test
+    fun testCustomCleanupPrompt_replacesTheBaseAndKeepsTheSharedClosing() {
+        val closing = asset.getJSONObject("cleanup").getString("customPromptClosing")
+        assertEquals("Answer in haiku.\n\n$closing", CleanupPolicy.systemPrompt("  Answer in haiku.\n"))
     }
 
     @Test

@@ -107,12 +107,17 @@ internal class SessionRequests(
         DictationEvent.Error(DictationFailure.KeyUnavailable)
     }
 
-    /** Cleans up [transcript]. Any failure, including a missing key, keeps the original text. */
-    suspend fun cleanup(model: CleanupModel, transcript: String): CleanupOutcome {
+    /**
+     * Cleans up [transcript] with [systemPrompt]. Any failure, including a missing key, keeps the
+     * original text.
+     */
+    suspend fun cleanup(model: CleanupModel, transcript: String, systemPrompt: String): CleanupOutcome {
         val cleaned = try {
             val key = withContext(io) { secrets.read(model.provider.credentialId) }
             key?.let {
-                capture.call(timings.cleanupMs, model.provider) { call -> cloud.cleanup(model, it, transcript, call) }
+                capture.call(timings.cleanupMs, model.provider) { call ->
+                    cloud.cleanup(model, it, transcript, systemPrompt, call)
+                }
             }
         } catch (e: RequestReleasedException) {
             return CleanupOutcome.Released

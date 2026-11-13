@@ -38,7 +38,7 @@ final class Reson8LiveTests: XCTestCase {
         XCTAssertTrue(items.contains(URLQueryItem(name: "encoding", value: "pcm_s16le")))
         XCTAssertTrue(items.contains(URLQueryItem(name: "include_interim", value: "true")))
         XCTAssertTrue(items.contains(URLQueryItem(name: "language", value: "nl")))
-        XCTAssertFalse(items.contains { $0.name == "model" })
+        XCTAssertEqual(items.filter { $0.name == "model" }, [URLQueryItem(name: "model", value: "resonant-1")])
         XCTAssertTrue(fixture.socket.sent.isEmpty)
         fixture.open()
         XCTAssertEqual(fixture.socket.sent, [.binary(Data([0, 0]))])

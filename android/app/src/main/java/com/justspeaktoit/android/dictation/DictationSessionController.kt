@@ -1,14 +1,16 @@
 package com.justspeaktoit.android.dictation
 
 import com.justspeaktoit.android.cloud.CleanupModel
+import com.justspeaktoit.android.cloud.CleanupPolicy
 import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.cloud.RecordingRecovery
 import com.justspeaktoit.android.cloud.RequestReleasedException
 import com.justspeaktoit.android.cloud.SharedAudio
-import com.justspeaktoit.android.cloud.WavFormat
 import com.justspeaktoit.android.cloud.live.LiveOutcome
 import com.justspeaktoit.android.cloud.live.LiveTranscriptListener
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.corrections.PersonalCorrections
+import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
@@ -31,6 +33,8 @@ internal data class SessionState(
     val originalTranscript: String? = null,
     /** True until a cancelled Cloud recording has released the microphone. */
     val releasingMicrophone: Boolean = false,
+    /** A Cloud capture paused while another app briefly holds audio focus. */
+    val paused: Boolean = false,
 )
 
 /** Settings a session reads when it needs them, so a change during the session applies to its end. */
@@ -40,6 +44,9 @@ internal interface SessionSettings {
 
     /** The model for an optional cleanup, or null when cleanup is off or its provider has no key. */
     val cleanupModel: CleanupModel?
+
+    /** The user's base cleanup prompt for this session, or null for the built-in one. */
+    val cleanupPrompt: String? get() = null
 
     /** Personal corrections applied to every final transcript, and sent to cloud models as vocabulary. */
     val corrections: List<CorrectionRule> get() = emptyList()
@@ -88,6 +95,9 @@ internal class DictationSessionController(
     /** The live session streaming the current Cloud recording, when its model is live. */
     private var live: LiveRun? = null
 
+    /** Set by [close]: work cut short after it keeps its recording for recovery instead of deleting it. */
+    private var closed = false
+
     val isCapturing: Boolean
         get() = state.dictation is DictationState.Starting || state.dictation is DictationState.Listening
 
@@ -123,15 +133,38 @@ internal class DictationSessionController(
     }
 
     /**
-     * Android does not let a foreground-only app keep the microphone once it leaves the screen, so
-     * capture ends as a failure. Work that no longer needs the microphone (an upload) continues.
+     * Without a foreground service Android does not let the app keep the microphone once it leaves
+     * the screen, so capture ends as a failure. Work that no longer needs the microphone (an upload)
+     * continues.
      */
-    fun leaveApp() {
+    fun leaveApp() = interrupt(DictationFailure.LeftApp)
+
+    /**
+     * Ends capture because something outside the app took the microphone (a call, another app's audio
+     * or a headset change). Nothing is lost: unfinished recogniser text is recorded with the failure,
+     * and a Cloud recording is saved beside it in History, ready to transcribe.
+     */
+    fun interrupt(failure: DictationFailure) {
         if (!isCapturing) return
+        val rec = if (state.dictation.modeOrNull() == RecognitionMode.Cloud) capture.current else null
         engine.cancel()
         cancelLive()
-        discardRecording()
-        dispatch(DictationEvent.Error(DictationFailure.LeftApp))
+        dispatch(DictationEvent.Error(failure))
+        if (rec != null) saveInterruptedRecording(rec, history.latestSession)
+    }
+
+    /** Stops writing Cloud audio while another app briefly has audio focus; the microphone stays held. */
+    fun pause() {
+        if (!isCapturing || state.paused || state.dictation.modeOrNull() != RecognitionMode.Cloud) return
+        val rec = capture.current ?: return
+        rec.recorder.setPaused(true)
+        change { it.copy(paused = true) }
+    }
+
+    fun resume() {
+        if (!state.paused) return
+        capture.current?.recorder?.setPaused(false)
+        change { it.copy(paused = false) }
     }
 
     /** Stops an optional cleanup without a result, keeping the transcript it would have replaced. */
@@ -196,6 +229,7 @@ internal class DictationSessionController(
     /** Ends the session's holds when its owner goes away; a recording still owned is retired off this thread. */
     fun close() {
         cancelLive()
+        closed = true
         microphoneHold?.end()
         microphoneHold = null
         capture.close()
@@ -280,6 +314,7 @@ internal class DictationSessionController(
         val modelId = sessionModelId
         work = scope.launch {
             var kept = false
+            var settled = false
             val event = try {
                 // The recorder stays owned (and releasable by close) until stop() has finished.
                 val bytes = capture.stop(rec)
@@ -294,7 +329,7 @@ internal class DictationSessionController(
                         DictationFailure.InvalidKey,
                         vocabulary(),
                     )
-                }
+                }.also { settled = true }
             } catch (e: RequestReleasedException) {
                 // Releasing the upload is a cancel, so honour "Keep audio when a recording is cancelled".
                 if (settings.keepAudioOnCancel) {
@@ -305,7 +340,12 @@ internal class DictationSessionController(
             } finally {
                 capture.release(rec)
                 reconcileMicrophoneHold()
-                if (!kept) capture.delete(file)
+                when {
+                    kept -> Unit
+                    // The screen went away mid-upload: keep the audio for the next History load.
+                    closed && !settled -> capture.abandon(file)
+                    else -> capture.delete(file)
+                }
             }
             // A cancelled upload must not deliver a late result into a newer session.
             ensureActive()
@@ -368,15 +408,41 @@ internal class DictationSessionController(
         val retention = settings.retention
         change { it.copy(releasingMicrophone = true) }
         scope.launch {
-            val bytes = capture.stop(rec)
-            reconcileMicrophoneHold()
-            change { it.copy(releasingMicrophone = false) }
-            if (bytes < MIN_AUDIO_BYTES) {
-                // Too short to contain a word, so there is nothing worth transcribing later.
-                capture.delete(file)
-                return@launch
+            var handed = false
+            try {
+                val bytes = capture.stop(rec)
+                reconcileMicrophoneHold()
+                change { it.copy(releasingMicrophone = false) }
+                handed = true
+                if (bytes < MIN_AUDIO_BYTES) {
+                    // Too short to contain a word, so there is nothing worth transcribing later.
+                    capture.delete(file)
+                    return@launch
+                }
+                history.keepRecording(file, modelId, retention)
+            } finally {
+                if (!handed) capture.abandon(file)
             }
-            history.keepRecording(file, modelId, retention)
+        }
+    }
+
+    /** Stops an interrupted recording and attaches it to the session's failed History [entry]. */
+    private fun saveInterruptedRecording(rec: CloudCapture.Recording, entry: HistoryEntry?) {
+        val retention = settings.retention
+        change { it.copy(releasingMicrophone = true) }
+        scope.launch {
+            var handed = false
+            try {
+                // A capture failure still leaves the audio written so far; attaching repairs its header.
+                capture.stop(rec)
+                reconcileMicrophoneHold()
+                change { it.copy(releasingMicrophone = false) }
+                history.attachAudio(rec.file, entry, retention)
+                handed = true
+            } finally {
+                // The screen went away first, so the next History load recovers it instead.
+                if (!handed) capture.abandon(rec.file)
+            }
         }
     }
 
@@ -422,7 +488,8 @@ internal class DictationSessionController(
         change { it.copy(cleanup = CleanupStatus.Running) }
         work = scope.launch {
             // Cleanup can restore a misheard word, so corrections run again on its output.
-            val outcome = when (val cleaned = requests.cleanup(model, done.transcript)) {
+            val systemPrompt = CleanupPolicy.systemPrompt(settings.cleanupPrompt)
+            val outcome = when (val cleaned = requests.cleanup(model, done.transcript, systemPrompt)) {
                 is CleanupOutcome.Applied ->
                     CleanupOutcome.Applied(PersonalCorrections.apply(cleaned.text, settings.corrections))
                 else -> cleaned
@@ -447,7 +514,12 @@ internal class DictationSessionController(
 
     private fun dispatch(event: DictationEvent) {
         val before = state.dictation
-        change { it.copy(dictation = DictationReducer.reduce(it.dictation, event)) }
+        change {
+            val dictation = DictationReducer.reduce(it.dictation, event)
+            val capturing = dictation is DictationState.Starting || dictation is DictationState.Listening
+            if (!capturing) capture.current?.recorder?.setPaused(false)
+            it.copy(dictation = dictation, paused = it.paused && capturing)
+        }
         val after = state.dictation
         if (!after.isActive) _level.value = 0f
         reconcileMicrophoneHold()
@@ -462,8 +534,7 @@ internal class DictationSessionController(
     }
 
     private companion object {
-        /** About a quarter of a second; shorter recordings cannot contain a word. */
-        const val MIN_AUDIO_BYTES = WavFormat.BYTES_PER_SECOND / 4
+        const val MIN_AUDIO_BYTES = RecordingRecovery.MIN_AUDIO_BYTES
     }
 }
 

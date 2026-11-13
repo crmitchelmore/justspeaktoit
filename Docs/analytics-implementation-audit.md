@@ -47,6 +47,11 @@ historical erasure or a clean inspection week. Server/history cleanup, retention
 policy publication and production qualification remain owner gates. No existing
 event or project setting was changed.
 
+Owner decision, 13 Nov 2026: keep the server GeoIP transformation on and disclose
+it, keep the client `$geoip_disable` control, retire the one-off GeoIP purge, and
+stop treating retention deletion as a rollout blocker. See
+[PostHog maintenance](posthog-maintenance.md#location-data-geoip).
+
 ## #776: what the repository establishes
 
 | Area | Evidence and remaining gap |

@@ -49,6 +49,24 @@
                 <string>C617.1</string>
             </array>
         </dict>
+        <!-- Linked SpeakCore measures elapsed time between receive failures with systemUptime. -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>35F9.1</string>
+            </array>
+        </dict>
+        <!-- The keyboard reads UITextInputMode.activeInputModes to decide whether it can hand back to the previous keyboard after dictation. Nothing derived from it leaves the device. Not 3EC4.1: a systemwide keyboard is not the app's primary functionality. -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryActiveKeyboards</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>54BD.1</string>
+            </array>
+        </dict>
     </array>
 </dict>
 </plist>

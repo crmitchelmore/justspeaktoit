@@ -126,6 +126,7 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         case .reson8:
             components = URLComponents(string: "https://api.reson8.dev/v1/speech-to-text/prerecorded")!
             components.queryItems = [
+                URLQueryItem(name: "model", value: FileSpeechProvider.reson8WireModel),
                 URLQueryItem(name: "include_timestamps", value: "true"),
                 URLQueryItem(name: "include_words", value: "true"),
                 URLQueryItem(name: "include_confidence", value: "true")

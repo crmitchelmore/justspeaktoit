@@ -1,6 +1,4 @@
-import CryptoKit
 import Foundation
-import Security
 import StoreKit
 
 /// The paid-access state an app manager publishes.
@@ -14,6 +12,50 @@ public struct PaidAccessFlowState: Equatable {
     public var products: [Product] = []
 
     public init() {}
+
+    /// Where a host publishes each field: the macOS `PaidAccessManager` and the
+    /// iOS `PaidAccessStore` mirror the flow through one of these, so a new
+    /// field cannot be added without both hosts publishing it.
+    @MainActor
+    public struct Mirror<Host: AnyObject> {
+        let entitlement: ReferenceWritableKeyPath<Host, PaidEntitlement>
+        let policy: ReferenceWritableKeyPath<Host, PaidRoutingPolicy>
+        let isSignedIn: ReferenceWritableKeyPath<Host, Bool>
+        let isBusy: ReferenceWritableKeyPath<Host, Bool>
+        let lastError: ReferenceWritableKeyPath<Host, String?>
+        let products: ReferenceWritableKeyPath<Host, [Product]>
+
+        public init(
+            entitlement: ReferenceWritableKeyPath<Host, PaidEntitlement>,
+            policy: ReferenceWritableKeyPath<Host, PaidRoutingPolicy>,
+            isSignedIn: ReferenceWritableKeyPath<Host, Bool>,
+            isBusy: ReferenceWritableKeyPath<Host, Bool>,
+            lastError: ReferenceWritableKeyPath<Host, String?>,
+            products: ReferenceWritableKeyPath<Host, [Product]>
+        ) {
+            self.entitlement = entitlement
+            self.policy = policy
+            self.isSignedIn = isSignedIn
+            self.isBusy = isBusy
+            self.lastError = lastError
+            self.products = products
+        }
+    }
+
+    /// Writes each field that differs from what `host` shows, so a view
+    /// observing one mirrored property is not invalidated by another field.
+    @MainActor
+    public func publish<Host: AnyObject>(to host: Host, through mirror: Mirror<Host>) {
+        func assign<Value: Equatable>(_ value: Value, to keyPath: ReferenceWritableKeyPath<Host, Value>) {
+            if host[keyPath: keyPath] != value { host[keyPath: keyPath] = value }
+        }
+        assign(entitlement, to: mirror.entitlement)
+        assign(policy, to: mirror.policy)
+        assign(isSignedIn, to: mirror.isSignedIn)
+        assign(isBusy, to: mirror.isBusy)
+        assign(lastError, to: mirror.lastError)
+        assign(products, to: mirror.products)
+    }
 }
 
 /// The paid-access session, entitlement, sign-in and StoreKit purchase flow
@@ -346,27 +388,5 @@ public final class PaidAccessFlow {
                 ?? "Could not confirm the subscription."
             return false
         }
-    }
-}
-
-/// The Sign in with Apple nonce. Apple replays its hash in the identity token,
-/// so a captured token cannot be replayed against a different request.
-public enum PaidAccessNonce {
-    /// 32 bytes of entropy, URL-safe.
-    public static func makeRaw() -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        if SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) != errSecSuccess {
-            bytes = (0..<32).map { _ in UInt8.random(in: UInt8.min...UInt8.max) }
-        }
-        return Data(bytes).base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
-
-    public static func sha256Hex(_ value: String) -> String {
-        SHA256.hash(data: Data(value.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
     }
 }

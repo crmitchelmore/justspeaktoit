@@ -19,9 +19,6 @@ extension AppSettings {
   }
 
   func reloadMigrationShellAndCapture(_ restored: AppSettings) {
-    self.appVisibility = restored.appVisibility
-    self.showStatusBarIconInDockOnly = restored.showStatusBarIconInDockOnly
-    self.compactStatusBarIcon = restored.compactStatusBarIcon
     self.runAtLogin = restored.runAtLogin
     self.recordingsDirectory = restored.recordingsDirectory
     self.selectedHotKey = restored.selectedHotKey

@@ -38,7 +38,7 @@ extension SettingsView {
         processingSpeedCard
       }
       if settings.hasSelectedModulateModel {
-        modulateFeatureSettings
+        ModulateFeatureSettingsCard()
       }
       if settings.hasSelectedMetaMuseModel {
         metaMuseRecognitionBiasCard

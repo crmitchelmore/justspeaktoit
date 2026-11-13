@@ -170,8 +170,11 @@ final class SessionCompletionPipeline {
       rawText: input,
       context: session.lexiconContext,
       corrections: session.personalCorrections,
-      onStreamingUpdate: { [weak hud] accumulatedText in
+      onStreamingUpdate: { [weak hud, weak host] accumulatedText in
         Task { @MainActor in
+          // A chunk can land after this session was replaced; it must not
+          // overwrite the replacement's HUD.
+          guard host?.activeSession === session else { return }
           hud?.updateStreamingText(accumulatedText)
         }
       },

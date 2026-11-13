@@ -39,7 +39,7 @@ final class LiveControllerRoutingTests: XCTestCase {
             "google/gemini-2.5-flash", "Deepgram/nova-3-streaming", " deepgram/nova-3-streaming",
             "unknown/model", "apple/local/Dictation", "local/batch/whisper"
         ] {
-            XCTAssertNil(SwitchingLiveTranscriber.cloudProvider(for: model), model)
+            XCTAssertNil(LiveControllerSet.cloudProvider(for: model), model)
             let controller = switcher.controller(for: model)
             XCTAssertFalse(controller is SharedClientLiveController, model)
             XCTAssertFalse(controller is OpenAIRealtimeLiveController, model)

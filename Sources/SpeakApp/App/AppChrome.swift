@@ -57,9 +57,9 @@ final class AppChrome {
   /// example after launching straight into menu-bar-only mode).
   func installStatusBarIfNeeded() {
     if statusBarVisibilityObserver == nil {
-      statusBarVisibilityObserver = settings.$appVisibility
+      statusBarVisibilityObserver = settings.shell.$appVisibility
         .removeDuplicates()
-        .combineLatest(settings.$showStatusBarIconInDockOnly.removeDuplicates())
+        .combineLatest(settings.shell.$showStatusBarIconInDockOnly.removeDuplicates())
         .receive(on: RunLoop.main)
         .sink { [weak self] _, _ in
           self?.updateStatusBarVisibility()

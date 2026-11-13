@@ -13,6 +13,8 @@ import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
+import com.justspeaktoit.android.cloud.live.LiveTranscriber
+import com.justspeaktoit.android.cloud.live.LiveTranscriptListener
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryFile
 import com.justspeaktoit.android.history.HistoryStore
@@ -159,6 +161,13 @@ internal class FakeRecorder(
         writing = !paused
     }
 
+    /** Where captured PCM would go; tests call it to play the capture thread. */
+    @Volatile var sink: ((ByteArray) -> Unit)? = null
+
+    override fun tap(sink: (ByteArray) -> Unit) {
+        this.sink = sink
+    }
+
     override fun start(): Boolean {
         if (!opens) return false
         file.writeBytes(ByteArray(WavFormat.HEADER_BYTES + bytes.coerceAtLeast(0).toInt()))
@@ -190,6 +199,46 @@ internal class FakeRecorders : RecorderFactory {
     ): AudioRecorder = FakeRecorder(file, onLimitReached, onCaptureFailed, bytes, opens, stopGate).also { created += it }
 
     val last: FakeRecorder get() = created.last()
+}
+
+/** Live sessions whose provider side the test plays through each client's listener. */
+internal class FakeLiveSessions : LiveSessions {
+    val created = CopyOnWriteArrayList<FakeLiveClient>()
+    val last: FakeLiveClient get() = created.last()
+
+    override fun create(
+        model: CloudModel,
+        languageTag: String,
+        words: List<String>,
+        listener: LiveTranscriptListener,
+    ): LiveTranscriber = FakeLiveClient(model, words, listener).also { created += it }
+}
+
+internal class FakeLiveClient(
+    val model: CloudModel,
+    val words: List<String>,
+    val listener: LiveTranscriptListener,
+) : LiveTranscriber {
+    val connected = CountDownLatch(1)
+    val finished = CountDownLatch(1)
+    val appended = CopyOnWriteArrayList<ByteArray>()
+    @Volatile var key: String? = null
+    @Volatile var cancelled = false
+
+    override fun connect(apiKey: String) {
+        key = apiKey
+        connected.countDown()
+    }
+
+    override fun append(pcm: ByteArray) {
+        appended += pcm
+    }
+
+    override fun finish() = finished.countDown()
+
+    override fun cancel() {
+        cancelled = true
+    }
 }
 
 internal class FakeCloud : CloudService {

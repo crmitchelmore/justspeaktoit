@@ -1306,6 +1306,34 @@ sessions:
           - "Restore the key, turn on cleanup with an OpenRouter model and dictate."
         expected: "Both models return the words. The invalid key fails with \"rejected the API key\". Cleanup returns tidied text and Show original restores the raw transcript."
         final_gate: true
+      - id: "android-cloud-live-streaming"
+        issues:
+          - 1590
+        title: "Live Cloud streaming shows words while speaking and fails honestly"
+        minutes: 6
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1590"
+        steps:
+          - "Settings: choose OpenAI GPT Live Transcribe (Streaming) and dictate three sentences in Cloud mode, pausing between them."
+          - "Dictate again and tap Stop mid-word."
+          - "Start another dictation, say a sentence, then turn on flight mode while still talking."
+          - "Share an audio file into the app while the live model is still selected."
+        expected: "Words appear while speaking and are replaced, never duplicated, as each phrase settles. Stop returns the full text within a few seconds, including the last words. Flight mode ends the session with a network failure and History keeps the words heard so far as unfinished; no upload happens instead. The shared file fails with a message to choose a batch model."
+        final_gate: true
+      - id: "owner-android-live-deepgram-assemblyai"
+        issues:
+          - 1590
+        title: "Deepgram and AssemblyAI live streaming with real keys"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1590"
+        steps:
+          - "Save a Deepgram and an AssemblyAI key in Settings."
+          - "Dictate a few sentences with Deepgram Nova-3 (Streaming), Deepgram Flux (English Streaming) and AssemblyAI Universal-3.6 Pro (Streaming) in turn."
+          - "Add a personal correction, write as \"Kubernetes\", and say \"Kubernetes\" with each model."
+          - "Save an invalid Deepgram key and dictate with Deepgram Nova-3 (Streaming)."
+        expected: "Each model shows words while speaking and returns the full formatted text after Stop. The vocabulary word is spelt correctly. The invalid key fails with \"rejected the API key\" and shows under Errors on the API key filter."
+        final_gate: true
       - id: "android-entry-surfaces"
         issues:
           - 1328

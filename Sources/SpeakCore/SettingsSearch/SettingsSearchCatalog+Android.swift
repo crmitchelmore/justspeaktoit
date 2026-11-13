@@ -13,6 +13,23 @@ extension SettingsSearchCatalog {
             settingKeys: ["cloud_model"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.language", title: "Dictation language", section: .transcription,
+            systemImage: "globe",
+            summary: "The language you speak. Automatic uses the phone's language.",
+            keywords: ["language", "locale", "spoken language", "accent", "english", "spanish", "french", "german"],
+            settingKeys: ["preferredLocale"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.personalCorrections", title: "Personal corrections", section: .corrections,
+            systemImage: "character.book.closed",
+            summary: "Words the recogniser gets wrong and how to write them; also sent to cloud models as vocabulary.",
+            keywords: [
+                "vocabulary", "dictionary", "custom words", "names", "spelling", "replace", "lexicon",
+                "keyterms", "jargon"
+            ],
+            settingKeys: ["personal_corrections"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.cleanup", title: "Clean up transcripts", section: .postProcessing,
             systemImage: "wand.and.stars",
             summary: "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",

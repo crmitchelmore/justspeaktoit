@@ -97,6 +97,8 @@ class MainActivity : ComponentActivity() {
                                 onChooseCleanupModel = viewModel::chooseCleanupModel,
                                 onReleaseResource = viewModel::releaseResource,
                                 onReleaseEverything = viewModel::releaseEverything,
+                                onChooseLanguage = viewModel::chooseLanguage,
+                                onCorrectionsChanged = viewModel::setCorrections,
                             ),
                         )
                         Screen.History -> HistoryScreen(

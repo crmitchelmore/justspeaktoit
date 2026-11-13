@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,6 +40,7 @@ import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.dictation.DictationFailure
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.history.HistoryEntry
+import com.justspeaktoit.android.history.HistoryInsights
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.output.TranscriptOutput
@@ -92,6 +94,8 @@ fun HistoryScreen(
                     }
                 }
             }
+            val insights = HistoryInsights.of(entries, System.currentTimeMillis())
+            if (insights.dictations > 0) item { InsightsCard(insights) }
             item { RetentionPicker(retention, actions.onRetention) }
             item {
                 Text(
@@ -234,4 +238,27 @@ private fun sourceLabel(entry: HistoryEntry): String? {
             ?: entry.model
     }
     return stringResource(mode.label())
+}
+
+/** Recent dictation totals, the Android counterpart of the Mac's usage insights. */
+@Composable
+private fun InsightsCard(insights: HistoryInsights) {
+    val dictations = pluralStringResource(
+        R.plurals.history_insights_dictations, insights.dictations, insights.dictations,
+    )
+    val words = pluralStringResource(R.plurals.history_insights_words, insights.words, insights.words)
+    Card(modifier = Modifier.fillMaxWidth().testTag(AutomationIds.HISTORY_INSIGHTS)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(stringResource(R.string.history_insights_title), style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.history_insights_summary, dictations, words),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                stringResource(R.string.history_insights_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }

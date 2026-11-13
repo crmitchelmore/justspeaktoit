@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { MAX_NOTE_LENGTH, RESULTS_FENCE, RESULTS_FORMAT } from './results-format.mjs';
 
-export const DEVICES = ['iPhone', 'Watch', 'Mac', 'Decision'];
+export const DEVICES = ['iPhone', 'Watch', 'Mac', 'Android', 'Decision'];
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 // Docs/manual-checks.yml uses a deliberately small YAML subset: block maps and

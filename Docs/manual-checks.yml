@@ -1369,6 +1369,20 @@ sessions:
           - "Delete the Spanish profile in Settings."
         expected: "The first transcript is in capitals and the second is normal cleanup. With the profile, Cloud uses Groq, recognises Spanish and ends sentences with exclamation marks, and On-device stays on the phone in Spanish. The keyboard key cycles profiles, TalkBack announces the profile name, and the key is disabled while listening. Deleting the profile hides the chooser and restores your own settings."
         final_gate: true
+      - id: "android-report-issue"
+        issues:
+          - 1633
+        title: "Report an issue with privacy-safe diagnostics"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes Report an issue"
+        steps:
+          - "Turn on airplane mode, dictate one made-up sentence in Cloud mode so it fails, then open History and tap Report on that entry."
+          - "Read the draft: check it names the model, mode and failure but not your sentence, then turn off Include diagnostics and read it again."
+          - "Tap Copy draft and paste it into a note; then turn airplane mode off and tap Open in GitHub, and close the browser without submitting."
+          - "Settings \u203a Report an issue: open the draft and repeat Copy draft with TalkBack on."
+        expected: "The draft never contains the transcript, audio or keys. Turning off diagnostics leaves only the description and a userRemoved state. Copy puts the title and body on the clipboard, Open shows a prefilled GitHub draft labelled bug without submitting, and TalkBack announces the switch state and each status message."
+        final_gate: true
       - id: "android-battery-latency"
         issues:
           - 1328

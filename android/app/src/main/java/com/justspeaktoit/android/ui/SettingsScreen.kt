@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.justspeaktoit.android.R
+import com.justspeaktoit.android.diagnostics.AndroidIssueEnvironment
+import com.justspeaktoit.android.diagnostics.IssueFacts
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CleanupModelPicker
 import com.justspeaktoit.android.cloud.CloudCatalog
@@ -352,6 +354,17 @@ fun SettingsScreen(
                 modifier = anchor("android.privacyPolicy").testTag(AutomationIds.SETTINGS_PRIVACY_POLICY),
             ) {
                 Text(stringResource(R.string.privacy_policy_link))
+            }
+            var reporting by rememberSaveable { mutableStateOf(false) }
+            TextButton(
+                onClick = { reporting = true },
+                modifier = anchor("android.reportIssue").testTag(AutomationIds.SETTINGS_REPORT_ISSUE),
+            ) {
+                Text(stringResource(R.string.settings_report_issue))
+            }
+            if (reporting) {
+                val facts = remember { IssueFacts.forSettings(AndroidIssueEnvironment.current(context)) }
+                IssueReportDialog(facts) { reporting = false }
             }
         }
     }

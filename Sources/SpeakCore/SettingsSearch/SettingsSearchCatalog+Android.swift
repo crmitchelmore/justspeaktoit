@@ -122,6 +122,13 @@ extension SettingsSearchCatalog {
             summary: "Open the Just Speak to It privacy policy on the website.",
             keywords: ["privacy", "data", "policy", "data safety", "what is collected"],
             platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.reportIssue", title: "Report an issue", section: .about,
+            systemImage: "ladybug",
+            summary: "Preview a GitHub issue draft with privacy-safe diagnostics before you share it.",
+            keywords: ["bug", "report", "feedback", "diagnostics", "github", "problem", "support"],
+            platforms: .android
         )
     ]
 

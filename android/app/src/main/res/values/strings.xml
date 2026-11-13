@@ -269,4 +269,18 @@
     <string name="consent_title">Help improve Just Speak to It?</string>
     <string name="consent_body">Both are optional and off. You can change them at any time in Settings.</string>
     <string name="action_done">Done</string>
+    <string name="issue_report_title">Report an issue</string>
+    <string name="issue_report_intro">Review the draft before sharing it. Nothing leaves the phone until you copy it or open it in GitHub, and it never includes your transcript, audio or API keys.</string>
+    <string name="issue_report_include">Include diagnostics</string>
+    <string name="issue_report_include_note">The app version, Android version, recording mode, catalogue model and failure type. Turn this off to send only your own description.</string>
+    <string name="issue_report_draft">Public issue draft</string>
+    <string name="issue_report_copy">Copy draft</string>
+    <string name="issue_report_open">Open in GitHub</string>
+    <string name="issue_report_close">Close</string>
+    <string name="issue_report_copied">Draft copied. Paste it into a new GitHub issue.</string>
+    <string name="issue_report_opened">GitHub opened in your browser. Nothing has been submitted.</string>
+    <string name="issue_report_open_failed">Could not open a browser. Copy the draft instead.</string>
+    <string name="issue_report_too_long">This draft is too long for a link. Copy it into a new GitHub issue.</string>
+    <string name="action_report_issue">Report</string>
+    <string name="settings_report_issue">Report an issue</string>
 </resources>

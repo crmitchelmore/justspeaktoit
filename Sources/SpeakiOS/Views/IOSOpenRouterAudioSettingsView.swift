@@ -2,40 +2,27 @@
 import SpeakCore
 import SwiftUI
 
-/// Both settings entry points update the same normal recording and voice-output preferences.
-struct IOSOpenRouterAudioSettingsLink: View {
-    var forSpeech = false
+/// The separate Browse OpenRouter models link under the Remote Batch Model picker:
+/// bundled OpenRouter models first, then the live speech-to-text catalogue.
+struct IOSOpenRouterTranscriptionBrowserLink: View {
+    @ObservedObject var settings: AppSettings
 
     var body: some View {
         NavigationLink {
-            IOSOpenRouterAudioSettingsView(forSpeech: forSpeech)
+            OpenRouterTranscriptionBrowser(
+                apiKeyProvider: {
+                    await AppSettings.shared.ensureKeysLoaded()
+                    return await AppSettings.shared.openRouterAPIKey
+                },
+                selection: settings.batchTranscriptionModel,
+                bundled: AppSettings.supportedBatchModels,
+                embedded: true,
+                onSelect: { settings.selectOpenRouterBatchModel($0) }
+            )
         } label: {
-            Label("Browse OpenRouter Audio", systemImage: "waveform")
+            Label("Browse OpenRouter models…", systemImage: "waveform")
         }
-        .accessibilityIdentifier("openRouterAudioBrowserLink")
-    }
-}
-
-struct IOSOpenRouterAudioSettingsView: View {
-    let forSpeech: Bool
-    @ObservedObject private var settings = AppSettings.shared
-    @ObservedObject private var voiceSettings = IOSVoiceOutputSettings.shared
-
-    var body: some View {
-        OpenRouterAudioBrowser(
-            apiKeyProvider: {
-                await AppSettings.shared.ensureKeysLoaded()
-                return await AppSettings.shared.openRouterAPIKey
-            },
-            selectedTranscriptionID: settings.batchTranscriptionModel,
-            selectedSpeechID: voiceSettings.ttsProvider == .openrouter ? voiceSettings.ttsModel : nil,
-            onSelectTranscription: forSpeech ? nil : { identifier in
-                settings.selectOpenRouterTranscription(identifier)
-            },
-            onSelectSpeech: forSpeech ? { identifier in
-                voiceSettings.selectOpenRouterSpeech(identifier)
-            } : nil
-        )
+        .accessibilityIdentifier("openRouterTranscriptionBrowserLink")
     }
 }
 
@@ -67,6 +54,13 @@ extension IOSVoiceOutputSettings {
 extension AppSettings {
     func selectOpenRouterTranscription(_ identifier: String) {
         guard OpenRouterTranscriptionSelection.modelID(from: identifier) != nil else { return }
+        batchTranscriptionModel = identifier
+        selectRemoteTranscriptionMode(.batch)
+    }
+
+    /// A bundled OpenRouter batch model or a live-discovered one, from the browser.
+    func selectOpenRouterBatchModel(_ identifier: String) {
+        guard Self.supportsBatchModel(identifier) else { return }
         batchTranscriptionModel = identifier
         selectRemoteTranscriptionMode(.batch)
     }

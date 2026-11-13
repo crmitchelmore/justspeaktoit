@@ -363,16 +363,16 @@ sessions:
       - id: "mac-openrouter-discover-configure"
         issues:
           - 1575
-        title: "OpenRouter cleanup and transcription pickers discover models and open a details page"
+        title: "Cleanup and transcription have a separate Browse OpenRouter models button, like voice"
         minutes: 4
         core: false
-        build: "Just Speak to It for Mac, the first Alpha build that includes #1575"
+        build: "Just Speak to It for Mac, the first Alpha build that includes the Browse OpenRouter models button"
         steps:
-          - "Open Settings \u203a Post-processing, choose Remote, click the Remote Post-processing Model picker and click the OpenRouter row."
-          - "Turn on Discover OpenAI cleanup models via OpenRouter, type gpt in Search models, click a model and check its Pricing and Temperature, then click Use for cleanup."
-          - "Open Settings \u203a Transcription, click the Remote Batch Model picker, click the OpenRouter row and wait for the list to refresh."
-          - "Click any discovered model, then click Use for transcription."
-        expected: "Both OpenRouter rows open a searchable list with provider and price filters, a Back button and a Refresh button. Each model opens a page with its pricing; choosing one closes the sheet and the picker shows OpenRouter \u203a the chosen model. Native providers are still listed first."
+          - "Open Settings \u203a Post-processing, choose Remote and check the Remote Post-processing Model picker lists native models only, with Browse OpenRouter models\u2026 below it."
+          - "Click Browse OpenRouter models\u2026, turn on Discover OpenAI cleanup models via OpenRouter, search for gpt, click a model, check its Pricing and Temperature, then click Use for cleanup."
+          - "Open Settings \u203a Transcription, click Browse OpenRouter models\u2026 under the Remote Batch Model picker, wait for the list to refresh, click any model and click Use for transcription."
+          - "Open each picker again."
+        expected: "Neither picker has an OpenRouter drill-in row. Each Browse OpenRouter models\u2026 button opens a searchable list with provider and price filters and a Refresh button, each model opens a page with its pricing, and choosing one closes the sheet. Each picker then shows OpenRouter \u203a the chosen model, as the voice picker does."
         final_gate: true
   - id: "iphone"
     device: "iPhone"
@@ -741,15 +741,15 @@ sessions:
       - id: "iphone-openrouter-cleanup-discover-configure"
         issues:
           - 1575
-        title: "OpenRouter cleanup picker discovers models and opens a details page"
-        minutes: 3
+        title: "Cleanup and transcription have a separate Browse OpenRouter models link, like voice"
+        minutes: 4
         core: false
-        build: "TestFlight Just Speak to It, the first Alpha build that includes #1575"
+        build: "TestFlight Just Speak to It, the first Alpha build that includes the Browse OpenRouter models link"
         steps:
-          - "Open Settings \u203a Post-Processing and tap the OpenRouter row under the native models."
-          - "Turn on Discover OpenAI cleanup models via OpenRouter and search for gpt."
-          - "Tap a model, check its Pricing, then tap Use for cleanup."
-        expected: "The OpenRouter row opens a searchable list with provider and price filters; each model opens a page with its pricing, and choosing one returns to Post-Processing with that model ticked under OpenRouter."
+          - "Open Settings \u203a Post-Processing: check the native models are listed with Browse OpenRouter models\u2026 below them and no OpenRouter row."
+          - "Tap Browse OpenRouter models\u2026, turn on Discover OpenAI cleanup models via OpenRouter, search for gpt, tap a model, check its Pricing, then tap Use for cleanup."
+          - "Open Settings \u203a Transcription, choose Remote and Batch, tap Browse OpenRouter models\u2026 under Remote Batch Model, tap any model and tap Use for transcription."
+        expected: "Each link opens a searchable list with provider and price filters, and each model opens a page with its pricing. After choosing, Post-Processing lists OpenRouter \u203a the chosen model with a tick, and Remote Batch Model shows the chosen OpenRouter model."
         final_gate: true
   - id: "watch"
     device: "Watch"

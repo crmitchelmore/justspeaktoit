@@ -53,6 +53,18 @@ struct ModelPickerSelection: Equatable {
     return .init(selection: "", customValue: "")
   }
 
+  /// Native-provider options plus the selected OpenRouter one: what a picker
+  /// with its own Browse OpenRouter button lists, as the voice picker does.
+  static func nativeOptions(
+    _ options: [ModelCatalog.Option], selected: String, purpose: ModelCredentialPurpose
+  ) -> [ModelCatalog.Option] {
+    let current = selected.trimmingCharacters(in: .whitespacesAndNewlines)
+    return options.filter { option in
+      !ModelPickerGrouping.isOpenRouter(option.id, purpose: purpose)
+        || option.id.caseInsensitiveCompare(current) == .orderedSame
+    }
+  }
+
   private static func match(_ trimmed: String, in options: [ModelCatalog.Option]) -> ModelCatalog.Option? {
     options.first { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }
   }

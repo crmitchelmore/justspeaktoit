@@ -184,7 +184,7 @@ extension SettingsView {
           title: "Remote Batch Model",
           help: """
           Remote transcription runs after recording stops. Built-in providers use their own keys; \
-          custom model identifiers are sent through OpenRouter.
+          Browse OpenRouter models… and custom model identifiers use OpenRouter.
           """,
           options: batchTranscriptionOptions,
           value: remoteTranscriptionModelBinding(

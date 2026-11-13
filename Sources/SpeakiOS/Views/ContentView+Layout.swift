@@ -198,11 +198,6 @@ extension ContentView {
             .toolbar { toolbarContent }
     }
 
-    /// Names what went wrong instead of a bare "Error".
-    var errorAlertTitle: String {
-        errorIsStartFailure ? "Can't Start Recording" : "Recording Problem"
-    }
-
     func presentations(_ content: some View) -> some View {
         recoveryPresentations(content)
             .alert(errorAlertTitle, isPresented: $showingError) {

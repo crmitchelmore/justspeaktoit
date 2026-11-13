@@ -225,6 +225,11 @@ extension ContentView {
         }
     }
 
+    /// Names what went wrong instead of a bare "Error".
+    var errorAlertTitle: String {
+        errorIsStartFailure ? "Can't Start Recording" : "Recording Problem"
+    }
+
     func presentStartFailure(_ error: Error, snapshot: IOSIssueReportSnapshot? = nil) {
         self.issueErrorSnapshot = snapshot ?? IOSIssueReporter.failedRequest()
         let presentation = CaptureStartFailurePresentation.make(for: error)

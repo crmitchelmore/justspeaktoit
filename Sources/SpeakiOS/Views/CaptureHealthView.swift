@@ -27,7 +27,8 @@ public struct CaptureHealthView: View {
             self.summarySection
             self.checksSection
             self.selfTestSection
-            if !self.recovery.recoverable.isEmpty || !self.recovery.uncertain.isEmpty {
+            if !self.recovery.recoverable.isEmpty || !self.recovery.uncertain.isEmpty
+                || !self.recovery.unreadable.isEmpty {
                 self.recoverySection
             }
             self.privacySection
@@ -122,6 +123,9 @@ public struct CaptureHealthView: View {
         Section("Interrupted recordings") {
             ForEach(self.recovery.recoverable, id: \.run) { finding in
                 CaptureRecoveryRow(finding: finding, coordinator: self.recovery)
+            }
+            ForEach(self.recovery.unreadable, id: \.run) { finding in
+                CaptureRecoveryUnreadableRow(finding: finding, coordinator: self.recovery)
             }
             ForEach(self.recovery.uncertain, id: \.run) { finding in
                 VStack(alignment: .leading, spacing: 2) {
@@ -229,6 +233,7 @@ struct CaptureHealthRow: View {
 struct CaptureRecoveryRow: View {
     let finding: CaptureRecoveryFinding
     @ObservedObject var coordinator: CaptureRecoveryCoordinator
+    @State private var confirmingDiscard = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -240,20 +245,58 @@ struct CaptureRecoveryRow: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(self.coordinator.recovering != nil)
+                .accessibilityIdentifier("captureRecoveryRowTranscribeButton")
 
                 Button("Keep audio") {
                     self.coordinator.keepWithoutTranscribing(self.finding)
                 }
                 .buttonStyle(.bordered)
                 .disabled(self.coordinator.recovering != nil)
+                .accessibilityIdentifier("captureRecoveryRowKeepButton")
+
+                Button("Discard", role: .destructive) { self.confirmingDiscard = true }
+                    .buttonStyle(.bordered)
+                    .disabled(self.coordinator.recovering != nil)
+                    .accessibilityIdentifier("captureRecoveryRowDiscardButton")
 
                 if self.coordinator.recovering == self.finding.run { ProgressView() }
             }
-            Text("Keeping leaves the audio in Saved Recordings. Nothing here deletes a recording.")
+            Text("Keeping leaves the audio in Saved Recordings. Only Discard deletes it.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
         .accessibilityIdentifier("captureRecoveryRow")
+        .confirmationDialog(
+            "Delete this recording?", isPresented: self.$confirmingDiscard, titleVisibility: .visible
+        ) {
+            Button("Discard recording", role: .destructive) { self.coordinator.discard(self.finding) }
+                .accessibilityIdentifier("captureRecoveryRowConfirmDiscardButton")
+        } message: {
+            Text("The audio is deleted from \(DeviceCopy.thisDevice) and cannot be transcribed later.")
+        }
+    }
+}
+
+/// An interrupted capture whose file holds no readable audio: never offered
+/// for transcription, kept until the user discards it.
+struct CaptureRecoveryUnreadableRow: View {
+    let finding: CaptureRecoveryFinding
+    @ObservedObject var coordinator: CaptureRecoveryCoordinator
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(self.finding.startedAt.formatted(date: .abbreviated, time: .shortened))
+                Text("Interrupted before any readable audio was saved, so it cannot be transcribed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Discard", role: .destructive) { self.coordinator.discard(self.finding) }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("captureRecoveryUnreadableDiscardButton")
+        }
+        .accessibilityIdentifier("captureRecoveryUnreadableRow")
     }
 }
 #endif

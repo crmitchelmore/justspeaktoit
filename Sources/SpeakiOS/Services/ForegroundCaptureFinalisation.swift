@@ -14,6 +14,8 @@ final class ForegroundCaptureFinalisation {
     var tagOfflineCapture: (iOSHistoryItem, UUID, String) -> Void = {
         OfflineTranscriptUpgrader.shared.tag(item: $0, recordingID: $1, intendedModelID: $2)
     }
+    /// Settles a delivered capture's safety claim (issue #992).
+    var markDelivered: (UUID) -> Void = { CaptureSafetyClaimStore.shared.markDelivered(recording: $0) }
 
     init(sharedState: SharedTranscriptionState, historyManager: iOSHistoryManager) {
         self.sharedState = sharedState
@@ -116,6 +118,14 @@ final class ForegroundCaptureFinalisation {
         )
         if let item, let offlineIntendedModel, let recordingID {
             tagOfflineCapture(item, recordingID, offlineIntendedModel)
+        }
+        // The transcript has landed, so this capture's safety audio no longer
+        // needs recovering. Without this every in-app recording was offered
+        // back as "interrupted" on the next launch (issue #1617). A History
+        // write that failed for real words leaves the claim open, so the audio
+        // is still offered; an empty result has nothing to recover.
+        if let recordingID, item != nil || result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            markDelivered(recordingID)
         }
     }
 }

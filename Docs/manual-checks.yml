@@ -559,6 +559,22 @@ sessions:
           - "Wait 20 seconds, unlock and paste into Notes."
         expected: "Paste is the raw \"locked stop\"; History has one polished item. No placeholder. Add your iOS version and whether Stop needed an unlock to any Fail note."
         final_gate: true
+      - id: "iphone-interrupted-recording-prompt"
+        issues:
+          - 1617
+        title: "Recording interrupted prompt: only after a real interruption, and every answer sticks"
+        minutes: 6
+        core: false
+        build: "TestFlight Just Speak to It Alpha that includes the #1617 fix"
+        steps:
+          - "If \"Recording interrupted\" appears on the first launch after updating, tap Not now once (older recordings may still be listed)."
+          - "In the app, record \"normal recording\" and stop. Force-quit the app and reopen it."
+          - "In the app, start recording, say \"interrupted test\", and while it is recording force-quit the app. Reopen it and tap Transcribe it."
+          - "Repeat the interrupted recording, reopen, tap Not now, then force-quit and reopen again."
+          - "Repeat the interrupted recording once more, reopen and tap Discard recording."
+          - "Turn on Airplane Mode, repeat the interrupted recording, reopen and tap Transcribe it."
+        expected: "No prompt after the normal recording. Transcribe it shows a \"Transcribing interrupted recording\u2026\" banner, then opens the new History item containing \"interrupted test\" and the prompt does not return. After Not now the prompt does not come back on the next launch. Discard recording removes it with no prompt on the next launch. In Airplane Mode a \"Couldn't transcribe recording\" alert offers Try again, Discard recording and Keep for later; nothing is deleted unless you choose Discard."
+        final_gate: false
       - id: "iphone-siri-interruption"
         issues:
           - 1117

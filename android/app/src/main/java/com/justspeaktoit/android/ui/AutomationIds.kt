@@ -46,6 +46,17 @@ object AutomationIds {
     fun resourceRelease(kind: SystemResourceKind, owner: String): String =
         "settings.resources.release.${kind.rawValue}.$owner"
 
+    /** Shared with the Apple raw configuration editors. */
+    const val RAW_CONFIG_EDITOR = "rawConfigurationEditor"
+    const val RAW_CONFIG_LOAD = "rawConfigurationLoad"
+    const val RAW_CONFIG_VALIDATE = "rawConfigurationValidate"
+    const val RAW_CONFIG_APPLY = "rawConfigurationApply"
+    const val RAW_CONFIG_IMPORT = "rawConfigurationImport"
+    const val RAW_CONFIG_EXPORT = "rawConfigurationExport"
+    const val RAW_CONFIG_RESET = "rawConfigurationReset"
+    const val RAW_CONFIG_RESET_CONFIRM = "rawConfigurationResetConfirm"
+    const val RAW_CONFIG_STATUS = "rawConfigurationStatus"
+
     const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
     const val SETTINGS_CLEANUP_PROMPT = "settings.cleanupPrompt"
     const val SETTINGS_CLEANUP_PROMPT_RESET = "settings.cleanupPrompt.reset"

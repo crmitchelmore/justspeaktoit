@@ -80,6 +80,15 @@ setting, add a field there and a binding; `SettingsSearchCoverageTests`
 `Tests/SpeakiOSTests/IOSSettingsConfigurationTests.swift` checks bindings,
 defaults and enum values.
 
+Android uses `SettingsSchema.fields(for: .android)` (`SettingsSchema+Android.swift`,
+keyed by the `AppPreferences` names such as `cloud_model` and `history_retention`).
+`SettingsSchemaAndroidExport` writes it to
+`android/app/src/main/assets/settings_schema.json` (`SettingsSchemaAndroidExportTests`
+fails when it is stale), and Settings › **Edit raw configuration** validates
+against that asset in `RawConfiguration.kt`. When you add an Android preference,
+add a field there, regenerate the assets and bind it in `RawConfigurationValues`
+and `DictationViewModel.applyConfiguration`; `RawConfigurationTest` fails otherwise.
+
 When you add a persisted macOS setting, also add a `SettingsSchema+macOS.swift`
 field and an `AppSettingsConfiguration` binding.
 `Tests/SpeakAppTests/AppSettingsConfigurationTests.swift` fails when an
@@ -125,8 +134,9 @@ it, run:
 UPDATE_SETTINGS_SEARCH_ANDROID=1 swift test --filter SettingsSearchAndroidExportTests
 ```
 
-`scripts/update-android-assets` regenerates this asset and the cloud catalogue
-(`cloud_catalog.json`) together.
+`scripts/update-android-assets` regenerates this asset, the cloud catalogue
+(`cloud_catalog.json`) and the raw configuration schema (`settings_schema.json`)
+together.
 
 `SettingsSearchIndex.kt` mirrors the Swift ranking rules and adds one entry per
 `CloudCatalog` model and provider key. Settings has a search field with

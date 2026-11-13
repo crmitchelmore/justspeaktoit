@@ -127,7 +127,7 @@ extension SettingsSearchCatalog {
             summary: "View, validate, import or export every setting as JSON.",
             keywords: ["raw settings", "json", "config file", "export settings", "import settings",
                        "reset to defaults", "advanced editor"],
-            platforms: [.macOS, .iOS]
+            platforms: [.macOS, .iOS, .android]
         ),
         SettingsSearchEntry(
             id: "permissions.system", title: "System permissions", section: .permissions, systemImage: "lock.shield",

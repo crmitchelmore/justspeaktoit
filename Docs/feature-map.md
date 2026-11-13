@@ -119,7 +119,7 @@ The flags live in `Project.swift`; release selection is in
 | F31 | API keys page | Yes | Yes | Yes | Yes | Yes | | |
 | F32 | Provider credit balances | Yes | Yes | No | No | No | #1621 | |
 | F33 | Configuration export/import and backup | Yes | Yes | Partial | Partial | No | #1635 | |
-| F34 | Raw settings editor and config tools | Yes | Partial | Partial | Partial | No | #1608 | iOS has the raw JSON editor but no automation server, so no config tools; Read aloud settings are not in its schema yet (#1671). Windows and Linux have `speak config` and MCP `get_configuration`/`set_configuration`; no raw JSON editor window yet (#1670). |
+| F34 | Raw settings editor and config tools | Yes | Partial | Partial | Partial | Partial | #1608 | iOS and Android have the raw JSON editor but no automation server, so no config tools; iOS Read aloud settings are not in the schema yet (#1671). Windows and Linux have `speak config` and MCP `get_configuration`/`set_configuration`; no raw JSON editor window yet (#1670). |
 | F35 | Automation (CLI, MCP, App Intents) | Yes | Yes | Yes | Yes | Limited | | |
 | F36 | Usage insights dashboard | Yes | No | Yes | Yes | Partial | #1623 | Android: 7-day card on History. |
 | F37 | Opt-in analytics and crash reporting | Yes | Yes | No | No | Yes | #1624 | |
@@ -437,11 +437,11 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Never turn a missing category into an empty replacement. See [configuration transfer](configuration-transfer.md) and [data migration](data-migration.md).
 
 ### F34 Raw settings editor and config tools
-- **Platforms:** macOS Yes · iOS Partial · Windows Partial · Linux Partial · Android No
+- **Platforms:** macOS Yes · iOS Partial · Windows Partial · Linux Partial · Android Partial
 - **Excluded:** none
-- **Gaps:** iOS, Windows, Linux, Android #1608 (Windows and Linux lack only the raw JSON editor window, #1670; iOS Read aloud settings, #1671).
+- **Gaps:** iOS, Windows, Linux, Android #1608 (Windows and Linux lack only the raw JSON editor window, #1670; iOS Read aloud settings, #1671; iOS and Android have no automation server for the config tools).
 - **How:** One JSON document of canonical keys with all-or-nothing validation, no secrets, and keys for other platforms preserved; the same document backs `speak config` and the MCP configuration tools.
-- **Refs:** `Sources/SpeakCore/Automation/AutomationConfiguration.swift`, `Sources/SpeakCore/SettingsConfiguration/SettingsSchema+Desktop.swift`, `Sources/SpeakDesktopHost/Automation/DesktopHostAutomationConfiguration.swift`, `Sources/SpeakiOS/Views/Settings/IOSRawConfigurationEditorView.swift`, `Sources/SpeakApp/Views/Settings/RawConfigurationEditorView.swift`, `Sources/SpeakApp/Transport/AppAutomationHandler+Configuration.swift`
+- **Refs:** `Sources/SpeakCore/Automation/AutomationConfiguration.swift`, `Sources/SpeakCore/SettingsConfiguration/SettingsSchema+Desktop.swift`, `Sources/SpeakDesktopHost/Automation/DesktopHostAutomationConfiguration.swift`, `Sources/SpeakiOS/Views/Settings/IOSRawConfigurationEditorView.swift`, `android/app/src/main/java/com/justspeaktoit/android/settings/RawConfiguration.kt`, `Sources/SpeakApp/Views/Settings/RawConfigurationEditorView.swift`, `Sources/SpeakApp/Transport/AppAutomationHandler+Configuration.swift`
 - **Sunset:** none
 - **Nuances:** The desktop Preferences editor (`Sources/SpeakDesktopHost/Settings/DesktopHostConfigurationEditor.swift`) is a typed form, not this feature.
 

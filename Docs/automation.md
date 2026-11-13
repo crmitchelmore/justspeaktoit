@@ -558,7 +558,10 @@ reports which schema the host uses in `platform`.
 The iPhone has no automation server, but Settings › General › **Edit raw
 configuration** edits, validates, imports and exports the same document format
 over its own field list (`SettingsSchema+iOS.swift`, keyed by the iOS settings
-names such as `selectedModel` and `hardwareTriggerDestination`).
+names such as `selectedModel` and `hardwareTriggerDestination`). Android has
+no automation server either; Settings › **Edit raw configuration** does the same
+over `SettingsSchema+Android.swift` (keyed by its preference names such as
+`cloud_model` and `history_retention`) and refuses to apply while dictating.
 
 - **Reading** works whenever automation is on. `get_configuration` returns
   `settings`, `apiKeys` and `schema`; narrow it with `keys` or `prefix`.

@@ -91,8 +91,9 @@ envelope. This is not a location dimension or a new event family. PostHog's
 is serialized to that property by the
 [official SDK](https://github.com/PostHog/posthog-python/blob/3f6c80eb4df1ddffd9e5b9d1d8aae8facf9f83b2/posthog/client.py#L2432).
 The [IP-discard setting permits enrichment before discarding the raw IP](https://posthog.com/docs/privacy/data-storage#discarding-ip-addresses-at-project-level);
-it does not establish absence of stored location fields. Authorized server
-verification, historical-data handling and retention remain rollout gates.
+it does not establish absence of stored location fields. The project keeps
+GeoIP on (owner decision, 13 Nov 2026); the remaining rollout gate is listed in
+[PostHog maintenance](posthog-maintenance.md#rollout-gate).
 
 ### Bucket definitions (shared, versioned with the schema)
 

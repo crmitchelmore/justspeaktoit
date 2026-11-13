@@ -94,9 +94,9 @@ The flags live in `Project.swift`; release selection is in
 | F06 | Platform on-device recogniser | Yes | Yes | N/A | N/A | Yes | | |
 | F07 | Remote cleanup (OpenRouter and native LLMs) | Yes | Yes | Yes | Yes | Yes | | |
 | F08 | Local LLM cleanup | Yes | No | Yes | Yes | No | #1650 | |
-| F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | No | #1591 | |
+| F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | Yes | | |
 | F10 | Browse OpenRouter models picker | Yes | Yes | No | No | Partial | #1618 | Android: searchable cleanup list only. |
-| F11 | Dictation profiles | Yes | Limited | Yes | Yes | No | #1591 | iOS cannot see the frontmost app. |
+| F11 | Dictation profiles | Yes | Limited | Yes | Yes | Limited | | iOS and Android cannot see the frontmost app. |
 | F12 | Vocabulary, corrections, pronunciation | Yes | Yes | Yes | Yes | Partial | #1626 | Android: corrections only. |
 | F13 | Transcription language selection | Yes | Yes | Yes | Yes | Yes | | |
 | F14 | History list and search | Yes | Yes | Yes | Yes | Partial | #1628 | Android has no search. |
@@ -212,11 +212,11 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Rules cleanup ignores the prompt; the UI must say so. Desktop runtime notes: [desktop local LLM cleanup](desktop-local-llm-cleanup.md).
 
 ### F09 Custom cleanup prompt
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1591.
+- **Gaps:** none
 - **How:** The prompt is an instruction; the transcript is content, never instructions. Show the editor for remote and downloaded local LLMs alike.
-- **Refs:** `Sources/SpeakApp/PostProcessing/PostProcessingPromptBuilder.swift`, `Sources/SpeakApp/Views/Settings/CleanupPromptPreview.swift`, `Sources/SpeakDesktop/Transcription/DesktopPostProcessing.swift`
+- **Refs:** `Sources/SpeakApp/PostProcessing/PostProcessingPromptBuilder.swift`, `Sources/SpeakApp/Views/Settings/CleanupPromptPreview.swift`, `Sources/SpeakDesktop/Transcription/DesktopPostProcessing.swift`, `Sources/SpeakCore/TranscriptCleanupPolicy.swift`, `android/app/src/main/java/com/justspeaktoit/android/cloud/CleanupPolicy.kt`
 - **Sunset:** none
 - **Nuances:** Provider transcription prompts (OpenAI `prompt`, AssemblyAI keyterms) bias vocabulary only; tone and formatting belong in this cleanup prompt.
 
@@ -230,13 +230,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Streaming pickers have no browse button because OpenRouter can't stream ([OpenRouter audio](openrouter-audio.md)). Discovery behaviour: [cleanup model discovery](cleanup-model-discovery.md).
 
 ### F11 Dictation profiles
-- **Platforms:** macOS Yes · iOS Limited · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Limited · Windows Yes · Linux Yes · Android Limited
 - **Excluded:** none
-- **Gaps:** Android #1591.
+- **Gaps:** none
 - **How:** A profile matches the frontmost app and overrides model, prompt, vocabulary and output for that session; validate with the shared rules.
-- **Refs:** `Sources/SpeakCore/Recording/DictationProfileValidation.swift`, `Sources/SpeakDesktop/Profiles/DesktopDictationProfileStore.swift`, `Sources/SpeakDesktopHost/Settings/DesktopHostProfiles.swift`, `Sources/SpeakApp/Session/SessionProfileApplier.swift`, `Sources/SpeakCore/Desktop/LinuxProfileMatching.swift`
+- **Refs:** `Sources/SpeakCore/Recording/DictationProfileValidation.swift`, `Sources/SpeakDesktop/Profiles/DesktopDictationProfileStore.swift`, `Sources/SpeakDesktopHost/Settings/DesktopHostProfiles.swift`, `Sources/SpeakApp/Session/SessionProfileApplier.swift`, `Sources/SpeakCore/Desktop/LinuxProfileMatching.swift`, `Sources/SpeakCore/Recording/DictationProfile.swift`, `android/app/src/main/java/com/justspeaktoit/android/settings/DictationProfiles.kt`
 - **Sunset:** none
-- **Nuances:** iOS can't see the frontmost app, so profiles apply through keyboard handoff and Focus filters (F44). Linux app matching depends on what the compositor exposes.
+- **Nuances:** iOS can't see the frontmost app, so profiles apply through keyboard handoff and Focus filters (F44). Android can't either; the user picks the active profile in the app or the keyboard's profile key. Linux app matching depends on what the compositor exposes.
 
 ### F12 Vocabulary, corrections, pronunciation
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial

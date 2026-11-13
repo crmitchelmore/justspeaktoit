@@ -5,6 +5,8 @@ import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.DictationPreferences
+import com.justspeaktoit.android.settings.DictationProfile
+import com.justspeaktoit.android.settings.DictationProfiles
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -37,7 +39,12 @@ internal data class EngineSelection(
     val options: List<ModeAvailability>,
     /** True while the on-device language check for [languageTag] is outstanding. */
     val checking: Boolean,
-)
+    /** The chosen profile, whose language and cloud model override the user's own for new sessions. */
+    val profile: DictationProfile? = null,
+) {
+    /** The cloud model a new Cloud session uses. */
+    val sessionCloudModel: CloudModel get() = profile?.cloudModel ?: cloudModel
+}
 
 /**
  * Owns engine selection: the persisted mode and cloud model, the availability of each mode for the
@@ -55,10 +62,13 @@ internal class DictationEngineSelector(
     private val phoneLanguageTag: () -> String = { Locale.getDefault().toLanguageTag() },
     private val publish: (EngineSelection) -> Unit,
 ) {
-    private fun currentLanguageTag(): String = DictationLanguages.languageTag(prefs.languageId, phoneLanguageTag)
+    private fun currentLanguageTag(profile: DictationProfile?): String =
+        DictationLanguages.languageTag(profile?.language ?: prefs.languageId, phoneLanguageTag)
 
-    var selection: EngineSelection = currentLanguageTag().let { tag ->
+    var selection: EngineSelection = DictationProfiles.active(prefs).let { profile ->
+        val tag = currentLanguageTag(profile)
         EngineSelection(
+            profile = profile,
             chosenMode = prefs.chosenMode,
             languageId = DictationLanguages.normalized(prefs.languageId),
             cloudModel = CloudCatalog.transcriptionModel(prefs.cloudModelId),
@@ -80,15 +90,16 @@ internal class DictationEngineSelector(
         val names = secrets.names()
         val saved = CloudCatalog.providers.filterTo(mutableSetOf()) { it.credentialId in names }
         val caps = engine.capabilities()
-        val tag = currentLanguageTag()
-        change { it.copy(languageTag = tag, savedKeys = saved, checking = true) }
+        val profile = DictationProfiles.active(prefs)
+        val tag = currentLanguageTag(profile)
+        change { it.copy(profile = profile, languageTag = tag, savedKeys = saved, checking = true) }
         engine.checkOnDeviceLanguage(tag) { resolution ->
             change {
                 it.copy(
                     options = RecognizerAvailability.evaluate(
                         caps,
                         resolution.support,
-                        cloudKeySaved = it.cloudModel.provider in it.savedKeys,
+                        cloudKeySaved = it.sessionCloudModel.provider in it.savedKeys,
                     ),
                     onDeviceLanguageTag = resolution.languageTag,
                     checking = false,
@@ -107,6 +118,16 @@ internal class DictationEngineSelector(
     fun chooseCloudModel(model: CloudModel) {
         prefs.cloudModelId = model.catalogId
         change { it.copy(cloudModel = model) }
+        refresh()
+    }
+
+    /**
+     * Makes [id] the active profile, or none with null; it applies from the next session, so the
+     * language and cloud key availability are rechecked.
+     */
+    fun chooseProfile(id: String?) {
+        if (sessionActive()) return
+        prefs.activeProfileId = id?.takeIf { wanted -> prefs.profiles.any { it.id == wanted } }
         refresh()
     }
 
@@ -138,7 +159,7 @@ internal class DictationEngineSelector(
 
     /** The route for a session in [mode], with the language its recogniser was resolved for. */
     fun plan(mode: RecognitionMode): SessionPlan = when (mode) {
-        RecognitionMode.Cloud -> SessionPlan.Cloud(selection.cloudModel, selection.languageTag)
+        RecognitionMode.Cloud -> SessionPlan.Cloud(selection.sessionCloudModel, selection.languageTag)
         RecognitionMode.OnDevice -> SessionPlan.Recognizer(mode, selection.onDeviceLanguageTag)
         RecognitionMode.SpeechService -> SessionPlan.Recognizer(mode, selection.languageTag)
     }

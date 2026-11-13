@@ -1,7 +1,11 @@
 package com.justspeaktoit.android.dictation
 
+import com.justspeaktoit.android.cloud.CleanupPolicy
+import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudException
+import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.history.HistoryStatus
+import com.justspeaktoit.android.settings.DictationProfile
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -179,6 +183,54 @@ class DictationViewModelTest {
         assertEquals(DictationState.Done(RecognitionMode.Cloud, "second"), original.dictation)
         assertFalse(original.history[0].cleanedUp)
         assertEquals("First.", original.history[1].text)
+    }
+
+    @Test
+    fun testCleanupPrompt_isTheSystemInstruction_andTheActiveProfileOverridesIt() {
+        h.prefs.cleanupEnabled = true
+        h.prefs.cleanupPrompt = "Write in British English."
+        h.secrets.write("openrouter.apiKey", "or-test")
+        startCloud()
+        h.onMain { h.viewModel.stop() }
+        h.awaitState { it.cleanup == CleanupStatus.Applied }
+        assertEquals(CleanupPolicy.systemPrompt("Write in British English."), h.cloud.cleanupPrompts.single())
+
+        val profile = DictationProfile.create("Formal").copy(cleanupPrompt = "Write formally.")
+        h.onMain {
+            h.viewModel.saveProfile(profile)
+            h.viewModel.chooseProfile(profile.id)
+        }
+        h.awaitState { it.profile == profile && it.canStart }
+        h.onMain { h.viewModel.start() }
+        h.awaitState { it.dictation is DictationState.Listening }
+        h.onMain { h.viewModel.stop() }
+        h.awaitState { it.cleanup == CleanupStatus.Applied && it.history.size == 2 }
+        assertEquals(CleanupPolicy.systemPrompt("Write formally."), h.cloud.cleanupPrompts.last())
+    }
+
+    @Test
+    fun testActiveProfile_setsTheSessionCloudModelAndLanguage_withoutChangingSettings() {
+        val groq = CloudCatalog.transcriptionModels.first { it.provider == CloudProvider.Groq }
+        h.secrets.write(CloudProvider.Groq.credentialId, "gsk-test")
+        val profile = DictationProfile.create("Spanish").withCloudModel(groq).copy(languageId = "es_ES")
+        h.prefs.profiles = listOf(profile)
+        h.prefs.activeProfileId = profile.id
+
+        val ready = h.ready().state.value
+        assertEquals(CloudCatalog.defaultTranscriptionModel, ready.cloudModel)
+        assertEquals(groq, ready.sessionCloudModel)
+        h.onMain { h.viewModel.start() }
+        h.awaitState { it.dictation is DictationState.Listening }
+        h.onMain { h.viewModel.stop() }
+        h.awaitState { it.dictation is DictationState.Done }
+        val request = h.cloud.transcriptions.single()
+        assertEquals(groq.catalogId, request.model)
+        assertEquals("es-ES", request.languageTag)
+
+        h.onMain { h.viewModel.deleteProfile(profile.id) }
+        val cleared = h.awaitState { it.profile == null && it.profiles.isEmpty() }
+        assertNull(h.prefs.activeProfileId)
+        assertEquals(CloudCatalog.defaultTranscriptionModel, cleared.sessionCloudModel)
     }
 
     @Test

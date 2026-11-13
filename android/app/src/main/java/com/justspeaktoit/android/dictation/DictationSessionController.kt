@@ -1,6 +1,7 @@
 package com.justspeaktoit.android.dictation
 
 import com.justspeaktoit.android.cloud.CleanupModel
+import com.justspeaktoit.android.cloud.CleanupPolicy
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.RecordingRecovery
 import com.justspeaktoit.android.cloud.RequestReleasedException
@@ -41,6 +42,9 @@ internal interface SessionSettings {
 
     /** The model for an optional cleanup, or null when cleanup is off or its provider has no key. */
     val cleanupModel: CleanupModel?
+
+    /** The user's base cleanup prompt for this session, or null for the built-in one. */
+    val cleanupPrompt: String? get() = null
 
     /** Personal corrections applied to every final transcript, and sent to cloud models as vocabulary. */
     val corrections: List<CorrectionRule> get() = emptyList()
@@ -377,7 +381,8 @@ internal class DictationSessionController(
         change { it.copy(cleanup = CleanupStatus.Running) }
         work = scope.launch {
             // Cleanup can restore a misheard word, so corrections run again on its output.
-            val outcome = when (val cleaned = requests.cleanup(model, done.transcript)) {
+            val systemPrompt = CleanupPolicy.systemPrompt(settings.cleanupPrompt)
+            val outcome = when (val cleaned = requests.cleanup(model, done.transcript, systemPrompt)) {
                 is CleanupOutcome.Applied ->
                     CleanupOutcome.Applied(PersonalCorrections.apply(cleaned.text, settings.corrections))
                 else -> cleaned

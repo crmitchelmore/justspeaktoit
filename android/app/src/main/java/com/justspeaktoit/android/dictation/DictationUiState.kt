@@ -10,6 +10,7 @@ import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.settings.AppPreferences
+import com.justspeaktoit.android.settings.DictationProfile
 import java.util.Locale
 
 data class SharedAudioOffer(val uri: Uri, val mimeType: String?)
@@ -56,7 +57,24 @@ data class DictationUiState(
     val corrections: List<CorrectionRule> = emptyList(),
     /** System resources the app holds now, oldest first (#1473). */
     val resourcesInUse: List<SystemResourceHold> = emptyList(),
+    /** The user's base cleanup prompt; null means the built-in one. */
+    val cleanupPrompt: String? = null,
+    /** Every saved profile, in the user's order. */
+    val profiles: List<DictationProfile> = emptyList(),
+    /** The active profile; its choices override the user's own for new sessions. */
+    val profile: DictationProfile? = null,
 ) {
+    /** The cloud model a new Cloud session uses: the profile's, else the user's. */
+    val sessionCloudModel: CloudModel get() = profile?.cloudModel ?: cloudModel
+
+    val sessionCleanupEnabled: Boolean get() = profile?.cleanupEnabled ?: cleanupEnabled
+
+    val sessionCleanupModel: CleanupModel get() = profile?.cleanupModel ?: cleanupModel
+
+    /** The base cleanup prompt a session uses: the profile's, else the user's, else null for the built-in one. */
+    val sessionCleanupPrompt: String?
+        get() = profile?.prompt ?: cleanupPrompt?.takeIf { it.isNotBlank() }
+
     /** The mode a new session would use. */
     val activeMode: RecognitionMode?
         get() = chosenMode ?: RecognizerAvailability.defaultMode(options)
@@ -78,9 +96,9 @@ data class DictationUiState(
         get() = !dictation.isActive && !checkingAvailability && !releasingMicrophone &&
             cleanup != CleanupStatus.Running && options.firstOrNull { it.mode == activeMode }?.usable == true
 
-    /** Cleanup runs only when switched on and the chosen model's provider has a key. */
+    /** Cleanup runs only when switched on (by the profile or the user) and its model's provider has a key. */
     val cleanupReady: Boolean
-        get() = cleanupEnabled && cleanupModel.provider in savedKeys
+        get() = sessionCleanupEnabled && sessionCleanupModel.provider in savedKeys
 }
 
 /** Deadlines and polling for the session's blocking work; tests shorten them. */

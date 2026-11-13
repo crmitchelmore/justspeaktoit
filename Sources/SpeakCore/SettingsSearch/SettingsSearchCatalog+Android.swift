@@ -40,6 +40,26 @@ extension SettingsSearchCatalog {
             settingKeys: ["cleanup_enabled", "cleanup_model"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.cleanupPrompt", title: "Cleanup prompt", section: .postProcessing,
+            systemImage: "text.quote",
+            summary: "Replace the built-in cleanup instructions with your own system prompt.",
+            keywords: [
+                "custom prompt", "system prompt", "instructions", "post-processing prompt", "polish prompt",
+                "tone", "style", "formatting"
+            ],
+            settingKeys: ["postProcessingSystemPrompt"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.profiles", title: "Dictation profiles", section: .profiles,
+            systemImage: "person.crop.rectangle.stack",
+            summary: "Named sets of cloud model, language and cleanup settings, chosen in the app or the keyboard.",
+            keywords: [
+                "profile", "profiles", "power mode", "preset", "mode", "work", "personal", "context",
+                "per app", "custom prompt"
+            ],
+            settingKeys: ["dictationProfiles", "activeDictationProfileID"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.keepAudio", title: "Keep audio when a recording is cancelled", section: .general,
             systemImage: "xmark.bin",
             summary: "Keep cancelled cloud recordings in History so you can transcribe them later.",

@@ -65,13 +65,18 @@ object CloudWire {
     fun cleanupMaxTokens(model: CleanupModel): Int? =
         if (model.provider == CloudProvider.Anthropic) ANTHROPIC_MAX_TOKENS else null
 
-    fun cleanupBody(model: String, transcript: String, maxTokens: Int? = null): String = JSONObject()
+    fun cleanupBody(
+        model: String,
+        transcript: String,
+        maxTokens: Int? = null,
+        systemPrompt: String = CleanupPolicy.systemPrompt(),
+    ): String = JSONObject()
         .put("model", model)
         .apply { if (maxTokens != null) put("max_tokens", maxTokens) }
         .put(
             "messages",
             JSONArray()
-                .put(JSONObject().put("role", "system").put("content", CleanupPolicy.systemPrompt()))
+                .put(JSONObject().put("role", "system").put("content", systemPrompt))
                 .put(JSONObject().put("role", "user").put("content", CleanupPolicy.userMessage(transcript))),
         )
         .toString()

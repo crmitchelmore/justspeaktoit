@@ -69,14 +69,18 @@ internal fun ModeSection(state: DictationUiState, actions: DictationActions) {
 @Composable
 private fun ModeAvailability.explanation(languageName: String, state: DictationUiState): String = when (status) {
     ModeStatus.Ready -> if (mode == RecognitionMode.Cloud) {
-        stringResource(R.string.privacy_cloud, state.cloudModel.provider.displayName, state.cloudModel.displayName)
+        stringResource(
+            R.string.privacy_cloud,
+            state.sessionCloudModel.provider.displayName,
+            state.sessionCloudModel.displayName,
+        )
     } else {
         stringResource(mode.privacyNote())
     }
     ModeStatus.NeedsKey -> stringResource(
         R.string.status_mode_needs_key,
-        state.cloudModel.provider.displayName,
-        state.cloudModel.displayName,
+        state.sessionCloudModel.provider.displayName,
+        state.sessionCloudModel.displayName,
     )
     ModeStatus.NeedsDownload -> stringResource(R.string.status_mode_needs_download, languageName)
     ModeStatus.Unverified -> stringResource(R.string.status_mode_unverified, languageName)

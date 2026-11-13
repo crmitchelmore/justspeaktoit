@@ -118,7 +118,7 @@ The flags live in `Project.swift`; release selection is in
 | F30 | Onboarding and permissions guide | Yes | Yes | Yes | Yes | Yes | | |
 | F31 | API keys page | Yes | Yes | Yes | Yes | Yes | | |
 | F32 | Provider credit balances | Yes | Yes | Yes | Yes | Yes | | Android reads OpenRouter; its other providers link to billing. |
-| F33 | Configuration export/import and backup | Yes | Yes | Partial | Partial | No | #1635 | |
+| F33 | Configuration export/import and backup | Yes | Yes | Partial | Partial | Yes | #1635 | Android: settings, profiles, corrections, History, WAV recordings, keys opt-in. |
 | F34 | Raw settings editor and config tools | Yes | Partial | Partial | Partial | Partial | #1608 | iOS and Android have the raw JSON editor but no automation server, so no config tools. Windows and Linux have `speak config` and MCP `get_configuration`/`set_configuration`; no raw JSON editor window yet (#1670). |
 | F35 | Automation (CLI, MCP, App Intents) | Yes | Yes | Yes | Yes | Limited | | |
 | F36 | Usage insights dashboard | Yes | No | Yes | Yes | Partial | #1623 | Android: 7-day card on History. |
@@ -428,13 +428,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** See [provider balances](provider-balances.md). Android's account list is exported from SpeakCore (`provider_balances.json`); a new readable account needs a Kotlin client or `ProviderBalancesTest` fails.
 
 ### F33 Configuration export/import and backup
-- **Platforms:** macOS Yes · iOS Yes · Windows Partial · Linux Partial · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Partial · Linux Partial · Android Yes
 - **Excluded:** none
-- **Gaps:** Windows, Linux, Android #1635 (desktops back up History, and Windows profiles, only).
-- **How:** Inspect an archive, stage it, then apply only valid categories; absent or damaged categories keep existing data. Secrets never travel.
-- **Refs:** `Sources/SpeakCore/DataMigration/DataMigrationPlanner.swift`, `Sources/SpeakDesktop/Migration/DesktopMigrationArchive.swift`, `Sources/SpeakApp/DataMigration/MigrationPlanner.swift`, `Sources/SpeakiOS/Views/ConfigTransferView.swift`, `Sources/SpeakLinux/LinuxMigrationRestore.swift`
+- **Gaps:** Windows, Linux #1635 (desktops back up History, and Windows profiles, only).
+- **How:** Inspect an archive, stage it, then apply only valid categories; absent or damaged categories keep existing data. API keys travel only when the user explicitly includes them.
+- **Refs:** `Sources/SpeakCore/DataMigration/DataMigrationPlanner.swift`, `Sources/SpeakDesktop/Migration/DesktopMigrationArchive.swift`, `Sources/SpeakApp/DataMigration/MigrationPlanner.swift`, `Sources/SpeakiOS/Views/ConfigTransferView.swift`, `Sources/SpeakLinux/LinuxMigrationRestore.swift`, `android/app/src/main/java/com/justspeaktoit/android/transfer/ConfigImporter.kt`
 - **Sunset:** Legacy saved model references are rewritten on import (`Sources/SpeakApp/DataMigration/MigrationModelReferences.swift`).
-- **Nuances:** Never turn a missing category into an empty replacement. See [configuration transfer](configuration-transfer.md) and [data migration](data-migration.md).
+- **Nuances:** Never turn a missing category into an empty replacement. Android writes and reads the same version-2 ZIP; it merges rather than replaces, imports only WAV recordings, carries its own mode, retention, prompt and active profile in `android-settings.json`, and skips (with a notice) connections, model references, pronunciations and settings it has no equivalent for. API keys travel only when chosen on export and again on import. See [configuration transfer](configuration-transfer.md) and [data migration](data-migration.md).
 
 ### F34 Raw settings editor and config tools
 - **Platforms:** macOS Yes · iOS Partial · Windows Partial · Linux Partial · Android Partial

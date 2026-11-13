@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -56,6 +57,8 @@ import com.justspeaktoit.android.ui.AppearanceChoice
 import com.justspeaktoit.android.ui.SettingsActions
 import com.justspeaktoit.android.ui.SettingsScreen
 import com.justspeaktoit.android.ui.theme.JustSpeakTheme
+import java.io.FileNotFoundException
+import java.time.LocalDate
 
 private enum class Screen { Dictation, Settings, History, Onboarding }
 
@@ -92,6 +95,20 @@ class MainActivity : ComponentActivity() {
     // The answer does not matter: without it the recording notification is only hidden from the shade.
     private val requestNotification = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
     private var askedForNotifications = false
+
+    private val exportConfiguration =
+        registerForActivityResult(ActivityResultContracts.CreateDocument(ARCHIVE_TYPE)) { uri ->
+            if (uri == null) return@registerForActivityResult
+            viewModel.exportConfiguration(
+                open = { contentResolver.openOutputStream(uri, "wt") },
+                discard = { deleteDocument(uri) },
+            )
+        }
+
+    private val importConfiguration = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        viewModel.inspectConfiguration { contentResolver.openInputStream(uri) }
+    }
 
     @OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -201,6 +218,14 @@ class MainActivity : ComponentActivity() {
                                     prefs.dynamicColor = choice.dynamicColor
                                     appearance = choice
                                 },
+                                onExportConfiguration = {
+                                    exportConfiguration.launch("JustSpeakToIt-config-${LocalDate.now()}.zip")
+                                },
+                                onImportConfiguration = { importConfiguration.launch(IMPORT_TYPES) },
+                                onExportCredentialsChanged = viewModel::setExportCredentials,
+                                onImportCredentialsChanged = viewModel::setImportCredentials,
+                                onApplyConfigurationImport = viewModel::applyConfigurationImport,
+                                onDismissConfiguration = viewModel::dismissConfigurationImport,
                             ),
                             privacy = privacyChoices,
                             tips = tips,
@@ -385,8 +410,26 @@ class MainActivity : ComponentActivity() {
         private val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
         private val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
 
+        private const val ARCHIVE_TYPE = "application/zip"
+
+        // Some file managers label a ZIP as a generic binary or with the legacy Windows type.
+        private val IMPORT_TYPES = arrayOf(ARCHIVE_TYPE, "application/x-zip-compressed", "application/octet-stream")
+
         fun dictateIntent(context: Context): Intent =
             Intent(Intent.ACTION_MAIN).setClassName(context, DICTATE_ENTRY)
+    }
+
+    /** Removes an export that did not finish, so a partial file is never kept as a backup. */
+    private fun deleteDocument(uri: Uri) {
+        try {
+            DocumentsContract.deleteDocument(contentResolver, uri)
+        } catch (_: FileNotFoundException) {
+            // Already gone.
+        } catch (_: SecurityException) {
+            // The provider does not let this app delete it; the export failure is still shown.
+        } catch (_: UnsupportedOperationException) {
+            // The provider does not support deleting.
+        }
     }
 
     private fun openAppSettings() {

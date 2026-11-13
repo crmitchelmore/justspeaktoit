@@ -36,9 +36,18 @@ import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RawConfigurationValues
 import com.justspeaktoit.android.settings.RecordingCue
 import com.justspeaktoit.android.settings.RecordingSoundSettings
+import com.justspeaktoit.android.transfer.ConfigArchiveException
+import com.justspeaktoit.android.transfer.ConfigExporter
+import com.justspeaktoit.android.transfer.ConfigImportApplier
+import com.justspeaktoit.android.transfer.ConfigImporter
+import com.justspeaktoit.android.transfer.ConfigTransferFiles
+import com.justspeaktoit.android.transfer.ConfigTransferState
+import com.justspeaktoit.android.transfer.ImportPlan
+import com.justspeaktoit.android.transfer.TransferOutcome
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,7 +55,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.security.GeneralSecurityException
 import java.security.ProviderException
 
@@ -151,6 +164,17 @@ class DictationViewModel internal constructor(
     private val historyOwner = DictationHistory(history, recordingsDir, scope, io) { entries, failed ->
         _state.update { it.copy(history = entries, historyError = failed) }
     }
+
+    // One thread owns the transfer files, so dismissing an import never deletes a newer one's files.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val transferIo = io.limitedParallelism(1)
+    private val transferFiles = ConfigTransferFiles(File(cacheDir, "config-transfer"))
+    private val importApplier = ConfigImportApplier(prefs, secrets, recordingsDir, transferIo) { retention, change ->
+        historyOwner.importEntries(retention, change)
+    }
+
+    /** The import the preview describes, applied only when the user confirms it. */
+    private var pendingImport: ImportPlan? = null
 
     private val session: DictationSessionController = DictationSessionController(
         engine = engine,
@@ -551,6 +575,131 @@ class DictationViewModel internal constructor(
                 _state.update { it.copy(transcribingEntryId = null) }
             }
         }
+    }
+
+    fun setExportCredentials(enabled: Boolean) = updateTransfer { it.copy(exportCredentials = enabled) }
+
+    fun setImportCredentials(enabled: Boolean) = updateTransfer { it.copy(importCredentials = enabled) }
+
+    /**
+     * Writes the configuration archive to the stream [open] returns. If the export does not finish,
+     * [discard] removes the partly written file so it is never mistaken for a backup.
+     */
+    fun exportConfiguration(open: () -> OutputStream?, discard: () -> Unit) {
+        val transfer = _state.value.transfer
+        if (transfer.busy) return
+        updateTransfer { it.copy(busy = true, outcome = null, detail = null) }
+        scope.launch {
+            val history = historyOwner.snapshot(_state.value.retention)
+            val ok = withContext(transferIo) {
+                val written = try {
+                    val output = open() ?: throw IOException("The file could not be created.")
+                    output.use {
+                        ConfigExporter.export(it, prefs, history, secrets, transfer.exportCredentials, System.currentTimeMillis())
+                    }
+                    true
+                } catch (_: IOException) {
+                    false
+                } catch (_: SecurityException) {
+                    false
+                } catch (_: GeneralSecurityException) {
+                    false
+                } catch (_: ProviderException) {
+                    false
+                }
+                if (!written) discard()
+                written
+            }
+            updateTransfer {
+                it.copy(busy = false, outcome = if (ok) TransferOutcome.Exported else TransferOutcome.ExportFailed)
+            }
+        }
+    }
+
+    /** Reads the archive [open] returns and shows what importing it would change; nothing changes yet. */
+    fun inspectConfiguration(open: () -> InputStream?) {
+        val current = _state.value
+        if (current.transfer.busy || current.dictation.isActive) return
+        pendingImport = null
+        updateTransfer { it.copy(busy = true, preview = null, importCredentials = false, outcome = null, detail = null) }
+        scope.launch {
+            val history = historyOwner.snapshot(_state.value.retention)
+            var detail: String? = null
+            val plan = withContext(transferIo) {
+                try {
+                    val contents = transferFiles.read(open)
+                    ConfigImporter.plan(contents, prefs, history, secrets.names(), System.currentTimeMillis())
+                } catch (e: ConfigArchiveException) {
+                    detail = e.message
+                    null
+                } catch (_: IOException) {
+                    null
+                } catch (_: SecurityException) {
+                    null
+                }
+            }
+            pendingImport = plan
+            updateTransfer {
+                it.copy(
+                    busy = false,
+                    preview = plan?.preview,
+                    outcome = if (plan == null) TransferOutcome.Unreadable else null,
+                    detail = detail,
+                )
+            }
+        }
+    }
+
+    /** Applies the previewed import all or nothing. Refused while dictating, so a session keeps its settings. */
+    fun applyConfigurationImport() {
+        val plan = pendingImport ?: return
+        val current = _state.value
+        if (current.transfer.busy || current.dictation.isActive) return
+        pendingImport = null
+        val includeCredentials = current.transfer.importCredentials
+        val previousRetention = prefs.retention
+        updateTransfer { it.copy(busy = true) }
+        scope.launch {
+            val ok = importApplier.applyPlan(plan, includeCredentials)
+            withContext(transferIo) { transferFiles.clear() }
+            if (ok) reloadAfterImport(previousRetention)
+            updateTransfer {
+                it.copy(
+                    busy = false,
+                    preview = null,
+                    importCredentials = false,
+                    outcome = if (ok) TransferOutcome.Imported else TransferOutcome.ImportFailed,
+                    generation = if (ok) it.generation + 1 else it.generation,
+                )
+            }
+        }
+    }
+
+    fun dismissConfigurationImport() {
+        if (_state.value.transfer.busy) return
+        pendingImport = null
+        updateTransfer { it.copy(preview = null, importCredentials = false) }
+        scope.launch { withContext(transferIo) { transferFiles.clear() } }
+    }
+
+    private fun reloadAfterImport(previousRetention: Retention) {
+        _state.update {
+            it.copy(
+                cleanupEnabled = prefs.cleanupEnabled,
+                cleanupModel = CloudCatalog.cleanupModel(prefs.cleanupModelId),
+                retention = prefs.retention,
+                keepAudioOnCancel = prefs.keepAudioOnCancel,
+                corrections = prefs.corrections,
+                cleanupPrompt = prefs.cleanupPrompt,
+                profiles = prefs.profiles,
+            )
+        }
+        selector.reload()
+        if (prefs.retention != previousRetention) historyOwner.refresh(prefs.retention, capture::recoverable)
+    }
+
+    private fun updateTransfer(change: (ConfigTransferState) -> ConfigTransferState) {
+        _state.update { it.copy(transfer = change(it.transfer)) }
     }
 
     /** Keeps the foreground service and interruption watching in step with the session. */

@@ -3,6 +3,7 @@ package com.justspeaktoit.android.history
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.io.IOException
 
 /**
  * [Cancelled] is a recording the user cancelled while "Keep audio when a recording is cancelled"
@@ -164,6 +165,27 @@ class HistoryStore(
     /** Clears every entry except those holding a recording, which on Android lives only in History. */
     fun clearKeepingRecordings(retention: Retention): List<HistoryEntry> =
         save(current(retention).filter { it.audioPath != null })
+
+    /**
+     * Replaces History in one write, for an import. Unlike the other changes the file is written
+     * before the cache changes, so a failed write throws and leaves History exactly as it was.
+     */
+    fun replaceAll(retention: Retention, change: (List<HistoryEntry>) -> List<HistoryEntry>): List<HistoryEntry> {
+        val before = current(retention)
+        val next = HistoryPolicy.prune(change(before), now(), retention)
+        if (next.isEmpty()) file.delete() else file.write(HistoryCodec.encode(next))
+        entries = next
+        dirty = false
+        HistoryAudio.released(before, next).forEach(deleteAudio)
+        return next
+    }
+
+    /** The current entries, or the cache when the file cannot be read. */
+    fun snapshot(retention: Retention): List<HistoryEntry> = try {
+        current(retention)
+    } catch (_: IOException) {
+        cached
+    }
 
     private fun current(retention: Retention) = entries ?: load(retention)
 

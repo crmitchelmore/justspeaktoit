@@ -18,6 +18,7 @@ import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
+import com.justspeaktoit.android.transfer.ConfigTransferState
 import java.util.Locale
 
 data class SharedAudioOffer(val uri: Uri, val mimeType: String?)
@@ -90,6 +91,8 @@ data class DictationUiState(
     /** The microphone Cloud recordings use; null is the system default. */
     val audioInputId: String? = null,
     val audioInputs: List<AudioInput> = emptyList(),
+    /** Exporting and importing the configuration archive. */
+    val transfer: ConfigTransferState = ConfigTransferState(),
 ) {
     val audioInputChoice: AudioInputChoice get() = AudioInputChoice.resolve(audioInputId, audioInputs)
 

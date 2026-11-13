@@ -113,6 +113,28 @@ not re-encode the runtime profile list, whose tolerant decoder drops unknown
 matcher kinds and newer routing values. This codec does not itself establish
 owned-file read authority, multi-store consistency or native import availability.
 
+## Android
+
+**Settings → Export and import** writes and reads the same version-2 ZIP
+(`android/app/src/main/java/com/justspeaktoit/android/transfer/`). An export
+always holds the shared settings Android has (keep cancelled audio, cleanup on,
+language, cleanup model, cloud model). It also holds History, kept WAV
+recordings, dictation profiles and corrections (as lexicon rules) when there are
+any, and API keys only when **Include API keys** is on. Android's own mode,
+History retention, cleanup prompt and active profile go in
+`android-settings.json`, which other readers ignore. Connections and model
+references are never written.
+
+Importing copies the file into app storage, validates it as the shared readers
+do (CRC, SHA-256 digest, safe paths, regular files only, size limits) and shows
+a preview of counts for each category before anything changes. Unknown keys,
+kinds Android lacks (pronunciations, connections), unsupported values and
+non-WAV recordings are skipped with a notice. Apply merges rather than replaces:
+recordings and keys are written first, then History in one write, then settings,
+and a failure undoes the earlier steps. API keys are imported only when
+**Import API keys** is on in the preview. An archive whose History is off
+deletes this phone's History once applied, and the preview warns first.
+
 ## Verification
 
 `make test` runs the archive, merge, validation, disk round-trip, separate audio/text,

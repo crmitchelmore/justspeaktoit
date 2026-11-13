@@ -108,6 +108,19 @@ internal class DictationEngineSelector(
         }
     }
 
+    /** Re-reads every saved choice, after an import replaced them, then rechecks availability. */
+    fun reload() {
+        if (sessionActive()) return
+        change {
+            it.copy(
+                chosenMode = prefs.chosenMode,
+                cloudModel = CloudCatalog.transcriptionModel(prefs.cloudModelId),
+                languageId = DictationLanguages.normalized(prefs.languageId),
+            )
+        }
+        refresh()
+    }
+
     /** Null goes back to the best available mode. */
     fun chooseMode(mode: RecognitionMode?) {
         if (sessionActive()) return

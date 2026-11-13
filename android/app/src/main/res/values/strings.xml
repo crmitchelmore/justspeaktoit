@@ -167,7 +167,7 @@
     <string name="clear_history_confirm">Delete all saved dictations?</string>
     <string name="failure_missing_key">Add a cloud API key in Settings to transcribe audio files.</string>
     <string name="failure_audio_too_large">The audio file is larger than the 25 MB the cloud providers accept.</string>
-    <string name="failure_live_only_model">Live models transcribe while you speak and can't transcribe a saved recording. Choose a model without “Streaming” in Settings.</string>
+    <string name="failure_live_only_model">Live models transcribe while you speak and can\'t transcribe a saved recording. Choose a model without “Streaming” in Settings.</string>
     <string name="failure_unsupported_audio">This audio format is not supported. Share MP3, M4A, WAV, OGG, WebM or FLAC.</string>
     <string name="shortcut_dictate_short">Dictate</string>
     <string name="shortcut_dictate_long">Start dictation</string>

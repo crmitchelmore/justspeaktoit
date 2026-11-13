@@ -27,6 +27,18 @@ enum class DictationFailure {
     LanguageNotSupported,
     LanguageUnavailable,
     LeftApp,
+
+    /** A phone or VoIP call took the audio. */
+    InterruptedByCall,
+
+    /** Another app took audio focus for good. */
+    AudioFocusLost,
+
+    /** A headset or Bluetooth microphone was connected or disconnected. */
+    AudioDeviceChanged,
+
+    /** A recording that ended without its owner (the app closed or was stopped) and was saved. */
+    RecordingRecovered,
     Unavailable,
     InvalidKey,
     KeyUnavailable,

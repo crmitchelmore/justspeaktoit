@@ -110,7 +110,7 @@ The flags live in `Project.swift`; release selection is in
 | F22 | Voice edit of selected text | Yes | Yes | Yes | No | No | #1620 | |
 | F23 | Hands-free and silence auto-stop | Yes | Yes | Yes | Yes | No | #1632 | |
 | F24 | Insert text into other apps | Yes | Limited | Yes | Limited | Yes | | |
-| F25 | Recording HUD / live text overlay | Yes | Yes | Yes | Yes | Partial | #1592 | |
+| F25 | Recording HUD / live text overlay | Yes | Yes | Yes | Yes | Partial | #1592 | Android shows an ongoing foreground-service notification with Stop, but no live text. |
 | F26 | Menu bar / tray presence | Yes | N/A | Yes | Yes | N/A | | |
 | F27 | Resources-in-use status | Yes | Yes | Yes | Yes | Yes | | |
 | F28 | Report an issue with diagnostics | Yes | Yes | Yes | Yes | No | #1633 | |
@@ -358,8 +358,8 @@ The flags live in `Project.swift`; release selection is in
 ### F25 Recording HUD / live text overlay
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
 - **Excluded:** none
-- **Gaps:** Android #1592 (foreground-service notification).
-- **How:** Show recording state, level and live text while capturing, and dismiss with the session. iOS uses a Live Activity.
+- **Gaps:** Android #1592: the foreground-service notification shows state and a Stop action but no live text.
+- **How:** Show recording state, level and live text while capturing, and dismiss with the session. iOS uses a Live Activity; Android an ongoing microphone foreground-service notification.
 - **Refs:** `Sources/SpeakApp/HUD/HUDManager.swift`, `Sources/SpeakDesktopHost/Output/DesktopHostHUD.swift`, `Sources/CWindowsSupport/WindowsHUD.cpp`, `Sources/CLinuxSupport/LinuxHUD.c`
 - **Sunset:** none
 - **Nuances:** Providers that retract text need an authoritative transcript snapshot or the Mac drops empty interim callbacks (`Sources/SpeakApp/Live/SharedClientLiveController.swift`).

@@ -39,6 +39,8 @@ data class DictationUiState(
     val keyErrors: Set<CloudProvider> = emptySet(),
     /** True until a discarded recording has released the microphone. */
     val releasingMicrophone: Boolean = false,
+    /** A Cloud recording paused while another app holds audio focus. */
+    val paused: Boolean = false,
     /** Newest first. */
     val history: List<HistoryEntry> = emptyList(),
     val retention: Retention = Retention.Month,

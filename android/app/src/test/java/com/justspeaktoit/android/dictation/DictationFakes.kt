@@ -95,6 +95,49 @@ internal class FakeEngine : SpeechEngine {
     }
 }
 
+/** Records what the session asked for; [signal] delivers an interruption as the platform would. */
+internal class FakeInterruptions : AudioInterruptions {
+    /** The requestFocus argument of each start. */
+    val starts = CopyOnWriteArrayList<Boolean>()
+    @Volatile var stops = 0
+    private var onSignal: ((InterruptionSignal) -> Unit)? = null
+
+    val watching: Boolean get() = onSignal != null
+
+    override fun start(requestFocus: Boolean, onSignal: (InterruptionSignal) -> Unit) {
+        starts += requestFocus
+        this.onSignal = onSignal
+    }
+
+    override fun stop() {
+        stops++
+        onSignal = null
+    }
+
+    /** Call on the ViewModel's main thread. */
+    fun signal(signal: InterruptionSignal) {
+        onSignal?.invoke(signal)
+    }
+}
+
+/** Records every phase shown; [refuses] makes Android refuse to start the service. */
+internal class FakeForeground : ForegroundSession {
+    val shown = CopyOnWriteArrayList<ForegroundPhase>()
+    @Volatile var refuses = false
+    @Volatile var visible = false
+
+    override fun show(phase: ForegroundPhase): Boolean {
+        if (refuses) return false
+        shown += phase
+        visible = true
+        return true
+    }
+
+    override fun hide() {
+        visible = false
+    }
+}
+
 /** Writes a WAV-sized file on start and reports [bytes] on stop. */
 internal class FakeRecorder(
     val file: File,
@@ -109,6 +152,11 @@ internal class FakeRecorder(
     val stopped = CountDownLatch(1)
     @Volatile var stops = 0
     @Volatile var startedCapture = false
+    @Volatile var writing = true
+
+    override fun setPaused(paused: Boolean) {
+        writing = !paused
+    }
 
     override fun start(): Boolean {
         if (!opens) return false
@@ -230,20 +278,24 @@ internal object NoSharedAudio : SharedAudioSource {
  * Builds a real [DictationViewModel] with fakes. Its main thread is a single test thread; the
  * ViewModel is owned by a [ViewModelStore] so [clear] runs the production `onCleared` path.
  */
-internal class ViewModelHarness(root: File) {
+internal class ViewModelHarness(
+    root: File,
+    /** Each harness gets its own lane, so a stalled stop in one test never refuses another's recording. */
+    val retirement: RecorderRetirement = RecorderRetirement(Dispatchers.IO),
+    val historyFile: MemoryHistoryFile = MemoryHistoryFile(),
+) {
     val engine = FakeEngine()
     val recorders = FakeRecorders()
     val cloud = FakeCloud()
     val secrets = MemorySecrets("openai.apiKey" to "sk-test")
     val prefs = MemoryPrefs()
-    val historyFile = MemoryHistoryFile()
     val cacheDir = File(root, "cache").apply { mkdirs() }
     val recordingsDir = File(root, "recordings")
     var timings = DictationTimings()
-    /** Each harness gets its own lane, so a stalled stop in one test never refuses another's recording. */
-    val retirement = RecorderRetirement(Dispatchers.IO)
     /** Each harness lists its own holds, so tests never see another's microphone or request. */
     val resources = SystemResourceRegistry()
+    val interruptions = FakeInterruptions()
+    val foreground = FakeForeground()
 
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "test-main") }
     private val main = executor.asCoroutineDispatcher()
@@ -267,6 +319,8 @@ internal class ViewModelHarness(root: File) {
                     timings = timings,
                     retirement = retirement,
                     resources = resources,
+                    interruptions = interruptions,
+                    foreground = foreground,
                 )
             }
         }

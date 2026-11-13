@@ -9,6 +9,7 @@ import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
@@ -29,7 +30,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * [owns]. Blocking IO runs under an overall deadline, and cancelling it aborts the blocked call.
  *
  * Each recorder is stopped exactly once, by whichever path claims it first: [stop], [discard] or
- * [close]. A recording still owned at [close] is handed to [retirement], which outlives the owner on
+ * [close]. A recording still owned at [close] is handed to [retirement] (which keeps its audio for
+ * recovery rather than deleting it), and the retirement outlives the owner on
  * purpose (the microphone must be released after the screen is gone) and is shared by every owner
  * in the process: it retires an unstopped recording on its one lane, and counts a stop already under
  * way until it settles, so recreated owners cannot multiply stalled stops either way.
@@ -85,7 +87,7 @@ internal class CloudCapture(
     ): Boolean {
         // Orphans are still holding microphones that have not been released.
         if (!retirement.admitsNewRecording()) return false
-        val file = File(cacheDir, "dictation-${System.nanoTime()}.wav")
+        val file = retirement.recordingFile(cacheDir)
         lateinit var recording: Recording
         val recorder = recorders.create(
             file = file,
@@ -121,6 +123,12 @@ internal class CloudCapture(
     suspend fun delete(file: File) {
         withContext(NonCancellable + io) { file.delete() }
     }
+
+    /** Keeps a stopped recording that its session could not finish, for the next History load. */
+    fun abandon(file: File) = retirement.abandon(file)
+
+    /** Recordings left by sessions that ended without finishing them; see [RecorderRetirement.recoverable]. */
+    fun recoverable(): List<File> = retirement.recoverable(cacheDir)
 
     fun release(recording: Recording) {
         if (current === recording) current = null
@@ -177,7 +185,9 @@ internal class CloudCapture(
     ): T = try {
         withTimeout(deadlineMs) {
             coroutineScope {
-                val watchdog = launch {
+                // Undispatched, so its finally is armed before the block runs: a watchdog cancelled
+                // before it was dispatched would never run its body, leaving the block unaborted.
+                val watchdog = launch(start = CoroutineStart.UNDISPATCHED) {
                     try {
                         awaitCancellation()
                     } finally {

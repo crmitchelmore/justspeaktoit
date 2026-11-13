@@ -8,6 +8,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# An explicit scratch path keeps the build and the binary lookup in one place,
+# even when a wrapper on PATH would give each `swift build` its own build area.
+SCRATCH="$ROOT/Tooling/.build"
+
 # Each worktree would otherwise compile SwiftFormat from source (~90s of CPU) on its
 # first autofix. The release binary is shared per user, keyed by the tooling pins,
 # the toolchain and the architecture. JSTI_TOOLING_CACHE=off builds in place as before.
@@ -17,15 +21,15 @@ if [ "$cache_root" != off ]; then
         | shasum -a 256 | cut -c1-16)"
     cached="$cache_root/swiftformat-$key/swiftformat"
     if [ ! -x "$cached" ]; then
-        swift build --package-path Tooling -c release --product swiftformat >&2
+        swift build --package-path Tooling --scratch-path "$SCRATCH" -c release --product swiftformat >&2
         mkdir -p "$(dirname "$cached")"
         staged="$(mktemp "$cached.XXXXXX")"
-        cp "$(swift build --package-path Tooling -c release --show-bin-path)/swiftformat" "$staged"
+        cp "$(swift build --package-path Tooling --scratch-path "$SCRATCH" -c release --show-bin-path)/swiftformat" "$staged"
         chmod +x "$staged"
         mv -f "$staged" "$cached"  # atomic, so concurrent worktrees never run a partial copy
     fi
     exec "$cached" "$@"
 fi
 
-swift build --package-path Tooling -c release --product swiftformat >&2
-exec "$(swift build --package-path Tooling -c release --show-bin-path)/swiftformat" "$@"
+swift build --package-path Tooling --scratch-path "$SCRATCH" -c release --product swiftformat >&2
+exec "$(swift build --package-path Tooling --scratch-path "$SCRATCH" -c release --show-bin-path)/swiftformat" "$@"

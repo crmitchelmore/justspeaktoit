@@ -11,7 +11,7 @@ Platform detail lives in [Android parity matrix](android-parity-matrix.md),
 [desktop settings coverage](desktop-settings-parity.md). This table is the
 cross-platform summary; those documents hold acceptance evidence.
 
-Key: **Yes** implemented; **Partial** implemented with a stated gap; **No** missing
+Key: **Yes** implemented; **Partial** implemented with a gap (tracked by the issue, or an OS limit explained in Notes); **No** missing
 (see the issue); **N/A** the OS cannot support it, with the reason in Notes.
 watchOS is a capture companion (start/stop, complication, transfer to iPhone) and
 is not listed per row. The `speak` CLI, MCP tools and automation socket/pipe are
@@ -23,10 +23,10 @@ row F35.
 | F02 | Custom action shortcuts | Yes | N/A | Yes | Yes | N/A | | No background key handling on iOS/Android. |
 | F03 | Live streaming cloud transcription | Yes | Yes | Yes | Yes | Partial | #1590 | Android partials come only from the platform recogniser. |
 | F04 | Batch cloud provider catalogue | Yes | Yes | Yes | Yes | Partial | #1636 | Android: OpenAI and Groq only. |
-| F05 | Downloaded local transcription models | Yes | Partial | Partial | Yes | No | #1593 | iOS: WhisperKit/Apple on-device, no Hugging Face import. |
+| F05 | Downloaded local transcription models | Yes | Partial | Yes | Yes | No | #1650 | iOS: WhisperKit/Apple on-device, no Hugging Face import. Android runtime assessment: #1593. |
 | F06 | Platform on-device recogniser | Yes | Yes | N/A | N/A | Yes | | Apple Speech and Android `SpeechRecognizer` only; desktops use local models. |
 | F07 | Remote cleanup (OpenRouter and native LLMs) | Yes | Yes | Yes | Yes | Yes | | |
-| F08 | Local LLM cleanup | Yes | Partial | Yes | Yes | No | #1593 | |
+| F08 | Local LLM cleanup | Yes | No | Yes | Yes | No | #1650 | |
 | F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | No | #1591 | |
 | F10 | Browse OpenRouter models picker | Yes | Yes | No | No | Partial | #1618 | Android has a searchable cleanup list only. |
 | F11 | Dictation profiles | Yes | Partial | Yes | Yes | No | #1591 | iOS cannot see the frontmost app; profiles apply through keyboard handoff. |
@@ -59,13 +59,13 @@ row F35.
 | F38 | Tip jar / paid access | Yes | Yes | No | No | No | #1625 | |
 | F39 | Audio file import | Yes | Yes | Yes | Yes | Yes | | |
 | F40 | Launch at login | Yes | N/A | Yes | Yes | N/A | | Mobile apps do not launch at login. |
-| F41 | Updates | Yes | N/A | Partial | Yes | N/A | | Sparkle on Mac; MSIX App Installer and Flatpak repository on desktops; stores elsewhere. |
+| F41 | Updates | Yes | N/A | Yes | Yes | N/A | | Sparkle on Mac; MSIX App Installer and Flatpak repository on desktops; stores elsewhere. |
 | F42 | Microphone selection | Yes | Partial | Yes | Yes | No | #1637 | iOS follows the system route. |
-| F43 | Recording start/stop sounds | Yes | Yes | Partial | Yes | No | #1638 | |
-| F44 | Per-app output target / focus overrides | Yes | Partial | Partial | Partial | N/A | | Mobile keyboards always insert in the focused field. |
+| F43 | Recording start/stop sounds | Yes | Yes | Yes | Yes | No | #1638 | |
+| F44 | Per-app output target (profiles) / Focus overrides | Yes | Yes | Yes | Partial | N/A | | iOS uses Focus filters instead of app detection. Linux app detection depends on the Wayland compositor. Android keyboards always insert in the focused field. |
 | F45 | Recording audio housekeeping | Yes | Yes | Yes | Yes | Partial | #1629 | Android deletes cloud audio after upload. |
 | F46 | Send transcripts from phone to desktop | Yes | Yes | No | No | No | #1640 | Receiver on desktops, sender on Android. |
 | F47 | Accessible names, IDs and recording announcements | Yes | Yes | Yes | Yes | Yes | | Owner passes tracked in #1399; see [accessibility](accessibility.md). |
-| F48 | Learned auto-corrections | Yes | Partial | Yes | Yes | No | #1626 | Desktops share `DesktopHostCorrectionLearning`. |
-| F49 | Appearance settings | Yes | Yes | Yes | Yes | Partial | | Android follows the system theme. |
+| F48 | Learned auto-corrections | Yes | No | Yes | Yes | No | #1651 | Desktops share `DesktopHostCorrectionLearning`; iOS has automatic polish only. |
+| F49 | Appearance settings | Yes | Yes | Yes | Yes | No | #1652 | Android always follows the system theme. |
 | F50 | Keyboard / IME surface | N/A | Yes | N/A | N/A | Yes | | Desktops use hotkeys and direct insertion instead. |

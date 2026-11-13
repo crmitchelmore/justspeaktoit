@@ -26,6 +26,8 @@ import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.settings.DictationPreferences
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RawConfigurationValues
+import com.justspeaktoit.android.settings.RecordingCue
+import com.justspeaktoit.android.settings.RecordingSoundSettings
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +76,7 @@ class DictationViewModel internal constructor(
     private val foreground: ForegroundSession = NoForegroundSession,
     // Told when a dictation produces a transcript; only its mode and model are passed, never the text.
     private val onTranscriptionSucceeded: (RecognitionMode, CloudModel) -> Unit = { _, _ -> },
+    private val sounds: RecordingSoundOutput? = null,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     private val capture = CloudCapture(recorders, cacheDir, io, retirement, resources)
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
@@ -98,6 +101,7 @@ class DictationViewModel internal constructor(
             corrections = prefs.corrections,
             cleanupPrompt = prefs.cleanupPrompt,
             profiles = prefs.profiles,
+            recordingSounds = prefs.recordingSounds,
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
@@ -123,6 +127,10 @@ class DictationViewModel internal constructor(
                 get() = _state.value.let { if (it.cleanupReady) it.sessionCleanupModel else null }
             override val cleanupPrompt: String? get() = _state.value.sessionCleanupPrompt
             override val corrections: List<CorrectionRule> get() = _state.value.corrections
+        },
+        cues = { cue ->
+            val choice = _state.value.recordingSounds
+            if (choice.enabled) sounds?.play(cue, choice.profile, choice.gain) ?: 0L else 0L
         },
         publish = { s ->
             // Before the screen sees the change, so the service and watching are in step with it.
@@ -241,6 +249,18 @@ class DictationViewModel internal constructor(
     fun setCorrections(rules: List<CorrectionRule>) {
         prefs.corrections = rules
         _state.update { it.copy(corrections = rules) }
+    }
+
+    /** Saves the shared start/stop sound settings; they apply from the next cue. */
+    fun setRecordingSounds(choice: RecordingSoundSettings) {
+        prefs.recordingSounds = choice
+        _state.update { it.copy(recordingSounds = choice) }
+    }
+
+    /** Plays the chosen profile's start cue so the user can hear the profile and volume. */
+    fun previewRecordingSound() {
+        val choice = _state.value.recordingSounds
+        sounds?.play(RecordingCue.Start, choice.profile, choice.gain)
     }
 
     fun chooseCleanupModel(model: CleanupModel) {
@@ -461,6 +481,7 @@ class DictationViewModel internal constructor(
         if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
         engine.close()
         session.close()
+        sounds?.close()
     }
 
     companion object {
@@ -492,6 +513,7 @@ class DictationViewModel internal constructor(
             onTranscriptionSucceeded = { mode, model ->
                 (application as? JustSpeakApplication)?.telemetry?.transcriptionSucceeded(mode, model)
             },
+            sounds = RecordingSoundPlayer(application),
         )
     }
 }

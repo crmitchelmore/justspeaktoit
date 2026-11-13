@@ -78,6 +78,12 @@ object AutomationIds {
 
     /** One per profile row in Settings, keyed by its position. */
     fun profileEdit(index: Int) = "settings.profiles.edit.$index"
+    const val SETTINGS_SOUNDS_ENABLED = "settings.recordingSounds.enabled"
+    const val SETTINGS_SOUNDS_VOLUME = "settings.recordingSounds.volume"
+    const val SETTINGS_SOUNDS_PREVIEW = "settings.recordingSounds.preview"
+
+    /** One per sound profile, keyed by its shared ID (for example `classic`). */
+    fun soundProfile(id: String) = "settings.recordingSounds.profile.$id"
     const val SETTINGS_LANGUAGE = "settings.language"
     const val CORRECTIONS_WRITE_AS = "settings.corrections.writeAs"
     const val CORRECTIONS_HEARD_AS = "settings.corrections.heardAs"

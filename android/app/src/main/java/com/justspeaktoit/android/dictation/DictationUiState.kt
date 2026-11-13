@@ -11,6 +11,7 @@ import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.settings.DictationProfile
+import com.justspeaktoit.android.settings.RecordingSoundSettings
 import java.util.Locale
 
 data class SharedAudioOffer(val uri: Uri, val mimeType: String?)
@@ -63,6 +64,7 @@ data class DictationUiState(
     val profiles: List<DictationProfile> = emptyList(),
     /** The active profile; its choices override the user's own for new sessions. */
     val profile: DictationProfile? = null,
+    val recordingSounds: RecordingSoundSettings = RecordingSoundSettings(),
 ) {
     /** The cloud model a new Cloud session uses: the profile's, else the user's. */
     val sessionCloudModel: CloudModel get() = profile?.cloudModel ?: cloudModel

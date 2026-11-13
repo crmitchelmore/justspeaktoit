@@ -176,6 +176,13 @@
     <string name="raw_config_exported">Settings exported.</string>
     <string name="raw_config_imported">Imported and valid. Apply to use these settings.</string>
     <string name="raw_config_file_error">The file could not be read or written.</string>
+    <string name="settings_sounds_title">Recording sounds</string>
+    <string name="settings_sounds_enabled">Play start and stop sounds</string>
+    <string name="settings_sounds_note">A short sound when recording starts and when it stops. Cloud recordings leave the sounds out of the audio they send.</string>
+    <string name="settings_sounds_profile">Sound profile</string>
+    <string name="settings_sounds_volume">Volume</string>
+    <string name="settings_sounds_volume_value">%1$d%%</string>
+    <string name="settings_sounds_preview">Play sample</string>
     <string name="settings_resources_title">System resources in use</string>
     <string name="settings_resources_note">What the app holds right now, why, and since when. Release stops it.</string>
     <string name="settings_resources_releasing">Releasing…</string>

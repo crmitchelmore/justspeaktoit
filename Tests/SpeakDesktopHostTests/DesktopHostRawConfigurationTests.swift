@@ -118,6 +118,27 @@ final class DesktopHostRawConfigurationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: other.path))
     }
 
+    func testApply_KeepsOtherPlatformsKeysInTheRefreshedEditorAndAnnouncesWarnings() async throws {
+        let desktopKeys = Set(SettingsSchema.fields(for: .windows).map(\.key))
+        let foreign = try XCTUnwrap(SettingsSchema.knownKeys.subtracting(desktopKeys).sorted().first)
+        let outcome = await controller.rawConfiguration(
+            .apply, text: try await edited(["showHUD": .bool(false), foreign: .string("kept")])
+        )
+        XCTAssertFalse(outcome.failed, outcome.issuesText)
+        let refreshed = try SettingsDocument.parse(Data(try XCTUnwrap(outcome.text).utf8)).get()
+        XCTAssertEqual(refreshed.settings[foreign], .string("kept"))
+        XCTAssertEqual(refreshed.settings["showHUD"], .bool(false))
+        XCTAssertEqual(outcome.announcement, "\(outcome.status) \(outcome.warnings[0])")
+    }
+
+    func testDefaults_WarnsThatSettingsWithoutADefaultKeepTheirSavedValue() async throws {
+        let modulate = try XCTUnwrap(DesktopConfiguration.modulatePreferenceKeys.sorted().first)
+        _ = await controller.rawConfiguration(.apply, text: try await edited([modulate: .bool(true)]))
+        let defaults = await controller.rawConfiguration(.defaults, text: "")
+        XCTAssertFalse(defaults.failed, defaults.issuesText)
+        XCTAssertTrue(defaults.warnings.contains { $0.hasPrefix("settings.\(modulate):") }, defaults.issuesText)
+    }
+
     private func edited(_ changes: [String: JSONValue]) async throws -> String {
         let loaded = await controller.rawConfiguration(.load, text: "")
         var document = try SettingsDocument.parse(Data(try XCTUnwrap(loaded.text).utf8)).get()

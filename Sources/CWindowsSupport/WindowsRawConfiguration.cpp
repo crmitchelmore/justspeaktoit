@@ -26,7 +26,7 @@ enum Control {
 enum Action { loadAction = 0, validateAction, applyAction, defaultsAction, importAction, exportAction };
 constexpr DWORD windowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
 constexpr DWORD windowExStyle = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
-constexpr int minimumClientWidth = 640, minimumClientHeight = 480;
+constexpr int minimumClientWidth = 720, minimumClientHeight = 480;
 constexpr UINT outcomeMessage = WM_APP + 43;
 // The host refuses imports over 1 MB; leave room for its reformatting.
 constexpr size_t maximumText = 4u << 20;
@@ -136,6 +136,8 @@ void updateEnabled(HWND window, const Dialog &dialog) {
     const bool idle = dialog.outstanding == 0;
     for (int id : {resetID, importID, exportID, validateID}) EnableWindow(GetDlgItem(window, id), idle);
     EnableWindow(GetDlgItem(window, applyID), idle && dialog.loaded);
+    // An answer may replace the text, so typing waits for it.
+    SendDlgItemMessageW(window, editorID, EM_SETREADONLY, idle ? FALSE : TRUE, 0);
 }
 
 void show(HWND window, Dialog &dialog, const Outcome &outcome) {

@@ -33,6 +33,8 @@ static void set_busy(gboolean busy) {
     if (raw.window == NULL) return;
     GtkWidget *actions[] = { raw.reset, raw.import, raw.export, raw.validate, raw.apply };
     for (gsize i = 0; i < G_N_ELEMENTS(actions); i++) gtk_widget_set_sensitive(actions[i], !busy);
+    /* An answer may replace the text, so typing waits for it. */
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(raw.editor), !busy);
 }
 
 static void request(gint action, const char *text) {

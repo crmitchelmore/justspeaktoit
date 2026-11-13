@@ -41,9 +41,9 @@ package struct DesktopRawConfigurationOutcome: Equatable, Sendable {
         (errors.map { "Error: \($0)" } + warnings.map { "Warning: \($0)" }).joined(separator: "\n")
     }
 
-    /// The status and the first error, which the window announces.
+    /// The status and the first error, or else the first warning, which the window announces.
     package var announcement: String {
-        errors.first.map { "\(status) \($0)" } ?? status
+        (errors.first ?? warnings.first).map { "\(status) \($0)" } ?? status
     }
 }
 
@@ -65,9 +65,7 @@ extension DesktopHostController {
             case .load:
                 return DesktopRawConfigurationOutcome(text: try Self.rawJSON(automationSettingsDocument()), status: "")
             case .defaults:
-                return DesktopRawConfigurationOutcome(
-                    text: try Self.rawJSON(rawConfigurationDefaults()), status: "Defaults loaded. Apply to save them."
-                )
+                return try rawConfigurationDefaultsOutcome()
             case .validate:
                 return try validateRawConfiguration(text).outcome
             case .apply:
@@ -84,6 +82,19 @@ extension DesktopHostController {
         }
     }
 
+    /// Settings with no default (the Modulate features, whose provider default
+    /// is chosen by removing the key) keep their saved value: a document can't
+    /// remove a key, so the window says so instead of implying a reset.
+    private func rawConfigurationDefaultsOutcome() throws -> DesktopRawConfigurationOutcome {
+        let document = try rawConfigurationDefaults()
+        let kept = SettingsSchema.fields(for: Self.settingsSchemaPlatform)
+            .filter { !$0.isReadOnly && $0.defaultValue == nil && document.settings[$0.key] != nil }
+            .map { "settings.\($0.key): No default; kept the saved value. Change it in Preferences." }
+        return DesktopRawConfigurationOutcome(
+            text: try Self.rawJSON(document), status: "Defaults loaded. Apply to save them.", warnings: kept
+        )
+    }
+
     /// Every editable setting at its default, keeping read-only values and
     /// which API keys are stored.
     func rawConfigurationDefaults() throws -> SettingsDocument {
@@ -95,6 +106,7 @@ extension DesktopHostController {
     }
 
     private struct RawValidation {
+        var document: SettingsDocument?
         var report: SettingsValidationReport?
         var outcome: DesktopRawConfigurationOutcome
     }
@@ -114,7 +126,7 @@ extension DesktopHostController {
             let count = report.changes.count
             let ready = count == 0 ? "Valid. Nothing to change." : "Valid. \(count) change(s) ready."
             let status = report.isValid ? ready : "The configuration is not valid. Nothing was saved."
-            return RawValidation(report: report, outcome: DesktopRawConfigurationOutcome(
+            return RawValidation(document: document, report: report, outcome: DesktopRawConfigurationOutcome(
                 status: status, errors: report.errors.map(\.description), warnings: report.warnings.map(\.description)
             ))
         }
@@ -141,9 +153,11 @@ extension DesktopHostController {
         }
         let status = "Saved \(report.changes.count) change(s)."
         try await saveSettingsDocumentChanges(candidate, from: previous, status: status)
-        return DesktopRawConfigurationOutcome(
-            text: try Self.rawJSON(automationSettingsDocument()), status: status, warnings: warnings
-        )
+        // Keys owned by another platform were kept but ignored; keep them in
+        // the editor so a later export still carries them.
+        var saved = try automationSettingsDocument()
+        for key in report.ignoredKeys { saved.settings[key] = validation.document?.settings[key] }
+        return DesktopRawConfigurationOutcome(text: try Self.rawJSON(saved), status: status, warnings: warnings)
     }
 
     /// Loads a file into the editor and checks it. Nothing is saved until Apply.

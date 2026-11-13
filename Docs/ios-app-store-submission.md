@@ -339,8 +339,13 @@ export/upload, checks the **actual bundled** privacy manifests, their audited
 required reasons, collected-data field types, microphone/speech purpose
 strings and excluded Store product analytics. It also reads the compiler's
 `Metadata.appintents/extract.actionsdata`: description keys are checked for
-the rejected terms and final period; App Shortcuts are limited to ten and
-phrases must contain the application-name placeholder. Unrecognized localized
+the rejected terms and final period; App Shortcuts are limited to ten,
+phrases must contain the application-name placeholder, and the iOS app must
+register at least one. Xcode merges a static library's actions into the app
+but drops its `autoShortcuts`, so `TranscriptionShortcuts` lives in the app
+target (`SpeakiOSApp/`) and includes the library's intents through
+`AppIntentsPackage`. CI's iOS build runs `scripts/ios/check-app-shortcuts.py`,
+which requires every declared shortcut in the built app. Unrecognized localized
 description alternatives fail for explicit review rather than being ignored.
 This does not validate every localization or Apple's server-side rules.
 A dependency's manifest cannot stand

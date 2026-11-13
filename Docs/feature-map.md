@@ -119,11 +119,11 @@ The flags live in `Project.swift`; release selection is in
 | F31 | API keys page | Yes | Yes | Yes | Yes | Yes | | |
 | F32 | Provider credit balances | Yes | Yes | No | No | No | #1621 | |
 | F33 | Configuration export/import and backup | Yes | Yes | Partial | Partial | No | #1635 | |
-| F34 | Raw settings editor and config tools | Yes | No | No | No | No | #1608 | |
+| F34 | Raw settings editor and config tools | Yes | Partial | Partial | Partial | Partial | #1608 | iOS and Android have the raw JSON editor but no automation server, so no config tools; iOS Read aloud settings are not in the schema yet (#1671). Windows and Linux have `speak config` and MCP `get_configuration`/`set_configuration`; no raw JSON editor window yet (#1670). |
 | F35 | Automation (CLI, MCP, App Intents) | Yes | Yes | Yes | Yes | Limited | | |
 | F36 | Usage insights dashboard | Yes | No | Yes | Yes | Partial | #1623 | Android: 7-day card on History. |
-| F37 | Opt-in analytics and crash reporting | Yes | Yes | No | No | No | #1624 | |
-| F38 | Tip jar / paid access | Yes | Yes | No | No | No | #1625 | Paid access is compiled dark. |
+| F37 | Opt-in analytics and crash reporting | Yes | Yes | No | No | Yes | #1624 | |
+| F38 | Tip jar / paid access | Yes | Yes | No | No | Partial | #1625 | Paid access is compiled dark. Android: tip jar only. |
 | F39 | Audio file import | Yes | Yes | Yes | Yes | Yes | | |
 | F40 | Launch at login | Yes | N/A | Yes | Yes | N/A | | |
 | F41 | Updates | Yes | N/A | Yes | Yes | N/A | | |
@@ -131,7 +131,7 @@ The flags live in `Project.swift`; release selection is in
 | F43 | Recording start/stop sounds | Yes | Yes | Yes | Yes | No | #1638 | |
 | F44 | Per-app output target (profiles) / Focus overrides | Yes | Yes | Yes | Limited | N/A | | |
 | F45 | Recording audio housekeeping | Yes | Yes | Yes | Yes | Partial | #1629 | |
-| F46 | Send transcripts from phone to desktop | Yes | Partial | No | No | No | #1640 | iOS: Handoff and History sync, no direct sender. |
+| F46 | Send transcripts from phone to desktop | Yes | Partial | No | No | No | #1640 | iOS: Handoff and History sync, no direct sender. macOS: direct build only; the Mac App Store build has no receiver. |
 | F47 | Accessible names, IDs and recording announcements | Yes | Yes | Yes | Yes | Yes | | |
 | F48 | Learned auto-corrections | Yes | No | Yes | Yes | No | #1651 | |
 | F49 | Appearance settings | Yes | Yes | Yes | Yes | No | #1652 | |
@@ -437,11 +437,11 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Never turn a missing category into an empty replacement. See [configuration transfer](configuration-transfer.md) and [data migration](data-migration.md).
 
 ### F34 Raw settings editor and config tools
-- **Platforms:** macOS Yes · iOS No · Windows No · Linux No · Android No
+- **Platforms:** macOS Yes · iOS Partial · Windows Partial · Linux Partial · Android Partial
 - **Excluded:** none
-- **Gaps:** iOS, Windows, Linux, Android #1608.
+- **Gaps:** iOS, Windows, Linux, Android #1608 (Windows and Linux lack only the raw JSON editor window, #1670; iOS Read aloud settings, #1671; iOS and Android have no automation server for the config tools).
 - **How:** One JSON document of canonical keys with all-or-nothing validation, no secrets, and keys for other platforms preserved; the same document backs `speak config` and the MCP configuration tools.
-- **Refs:** `Sources/SpeakCore/Automation/AutomationConfiguration.swift`, `Sources/SpeakApp/Views/Settings/RawConfigurationEditorView.swift`, `Sources/SpeakApp/Transport/AppAutomationHandler+Configuration.swift`
+- **Refs:** `Sources/SpeakCore/Automation/AutomationConfiguration.swift`, `Sources/SpeakCore/SettingsConfiguration/SettingsSchema+Desktop.swift`, `Sources/SpeakDesktopHost/Automation/DesktopHostAutomationConfiguration.swift`, `Sources/SpeakiOS/Views/Settings/IOSRawConfigurationEditorView.swift`, `android/app/src/main/java/com/justspeaktoit/android/settings/RawConfiguration.kt`, `Sources/SpeakApp/Views/Settings/RawConfigurationEditorView.swift`, `Sources/SpeakApp/Transport/AppAutomationHandler+Configuration.swift`
 - **Sunset:** none
 - **Nuances:** The desktop Preferences editor (`Sources/SpeakDesktopHost/Settings/DesktopHostConfigurationEditor.swift`) is a typed form, not this feature.
 
@@ -464,22 +464,22 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Count only completed entries with text, as `HistoryInsights` does.
 
 ### F37 Opt-in analytics and crash reporting
-- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android Yes
 - **Excluded:** none
-- **Gaps:** Windows, Linux, Android #1624.
-- **How:** Nothing is sent until the user opts in; crash events are scrubbed before upload.
-- **Refs:** `Sources/SpeakApp/Analytics/AnalyticsLocalPolicy.swift`, `Sources/SpeakApp/Analytics/PostHogAnalytics.swift`, `Sources/SpeakApp/Analytics/SentryManager.swift`, `Sources/SpeakApp/Analytics/SentryEventScrubber.swift`
+- **Gaps:** Windows, Linux #1624.
+- **How:** Nothing is sent until the user opts in; crash events are scrubbed before upload. Withdrawing consent drops queued analytics events (cancelling one in flight) and deletes queued crash reports without sending them.
+- **Refs:** `Sources/SpeakApp/Analytics/AnalyticsLocalPolicy.swift`, `Sources/SpeakApp/Analytics/PostHogAnalytics.swift`, `Sources/SpeakApp/Analytics/SentryManager.swift`, `Sources/SpeakApp/Analytics/SentryEventScrubber.swift`, `android/app/src/main/java/com/justspeaktoit/android/telemetry/ProductAnalytics.kt`, `android/app/src/main/java/com/justspeaktoit/android/telemetry/SentryCrashReporter.kt`
 - **Sunset:** none
 - **Nuances:** Sentry is EU-hosted; PostHog covers product events only ([analytics plan](analytics-plan.md), [PostHog maintenance](posthog-maintenance.md)).
 
 ### F38 Tip jar / paid access
-- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android Partial
 - **Excluded:** none
-- **Gaps:** Windows, Linux, Android #1625.
-- **How:** The tip jar uses StoreKit. Paid access proxies requests through a Cloudflare Worker (`workers/paid-access`) that holds vendor keys, so subscribers need no API keys; it is entitlement-checked at routing time.
-- **Refs:** `Sources/SpeakApp/App/TipStore.swift`, `Sources/SpeakApp/Views/TipJarView.swift`, `Sources/SpeakApp/PaidAccess/PaidAccessManager.swift`, `workers/paid-access`
+- **Gaps:** Windows, Linux, Android #1625 (Android: tip jar only, no paid access).
+- **How:** The tip jar uses StoreKit, and Google Play Billing consumables with the same product IDs on Android. Paid access proxies requests through a Cloudflare Worker (`workers/paid-access`) that holds vendor keys, so subscribers need no API keys; it is entitlement-checked at routing time.
+- **Refs:** `Sources/SpeakApp/App/TipStore.swift`, `Sources/SpeakApp/Views/TipJarView.swift`, `Sources/SpeakApp/PaidAccess/PaidAccessManager.swift`, `workers/paid-access`, `android/app/src/main/java/com/justspeaktoit/android/tips/PlayBillingTipStore.kt`
 - **Sunset:** Paid access stays compiled dark (`TUIST_PAID_ACCESS`) until the owner launches it ([paid access](paid-access.md)).
-- **Nuances:** Use `@ObservedObject` for `TipStore.shared`, never `@StateObject`. Stale preferences can't enable paid access in a public build.
+- **Nuances:** Use `@ObservedObject` for `TipStore.shared`, never `@StateObject`. Stale preferences can't enable paid access in a public build. Android thanks the user only after Play confirms the consume, and retries a failed one so the tier can be bought again and isn't refunded.
 
 ### F39 Audio file import
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
@@ -549,9 +549,9 @@ The flags live in `Project.swift`; release selection is in
 - **Excluded:** none
 - **Gaps:** iOS, Windows, Linux, Android #1640.
 - **How:** The Mac runs a user-enabled, paired, encrypted WebSocket receiver (`SpeakTransportWire` v2 over Bonjour) that inserts at the cursor. A phone sender must use the same protocol.
-- **Refs:** `Sources/SpeakCore/Sync/Apple/TransportChannel.swift`, `Sources/SpeakApp/Transport/TransportServer.swift`, `Sources/SpeakiOS/Services/TranscriptHandoffPublisher.swift`, `Docs/MACOS_RECEIVER.md`
+- **Refs:** `Sources/SpeakCore/Sync/Apple/TransportChannel.swift`, `Sources/SpeakApp/Transport/TransportServer.swift`, `Sources/SpeakApp/Transport/SendToMacAvailability.swift`, `Sources/SpeakiOS/Services/TranscriptHandoffPublisher.swift`, `Docs/MACOS_RECEIVER.md`
 - **Sunset:** none
-- **Nuances:** iPhone has no direct sender: it reaches the Mac through Handoff ("Continue on Mac") and History sync. v1 plaintext peers are refused.
+- **Nuances:** iPhone has no direct sender: it reaches the Mac through Handoff ("Continue on Mac") and History sync. v1 plaintext peers are refused. The receiver ships only in the direct macOS build: the Mac App Store build has no `network.server` entitlement or Bonjour service and hides Send to Mac (`SendToMacAvailability`).
 
 ### F47 Accessible names, IDs and recording announcements
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

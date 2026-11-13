@@ -206,6 +206,10 @@ def main():
             raise SystemExit('Signed archive has the wrong App Groups')
         if surface == 'mac-store' and entitlements.get('com.apple.security.app-sandbox') is not True:
             raise SystemExit('App Store archive is not sandboxed')
+        if surface == 'mac-store' and 'com.apple.security.network.server' in entitlements:
+            raise SystemExit('App Store archive has network.server without a listener')  # App Review rejects it unused
+        if surface == 'mac-store' and any(key in info for key in ['NSLocalNetworkUsageDescription', 'NSBonjourServices']):
+            raise SystemExit('App Store archive declares an unavailable local-network feature')
     bundles = list(app.rglob('*.appex'))
     if surface == 'ios':
         bundles.extend((app / 'Watch').glob('*.app'))

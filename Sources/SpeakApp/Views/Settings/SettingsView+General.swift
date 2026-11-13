@@ -292,7 +292,9 @@ extension SettingsView {
       }
       .speakTooltip("Trade a little idle work for a faster start when you press your dictation shortcut.")
 
-      SendToMacSettingsCard()
+      if SendToMacAvailability.isAvailable {
+        SendToMacSettingsCard()
+      }
 
       ICloudSyncSettingsCard()
 

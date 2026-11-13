@@ -54,7 +54,8 @@ enum IOSSettingsSearch {
 
     /// Entries whose settings live on the API Keys page rather than the main list.
     static func opensAPIKeys(_ entry: SettingsSearchEntry) -> Bool {
-        entry.id.hasPrefix(apiKeyEntryPrefix) || entry.id == "apiKeys.alibaba" || entry.id == "apiKeys.azure"
+        entry.id.hasPrefix(apiKeyEntryPrefix)
+            || ["apiKeys.alibaba", "apiKeys.stepfun", "apiKeys.azure"].contains(entry.id)
     }
 }
 

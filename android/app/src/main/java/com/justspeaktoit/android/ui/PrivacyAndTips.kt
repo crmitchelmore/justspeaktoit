@@ -141,6 +141,7 @@ internal fun TipJarSection(state: TipJarUiState, onTip: (String) -> Unit) {
     val message = when (state.message) {
         TipMessage.Thanks -> R.string.tip_jar_thanks
         TipMessage.Pending -> R.string.tip_jar_pending
+        TipMessage.Unconfirmed -> R.string.tip_jar_unconfirmed
         TipMessage.Failed -> R.string.tip_jar_failed
         null -> null
     }

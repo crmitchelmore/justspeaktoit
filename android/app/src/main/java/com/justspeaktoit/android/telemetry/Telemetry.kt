@@ -1,5 +1,6 @@
 package com.justspeaktoit.android.telemetry
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -70,16 +71,31 @@ class Telemetry(
             return Telemetry(store, analytics, crashes)
         }
 
+        // InstallSource.installer calls `current` only on API 30+, which Lint cannot see through the lambda.
+        @SuppressLint("NewApi")
         private fun installedFromPlay(context: Context): Boolean {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+            val packageManager = context.packageManager
             val installer = try {
-                context.packageManager.getInstallSourceInfo(context.packageName).installingPackageName
+                InstallSource.installer(
+                    Build.VERSION.SDK_INT,
+                    current = { packageManager.getInstallSourceInfo(context.packageName).installingPackageName },
+                    // The only lookup API 29 has; minSdk is 29, and getInstallSourceInfo needs 30.
+                    legacy = @Suppress("DEPRECATION") { packageManager.getInstallerPackageName(context.packageName) },
+                )
             } catch (_: PackageManager.NameNotFoundException) {
                 null
             }
-            return installer == PLAY_STORE
+            return InstallSource.isPlayStore(installer)
         }
-
-        private const val PLAY_STORE = "com.android.vending"
     }
+}
+
+/** Which installer put the app on the device, by the API each Android version offers. */
+internal object InstallSource {
+    private const val PLAY_STORE = "com.android.vending"
+
+    fun installer(sdkInt: Int, current: () -> String?, legacy: () -> String?): String? =
+        if (sdkInt >= Build.VERSION_CODES.R) current() else legacy()
+
+    fun isPlayStore(installer: String?): Boolean = installer == PLAY_STORE
 }

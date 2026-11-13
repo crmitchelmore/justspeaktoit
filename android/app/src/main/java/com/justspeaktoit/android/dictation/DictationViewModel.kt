@@ -25,6 +25,7 @@ import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.settings.DictationPreferences
 import com.justspeaktoit.android.settings.DictationProfile
+import com.justspeaktoit.android.settings.RawConfigurationValues
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -128,7 +129,8 @@ class DictationViewModel internal constructor(
             onSessionChanged(s)
             val finished = s.dictation as? DictationState.Done
             if (finished != null && _state.value.dictation !is DictationState.Done) {
-                onTranscriptionSucceeded(finished.mode, _state.value.cloudModel)
+                // The session's own model: a profile can override the Settings one for a single session.
+                onTranscriptionSucceeded(finished.mode, CloudCatalog.transcriptionModel(session.sessionModelId))
             }
             _state.update {
                 it.copy(
@@ -287,6 +289,29 @@ class DictationViewModel internal constructor(
     fun setKeepAudioOnCancel(enabled: Boolean) {
         prefs.keepAudioOnCancel = enabled
         _state.update { it.copy(keepAudioOnCancel = enabled) }
+    }
+
+    /**
+     * Applies validated raw-configuration changes (see [RawConfiguration]) through the same paths as the
+     * Settings controls, all of them or, while a dictation is running, none: returns false then.
+     */
+    fun applyConfiguration(changes: Map<String, Any?>): Boolean {
+        if (_state.value.dictation.isActive) return false
+        changes.forEach { (key, value) ->
+            when (key) {
+                "chosen_mode" -> selector.chooseMode((value as String?)?.let(RecognitionMode::valueOf))
+                "cloud_model" -> chooseCloudModel(CloudCatalog.transcriptionModel(value as String))
+                "preferredLocale" -> chooseLanguage(value as String)
+                "personal_corrections" ->
+                    setCorrections(RawConfigurationValues.corrections(value as Map<*, *>, _state.value.corrections))
+                "cleanup_enabled" -> setCleanupEnabled(value as Boolean)
+                "cleanup_model" -> chooseCleanupModel(CloudCatalog.cleanupModel(value as String))
+                "keepAudioOnCancel" -> setKeepAudioOnCancel(value as Boolean)
+                "history_retention" -> setRetention(Retention.valueOf(value as String))
+                else -> error("No raw-configuration binding for $key")
+            }
+        }
+        return true
     }
 
     fun saveKey(provider: CloudProvider, key: String) =

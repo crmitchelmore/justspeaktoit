@@ -21,6 +21,9 @@ extension SettingsView {
           SettingsCard(title: "Alibaba workspace for new keys", systemImage: "waveform", tint: .brandAccent) {
             AlibabaSpeechConfigurationFields()
           }
+          SettingsCard(title: "StepFun region for new keys", systemImage: "globe", tint: .brandAccent) {
+            StepFunRegionField()
+          }
           SettingsCard(title: "Azure Speech resource", systemImage: "cloud", tint: .brandAccent) {
             AzureSpeechEndpointField()
           }

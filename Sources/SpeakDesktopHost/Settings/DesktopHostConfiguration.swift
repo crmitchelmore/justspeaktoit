@@ -105,7 +105,7 @@ extension DesktopHostController {
         )
     }
 
-    private func reconcilingPronunciationSelection(
+    func reconcilingPronunciationSelection(
         _ configuration: DesktopConfiguration, from previous: DesktopConfiguration,
         editor: DesktopHostConfigurationEditorBasis?
     ) async throws -> DesktopConfiguration {
@@ -130,7 +130,7 @@ extension DesktopHostController {
         return try configuration.recordingPronunciationKeytermSelection(from: previous, modern: hints.pronunciationWords)
     }
 
-    private func persistConfiguration( // swiftlint:disable:this function_body_length
+    func persistConfiguration( // swiftlint:disable:this function_body_length
         _ configuration: DesktopConfiguration, intent: DesktopConfigurationSaveIntent, status: String
     ) async throws {
         invalidateConnectionPreWarming(resetCapture: true)
@@ -276,7 +276,10 @@ extension DesktopHostController {
         var voice = changed.voiceOutput
         changed.configuration = try importingAutomationPreferences(
             Platform.importVoiceConfiguration(
-                from: DesktopConnectionPreWarming.removingApproval(from: document.preferences), into: &voice
+                from: keepingLocalAutomationWriteGrant(
+                    DesktopConnectionPreWarming.removingApproval(from: document.preferences)
+                ),
+                into: &voice
             )
         )
         applyingAutomationRevocation(to: &changed)

@@ -42,6 +42,7 @@ struct APIKeysView: View {
     var body: some View {
         Form {
             Section("Alibaba workspace for new keys") { AlibabaSpeechConfigurationFields() }
+            Section("StepFun region for new keys") { StepFunRegionField() }
             Section("Azure Speech resource") { AzureSpeechEndpointField() }
             if visibleEntries.isEmpty {
                 let empty = APIKeyListQuery.emptyState(status: statusFilter, searchText: searchText)
@@ -193,8 +194,13 @@ struct APIKeysView: View {
     private func saveKeys() {
         let submission = self.drafts.submission()
         let order = self.allEntries.map(\.id)
-        let alibabaCredential = submission["alibaba"].map { key in
-            Result { try AlibabaSpeechConfiguration.credentialsForSaving(key) }
+        // Region-bound credentials read their new-key drafts when Save is pressed.
+        var taggedCredentials: [String: Result<String, Error>] = [:]
+        if let key = submission["alibaba"] {
+            taggedCredentials["alibaba"] = Result { try AlibabaSpeechConfiguration.credentialsForSaving(key) }
+        }
+        if let key = submission["stepfun"] {
+            taggedCredentials["stepfun"] = Result { try StepFunCredential.credentialsForSaving(key) }
         }
         Task {
             isValidating = true
@@ -202,8 +208,8 @@ struct APIKeysView: View {
             for id in order {
                 guard let key = submission[id] else { continue }
                 let credential: String?
-                if id == "alibaba", let alibabaCredential {
-                    switch alibabaCredential {
+                if let tagged = taggedCredentials[id] {
+                    switch tagged {
                     case .success(let value): credential = value
                     case .failure(let error):
                         failedEntryIDs.insert(id)

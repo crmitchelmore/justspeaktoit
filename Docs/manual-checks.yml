@@ -219,6 +219,21 @@ sessions:
           - "Open History."
         expected: "Every route transcribes the phrase once, streaming routes show words while you speak (Azure MAI Transcribe (Turn-based) shows each turn when you pause), and History names the model with its cost. Pulse refuses the non-English run before sending audio. Note any route that is unavailable to your account."
         final_gate: true
+      - id: "owner-stepfun-international-region"
+        issues:
+          - 1210
+        title: "StepFun International key region"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Mac, first Alpha with the StepFun region setting"
+        prerequisites:
+          - "A StepFun API key from platform.stepfun.ai (International)"
+        steps:
+          - "Settings \u203a API Keys: set StepFun region for new keys to International, then save the StepFun key."
+          - "Choose StepFun StepAudio 3 ASR Max, dictate \u201cstep fun international\u201d into TextEdit and stop."
+          - "Set the region to China, save the same key again, and dictate once more."
+        expected: "The International run transcribes the phrase. The China run fails with a message that StepFun rejected the key for the China region; it does not silently succeed through the International endpoint."
+        final_gate: false
       - id: "owner-cloudkit-shared-container"
         issues:
           - 1119
@@ -564,6 +579,21 @@ sessions:
           - "Turn Allow automation to change settings on, run speak config set ttsSpeed=1.1 showCompactHUD=true, then speak config get --prefix tts."
         expected: "Invalid edits change nothing and every error is announced; valid edits, export/import and reset round-trip. CLI writes are refused until the opt-in is on, dry runs always work, and get shows the new values with no API key material."
         final_gate: false
+      - id: "owner-desktop-speak-config"
+        issues:
+          - 1608
+        title: "Windows and Linux: speak config reads and changes preferences safely"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Windows or Linux, the first Alpha build that includes the #1608 desktop configuration tools, with automation on and the speak CLI set up"
+        steps:
+          - "Run speak config get --prefix show and check the output lists showHUD and every API key only as set or not set."
+          - "With Preferences \u203a General \u203a Allow automation to change settings off, run speak config set showHUD=false: it is refused. Run it again with --dry-run: it reports the change without applying it."
+          - "Turn Allow automation to change settings on with a screen reader running (Narrator or Orca) and check it reads the switch name and state."
+          - "Run speak config set showHUD=false holdThreshold=9: both are refused and nothing changes. Then run speak config set showHUD=false and open Preferences: Show recording HUD is off."
+          - "Export preferences, turn the allow switch off, import the file: the switch stays off."
+        expected: "Reads never show key material, writes are refused until the local switch is on and are all-or-nothing, Preferences shows the change at once, and importing a file never turns the switch on."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"
@@ -574,6 +604,22 @@ sessions:
       - "iOS Settings \u203a Action Button \u203a Controls: choose Transcribe Voice (Just Speak to It Alpha)."
       - "Have Notes open on a scratch note, AirPods in their case, and your Mac (same Apple ID, Handoff on) nearby."
     items:
+      - id: "iphone-raw-configuration-editor"
+        issues:
+          - 1608
+        title: "iPhone raw configuration editor validates, applies all or none, imports and exports"
+        minutes: 5
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes the #1608 iPhone raw configuration editor"
+        steps:
+          - "Open Settings \u203a General \u203a Edit raw configuration \u203a Raw configuration. Check no API key value appears; \"apiKeys\" lists only true or false."
+          - "Change \"autoStopSilenceSeconds\" to 30 and tap Validate, then Apply: an error names settings.autoStopSilenceSeconds and nothing is saved."
+          - "Set it to 5 and \"hardwareTriggerDestination\" to \"historyOnly\", tap Apply, go back to Recording & Shortcuts: both show the new values."
+          - "Tap Export, save to Files, tap Reset to Defaults and confirm, Apply, then Import the saved file and Apply: your values come back."
+          - "With VoiceOver on, tap Validate on an invalid document: VoiceOver reads the result and the first error."
+          - "Search Settings for \"raw\" or \"json\": Edit raw configuration is a result and opens General."
+        expected: "Errors name each bad key and nothing changes until every value is valid; applied values show on their Settings pages at once; export, reset and import round-trip; results are announced to VoiceOver."
+        final_gate: false
       - id: "iphone-ipad-device-copy"
         issues:
           - 1598
@@ -975,6 +1021,23 @@ sessions:
           - "Deny microphone access on a test installation and confirm the app explains how to recover without claiming it is recording."
         expected: "Both devices expose the recording control, complete local and review-provider transcription, show recording state, stop cleanly and save one item per completed recording. Denied access is recoverable. This supplies device evidence for the historical July review findings, not App Store approval."
         final_gate: false
+      - id: "ipad-transcribe-control-first-run"
+        issues:
+          - 1598
+        title: "iPad: Transcribe is visible in every layout and works with no API key"
+        minutes: 6
+        core: true
+        build: "TestFlight Just Speak to It Alpha that includes the App Review iPad fix (labelled Transcribe button)"
+        prerequisites:
+          - "An iPad on iPadOS 26 or later that is backed up or a spare test device, with a fresh installation (delete the app first so its local History goes too); no API keys entered."
+        steps:
+          - "Open the app in portrait and look at the bottom of the main screen, then rotate to landscape."
+          - "Open Safari beside it in Split View (or Stage Manager), then resize the app to one-third and to half width."
+          - "Tap Transcribe and allow the Microphone and Speech Recognition prompts; if Prepare Apple Model appears, tap it, wait until it is ready and tap Transcribe again. Say a fictional sentence and tap Stop."
+          - "Open Settings \u203a Recording & Shortcuts with Live Activities on, and Settings \u203a Transcription; read the footnotes."
+          - "In iOS Settings turn the app's Microphone access off, return and tap Transcribe."
+        expected: "A button labelled Transcribe with a microphone icon is visible at the bottom in portrait, landscape and every Split View width. With no API key the first recording uses on-device Apple Speech and produces text with no error (if Apple's speech assets are still downloading, the alert offers Prepare Apple Model, not a generic Error). No copy mentions this iPhone or the Dynamic Island. With access off, the alert is titled Can't Start Recording and offers Open Settings."
+        final_gate: true
       - id: "owner-iphone-store-privacy-and-review-metadata"
         issues:
           - 1468
@@ -1285,6 +1348,23 @@ sessions:
           - "Open a password field and check the keyboard's microphone; then deny the microphone permission and try the keyboard."
         expected: "The tile and shortcut open the app and start dictating (after unlocking when locked). Both shared files are transcribed into History. The keyboard inserts the final text, is disabled in the password field, and explains a denied permission. Switching keyboards stops dictation without inserting stray text."
         final_gate: true
+      - id: "android-raw-configuration-editor"
+        issues:
+          - 1608
+        title: "Android raw configuration editor validates, applies all or none, imports and exports"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1608 raw configuration editor"
+        steps:
+          - "Open Settings \u203a Edit raw configuration and tap Show current. Check no API key value appears; \"apiKeys\" lists only true or false."
+          - "Change \"history_retention\" to \"Year\" and tap Validate, then Apply: an error names settings.history_retention and nothing is saved."
+          - "Set it to \"Week\" and \"cleanup_enabled\" to true, tap Apply: Settings shows History kept for 7 days and Clean up transcripts on at once."
+          - "Tap Export and save the file, tap Reset to defaults and confirm, then Import the saved file and Apply: your values come back."
+          - "Start dictating and tap Apply: it says to stop dictating first and changes nothing."
+          - "With TalkBack on, tap Validate on an invalid document: TalkBack reads the result and the first error."
+          - "Search Settings for \"raw\" or \"json\": Edit raw configuration is a result and scrolls to the editor."
+        expected: "Errors name each bad key and nothing changes until every value is valid; applied values show on their settings at once; export, reset and import round-trip; Apply is refused while dictating; results are announced to TalkBack."
+        final_gate: false
       - id: "android-language-corrections-read-aloud"
         issues:
           - 1328

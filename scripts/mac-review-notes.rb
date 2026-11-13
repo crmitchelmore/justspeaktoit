@@ -14,6 +14,13 @@ module AppleRelease
     MAX_NOTES_LENGTH = 4000
     ROOT = File.expand_path('..', __dir__)
     CANONICAL = <<~TEXT.freeze
+      Network entitlements: this Mac App Store build does not include com.apple.security.network.server and accepts no incoming network connections. It has no network listener, Bonjour service or "Send to Mac" receiver; that feature is not part of the App Store build. The optional local automation interface (off by default) uses a UNIX domain socket inside the app's container, not a network port.
+
+      The app uses com.apple.security.network.client only for outgoing HTTPS and WebSocket connections to the speech-to-text and text-processing providers the user chooses in Settings. With the default on-device Apple Speech model, transcription needs no account, API key or network connection.
+    TEXT
+    # Earlier canonical notes, removed when present so the notes never describe
+    # a listener the build no longer has. %{service} is the train's Bonjour type.
+    SUPERSEDED = [<<~TEXT].freeze
       The macOS app includes an optional "Send to Mac" receiver using com.apple.security.network.server. It is off by default.
 
       On the Mac, open Settings > General > Send to Mac and enable "Enable Send to Mac": this starts a Network.framework TCP NWListener, advertises %{service}, and displays a pairing code. Turning the setting off stops the listener. This listener exchanges paired transcript protocol messages; it does not serve web pages or transfer files. Outbound provider requests use network.client separately.
@@ -28,7 +35,8 @@ module AppleRelease
       config = JSON.parse(File.read(File.join(ROOT, 'Sources/SpeakCore/Resources/ReleaseTrains.json'))).fetch(train)
       @app = pipeline.fetch('apple').fetch(train).fetch('mac-store')
       @bundle = config.fetch('storeMacBundleIdentifier')
-      @canonical = format(CANONICAL, service: config.fetch('transportServiceType')).strip
+      @canonical = CANONICAL.strip
+      @superseded = SUPERSEDED.map { |text| format(text, service: config.fetch('transportServiceType')).strip }
     end
 
     def audit(version_id: nil)
@@ -151,10 +159,26 @@ module AppleRelease
     end
 
     def append(notes)
+      notes = without_superseded(notes)
       return notes if notes.include?(@canonical)
       result = notes.empty? ? @canonical : notes + "\n\n" + @canonical
       raise Error, 'review_notes_capacity_exceeded' if result.length > MAX_NOTES_LENGTH
       result
+    end
+
+    def without_superseded(notes)
+      @superseded.reduce(notes) do |text, old|
+        while text.include?(old)
+          text = if text.include?("\n\n" + old)
+            text.sub("\n\n" + old, '')
+          else
+            # Only a note removed from the very start leaves separators to
+            # trim; owner text keeps its own leading blank lines.
+            text.sub(old, '').sub(/\A\n\n/, '')
+          end
+        end
+        text
+      end
     end
 
     def same_detail?(first, second)

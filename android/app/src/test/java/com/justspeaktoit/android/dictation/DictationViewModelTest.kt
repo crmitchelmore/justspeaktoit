@@ -4,8 +4,11 @@ import com.justspeaktoit.android.cloud.CleanupPolicy
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryStatus
+import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.settings.DictationProfile
+import com.justspeaktoit.android.settings.RawConfigurationValues
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -226,6 +229,7 @@ class DictationViewModelTest {
         val request = h.cloud.transcriptions.single()
         assertEquals(groq.catalogId, request.model)
         assertEquals("es-ES", request.languageTag)
+        assertEquals(listOf(RecognitionMode.Cloud to groq), h.successes.toList())
 
         h.onMain { h.viewModel.deleteProfile(profile.id) }
         val cleared = h.awaitState { it.profile == null && it.profiles.isEmpty() }
@@ -510,5 +514,47 @@ class DictationViewModelTest {
         val end = System.currentTimeMillis() + ViewModelHarness.TIMEOUT_MS
         while (h.retirement.pendingOrphans > 0 && System.currentTimeMillis() < end) Thread.sleep(5)
         assertEquals(0, h.retirement.pendingOrphans)
+    }
+
+    @Test
+    fun testApplyConfiguration_routesEveryKeyThroughItsOwner() {
+        val vm = h.ready()
+        val cloud = CloudCatalog.transcriptionModels.last()
+        val cleanup = CloudCatalog.cleanupModels.last()
+        val language = DictationLanguages.all.last().id
+        val changes = mapOf(
+            "chosen_mode" to null,
+            "cloud_model" to cloud.catalogId,
+            "preferredLocale" to language,
+            "personal_corrections" to mapOf("Ada" to "ada, adder"),
+            "cleanup_enabled" to true,
+            "cleanup_model" to cleanup.selectionId,
+            "keepAudioOnCancel" to false,
+            "history_retention" to "Forever",
+        )
+        var applied = false
+        h.onMain { applied = vm.applyConfiguration(changes) }
+
+        assertTrue(applied)
+        assertEquals(changes, RawConfigurationValues.of(vm.state.value))
+        assertNull(h.prefs.chosenMode)
+        assertEquals(cloud.catalogId, h.prefs.cloudModelId)
+        assertEquals(language, h.prefs.languageId)
+        assertEquals(listOf(CorrectionRule("Ada", listOf("ada", "adder"))), h.prefs.corrections)
+        assertTrue(h.prefs.cleanupEnabled)
+        assertEquals(cleanup.selectionId, h.prefs.cleanupModelId)
+        assertFalse(h.prefs.keepAudioOnCancel)
+        assertEquals(Retention.Forever, h.prefs.retention)
+    }
+
+    @Test
+    fun testApplyConfigurationWhileDictating_changesNothing() {
+        startCloud()
+        val vm = h.viewModel
+        val before = h.prefs.retention
+        var applied = true
+        h.onMain { applied = vm.applyConfiguration(mapOf("history_retention" to "Week")) }
+        assertFalse(applied)
+        assertEquals(before, h.prefs.retention)
     }
 }

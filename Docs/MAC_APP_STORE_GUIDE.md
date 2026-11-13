@@ -248,19 +248,26 @@ xcrun altool --upload-app \
 
 ### App Review Information (required)
 
-Keep the canonical listener explanation in **App Review Information** for every macOS version. The
-`com.apple.security.network.server` entitlement is intentional: the optional,
-user-enabled **Send to Mac** feature starts an inbound Bonjour listener. Apple's
+The Mac App Store build does **not** carry
+`com.apple.security.network.server`. Apple's
 [network server entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.network.server)
-permits incoming connections. Removing
-the entitlement while leaving that feature enabled breaks the feature in the App
-Sandbox.
+lets other computers initiate connections to a sandboxed app, and App Review
+rejects it without matching functionality. Send to Mac was the only inbound
+listener and no shipping app can connect to it, so `SendToMacAvailability`
+compiles it out of `APP_STORE` builds: no `NWListener`, Settings card, search
+entry, Local Network purpose string or `NSBonjourServices`. The Direct build
+keeps the feature. `EntitlementsTests` and `AppStoreInfoPlistTests` fail if the
+entitlement or the Bonjour keys return to the Store build. The automation
+interface uses a UNIX domain socket inside the container and needs no network
+entitlement. To ship Send to Mac in the Store again, restore the entitlement, the
+plist keys and `SendToMacAvailability` together, and only once a shipping sender
+lets the reviewer exercise the listener.
 
-The canonical text lives in [`scripts/mac-review-notes.rb`](../scripts/mac-review-notes.rb),
-using the release train's Bonjour service from `ReleaseTrains.json`. It describes
-the actual Mac receiver: Settings > General > Send to Mac > **Enable Send to Mac**,
-the listener, and the displayed pairing code. No shipping iOS sender screen exists;
-do not provide fictional iOS pairing navigation or claim verified end-to-end delivery.
+The canonical App Review Information text lives in
+[`scripts/mac-review-notes.rb`](../scripts/mac-review-notes.rb). It states that
+the build accepts no incoming connections and uses `network.client` only for
+outgoing provider requests. It also removes the superseded Send to Mac listener
+explanation if a version's notes still contain it, leaving owner-written text untouched.
 
 Before new Mac beta or approved Stable review submissions, release tooling appends
 the explanation without replacing existing notes, then checks exact readback.
@@ -285,12 +292,10 @@ validated vault references. CI uses explicit `environment` mode with an owned ke
 path. Missing or unknown sources fail before credential access; neither mode falls
 back to a personal key file or a different credential store.
 
-Saving the explanation is not evidence that Apple accepted the entitlement or that
-the unavailable iOS sender flow works. Reviewer acceptance remains a separate gate.
-
-If automated review flags the entitlement, reply in the Resolution Center with
-the same explanation and verification steps. Do not remove the entitlement unless
-the Send to Mac listener is also removed or gated out of the App Store build.
+Saving the explanation is not evidence that Apple accepted the build. Reviewer
+acceptance remains a separate gate. A rejection for the entitlement is resolved
+by a new build without it; the Resolution Center reply is in
+[ios-app-store-submission.md](ios-app-store-submission.md#app-review-rejection-replies).
 
 ## Pre-Submission Checklist
 
@@ -306,9 +311,8 @@ the Send to Mac listener is also removed or gated out of the App Store build.
 - [ ] Tested on Apple Silicon and Intel
 - [ ] No crashes or major bugs
 - [ ] Sandbox entitlements minimal and justified
-- [ ] App Review Information explains and gives test steps for the Send to Mac
-      `com.apple.security.network.server` entitlement
-- [ ] The actual App Store-signed build starts Send to Mac from Settings > General
+- [ ] The signed Store build's entitlements have no `com.apple.security.network.server`
+      (`codesign -d --entitlements :- <app>`)
 
 ## Common Rejection Reasons
 

@@ -50,8 +50,9 @@ Hosts render from the catalogue. They don't keep their own lists:
 - a macOS `SettingsCard(title: "…")` or `ShortcutSettingsCard(title: "…")` has no
   macOS entry, or a card with a computed title omits `searchEntryID:`;
 - an iOS Settings section uses a plain `Section("…")` or has no iOS entry;
-- an `@Published` property of either platform's `AppSettings` isn't in some
-  entry's `settingKeys`, unless it is exempted there with a reason;
+- an `@Published` property of either platform's `AppSettings` (with any access
+  modifiers, such as iOS's `@Published public var`) isn't in some entry's
+  `settingKeys`, unless it is exempted there with a reason;
 - a `SettingsTab` has no searchable page root.
 
 `Tests/SpeakCoreTests/SettingsSearchIndexTests.swift` covers ranking, synonyms,
@@ -66,6 +67,28 @@ persisted macOS setting for the raw editor (Settings › General › Advanced �
 automation tools. Its keys are the same property names as `settingKeys` here,
 and each field records the type, default, allowed values or range, platforms,
 and whether it is read-only or sensitive.
+
+Windows and Linux use `SettingsSchema.fields(for: .windows)` (`.linux` is the
+same list), derived from `DesktopConfiguration.fields` in
+`SettingsSchema+Desktop.swift`, so a new desktop preference joins the schema
+and `speak config` with no extra entry. Mark consent and grants read-only there.
+
+The iPhone uses `SettingsSchema.fields(for: .iOS)` (`SettingsSchema+iOS.swift`),
+bound in `Sources/SpeakiOS/Settings/IOSSettingsConfiguration.swift` and edited in
+Settings › General › **Edit raw configuration**. When you add a persisted iOS
+setting, add a field there and a binding; `SettingsSearchCoverageTests`
+(`testEveryPersistedIOSSettingHasARawConfigurationField`) fails otherwise, and
+`Tests/SpeakiOSTests/IOSSettingsConfigurationTests.swift` checks bindings,
+defaults and enum values.
+
+Android uses `SettingsSchema.fields(for: .android)` (`SettingsSchema+Android.swift`,
+keyed by the `AppPreferences` names such as `cloud_model` and `history_retention`).
+`SettingsSchemaAndroidExport` writes it to
+`android/app/src/main/assets/settings_schema.json` (`SettingsSchemaAndroidExportTests`
+fails when it is stale), and Settings › **Edit raw configuration** validates
+against that asset in `RawConfiguration.kt`. When you add an Android preference,
+add a field there, regenerate the assets and bind it in `RawConfigurationValues`
+and `DictationViewModel.applyConfiguration`; `RawConfigurationTest` fails otherwise.
 
 When you add a persisted macOS setting, also add a `SettingsSchema+macOS.swift`
 field and an `AppSettingsConfiguration` binding.
@@ -112,8 +135,9 @@ it, run:
 UPDATE_SETTINGS_SEARCH_ANDROID=1 swift test --filter SettingsSearchAndroidExportTests
 ```
 
-`scripts/update-android-assets` regenerates this asset and the cloud catalogue
-(`cloud_catalog.json`) together.
+`scripts/update-android-assets` regenerates this asset, the cloud catalogue
+(`cloud_catalog.json`) and the raw configuration schema (`settings_schema.json`)
+together.
 
 `SettingsSearchIndex.kt` mirrors the Swift ranking rules and adds one entry per
 `CloudCatalog` model and provider key. Settings has a search field with

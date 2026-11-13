@@ -119,7 +119,7 @@ struct CaptureOnboardingCard: View {
         case .keyboard:
             "Add the Just Speak keyboard and tap the mic key in any text field."
         case .inApp:
-            "Tap the microphone button."
+            "Tap Transcribe."
         }
     }
 }

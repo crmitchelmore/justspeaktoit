@@ -178,9 +178,9 @@ struct SpeakiOSApp: App {
     }
 
     private var appContent: some View {
-        NavigationStack {
-            ContentView()
-        }
+        // ContentView owns its NavigationStack; a second one around it nests
+        // stacks, which SwiftUI does not support.
+        ContentView()
             .tint(.brandAccent)
             .environmentObject(deepLinkRouter)
             .environment(\.iOSKeyboardEnabled, FeatureFlags.iOSKeyboardEnabled)

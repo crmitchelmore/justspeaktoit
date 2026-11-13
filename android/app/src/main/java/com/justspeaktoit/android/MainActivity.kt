@@ -137,6 +137,7 @@ class MainActivity : ComponentActivity() {
                                     refreshPrivacy()
                                 },
                                 onTip = { productId -> tipStore.purchase(this@MainActivity, productId) },
+                                onApplyConfiguration = viewModel::applyConfiguration,
                             ),
                             privacy = privacyChoices,
                             tips = tips,

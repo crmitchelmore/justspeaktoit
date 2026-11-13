@@ -246,7 +246,8 @@ dedicated speech-to-text live models use shared Swift clients with the native
 WinHTTP transport. Reson8 (`reson8/resonant-1-streaming`, 16 kHz PCM) also uses
 the shared native transport with handshake-gated audio and a bounded,
 correlated flush confirmation; Smallest AI Pulse Pro and StepAudio 3 ASR Max
-are file-only routes. These additional Reson8/Smallest AI/StepFun routes have
+are file-only routes. Desktop hosts save new StepFun keys for the International
+region (`api.stepfun.ai`) and have no region picker yet. These additional Reson8/Smallest AI/StepFun routes have
 fake-transport evidence only and no native Windows provider receipt; see
 [batch transcription contracts](batch-transcription-providers.md).
 

@@ -76,6 +76,7 @@ final class SettingsSearchCoverageTests: XCTestCase {
         let sources = try swiftFiles(under: "Sources/SpeakApp/Settings")
             .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
         let published = sources.flatMap { publishedProperties(in: $0.1) }
+        XCTAssertGreaterThan(published.count, 10, "The scan no longer finds macOS AppSettings properties")
         assertIndexed(published, platform: .macOS, exemptions: Self.unindexedMacSettings)
     }
 
@@ -84,7 +85,20 @@ final class SettingsSearchCoverageTests: XCTestCase {
             .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
         let published = sources.flatMap { publishedProperties(in: $0.1) }
             .filter { !$0.hasSuffix("APIKey") }  // Each key is indexed at runtime from the API Keys list.
+        XCTAssertGreaterThan(published.count, 10, "The scan no longer finds iOS AppSettings properties")
         assertIndexed(published, platform: .iOS, exemptions: Self.unindexedIOSSettings)
+    }
+
+    /// The iOS raw configuration (#1608) covers every persisted iPhone setting
+    /// except secrets and the derived state the search guard also exempts.
+    func testEveryPersistedIOSSettingHasARawConfigurationField() throws {
+        let sources = try swiftFiles(under: "Sources/SpeakiOS/Settings")
+            .filter { ($0.0 as NSString).lastPathComponent.hasPrefix("AppSettings") }
+        let declarations = sources.flatMap { publishedProperties(in: $0.1) }
+        let published = Set(declarations.filter { !$0.hasSuffix("APIKey") })
+            .subtracting(Self.unindexedIOSSettings.keys)
+        XCTAssertGreaterThan(published.count, 10, "The scan no longer finds iOS AppSettings properties")
+        XCTAssertEqual(published, Set(SettingsSchema.keys(for: .iOS)))
     }
 
     func testEverySettingsTabHasASearchableRoot() {
@@ -95,6 +109,14 @@ final class SettingsSearchCoverageTests: XCTestCase {
         }
     }
 
+    func testSendToMacSearchEntry_isDroppedWhenTheReceiverIsCompiledOut() {
+        let entries = SettingsSearchCatalog.entries(for: .macOS)
+        let id = SendToMacAvailability.settingsSearchEntryID
+        XCTAssertTrue(entries.contains { $0.id == id })
+        XCTAssertFalse(SendToMacAvailability.filter(entries, isAvailable: false).contains { $0.id == id })
+        XCTAssertEqual(SendToMacAvailability.filter(entries, isAvailable: true).count, entries.count)
+    }
+
     func testAPIKeyEntriesCoverEveryKeyCard() {
         let entries = MacSettingsSearch.apiKeyEntries(transcriptionProviders: [])
         let ids = Set(entries.map(\.id))
@@ -102,6 +124,24 @@ final class SettingsSearchCoverageTests: XCTestCase {
         for provider in TTSProvider.apiKeyCardProviders {
             XCTAssertTrue(ids.contains(MacSettingsSearch.apiKeyEntryPrefix + "tts-\(provider.id)"), provider.id)
         }
+    }
+
+    func testPublishedPropertyScanner_matchesEveryModifierForm() {
+        let source = """
+            @Published var plain = 1
+            @Published private(set) var privateSetter = 1
+            @Published public var publicVar = 1
+            @Published public private(set) var publicPrivateSetter = 1
+            @Published  internal   var spaced = 1
+            @MainActor @Published fileprivate(set) var attributed = 1
+            @Published
+            public var nextLine = 1
+            var notPublished = 1
+            """
+        XCTAssertEqual(
+            publishedProperties(in: source),
+            ["plain", "privateSetter", "publicVar", "publicPrivateSetter", "spaced", "attributed", "nextLine"]
+        )
     }
 
     // MARK: - Helpers
@@ -118,7 +158,7 @@ final class SettingsSearchCoverageTests: XCTestCase {
     }
 
     private func publishedProperties(in source: String) -> [String] {
-        matches(of: #"@Published\s+(?:private\(set\)\s+)?var\s+(\w+)"#, in: source)
+        PublishedPropertyScanner.propertyNames(in: source)
     }
 
     private var repositoryRoot: URL {

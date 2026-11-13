@@ -29,6 +29,15 @@ extension DesktopHostController {
         return try DesktopConfiguration(values: imported)
     }
 
+    /// A file never grants automation write access: the imported value is
+    /// replaced by this computer's own choice.
+    func keepingLocalAutomationWriteGrant(_ preferences: DesktopConfiguration) throws -> DesktopConfiguration {
+        let key = ApplicationPreferenceKey.allowAutomationConfigurationChanges.rawValue
+        var values = preferences.values
+        values[key] = settings.configuration?.values[key]
+        return try DesktopConfiguration(values: values)
+    }
+
     func applyingAutomationRevocation(to changed: inout Settings) {
         guard automationUsesLocalConsent else { return }
         if changed.configuration?.values["enableAutomationServer"]?.storage == .bool(false) {

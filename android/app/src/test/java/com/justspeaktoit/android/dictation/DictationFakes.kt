@@ -357,6 +357,8 @@ internal class ViewModelHarness(
     val resources = SystemResourceRegistry()
     val interruptions = FakeInterruptions()
     val foreground = FakeForeground()
+    /** The (mode, model) pairs the ViewModel reported as successful transcriptions. */
+    val successes = CopyOnWriteArrayList<Pair<RecognitionMode, CloudModel>>()
 
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "test-main") }
     private val main = executor.asCoroutineDispatcher()
@@ -382,6 +384,7 @@ internal class ViewModelHarness(
                     resources = resources,
                     interruptions = interruptions,
                     foreground = foreground,
+                    onTranscriptionSucceeded = { mode, model -> successes += mode to model },
                 )
             }
         }

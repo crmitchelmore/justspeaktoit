@@ -54,6 +54,20 @@ sessions:
           - "Check both notes."
         expected: "XX is kept and nothing outside the dictated text changed or duplicated (streaming may pause). After the switch, streaming pauses: the second note stays empty, the first note keeps only the words dictated before you switched, and a notice says the full transcript is on the clipboard. This holds for every \u201cIf you switch apps\u201d setting, because both notes are in the same app."
         final_gate: true
+      - id: "mac-escape-removes-streamed-text"
+        issues:
+          - 1561
+        title: "TextEdit: Escape removes streamed text, but never your edits"
+        minutes: 3
+        core: true
+        build: "Just Speak to It for Mac, an Alpha build that includes the #1561 cancel rollback"
+        steps:
+          - "Settings \u203a Keyboard: check Keep audio when a recording is cancelled is on (otherwise cancelled recordings leave no History entry) and Cancel recording with Escape is on. In TextEdit, create a plain-text document, save it (rollback only acts on a saved document it can identify), and type: Start here "
+          - "With the caret after \"Start here \", dictate \"This cancelled recording should not be inserted\" and press Escape after the words appear."
+          - "Dictate again; after the first words appear, type XX at the very end of the document, keep talking, then press Escape."
+          - "Check the document and the two newest History entries."
+        expected: "After the first Escape the document reads exactly \"Start here \" with the caret after it. After the second, the streamed words and XX are both left in place, and that History entry has an output note saying the streamed text was left because the document changed."
+        final_gate: true
       - id: "mac-one-shot-baselines"
         issues:
           - 664
@@ -128,6 +142,21 @@ sessions:
           - "Choose Apple Dictation and read the same paragraph three more times."
           - "Mark this Pass. An agent then compares first-words latency for the two models using only the numeric latency fields in History."
         expected: "Six recordings exist, three per model. The agent posts both first-words p50 values on #614 and closes it if SpeechTranscriber\u2019s is the same or lower and iphone-hands-free has passed."
+        final_gate: false
+      - id: "mac-hands-free"
+        issues:
+          - 1553
+          - 614
+        title: "Mac hands-free: arms, starts on speech, nothing captured in silence"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, an Alpha build that includes the #1553 voice-activity gate, macOS 26 or later (ideally macOS 27)"
+        steps:
+          - "Settings \u203a Transcription \u203a Local \u203a Streaming: choose Apple SpeechTranscriber (On-device). Turn Hands-Free Dictation on."
+          - "Click into a new TextEdit document and arm with the hotkey; wait for the armed HUD."
+          - "Stay silent for 30 seconds, tap the desk once, then say \"Hands free works on this Mac\" and stay silent until it finishes."
+          - "Disarm and open History."
+        expected: "Arming shows armed (never \u201ccouldn\u2019t access the microphone\u201d). Silence and the tap start nothing; speech starts recording within about a second, the sentence lands in TextEdit, and it returns to armed after silence. History has exactly one new item."
         final_gate: false
       - id: "mac-start-latency-sample"
         issues:
@@ -403,6 +432,21 @@ sessions:
           - "Open each picker again."
         expected: "Neither picker has an OpenRouter drill-in row. Each Browse OpenRouter models\u2026 button opens a searchable list with provider and price filters and a Refresh button, each model opens a page with its pricing, and choosing one closes the sheet. Each picker then shows OpenRouter \u203a the chosen model, as the voice picker does."
         final_gate: true
+      - id: "mac-raw-configuration-editor"
+        issues:
+          - 1546
+        title: "Raw configuration editor and speak config tools validate and apply settings safely"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes #1546, with the speak CLI installed"
+        steps:
+          - "Open Settings \u203a General \u203a Advanced and click Edit raw configuration\u2026; check that apiKeys shows only true or false for each provider."
+          - "Change ttsSpeed to 9 and appearance to \"sepia\", click Apply, and listen with VoiceOver on: both errors are announced with their settings.<key> path and nothing changes."
+          - "Set ttsSpeed to 1.2, click Apply, close the sheet and check Voice Output shows speed 1.2. Export\u2026 to a file, Reset to Defaults, Apply, then Import\u2026 the file and Apply: your settings come back."
+          - "With automation on and Allow automation to change settings off, run speak config set ttsSpeed=1.1: it is refused. Run it again with --dry-run: it reports the change without applying it."
+          - "Turn Allow automation to change settings on, run speak config set ttsSpeed=1.1 showCompactHUD=true, then speak config get --prefix tts."
+        expected: "Invalid edits change nothing and every error is announced; valid edits, export/import and reset round-trip. CLI writes are refused until the opt-in is on, dry runs always work, and get shows the new values with no API key material."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"
@@ -631,10 +675,11 @@ sessions:
       - id: "iphone-hands-free"
         issues:
           - 614
+          - 1553
         title: "Hands-free: fast start on speech, no capture in silence"
         minutes: 4
         core: false
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        build: "TestFlight Just Speak to It Alpha that includes the #1553 voice-activity gate"
         steps:
           - "Settings \u203a Behavior: Hands-Free Dictation on; arm with the mic button."
           - "Say \"Go quick start\", then stay silent until it finishes."

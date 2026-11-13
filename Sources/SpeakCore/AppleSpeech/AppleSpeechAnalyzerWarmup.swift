@@ -86,7 +86,8 @@ enum AppleSpeechAnalyzerLiveSetup {
             try Task.checkCancellation()
             guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(
                 compatibleWith: [configuration.module.speechModule]
-            ) else {
+            ), AppleLocalModels.isUsableAudioFormat(sampleRate: format.sampleRate, channelCount: format.channelCount)
+            else {
                 throw AppleLocalModelError.compatibleAudioFormatUnavailable
             }
             return Resolved(engine: configuration.engine, locale: configuration.locale, format: format)

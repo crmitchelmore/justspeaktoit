@@ -504,6 +504,21 @@ sessions:
           - "Turn Allow automation to change settings on, run speak config set ttsSpeed=1.1 showCompactHUD=true, then speak config get --prefix tts."
         expected: "Invalid edits change nothing and every error is announced; valid edits, export/import and reset round-trip. CLI writes are refused until the opt-in is on, dry runs always work, and get shows the new values with no API key material."
         final_gate: false
+      - id: "owner-desktop-speak-config"
+        issues:
+          - 1608
+        title: "Windows and Linux: speak config reads and changes preferences safely"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Windows or Linux, the first Alpha build that includes the #1608 desktop configuration tools, with automation on and the speak CLI set up"
+        steps:
+          - "Run speak config get --prefix show and check the output lists showHUD and every API key only as set or not set."
+          - "With Preferences \u203a General \u203a Allow automation to change settings off, run speak config set showHUD=false: it is refused. Run it again with --dry-run: it reports the change without applying it."
+          - "Turn Allow automation to change settings on with a screen reader running (Narrator or Orca) and check it reads the switch name and state."
+          - "Run speak config set showHUD=false holdThreshold=9: both are refused and nothing changes. Then run speak config set showHUD=false and open Preferences: Show recording HUD is off."
+          - "Export preferences, turn the allow switch off, import the file: the switch stays off."
+        expected: "Reads never show key material, writes are refused until the local switch is on and are all-or-nothing, Preferences shows the change at once, and importing a file never turns the switch on."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"
@@ -514,6 +529,22 @@ sessions:
       - "iOS Settings \u203a Action Button \u203a Controls: choose Transcribe Voice (Just Speak to It Alpha)."
       - "Have Notes open on a scratch note, AirPods in their case, and your Mac (same Apple ID, Handoff on) nearby."
     items:
+      - id: "iphone-raw-configuration-editor"
+        issues:
+          - 1608
+        title: "iPhone raw configuration editor validates, applies all or none, imports and exports"
+        minutes: 5
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes the #1608 iPhone raw configuration editor"
+        steps:
+          - "Open Settings \u203a General \u203a Edit raw configuration \u203a Raw configuration. Check no API key value appears; \"apiKeys\" lists only true or false."
+          - "Change \"autoStopSilenceSeconds\" to 30 and tap Validate, then Apply: an error names settings.autoStopSilenceSeconds and nothing is saved."
+          - "Set it to 5 and \"hardwareTriggerDestination\" to \"historyOnly\", tap Apply, go back to Recording & Shortcuts: both show the new values."
+          - "Tap Export, save to Files, tap Reset to Defaults and confirm, Apply, then Import the saved file and Apply: your values come back."
+          - "With VoiceOver on, tap Validate on an invalid document: VoiceOver reads the result and the first error."
+          - "Search Settings for \"raw\" or \"json\": Edit raw configuration is a result and opens General."
+        expected: "Errors name each bad key and nothing changes until every value is valid; applied values show on their Settings pages at once; export, reset and import round-trip; results are announced to VoiceOver."
+        final_gate: false
       - id: "iphone-ipad-device-copy"
         issues:
           - 1598

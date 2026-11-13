@@ -549,22 +549,36 @@ Every tool also returns `structuredContent` with the same fields as the CLI's
 The app's settings are described by one shared schema in SpeakCore
 (`Sources/SpeakCore/SettingsConfiguration/`): each key's type, default, allowed
 values or range, platforms, and whether it is read-only or sensitive. The same
-document backs Settings › General › Advanced › **Edit raw configuration**.
+document backs Settings › General › Advanced › **Edit raw configuration** on
+the Mac. Windows and Linux (#1608) serve the same tools through `speak` and MCP
+with their own field list, derived from the portable desktop preferences
+(`SettingsSchema+Desktop.swift`), so the keys there are the desktop preference
+names (`showHUD`, `preferredLocale`, `holdThreshold`). `get_configuration`
+reports which schema the host uses in `platform`.
+The iPhone has no automation server, but Settings › General › **Edit raw
+configuration** edits, validates, imports and exports the same document format
+over its own field list (`SettingsSchema+iOS.swift`, keyed by the iOS settings
+names such as `selectedModel` and `hardwareTriggerDestination`).
 
 - **Reading** works whenever automation is on. `get_configuration` returns
   `settings`, `apiKeys` and `schema`; narrow it with `keys` or `prefix`.
   API keys are never returned, only whether each is stored (`apiKeys.openai:
   true`).
 - **Writing** needs a second opt-in: Settings › General › Automation › **Allow
-  automation to change settings**. Without it `set_configuration` fails with
-  `unsupported_command`, but `dry_run: true` still validates.
+  automation to change settings** on the Mac, or Preferences › General ›
+  **Allow automation to change settings** on Windows and Linux. Without it
+  `set_configuration` fails with `unsupported_command`, but `dry_run: true`
+  still validates. A preferences import never turns it on; the computer's own
+  choice is kept. Windows and Linux refuse a write while dictation is running.
 - Changes are validated together (type, range, allowed values, model IDs in
   the shared catalogue, and cross-field rules such as Auto-Clean needing a
   live model that supports it) and applied **all or none**. Every invalid key
   is reported with its `settings.<key>` path, and nothing changes.
 - Read-only keys (`analyticsEnabled`, `selectedHotKey`, `enableAutomationServer`,
   `allowAutomationConfigurationChanges`) change only in the app. Keys another
-  platform owns are accepted, reported in `ignoredKeys` and not applied.
+  platform owns are accepted, reported in `ignoredKeys` and not applied. On
+  Windows and Linux a Modulate feature key that is absent uses the provider
+  default.
 - `speak config set` parses each value as JSON when it can and falls back to a
   string, so `ttsSpeed=1.2`, `showCompactHUD=false` and
   `postProcessingModel=openai/gpt-4o-mini` all work; quote JSON arrays and

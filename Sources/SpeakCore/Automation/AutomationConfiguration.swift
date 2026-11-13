@@ -26,12 +26,18 @@ public enum AutomationConfiguration {
 
     /// `get_configuration`: the document's sections plus each returned key's schema.
     public static func getResult(_ document: SettingsDocument, keys: [String]?, prefix: String?) -> AutomationResult {
+        getResult(document, keys: keys, prefix: prefix, platform: .macOS)
+    }
+
+    public static func getResult(
+        _ document: SettingsDocument, keys: [String]?, prefix: String?, platform: SettingsSchemaPlatform
+    ) -> AutomationResult {
         let filtered = document.filtered(keys: keys, prefix: prefix)
-        let schemaKeys = SettingsSchema.keys.filter {
+        let schemaKeys = SettingsSchema.keys(for: platform).filter {
             (keys.map(Set.init)?.contains($0) ?? true) && (prefix.map($0.hasPrefix) ?? true)
         }
         guard case .object(var object) = filtered.jsonValue else { return AutomationResult() }
-        object["schema"] = .object(SettingsSchema.describe(keys: schemaKeys))
+        object["schema"] = .object(SettingsSchema.describe(keys: schemaKeys, platform: platform))
         var result = AutomationResult()
         result.configuration = AnyCodable(.object(object))
         return result
@@ -61,10 +67,15 @@ public enum AutomationConfiguration {
     }
 
     /// `set_configuration` without the user's opt-in to automated writes.
-    public static let writesNotAllowed = AutomationError(
-        code: .unsupportedCommand,
-        message: "Changing settings over automation is turned off. Turn on \"Allow automation to change "
-            + "settings\" under Settings → General → Automation, or pass dry_run to only validate.")
+    public static let writesNotAllowed = writesNotAllowed(location: "Settings → General → Automation")
+
+    /// `set_configuration` without the opt-in, naming where the host shows it.
+    public static func writesNotAllowed(location: String) -> AutomationError {
+        AutomationError(
+            code: .unsupportedCommand,
+            message: "Changing settings over automation is turned off. Turn on \"Allow automation to change "
+                + "settings\" under \(location), or pass dry_run to only validate.")
+    }
 }
 
 extension AutomationRequest {

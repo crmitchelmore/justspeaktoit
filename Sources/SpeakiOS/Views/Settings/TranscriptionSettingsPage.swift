@@ -33,6 +33,8 @@ struct GeneralSettingsPage: View {
                     + "Apple on-device transcription then uses \(DeviceCopy.yourDevice)'s language."
             )
         }
+
+        IOSRawConfigurationSection()
     }
 }
 

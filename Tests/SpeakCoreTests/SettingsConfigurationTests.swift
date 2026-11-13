@@ -250,4 +250,42 @@ final class SettingsConfigurationTests: XCTestCase {
         XCTAssertEqual(fromMac.warnings.first?.path, "platform")
         XCTAssertTrue(SettingsSchema.platforms(forKey: "showHUD").contains(.windows))
     }
+
+    // MARK: - iOS (#1608)
+
+    func testIOSSchema_defaultsPassNoSecretsAndEveryKeyIsSearchableOnIPhone() {
+        let fields = SettingsSchema.fields(for: .iOS)
+        XCTAssertEqual(Set(fields.map(\.key)).count, fields.count)
+        XCTAssertTrue(fields.allSatisfy { !$0.isSensitive && !$0.key.hasSuffix("APIKey") })
+        let indexed = Set(SettingsSearchCatalog.entries(for: .iOS).flatMap(\.settingKeys))
+        XCTAssertEqual(Set(fields.map(\.key)).subtracting(indexed), [])
+
+        var context = SettingsValidationContext(currentValues: Dictionary(uniqueKeysWithValues:
+            fields.compactMap { field in field.defaultValue.map { (field.key, $0) } }))
+        context.platform = .iOS
+        let report = SettingsValidator.validate(settings: context.currentValues, context: context)
+        XCTAssertEqual(report.errors, [])
+        XCTAssertEqual(report.changes, [:])
+        XCTAssertEqual(
+            SettingsSchema.field(forKey: "transcriptClipboardLifetime", platform: .iOS)?.defaultValue,
+            .int(SettingsSchema.iOSTranscriptClipboardLifetimes[1]))
+    }
+
+    func testIOSSchema_rejectsMacValuesAndKeepsMacOnlyKeys() throws {
+        var context = SettingsValidationContext(currentValues: ["transcriptionMode": .string("streaming")])
+        context.platform = .iOS
+        let macOnly = try XCTUnwrap(Set(SettingsSchema.keys(for: .macOS))
+            .subtracting(SettingsSchema.keys(for: .iOS)).sorted().first)
+        let report = SettingsValidator.validate(
+            SettingsDocument(platform: "macOS", settings: [
+                "transcriptionMode": .string("liveNative"), macOnly: .bool(true),
+                "transcriptReadyNotificationsEnabled": .bool(true)
+            ]),
+            context: context)
+        XCTAssertEqual(
+            Set(self.errorPaths(report)),
+            ["settings.transcriptionMode", "settings.transcriptReadyNotificationsEnabled"])
+        XCTAssertEqual(report.ignoredKeys, [macOnly])
+        XCTAssertEqual(report.warnings.first?.path, "platform")
+    }
 }

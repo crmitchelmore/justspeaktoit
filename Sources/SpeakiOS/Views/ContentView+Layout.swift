@@ -50,7 +50,7 @@ extension ContentView {
                         if currentText.isEmpty {
                             Text(backgroundService.isRunning
                                  ? "Recording via Action Button…"
-                                 : "Tap the microphone to start transcription")
+                                 : "Tap Transcribe to start")
                                 .font(density.isCompact ? .subheadline : .title3)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .center)
@@ -198,9 +198,14 @@ extension ContentView {
             .toolbar { toolbarContent }
     }
 
+    /// Names what went wrong instead of a bare "Error".
+    var errorAlertTitle: String {
+        startFailureRecovery == nil ? "Recording Problem" : "Can't Start Recording"
+    }
+
     func presentations(_ content: some View) -> some View {
         recoveryPresentations(content)
-            .alert("Error", isPresented: $showingError) {
+            .alert(errorAlertTitle, isPresented: $showingError) {
                 if let recovery = self.startFailureRecovery {
                     Button(recovery.buttonTitle) { self.performStartFailureRecovery(recovery) }
                         .accessibilityIdentifier("captureStartRecoveryButton")

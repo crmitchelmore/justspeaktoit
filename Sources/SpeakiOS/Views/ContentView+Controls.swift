@@ -6,6 +6,22 @@ import UIKit
 extension ContentView {
     // MARK: - Floating Controls with Glass Effect
 
+    /// Icon and visible title, so the action is named on screen on iPhone and
+    /// iPad alike rather than relying on an icon-only button.
+    var recordButtonLabel: some View {
+        let control = recordControl
+        return HStack(spacing: density.isCompact ? 6 : 8) {
+            Image(systemName: control.symbolName)
+                .font(.system(size: primarySymbolSize))
+            Text(control.title)
+                .font(density.isCompact ? .subheadline.weight(.semibold) : .headline)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .padding(.horizontal, density.isCompact ? 12 : 20)
+        .frame(minWidth: primaryControlSize, minHeight: primaryControlSize)
+    }
+
     @ViewBuilder
     var floatingControls: some View {
         #if compiler(>=6.1) && canImport(SwiftUI, _version: 7.0)
@@ -31,14 +47,13 @@ extension ContentView {
                         await toggleRecording()
                     }
                 } label: {
-                    Image(systemName: primaryActionSymbol)
-                        .font(.system(size: primarySymbolSize))
-                        .frame(width: primaryControlSize, height: primaryControlSize)
+                    recordButtonLabel
                 }
                 .buttonStyle(.glassProminent)
                 .tint(isAnyRecording ? .red : .brandAccent)
-                .clipShape(Circle())
-                .accessibilityLabel(primaryActionLabel)
+                .clipShape(Capsule())
+                .accessibilityLabel(recordControl.accessibilityLabel)
+                .accessibilityInputLabels(recordControl.inputLabels)
                 .accessibilityIdentifier("recordToggleButton")
 
                 // Secondary actions (only visible when there's text and not recording)
@@ -90,14 +105,13 @@ extension ContentView {
                     await toggleRecording()
                 }
             } label: {
-                Image(systemName: primaryActionSymbol)
-                    .font(.system(size: primarySymbolSize))
-                    .frame(width: primaryControlSize, height: primaryControlSize)
+                recordButtonLabel
             }
             .buttonStyle(.borderedProminent)
             .tint(isAnyRecording ? .red : .accentColor)
-            .clipShape(Circle())
-            .accessibilityLabel(primaryActionLabel)
+            .clipShape(Capsule())
+            .accessibilityLabel(recordControl.accessibilityLabel)
+            .accessibilityInputLabels(recordControl.inputLabels)
             .accessibilityIdentifier("recordToggleButton")
 
             // Secondary actions (only visible when there's text and not recording)

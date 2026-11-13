@@ -36,6 +36,7 @@ struct ModelChooserSheet: View {
       items: levelOptions, id: { $0.id }, selection: $selection,
       searchText: { [$0.displayName, $0.id, $0.description ?? ""] },
       includes: { option in selectedTag.map { option.tags.contains($0) } ?? true },
+      filtersCurrentSelection: true,
       controls: {
         AnyView(HStack {
           if isBrowsingOpenRouter {
@@ -56,30 +57,27 @@ struct ModelChooserSheet: View {
       },
       clearFilters: { selectedTag = nil },
       footer: { select in
-        AnyView(Group {
-          if isGrouped && !isBrowsingOpenRouter {
-            openRouterRow
-          }
-          if allowsCustom {
-            Divider()
-            Button {
-              select(ModelCatalog.customOptionID)
-            } label: {
-              HStack {
-                Text("Custom…")
-                Spacer()
-                ModelCredentialStatusView(
-                  availability: ModelCredentialResolver.availability(
-                    for: ModelCatalog.customOptionID,
-                    purpose: credentialPurpose,
-                    storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
-                  )
+        if isGrouped && !isBrowsingOpenRouter {
+          openRouterRow
+        }
+        if allowsCustom {
+          Button {
+            select(ModelCatalog.customOptionID)
+          } label: {
+            HStack {
+              Text("Custom…")
+              Spacer()
+              ModelCredentialStatusView(
+                availability: ModelCredentialResolver.availability(
+                  for: ModelCatalog.customOptionID,
+                  purpose: credentialPurpose,
+                  storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
                 )
-              }
+              )
             }
-            .buttonStyle(.plain)
           }
-        })
+          .buttonStyle(.plain)
+        }
       },
       row: { option in
       VStack(alignment: .leading, spacing: 4) {

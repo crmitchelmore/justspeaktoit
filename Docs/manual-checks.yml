@@ -12,6 +12,20 @@ sessions:
       - "Settings \u203a General: Accessibility Insertion = Insert at Cursor; Stream text while dictating (experimental) = on; post-processing off."
       - "A Streaming model with a working key is selected. Use made-up sentences only."
     items:
+      - id: "mac-model-chooser-empty-results"
+        issues:
+          - 1581
+        title: "Model chooser: empty results have no stale selection or stray lines"
+        minutes: 2
+        core: false
+        build: "Just Speak to It for Mac, an Alpha build that includes the #1581 model chooser fix"
+        steps:
+          - "Open Settings, Transcription, Remote, Streaming and open the model chooser."
+          - "Choose a tag filter that excludes every model, or search for a made-up model name."
+          - "Clear filters, then search for the full name of the currently selected model."
+          - "Clear filters again and inspect the bottom of the model list above Custom."
+        expected: "No matches shows only the empty-results message and available footer actions, with no Current selection section. Searching for the selected model shows it once without an empty-results message. There are no empty rows or stacked separator lines above Custom, and filtering never changes the selected model."
+        final_gate: true
       - id: "mac-notes-streaming"
         issues:
           - 664

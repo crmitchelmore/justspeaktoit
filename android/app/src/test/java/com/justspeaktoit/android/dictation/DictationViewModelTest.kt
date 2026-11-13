@@ -1,5 +1,6 @@
 package com.justspeaktoit.android.dictation
 
+import com.justspeaktoit.android.cloud.CaptureLevel
 import com.justspeaktoit.android.cloud.CleanupPolicy
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudException
@@ -431,6 +432,36 @@ class DictationViewModelTest {
 
         assertTrue(h.viewModel.state.value.dictation is DictationState.Listening)
         assertEquals(0, second.stops)
+    }
+
+    @Test
+    fun testSilenceAutoStop_stopsAndTranscribesOnceTheQuietLastsTheSetDuration() {
+        h.onMain { h.viewModel.setSilence(SilenceSettings(enabled = true, durationSeconds = 1.0)) }
+        assertEquals(SilenceSettings(enabled = true, durationSeconds = 1.0), h.prefs.silence)
+        val rec = startCloud()
+        rec.onLevel(CaptureLevel(0f, 0.01, 0.1))
+        rec.onLevel(CaptureLevel(0f, 0.5, 0.2))
+        rec.onLevel(CaptureLevel(0f, 0.01, 0.3))
+        rec.onLevel(CaptureLevel(0f, 0.01, 1.2))
+        h.onMain { }
+        h.onMain { }
+        assertTrue(h.viewModel.state.value.dictation is DictationState.Listening)
+
+        rec.onLevel(CaptureLevel(0f, 0.01, 1.3))
+        val done = h.awaitState { it.dictation is DictationState.Done }
+        assertEquals("hello world", (done.dictation as DictationState.Done).transcript)
+        assertEquals(1, rec.stops)
+    }
+
+    @Test
+    fun testSilenceAutoStop_isOffByDefault() {
+        val rec = startCloud()
+        rec.onLevel(CaptureLevel(0f, 0.0, 0.1))
+        rec.onLevel(CaptureLevel(0f, 0.0, 30.0))
+        h.onMain { }
+        h.onMain { }
+        assertTrue(h.viewModel.state.value.dictation is DictationState.Listening)
+        assertEquals(0, rec.stops)
     }
 
     @Test

@@ -10,6 +10,7 @@ import com.justspeaktoit.android.cloud.CallHandle
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudService
+import com.justspeaktoit.android.cloud.CaptureLevel
 import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
@@ -157,6 +158,9 @@ internal class FakeRecorder(
     @Volatile var writing = true
     @Volatile var mutedFor = 0L
 
+    /** Reports a capture level as the recorder's thread would. */
+    @Volatile var onLevel: (CaptureLevel) -> Unit = {}
+
     override fun setPaused(paused: Boolean) {
         writing = !paused
     }
@@ -190,10 +194,13 @@ internal class FakeRecorders : RecorderFactory {
 
     override fun create(
         file: File,
-        onLevel: (Float) -> Unit,
+        onLevel: (CaptureLevel) -> Unit,
         onLimitReached: () -> Unit,
         onCaptureFailed: () -> Unit,
-    ): AudioRecorder = FakeRecorder(file, onLimitReached, onCaptureFailed, bytes, opens, stopGate).also { created += it }
+    ): AudioRecorder = FakeRecorder(file, onLimitReached, onCaptureFailed, bytes, opens, stopGate).also {
+        it.onLevel = onLevel
+        created += it
+    }
 
     val last: FakeRecorder get() = created.last()
 }
@@ -269,6 +276,7 @@ internal class MemoryPrefs(
     override var profiles: List<DictationProfile> = emptyList(),
     override var activeProfileId: String? = null,
     override var recordingSounds: RecordingSoundSettings = RecordingSoundSettings(),
+    override var silence: SilenceSettings = SilenceSettings(),
 ) : DictationPreferences
 
 internal class MemoryHistoryFile : HistoryFile {

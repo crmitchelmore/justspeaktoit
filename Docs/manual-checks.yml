@@ -1265,6 +1265,20 @@ sessions:
           - "During a Cloud dictation, say a first phrase, leave the app, say a second, different phrase, then come back and stop."
         expected: "Denial shows a rationale, then a Settings link, and dictation works once granted. A call or route change ends the session with a clear reason or carries on with correct text; leaving the app does not stop dictation: it carries on with the recording notification showing, and stopping after you come back keeps both phrases."
         final_gate: true
+      - id: "android-silence-auto-stop"
+        issues:
+          - 1632
+        title: "Cloud recordings stop after the set silence"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1632 silence auto-stop change"
+        steps:
+          - "Settings: turn on Stop recording after silence, set Silence duration to 2 seconds and leave the threshold at 0.05."
+          - "Choose Cloud mode, start dictating, say a sentence and then stay quiet."
+          - "Start again and say nothing at all; then start once more, pause for 1 second mid-sentence and carry on."
+          - "Set the duration to 5 seconds and repeat the first dictation; then turn the setting off and stay quiet for 10 seconds."
+        expected: "With the setting on, the recording stops about the set time after you go quiet and the sentence is transcribed. Saying nothing stops after the set time with no invented text. A pause shorter than the duration does not stop it. With the setting off, the recording keeps going until you stop it."
+        final_gate: false
       - id: "android-foreground-long-dictation"
         issues:
           - 1592

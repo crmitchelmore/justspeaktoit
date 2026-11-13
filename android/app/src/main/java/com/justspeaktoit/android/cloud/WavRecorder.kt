@@ -10,7 +10,9 @@ import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
 import kotlin.math.log10
+import kotlin.math.max
 import kotlin.math.sqrt
 
 /** 16 kHz mono PCM WAV header, the format every supported cloud model accepts. */
@@ -52,7 +54,35 @@ object WavFormat {
         val dbfs = if (rms <= 0.0) -60.0 else (20 * log10(rms)).coerceIn(-60.0, 0.0)
         return ((dbfs + 60.0) / 5.0 - 2.0).toFloat()
     }
+
+    /**
+     * SpeakCore's `DictationSilencePolicy.normalizedLevel`: 0..1 from a weighted mix of average and
+     * peak loudness, the scale the shared silence threshold is set on.
+     */
+    fun normalizedLevel(samples: ShortArray, count: Int): Double {
+        if (count <= 0) return 0.0
+        var squares = 0.0
+        var peak = 0.0
+        for (i in 0 until count) {
+            val amplitude = abs(samples[i].toDouble()) / FULL_SCALE
+            squares += amplitude * amplitude
+            peak = max(peak, amplitude)
+        }
+        if (peak <= 0.0) return 0.0
+        val averageDb = 20 * log10(sqrt(squares / count))
+        val peakDb = 20 * log10(peak)
+        return ((0.7 * averageDb + 0.3 * peakDb + 60) / 60).coerceIn(0.0, 1.0)
+    }
+
+    private const val FULL_SCALE = 32_768.0
 }
+
+/**
+ * One capture block's loudness: [meter] on SpeechRecognizer's -2..10 scale for the level indicator,
+ * [normalized] on SpeakCore's 0..1 silence scale (not a number while paused), and [atSeconds] of
+ * audio written so far.
+ */
+data class CaptureLevel(val meter: Float, val normalized: Double, val atSeconds: Double)
 
 /** A microphone capture to one file; [WavRecorder] in production. */
 interface AudioRecorder {
@@ -73,7 +103,7 @@ interface AudioRecorder {
 fun interface RecorderFactory {
     fun create(
         file: File,
-        onLevel: (Float) -> Unit,
+        onLevel: (CaptureLevel) -> Unit,
         onLimitReached: () -> Unit,
         onCaptureFailed: () -> Unit,
     ): AudioRecorder
@@ -85,7 +115,7 @@ fun interface RecorderFactory {
  */
 class WavRecorder(
     private val file: File,
-    private val onLevel: (Float) -> Unit,
+    private val onLevel: (CaptureLevel) -> Unit,
     private val onLimitReached: () -> Unit,
     /** Called on the capture thread when the microphone or disk fails mid-recording. */
     private val onCaptureFailed: () -> Unit,
@@ -170,7 +200,7 @@ class WavRecorder(
                     continue
                 }
                 if (paused) {
-                    onLevel(WavFormat.level(chunk, 0))
+                    onLevel(CaptureLevel(WavFormat.level(chunk, 0), Double.NaN, seconds(written)))
                     continue
                 }
                 if (System.nanoTime() < mutedUntil) chunk.fill(0, 0, read)
@@ -178,7 +208,8 @@ class WavRecorder(
                 bytes.asShortBuffer().put(chunk, 0, read)
                 out.write(bytes.array(), 0, read * 2)
                 written += read * 2
-                onLevel(WavFormat.level(chunk, read))
+                val meter = WavFormat.level(chunk, read)
+                onLevel(CaptureLevel(meter, WavFormat.normalizedLevel(chunk, read), seconds(written)))
                 if (written >= limit) {
                     running = false
                     onLimitReached()
@@ -187,6 +218,8 @@ class WavRecorder(
         }
         RandomAccessFile(file, "rw").use { it.write(WavFormat.header(written)) }
     }
+
+    private fun seconds(bytes: Long): Double = bytes.toDouble() / WavFormat.BYTES_PER_SECOND
 
     override fun setPaused(paused: Boolean) {
         this.paused = paused

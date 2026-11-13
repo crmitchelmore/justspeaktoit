@@ -36,6 +36,9 @@ class RawConfigurationTest {
         "recordingSoundsEnabled" to "Recording sounds are edited in Settings only for now.",
         "recordingSoundProfile" to "Recording sounds are edited in Settings only for now.",
         "recordingSoundVolume" to "Recording sounds are edited in Settings only for now.",
+        "silenceDetectionEnabled" to "Silence detection is edited in Settings only for now.",
+        "silenceThreshold" to "Silence detection is edited in Settings only for now.",
+        "silenceDuration" to "Silence detection is edited in Settings only for now.",
     )
 
     private fun validate(settings: String, current: Map<String, Any?> = fresh) =

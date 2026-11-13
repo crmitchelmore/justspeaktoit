@@ -183,6 +183,12 @@
     <string name="settings_sounds_volume">Volume</string>
     <string name="settings_sounds_volume_value">%1$d%%</string>
     <string name="settings_sounds_preview">Play sample</string>
+    <string name="settings_silence_title">Stop recording after silence</string>
+    <string name="settings_silence_note">Cloud mode only: the recording stops and is transcribed once you have been quiet this long. On-device and speech-service recognition already stop when you pause.</string>
+    <string name="settings_silence_duration">Silence duration</string>
+    <string name="settings_silence_duration_value">%1$s seconds</string>
+    <string name="settings_silence_threshold">Silence threshold</string>
+    <string name="settings_silence_threshold_note">Lower is more sensitive: raise it if background noise keeps recordings going.</string>
     <string name="settings_resources_title">System resources in use</string>
     <string name="settings_resources_note">What the app holds right now, why, and since when. Release stops it.</string>
     <string name="settings_resources_releasing">Releasing…</string>

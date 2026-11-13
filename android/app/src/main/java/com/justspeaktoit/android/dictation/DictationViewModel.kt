@@ -98,6 +98,7 @@ class DictationViewModel internal constructor(
             cleanupModel = CloudCatalog.cleanupModel(prefs.cleanupModelId),
             retention = prefs.retention,
             keepAudioOnCancel = prefs.keepAudioOnCancel,
+            silence = prefs.silence,
             corrections = prefs.corrections,
             cleanupPrompt = prefs.cleanupPrompt,
             profiles = prefs.profiles,
@@ -127,6 +128,7 @@ class DictationViewModel internal constructor(
                 get() = _state.value.let { if (it.cleanupReady) it.sessionCleanupModel else null }
             override val cleanupPrompt: String? get() = _state.value.sessionCleanupPrompt
             override val corrections: List<CorrectionRule> get() = _state.value.corrections
+            override val silence: SilenceSettings get() = _state.value.silence
         },
         cues = { cue ->
             val choice = _state.value.recordingSounds
@@ -332,6 +334,13 @@ class DictationViewModel internal constructor(
             }
         }
         return true
+    }
+
+    /** Applies from the next Cloud recording; one under way keeps the settings it started with. */
+    fun setSilence(settings: SilenceSettings) {
+        val clamped = SilenceSettings.of(settings.enabled, settings.threshold, settings.durationSeconds)
+        prefs.silence = clamped
+        _state.update { it.copy(silence = clamped) }
     }
 
     fun saveKey(provider: CloudProvider, key: String) =

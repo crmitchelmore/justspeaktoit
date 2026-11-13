@@ -28,15 +28,31 @@ final class LongListPickerItemsTests: XCTestCase {
         XCTAssertEqual(result.last?.items.map(\.id), [1, 2])
     }
 
-    func testPinnedSelection_IsExcludedFromGroupsAndSurvivesFilters() {
+    func testPinnedSelection_IsExcludedFromGroups() {
         let catalog = LongListPickerItems(items: items, id: { $0.id })
         XCTAssertEqual(catalog.pinned(selection: 1)?.name, "Zara")
         XCTAssertFalse(groups(selection: 1).flatMap { $0.items.map(\.id) }.contains(1))
-        let result = catalog.groups(
-            selection: 1, query: "no match", searchText: { [$0.name] }, group: nil, includes: { _ in false }
+    }
+
+    func testPinnedSelection_ObeysSearchAndFilters() {
+        let catalog = LongListPickerItems(items: items, id: { $0.id })
+        XCTAssertNil(catalog.pinned(selection: 1, query: "no match", searchText: { [$0.name] }))
+        XCTAssertNil(catalog.pinned(selection: 1, includes: { $0.provider == "ElevenLabs" }))
+        XCTAssertEqual(
+            catalog.pinned(
+                selection: 1, query: " FEMALE  british OPENAI ",
+                searchText: { [$0.name, $0.provider, $0.traits] }, includes: { $0.provider == "OpenAI" }
+            )?.id,
+            1
         )
-        XCTAssertTrue(result.isEmpty)
-        XCTAssertEqual(catalog.pinned(selection: 1)?.id, 1)
+    }
+
+    func testOnlySelectedItemMatches_IsStillAResult() {
+        let catalog = LongListPickerItems(items: items, id: { $0.id })
+        XCTAssertEqual(catalog.pinned(selection: 1, query: "Zara", searchText: { [$0.name] })?.id, 1)
+        XCTAssertTrue(catalog.groups(
+            selection: 1, query: "Zara", searchText: { [$0.name] }, group: nil
+        ).isEmpty)
     }
 
     func testUngroupedResults_PreserveOrder() {

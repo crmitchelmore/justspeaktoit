@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-12"
+updated: "2026-11-13"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -12,6 +12,20 @@ sessions:
       - "Settings \u203a General: Accessibility Insertion = Insert at Cursor; Stream text while dictating (experimental) = on; post-processing off."
       - "A Streaming model with a working key is selected. Use made-up sentences only."
     items:
+      - id: "mac-model-chooser-empty-results"
+        issues:
+          - 1581
+        title: "Model chooser: empty results have no stale selection or stray lines"
+        minutes: 2
+        core: false
+        build: "Just Speak to It for Mac, an Alpha build that includes the #1581 model chooser fix"
+        steps:
+          - "Open Settings, Transcription, Remote, Streaming and open the model chooser."
+          - "Choose a tag filter that excludes every model, or search for a made-up model name."
+          - "Clear filters, then search for the full name of the currently selected model."
+          - "Clear filters again and inspect the bottom of the model list above Custom."
+        expected: "No matches shows only the empty-results message and available footer actions, with no Current selection section. Searching for the selected model shows it once without an empty-results message. There are no empty rows or stacked separator lines above Custom, and filtering never changes the selected model."
+        final_gate: true
       - id: "mac-notes-streaming"
         issues:
           - 664
@@ -39,6 +53,20 @@ sessions:
           - "Start dictating again at the end of the note; after the first words appear, click into a different, empty note, keep talking, then stop."
           - "Check both notes."
         expected: "XX is kept and nothing outside the dictated text changed or duplicated (streaming may pause). After the switch, streaming pauses: the second note stays empty, the first note keeps only the words dictated before you switched, and a notice says the full transcript is on the clipboard. This holds for every \u201cIf you switch apps\u201d setting, because both notes are in the same app."
+        final_gate: true
+      - id: "mac-escape-removes-streamed-text"
+        issues:
+          - 1561
+        title: "TextEdit: Escape removes streamed text, but never your edits"
+        minutes: 3
+        core: true
+        build: "Just Speak to It for Mac, an Alpha build that includes the #1561 cancel rollback"
+        steps:
+          - "Settings \u203a Keyboard: check Keep audio when a recording is cancelled is on (otherwise cancelled recordings leave no History entry) and Cancel recording with Escape is on. In TextEdit, create a plain-text document, save it (rollback only acts on a saved document it can identify), and type: Start here "
+          - "With the caret after \"Start here \", dictate \"This cancelled recording should not be inserted\" and press Escape after the words appear."
+          - "Dictate again; after the first words appear, type XX at the very end of the document, keep talking, then press Escape."
+          - "Check the document and the two newest History entries."
+        expected: "After the first Escape the document reads exactly \"Start here \" with the caret after it. After the second, the streamed words and XX are both left in place, and that History entry has an output note saying the streamed text was left because the document changed."
         final_gate: true
       - id: "mac-one-shot-baselines"
         issues:
@@ -114,6 +142,21 @@ sessions:
           - "Choose Apple Dictation and read the same paragraph three more times."
           - "Mark this Pass. An agent then compares first-words latency for the two models using only the numeric latency fields in History."
         expected: "Six recordings exist, three per model. The agent posts both first-words p50 values on #614 and closes it if SpeechTranscriber\u2019s is the same or lower and iphone-hands-free has passed."
+        final_gate: false
+      - id: "mac-hands-free"
+        issues:
+          - 1553
+          - 614
+        title: "Mac hands-free: arms, starts on speech, nothing captured in silence"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, an Alpha build that includes the #1553 voice-activity gate, macOS 26 or later (ideally macOS 27)"
+        steps:
+          - "Settings \u203a Transcription \u203a Local \u203a Streaming: choose Apple SpeechTranscriber (On-device). Turn Hands-Free Dictation on."
+          - "Click into a new TextEdit document and arm with the hotkey; wait for the armed HUD."
+          - "Stay silent for 30 seconds, tap the desk once, then say \"Hands free works on this Mac\" and stay silent until it finishes."
+          - "Disarm and open History."
+        expected: "Arming shows armed (never \u201ccouldn\u2019t access the microphone\u201d). Silence and the tap start nothing; speech starts recording within about a second, the sentence lands in TextEdit, and it returns to armed after silence. History has exactly one new item."
         final_gate: false
       - id: "mac-start-latency-sample"
         issues:
@@ -212,6 +255,37 @@ sessions:
           - "Reserve the app name Just Speak to It."
           - "Copy the Package/Identity Name and Publisher values from Product identity into a comment on #1157."
         expected: "The reserved identity is on #1157, so an agent can set the MSIX identity and add the Store submission job."
+        final_gate: false
+      - id: "owner-android-apk-install"
+        issues:
+          - 1582
+        title: "Android: install the Alpha APK from the website"
+        minutes: 5
+        core: false
+        build: "An Android 10+ phone and the newest Alpha with JustSpeakToIt-android.apk"
+        prerequisites:
+          - "Release flow: Docs/alpha-stable-release-trains.md (Android Alpha APK)"
+        steps:
+          - "On the phone open https://justspeaktoit.com/#get and tap Download APK in the Android card."
+          - "Allow installs from the browser when Android asks, then install and open Just Speak to It."
+          - "Dictate a made-up sentence with on-device recognition and copy the transcript."
+          - "After the next Alpha, download and install the APK again over the existing app."
+        expected: "The APK installs without a signature warning, dictation works, and the newer APK upgrades in place with History kept."
+        final_gate: false
+      - id: "owner-play-console"
+        issues:
+          - 1582
+        title: "Android: create the Play Console app and service account"
+        minutes: 45
+        core: false
+        build: "Google Play Console and Google Cloud console"
+        prerequisites:
+          - "Steps: Docs/android-play-store-submission.md (Owner setup, steps 1 and 4 to 10; the upload key already exists)"
+        steps:
+          - "Create the app in Play Console, download the justspeaktoit-android-release artefact from the newest green Android run on main and upload app-release.aab to Internal testing by hand."
+          - "Create the Play service account and save its JSON as PLAY_SERVICE_ACCOUNT_JSON in the android-release environment."
+          - "Fill in the App content forms and store listing from the guide."
+        expected: "The next green Android run on main publishes to the internal track without manual steps."
         final_gate: false
       - id: "mac-compare-models-history"
         issues:
@@ -332,17 +406,32 @@ sessions:
       - id: "mac-openrouter-discover-configure"
         issues:
           - 1575
-        title: "OpenRouter cleanup and transcription pickers discover models and open a details page"
+        title: "Cleanup and transcription have a separate Browse OpenRouter models button, like voice"
         minutes: 4
         core: false
-        build: "Just Speak to It for Mac, the first Alpha build that includes #1575"
+        build: "Just Speak to It for Mac, the first Alpha build that includes the Browse OpenRouter models button"
         steps:
-          - "Open Settings \u203a Post-processing, choose Remote, click the Remote Post-processing Model picker and click the OpenRouter row."
-          - "Turn on Discover OpenAI cleanup models via OpenRouter, type gpt in Search models, click a model and check its Pricing and Temperature, then click Use for cleanup."
-          - "Open Settings \u203a Transcription, click the Remote Batch Model picker, click the OpenRouter row and wait for the list to refresh."
-          - "Click any discovered model, then click Use for transcription."
-        expected: "Both OpenRouter rows open a searchable list with provider and price filters, a Back button and a Refresh button. Each model opens a page with its pricing; choosing one closes the sheet and the picker shows OpenRouter \u203a the chosen model. Native providers are still listed first."
+          - "Open Settings \u203a Post-processing, choose Remote and check the Remote Post-processing Model picker lists native models only, with Browse OpenRouter models\u2026 below it."
+          - "Click Browse OpenRouter models\u2026, turn on Discover OpenAI cleanup models via OpenRouter, search for gpt, click a model, check its Pricing and Temperature, then click Use for cleanup."
+          - "Open Settings \u203a Transcription, click Browse OpenRouter models\u2026 under the Remote Batch Model picker, wait for the list to refresh, click any model and click Use for transcription."
+          - "Open each picker again."
+        expected: "Neither picker has an OpenRouter drill-in row. Each Browse OpenRouter models\u2026 button opens a searchable list with provider and price filters and a Refresh button, each model opens a page with its pricing, and choosing one closes the sheet. Each picker then shows OpenRouter \u203a the chosen model, as the voice picker does."
         final_gate: true
+      - id: "mac-raw-configuration-editor"
+        issues:
+          - 1546
+        title: "Raw configuration editor and speak config tools validate and apply settings safely"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes #1546, with the speak CLI installed"
+        steps:
+          - "Open Settings \u203a General \u203a Advanced and click Edit raw configuration\u2026; check that apiKeys shows only true or false for each provider."
+          - "Change ttsSpeed to 9 and appearance to \"sepia\", click Apply, and listen with VoiceOver on: both errors are announced with their settings.<key> path and nothing changes."
+          - "Set ttsSpeed to 1.2, click Apply, close the sheet and check Voice Output shows speed 1.2. Export\u2026 to a file, Reset to Defaults, Apply, then Import\u2026 the file and Apply: your settings come back."
+          - "With automation on and Allow automation to change settings off, run speak config set ttsSpeed=1.1: it is refused. Run it again with --dry-run: it reports the change without applying it."
+          - "Turn Allow automation to change settings on, run speak config set ttsSpeed=1.1 showCompactHUD=true, then speak config get --prefix tts."
+        expected: "Invalid edits change nothing and every error is announced; valid edits, export/import and reset round-trip. CLI writes are refused until the opt-in is on, dry runs always work, and get shows the new values with no API key material."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"
@@ -552,13 +641,30 @@ sessions:
           - "If any attempt shows a message, note its exact wording."
         expected: "All four dictations insert exactly once. The keyboard never asks for microphone or Speech permission and never shows a microphone error."
         final_gate: true
+      - id: "iphone-unavailable-model-reported"
+        issues:
+          - 661
+          - 1051
+        title: "Keyless cloud model is reported unavailable, not swapped for Apple speech"
+        minutes: 4
+        core: false
+        build: "TestFlight Just Speak to It Alpha that includes the unavailable-profile fix for #661"
+        steps:
+          - "In Just Speak, Settings \u203a Transcription: choose a Streaming model whose API key is not set (for example MAI-Transcribe-2 Streaming with no Azure Speech key)."
+          - "Tap Record in the app and read the message."
+          - "In Notes switch to the Just Speak keyboard and open the profile menu (the chip left of the mic) with VoiceOver on, then off."
+          - "Choose the App profile, tap the mic and read the message."
+          - "Add the key in Just Speak, return to Notes and open the profile menu again."
+        expected: "The app does not record and says the model is unavailable because its API key isn't set; no Apple Speech transcript is added to History. The App profile shows a warning and \"Unavailable: Azure Speech API key not set\", which VoiceOver reads too; the chip shows a warning. Tapping the mic says the profile is unavailable and inserts nothing. After adding the key the note is gone and dictation works."
+        final_gate: false
       - id: "iphone-hands-free"
         issues:
           - 614
+          - 1553
         title: "Hands-free: fast start on speech, no capture in silence"
         minutes: 4
         core: false
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        build: "TestFlight Just Speak to It Alpha that includes the #1553 voice-activity gate"
         steps:
           - "Settings \u203a Behavior: Hands-Free Dictation on; arm with the mic button."
           - "Say \"Go quick start\", then stay silent until it finishes."
@@ -710,15 +816,29 @@ sessions:
       - id: "iphone-openrouter-cleanup-discover-configure"
         issues:
           - 1575
-        title: "OpenRouter cleanup picker discovers models and opens a details page"
+        title: "Cleanup and transcription have a separate Browse OpenRouter models link, like voice"
+        minutes: 4
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes the Browse OpenRouter models link"
+        steps:
+          - "Open Settings \u203a Post-Processing: check the native models are listed with Browse OpenRouter models\u2026 below them and no OpenRouter row."
+          - "Tap Browse OpenRouter models\u2026, turn on Discover OpenAI cleanup models via OpenRouter, search for gpt, tap a model, check its Pricing, then tap Use for cleanup."
+          - "Open Settings \u203a Transcription, choose Remote and Batch, tap Browse OpenRouter models\u2026 under Remote Batch Model, tap any model and tap Use for transcription."
+        expected: "Each link opens a searchable list with provider and price filters, and each model opens a page with its pricing. After choosing, Post-Processing lists OpenRouter \u203a the chosen model with a tick, and Remote Batch Model shows the chosen OpenRouter model."
+        final_gate: true
+      - id: "iphone-history-session-details"
+        issues:
+          - 1596
+        title: "History shows session details and a timed issue report"
         minutes: 3
         core: false
-        build: "TestFlight Just Speak to It, the first Alpha build that includes #1575"
+        build: "TestFlight Just Speak to It, the first Alpha build that includes the iOS History session details change"
         steps:
-          - "Open Settings \u203a Post-Processing and tap the OpenRouter row under the native models."
-          - "Turn on Discover OpenAI cleanup models via OpenRouter and search for gpt."
-          - "Tap a model, check its Pricing, then tap Use for cleanup."
-        expected: "The OpenRouter row opens a searchable list with provider and price filters; each model opens a page with its pricing, and choosing one returns to Post-Processing with that model ticked under OpenRouter."
+          - "Make a short recording from the in-app mic with polish on, then one from the Action Button."
+          - "In History tap Session details on each new entry."
+          - "Long-press one entry, choose Create Issue with Details\u2026 and read the preview."
+          - "With VoiceOver on, swipe through the Session details rows."
+        expected: "Each entry lists its trigger (Button or Automation), friendly model names per phase, recording length, transcript and post-processing times and a total. The issue preview has relative timings but no transcript text or dates. VoiceOver reads each row's title and value."
         final_gate: true
   - id: "watch"
     device: "Watch"

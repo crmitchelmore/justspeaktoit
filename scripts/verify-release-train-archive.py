@@ -14,7 +14,7 @@ def bundle_info(bundle):
     return plistlib.loads((root / "Info.plist").read_bytes())
 
 
-def verify_intent_metadata(resources, *, main):
+def verify_intent_metadata(resources, *, main, require_shortcuts=False):
     path = resources / "Metadata.appintents/extract.actionsdata"
     if not path.is_file():
         if main:
@@ -46,6 +46,9 @@ def verify_intent_metadata(resources, *, main):
     shortcuts = metadata.get("autoShortcuts")
     if not isinstance(shortcuts, list) or len(shortcuts) > 10:
         raise SystemExit(f"Invalid App Shortcuts list (maximum ten): {path}")
+    if require_shortcuts and not shortcuts:
+        # A provider compiled into a static library builds but registers no phrases.
+        raise SystemExit(f"App registers no App Shortcuts: {path}")
     for shortcut in shortcuts:
         if not isinstance(shortcut, dict):
             raise SystemExit(f"Invalid App Shortcut: {path}")
@@ -135,7 +138,7 @@ def verify_submission_metadata(bundle, info, *, surface, main=False, watch=False
     for key in purpose_keys:
         if not isinstance(info.get(key), str) or not info[key].strip() or "$(" in info[key]:
             raise SystemExit(f"Missing or unresolved {key}: {bundle}")
-    verify_intent_metadata(resources, main=main)
+    verify_intent_metadata(resources, main=main, require_shortcuts=main and surface == "ios")
 
 
 def signed_entitlements(bundle):

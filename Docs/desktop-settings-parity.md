@@ -1826,10 +1826,12 @@ quiet and uses the existing recording buffer, provider finalization,
 post-processing and insertion pipeline; manual Record stays manual even when
 the hands-free preference is enabled.
 
-Windows/Linux hands-free is explicitly **sound activation, not Apple's ML speech
-classifier**. Noise can trigger it. The existing pure `HandsFreeDictationMachine`
-and activity tracker now compile portably; unchanged Apple classification,
-sensitivity and model admission live in `HandsFreeDictationApple.swift`.
+Windows/Linux hands-free is explicitly **fixed-threshold sound activation**.
+Noise can trigger it. Mac and iPhone use the adaptive
+`HandsFreeEnergyVoiceActivityDetector` instead (#1553), which tracks a noise
+floor and needs sustained speech. The pure `HandsFreeDictationMachine`, activity
+tracker and that detector compile portably; Apple error classification and model
+admission live in `HandsFreeDictationApple.swift`.
 The native hotkey arms/disarms, sound starts an utterance, configured silence
 finishes it, and successful transcription rearms the same native capture only
 after record-bound output confirms field insertion or an explicitly requested
@@ -2713,7 +2715,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsPronunciationDictionary | Source wired; qualification pending / Same | Strict word-to-text transfer/restart preserves the raw map; only keys seed AssemblyAI recognition using the shared Mac policy, never phonetic values or TTS replacements. A separate native Legacy word dictionary editor supports stale-safe CRUD without altering the modern store or Voice rendering pipeline. Modern literal-word recognition seeding is separately wired above. |
 | historyFlushInterval | Persisted only / Persisted only | Generic 0...30 s field; History stays durable per operation (see Capture warm-up section) |
 | silenceDetectionEnabled | Executable; qualification pending / Same | Native switch; initial quiet and configured silence stop the existing manual recording/finalization pipeline |
-| handsFreeDictationEnabled | Sound-activation replacement; per-slice qualification / Same | Fresh target and app profile per utterance (Windows/X11; Wayland uses normal settings with a note), immutable provider options, record-bound output evidence; rate changes refuse/rearm; not Apple's classifier |
+| handsFreeDictationEnabled | Sound-activation replacement; per-slice qualification / Same | Fresh target and app profile per utterance (Windows/X11; Wayland uses normal settings with a note), immutable provider options, record-bound output evidence; rate changes refuse/rearm; fixed threshold, not Apple's adaptive gate |
 | silenceThreshold | Executable; qualification pending / Same | Canonical range/default and Mac PCM meter; native editor feeds manual silence and sound activation |
 | silenceDuration | Executable; qualification pending / Same | Canonical hold/range feeds manual auto-stop and hands-free debounce; existing recording tail is retained |
 | connectionPreWarmingEnabled | Partial / Partial (source only; NOT_RUN) | Canonical intent round-trips. Separate native session approval allows a credential-free HEAD on the shared OpenRouter pool with a 5-second cancellation budget, only at idle after acknowledged ordinary capture in the current process/configuration and its real cleanup credential check. No probe before successful capture after restart; approval and capture evidence are transient. Completed-request remote cleanup only; native live WinHTTP/NIO and streaming cleanup's owned delegate sessions cannot reuse this pool. Owned/hands-free capture does not provide this witness. Existing device/absence notifications invalidate readiness; no new network/sleep monitor, idle timer/retry or guaranteed latency improvement. |
@@ -2736,6 +2738,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | clipboardInsertionTriggers | Implemented, native acceptance pending / Implemented, native acceptance pending | General trigger entry; bounded native snapshot, canonical matching, no History re-expansion |
 | enableSendToMac | Partial / Partial | iCloud web History sync is not Send-to-Mac transport/pairing |
 | enableAutomationServer | Equivalent / Source wired, unqualified | Automation; Windows per-user named pipe unchanged, still saved as legacy `automationEnabled`; General switch plus source-only CLI and MCP setup dialog (status, pipe name, consent text, copyable `speak`/MCP/Claude Code text). Linux native opt-in starts a bounded same-user Unix socket and `speak`; imported/legacy true preserves intent but never grants device-local approval. False revokes. No native/runtime qualification claimed. |
+| allowAutomationConfigurationChanges | Not applicable / Not applicable | Mac-only opt-in for `set_configuration` and `speak config set` (#1546); desktop raw configuration and its automation tools are follow-up work |
 | pasteRemoteTranscriptsAtCursor | Source wired, unqualified / Same | Shared arrival rule on synced History; 300 s poll and Mac-container-only limits |
 | autoCorrectionsEnabled | Source wired, unqualified / Separate opt-in observational source, unqualified | Canonical true default is not consent. Windows retains its acknowledged native Edit/UIA Value route and session approval. Linux observation is OFF until its distinct disclosed local in-app session action; generic approval and imports cannot authorize it. Only an admitted ordinary AT-SPI field with a bounded observational span qualifies. Paste/clipboard never do. App-origin changes can also be learned. Manual candidate actions remain available when learning is off. NOT_RUN |
 | autoCorrectionsPromotionThreshold | Source wired, unqualified / Source wired for opt-in observation, unqualified | Canonical Mac default 2 and integral 2...10 validation; captured per observation and passed to the shared domain with its persistence/rollback behavior. Linux preferences are editable but cannot activate sampling or grant consent. NOT_RUN |

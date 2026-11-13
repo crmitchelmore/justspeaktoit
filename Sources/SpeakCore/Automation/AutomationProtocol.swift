@@ -50,6 +50,8 @@ public enum AutomationCommand: String, Codable, Sendable, CaseIterable {
     case awaitTranscript = "await_transcript"
     case speakText = "speak_text"
     case listVoices = "list_voices"
+    case getConfiguration = "get_configuration"
+    case setConfiguration = "set_configuration"
 }
 
 /// Stable machine-readable failure codes.
@@ -116,6 +118,8 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     /// `speak_text` only (`provider` too): see `AutomationSpeechSelection`/`Settings`.
     public var text: String?, voice: String?, play: Bool?, model: String?, speed: Double?, pitch: Double?
     public var quality: String?, language: String?
+    /// `get_configuration` filters and `set_configuration` changes: see `AutomationConfiguration`.
+    public var keys: [String]?, prefix: String?, changes: [String: AnyCodable]?, dryRun: Bool?
 
     public init(
         schemaVersion: Int = AutomationSchema.currentVersion,
@@ -170,6 +174,7 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
             throw AutomationError(code: .invalidArgument, message: "Capture cursors require await_transcript.")
         }
         try self.validateSpeechFields()
+        try self.validateConfigurationFields()
         switch self.command {
         case .awaitTranscript:
             try self.validateAwait()
@@ -190,7 +195,8 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
                     message: "get_history limit must be between 1 and \(AutomationLimits.maxHistoryLimit)."
                 )
             }
-        case .status, .startDictation, .stopDictation, .speakText, .listVoices:
+        case .status, .startDictation, .stopDictation, .speakText, .listVoices, .getConfiguration,
+             .setConfiguration:
             break
         }
         return self
@@ -257,6 +263,8 @@ public struct AutomationResult: Codable, Sendable, Equatable {
     /// `speak_text`: the voice used, the file written and any `notice` worth
     /// telling a person (such as a fallback); `list_voices`: `voices`.
     public var voice: String?, path: String?, notice: String?, voices: [AutomationVoice]?
+    /// `get_configuration` and `set_configuration`: see `AutomationConfiguration`.
+    public var configuration: AnyCodable?
 
     public init(
         text: String? = nil,

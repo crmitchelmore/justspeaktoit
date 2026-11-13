@@ -139,7 +139,7 @@ final class IOSAppStoreComplianceTests: XCTestCase {
     }
 
     func testIOSAppShortcutCountStaysWithinApplesLimit() throws {
-        let source = try contents(of: "Sources/SpeakiOS/Activity/TranscriptionShortcuts.swift")
+        let source = try contents(of: "SpeakiOSApp/TranscriptionShortcuts.swift")
         let expression = try NSRegularExpression(pattern: #"\bAppShortcut\s*\("#)
         let count = expression.numberOfMatches(in: source, range: NSRange(source.startIndex..., in: source))
         XCTAssertGreaterThan(count, 0)

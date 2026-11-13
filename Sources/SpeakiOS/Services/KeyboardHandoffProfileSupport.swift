@@ -8,37 +8,11 @@ import SpeakCore
 @MainActor
 enum KeyboardHandoffProfileSupport {
     static func isAvailable(_ profile: KeyboardDictationProfileOption) -> Bool {
-        let settings = AppSettings.shared
-        if profile.transcriptionMode == .streaming {
-            guard let route = LiveTranscriptionRouting.route(for: profile.transcriptionModelIdentifier),
-                  route.isSupportedOnIOS else {
-                return false
-            }
-            if route.apiKeyIdentifier != nil,
-               settings.liveAPIKey(for: route).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return false
-            }
-        }
-        if profile.transcriptionMode == .batch {
-            guard AppSettings.supportsBatchModel(profile.transcriptionModelIdentifier) else {
-                return false
-            }
-            if profile.transcriptionModelIdentifier != AppleLocalModels.speechTranscriberModelID,
-               settings.batchAPIKey(for: profile.transcriptionModelIdentifier)
-                   .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return false
-            }
-        }
-        guard profile.polishes, let postProcessingModel = profile.postProcessingModelIdentifier else { return true }
-        guard AppSettings.postProcessingModels.contains(where: {
-            $0.id == postProcessingModel
-        }) || CleanupModelSelection.modelID(from: postProcessingModel) != nil else {
-            return false
-        }
-        if postProcessingModel == AppleLocalModels.foundationModelID {
-            return AppleFoundationModelPolisher.isAvailable
-        }
-        return settings.hasPostProcessingKey(for: postProcessingModel)
+        AppSettings.shared.profileAvailability(
+            transcriptionModel: profile.transcriptionModelIdentifier,
+            usesBatch: profile.transcriptionMode == .batch,
+            postProcessingModel: profile.polishes ? profile.postProcessingModelIdentifier : nil
+        ).isAvailable
     }
 
     static func polish(_ transcript: String, with profile: KeyboardDictationProfileOption) async throws -> String {

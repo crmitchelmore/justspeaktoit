@@ -54,7 +54,7 @@ Status key:
 | Audio / file transcription | **Android equivalent, done** | Share audio (MP3, M4A, WAV, OGG/Opus, WebM, FLAC; at most 25 MB) into the app; it is uploaded to the chosen cloud model after confirmation and recorded in History. |
 | Usage insights | **Launch, done (basic)** | History shows dictations and words in the last 7 days, counted locally from completed History entries. |
 | Voice output (TTS) | **Launch, partial** | Read aloud on a finished transcript uses the phone's `TextToSpeech` engine. Cloud voices are not planned for launch. |
-| Downloaded local models (Parakeet, WhisperKit, etc.) | **Planned (assess)** | Assess ML Kit GenAI speech recognition and on-device Whisper runtimes against size and battery; the platform recogniser covers launch. |
+| Downloaded local models (Parakeet, WhisperKit, etc.) | **Planned** | Assessed in [android-on-device-models.md](android-on-device-models.md) (#1593): whisper.cpp with the shared `local/whisperkit/*` pins for transcription (#1658), Gemini Nano through the ML Kit Prompt API on supported phones (#1659) and llama.cpp GGUF models (#1660) for cleanup. ML Kit GenAI speech recognition and sherpa-onnx are deferred. The platform recogniser covers launch. |
 | Keyboard extension (iOS) | **Android equivalent, done** | Dictation keyboard (IME). |
 | Share extension | **Android equivalent, done (audio)** | Share target for audio. Text in is not needed, as cleanup runs on dictated text. |
 | Widgets / Live Activity | **Deferred** | The Quick Settings tile and shortcut cover quick start; a home-screen widget only if it adds value. |

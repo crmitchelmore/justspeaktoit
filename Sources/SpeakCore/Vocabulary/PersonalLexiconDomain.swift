@@ -178,6 +178,23 @@ public final class PersonalLexiconDomain {
           suggestions.append(record)
         }
       }
+
+      // A recogniser that already writes the word in another case ("kubernetes") still gets the
+      // spelling the user entered ("Kubernetes"). Aliases never equal the canonical ignoring case.
+      if eligibleForAutoApply, let normalised = normaliseCase(of: rule.canonical, in: workingText) {
+        workingText = normalised.text
+        applied.append(
+          PersonalLexiconCorrectionRecord(
+            ruleID: rule.id,
+            alias: normalised.variant,
+            canonical: rule.canonical,
+            occurrences: normalised.occurrences,
+            wasApplied: true,
+            confidence: rule.confidence,
+            reason: nil
+          )
+        )
+      }
     }
 
     return PersonalLexiconApplicationResult(
@@ -250,19 +267,34 @@ public final class PersonalLexiconDomain {
     return result
   }
 
-  private func apply(alias: String, with canonical: String, to text: String) -> (Int, String) {
-    let regex: NSRegularExpression
-    if let cached = regexCache[alias] {
-      regex = cached
-    } else {
-      let escapedAlias = NSRegularExpression.escapedPattern(for: alias)
-      let pattern = "(?i)\\b\(escapedAlias)\\b"
-      guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else {
-        return (0, text)
-      }
-      regexCache[alias] = compiled
-      regex = compiled
+  private func wholeWordRegex(for alias: String) -> NSRegularExpression? {
+    if let cached = regexCache[alias] { return cached }
+    let escapedAlias = NSRegularExpression.escapedPattern(for: alias)
+    let pattern = "(?i)\\b\(escapedAlias)\\b"
+    guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+    regexCache[alias] = compiled
+    return compiled
+  }
+
+  /// Rewrites whole-word matches of `canonical` whose case differs. Returns the first differing
+  /// variant, how many matches changed and the new text, or nil when nothing changed.
+  private func normaliseCase(
+    of canonical: String, in text: String
+  ) -> (variant: String, occurrences: Int, text: String)? {
+    guard !canonical.isEmpty, let regex = wholeWordRegex(for: canonical) else { return nil }
+    let source = text as NSString
+    let differing = regex.matches(in: text, options: [], range: NSRange(location: 0, length: source.length))
+      .filter { source.substring(with: $0.range) != canonical }
+    guard let first = differing.first else { return nil }
+    let result = NSMutableString(string: text)
+    for match in differing.reversed() {
+      result.replaceCharacters(in: match.range, with: canonical)
     }
+    return (source.substring(with: first.range), differing.count, result as String)
+  }
+
+  private func apply(alias: String, with canonical: String, to text: String) -> (Int, String) {
+    guard let regex = wholeWordRegex(for: alias) else { return (0, text) }
     let fullRange = NSRange(location: 0, length: text.utf16.count)
     let matches = regex.numberOfMatches(in: text, options: [], range: fullRange)
     guard matches > 0 else { return (0, text) }

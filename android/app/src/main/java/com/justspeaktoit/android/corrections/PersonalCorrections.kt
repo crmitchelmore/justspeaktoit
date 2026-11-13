@@ -14,9 +14,13 @@ data class CorrectionRule(val writeAs: String, val heardAs: List<String>)
  * vocabulary glossary that cloud models with a `prompt` field receive.
  */
 object PersonalCorrections {
-    /** Applies [rules] in order, alias by alias, to a final transcript. */
+    /**
+     * Applies [rules] in order, alias by alias, to a final transcript. The spelling itself is matched
+     * too, so a recogniser that already writes the word in another case (`kubernetes`) still gets
+     * the casing the user entered (`Kubernetes`).
+     */
     fun apply(text: String, rules: List<CorrectionRule>): String = rules.fold(text) { current, rule ->
-        rule.heardAs.fold(current) { inner, alias ->
+        (rule.heardAs + rule.writeAs).fold(current) { inner, alias ->
             val trimmed = alias.trim()
             if (trimmed.isEmpty()) {
                 inner

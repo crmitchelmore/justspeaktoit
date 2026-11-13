@@ -65,6 +65,18 @@ final class PersonalLexiconDomainTests: XCTestCase {
         XCTAssertTrue(directives.contains { $0.contains("Suggestion: Only change \"Jon\"") })
     }
 
+    func testApply_keepsTheCanonicalCaseWhenTheRecogniserAlreadyWritesTheWord() async throws {
+        let rules = [rule("Kubernetes", alias: "cooper netties"), rule("Jonathan", alias: "Jon", activation: .manual)]
+        let domain = PersonalLexiconDomain(store: LexiconTestStore(rules))
+        await domain.waitUntilLoaded()
+        let result = domain.apply(to: "kubernetes, KUBERNETES, Kubernetes and kubernetesx jonathan", context: .empty)
+        XCTAssertEqual(result.transformedText, "Kubernetes, Kubernetes, Kubernetes and kubernetesx jonathan")
+        XCTAssertEqual(result.applied.map(\.alias), ["kubernetes"])
+        XCTAssertEqual(result.applied.map(\.occurrences), [2])
+        XCTAssertTrue(result.suggestions.isEmpty)
+        XCTAssertTrue(domain.apply(to: "Kubernetes", context: .empty).applied.isEmpty)
+    }
+
     func testLoadMutationSerializationRollbackAndDurableOrder() async throws {
         let first = rule("Zed", alias: "zeded"), second = rule("Alpha", alias: "alfa")
         let store = LexiconTestStore([first, second], delayed: true)

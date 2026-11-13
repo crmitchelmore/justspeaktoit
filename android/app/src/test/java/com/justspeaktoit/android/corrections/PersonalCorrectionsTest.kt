@@ -19,6 +19,13 @@ class PersonalCorrectionsTest {
     }
 
     @Test
+    fun testApply_keepsTheSpellingsCaseWhenTheRecogniserAlreadyWritesTheWord() {
+        assertEquals("I deploy to Kubernetes", PersonalCorrections.apply("I deploy to kubernetes", rules))
+        assertEquals("Kubernetes, not kubernetesx", PersonalCorrections.apply("KUBERNETES, not kubernetesx", rules))
+        assertEquals("iPhone", PersonalCorrections.apply("IPHONE", listOf(CorrectionRule("iPhone", emptyList()))))
+    }
+
+    @Test
     fun testApply_leavesPartialWordsAndRegexCharactersAlone() {
         val rule = listOf(CorrectionRule("$1 Ltd", listOf("acme")), CorrectionRule("x", listOf("a.c")))
         assertEquals("acmes and abc stay; $1 Ltd changes", PersonalCorrections.apply("acmes and abc stay; ACME changes", rule))

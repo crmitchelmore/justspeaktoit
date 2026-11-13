@@ -5,13 +5,15 @@ import Foundation
 import os.log
 
 /// Owns hands-free ("armed") dictation on macOS: the microphone tap feeding
-/// Apple's `SpeechDetector`, the cooldown timer, and the pure
+/// the on-device energy voice-activity gate, the cooldown timer, and the pure
 /// ``HandsFreeDictationMachine`` that decides what happens next.
 ///
 /// The session owner only sees `toggle()` / `disarm()` / `captureFinished()`
 /// and the callbacks it supplied; nothing about Speech, AVFoundation or the
-/// OS-version gate leaks out. Below macOS 26 arming always fails with a clear
-/// message rather than silently doing nothing.
+/// OS-version gate leaks out. Below macOS 26 (no on-device SpeechAnalyzer
+/// capture) arming always fails with a clear message rather than silently
+/// doing nothing. While armed nothing is recognised: the gate sees only audio
+/// levels, and speech starts a separate capture.
 @MainActor
 final class HandsFreeDictationCoordinator {
   /// What the coordinator asks the session owner to do. Kept as closures so the
@@ -34,7 +36,7 @@ final class HandsFreeDictationCoordinator {
   private var machine = HandsFreeDictationMachine()
   private var tracker = HandsFreeVoiceActivityTracker()
   private var audioEngine: AVAudioEngine?
-  private var detectorSession: Any?
+  private var detectorSession: HandsFreeVoiceActivitySession?
   private var inputSession: AudioInputDeviceManager.SessionContext?
   private let preRoll = HandsFreeAudioPreRollBuffer()
   private var armTask: Task<Void, Never>?
@@ -100,6 +102,7 @@ final class HandsFreeDictationCoordinator {
     switch outcome {
     case .completed:
       tracker.reset()
+      detectorSession?.resetSpeech()
       preRoll.reset()
       await apply(machine.handle(.captureFinished))
     case .failed(let failure):
@@ -180,7 +183,7 @@ final class HandsFreeDictationCoordinator {
       return
     }
     guard await permissionsManager.ensureGranted(.microphone).isGranted else {
-      await fail(AppleLocalModelError.compatibleAudioFormatUnavailable)
+      await apply(machine.handle(.sessionFailed(.audioUnavailable)))
       return
     }
     guard armAttemptIsCurrent(armID) else { return }
@@ -192,7 +195,7 @@ final class HandsFreeDictationCoordinator {
       return
     }
     do {
-      try await startDetectorSession(armID: armID)
+      try await startVoiceActivityGate(armID: armID)
       guard armAttemptIsCurrent(armID) else {
         await stopDetector()
         await audioDeviceManager.endUsingPreferredInput(session: inputSession)
@@ -207,42 +210,30 @@ final class HandsFreeDictationCoordinator {
     }
   }
 
-  @available(macOS 26.0, *)
-  private func startDetectorSession(armID: UUID) async throws {
-    let session = try await AppleSpeechDetectorSession(
-      onActivity: { [weak self] update in
-        Task { @MainActor [weak self] in await self?.handleActivity(update) }
-      },
-      onFailure: { [weak self] error in
-        Task { @MainActor [weak self] in
-          guard self?.armID == armID, self?.machine.isArmed == true else { return }
-          await self?.fail(error)
-        }
+  /// Starts the microphone tap that feeds the pre-roll and the energy
+  /// voice-activity gate. No `SpeechAnalyzer` runs while armed: a
+  /// SpeechDetector-only analyzer traps on macOS 27 (#1553).
+  private func startVoiceActivityGate(armID: UUID) async throws {
+    let session = HandsFreeVoiceActivitySession(onActivity: { [weak self] update in
+      Task { @MainActor [weak self] in
+        guard self?.armID == armID else { return }
+        await self?.handleActivity(update)
       }
-    )
-    guard armAttemptIsCurrent(armID) else {
-      await session.cancel()
-      throw CancellationError()
-    }
+    })
 
     let engine = AVAudioEngine()
     let inputNode = engine.inputNode
     inputNode.removeTap(onBus: 0)
     let inputFormat = inputNode.outputFormat(forBus: 0)
     guard audioInputFormatIsUsable(inputFormat) else {
-      await session.cancel()
-      throw AppleLocalModelError.compatibleAudioFormatUnavailable
+      session.cancel()
+      throw HandsFreeMicrophoneUnavailable()
     }
 
     do {
-      let converter = try AppleSpeechAudioConverter(
-        sourceFormat: inputFormat,
-        targetFormat: session.audioFormat
-      )
       try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: inputFormat) { [preRoll, session] buffer, _ in
         preRoll.append(buffer)
-        guard let converted = converter.convert(buffer) else { return }
-        session.send(converted)
+        session.send(buffer)
       }
       try await startAudioEngineAfterInputDeviceSettles(engine)
       audioEngine = engine
@@ -252,8 +243,9 @@ final class HandsFreeDictationCoordinator {
     } catch {
       engine.stop()
       inputNode.removeTap(onBus: 0)
-      await session.cancel()
-      throw error
+      session.cancel()
+      if error is CancellationError { throw error }
+      throw HandsFreeMicrophoneUnavailable()
     }
   }
 
@@ -285,9 +277,7 @@ final class HandsFreeDictationCoordinator {
     resourceHold?.end()
     resourceHold = nil
 
-    if #available(macOS 26.0, *), let session = detectorSession as? AppleSpeechDetectorSession {
-      await session.cancel()
-    }
+    detectorSession?.cancel()
     detectorSession = nil
 
     if let inputSession {
@@ -300,6 +290,10 @@ final class HandsFreeDictationCoordinator {
   /// and reports through exactly one path.
   private func fail(_ error: Error) async {
     guard !(error is CancellationError) else { return }
+    if error is HandsFreeMicrophoneUnavailable {
+      await apply(machine.handle(.sessionFailed(.audioUnavailable)))
+      return
+    }
     await apply(machine.handle(sessionError: error))
   }
 
@@ -307,6 +301,10 @@ final class HandsFreeDictationCoordinator {
     armID == id && !Task.isCancelled && machine.state == .arming
   }
 }
+
+/// The microphone tap or engine could not start, as opposed to a Speech
+/// framework failure.
+private struct HandsFreeMicrophoneUnavailable: Error {}
 
 // MARK: - Sleep, screen lock and audio-device changes
 

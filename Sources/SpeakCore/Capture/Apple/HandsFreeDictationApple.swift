@@ -14,7 +14,7 @@ extension HandsFreeDictationMachine.Failure {
         case .modelAssetsUnavailable:
             self = .assetsUnavailable
         case .compatibleAudioFormatUnavailable:
-            self = .audioUnavailable
+            self = .audioFormatUnavailable
         case .foundationModelUnavailable, .emptyTranscript:
             self = .captureFailed
         }
@@ -23,14 +23,17 @@ extension HandsFreeDictationMachine.Failure {
     public var message: String {
         switch self {
         case .detectorUnavailable:
-            return "Hands-free dictation needs Apple's on-device speech detector, "
-                + "which isn't available on this device."
+            return "Hands-free dictation needs Apple's on-device speech recognition "
+                + "(macOS 26 or iOS 26 or later), which isn't available on this device."
         case .assetsUnavailable:
             return "Hands-free dictation couldn't install Apple's on-device speech models."
         case .localeUnsupported:
             return "Hands-free dictation doesn't support this language on this device."
         case .audioUnavailable:
             return "Hands-free dictation couldn't access the microphone."
+        case .audioFormatUnavailable:
+            return "Hands-free dictation couldn't start because Apple's on-device speech recognition "
+                + "didn't offer a usable audio format on this device."
         case .captureFailed:
             return "Hands-free dictation stopped because the recording session failed."
         case .unsupportedConfiguration:

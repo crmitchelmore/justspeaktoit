@@ -16,7 +16,7 @@ enum HandsFreeCaptureOwnership {
 }
 
 /// Hands-free ("armed") dictation wiring: the hotkey arms a listening session
-/// instead of recording, and Apple's `SpeechDetector` starts and stops capture.
+/// instead of recording, and an on-device voice-activity gate starts and stops capture.
 ///
 /// Everything here is inert unless `appSettings.handsFreeDictationActive` is
 /// true, which requires both the default-off setting and macOS 26.

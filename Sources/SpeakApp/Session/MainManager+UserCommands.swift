@@ -67,6 +67,13 @@ extension MainManager {
   /// that can be reprocessed later, or deletes it and records nothing.
   private func cancelRecordingByUser(reason: String) {
     activeSession?.errors.append(HistoryError(phase: .recording, message: reason, debugDescription: nil))
+    // A cancelled recording inserts nothing: take back any streamed text
+    // before teardown resets the inserter (issue #1561).
+    if case .kept(let why) = text.liveTextInserter.rollBackForCancellation() {
+      activeSession?.errors.append(
+        HistoryError(phase: .output, message: "Streamed text was left in the document: \(why)", debugDescription: nil)
+      )
+    }
     cleanupAfterFailure(
       message: "Recording cancelled", preserveFile: appSettings.keepAudioOnCancel,
       transcriptPolicy: .discard, historyRequiresAudio: true

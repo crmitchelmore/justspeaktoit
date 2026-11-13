@@ -105,18 +105,33 @@ final class OfflineTranscriptUpgradeHistoryTests: XCTestCase {
                 networkSnapshot: { snapshot },
                 localRecognitionCapability: { _ in .available }
             )
-            coordinator.makeSession = { session }
+            var sessionsMade = 0
+            coordinator.makeSession = { sessionsMade += 1; return session }
             var tags: [(UUID, String)] = []
             coordinator.tagOfflineCapture = { _, recording, intended in tags.append((recording, intended)) }
 
-            try await coordinator.start()
-            _ = await coordinator.stop()
-
             if snapshot == .unavailable {
+                try await coordinator.start()
+                _ = await coordinator.stop()
                 XCTAssertEqual(tags.count, 1)
                 XCTAssertEqual(tags.first?.0, recordingID)
                 XCTAssertEqual(tags.first?.1, "deepgram/nova-3-streaming")
             } else {
+                // Online, a keyless cloud model is refused rather than
+                // recorded with Apple speech (#661). The shared Keychain may
+                // or may not hold a key here, so follow what settings report.
+                let refused = !settings.transcriptionAvailability(
+                    for: "deepgram/nova-3-streaming", usesBatch: false
+                ).isAvailable
+                do {
+                    try await coordinator.start()
+                    _ = await coordinator.stop()
+                    XCTAssertFalse(refused, "A keyless cloud model must not start")
+                } catch {
+                    XCTAssertTrue(refused, "\(error)")
+                    XCTAssertTrue(error is TranscriptionModelUnavailableError, "\(error)")
+                    XCTAssertEqual(sessionsMade, 0, "No substitute session is recorded")
+                }
                 XCTAssertTrue(tags.isEmpty, "An online capture is never queued for an upgrade")
             }
         }

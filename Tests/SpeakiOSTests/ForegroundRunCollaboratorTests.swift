@@ -80,19 +80,21 @@ final class ForegroundRunCollaboratorTests: XCTestCase {
 
     func testRoute_offlineRemoteRunFallsBackOnDeviceAndRemembersTheIntendedModel() throws {
         var asked = 0
+        var checked: [String] = []
         let route = try ForegroundCaptureRoute.resolve(
             requestedModelID: "deepgram/nova-3-streaming", usesBatch: false, connectivity: .unavailable,
-            localCapability: { asked += 1; return .available }, resolveLiveModel: { "live:" + $0 }
+            localCapability: { asked += 1; return .available }, requireAvailable: { checked.append($0) }
         )
         XCTAssertEqual(asked, 1)
-        XCTAssertEqual(route.modelID, "live:" + AppleLocalModels.legacySpeechModelID)
+        XCTAssertEqual(route.modelID, AppleLocalModels.legacySpeechModelID)
+        XCTAssertEqual(checked, [AppleLocalModels.legacySpeechModelID], "The offline model is what must run")
         XCTAssertEqual(route.offlineIntendedModelID, "deepgram/nova-3-streaming")
         XCTAssertEqual(route.notice, OfflineCaptureRouting.fallbackNotice)
         XCTAssertTrue(route.requiresStrictOnDeviceRecognition)
 
         XCTAssertThrowsError(try ForegroundCaptureRoute.resolve(
             requestedModelID: "deepgram/nova-3-streaming", usesBatch: false, connectivity: .unavailable,
-            localCapability: { .unavailable }, resolveLiveModel: { $0 }
+            localCapability: { .unavailable }, requireAvailable: { _ in }
         )) {
             guard case .offlineLocalRecognitionUnavailable? = $0 as? iOSTranscriptionError else {
                 return XCTFail("\($0)")
@@ -101,19 +103,36 @@ final class ForegroundRunCollaboratorTests: XCTestCase {
     }
 
     func testRoute_onlineAndBatchRunsKeepTheirModelWithoutAskingForLocalCapability() throws {
+        var checked: [String] = []
         let online = try ForegroundCaptureRoute.resolve(
             requestedModelID: "deepgram/nova-3-streaming", usesBatch: false, connectivity: .available,
-            localCapability: { XCTFail("Not needed online"); return .unknown }, resolveLiveModel: { "live:" + $0 }
+            localCapability: { XCTFail("Not needed online"); return .unknown }, requireAvailable: { checked.append($0) }
         )
-        XCTAssertEqual(online.modelID, "live:deepgram/nova-3-streaming")
+        XCTAssertEqual(online.modelID, "deepgram/nova-3-streaming")
         XCTAssertNil(online.offlineIntendedModelID)
         let batch = try ForegroundCaptureRoute.resolve(
             requestedModelID: "deepgram/nova-3", usesBatch: true, connectivity: .unavailable,
             localCapability: { XCTFail("Batch never falls back"); return .unknown },
-            resolveLiveModel: { _ in XCTFail("Batch has no live route"); return "" }
+            requireAvailable: { checked.append($0) }
         )
         XCTAssertEqual(batch.modelID, "deepgram/nova-3")
         XCTAssertFalse(batch.requiresStrictOnDeviceRecognition)
+        XCTAssertEqual(checked, ["deepgram/nova-3-streaming", "deepgram/nova-3"])
+    }
+
+    /// Issue #661: a keyless cloud model is reported, never swapped for Apple speech.
+    func testRoute_unavailableModelRefusesTheRunInsteadOfSubstituting() {
+        let unavailable = TranscriptionModelUnavailableError(
+            modelIdentifier: "azure/mai-transcribe-2-streaming",
+            modelName: "MAI-Transcribe-2",
+            availability: TranscriptionModelAvailability(status: .missingCredential, providerName: "Azure Speech")
+        )
+        XCTAssertThrowsError(try ForegroundCaptureRoute.resolve(
+            requestedModelID: "azure/mai-transcribe-2-streaming", usesBatch: false, connectivity: .available,
+            localCapability: { .unknown }, requireAvailable: { _ in throw unavailable }
+        )) {
+            XCTAssertEqual($0 as? TranscriptionModelUnavailableError, unavailable)
+        }
     }
 
     // MARK: Stop settlement

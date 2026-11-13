@@ -148,6 +148,11 @@ final class KeyboardViewModel: ObservableObject {
         profileSelection.route.displayName
     }
 
+    /// Why the selected profile cannot run, as reported by the app; `nil` when it can.
+    var profileUnavailableNote: String? {
+        profileSelection.selectedProfile.unavailableNote
+    }
+
     var profileOptions: [KeyboardDictationProfileOption] {
         profileSelection.availableProfiles
     }

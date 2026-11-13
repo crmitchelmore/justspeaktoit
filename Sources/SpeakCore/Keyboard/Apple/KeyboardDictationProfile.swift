@@ -34,6 +34,10 @@ public struct KeyboardDictationProfileOption: Identifiable, Codable, Equatable, 
     public let languageIdentifier: String
     public let postProcessingEnabled: Bool
     public let postProcessingModelIdentifier: String?
+    /// Whether the app can run this profile, published by the app because the
+    /// extension cannot read credentials. `nil` (older payloads, the Local
+    /// profile) means nothing unavailable was reported.
+    public var availability: TranscriptionModelAvailability?
 
     public init(
         id: String,
@@ -62,6 +66,11 @@ public struct KeyboardDictationProfileOption: Identifiable, Codable, Equatable, 
     public var polishes: Bool {
         postProcessingEnabled && postProcessingModelIdentifier?.isEmpty == false
     }
+
+    public var isAvailable: Bool { availability?.isAvailable ?? true }
+
+    /// The reason this profile cannot run, for menus and accessibility.
+    public var unavailableNote: String? { isAvailable ? nil : availability?.note }
 }
 
 /// Non-secret app settings used to publish the app-owned keyboard projection.
@@ -71,6 +80,9 @@ public struct KeyboardAppProfileConfiguration: Equatable, Sendable {
     public let languageIdentifier: String
     public let postProcessingEnabled: Bool
     public let postProcessingModelIdentifier: String?
+    /// Whether the app can run this configuration with the credentials and
+    /// routes it has now. The keyboard shows it; the app still re-checks at start.
+    public var availability: TranscriptionModelAvailability = .available
 
     public init(
         transcriptionMode: KeyboardDictationTranscriptionMode,
@@ -123,7 +135,7 @@ public enum KeyboardDictationProfileCatalog {
             for: configuration.transcriptionModelIdentifier,
             isBatch: isBatch
         )
-        let app = KeyboardDictationProfileOption(
+        var app = KeyboardDictationProfileOption(
             id: appIdentifier,
             displayName: "App: \(appModelName)",
             chipLabel: "App",
@@ -134,6 +146,7 @@ public enum KeyboardDictationProfileCatalog {
             postProcessingEnabled: configuration.postProcessingEnabled,
             postProcessingModelIdentifier: configuration.postProcessingModelIdentifier
         )
+        app.availability = configuration.availability
         return KeyboardProfileSelection(
             selectedIdentifier: selectedIdentifier ?? appIdentifier,
             availableProfiles: [direct, app],

@@ -15,10 +15,13 @@ struct HistoryItemMetaSection: View {
       LazyVGrid(columns: metaColumns, alignment: .leading, spacing: 12) {
         metaTile(icon: "bolt.horizontal.circle", title: "Trigger") {
           VStack(alignment: .leading, spacing: 2) {
-            Text(item.trigger.gesture.rawValue.capitalized)
-            Text("Hotkey: \(item.trigger.hotKeyDescription)")
-              .font(.caption)
-              .foregroundStyle(.secondary)
+            Text(item.trigger.gestureLabel)
+            if !item.trigger.hotKeyDescription.isEmpty {
+              Text(item.trigger.isHotKeyGesture
+                ? "Hotkey: \(item.trigger.hotKeyDescription)" : item.trigger.hotKeyDescription)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
           }
         }
 

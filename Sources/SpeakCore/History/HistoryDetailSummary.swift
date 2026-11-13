@@ -40,18 +40,29 @@ public struct HistoryModelsByPhase: Equatable, Sendable {
 }
 
 extension ApplicationHistoryTrigger {
+    /// The gesture as people read it, such as "Double tap" or "Button".
+    public var gestureLabel: String {
+        switch self.gesture {
+        case .singleTap: "Single tap"
+        case .doubleTap: "Double tap"
+        case .hold: "Hold"
+        case .uiButton: "Button"
+        case .automation: "Automation"
+        }
+    }
+
+    /// Whether ``hotKeyDescription`` names a hot key rather than a button or source such as Compare Models.
+    public var isHotKeyGesture: Bool {
+        switch self.gesture {
+        case .singleTap, .doubleTap, .hold: true
+        case .uiButton, .automation: false
+        }
+    }
+
     /// One line such as "Double tap · Right Option" or "Automation · Shortcut".
     public var historySummary: String {
-        let gestureLabel: String
-        switch self.gesture {
-        case .singleTap: gestureLabel = "Single tap"
-        case .doubleTap: gestureLabel = "Double tap"
-        case .hold: gestureLabel = "Hold"
-        case .uiButton: gestureLabel = "Button"
-        case .automation: gestureLabel = "Automation"
-        }
         let description = self.hotKeyDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        return description.isEmpty ? gestureLabel : "\(gestureLabel) · \(description)"
+        return description.isEmpty ? self.gestureLabel : "\(self.gestureLabel) · \(description)"
     }
 }
 
@@ -70,10 +81,20 @@ public enum HistoryDetailFormatting {
             }
     }
 
+    /// Whole-cent amounts use the currency's usual digits; a non-zero amount under one cent keeps up to
+    /// four decimal places, and anything smaller reads "< $0.0001", so cheap requests never show "$0.00".
     public static func formatCurrency(_ value: Decimal, currency: String) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = currency.isEmpty ? "USD" : currency
+        let smallest = Decimal(sign: .plus, exponent: -4, significand: 1)
+        guard value > 0, value < Decimal(sign: .plus, exponent: -2, significand: 1) else {
+            return formatter.string(from: NSDecimalNumber(decimal: value)) ?? "$0.00"
+        }
+        formatter.maximumFractionDigits = 4
+        if value < smallest {
+            return "< " + (formatter.string(from: NSDecimalNumber(decimal: smallest)) ?? "$0.0001")
+        }
         return formatter.string(from: NSDecimalNumber(decimal: value)) ?? "$0.00"
     }
 

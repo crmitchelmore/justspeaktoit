@@ -45,6 +45,7 @@ extension DesktopConfiguration {
                       group: "Post-processing", kind: .boolean, defaultValue: AnyCodable(.bool(false)))]
         all += [VoiceSynthesisPreference.quality.field, VoiceAudioFormat.transferField]
         all += ShellPreference.fields
+        all += DesktopTelemetryConsent.fields
         all += SonioxVoicePreference.fields
         all += CaptureDeliveryPreference.fields
         all += LivePolishPreference.fields

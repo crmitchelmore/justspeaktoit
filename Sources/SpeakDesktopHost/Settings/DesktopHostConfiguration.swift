@@ -9,7 +9,7 @@ package enum DesktopConfigurationSaveIntent: Equatable, Sendable {
 extension DesktopHostController {
     package func configuration() throws -> DesktopConfiguration {
         var values = settings.configuration?.values ?? [:]
-        values.removeValue(forKey: DesktopConnectionPreWarming.approvalProjectionKey)
+        for key in DesktopConfiguration.editorProjectionKeys { values.removeValue(forKey: key) }
         values[DesktopPostProcessingConfiguration.streamingKey] = AnyCodable(
             .bool((settings.postProcessing ?? .init()).streamingEnabled)
         )
@@ -32,6 +32,9 @@ extension DesktopHostController {
         let qualityKey = VoiceSynthesisPreference.quality.key.rawValue
         values[qualityKey] = projected.values[qualityKey]
         values[DesktopConnectionPreWarming.approvalProjectionKey] = AnyCodable(.bool(connectionWarm.approved))
+        let consent = telemetry.store.snapshot()
+        values[DesktopTelemetryConsent.analyticsKey] = AnyCodable(.bool(consent.analyticsConsent == .optedIn))
+        values[DesktopTelemetryConsent.diagnosticsKey] = AnyCodable(.bool(consent.diagnosticsConsent == .granted))
         if values[qualityKey] == nil, let voice = settings.voiceOutput as? DesktopVoiceOutputSettings {
             values[qualityKey] = AnyCodable(.string(voice.qualityForNativeEditor))
         }
@@ -67,6 +70,20 @@ extension DesktopHostController {
         )
         try await persistConfiguration(
             configuration, intent: intent, status: "Configuration saved. New recordings use these preferences."
+        )
+        if intent == .apply { await applyTelemetryConsent(configuration, previous: previous) }
+    }
+
+    /// Only an explicit change in the native editor moves consent: an unchanged
+    /// "off" keeps an undecided state undecided, and nothing else can grant it.
+    private func applyTelemetryConsent(_ configuration: DesktopConfiguration, previous: DesktopConfiguration) async {
+        func changed(_ key: String) -> Bool? {
+            let value = configuration.enabled(key)
+            return value == previous.enabled(key) ? nil : value
+        }
+        await telemetry.updateConsent(
+            analytics: changed(DesktopTelemetryConsent.analyticsKey),
+            diagnostics: changed(DesktopTelemetryConsent.diagnosticsKey)
         )
     }
 
@@ -137,7 +154,7 @@ extension DesktopHostController {
         let approved = configuration.enabled(DesktopConnectionPreWarming.approvalProjectionKey)
             && configuration.enabled(DesktopConnectionPreWarming.preferenceKey)
             && (intent == .apply || connectionWarm.approved)
-        let configuration = try DesktopConnectionPreWarming.removingApproval(from: configuration)
+        let configuration = try configuration.removingEditorProjections()
         var changed = settings
         var voice = changed.voiceOutput
         changed.configuration = try importingAutomationPreferences(
@@ -235,7 +252,7 @@ extension DesktopHostController {
         var values = projected.values
         values.removeValue(forKey: "automationLocalConsent")
         values.removeValue(forKey: "automationEnabled")
-        values.removeValue(forKey: DesktopConnectionPreWarming.approvalProjectionKey)
+        for key in DesktopConfiguration.editorProjectionKeys { values.removeValue(forKey: key) }
         let preferences = try DesktopConfiguration(values: values)
         try DesktopConfigurationDocument(preferences: preferences).write(to: path)
         update("Portable preferences exported, including preserved imported values. Credential stores were not read.")
@@ -277,7 +294,7 @@ extension DesktopHostController {
         changed.configuration = try importingAutomationPreferences(
             Platform.importVoiceConfiguration(
                 from: keepingLocalAutomationWriteGrant(
-                    DesktopConnectionPreWarming.removingApproval(from: document.preferences)
+                    document.preferences.removingEditorProjections()
                 ),
                 into: &voice
             )

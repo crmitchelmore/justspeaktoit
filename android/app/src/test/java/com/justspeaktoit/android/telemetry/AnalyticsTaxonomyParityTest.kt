@@ -6,8 +6,8 @@ import org.junit.Test
 
 /** Android sends the Mac and iOS event names and values, so one PostHog project reads all three. */
 class AnalyticsTaxonomyParityTest {
-    private val events = RepoSources.speakCore("Analytics/Apple/ProductAnalyticsEvent.swift")
-    private val taxonomy = RepoSources.speakCore("Analytics/Apple/ProductAnalyticsTaxonomy.swift")
+    private val events = RepoSources.speakCore("Analytics/ProductAnalyticsEvent.swift")
+    private val taxonomy = RepoSources.speakCore("Analytics/ProductAnalyticsTaxonomy.swift")
     private val diagnostics = RepoSources.speakCore("Analytics/DiagnosticsConsent.swift")
 
     @Test

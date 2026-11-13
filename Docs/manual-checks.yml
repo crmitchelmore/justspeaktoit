@@ -1668,7 +1668,8 @@ sessions:
     device: "Windows"
     title: "Windows"
     setup:
-      - "Windows with Just Speak to It installed from an Alpha build that includes #1619, and at least two recordings in History."
+      - "A Windows 11 PC with the Just Speak to It Alpha for Windows installed and Narrator available, and at least two recordings in History."
+      - "Use made-up sentences only. Keep a second computer or phone handy to export settings from."
     items:
       - id: "windows-command-palette"
         issues:
@@ -1685,11 +1686,40 @@ sessions:
           - "Press Ctrl+K, type silence, choose the setting and check its page opens with that preference highlighted. Press Ctrl+K, type zzqx and check No results is shown and announced, then press Escape."
         expected: "Ctrl+K always focuses the search box. Results list actions first, then History, then settings, each read as its title then its kind (Action, History or the settings page). Choosing an action runs it, a History result selects that recording, and a setting opens and highlights its field. Escape restores the sidebar pages."
         final_gate: true
+      - id: "windows-telemetry-consent"
+        issues:
+          - 1624
+        title: "Analytics and crash-report switches start off and only Settings changes them"
+        minutes: 6
+        core: true
+        build: "Just Speak to It for Windows, an Alpha build that includes the #1624 desktop telemetry change"
+        steps:
+          - "On a fresh install, open Settings \u203a General and find Share anonymous usage analytics and Send crash reports and diagnostics."
+          - "Import a settings file exported from a Mac or another desktop on which both are on, then reopen Settings."
+          - "Turn on only Send crash reports and diagnostics, apply, quit and reopen the app; then turn it off again."
+          - "With Narrator on, move focus to each switch and listen to what it announces."
+        expected: "Both switches are off on a fresh install and stay off after the import. Each switch changes only its own choice and keeps it after a restart. A screen reader reads each switch's name and on or off state."
+        final_gate: false
+      - id: "windows-crash-report-unclean-exit"
+        issues:
+          - 1624
+        title: "An unclean exit sends one crash report on the next launch"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Windows, a release Alpha build that includes the #1624 desktop telemetry change"
+        steps:
+          - "Turn on Send crash reports and diagnostics in Settings \u203a General and apply."
+          - "Dictate a made-up sentence, then end the app's process from the system's process manager instead of quitting."
+          - "Open the app, wait a minute, then quit normally and open it again."
+          - "Ask the owner to look in Sentry for a desktop.unclean_exit event from this build."
+        expected: "Exactly one unclean-exit report arrives, with the app version and OS but no transcript text, file path, user name or installation ID. A normal quit and relaunch sends nothing more."
+        final_gate: false
   - id: "linux"
     device: "Linux"
     title: "Linux"
     setup:
-      - "Linux with Just Speak to It installed from an Alpha build that includes #1619, and at least two recordings in History."
+      - "A Linux desktop (GNOME on Wayland or X11) with the Just Speak to It Alpha for Linux installed and Orca available, and at least two recordings in History."
+      - "Use made-up sentences only. Keep a second computer or phone handy to export settings from."
     items:
       - id: "linux-command-palette"
         issues:
@@ -1706,6 +1736,34 @@ sessions:
           - "Press Ctrl+K, type silence, choose the setting and check its page opens with that preference highlighted. Press Ctrl+K, type zzqx and check No results is shown and announced, then press Escape."
         expected: "Ctrl+K always focuses the search box. Results list actions first, then History, then settings, each read as its title then its kind (Action, History or the settings page). Choosing an action runs it, a History result selects that recording, and a setting opens and highlights its field. Escape restores the sidebar pages."
         final_gate: true
+      - id: "linux-telemetry-consent"
+        issues:
+          - 1624
+        title: "Analytics and crash-report switches start off and only Settings changes them"
+        minutes: 6
+        core: true
+        build: "Just Speak to It for Linux, an Alpha build that includes the #1624 desktop telemetry change"
+        steps:
+          - "On a fresh install, open Settings \u203a General and find Share anonymous usage analytics and Send crash reports and diagnostics."
+          - "Import a settings file exported from a Mac or another desktop on which both are on, then reopen Settings."
+          - "Turn on only Send crash reports and diagnostics, apply, quit and reopen the app; then turn it off again."
+          - "With Orca on, move focus to each switch and listen to what it announces."
+        expected: "Both switches are off on a fresh install and stay off after the import. Each switch changes only its own choice and keeps it after a restart. A screen reader reads each switch's name and on or off state."
+        final_gate: false
+      - id: "linux-crash-report-unclean-exit"
+        issues:
+          - 1624
+        title: "An unclean exit sends one crash report on the next launch"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Linux, a release Alpha build that includes the #1624 desktop telemetry change"
+        steps:
+          - "Turn on Send crash reports and diagnostics in Settings \u203a General and apply."
+          - "Dictate a made-up sentence, then end the app's process from the system's process manager instead of quitting."
+          - "Open the app, wait a minute, then quit normally and open it again."
+          - "Ask the owner to look in Sentry for a desktop.unclean_exit event from this build."
+        expected: "Exactly one unclean-exit report arrives, with the app version and OS but no transcript text, file path, user name or installation ID. A normal quit and relaunch sends nothing more."
+        final_gate: false
   - id: "decisions"
     device: "Decision"
     title: "Decisions"

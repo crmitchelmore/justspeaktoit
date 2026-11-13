@@ -8,7 +8,7 @@ import java.util.UUID
 
 /**
  * A product event. Names and property values come from SpeakCore's analytics taxonomy
- * (`Sources/SpeakCore/Analytics/Apple`); `AnalyticsTaxonomyParityTest` keeps them identical. Every value
+ * (`Sources/SpeakCore/Analytics`); `AnalyticsTaxonomyParityTest` keeps them identical. Every value
  * is from a closed set, so transcripts, audio, prompts, keys or other user content cannot be sent.
  */
 class AnalyticsEvent private constructor(val name: String, val properties: Map<String, String>) {

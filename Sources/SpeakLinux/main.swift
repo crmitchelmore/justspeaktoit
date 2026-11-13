@@ -250,6 +250,9 @@ let remoteDesktop = !smokeTest && session.displayServer == .wayland
     && LinuxPortal.version(of: LinuxPortal.remoteDesktop) != nil
 LinuxHostPlatform.configure(session: session, remoteDesktopAvailable: remoteDesktop)
 
+// Set once a real session's telemetry is active, so a fatal error can be
+// reported (only with crash-report consent) before the process exits.
+var sessionTelemetry: DesktopTelemetry?
 do {
     try LinuxFiles.preparePrivateDirectory(directory)
     if profileSessionProbe { try LinuxProfileSessionProbe.prepare(directory: directory) }
@@ -261,6 +264,14 @@ do {
     let effects: any DesktopHostEffects<LinuxHostPlatform>
     if let probeEffects { effects = probeEffects } else { effects = LinuxNativeEffects() }
     let controller = try LinuxAppController(directory: directory, effects: effects)
+    if !smokeTest {
+        let telemetry = controller.telemetry
+        let http = DesktopHostTelemetryHTTP(
+            transport: LinuxCloudKitTransport(timeout: DesktopHostTelemetryHTTP.timeout)
+        )
+        try blocking { await telemetry.activate(.current(platform: .linux), http: http) }
+        sessionTelemetry = telemetry
+    }
     let holder = LinuxEventContext(controller: controller, smokeTest: smokeTest)
     holder.needsSetupAtLaunch = needsSetup
     try LinuxOnboarding.configure(holder)
@@ -274,11 +285,13 @@ do {
     }
     defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
     try runWindow(controller: controller, holder: holder)
+    if let telemetry = sessionTelemetry { try blocking { await telemetry.finishCleanly() } }
     if let screenshotDirectory {
         print("Saved the window's pages to \(screenshotDirectory).")
     } else if smokeTest && integrationCheck == nil {
         print("Native window creation and shutdown passed.")
     }
 } catch {
+    if let telemetry = sessionTelemetry { _ = try? blocking { await telemetry.reportFatal(error) } }
     fail(error)
 }

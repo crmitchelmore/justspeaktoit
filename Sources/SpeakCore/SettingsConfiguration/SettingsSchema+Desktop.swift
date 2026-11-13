@@ -6,9 +6,9 @@ import Foundation
 // it saves anything.
 extension SettingsSchema {
     /// Keys a desktop host shows but never takes from the raw editor or
-    /// automation: analytics consent and the automation write grant itself.
+    /// automation: the automation write grant itself. Telemetry consent is an
+    /// editor projection, so it is not in the schema at all.
     static let desktopReadOnlyKeys: Set<String> = [
-        ShellPreference.analyticsKey,
         ApplicationPreferenceKey.allowAutomationConfigurationChanges.rawValue
     ]
 
@@ -30,7 +30,7 @@ extension SettingsSchema {
     ]
 
     static let desktopFields: [SettingsSchemaField] = DesktopConfiguration.fields
-        .filter { $0.key != DesktopConnectionPreWarming.approvalProjectionKey }
+        .filter { !DesktopConfiguration.editorProjectionKeys.contains($0.key) }
         .map(desktopField) + [
             SettingsSchemaField(
                 key: ApplicationPreferenceKey.enableAutomationServer.rawValue, kind: .boolean,

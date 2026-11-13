@@ -77,6 +77,15 @@ final class PersonalLexiconDomainTests: XCTestCase {
         XCTAssertTrue(domain.apply(to: "Kubernetes", context: .empty).applied.isEmpty)
     }
 
+    func testApply_keepsTheCanonicalCaseForSpellingsEdgedWithPunctuation() async throws {
+        let rules = [rule("C++", alias: "see plus plus"), rule(".NET", alias: "dot nett")]
+        let domain = PersonalLexiconDomain(store: LexiconTestStore(rules))
+        await domain.waitUntilLoaded()
+        let result = domain.apply(to: "I use c++ and .net, not xc++ or a.netx", context: .empty)
+        XCTAssertEqual(result.transformedText, "I use C++ and .NET, not xc++ or a.netx")
+        XCTAssertEqual(result.applied.map(\.alias), ["c++", ".net"])
+    }
+
     func testLoadMutationSerializationRollbackAndDurableOrder() async throws {
         let first = rule("Zed", alias: "zeded"), second = rule("Alpha", alias: "alfa")
         let store = LexiconTestStore([first, second], delayed: true)

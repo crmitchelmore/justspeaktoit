@@ -278,6 +278,18 @@ extension PersonalLexiconDomain {
     return compiled
   }
 
+  /// Bounded by adjacent word characters rather than `\b`, so spellings that start or end with
+  /// punctuation ("C++", ".NET") still match, as on Android.
+  private func canonicalRegex(for canonical: String) -> NSRegularExpression? {
+    let key = "canonical:" + canonical
+    if let cached = regexCache[key] { return cached }
+    let word = "[\\p{L}\\p{M}\\p{N}_]"
+    let pattern = "(?i)(?<!\(word))\(NSRegularExpression.escapedPattern(for: canonical))(?!\(word))"
+    guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+    regexCache[key] = compiled
+    return compiled
+  }
+
   private func suggestionReason(
     for activation: PersonalLexiconRule.Activation, eligibleForAutoApply: Bool
   ) -> String? {
@@ -297,7 +309,7 @@ extension PersonalLexiconDomain {
     of rule: PersonalLexiconRule, in text: String
   ) -> (record: PersonalLexiconCorrectionRecord, text: String)? {
     let canonical = rule.canonical
-    guard !canonical.isEmpty, let regex = wholeWordRegex(for: canonical) else { return nil }
+    guard !canonical.isEmpty, let regex = canonicalRegex(for: canonical) else { return nil }
     let source = text as NSString
     let differing = regex.matches(in: text, options: [], range: NSRange(location: 0, length: source.length))
       .filter { source.substring(with: $0.range) != canonical }

@@ -97,7 +97,7 @@ The flags live in `Project.swift`; release selection is in
 | F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | Yes | | |
 | F10 | Browse OpenRouter models picker | Yes | Yes | No | No | Partial | #1618 | Android: searchable cleanup list only. |
 | F11 | Dictation profiles | Yes | Limited | Yes | Yes | Limited | | iOS and Android cannot see the frontmost app. |
-| F12 | Vocabulary, corrections, pronunciation | Yes | Yes | Yes | Yes | Partial | #1626 | Android: corrections only. |
+| F12 | Vocabulary, corrections, pronunciation | Yes | Yes | Yes | Yes | Partial | #1626 | Android: corrections only. Corrections also restore the stored spelling's case. |
 | F13 | Transcription language selection | Yes | Yes | Yes | Yes | Yes | | |
 | F14 | History list and search | Yes | Yes | Yes | Yes | Partial | #1628 | Android has no search. |
 | F15 | History filters (model, errors, dates) | Yes | Partial | Yes | Yes | No | #1628 | |
@@ -242,7 +242,7 @@ The flags live in `Project.swift`; release selection is in
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
 - **Excluded:** none
 - **Gaps:** Android #1626 (corrections and vocabulary prompt only; no pronunciation).
-- **How:** Vocabulary biases recognition (sent as the provider's keyterms or prompt when its catalogue entry accepts one); corrections rewrite final text. Limits come from `TranscriptionKeywordPolicy`.
+- **How:** Vocabulary biases recognition (sent as the provider's keyterms or prompt when its catalogue entry accepts one); corrections rewrite final text, and an automatic correction also restores the stored spelling's case when the recogniser already writes the word ("kubernetes" → "Kubernetes"). Limits come from `TranscriptionKeywordPolicy`.
 - **Refs:** `Sources/SpeakCore/Vocabulary/PersonalLexiconStore.swift`, `Sources/SpeakDesktop/Vocabulary/DesktopVocabulary.swift`, `Sources/SpeakDesktopHost/Transcription/DesktopHostVocabulary.swift`, `Sources/SpeakApp/PostProcessing/PersonalCorrectionsView.swift`, `android/app/src/main/java/com/justspeaktoit/android/corrections/PersonalCorrections.kt`
 - **Sunset:** none
 - **Nuances:** AssemblyAI keyterms are capped (50 characters each, 100 items). Corrections apply to every final path: app, keyboard, import and History retry.

@@ -122,11 +122,11 @@ struct CloudKitKeySyncSettingsSection: View {
                 spacing: 8,
                 enable: { passphrase in
                     try await keySync.enable(passphrase: passphrase)
-                    await AppSettings.shared.reloadSyncedAPIKeys()
+                    try await Self.reloadSyncedKeys()
                 },
                 syncNow: {
                     try await keySync.syncNow()
-                    await AppSettings.shared.reloadSyncedAPIKeys()
+                    try await Self.reloadSyncedKeys()
                 },
                 disable: { await keySync.disable() }
             )
@@ -139,6 +139,23 @@ struct CloudKitKeySyncSettingsSection: View {
             _ = await AppSettings.shared.syncCloudKitKeys()
         }
     }
+
+    /// Reloads the synced keys into settings, failing visibly when the
+    /// credential store could not be read so the error line reports it.
+    @MainActor
+    private static func reloadSyncedKeys() async throws {
+        guard await AppSettings.shared.reloadSyncedAPIKeys() else {
+            throw KeySyncReloadError(
+                message: "Keys synced, but \(DeviceCopy.thisDevice) could not read them from the Keychain. "
+                    + "Try again after unlocking."
+            )
+        }
+    }
+}
+
+private struct KeySyncReloadError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }
 
 #endif

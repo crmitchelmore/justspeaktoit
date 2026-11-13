@@ -118,7 +118,7 @@ final class SessionCompletionPipelineTests: XCTestCase {
         let completion = Task { try await pipeline.complete(first, recording: summary, isStreaming: true) }
         await fulfillment(of: [requested], timeout: 5)
         llm.yield("Partial ")
-        await Self.drainMainActor()
+        await Self.waitUntil { env.hud.snapshot.streamingText == "Partial " }
         XCTAssertEqual(env.hud.snapshot.streamingText, "Partial ", "The active session's stream reaches the HUD")
 
         host.releaseActiveSession()
@@ -172,7 +172,17 @@ final class SessionCompletionPipelineTests: XCTestCase {
         )
     }
 
-    /// Lets main-actor work enqueued by provider callbacks run.
+    /// Polls `condition` on the main actor until it holds or five seconds pass,
+    /// so the assertion that follows reports the failure rather than a hang.
+    private static func waitUntil(_ condition: @MainActor () -> Bool) async {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !condition(), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    /// Lets main-actor work enqueued by provider callbacks run. Used only
+    /// where the test asserts that nothing arrives, which no wait can prove.
     private static func drainMainActor() async {
         for _ in 0..<20 { await Task.yield() }
     }

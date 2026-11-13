@@ -95,7 +95,7 @@ final class TransportFramingTests: XCTestCase {
         let hello = HelloMessage(deviceName: String(repeating: "n", count: ceiling), deviceId: "device-1")
 
         do {
-            try await channel.send(.hello(hello))
+            try await channel.sendPlaintext(.hello(hello))
             XCTFail("An oversized handshake frame must not be sent")
         } catch let error as TransportChannelError {
             guard case .frameTooLarge(let byteCount, let maximumBytes) = error else {

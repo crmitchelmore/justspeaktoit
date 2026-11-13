@@ -8,9 +8,8 @@ extension TransportLoopbackTests {
     func testUnauthenticatedIdlePeer_timesOutAndReleasesAdmissionSlot() async throws {
         let server = TransportServer(maximumPendingConnections: 1, handshakeTimeout: .seconds(1))
         let endpoint = try await self.startServer(configuredServer: server)
-        let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
+        let channel = try await self.securedChannel(to: endpoint)
         defer { channel.close() }
-        try await channel.start()
         try await self.ping(channel)
         XCTAssertEqual(server.pendingConnectionCount, 1)
 
@@ -26,9 +25,8 @@ extension TransportLoopbackTests {
     func testUnauthenticatedPings_doNotExtendAbsoluteHandshakeDeadline() async throws {
         let server = TransportServer(maximumPendingConnections: 1, handshakeTimeout: .seconds(1))
         let endpoint = try await self.startServer(configuredServer: server)
-        let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
+        let channel = try await self.securedChannel(to: endpoint)
         defer { channel.close() }
-        try await channel.start()
         try await self.ping(channel)
         let pingTask = Task {
             while !Task.isCancelled {
@@ -50,9 +48,8 @@ extension TransportLoopbackTests {
         let paired = try await self.authenticatedChannel(to: endpoint, deviceId: "paired")
         defer { paired.close() }
         XCTAssertEqual(server.pendingConnectionCount, 0, "Authentication releases the pending slot")
-        let pending = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
+        let pending = try await self.securedChannel(to: endpoint)
         defer { pending.close() }
-        try await pending.start()
         try await self.ping(pending)
 
         let rejection = await self.connectionIsRejected(at: endpoint)

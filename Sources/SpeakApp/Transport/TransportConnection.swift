@@ -7,10 +7,12 @@ import SpeakCore
 
 /// Server half of one paired device's session.
 ///
-/// A device must greet, then authenticate, before the server accepts anything
-/// that carries text. Until it authenticates it is held to the handshake frame
-/// ceiling, so an unpaired peer on the local network can neither insert text on
-/// this Mac nor make it buffer a large frame.
+/// A device must first complete the encrypted handshake, which proves it holds
+/// the pairing code, then greet and authenticate before the server accepts
+/// anything that carries text. Plaintext peers are refused. Until it
+/// authenticates it is held to the handshake frame ceiling, so an unpaired peer
+/// on the local network can neither read nor insert text on this Mac, nor make
+/// it buffer a large frame.
 @MainActor
 final class TransportConnection {
     private let channel: TransportChannel
@@ -65,6 +67,18 @@ final class TransportConnection {
             try await self.channel.start()
         } catch {
             SpeakLogger.logError(error, context: "Transport handshake", logger: SpeakLogger.transport)
+            return
+        }
+        do {
+            // The pairing attempt limit applies to the encrypted proof, so a
+            // peer cannot guess codes any faster than it could before.
+            try await self.channel.acceptSecureSession { proof in
+                PairingManager.shared.attemptPairing(provingWith: proof.verifies(pairingCode:))
+            }
+        } catch {
+            SpeakLogger.transport.warning(
+                "Refused unencrypted or unpaired peer: \(error.localizedDescription, privacy: .public)"
+            )
             return
         }
 
@@ -136,18 +150,11 @@ final class TransportConnection {
             SpeakLogger.transport.warning("Dropping connection: authenticate arrived before hello")
             return false
         }
-        switch PairingManager.shared.attemptPairing(with: auth.pairingCode) {
-        case .accepted:
-            break
-        case .rejected:
+        // The handshake already proved the code under the attempt limit; this
+        // only confirms the sealed message agrees, so it is not counted again.
+        guard PairingManager.shared.validatePairingCode(auth.pairingCode) else {
             await self.send(.authResult(AuthResultMessage(success: false, errorMessage: "Invalid pairing code")))
             SpeakLogger.transport.warning("Authentication failed")
-            return false
-        case .lockedOut(let retryAfter):
-            let seconds = Int(retryAfter.rounded(.up))
-            let message = "Too many failed pairing attempts. Try again in \(seconds) seconds."
-            await self.send(.authResult(AuthResultMessage(success: false, errorMessage: message)))
-            SpeakLogger.transport.warning("Authentication refused: pairing locked out for \(seconds)s")
             return false
         }
 

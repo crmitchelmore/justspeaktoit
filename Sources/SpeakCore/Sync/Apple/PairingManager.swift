@@ -58,11 +58,21 @@ public final class PairingManager: @unchecked Sendable {
     /// correct guess cannot be confirmed during the window. A success clears
     /// the failure count.
     public func attemptPairing(with code: String, now: Date = Date()) -> PairingAttemptResult {
+        attemptPairing(now: now) { Self.constantTimeEquals(code, $0) }
+    }
+
+    /// Authenticates a peer that proves knowledge of the code without sending it,
+    /// such as the encrypted Send to Mac handshake.
+    ///
+    /// `proof` receives the current code and reports whether the peer's proof
+    /// matches it. It runs under the same limit as `attemptPairing(with:)` and is
+    /// not called at all during a lockout.
+    public func attemptPairing(now: Date = Date(), provingWith proof: (String) -> Bool) -> PairingAttemptResult {
         lock.withLock {
             if let remaining = attemptLimiter.lockoutRemaining(at: now) {
                 return .lockedOut(retryAfter: remaining)
             }
-            guard Self.constantTimeEquals(code, pairingCodeUnlocked()) else {
+            guard proof(pairingCodeUnlocked()) else {
                 attemptLimiter.recordFailure(at: now)
                 return .rejected
             }

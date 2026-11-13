@@ -5,8 +5,12 @@ import Foundation
 /// Service type for Bonjour discovery
 public let SpeakTransportServiceType = ReleaseTrain.current.bonjourService // swiftlint:disable:this identifier_name
 
-/// Protocol version for compatibility checking
-public let SpeakTransportProtocolVersion = 1 // swiftlint:disable:this identifier_name
+/// Protocol version for compatibility checking.
+///
+/// - 1: plaintext JSON frames over WebSocket. No longer accepted.
+/// - 2: an X25519 key share per side, then every frame sealed with keys derived
+///   from the pairing code (see `TransportSecureSession.swift`).
+public let SpeakTransportProtocolVersion = 2 // swiftlint:disable:this identifier_name
 
 // MARK: - Message Types
 

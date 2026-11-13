@@ -52,11 +52,13 @@ def run_batch(ids: list[str], verbosity: int):
     suite(result)
     result.printErrors()
     # Only real test ids can be rerun; a setUpClass error or an unexpected success cannot.
-    rerunnable = [test.id() for test, _ in result.failures + result.errors
-                  if isinstance(test, unittest.TestCase)]
-    failed = len(result.failures) + len(result.errors) + len(result.unexpectedSuccesses)
+    # A failed subtest reruns its whole parent test, whose id the loader can resolve.
+    problems = [test for test, _ in result.failures + result.errors] + result.unexpectedSuccesses
+    parents = [getattr(test, 'test_case', test) for test in problems]
+    rerunnable = all(isinstance(test, unittest.TestCase) for test in parents) and not result.unexpectedSuccesses
+    failed = len(problems)
     return (result.testsRun, failed, len(result.skipped), stream.getvalue(), time.monotonic() - started,
-            rerunnable if len(rerunnable) == failed else None)
+            list(dict.fromkeys(test.id() for test in parents)) if rerunnable else None)
 
 
 def rerun(ids: list[str], verbosity: int) -> bool:

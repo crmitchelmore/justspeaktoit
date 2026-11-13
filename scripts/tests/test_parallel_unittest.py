@@ -58,6 +58,16 @@ class ParallelUnittestTests(unittest.TestCase):
         self.assertIn('passed on a serial rerun', result.stderr)
         self.assertIn('test_b.F.test_x', result.stderr)
 
+    def test_retry_reruns_the_parent_of_failed_subtests_once(self):
+        flaky = ('import os, unittest\nclass F(unittest.TestCase):\n    def test_x(self):\n'
+                 '        marker = os.path.join(os.path.dirname(__file__), "ran")\n'
+                 '        first = not os.path.exists(marker)\n        open(marker, "w").close()\n'
+                 '        for case in ("a", "b"):\n            with self.subTest(case=case):\n'
+                 '                self.assertFalse(first, "slow")\n')
+        result = self.run_suite({'test_b.py': flaky}, retry=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('rerunning 1 failed test(s)', result.stderr)
+
     def test_retry_still_fails_a_test_that_fails_again(self):
         failing = 'import unittest\nclass F(unittest.TestCase):\n    def test_x(self):\n        self.fail("boom")\n'
         self.assertEqual(self.run_suite({'test_b.py': failing}, retry=True).returncode, 1)

@@ -333,8 +333,10 @@ const wchar_t *packagedAliasName() {
     // A family name is <package name>_<publisher id>.
     static constexpr wchar_t developer[] = L"com.justspeaktoit.windows.developer_";
     static constexpr wchar_t beta[] = L"com.justspeaktoit.windows_";
+    static constexpr wchar_t store[] = L"ChrisMitchelmore.JustSpeaktoIt_";
     if (_wcsnicmp(family, developer, wcslen(developer)) == 0) return L"JustSpeakToItDeveloperCLI.exe";
     if (_wcsnicmp(family, beta, wcslen(beta)) == 0) return L"JustSpeakToItCLI.exe";
+    if (_wcsnicmp(family, store, wcslen(store)) == 0) return L"JustSpeakToItCLI.exe";
     return nullptr;
 }
 

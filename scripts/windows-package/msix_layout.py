@@ -34,6 +34,7 @@ from msix_identity import (
     RESERVED_PACKAGE_DIRECTORIES,
     RESERVED_PACKAGE_FILES,
     PackageError,
+    fixed_publisher,
     load_identity,
     package_identity,
     sha256,
@@ -205,7 +206,9 @@ def build_layout(bundle_dir, output_dir, version, publisher=None, expected_commi
                  identity=None, source_root=REPOSITORY):
     """Write ``output_dir/layout`` (the exact package payload) and its evidence."""
     identity = identity or load_identity()
-    publisher = publisher or identity["identity"].get("developerPublisher")
+    if identity["channel"] == "store" and publisher not in (None, identity["identity"]["publisher"]):
+        raise PackageError("the store channel uses only its Partner Center publisher " + identity["identity"]["publisher"])
+    publisher = publisher or fixed_publisher(identity)
     if publisher is None:
         raise PackageError("the %s channel needs --publisher: the signing certificate's exact subject"
                            % identity["channel"])

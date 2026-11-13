@@ -27,8 +27,10 @@ refusal, upgrade and uninstall; ARM64 execution was native, not x64 emulation.
 This checkpoint supersedes older pending compilation/native-fixture statements
 below for that source tree. It does not qualify physical microphones, focus and
 external insertion, real provider accounts, GPU/performance acceptance or live
-CloudKit sync. Public Artifact Signing was skipped; Windows updates and public
-release identities remain unresolved. Linux Flatpak build, installed runtime and
+CloudKit sync. Public Artifact Signing was skipped. The Microsoft Store identity
+is reserved and Publish Stable submits a Store bundle once the owner connects
+Partner Center ([Microsoft Store package](windows-installer.md#microsoft-store-package));
+Windows updates outside the Store remain unresolved. Linux Flatpak build, installed runtime and
 portal acceptance are separate from the passing GTK job. The developer packages
 are not a public Alpha or Stable Windows release.
 

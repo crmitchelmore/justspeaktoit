@@ -23,6 +23,7 @@ import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.settings.DictationPreferences
+import com.justspeaktoit.android.settings.DictationProfile
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -85,6 +86,8 @@ class DictationViewModel internal constructor(
             retention = prefs.retention,
             keepAudioOnCancel = prefs.keepAudioOnCancel,
             corrections = prefs.corrections,
+            cleanupPrompt = prefs.cleanupPrompt,
+            profiles = prefs.profiles,
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
@@ -107,7 +110,8 @@ class DictationViewModel internal constructor(
             override val retention: Retention get() = _state.value.retention
             override val keepAudioOnCancel: Boolean get() = _state.value.keepAudioOnCancel
             override val cleanupModel: CleanupModel?
-                get() = _state.value.let { if (it.cleanupReady) it.cleanupModel else null }
+                get() = _state.value.let { if (it.cleanupReady) it.sessionCleanupModel else null }
+            override val cleanupPrompt: String? get() = _state.value.sessionCleanupPrompt
             override val corrections: List<CorrectionRule> get() = _state.value.corrections
         },
         publish = { s ->
@@ -166,7 +170,7 @@ class DictationViewModel internal constructor(
     fun offerSharedAudio(uri: Uri, mimeType: String?) {
         if (_state.value.dictation.isActive) return
         if (!sharedAudioSource.accepts(uri)) {
-            session.rejectSharedAudio(_state.value.cloudModel)
+            session.rejectSharedAudio(_state.value.sessionCloudModel)
             return
         }
         _state.update { it.copy(sharedAudio = SharedAudioOffer(uri, mimeType)) }
@@ -182,7 +186,7 @@ class DictationViewModel internal constructor(
         // Confirming takes priority over an optional cleanup; the transcript is already in History.
         session.cancelCleanup()
         val current = _state.value
-        session.transcribeSharedAudio(current.cloudModel, current.languageTag) { file ->
+        session.transcribeSharedAudio(current.sessionCloudModel, current.languageTag) { file ->
             sharedAudioImporter.import(
                 offer.mimeType,
                 file,
@@ -212,6 +216,39 @@ class DictationViewModel internal constructor(
     fun setCleanupEnabled(enabled: Boolean) {
         prefs.cleanupEnabled = enabled
         _state.update { it.copy(cleanupEnabled = enabled) }
+    }
+
+    /** A blank prompt restores the built-in one. Applies from the next cleanup. */
+    fun setCleanupPrompt(prompt: String) {
+        val saved = prompt.takeIf { it.isNotBlank() }
+        prefs.cleanupPrompt = saved
+        _state.update { it.copy(cleanupPrompt = saved) }
+    }
+
+    /** Adds [profile], or replaces the saved one with its id. Applies from the next session. */
+    fun saveProfile(profile: DictationProfile) {
+        val current = prefs.profiles
+        val updated = if (current.any { it.id == profile.id }) {
+            current.map { if (it.id == profile.id) profile else it }
+        } else {
+            current + profile
+        }
+        storeProfiles(updated)
+    }
+
+    /** Deleting the active profile leaves no profile chosen. */
+    fun deleteProfile(id: String) {
+        if (prefs.activeProfileId == id) prefs.activeProfileId = null
+        storeProfiles(prefs.profiles.filterNot { it.id == id })
+    }
+
+    /** Ignored while dictating, so a running session keeps the settings it started with. */
+    fun chooseProfile(id: String?) = selector.chooseProfile(id)
+
+    private fun storeProfiles(profiles: List<DictationProfile>) {
+        prefs.profiles = profiles
+        _state.update { it.copy(profiles = profiles) }
+        selector.refresh()
     }
 
     fun setKeepAudioOnCancel(enabled: Boolean) {
@@ -301,7 +338,7 @@ class DictationViewModel internal constructor(
         if (current.dictation.isActive || current.transcribingEntryId != null) return
         val entry = current.history.firstOrNull { it.id == id } ?: return
         if (entry.audioPath == null) return
-        val model = current.cloudModel
+        val model = current.sessionCloudModel
         val language = current.languageTag
         _state.update { it.copy(transcribingEntryId = id) }
         scope.launch {
@@ -358,4 +395,5 @@ private fun DictationUiState.withSelection(selection: EngineSelection) = copy(
     savedKeys = selection.savedKeys,
     options = selection.options,
     checkingAvailability = selection.checking,
+    profile = selection.profile,
 )

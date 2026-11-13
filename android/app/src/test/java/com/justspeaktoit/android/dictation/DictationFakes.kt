@@ -20,6 +20,7 @@ import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.DictationPreferences
+import com.justspeaktoit.android.settings.DictationProfile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -153,6 +154,7 @@ internal class FakeCloud : CloudService {
 
     val transcriptions = CopyOnWriteArrayList<Transcription>()
     val cleanups = CopyOnWriteArrayList<String>()
+    val cleanupPrompts = CopyOnWriteArrayList<String>()
 
     /** Runs on an IO thread; may block until the call is cancelled. */
     @Volatile var onTranscribe: (CallHandle) -> String = { "hello world" }
@@ -171,8 +173,15 @@ internal class FakeCloud : CloudService {
         return onTranscribe(call)
     }
 
-    override fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String {
+    override fun cleanup(
+        model: CleanupModel,
+        apiKey: String,
+        transcript: String,
+        systemPrompt: String,
+        call: CallHandle,
+    ): String {
         cleanups += transcript
+        cleanupPrompts += systemPrompt
         return onCleanup(transcript)
     }
 }
@@ -202,6 +211,9 @@ internal class MemoryPrefs(
     override var keepAudioOnCancel: Boolean = true,
     override var languageId: String? = null,
     override var corrections: List<CorrectionRule> = emptyList(),
+    override var cleanupPrompt: String? = null,
+    override var profiles: List<DictationProfile> = emptyList(),
+    override var activeProfileId: String? = null,
 ) : DictationPreferences
 
 internal class MemoryHistoryFile : HistoryFile {

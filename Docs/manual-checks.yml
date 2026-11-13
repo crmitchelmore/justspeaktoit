@@ -1115,6 +1115,22 @@ sessions:
           - "Tap Read aloud on the finished transcript, then Stop reading."
         expected: "French is recognised in each mode and Automatic follows the phone language again. Both transcripts read \"I deploy to Kubernetes\". Read aloud speaks the transcript and Stop reading silences it."
         final_gate: true
+      - id: "android-profiles-cleanup-prompt"
+        issues:
+          - 1591
+        title: "Dictation profiles and the custom cleanup prompt"
+        minutes: 8
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes dictation profiles"
+        steps:
+          - "With an OpenAI and an OpenRouter key saved and Clean up transcripts on, set Settings \u203a Cleanup prompt to \"Rewrite the transcript in capital letters.\" and dictate one sentence in Cloud mode."
+          - "Tap Use the built-in prompt and dictate again."
+          - "Settings \u203a Dictation profiles: add a profile named Spanish with Cloud model Whisper Large v3 Turbo (Groq key saved), Language Spanish (Spain) and Cleanup prompt \"End every sentence with an exclamation mark.\""
+          - "On the dictation screen choose Profile: Spanish, check the privacy line names Groq, and dictate a Spanish sentence in Cloud mode; then switch to On-device and dictate again."
+          - "Open the keyboard in a messaging app, tap the Profile key until it shows No profile and then Spanish, and dictate a Spanish sentence; repeat with TalkBack on."
+          - "Delete the Spanish profile in Settings."
+        expected: "The first transcript is in capitals and the second is normal cleanup. With the profile, Cloud uses Groq, recognises Spanish and ends sentences with exclamation marks, and On-device stays on the phone in Spanish. The keyboard key cycles profiles, TalkBack announces the profile name, and the key is disabled while listening. Deleting the profile hides the chooser and restores your own settings."
+        final_gate: true
       - id: "android-battery-latency"
         issues:
           - 1328

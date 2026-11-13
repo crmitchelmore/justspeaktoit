@@ -27,9 +27,9 @@ row F35.
 | F06 | Platform on-device recogniser | Yes | Yes | N/A | N/A | Yes | | Apple Speech and Android `SpeechRecognizer` only; desktops use local models. |
 | F07 | Remote cleanup (OpenRouter and native LLMs) | Yes | Yes | Yes | Yes | Yes | | |
 | F08 | Local LLM cleanup | Yes | No | Yes | Yes | No | #1650 | |
-| F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | No | #1591 | |
+| F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | Yes | | |
 | F10 | Browse OpenRouter models picker | Yes | Yes | No | No | Partial | #1618 | Android has a searchable cleanup list only. |
-| F11 | Dictation profiles | Yes | Limited | Yes | Yes | No | #1591 | iOS cannot see the frontmost app; profiles apply through keyboard handoff. |
+| F11 | Dictation profiles | Yes | Limited | Yes | Yes | Limited | | iOS cannot see the frontmost app; profiles apply through keyboard handoff. Android also cannot; the user chooses the profile in the app or keyboard. |
 | F12 | Vocabulary, corrections, pronunciation | Yes | Yes | Yes | Yes | No | #1626 | |
 | F13 | Transcription language selection | Yes | Yes | Yes | Yes | No | #1627 | |
 | F14 | History list and search | Yes | Yes | Yes | Yes | Partial | #1628 | Android has no search. |

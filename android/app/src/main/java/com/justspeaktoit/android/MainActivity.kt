@@ -99,6 +99,9 @@ class MainActivity : ComponentActivity() {
                                 onReleaseEverything = viewModel::releaseEverything,
                                 onChooseLanguage = viewModel::chooseLanguage,
                                 onCorrectionsChanged = viewModel::setCorrections,
+                                onCleanupPromptChanged = viewModel::setCleanupPrompt,
+                                onSaveProfile = viewModel::saveProfile,
+                                onDeleteProfile = viewModel::deleteProfile,
                             ),
                         )
                         Screen.History -> HistoryScreen(
@@ -126,6 +129,7 @@ class MainActivity : ComponentActivity() {
                                 onShowHistory = { screen = Screen.History },
                                 onConfirmSharedAudio = viewModel::confirmSharedAudio,
                                 onDismissSharedAudio = viewModel::dismissSharedAudio,
+                                onChooseProfile = viewModel::chooseProfile,
                             ),
                         )
                     }

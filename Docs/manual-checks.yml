@@ -1322,6 +1322,20 @@ sessions:
           - "Restore the key, turn on cleanup with an OpenRouter model and dictate."
         expected: "Both models return the words. The invalid key fails with \"rejected the API key\". Cleanup returns tidied text and Show original restores the raw transcript."
         final_gate: true
+      - id: "android-first-run-setup"
+        issues:
+          - 1639
+        title: "First-run setup guide: microphone, route, keyboard, tile and a test dictation"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1639 setup guide"
+        steps:
+          - "Uninstall the app (or clear its data) and install the Alpha. Open it from the launcher."
+          - "Walk the guide: allow the microphone on its step, pick a route, tap Open keyboard settings and turn on the keyboard, come back, then tap Add Dictate tile (Android 13+)."
+          - "On the test step, dictate a sentence; then finish with Start dictating."
+          - "Relaunch the app, then open Settings, Setup guide, Run setup again, and press system Back on the first step."
+        expected: "The guide opens only on the fresh install. Allowing the microphone does not start a recording. The keyboard step shows the keyboard as on after returning, and the tile is added from the system dialog (or instructions show on Android 12 and earlier). The test dictation shows the words. A relaunch opens the dictation screen, and the guide re-runs from Settings; Back on its first step returns to dictation."
+        final_gate: false
       - id: "android-entry-surfaces"
         issues:
           - 1328

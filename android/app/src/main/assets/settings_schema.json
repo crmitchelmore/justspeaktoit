@@ -157,6 +157,7 @@
     "enableSendToMac",
     "handsFreeDictationEnabled",
     "hardwareTriggerDestination",
+    "hasCompletedOnboarding",
     "historyFlushInterval",
     "holdThreshold",
     "hotKeyActivation",

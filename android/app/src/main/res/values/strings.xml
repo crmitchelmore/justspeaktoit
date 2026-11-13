@@ -289,4 +289,32 @@
     <string name="issue_report_too_long">This draft is too long for a link. Copy it into a new GitHub issue.</string>
     <string name="action_report_issue">Report</string>
     <string name="settings_report_issue">Report an issue</string>
+    <!-- First-run setup guide. -->
+    <string name="onboarding_progress">Step %1$d of %2$d</string>
+    <string name="onboarding_welcome_title">Welcome to Just Speak to It</string>
+    <string name="onboarding_welcome_detail">Speak instead of typing. This short setup allows the microphone, chooses how speech becomes text, adds the dictation keyboard and tile, and runs a test. You can run it again from Settings.</string>
+    <string name="onboarding_microphone_title">Microphone access</string>
+    <string name="onboarding_microphone_detail">The app records only while you dictate. Android asks once; you can change it later in the app\'s system settings.</string>
+    <string name="onboarding_microphone_granted">Microphone access is on.</string>
+    <string name="onboarding_allow_microphone">Allow microphone</string>
+    <string name="onboarding_route_title">Choose how speech becomes text</string>
+    <string name="onboarding_route_detail">On device keeps audio on this device. Speech service uses the recogniser Android provides. Cloud sends audio to the provider you choose, using your own key from Settings. You can change this later.</string>
+    <string name="onboarding_keyboard_title">Dictate in any app</string>
+    <string name="onboarding_keyboard_detail">Turn on the dictation keyboard to dictate into any text field, and add the Dictate tile to Quick Settings to start from anywhere.</string>
+    <string name="onboarding_keyboard_enabled">The dictation keyboard is on. Switch to it with the keyboard button while typing.</string>
+    <string name="onboarding_keyboard_disabled">The dictation keyboard is off.</string>
+    <string name="onboarding_open_keyboard_settings">Open keyboard settings</string>
+    <string name="onboarding_add_tile">Add Dictate tile</string>
+    <string name="onboarding_tile_added">The Dictate tile is in Quick Settings.</string>
+    <string name="onboarding_tile_manual">To add the tile, swipe down twice from the top of the screen, tap Edit and drag Dictate into place.</string>
+    <string name="onboarding_test_title">Try a test dictation</string>
+    <string name="onboarding_test_detail">Tap the microphone, say a sentence and tap stop. Your text appears below.</string>
+    <string name="onboarding_done_title">You\'re all set</string>
+    <string name="onboarding_done_detail">Dictate from this screen, the keyboard or the Dictate tile. This setup stays available in Settings.</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_skip">Skip setup</string>
+    <string name="onboarding_finish">Start dictating</string>
+    <string name="settings_setup_title">Setup guide</string>
+    <string name="settings_setup_note">Walk through microphone access, the speech route, the keyboard and tile, and a test dictation again.</string>
+    <string name="settings_setup_run">Run setup again</string>
 </resources>

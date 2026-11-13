@@ -131,6 +131,11 @@ class AppPreferences(context: Context) : DictationPreferences {
             putFloat(KEY_SILENCE_DURATION, value.durationSeconds.toFloat())
         }
 
+    /** Whether the first-run guide was finished or skipped; null on installs that never decided. */
+    var hasCompletedOnboarding: Boolean?
+        get() = if (prefs.contains(KEY_ONBOARDING)) prefs.getBoolean(KEY_ONBOARDING, false) else null
+        set(value) = prefs.edit { if (value == null) remove(KEY_ONBOARDING) else putBoolean(KEY_ONBOARDING, value) }
+
     companion object {
         const val FILE_NAME = "jsti_prefs"
 
@@ -167,5 +172,8 @@ class AppPreferences(context: Context) : DictationPreferences {
         private const val KEY_SILENCE_ENABLED = "silenceDetectionEnabled"
         private const val KEY_SILENCE_THRESHOLD = "silenceThreshold"
         private const val KEY_SILENCE_DURATION = "silenceDuration"
+
+        /** The Mac's onboarding key, so every platform records completion under one name. */
+        private const val KEY_ONBOARDING = "hasCompletedOnboarding"
     }
 }

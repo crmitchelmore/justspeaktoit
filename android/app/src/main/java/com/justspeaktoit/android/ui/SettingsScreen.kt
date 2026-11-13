@@ -21,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -97,6 +98,7 @@ class SettingsActions(
     val onRecordingSoundsChanged: (RecordingSoundSettings) -> Unit = {},
     val onPreviewRecordingSound: () -> Unit = {},
     val onSilenceChanged: (SilenceSettings) -> Unit = {},
+    val onRunSetup: () -> Unit = {},
 )
 
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
@@ -369,6 +371,14 @@ fun SettingsScreen(
             HorizontalDivider()
             SectionTitle(R.string.settings_support_title, anchor("android.tipJar"))
             TipJarSection(tips, actions.onTip)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_setup_title, anchor("android.setupGuide"))
+            Text(stringResource(R.string.settings_setup_note), style = MaterialTheme.typography.bodyMedium)
+            OutlinedButton(
+                onClick = actions.onRunSetup,
+                modifier = Modifier.testTag(AutomationIds.SETTINGS_RUN_SETUP),
+            ) { Text(stringResource(R.string.settings_setup_run)) }
 
             HorizontalDivider()
             val uriHandler = LocalUriHandler.current

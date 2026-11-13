@@ -69,15 +69,53 @@ extension ContentView {
     /// transcript as the current view and updates the History badge. Called on
     /// appear and whenever the app returns to the foreground so a headless
     /// recording is never lost behind a stale in-app transcript.
-    /// Offers the oldest interrupted capture back, once per launch, and only
-    /// when nothing is recording — a question about yesterday's audio must not
-    /// interrupt today's capture.
+    /// Offers the oldest interrupted capture back, at most once per launch,
+    /// and only when nothing is recording — a question about yesterday's audio
+    /// must not interrupt today's capture. Captures the user already put off
+    /// are not asked about again until a newer one is interrupted.
     func offerCaptureRecoveryIfNeeded() {
         guard !recovery.hasPromptedThisLaunch, !coordinator.isRunning else { return }
         let plan = recovery.refresh()
-        guard !plan.hasLiveCapture, !plan.recoverable.isEmpty else { return }
+        guard !plan.hasLiveCapture, let finding = recovery.promptable.first else { return }
         recovery.hasPromptedThisLaunch = true
+        recoveryPromptFinding = finding
         showingRecoveryPrompt = true
+    }
+
+    /// "Transcribe it", from the launch prompt or a failed attempt's retry.
+    func transcribeRecoveredCapture(_ finding: CaptureRecoveryFinding) {
+        recoveryInFlight = finding.run
+        Task { @MainActor in
+            await recovery.recover(finding)
+            handleRecoveryOutcome(for: finding)
+        }
+    }
+
+    /// Shows what a Transcribe this screen started did: the History entry on
+    /// success, or the reason and a choice on failure.
+    func handleRecoveryOutcome(for finding: CaptureRecoveryFinding) {
+        guard recoveryInFlight == finding.run else { return }
+        recoveryInFlight = nil
+        switch recovery.outcome {
+        case .recovered(let historyID)?:
+            recovery.acknowledgeOutcome()
+            AccessibilityNotification.Announcement("Interrupted recording saved to History").post()
+            historyRouter.pendingHistoryID = historyID
+        case .failed(let failed, let message)?:
+            recovery.acknowledgeOutcome()
+            AccessibilityNotification.Announcement("Couldn't transcribe interrupted recording").post()
+            recoveryFailureMessage = message
+            recoveryFailure = failed
+        case nil:
+            break
+        }
+    }
+
+    /// "Not now": stop asking about everything currently offered until a
+    /// newer capture is interrupted. Nothing is deleted.
+    func snoozeCaptureRecovery() {
+        recovery.snooze(recovery.promptable)
+        recoveryPromptFinding = nil
     }
 
     func refreshBackgroundState() {

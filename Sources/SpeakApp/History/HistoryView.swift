@@ -91,14 +91,7 @@ struct HistoryView: View {
         historyLoadState = state
       }
     }
-    .background(
-      LinearGradient(
-        colors: [Color.brandAccent.opacity(0.06), Color(nsColor: .windowBackgroundColor)],
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
-    )
+    .pageBackground(.history)
     .confirmationDialog(
       "Clear All History",
       isPresented: $library.showClearAllConfirmation,

@@ -61,9 +61,7 @@ struct SettingsView: View, AppSettingsBindingProviding, LocalModelRowPresenting 
         settingsSearchHighlightID = nil
       }
     }
-    .background(
-      LinearGradient(
-        colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center))
+    .pageBackground(.settings)
     .task {
       transcriptionProviders = await TranscriptionProviderRegistry.shared.allProviders()
       keytermSync.syncFromPronunciation()

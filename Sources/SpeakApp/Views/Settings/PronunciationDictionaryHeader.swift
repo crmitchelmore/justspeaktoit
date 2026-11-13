@@ -203,7 +203,7 @@ private struct CategoryTab: View {
                     .padding(.vertical, density.isCompact ? 1 : 2)
                     .background(
                         Capsule()
-                            .fill(isSelected ? Color.white.opacity(0.2) : Color.secondary.opacity(0.15))
+                            .fill(isSelected ? SpeakTextStyle.onTintFill : Color.secondary.opacity(0.15))
                     )
             }
             .padding(.horizontal, density.isCompact ? 7 : 12)
@@ -212,7 +212,7 @@ private struct CategoryTab: View {
                 Capsule()
                     .fill(isSelected ? Color.accentColor : Color.clear)
             )
-            .foregroundStyle(isSelected ? .white : .primary)
+            .foregroundStyle(SpeakTextStyle.primary(onTint: isSelected))
         }
         .buttonStyle(.plain)
     }

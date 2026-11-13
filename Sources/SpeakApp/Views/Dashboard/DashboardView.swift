@@ -29,14 +29,7 @@ struct DashboardView: View {
       .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
     }
-    .background(
-      LinearGradient(
-        colors: [Color.brandAccent.opacity(0.06), Color(nsColor: .windowBackgroundColor)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-      .ignoresSafeArea()
-    )
+    .pageBackground(.dashboard)
   }
 
   private var dashboardSections: some View {

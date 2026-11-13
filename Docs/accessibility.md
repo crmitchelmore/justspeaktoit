@@ -77,6 +77,17 @@ Android and the website have their own sections below.
   fixed point sizes, for text. Fixed sizes are acceptable only for decorative
   symbols. Use semantic colours (enforced by the `fixed_black_text` SwiftLint
   rule) and keep meaning out of colour alone.
+- **Page chrome (macOS):** page headers, compact strips, chips and badges come
+  from `Sources/SpeakApp/Views/PageChrome/`. `PageHeroHeader` and
+  `PageHeroStrip` make every label inside them white on the palette gradient,
+  and `SpeakTextStyle` holds the fonts, on-tint colours and truncation
+  (`speakSingleLine`, `speakLiveTranscriptLines`) for the whole app. Change
+  them there, not per page. SwiftLint rejects copies outside that folder:
+  `hand_rolled_on_tint_text` (`.white` foregrounds), `hand_rolled_page_title`
+  (`Text(…).font(.largeTitle)`) and `hand_rolled_gradient_surface`
+  (`LinearGradient(`; use `.pageBackground(_:)` for page washes). The HUD is
+  exempt; any other exception needs `// swiftlint:disable:next <rule>` with a
+  reason.
 
 #### Automated guard
 

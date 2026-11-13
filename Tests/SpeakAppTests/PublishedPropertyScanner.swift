@@ -7,7 +7,7 @@ enum PublishedPropertyScanner {
     private static let regex: NSRegularExpression = {
         let modifier = #"(?:@\w+(?:\([^)]*\))?|open|public|package|internal|fileprivate|private"#
             + #"|nonisolated|final|override|dynamic|lazy|weak|unowned)(?:\(set\))?"#
-        // swiftlint:disable:next force_try
+        // swiftlint:disable:next force_try - constant pattern; a typo should fail every guard loudly.
         return try! NSRegularExpression(pattern: #"@Published(?:\s+"# + modifier + #")*\s+var\s+(\w+)"#)
     }()
 

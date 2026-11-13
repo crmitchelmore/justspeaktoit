@@ -118,7 +118,7 @@ final class SettingsSearchCoverageTests: XCTestCase {
         }
     }
 
-    func testPublishedPropertiesMatchesEveryModifierForm() {
+    func testPublishedPropertyScanner_matchesEveryModifierForm() {
         let source = """
             @Published var plain = 1
             @Published private(set) var privateSetter = 1

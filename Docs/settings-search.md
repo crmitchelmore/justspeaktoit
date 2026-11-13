@@ -67,6 +67,11 @@ automation tools. Its keys are the same property names as `settingKeys` here,
 and each field records the type, default, allowed values or range, platforms,
 and whether it is read-only or sensitive.
 
+Windows and Linux use `SettingsSchema.fields(for: .windows)` (`.linux` is the
+same list), derived from `DesktopConfiguration.fields` in
+`SettingsSchema+Desktop.swift`, so a new desktop preference joins the schema
+and `speak config` with no extra entry. Mark consent and grants read-only there.
+
 When you add a persisted macOS setting, also add a `SettingsSchema+macOS.swift`
 field and an `AppSettingsConfiguration` binding.
 `Tests/SpeakAppTests/AppSettingsConfigurationTests.swift` fails when an

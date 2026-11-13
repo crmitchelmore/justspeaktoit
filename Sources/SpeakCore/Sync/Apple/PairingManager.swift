@@ -15,6 +15,12 @@ public final class PairingManager: @unchecked Sendable {
     private let defaults: UserDefaults
     private let pairingCodeKey = "speakTransportPairingCode"
     private let pairedDevicesKey = "speakTransportPairedDevices"
+    /// Device credentials issued to phones that proved the code (#1643). They sit
+    /// beside the code in the same store and are revoked with it.
+    private let credentialsKey = "speakTransportDeviceCredentials"
+    /// Oldest credentials are dropped beyond this, so repeated pairings cannot
+    /// grow the store without bound.
+    static let maximumCredentials = 32
     /// Serializes all read-modify-write transactions below. Not reentrant:
     /// public members take it once and only call `...Unlocked` helpers inside.
     private let lock = NSLock()
@@ -31,12 +37,14 @@ public final class PairingManager: @unchecked Sendable {
         lock.withLock { pairingCodeUnlocked() }
     }
 
-    /// Regenerates the pairing code (invalidates all existing pairings).
+    /// Regenerates the pairing code (invalidates all existing pairings and
+    /// device credentials).
     public func regeneratePairingCode() -> String {
         lock.withLock {
             let code = generatePairingCode()
             defaults.set(code, forKey: pairingCodeKey)
             defaults.removeObject(forKey: pairedDevicesKey)
+            defaults.removeObject(forKey: credentialsKey)
             // A new code invalidates whatever was being guessed, so the owner
             // can always recover from a lockout by regenerating.
             attemptLimiter.recordSuccess()
@@ -68,17 +76,62 @@ public final class PairingManager: @unchecked Sendable {
     /// matches it. It runs under the same limit as `attemptPairing(with:)` and is
     /// not called at all during a lockout.
     public func attemptPairing(now: Date = Date(), provingWith proof: (String) -> Bool) -> PairingAttemptResult {
-        lock.withLock {
-            if let remaining = attemptLimiter.lockoutRemaining(at: now) {
-                return .lockedOut(retryAfter: remaining)
-            }
-            guard proof(pairingCodeUnlocked()) else {
-                attemptLimiter.recordFailure(at: now)
-                return .rejected
-            }
-            attemptLimiter.recordSuccess()
-            return .accepted
+        lock.withLock { attemptPairingUnlocked(now: now, provingWith: proof) }
+    }
+
+    private func attemptPairingUnlocked(now: Date, provingWith proof: (String) -> Bool) -> PairingAttemptResult {
+        if let remaining = attemptLimiter.lockoutRemaining(at: now) {
+            return .lockedOut(retryAfter: remaining)
         }
+        guard proof(pairingCodeUnlocked()) else {
+            attemptLimiter.recordFailure(at: now)
+            return .rejected
+        }
+        attemptLimiter.recordSuccess()
+        return .accepted
+    }
+
+    /// Authenticates the encrypted Send to Mac handshake.
+    ///
+    /// A proof keyed with a device credential is checked against that credential
+    /// alone; an unknown or revoked one is refused without touching the attempt
+    /// limit, since nobody can guess a 256-bit secret. A proof keyed with the
+    /// code goes through `attemptPairing(provingWith:)`'s limit, and when the
+    /// phone asked for one it is issued a new credential in the same
+    /// transaction, so a code regenerated meanwhile cannot leave one behind.
+    public func authorize(_ proof: TransportPairingProof, now: Date = Date()) -> PairingAttemptResult {
+        lock.withLock {
+            if let credentialID = proof.credentialID {
+                guard let stored = credentialsUnlocked().first(where: { $0.credential.id == credentialID }),
+                      proof.verifies(credential: stored.credential) else { return .rejected }
+                return .accepted
+            }
+            let result = attemptPairingUnlocked(now: now, provingWith: proof.verifies(pairingCode:))
+            if result == .accepted, proof.requestsCredential {
+                let credential = TransportDeviceCredential.generate()
+                var stored = credentialsUnlocked()
+                stored.append(StoredCredential(credential: credential, deviceId: nil))
+                saveCredentialsUnlocked(Array(stored.suffix(Self.maximumCredentials)))
+                proof.issue(credential)
+            }
+            return result
+        }
+    }
+
+    /// Ties a credential to the device that authenticated with it, so removing
+    /// the device revokes the credential too.
+    public func bindCredential(_ credentialID: UUID, toDevice deviceId: String) {
+        lock.withLock {
+            var stored = credentialsUnlocked()
+            guard let index = stored.firstIndex(where: { $0.credential.id == credentialID }) else { return }
+            stored[index].deviceId = deviceId
+            saveCredentialsUnlocked(stored)
+        }
+    }
+
+    /// Whether `credentialID` is still accepted.
+    public func hasCredential(_ credentialID: UUID) -> Bool {
+        lock.withLock { credentialsUnlocked().contains { $0.credential.id == credentialID } }
     }
 
     /// Records a paired device.
@@ -90,12 +143,13 @@ public final class PairingManager: @unchecked Sendable {
         }
     }
 
-    /// Removes a paired device.
+    /// Removes a paired device and revokes the credentials bound to it.
     public func removePairedDevice(id: String) {
         lock.withLock {
             var devices = pairedDevicesUnlocked()
             devices.removeValue(forKey: id)
             defaults.set(devices, forKey: pairedDevicesKey)
+            saveCredentialsUnlocked(credentialsUnlocked().filter { $0.deviceId != id })
         }
     }
 
@@ -120,6 +174,24 @@ public final class PairingManager: @unchecked Sendable {
 
     private func pairedDevicesUnlocked() -> [String: String] {
         defaults.dictionary(forKey: pairedDevicesKey) as? [String: String] ?? [:]
+    }
+
+    private struct StoredCredential: Codable {
+        var credential: TransportDeviceCredential
+        var deviceId: String?
+    }
+
+    private func credentialsUnlocked() -> [StoredCredential] {
+        guard let data = defaults.data(forKey: credentialsKey) else { return [] }
+        return (try? JSONDecoder().decode([StoredCredential].self, from: data)) ?? []
+    }
+
+    private func saveCredentialsUnlocked(_ credentials: [StoredCredential]) {
+        guard !credentials.isEmpty, let data = try? JSONEncoder().encode(credentials) else {
+            defaults.removeObject(forKey: credentialsKey)
+            return
+        }
+        defaults.set(data, forKey: credentialsKey)
     }
 
     private func generatePairingCode() -> String {

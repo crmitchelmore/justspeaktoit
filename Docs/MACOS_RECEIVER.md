@@ -40,7 +40,7 @@ Both receiver and client use `SpeakTransportWire` in
 | Protocol version | 2 (`SpeakTransportProtocolVersion`); v1 plaintext peers are refused |
 | Discovery | Train-specific `SpeakTransportServiceType` Bonjour service |
 | Endpoint | Bonjour service endpoint, or `ws://<host>:<port>/speak` |
-| Encryption | X25519 key share each way, then ChaCha20-Poly1305 with HKDF-SHA256 keys from the X25519 secret and the pairing code |
+| Encryption | X25519 key share each way, then ChaCha20-Poly1305 with HKDF-SHA256 keys from the X25519 secret and the pairing code (first pairing) or a per-device credential (later sessions) |
 | Frame | One binary WebSocket message per sealed JSON `TransportMessage`, ISO8601 dates |
 | Unauthenticated ceiling | 4 KiB |
 | Authenticated ceiling | 1 MiB |
@@ -54,16 +54,20 @@ WebSocket handshake. The receiver accepts any request path.
 defines the handshake, which `TransportChannel` runs before any message:
 
 1. The client sends its protocol version and an ephemeral X25519 public key. This
-   and the Mac's reply are the only plaintext frames.
+   and the Mac's reply are the only plaintext frames. When pairing with the code
+   it also sets `requestsCredential`; once paired it sends `credentialID` instead.
 2. The Mac replies with its own ephemeral key. Both sides derive one key per
    direction with HKDF-SHA256 from the X25519 secret, a key HKDF-derived from the
-   pairing code, and a hash of both key-share frames.
+   pairing code or the device credential, and a hash of both key-share frames.
 3. The client sends a sealed "client finished" frame. The Mac checks it through
-   `PairingManager.attemptPairing(provingWith:)`, so it is the pairing check and
-   counts towards the lockout below.
-4. The Mac answers with a sealed "server finished" frame, or, for a wrong code or
-   a lockout, a plaintext failure `authResult` that the client only ever reads as
-   a refusal.
+   `PairingManager.authorize(_:)`. A code-keyed frame is the pairing check and
+   counts towards the lockout below; a credential-keyed frame is checked against
+   that stored credential only.
+4. The Mac answers with a sealed "server finished" frame, or, for a wrong code,
+   an unknown credential or a lockout, a plaintext failure `authResult` that the
+   client only ever reads as a refusal. After a code pairing that asked for one,
+   "server finished" also carries a new device credential: a 16-byte id and a
+   random 32-byte secret.
 
 After that `send` and `receive` accept only sealed frames, and refuse to run
 before the handshake. Nonces are per-direction frame counters, so a tampered,
@@ -74,11 +78,22 @@ A plaintext `hello` gets a plaintext error (a protocol-version mismatch for v1,
 "requires an encrypted connection" for v2) and the connection closes. There is
 no plaintext fallback: no shipping iPhone sender exists, so no v1 peer needs one.
 
-Limits: the code has six digits. The Mac sends nothing that depends on the code
-until the client has proved it, so guesses against the Mac are rate-limited. A
-device that impersonates the Mac to the phone, however, can test codes offline
-against the phone's "client finished" frame. Closing that needs a PAKE or a
-high-entropy per-device key issued at pairing, which a future sender should add.
+Device credentials (#1643): the code has six digits, and a device that
+impersonates the Mac to the phone (for example by spoofing Bonjour) could test
+every code offline against the phone's "client finished" frame. So the code is
+used only once. After it, sessions are keyed with the credential the Mac issued,
+which leaves an impostor nothing it can guess. `MacConnection` stores the
+credential per Mac in a `TransportCredentialStore` (a shipping sender must back
+it with the Keychain) and never falls back to the code on its own: when the Mac
+refuses a revoked credential, the user must forget the Mac and pair again.
+
+The Mac keeps up to 32 credentials beside the pairing code. Regenerating the code
+revokes all of them, and removing a paired device revokes the ones bound to it.
+An unknown credential is refused without counting towards the lockout.
+
+What is left: the first pairing is still exposed to an impostor present at that
+moment, and to one that gets the user to pair again. A PAKE would close that, but
+CryptoKit has none.
 
 ### Authentication
 

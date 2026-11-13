@@ -13,17 +13,20 @@ import Network
 /// After `start()`, the phone calls `establishSecureSession(pairingCode:)` and
 /// the Mac calls `acceptSecureSession(authorize:)`. `send` and `receive` refuse
 /// to run until that handshake has succeeded, and from then on every frame is
-/// sealed (see `TransportSecureSession.swift`).
+/// sealed (see `TransportSecureSession.swift` and the handshake in
+/// `TransportChannel+SecureSession.swift`).
 ///
 /// Receive is sequential: run one receive loop per channel.
 public actor TransportChannel {
     private let connection: NWConnection
     private let queue: DispatchQueue
     private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
+    let decoder = JSONDecoder()
     private var limit = TransportFrameLimit.handshake
     private var hasStarted = false
-    private var session: TransportSessionKeys?
+    var session: TransportSessionKeys?
+    var sessionCredentialID: UUID?
+    var sessionUsedCredential = false
 
     public init(connection: NWConnection) {
         self.connection = connection
@@ -86,114 +89,6 @@ public actor TransportChannel {
         }
     }
 
-    // MARK: - Encrypted handshake
-
-    /// Phone side: agrees session keys with the Mac using `pairingCode`.
-    ///
-    /// Returns once the Mac has proved it holds the same code. Throws
-    /// `TransportRejection` with the Mac's reason when it refuses the code,
-    /// is locked out or runs a different protocol version.
-    public func establishSecureSession(pairingCode: String) async throws {
-        try await self.establishSecureSession(pairingCode: pairingCode, protocolVersion: SpeakTransportProtocolVersion)
-    }
-
-    func establishSecureSession(pairingCode: String, protocolVersion: Int) async throws {
-        guard self.session == nil else { return }
-        let handshake = try TransportClientHandshake(protocolVersion: protocolVersion)
-        try await self.sendFrame(handshake.frame)
-
-        let reply = try await self.receiveFrame()
-        guard TransportKeyShare.decode(reply) != nil else {
-            throw self.rejection(in: reply) ?? TransportSecurityError.malformedHandshake
-        }
-        let finish = try handshake.finish(serverFrame: reply, pairingCode: pairingCode)
-        var keys = finish.keys
-        try await self.sendFrame(finish.finished)
-
-        let confirmation = try await self.receiveFrame()
-        guard let opened = try? keys.inbound.open(confirmation) else {
-            // The Mac could not open our frame, so it answered in plaintext.
-            // Only a refusal is read from such a frame; never a success.
-            throw self.rejection(in: confirmation) ?? TransportSecurityError.unauthenticatedFrame
-        }
-        guard opened == TransportKeySchedule.serverFinished else {
-            throw TransportSecurityError.unauthenticatedFrame
-        }
-        self.session = keys
-    }
-
-    /// Mac side: answers the phone's key share and checks its pairing proof.
-    ///
-    /// `authorize` receives the phone's proof and must run it through the
-    /// pairing attempt limit. A plaintext or wrong-version peer, a wrong code and
-    /// a lockout are each refused with a plaintext reason and a thrown
-    /// `TransportRejection`; nothing encrypted is sent until the code is proved.
-    public func acceptSecureSession(
-        authorize: @Sendable (TransportPairingProof) -> PairingAttemptResult
-    ) async throws {
-        try await self.acceptSecureSession(protocolVersion: SpeakTransportProtocolVersion, authorize: authorize)
-    }
-
-    func acceptSecureSession(
-        protocolVersion: Int,
-        authorize: @Sendable (TransportPairingProof) -> PairingAttemptResult
-    ) async throws {
-        guard self.session == nil else { return }
-        let handshake: TransportServerHandshake
-        do {
-            handshake = try TransportServerHandshake(
-                clientFrame: try await self.receiveFrame(),
-                protocolVersion: protocolVersion
-            )
-        } catch let refusal as TransportServerHandshake.Refusal {
-            throw await self.refuse(refusal, serverVersion: protocolVersion)
-        }
-        try await self.sendFrame(handshake.frame)
-
-        let proof = TransportPairingProof(schedule: handshake.schedule, clientFinished: try await self.receiveFrame())
-        let message: String
-        switch authorize(proof) {
-        case .accepted:
-            guard var keys = proof.acceptedKeys else { throw TransportSecurityError.unauthenticatedFrame }
-            try await self.sendFrame(try keys.outbound.seal(TransportKeySchedule.serverFinished))
-            self.session = keys
-            return
-        case .rejected:
-            message = "Invalid pairing code"
-        case .lockedOut(let retryAfter):
-            let seconds = Int(retryAfter.rounded(.up))
-            message = "Too many failed pairing attempts. Try again in \(seconds) seconds."
-        }
-        try? await self.sendPlaintext(.authResult(AuthResultMessage(success: false, errorMessage: message)))
-        throw TransportRejection(message: message)
-    }
-
-    private func refuse(_ refusal: TransportServerHandshake.Refusal, serverVersion: Int) async -> Error {
-        let reply: ErrorMessage
-        switch refusal {
-        case .plaintextHello(let version) where version == serverVersion:
-            reply = ErrorMessage(code: 426, message: "Send to Mac requires an encrypted connection")
-        case .plaintextHello(let version), .versionMismatch(let version):
-            reply = .protocolMismatch(clientVersion: version, serverVersion: serverVersion)
-        case .malformed:
-            return TransportSecurityError.malformedHandshake
-        }
-        try? await self.sendPlaintext(.error(reply))
-        return TransportRejection(message: reply.message)
-    }
-
-    /// A plaintext refusal the peer sent instead of a handshake frame.
-    private func rejection(in frame: Data) -> TransportRejection? {
-        switch try? self.decoder.decode(TransportMessage.self, from: frame) {
-        case .authResult(let result)? where !result.success:
-            TransportRejection(message: result.errorMessage ?? "Authentication failed")
-        case .error(let error)?:
-            TransportRejection(message: error.message)
-        default:
-            nil
-        }
-    }
-
     // MARK: - Messages
 
     /// Encodes, seals and sends one message as a binary WebSocket frame.
@@ -243,7 +138,7 @@ public actor TransportChannel {
         return try self.decoder.decode(TransportMessage.self, from: try await self.receiveFrame())
     }
 
-    private func sendFrame(_ data: Data) async throws {
+    func sendFrame(_ data: Data) async throws {
         guard self.limit.admits(byteCount: data.count) else {
             throw TransportChannelError.frameTooLarge(byteCount: data.count, maximumBytes: self.limit.maximumBytes)
         }
@@ -275,7 +170,7 @@ public actor TransportChannel {
         self.connection.cancel()
     }
 
-    private func receiveFrame() async throws -> Data {
+    func receiveFrame() async throws -> Data {
         let connection = self.connection
         let limit = self.limit
 

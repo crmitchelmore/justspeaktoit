@@ -113,4 +113,38 @@ extension TransportLoopbackTests {
         }
         XCTAssertTrue(message.contains("Too many failed pairing attempts"), "Unexpected refusal: \(message)")
     }
+
+    // MARK: - Device credentials (#1643)
+
+    func testReconnect_usesTheIssuedCredentialAndNeverFallsBackToTheCode() async throws {
+        let endpoint = try await self.startServer()
+        let store = InMemoryTransportCredentialStore()
+
+        let first = MacConnection(credentialStore: store)
+        await first.connect(to: endpoint, named: "Test Mac", pairingCode: PairingManager.shared.pairingCode)
+        XCTAssertEqual(first.state, .connected)
+        first.disconnect()
+        let credential = try XCTUnwrap(store.credential(forMac: "Test Mac"), "Pairing must store a credential")
+        XCTAssertTrue(PairingManager.shared.hasCredential(credential.id))
+
+        // The code is ignored once a credential exists, so a wrong one still connects.
+        let second = MacConnection(credentialStore: store)
+        await second.connect(to: endpoint, named: "Test Mac", pairingCode: "ignored")
+        XCTAssertEqual(second.state, .connected)
+        second.disconnect()
+
+        // Regenerating the code revokes the credential, and the phone does not
+        // quietly retry with the code it was given.
+        let newCode = PairingManager.shared.regeneratePairingCode()
+        let third = MacConnection(credentialStore: store)
+        await third.connect(to: endpoint, named: "Test Mac", pairingCode: newCode)
+        XCTAssertEqual(third.state, .error(TransportChannel.revokedCredentialMessage))
+        XCTAssertEqual(store.credential(forMac: "Test Mac"), credential, "Only the user may forget the Mac")
+
+        third.forgetMac(named: "Test Mac")
+        await third.connect(to: endpoint, named: "Test Mac", pairingCode: newCode)
+        XCTAssertEqual(third.state, .connected)
+        XCTAssertNotEqual(store.credential(forMac: "Test Mac"), credential)
+        third.disconnect()
+    }
 }

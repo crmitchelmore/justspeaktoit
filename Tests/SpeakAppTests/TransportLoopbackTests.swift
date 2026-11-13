@@ -19,18 +19,19 @@ import XCTest
 @MainActor
 final class TransportLoopbackTests: XCTestCase {
     var server: TransportServer?
-    private let codeKey = "speakTransportPairingCode"
-    private let devicesKey = "speakTransportPairedDevices"
-    private var savedCode: String?
-    private var savedDevices: [String: String]?
+    /// Every key `PairingManager` keeps, restored after each test.
+    private let pairingKeys = [
+        "speakTransportPairingCode", "speakTransportPairedDevices", "speakTransportDeviceCredentials"
+    ]
+    private var savedValues: [String: Any] = [:]
 
     override func setUp() {
         super.setUp()
         let defaults = UserDefaults.standard
-        self.savedCode = defaults.string(forKey: self.codeKey)
-        self.savedDevices = defaults.dictionary(forKey: self.devicesKey) as? [String: String]
-        defaults.removeObject(forKey: self.codeKey)
-        defaults.removeObject(forKey: self.devicesKey)
+        for key in self.pairingKeys {
+            self.savedValues[key] = defaults.object(forKey: key)
+            defaults.removeObject(forKey: key)
+        }
         // Also clears the in-memory attempt limiter, so one test's wrong codes
         // cannot lock out the next.
         _ = PairingManager.shared.regeneratePairingCode()
@@ -41,15 +42,12 @@ final class TransportLoopbackTests: XCTestCase {
         self.server = nil
 
         let defaults = UserDefaults.standard
-        if let savedCode = self.savedCode {
-            defaults.set(savedCode, forKey: self.codeKey)
-        } else {
-            defaults.removeObject(forKey: self.codeKey)
-        }
-        if let savedDevices = self.savedDevices {
-            defaults.set(savedDevices, forKey: self.devicesKey)
-        } else {
-            defaults.removeObject(forKey: self.devicesKey)
+        for key in self.pairingKeys {
+            if let value = self.savedValues[key] {
+                defaults.set(value, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
         }
         super.tearDown()
     }

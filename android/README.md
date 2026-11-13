@@ -87,16 +87,18 @@ app/src/main/java/com/justspeaktoit/android/
 │   ├── AndroidSpeechEngine.kt     # SpeechEngine: SpeechRecognizer adapter (main thread)
 │   ├── CloudCapture.kt      # owns the Cloud recording and deadline-bounded, abortable blocking IO
 │   ├── RecorderRetirement.kt      # process-wide bound on recorder stops that outlive their owner
-│   ├── DictationEngineSelector.kt # mode, cloud model, availability and the plan a session follows
+│   ├── DictationLanguages.kt      # the shared language catalogue and Automatic → phone language
+│   ├── DictationEngineSelector.kt # mode, cloud model, language, availability and the plan a session follows
 │   ├── DictationSessionController.kt  # session lifecycle, microphone hold and cleanup
 │   ├── SessionRequests.kt   # provider requests: key reads, deadlines and failure mapping
 │   ├── SharedAudioSource.kt # reads audio shared by other apps (content:// only)
 │   └── DictationViewModel.kt      # projects its owners into UI state; production wiring in Factory
 ├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
-├── history/                 # transcript history, retention and atomic storage
+├── corrections/             # personal corrections and the cloud vocabulary prompt
+├── history/                 # transcript history, retention, atomic storage and usage insights
 ├── settings/                # non-secret preferences
 ├── security/                # Keystore-backed AES-GCM secret store for BYOK keys
-├── output/                  # copy and share
+├── output/                  # copy and share (Read aloud lives in ui/ReadAloudButton.kt)
 └── ui/                      # Compose screen and brand theme
 ```
 
@@ -108,7 +110,8 @@ owners directly.
 
 Shared catalogues are generated from `Sources/SpeakCore`, never parsed from Swift:
 `assets/settings_search.json` (settings search) and `assets/cloud_catalog.json` (cloud providers,
-credential IDs, the models Android offers with their wire fields, the cleanup model and prompt).
+credential IDs, the models Android offers with their wire fields, the cleanup model and prompt, the
+dictation languages and the vocabulary prompt limits).
 Regenerate both with `scripts/update-android-assets`; the Swift export tests fail when an asset is
 stale. The build's `generateCloudCatalog` task writes `GeneratedCloudCatalog.kt` from the cloud asset,
 so `CloudCatalog` and `CleanupPolicy` hold no hand-typed copy; only each provider's base URL and

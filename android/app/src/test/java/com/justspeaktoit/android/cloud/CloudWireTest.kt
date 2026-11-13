@@ -29,6 +29,16 @@ class CloudWireTest {
     }
 
     @Test
+    fun testTranscriptionFields_sendAVocabularyPromptOnlyToModelsThatTakeOne() {
+        assertTrue(gpt.supportsPrompt)
+        assertEquals("prompt" to "Kubernetes", CloudWire.transcriptionFields(gpt, null, "Kubernetes").last())
+        assertEquals(2, CloudWire.transcriptionFields(gpt, null, " ").size)
+        CloudCatalog.transcriptionModels.filterNot { it.supportsPrompt }.forEach { model ->
+            assertTrue(CloudWire.transcriptionFields(model, null, "Kubernetes").none { it.first == "prompt" })
+        }
+    }
+
+    @Test
     fun testMultipart_wrapsStreamedFileWithFieldsAndClosingBoundary() {
         val parts = CloudWire.multipart(listOf("model" to "m"), "file", "a.wav", "audio/wav", "B")
         val head = String(parts.head)

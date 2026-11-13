@@ -2,6 +2,8 @@ package com.justspeaktoit.android.dictation
 
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.corrections.CorrectionRule
+import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.RequestReleasedException
 import com.justspeaktoit.android.history.HistoryEntry
@@ -26,7 +28,12 @@ internal class HistoryRetry(
     private val io: CoroutineDispatcher,
     private val deadlineMs: Long,
 ) {
-    suspend fun transcribe(entry: HistoryEntry, model: CloudModel, languageTag: String): HistoryEntry {
+    suspend fun transcribe(
+        entry: HistoryEntry,
+        model: CloudModel,
+        languageTag: String,
+        corrections: List<CorrectionRule> = emptyList(),
+    ): HistoryEntry {
         val file = File(entry.audioPath ?: return entry)
         return try {
             if (!withContext(io) { file.isFile }) {
@@ -35,9 +42,10 @@ internal class HistoryRetry(
             } else {
                 val key = withContext(io) { secrets.read(model.provider.credentialId) }
                     ?: throw CloudException(DictationFailure.MissingKey, "No key")
+                val prompt = PersonalCorrections.vocabularyPrompt(corrections)
                 val text = capture.call(deadlineMs, model.provider) { call ->
-                    cloud.transcribe(model, key, file, languageTag, call)
-                }.trim()
+                    cloud.transcribe(model, key, file, languageTag, call, prompt = prompt)
+                }.trim().let { PersonalCorrections.apply(it, corrections) }
                 if (text.isEmpty()) {
                     entry.copy(failure = DictationFailure.NoSpeech.name)
                 } else {

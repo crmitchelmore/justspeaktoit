@@ -34,6 +34,12 @@ final class RangedStreamingInserter: LiveInsertionWriter {
   /// (rather than altered by the app), and for rejecting a re-anchor onto
   /// identical pre-existing text.
   private var baselineFieldText: String?
+  /// The anchor and selection length as first captured, before any re-sync.
+  /// Cancellation rollback rebuilds the expected field from these.
+  private var originalSelection: CFRange?
+  /// The document the field showed when the region was anchored. Rollback
+  /// deletes only while the field provably still shows that document.
+  private var originalDocumentIdentity: String?
   /// Whether a read-back has confirmed this session's text in the field. After
   /// that, finding it absent means focus moved to another field, not that the
   /// text never landed, so a one-shot paste into the new field would be wrong.
@@ -84,7 +90,9 @@ final class RangedStreamingInserter: LiveInsertionWriter {
       }
       anchorUTF16 = selection.location
       pendingSelectionUTF16 = max(0, selection.length)
+      originalSelection = CFRange(location: selection.location, length: pendingSelectionUTF16)
       baselineFieldText = field.readValue()
+      originalDocumentIdentity = field.readDocumentIdentity()
       return true
     }
     guard !insertedText.isEmpty else { return true }
@@ -316,5 +324,84 @@ final class RangedStreamingInserter: LiveInsertionWriter {
         textAbsentFromField: textAbsentFromField
       )
     }
+  }
+}
+
+// MARK: - Cancellation rollback (issue #1561)
+
+extension RangedStreamingInserter {
+  /// Restores the field to its pre-recording text: the streamed region is
+  /// replaced by whatever selection it consumed, and that selection (or caret)
+  /// is put back. Writes only when the field still shows the document it was
+  /// anchored in and holds, code unit for code unit, the pre-recording text
+  /// with this session's text spliced in at the original anchor. Any user
+  /// edit, a re-anchored region, a normalisation change, or a different note
+  /// behind the same element (#664) leaves the document untouched.
+  func rollBack() -> LiveTextInserter.RollbackResult {
+    guard hasWritten, !insertedText.isEmpty else { return .nothingInserted }
+    guard let host, let field = host.streamingField() else {
+      return .kept(reason: "the target field is no longer available")
+    }
+    // Equal text does not prove the same document: Notes reuses one element
+    // for every note, so an identically populated note would pass every text
+    // check below. Without a document identity to compare, keep the text.
+    guard let document = originalDocumentIdentity, field.readDocumentIdentity() == document else {
+      return .kept(reason: "the target document's identity could not be verified")
+    }
+    guard let original = originalSelection, let baseline = baselineFieldText,
+          let replaced = StreamingRegionResolver.utf16Substring(
+            of: baseline, location: original.location, length: original.length
+          ),
+          let prefix = StreamingRegionResolver.utf16Substring(of: baseline, location: 0, length: original.location),
+          let suffix = StreamingRegionResolver.utf16Substring(
+            of: baseline,
+            location: original.location + original.length,
+            length: baseline.utf16.count - original.location - original.length
+          )
+    else {
+      return .kept(reason: "the field's text before recording is unknown")
+    }
+    guard let current = field.readValue() else {
+      return .kept(reason: "the target field could not be read")
+    }
+    // Exact UTF-16 comparison: String == treats canonically equivalent
+    // spellings as equal, but the AX ranges below are UTF-16 offsets, so a
+    // renormalised prefix would shift the deletion onto neighbouring text.
+    guard current.utf16.elementsEqual((prefix + insertedText + suffix).utf16) else {
+      return .kept(reason: "the document changed after the text was streamed")
+    }
+
+    let region = CFRange(location: prefix.utf16.count, length: insertedText.utf16.count)
+    let regionEnd = CFRange(location: region.location + region.length, length: 0)
+    guard host.capturedTargetAllowsWrite(), field.setSelectedRange(region) == .success else {
+      return .kept(reason: "the streamed region could not be selected")
+    }
+    // The app may have edited the field since it was read; replace only while
+    // the selection still covers exactly the streamed text.
+    guard selection(on: field, covers: region, expecting: current, in: document) else {
+      _ = field.setSelectedRange(regionEnd)
+      return .kept(reason: "the document changed before the streamed text could be removed")
+    }
+    guard host.capturedTargetAllowsWrite(), field.setSelectedText(replaced) == .success else {
+      // Never leave the streamed words highlighted for the next keystroke.
+      _ = field.setSelectedRange(regionEnd)
+      return .kept(reason: "the target app refused to remove the streamed text")
+    }
+    _ = field.setSelectedRange(original)
+
+    insertedText = ""
+    insertedRange = nil
+    guard let restored = field.readValue(), restored.utf16.elementsEqual(baseline.utf16) else {
+      return .kept(reason: "the removal could not be confirmed by reading the field back")
+    }
+    return .removed
+  }
+
+  private func selection(
+    on field: StreamingTextField, covers region: CFRange, expecting text: String, in document: String
+  ) -> Bool {
+    guard let selected = field.readSelectedRange(), let value = field.readValue() else { return false }
+    return selected.location == region.location && selected.length == region.length
+      && value.utf16.elementsEqual(text.utf16) && field.readDocumentIdentity() == document
   }
 }

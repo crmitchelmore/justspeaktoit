@@ -22,7 +22,7 @@ final class DesktopOpenRouterProjectionTests: XCTestCase {
                 == .apiKey(identifier: "openrouter.apiKey", providerName: "OpenRouter")
         }
         XCTAssertEqual(OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs, Set(openRouterOwned))
-        XCTAssertEqual(openRouterOwned.count, 11)
+        XCTAssertEqual(openRouterOwned.count, 9)
         for identifier in openRouterOwned {
             XCTAssertFalse(OpenAITranscriptionModels.directBatchModelIDs.contains(identifier), identifier)
             XCTAssertFalse(GeminiTranscribeModels.directBatchModelIDs.contains(identifier), identifier)

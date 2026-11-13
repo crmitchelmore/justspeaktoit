@@ -781,6 +781,20 @@ sessions:
           - "Open Settings \u203a Transcription, choose Remote and Batch, tap Browse OpenRouter models\u2026 under Remote Batch Model, tap any model and tap Use for transcription."
         expected: "Each link opens a searchable list with provider and price filters, and each model opens a page with its pricing. After choosing, Post-Processing lists OpenRouter \u203a the chosen model with a tick, and Remote Batch Model shows the chosen OpenRouter model."
         final_gate: true
+      - id: "iphone-history-session-details"
+        issues:
+          - 1596
+        title: "History shows session details and a timed issue report"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes the iOS History session details change"
+        steps:
+          - "Make a short recording from the in-app mic with polish on, then one from the Action Button."
+          - "In History tap Session details on each new entry."
+          - "Long-press one entry, choose Create Issue with Details\u2026 and read the preview."
+          - "With VoiceOver on, swipe through the Session details rows."
+        expected: "Each entry lists its trigger (Button or Automation), friendly model names per phase, recording length, transcript and post-processing times and a total. The issue preview has relative timings but no transcript text or dates. VoiceOver reads each row's title and value."
+        final_gate: true
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"

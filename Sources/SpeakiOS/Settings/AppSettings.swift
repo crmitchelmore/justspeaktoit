@@ -162,6 +162,11 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(keepAudioOnCancel, forKey: DefaultsKey.keepAudioOnCancel.storageKey) }
     }
 
+    /// The microphone to prefer while recording (`AVAudioSessionPortDescription.uid`); nil follows the system route.
+    @Published public var preferredAudioInputUID: String? {
+        didSet { defaults.set(preferredAudioInputUID, forKey: DefaultsKey.preferredAudioInputUID.storageKey) }
+    }
+
     @Published public var liveActivitiesEnabled: Bool {
         didSet { defaults.set(liveActivitiesEnabled, forKey: DefaultsKey.liveActivitiesEnabled.rawValue) }
     }
@@ -313,6 +318,7 @@ public final class AppSettings: ObservableObject {
         self.liveActivitiesEnabled = defaults.object(forKey: DefaultsKey.liveActivitiesEnabled.rawValue) as? Bool
             ?? true
         self.keepAudioOnCancel = Self.storedKeepAudioOnCancel(in: defaults)
+        self.preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.storageKey)
         let clipboardPolicy = Self.storedClipboardPolicy(in: defaults)
         self.transcriptClipboardLifetime = clipboardPolicy.lifetime
         self.transcriptAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard
@@ -328,12 +334,7 @@ public final class AppSettings: ObservableObject {
         self.cleanupModelDiscoveryEnabled = Shared.cleanupModelDiscoveryEnabled.iOS.value(in: defaults)
         self.postProcessingModel = Self.storedPostProcessingModel(in: defaults)
         self.autoPostProcess = defaults.bool(forKey: DefaultsKey.autoPostProcess.rawValue)
-        // `didSet` never fires during init, so persist the seeded memory explicitly.
-        selection.persist(to: defaults)
-        defaults.set(
-            self.rememberedRemoteTranscriptionMode.rawValue,
-            forKey: DefaultsKey.rememberedRemoteTranscriptionMode.rawValue
-        )
+        persistSeededTranscriptionMemory(selection)
         if loadsSecureStorage { startLoadingCredentials() }
     }
 
@@ -342,6 +343,15 @@ public final class AppSettings: ObservableObject {
 extension AppSettings {
     private func save(_ value: Any, _ key: DefaultsKey) {
         defaults.set(value, forKey: key.storageKey)
+    }
+
+    // `didSet` never fires during init, so persist the seeded memory explicitly.
+    fileprivate func persistSeededTranscriptionMemory(_ selection: LiveTranscriptionSelection) {
+        selection.persist(to: defaults)
+        defaults.set(
+            rememberedRemoteTranscriptionMode.rawValue,
+            forKey: DefaultsKey.rememberedRemoteTranscriptionMode.rawValue
+        )
     }
 
     // Each credential is reloaded without overwriting a locked Keychain entry.

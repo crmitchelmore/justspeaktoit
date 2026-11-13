@@ -17,6 +17,7 @@ public struct ContentView: View {
     @StateObject var coordinator: TranscriberCoordinator
     @StateObject var handsFree: IOSHandsFreeDictationCoordinator
     @ObservedObject var settings = AppSettings.shared
+    @ObservedObject var microphoneStatus = PreferredAudioInputStatus.shared
     @State var showingError = false
     @State var issueReport: IOSIssueReportController?
     @State var issueErrorSnapshot = IOSIssueReporter.failedRequest()

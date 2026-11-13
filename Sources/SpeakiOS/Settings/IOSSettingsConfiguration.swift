@@ -259,6 +259,15 @@ extension IOSSettingsConfiguration {
         string("transcriptionKeywords", \.transcriptionKeywords)
         bool("upgradeOfflineTranscriptsWhenOnline", \.upgradeOfflineTranscriptsWhenOnline)
         bool("keepAudioOnCancel", \.keepAudioOnCancel)
+        bind("preferredAudioInputUID", \.settings, \.preferredAudioInputUID,
+             read: { $0.map { .string($0) } ?? .null },
+             decode: { value -> String?? in
+                 switch value {
+                 case .null: return .some(nil)
+                 case .string(let uid): return .some(uid)
+                 default: return nil
+                 }
+             })
 
         // Recording, results and display
         choice("visualDensity", \.visualDensity)

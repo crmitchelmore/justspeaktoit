@@ -39,7 +39,9 @@ extension SettingsSchema {
                   defaultValue: .bool(false)),
             Field(key: "keepAudioOnCancel", kind: .boolean,
                   summary: "Keep a cancelled recording's audio in Saved Recordings.",
-                  defaultValue: .bool(Shared.keepAudioOnCancel.iOS.defaultValue))
+                  defaultValue: .bool(Shared.keepAudioOnCancel.iOS.defaultValue)),
+            Field(key: "preferredAudioInputUID", kind: .optionalString,
+                  summary: "Microphone device ID, or null for the system default.", defaultValue: .null)
         ]
         let recording: [Field] = [
             Field(key: "visualDensity", kind: .enumeration, summary: "Normal or compact layout.",

@@ -406,16 +406,16 @@ sessions:
       - id: "mac-openrouter-discover-configure"
         issues:
           - 1575
-        title: "Cleanup and transcription have a separate Browse OpenRouter models button, like voice"
-        minutes: 4
+        title: "Every Mac picker that can use OpenRouter has a Browse OpenRouter models button, like voice"
+        minutes: 6
         core: false
-        build: "Just Speak to It for Mac, the first Alpha build that includes the Browse OpenRouter models button"
+        build: "Just Speak to It for Mac, the first Alpha build that adds Browse OpenRouter models to dictation profiles"
         steps:
-          - "Open Settings \u203a Post-processing, choose Remote and check the Remote Post-processing Model picker lists native models only, with Browse OpenRouter models\u2026 below it."
-          - "Click Browse OpenRouter models\u2026, turn on Discover OpenAI cleanup models via OpenRouter, search for gpt, click a model, check its Pricing and Temperature, then click Use for cleanup."
-          - "Open Settings \u203a Transcription, click Browse OpenRouter models\u2026 under the Remote Batch Model picker, wait for the list to refresh, click any model and click Use for transcription."
-          - "Open each picker again."
-        expected: "Neither picker has an OpenRouter drill-in row. Each Browse OpenRouter models\u2026 button opens a searchable list with provider and price filters and a Refresh button, each model opens a page with its pricing, and choosing one closes the sheet. Each picker then shows OpenRouter \u203a the chosen model, as the voice picker does."
+          - "Open Settings \u203a Post-processing, choose Remote, click Browse OpenRouter models\u2026 under Remote Post-processing Model, turn on Discover OpenAI cleanup models via OpenRouter, click a model, check its Pricing and Temperature, then click Use for cleanup."
+          - "Open Settings \u203a Transcription, choose Remote Streaming and read the Remote Streaming Model help text."
+          - "Switch to Remote Batch, click Browse OpenRouter models\u2026 under Remote Batch Model, click any model and click Use for transcription."
+          - "Open Settings \u203a Profiles, edit a profile, set Transcription to Remote Batch and Polish to Enabled, and use Browse OpenRouter models\u2026 under Batch Model and under Polish Model."
+        expected: "Each Browse OpenRouter models\u2026 button sits directly under its picker, like Browse OpenRouter Speech\u2026 in Voice Output, and opens a searchable list where each model has a pricing page. After choosing, the picker shows OpenRouter \u203a the chosen model. Remote Streaming has no button and its help says OpenRouter models can't stream."
         final_gate: true
       - id: "mac-diagnostics-consent"
         issues:

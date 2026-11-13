@@ -10,7 +10,9 @@ Cleanup, batch transcription and voice output share one layout on Mac and iPhone
 The main model picker lists native-provider models, and a separate **Browse
 OpenRouter models…** button (on Mac voice output, **Browse OpenRouter Speech…**)
 opens the shared discover-then-configure browser (`OpenRouterModelBrowser` in
-`SpeakCore/AppleUI`). A chosen OpenRouter model then appears in the picker as
+`SpeakCore/AppleUI`). On Mac this includes the dictation profile Batch and Polish
+model pickers. Streaming pickers have no button because OpenRouter models can't
+stream live. A chosen OpenRouter model then appears in the picker as
 **OpenRouter › model**. Search by name or description, filter by provider and listed
 price, and inspect each model's pricing, voices, capabilities and retirement dates.
 

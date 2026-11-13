@@ -165,7 +165,8 @@ struct TranscriptionSettingsPage: View {
 
         SettingsFootnote(
             settings.transcriptionMode == .streaming
-                ? "**Streaming:** text appears while audio streams to the provider."
+                ? "**Streaming:** text appears while audio streams to the provider. "
+                    + "OpenRouter models can't stream; choose Batch to use one."
                 : "**Batch:** audio uploads when you stop, for a more complete transcript."
         )
     }

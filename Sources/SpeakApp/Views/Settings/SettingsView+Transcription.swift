@@ -151,7 +151,8 @@ extension SettingsView {
           .foregroundStyle(.secondary)
         ModelPicker(
           title: "Remote Streaming Model",
-          help: "Choose the remote provider model used while recording.",
+          help: "Choose the remote provider model used while recording. "
+            + "OpenRouter models can't stream; choose Remote Batch to use one.",
           options: ModelCatalog.remoteLiveTranscription,
           value: remoteTranscriptionModelBinding(
             \AppSettings.liveTranscriptionModel,

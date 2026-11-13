@@ -22,7 +22,7 @@ struct IOSOpenRouterTranscriptionBrowserLink: View {
         } label: {
             Label("Browse OpenRouter models…", systemImage: "waveform")
         }
-        .accessibilityIdentifier("openRouterTranscriptionBrowserLink")
+        .accessibilityIdentifier("openRouterAudioBrowserLink")
     }
 }
 

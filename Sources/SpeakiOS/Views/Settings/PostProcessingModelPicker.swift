@@ -54,7 +54,7 @@ struct PostProcessingModelPickerRows: View {
         } label: {
             Label("Browse OpenRouter models…", systemImage: "network")
         }
-        .accessibilityIdentifier("postProcessingModel.browseOpenRouter")
+        .accessibilityIdentifier("postProcessingModel.openRouter")
     }
 }
 

@@ -16,7 +16,13 @@
     {
       "allowedValues" : [
         "openai/gpt-transcribe",
-        "groq/whisper-large-v3-turbo"
+        "groq/whisper-large-v3-turbo",
+        "deepgram/nova-3-streaming",
+        "deepgram/flux-general-en-streaming",
+        "deepgram/flux-general-multi-streaming",
+        "assemblyai/universal-3-6-pro-streaming",
+        "openai/gpt-live-transcribe-streaming",
+        "openai/gpt-realtime-whisper-streaming"
       ],
       "default" : "openai/gpt-transcribe",
       "description" : "Model used when dictating in cloud mode.",

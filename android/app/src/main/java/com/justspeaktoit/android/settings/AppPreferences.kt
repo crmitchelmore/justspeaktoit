@@ -5,6 +5,7 @@ import androidx.core.content.edit
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.dictation.RecognitionMode
+import com.justspeaktoit.android.dictation.SilenceSettings
 import com.justspeaktoit.android.history.Retention
 import org.json.JSONObject
 
@@ -30,6 +31,9 @@ interface DictationPreferences {
     /** The chosen [DictationProfile.id], or null for none. */
     var activeProfileId: String?
     var recordingSounds: RecordingSoundSettings
+
+    /** Whether, and after how long, a Cloud recording stops on silence. */
+    var silence: SilenceSettings
 }
 
 /** Non-secret choices. Secrets live in the Keystore-backed `SecretStore`, never here. */
@@ -115,6 +119,18 @@ class AppPreferences(context: Context) : DictationPreferences {
             putFloat(KEY_SOUND_VOLUME, value.volume.coerceIn(0f, 1f))
         }
 
+    override var silence: SilenceSettings
+        get() = SilenceSettings.of(
+            enabled = prefs.getBoolean(KEY_SILENCE_ENABLED, false),
+            threshold = prefs.getFloat(KEY_SILENCE_THRESHOLD, SilenceSettings.DEFAULT_THRESHOLD.toFloat()).toDouble(),
+            durationSeconds = prefs.getFloat(KEY_SILENCE_DURATION, SilenceSettings.DEFAULT_DURATION.toFloat()).toDouble(),
+        )
+        set(value) = prefs.edit {
+            putBoolean(KEY_SILENCE_ENABLED, value.enabled)
+            putFloat(KEY_SILENCE_THRESHOLD, value.threshold.toFloat())
+            putFloat(KEY_SILENCE_DURATION, value.durationSeconds.toFloat())
+        }
+
     companion object {
         const val FILE_NAME = "jsti_prefs"
 
@@ -146,5 +162,10 @@ class AppPreferences(context: Context) : DictationPreferences {
         private const val KEY_SOUNDS_ENABLED = "recordingSoundsEnabled"
         private const val KEY_SOUND_PROFILE = "recordingSoundProfile"
         private const val KEY_SOUND_VOLUME = "recordingSoundVolume"
+
+        /** Canonical cross-platform keys (SpeakCore `ApplicationPreferenceKey`). */
+        private const val KEY_SILENCE_ENABLED = "silenceDetectionEnabled"
+        private const val KEY_SILENCE_THRESHOLD = "silenceThreshold"
+        private const val KEY_SILENCE_DURATION = "silenceDuration"
     }
 }

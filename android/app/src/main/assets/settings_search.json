@@ -185,6 +185,27 @@
       "title" : "Recording sounds"
     },
     {
+      "id" : "android.silenceDetection",
+      "keywords" : [
+        "silence",
+        "auto stop",
+        "automatic stop",
+        "pause",
+        "quiet",
+        "threshold",
+        "hands-free"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "silenceDetectionEnabled",
+        "silenceThreshold",
+        "silenceDuration"
+      ],
+      "summary" : "Stop a Cloud recording and transcribe it once you have been quiet for a set time.",
+      "title" : "Stop recording after silence"
+    },
+    {
       "id" : "android.resourcesInUse",
       "keywords" : [
         "status",

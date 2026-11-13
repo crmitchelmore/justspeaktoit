@@ -64,6 +64,7 @@ import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.dictation.DictationUiState
+import com.justspeaktoit.android.dictation.SilenceSettings
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
@@ -95,6 +96,7 @@ class SettingsActions(
     val onApplyConfiguration: (Map<String, Any?>) -> Boolean = { false },
     val onRecordingSoundsChanged: (RecordingSoundSettings) -> Unit = {},
     val onPreviewRecordingSound: () -> Unit = {},
+    val onSilenceChanged: (SilenceSettings) -> Unit = {},
 )
 
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
@@ -281,6 +283,28 @@ fun SettingsScreen(
                 onPreview = actions.onPreviewRecordingSound,
                 modifier = anchor("android.recordingSounds"),
             )
+
+            HorizontalDivider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = anchor("android.silenceDetection")
+                    .fillMaxWidth()
+                    .testTag(AutomationIds.SETTINGS_SILENCE)
+                    .toggleable(
+                        value = state.silence.enabled,
+                        role = Role.Switch,
+                        onValueChange = { actions.onSilenceChanged(state.silence.copy(enabled = it)) },
+                    ),
+            ) {
+                Text(
+                    stringResource(R.string.settings_silence_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.silence.enabled, onCheckedChange = null)
+            }
+            Text(stringResource(R.string.settings_silence_note), style = MaterialTheme.typography.bodyMedium)
+            if (state.silence.enabled) SilenceSliders(state.silence, actions.onSilenceChanged)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_corrections_title, anchor("android.personalCorrections"))

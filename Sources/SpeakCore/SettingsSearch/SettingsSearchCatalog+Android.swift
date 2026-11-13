@@ -75,6 +75,13 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.silenceDetection", title: "Stop recording after silence", section: .general,
+            systemImage: "waveform.slash",
+            summary: "Stop a Cloud recording and transcribe it once you have been quiet for a set time.",
+            keywords: ["silence", "auto stop", "automatic stop", "pause", "quiet", "threshold", "hands-free"],
+            settingKeys: ["silenceDetectionEnabled", "silenceThreshold", "silenceDuration"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.resourcesInUse", title: "System resources in use", section: .general,
             systemImage: "gauge.with.dots.needle.33percent",
             summary: "See what the app holds now, such as the microphone or a cloud request, and release it.",

@@ -44,6 +44,9 @@ object AutomationIds {
     const val ISSUE_REPORT_COPY = "issueReport.copy"
     const val ISSUE_REPORT_OPEN = "issueReport.open"
     const val ISSUE_REPORT_CLOSE = "issueReport.close"
+    const val SETTINGS_SILENCE = "settings.silenceDetection"
+    const val SETTINGS_SILENCE_DURATION = "settings.silenceDuration"
+    const val SETTINGS_SILENCE_THRESHOLD = "settings.silenceThreshold"
     const val RESOURCES_HEADLINE = "settings.resources.headline"
     const val RESOURCES_RELEASE_EVERYTHING = "settings.resources.releaseEverything"
 

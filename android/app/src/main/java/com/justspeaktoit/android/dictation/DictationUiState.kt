@@ -52,6 +52,8 @@ data class DictationUiState(
     val sharedAudio: SharedAudioOffer? = null,
     /** Cancelled Cloud recordings are kept in History for a later transcription. */
     val keepAudioOnCancel: Boolean = AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL,
+    /** Whether a Cloud recording stops by itself after a pause. */
+    val silence: SilenceSettings = SilenceSettings(),
     /** The History entry whose kept audio is being transcribed, if any. */
     val transcribingEntryId: String? = null,
     /** Personal corrections, in the order they apply. */

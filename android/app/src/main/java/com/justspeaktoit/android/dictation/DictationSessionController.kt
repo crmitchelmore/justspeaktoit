@@ -49,6 +49,9 @@ internal interface SessionSettings {
 
     /** Personal corrections applied to every final transcript, and sent to cloud models as vocabulary. */
     val corrections: List<CorrectionRule> get() = emptyList()
+
+    /** Read when a Cloud recording starts; the recognisers end on a pause by themselves. */
+    val silence: SilenceSettings get() = SilenceSettings()
 }
 
 /** Plays a recording cue when sounds are on; returns how long it lasts in milliseconds, or 0 if none plays. */
@@ -243,11 +246,20 @@ internal class DictationSessionController(
     }
 
     private fun startCloud() {
+        val silence = settings.silence.takeIf { it.enabled }?.let { SilenceMonitor(it.threshold, it.durationSeconds) }
+        // Set before any level callback can reach the main thread, so a stop on silence ends only this recording.
+        var recording: CloudCapture.Recording? = null
         val started = capture.start(
-            onLevel = { _level.value = it },
+            onLevel = { level ->
+                _level.value = level.meter
+                if (silence?.observe(level.normalized, level.atSeconds) == true) {
+                    scope.launch { if (recording?.let(capture::owns) == true) stop() }
+                }
+            },
             onLimitReached = { rec -> scope.launch { if (capture.owns(rec)) stop() } },
             onCaptureFailed = { rec -> scope.launch { if (capture.owns(rec)) failCapture() } },
         )
+        recording = capture.current.takeIf { started }
         dispatch(if (started) DictationEvent.Ready else DictationEvent.Error(DictationFailure.Audio))
     }
 

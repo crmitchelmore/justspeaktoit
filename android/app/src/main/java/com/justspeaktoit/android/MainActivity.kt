@@ -120,6 +120,7 @@ class MainActivity : ComponentActivity() {
                                 onChooseModel = viewModel::chooseCloudModel,
                                 onCleanupChanged = viewModel::setCleanupEnabled,
                                 onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
+                                onSilenceChanged = viewModel::setSilence,
                                 onChooseCleanupModel = viewModel::chooseCleanupModel,
                                 onReleaseResource = viewModel::releaseResource,
                                 onReleaseEverything = viewModel::releaseEverything,

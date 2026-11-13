@@ -12,13 +12,6 @@ on:
         description: Only report matching event counts; submit no deletion request
         type: boolean
         default: true
-      mode:
-        description: retention = events older than the retention window; geoip-test-events = one-off GeoIP-tagged test events
-        type: choice
-        default: retention
-        options:
-          - retention
-          - geoip-test-events
       attempt:
         description: Raise only to resubmit after PostHog marked the previous request failed
         type: number
@@ -50,7 +43,7 @@ jobs:
           POSTHOG_PROJECT_ID: ${{ vars.POSTHOG_PROJECT_ID }}
           POSTHOG_HOST: ${{ vars.POSTHOG_HOST || 'https://eu.posthog.com' }}
           RETENTION_DAYS: ${{ vars.POSTHOG_RETENTION_DAYS || '365' }}
-          PURGE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'retention' }}
+          PURGE_MODE: retention
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
           PURGE_ATTEMPT: ${{ github.event_name == 'workflow_dispatch' && inputs.attempt || '1' }}
         run: node .github/scripts/posthog-retention-purge.mjs

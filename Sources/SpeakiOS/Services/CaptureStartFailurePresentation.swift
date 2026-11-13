@@ -185,7 +185,7 @@ struct CaptureStartFailurePresentation: LocalizedError, Equatable, Sendable {
         recovery: nil
     )
     private static let credentialsUnavailable = CaptureStartFailurePresentation(
-        message: "Secure storage is temporarily unavailable. Unlock this iPhone and try again.",
+        message: "Secure storage is temporarily unavailable. Unlock your device and try again.",
         code: "start_credentials_unavailable",
         recovery: nil
     )

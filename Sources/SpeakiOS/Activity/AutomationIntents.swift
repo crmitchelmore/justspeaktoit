@@ -31,7 +31,7 @@ enum AutomationIntentError: LocalizedError {
             return "No transcriptions in history yet."
         case .unsupportedBatchModel(let model):
             return "The configured batch model (\(model)) isn't supported for file transcription "
-                + "on iPhone. Choose a supported model in Settings."
+                + "on this device. Choose a supported model in Settings."
         case .openRouterKeyMissing:
             return "Polish Text needs an OpenRouter API key. Add one in Settings."
         case .noPolishOutput:

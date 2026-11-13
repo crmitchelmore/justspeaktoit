@@ -88,9 +88,10 @@ install-verify: release ## Build release, install to /Applications, launch and v
 preflight: test-all verify ## Full pre-release check (tests + launch verification)
 
 .PHONY: lint
-lint: ## Run strict SwiftLint (isolated Tooling graph) with zero violations and no baseline
+lint: ## Run strict SwiftLint (isolated Tooling graph), accessibility and iOS device-copy checks
 	./scripts/swiftlint.sh lint --strict
 	python3 scripts/accessibility/check-apple-accessibility.py
+	python3 scripts/ios/check-device-copy.py
 
 # CI parity: ci.yml's Lint job and scripts/pre-pr both run exactly this target.
 .PHONY: ci-lint

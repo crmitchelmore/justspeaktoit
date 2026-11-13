@@ -238,6 +238,7 @@ Interface Guidelines and WWDC sessions.
 - Use `public` for types that need to be accessed from Xcode project or other modules
 - Enforce linting via `.swiftlint.yml`; rules include `implicit_return`, line-length 120/160
 - Apple UI controls need accessible names and stable identifiers; follow [Docs/accessibility.md](Docs/accessibility.md). `make lint` runs `scripts/accessibility/check-apple-accessibility.py`
+- The iOS app also runs on iPad: name the device through `DeviceCopy` (`Sources/SpeakiOS/Views/DeviceCopy.swift`), never a hard-coded "iPhone" or "Dynamic Island". `make lint` runs `scripts/ios/check-device-copy.py`; genuinely iPhone-only copy goes in its `ALLOWLIST`
 
 ## Testing Guidelines
 - Tests live in per-module XCTest targets under `Tests/` (for example `Tests/SpeakAppTests`, `Tests/SpeakCoreTests`, `Tests/SpeakDesktopTests`, `Tests/SpeakiOSTests`)

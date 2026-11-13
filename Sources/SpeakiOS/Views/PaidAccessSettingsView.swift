@@ -73,7 +73,7 @@ public struct PaidAccessSettingsView: View {
         Section {
             Label(
                 "Subscriptions are not available in the iOS app yet. "
-                    + "Transcription and cleanup on iPhone use on-device models "
+                    + "Transcription and cleanup here use on-device models "
                     + "or your own API keys.",
                 systemImage: "info.circle"
             )
@@ -96,7 +96,7 @@ public struct PaidAccessSettingsView: View {
             }
             .disabled(self.store.isBusy)
         } footer: {
-            Text("The same Apple account works on your iPhone and your Mac.")
+            Text("The same Apple account works on \(DeviceCopy.yourDevice) and your Mac.")
         }
     }
 

@@ -36,9 +36,11 @@ class SentryCrashReporter(
             options.isAttachViewHierarchy = false
             options.cacheDirPath?.let { cacheDir = File(it) }
             // Replaces Sentry's Android gate, so it repeats that gate's connectivity check.
-            options.transportGate = ITransportGate {
-                reporting && options.connectionStatusProvider.connectionStatus != ConnectionStatus.DISCONNECTED
-            }
+            options.setTransportGate(
+                ITransportGate {
+                    reporting && options.connectionStatusProvider.connectionStatus != ConnectionStatus.DISCONNECTED
+                },
+            )
             options.beforeSend = SentryOptions.BeforeSendCallback { event, _ ->
                 if (!reporting) return@BeforeSendCallback null
                 event.user = null

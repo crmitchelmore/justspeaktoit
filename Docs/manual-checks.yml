@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-12"
+updated: "2026-11-13"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -39,6 +39,20 @@ sessions:
           - "Start dictating again at the end of the note; after the first words appear, click into a different, empty note, keep talking, then stop."
           - "Check both notes."
         expected: "XX is kept and nothing outside the dictated text changed or duplicated (streaming may pause). After the switch, streaming pauses: the second note stays empty, the first note keeps only the words dictated before you switched, and a notice says the full transcript is on the clipboard. This holds for every \u201cIf you switch apps\u201d setting, because both notes are in the same app."
+        final_gate: true
+      - id: "mac-escape-removes-streamed-text"
+        issues:
+          - 1561
+        title: "TextEdit: Escape removes streamed text, but never your edits"
+        minutes: 3
+        core: true
+        build: "Just Speak to It for Mac, an Alpha build that includes the #1561 cancel rollback"
+        steps:
+          - "Settings \u203a General: Cancel recording with Escape = on. Open a new, empty TextEdit document and type: Start here "
+          - "With the caret after \"Start here \", dictate \"This cancelled recording should not be inserted\" and press Escape after the words appear."
+          - "Dictate again; after the first words appear, type XX at the very end of the document, keep talking, then press Escape."
+          - "Check the document and the two newest History entries."
+        expected: "After the first Escape the document reads exactly \"Start here \" with the caret after it. After the second, the streamed words and XX are both left in place, and that History entry has an output note saying the streamed text was left because the document changed."
         final_gate: true
       - id: "mac-one-shot-baselines"
         issues:

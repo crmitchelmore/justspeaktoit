@@ -74,6 +74,10 @@ In a named Notes editor field, exercise all of the following:
    edit must be preserved even when that prevents exact final equality.
 5. Move focus after the first partial to another clean field or app. Confirm
    the new target stays unchanged and inspect the original target separately.
+6. Press Escape mid-dictation. The streamed words must disappear and the field
+   must return to its pre-recording text and caret (or selection). If you edited
+   inside or next to the streamed region first, the field must be left exactly
+   as it was, and History records why the text stayed (#1561).
 
 For exactness, compare the expected streamed region—not an entire pre-populated
 field—with the appropriate final History text, accounting for expected prefix

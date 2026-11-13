@@ -43,7 +43,20 @@ class FeatureMapTests(unittest.TestCase):
 
     def test_exclusion_without_reason_kind_fails(self):
         errors = CHECK.check(TABLE + ENTRY.replace("(OS:", "("))
-        self.assertIn("F01: Excluded must say '(OS' or '(owner decision'", errors)
+        self.assertIn("F01: Excluded needs an '(OS' or '(owner decision' reason for iOS", errors)
+
+    def test_each_exclusion_needs_its_own_reason(self):
+        table = TABLE.replace("| Yes | #1 |", "| N/A | #1 |")
+        entry = ENTRY.replace("Android Yes", "Android N/A")
+        self.assertEqual([], CHECK.check(table + entry.replace(").", "); Android (OS: no keys).")))
+        errors = CHECK.check(table + entry.replace(").", "); Android."))
+        self.assertIn("F01: Excluded needs an '(OS' or '(owner decision' reason for Android", errors)
+
+    def test_gap_platform_and_issue_must_match_summary(self):
+        errors = CHECK.check(TABLE + ENTRY.replace("Linux #1", "#1"))
+        self.assertIn("F01: Gaps must name Linux", errors)
+        errors = CHECK.check(TABLE.replace("#1", "#2") + ENTRY)
+        self.assertIn("F01: Gaps must name the summary table's issue #2", errors)
 
     def test_missing_path_fails(self):
         errors = CHECK.check(TABLE + ENTRY.replace("Docs/feature-map.md", "Sources/Missing.swift"))

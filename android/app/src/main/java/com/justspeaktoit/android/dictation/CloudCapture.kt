@@ -9,6 +9,7 @@ import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
@@ -184,7 +185,9 @@ internal class CloudCapture(
     ): T = try {
         withTimeout(deadlineMs) {
             coroutineScope {
-                val watchdog = launch {
+                // Undispatched, so its finally is armed before the block runs: a watchdog cancelled
+                // before it was dispatched would never run its body, leaving the block unaborted.
+                val watchdog = launch(start = CoroutineStart.UNDISPATCHED) {
                     try {
                         awaitCancellation()
                     } finally {

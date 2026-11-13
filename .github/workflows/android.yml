@@ -140,6 +140,12 @@ jobs:
 
       - name: Verify upload signature
         if: ${{ steps.keystore.outputs.signed == 'true' }}
+        env:
+          JSTI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          JSTI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+        # Upload keys are self-signed, so -strict without a keystore always fails chain validation
+        # (exit 4, run 43332940123). Verifying against the upload keystore trusts that certificate
+        # and fails unless the bundle was signed by that alias, not merely by some valid key.
         run: |
           aab=app/build/outputs/bundle/release/app-release.aab
           certs="$(keytool -printcert -jarfile "$aab")"
@@ -147,8 +153,8 @@ jobs:
             echo "::error::$aab is not signed with the upload key"
             exit 1
           fi
-          # Not -strict: upload keys are self-signed, which -strict always rejects (exit 4).
-          jarsigner -verify "$aab" | grep -q '^jar verified'
+          jarsigner -verify -strict -keystore "$RUNNER_TEMP/upload.jks" \
+            -storepass:env JSTI_ANDROID_KEYSTORE_PASSWORD "$aab" "$JSTI_ANDROID_KEY_ALIAS" >/dev/null
           rm -f "$RUNNER_TEMP/upload.jks"
 
       - name: Upload release bundle

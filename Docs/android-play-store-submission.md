@@ -28,7 +28,7 @@ environment. Secrets are read only by that job.
 | Configured in `android-release` | Result |
 | --- | --- |
 | Nothing | Unsigned rehearsal AAB uploaded as the `justspeaktoit-android-release` artefact |
-| Upload keystore secrets | Upload-key-signed AAB artefact, signature verified (refuses a debug certificate) |
+| Upload keystore secrets | Upload-key-signed AAB artefact, signature verified against the upload keystore and alias (refuses a debug or other certificate) |
 | Keystore and `PLAY_SERVICE_ACCOUNT_JSON` | The signed AAB is also published to the **internal** track |
 
 The same upload key signs the sideloadable `JustSpeakToIt-android.apk` that

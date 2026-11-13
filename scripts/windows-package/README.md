@@ -11,6 +11,8 @@ developer identity. ARM64 packages are built and exercised by
 | File | Role |
 |---|---|
 | `package-identity.json` | The developer package identity, capabilities and data policy |
+| `package-identity-beta.json`, `package-identity-store.json` | The sideloaded beta identity, and the Microsoft Store identity Partner Center reserved (`build-windows-installer-bundle.ps1 -Channel store`) |
+| `submit-microsoft-store.ps1` | Submits the unsigned Store bundle with the pinned `msstore` CLI (Publish Stable only) |
 | `AppxManifest.xml.in` | The reviewed manifest template |
 | `build-windows-package-layout.py` | Authenticates the bundle and writes the package layout |
 | `pack-windows-package.ps1` | MakeAppx pack and independent block-map verification |

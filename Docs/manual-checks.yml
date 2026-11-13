@@ -269,20 +269,40 @@ sessions:
           - "Sign off the privacy and retention text in Docs/paid-access-privacy.md."
         expected: "Staging is configured so an agent can sign in on a Developer ID build through the web flow and run the staging purchase and refund drill. Paid Access stays switched off for users."
         final_gate: false
-      - id: "owner-partner-center"
+      - id: "owner-microsoft-store-first-submission"
         issues:
           - 1157
-        title: "Microsoft Store: open a Partner Center account"
-        minutes: 30
+        title: "Microsoft Store: make the first submission by hand"
+        minutes: 45
         core: false
-        build: "Microsoft Partner Center"
+        build: "Microsoft Partner Center and the windows-store-bundle artifact"
         prerequisites:
-          - "Steps: Docs/windows-installer.md (Owner steps: Microsoft Store)"
+          - "Steps: Docs/windows-installer.md (Owner steps: Microsoft Store, step 4)"
+          - "Deadline: the name reservation lapses unless a submission is made by 13 February 2027."
         steps:
-          - "Go to https://storedeveloper.microsoft.com and create a free individual developer account, completing the ID check."
-          - "Reserve the app name Just Speak to It."
-          - "Copy the Package/Identity Name and Publisher values from Product identity into a comment on #1157."
-        expected: "The reserved identity is on #1157, so an agent can set the MSIX identity and add the Store submission job."
+          - "In GitHub Actions run Microsoft Store (windows-store.yml) on main with the newest Stable candidate or Alpha tag as manifest, then download the windows-store-bundle artifact."
+          - "In Partner Center open Apps and games \u203a Just Speak to It and start a submission; upload the .msixbundle under Packages."
+          - "Set pricing and markets, the privacy policy URL, the age rating questionnaire and the Store listing."
+          - "Justify the restricted capabilities runFullTrust (inserts dictated text into other apps) and unvirtualizedResources (keeps History and settings in %LOCALAPPDATA%\\JustSpeakToIt)."
+          - "Submit for certification and note the outcome on #1157."
+        expected: "Store ID 9PDFKWGH31HP has a submission in certification or published, so later Stable releases can update it through the API."
+        final_gate: false
+      - id: "owner-microsoft-store-api"
+        issues:
+          - 1157
+        title: "Microsoft Store: connect automated Stable submission"
+        minutes: 20
+        core: false
+        build: "Microsoft Partner Center and GitHub repository settings"
+        prerequisites:
+          - "Steps: Docs/windows-installer.md (Owner steps: Microsoft Store, step 5)"
+        steps:
+          - "In Partner Center open Account settings \u203a User management \u203a Microsoft Entra applications and create (or add) an Entra application."
+          - "Give it the Manager role, then copy its Tenant ID and Client ID and add a new key, copying the client secret."
+          - "Copy the Seller ID from Account settings \u203a Legal info \u203a Developer."
+          - "In GitHub create the environment microsoft-store, limited to the main branch only."
+          - "Add the environment secrets MICROSOFT_STORE_TENANT_ID, MICROSOFT_STORE_CLIENT_ID, MICROSOFT_STORE_CLIENT_SECRET and MICROSOFT_STORE_SELLER_ID."
+        expected: "After the first submission is live, the next Publish Stable run's submit-microsoft-store job submits the Store bundle instead of skipping with a notice."
         final_gate: false
       - id: "owner-android-apk-install"
         issues:

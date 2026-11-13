@@ -25,7 +25,7 @@ struct IOSHistoryRevisionLedger {
             latestInsertion[item.id] = revision
         case .replaceIfUntouched(let item, _, _):
             latestMutation[item.id] = revision
-        case let .processed(id, _, _), let .error(id, _), .remove(let id), .remoteDelete(let id):
+        case let .processed(id, _, _, _), let .error(id, _), .remove(let id), .remoteDelete(let id):
             latestMutation[id] = revision
         case .clear: latestClear = revision
         case .load, .retry, .commit: break

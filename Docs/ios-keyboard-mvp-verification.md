@@ -177,11 +177,12 @@ must not be interpreted as Apple Speech running inside the extension.
    count. Controls must be disabled while a request is active where required.
 3. For each chosen profile, compare the request snapshot and History with the
    app's exact transcription model, language, and post-processing selection.
-4. Select a model whose credential or capability is unavailable. The keyboard
-   must report the profile unavailable and must not silently substitute another
-   model.
+4. Select a model whose credential or capability is unavailable. The profile
+   menu must mark the App profile unavailable with its reason (also read by
+   VoiceOver), the keyboard must report the profile unavailable on start, and
+   the app must not silently substitute another model.
 5. Confirm capability and profile records contain identifiers, display metadata, language,
-   and route only. They must contain no API key, token, custom prompt, audio, or
+   availability status and route only. They must contain no API key, token, custom prompt, audio, or
    surrounding host text.
 6. Kill and reopen the keyboard. A valid selection should survive; a retired
    choice must fall back visibly according to the published catalogue.

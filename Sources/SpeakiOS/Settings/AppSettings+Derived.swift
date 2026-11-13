@@ -1,4 +1,5 @@
 #if os(iOS)
+import Combine
 import Foundation
 import SpeakCore
 
@@ -89,10 +90,6 @@ extension AppSettings {
         self.transcriptClipboardNoticeVersion < 1
     }
 
-    var credentialFallbackReason: String {
-        credentialsAvailable ? "no API key" : "API keys unavailable — retry when access is restored"
-    }
-
     /// Remote consumers must not interpret a failed load as a missing key.
     /// Local models can continue without Keychain access.
     func requireAvailableCredentials(for model: String, purpose: ModelCredentialPurpose) throws {
@@ -104,17 +101,103 @@ extension AppSettings {
     /// Publishes one coherent, non-secret keyboard capability snapshot whenever
     /// any owning setting changes. App activation calls this too as reconciliation.
     public func publishKeyboardProfileSelection() {
-        let mode: KeyboardDictationTranscriptionMode = transcriptionMode == .batch ? .batch : .streaming
-        let model = transcriptionMode == .batch ? batchTranscriptionModel : selectedModel
-        KeyboardDictationPreferencesStore.shared.publishAppProfileSelection(
-            configuration: KeyboardAppProfileConfiguration(
-                transcriptionMode: mode,
-                transcriptionModelIdentifier: model,
-                languageIdentifier: preferredLocaleIdentifier,
-                postProcessingEnabled: postProcessingEnabled,
-                postProcessingModelIdentifier: postProcessingModel
-            )
+        let configuration = keyboardProfileConfiguration
+        lastPublishedKeyboardAvailability = configuration.availability
+        KeyboardDictationPreferencesStore.shared.publishAppProfileSelection(configuration: configuration)
+    }
+
+    /// Republishes only when the keyboard-visible availability changed, so a
+    /// saved, synced or removed key reaches the profile menu without churning
+    /// the catalogue revision on every unrelated settings change.
+    func publishKeyboardProfileSelectionIfAvailabilityChanged() {
+        guard keyboardProfileConfiguration.availability != lastPublishedKeyboardAvailability else { return }
+        publishKeyboardProfileSelection()
+    }
+
+    /// Keys load, sync and change outside the didSets that publish the
+    /// keyboard catalogue; follow them so the menu never shows a stale state.
+    func observeKeyboardProfileAvailability() {
+        keyboardAvailabilityObservation = objectWillChange
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.publishKeyboardProfileSelectionIfAvailabilityChanged() }
+    }
+
+    var keyboardProfileConfiguration: KeyboardAppProfileConfiguration {
+        let usesBatch = transcriptionMode == .batch
+        let model = usesBatch ? batchTranscriptionModel : selectedModel
+        var configuration = KeyboardAppProfileConfiguration(
+            transcriptionMode: usesBatch ? .batch : .streaming,
+            transcriptionModelIdentifier: model,
+            languageIdentifier: preferredLocaleIdentifier,
+            postProcessingEnabled: postProcessingEnabled,
+            postProcessingModelIdentifier: postProcessingModel
         )
+        configuration.availability = profileAvailability(
+            transcriptionModel: model,
+            usesBatch: usesBatch,
+            postProcessingModel: postProcessingEnabled ? postProcessingModel : nil
+        )
+        return configuration
+    }
+
+    // MARK: - Availability (report unavailable, never substitute)
+
+    /// Whether `modelID` can run on iOS in this mode with the stored credentials.
+    func transcriptionAvailability(for modelID: String, usesBatch: Bool) -> TranscriptionModelAvailability {
+        let executable: Bool
+        let credential: String
+        if usesBatch {
+            executable = Self.supportsBatchModel(modelID)
+            credential = batchAPIKey(for: modelID)
+        } else {
+            let route = LiveTranscriptionRouting.route(for: modelID)
+            executable = route?.isSupportedOnIOS == true
+            credential = route.map { liveAPIKey(for: $0) } ?? ""
+        }
+        return .evaluate(
+            requirement: ModelCredentialResolver.requirement(
+                for: modelID, purpose: usesBatch ? .batchTranscription : .liveTranscription
+            ),
+            isExecutableHere: executable,
+            credentialsLoaded: credentialsAvailable,
+            credential: credential
+        )
+    }
+
+    /// Refuses a run whose model cannot run, rather than substituting another.
+    func requireTranscriptionAvailable(_ modelID: String, usesBatch: Bool) throws {
+        let availability = transcriptionAvailability(for: modelID, usesBatch: usesBatch)
+        guard !availability.isAvailable else { return }
+        throw TranscriptionModelUnavailableError(
+            modelIdentifier: modelID,
+            modelName: ModelCatalog.friendlyName(for: modelID),
+            availability: availability
+        )
+    }
+
+    func postProcessingAvailability(for modelID: String) -> TranscriptionModelAvailability {
+        let listed = Self.postProcessingModels.contains { $0.id == modelID }
+            || CleanupModelSelection.modelID(from: modelID) != nil
+        let executable = listed
+            && (modelID != AppleLocalModels.foundationModelID || AppleFoundationModelPolisher.isAvailable)
+        return .evaluate(
+            requirement: ModelCredentialResolver.requirement(for: modelID, purpose: .postProcessing),
+            isExecutableHere: executable,
+            credentialsLoaded: credentialsAvailable,
+            credential: postProcessingAPIKey(for: modelID)
+        )
+    }
+
+    /// A profile is unavailable when its transcription model is, or when it
+    /// polishes with a model that cannot run.
+    func profileAvailability(
+        transcriptionModel: String, usesBatch: Bool, postProcessingModel: String?
+    ) -> TranscriptionModelAvailability {
+        var parts = [transcriptionAvailability(for: transcriptionModel, usesBatch: usesBatch)]
+        if let postProcessingModel, !postProcessingModel.isEmpty {
+            parts.append(postProcessingAvailability(for: postProcessingModel))
+        }
+        return .first(of: parts)
     }
 }
 #endif

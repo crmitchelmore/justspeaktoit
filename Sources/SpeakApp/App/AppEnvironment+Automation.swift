@@ -32,7 +32,11 @@ extension AppEnvironment {
         history: history,
         transcription: transcription,
         tts: tts,
-        appVersion: version ?? "unknown"
+        appVersion: version ?? "unknown",
+        configuration: AppSettingsConfiguration(settings: settings) { [secureStorage] identifier in
+          await secureStorage.hasSecret(identifier: identifier)
+        },
+        allowsConfigurationChanges: { [settings] in settings.allowAutomationConfigurationChanges }
       )
     )
   }

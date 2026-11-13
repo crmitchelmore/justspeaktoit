@@ -97,6 +97,13 @@ extension SettingsSearchCatalog {
             settingKeys: ["enableAutomationServer"], platforms: [.macOS, .linux]
         ),
         SettingsSearchEntry(
+            id: "general.automationConfigurationChanges", title: "Allow automation to change settings",
+            section: .general, systemImage: "slider.horizontal.3",
+            summary: "Let speak config set and the MCP set_configuration tool change settings.",
+            keywords: ["set configuration", "speak config", "mcp settings", "agent settings", "write settings"],
+            settingKeys: ["allowAutomationConfigurationChanges"], platforms: .macOS
+        ),
+        SettingsSearchEntry(
             id: "general.automationCLI", title: "Automation CLI", section: .general, systemImage: "terminal.fill",
             summary: "Install or update the speak command-line tool.",
             keywords: ["install cli", "update cli", "command line", "terminal", "path"],
@@ -113,6 +120,14 @@ extension SettingsSearchCatalog {
             summary: "History save interval and other advanced options.",
             keywords: ["history flush interval", "history save"],
             settingKeys: ["historyFlushInterval"], platforms: .macOS
+        ),
+        SettingsSearchEntry(
+            id: "general.rawConfiguration", title: "Edit raw configuration", section: .general,
+            systemImage: "curlybraces",
+            summary: "View, validate, import or export every setting as JSON.",
+            keywords: ["raw settings", "json", "config file", "export settings", "import settings",
+                       "reset to defaults", "advanced editor"],
+            platforms: .macOS
         ),
         SettingsSearchEntry(
             id: "permissions.system", title: "System permissions", section: .permissions, systemImage: "lock.shield",

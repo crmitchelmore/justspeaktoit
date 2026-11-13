@@ -4,9 +4,9 @@ import SwiftUI
 
 // MARK: - Post-processing model picker
 
-/// Native and on-device cleanup models first, then one OpenRouter row that opens
-/// the shared discover-then-configure OpenRouter browser. Grouping comes from the shared
-/// `ModelPickerGrouping`, so the list always reflects the route a model uses.
+/// Native and on-device cleanup models, the saved OpenRouter choice when there is one,
+/// then a separate Browse OpenRouter models link to the shared discover-then-configure
+/// browser, laid out like the voice and transcription pickers.
 struct PostProcessingModelPickerRows: View {
     @ObservedObject var settings: AppSettings
     var showsDescriptions = true
@@ -31,54 +31,30 @@ struct PostProcessingModelPickerRows: View {
                 settings: settings, model: model, showsDescription: showsDescriptions, onSelect: onSelect
             )
         }
-        if !groups.openRouter.isEmpty {
-            NavigationLink {
-                OpenRouterCleanupBrowser(
-                    selection: settings.postProcessingModel,
-                    discoveryEnabled: $settings.cleanupModelDiscoveryEnabled,
-                    options: { Self.options(selected: settings.postProcessingModel) },
-                    embedded: true,
-                    onSelect: { identifier in
-                        settings.postProcessingModel = identifier
-                        onSelect()
-                    }
-                )
-            } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(ModelPickerGrouping.openRouterTitle)
-                            .foregroundStyle(.primary)
-                        Text(openRouterSubtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    ModelCredentialStatusView(
-                        availability: ModelCredentialResolver.availability(
-                            for: groups.openRouter[0].id,
-                            purpose: .postProcessing,
-                            storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
-                        )
-                    )
-                    if isOpenRouterSelected {
-                        Image(systemName: "checkmark")
-                            .foregroundStyle(Color.accentColor)
-                    }
-                }
-            }
-            .accessibilityIdentifier("postProcessingModel.openRouter")
-        }
-    }
-
-    private var isOpenRouterSelected: Bool {
-        groups.openRouter.contains { $0.id == settings.postProcessingModel }
-    }
-
-    private var openRouterSubtitle: String {
         if let selected = groups.openRouter.first(where: { $0.id == settings.postProcessingModel }) {
-            return selected.displayName
+            PostProcessingModelRow(
+                settings: settings, model: selected, showsDescription: showsDescriptions,
+                title: ModelPickerGrouping.selectionLabel(
+                    for: selected.id, displayName: selected.displayName, purpose: .postProcessing
+                ),
+                onSelect: onSelect
+            )
         }
-        return "Choose from \(groups.openRouter.count) models with one OpenRouter key"
+        NavigationLink {
+            OpenRouterCleanupBrowser(
+                selection: settings.postProcessingModel,
+                discoveryEnabled: $settings.cleanupModelDiscoveryEnabled,
+                options: { Self.options(selected: settings.postProcessingModel) },
+                embedded: true,
+                onSelect: { identifier in
+                    settings.postProcessingModel = identifier
+                    onSelect()
+                }
+            )
+        } label: {
+            Label("Browse OpenRouter models…", systemImage: "network")
+        }
+        .accessibilityIdentifier("postProcessingModel.openRouter")
     }
 }
 
@@ -86,6 +62,7 @@ private struct PostProcessingModelRow: View {
     @ObservedObject var settings: AppSettings
     let model: ModelCatalog.Option
     let showsDescription: Bool
+    var title: String?
     let onSelect: () -> Void
 
     var body: some View {
@@ -95,7 +72,7 @@ private struct PostProcessingModelRow: View {
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.displayName)
+                    Text(title ?? model.displayName)
                         .foregroundStyle(.primary)
                     if showsDescription, let description = model.description {
                         Text(description)

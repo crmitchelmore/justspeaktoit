@@ -33,8 +33,9 @@ permissions:
   contents: read
   actions: read
 
+# App Store screenshot runs for different devices must not cancel each other.
 concurrency:
-  group: site-media-${{ github.ref }}
+  group: site-media-${{ github.ref }}-${{ inputs.ios_device || 'site' }}
   cancel-in-progress: true
 
 jobs:

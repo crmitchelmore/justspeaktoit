@@ -23,6 +23,8 @@ directly between them:
 | history | Get Last Transcription | `speak history` | `get_history` |
 | say | — | `speak say <text>` | `speak_text` |
 | voices | — | `speak voices` | `list_voices` |
+| config get | — | `speak config get [<key>...] [--prefix <p>]` | `get_configuration` |
+| config set | — | `speak config set <key=value>... [--dry-run]` | `set_configuration` |
 | polish | Polish Text | — | — |
 
 ## Named local capture await (qualification pending)
@@ -347,6 +349,8 @@ speak say [<text>... | -f <file> | -] [-o <file>] [--play] [--json] [--timeout <
           [--provider <id>] [--model <id>] [--voice <id|name>]
           [--speed <n>] [--pitch <semitones>] [--quality <q>] [--language <id>]
 speak voices [--provider <id>] [--json]
+speak config get [<key>...] [--prefix <prefix>] [--json]
+speak config set <key=value>... [--dry-run] [--json]
 speak status [--json]
 speak mcp
 speak --help | --version
@@ -534,9 +538,43 @@ of the client's PATH (replace `<you>` with your user name, or use
 | `await_transcript` | `capture_id` (required), `since_id`, `timeout_seconds` (>0–600; default 60) | Exact successful local capture and frozen History entry |
 | `speak_text` | `text` (required), `provider`, `model`, `voice`, `speed`, `pitch`, `quality`, `language`, `path`, `play`, `timeout_seconds` | Voice and model used and the file written, once playback has finished |
 | `list_voices` | `provider` | Providers, voices and models `speak_text` can use, marking the app's voice |
+| `get_configuration` | `keys`, `prefix` | Current settings, their schema (type, default, allowed values or range, platforms) and which API keys are stored |
+| `set_configuration` | `changes` (required object), `dry_run` | What changed or would change, ignored keys and warnings |
 
 Every tool also returns `structuredContent` with the same fields as the CLI's
 `--json` `data` object.
+
+### Settings (`speak config`, `get_configuration`, `set_configuration`)
+
+The app's settings are described by one shared schema in SpeakCore
+(`Sources/SpeakCore/SettingsConfiguration/`): each key's type, default, allowed
+values or range, platforms, and whether it is read-only or sensitive. The same
+document backs Settings › General › Advanced › **Edit raw configuration**.
+
+- **Reading** works whenever automation is on. `get_configuration` returns
+  `settings`, `apiKeys` and `schema`; narrow it with `keys` or `prefix`.
+  API keys are never returned, only whether each is stored (`apiKeys.openai:
+  true`).
+- **Writing** needs a second opt-in: Settings › General › Automation › **Allow
+  automation to change settings**. Without it `set_configuration` fails with
+  `unsupported_command`, but `dry_run: true` still validates.
+- Changes are validated together (type, range, allowed values, model IDs in
+  the shared catalogue, and cross-field rules such as Auto-Clean needing a
+  live model that supports it) and applied **all or none**. Every invalid key
+  is reported with its `settings.<key>` path, and nothing changes.
+- Read-only keys (`analyticsEnabled`, `selectedHotKey`, `enableAutomationServer`,
+  `allowAutomationConfigurationChanges`) change only in the app. Keys another
+  platform owns are accepted, reported in `ignoredKeys` and not applied.
+- `speak config set` parses each value as JSON when it can and falls back to a
+  string, so `ttsSpeed=1.2`, `showCompactHUD=false` and
+  `postProcessingModel=openai/gpt-4o-mini` all work; quote JSON arrays and
+  objects for the shell.
+
+```sh
+speak config get --prefix tts
+speak config set ttsSpeed=1.2 showCompactHUD=true --dry-run
+speak config set ttsSpeed=1.2 showCompactHUD=true
+```
 
 ### Behaviour worth knowing
 

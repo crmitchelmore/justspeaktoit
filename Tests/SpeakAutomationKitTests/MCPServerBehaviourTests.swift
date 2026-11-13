@@ -53,7 +53,7 @@ final class MCPServerBehaviourTests: XCTestCase {
         let names = Set(tools.compactMap { $0["name"] as? String })
         XCTAssertEqual(names, [
             "transcribe_file", "get_history", "start_dictation", "stop_dictation", "status", "await_transcript",
-            "speak_text", "list_voices"
+            "speak_text", "list_voices", "get_configuration", "set_configuration"
         ])
 
         let transcribe = try XCTUnwrap(tools.first { $0["name"] as? String == "transcribe_file" })

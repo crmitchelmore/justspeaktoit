@@ -136,7 +136,8 @@ final class DesktopSettingsSearchTests: XCTestCase {
             "deepgramStopGracePeriod": "Legacy key migrated to liveStopGracePeriod.",
             "mistralTTSModel": appleOnly, "ttsSpeed": appleOnly, "ttsPitch": appleOnly, "ttsAutoPlay": appleOnly,
             "ttsSaveToDirectory": appleOnly, "ttsUseSSML": appleOnly, "livePolishTailWindowChars": state,
-            "enableSendToMac": appleOnly, "paidAccessRoutingEnabled": appleOnly, "simpleModelChoices": appleOnly,
+            "enableSendToMac": appleOnly, "allowAutomationConfigurationChanges": appleOnly,
+            "paidAccessRoutingEnabled": appleOnly, "simpleModelChoices": appleOnly,
             "ttsPronunciationDictionary": "Edited on the Pronunciation page, whose page root is indexed.",
             "assemblyAIIgnoredPronunciationTerms": "Edited on the Pronunciation page, whose page root is indexed."
         ]

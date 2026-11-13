@@ -50,9 +50,9 @@ enum AutomationIntentError: LocalizedError {
 /// actions can consume it directly (the destination side-effects — clipboard,
 /// history, background polish — still apply).
 @available(iOS 18, *)
-struct StopDictationIntent: AudioRecordingIntent {
-    static var title: LocalizedStringResource = "Stop Dictation and Get Text"
-    static var description = IntentDescription(
+public struct StopDictationIntent: AudioRecordingIntent {
+    public static var title: LocalizedStringResource = "Stop Dictation and Get Text"
+    public static var description = IntentDescription(
         """
         Stops a recording started with Start Recording or Toggle Recording and returns the transcript \
         to the next action. Requires the device to be unlocked.
@@ -61,11 +61,13 @@ struct StopDictationIntent: AudioRecordingIntent {
         searchKeywords: ["finish", "end", "transcription", "get text"]
     )
 
-    static var openAppWhenRun: Bool = false
+    public static var openAppWhenRun: Bool = false
     /// Returns private transcript data, so never run on a locked device.
     /// (The plain Stop Recording intent, which returns no transcript, stays
     /// available for locked Action Button flows.)
-    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+
+    public init() {}
 
     /// The transcript comes back either way; this only redirects the
     /// side-effects (clipboard, history, background polish).
@@ -73,7 +75,7 @@ struct StopDictationIntent: AudioRecordingIntent {
         title: "Destination",
         description: "Where the transcript goes. Leave unset to use the destination from Settings."
     )
-    var destination: CaptureDestinationAppEnum?
+    public var destination: CaptureDestinationAppEnum?
 
     /// Issue #1015: without this, a "Clipboard and Polish" run hands the
     /// Shortcut the raw transcript and then quietly replaces the clipboard
@@ -93,14 +95,14 @@ struct StopDictationIntent: AudioRecordingIntent {
     )
     var waitForPolish: Bool
 
-    static var parameterSummary: some ParameterSummary {
+    public static var parameterSummary: some ParameterSummary {
         Summary("Stop dictation and get text") {
             \.$destination
             \.$waitForPolish
         }
     }
 
-    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    public func perform() async throws -> some IntentResult & ReturnsValue<String> {
         // The budget is the whole operation's, not the polish wait's alone.
         // `stopRecording` awaits transcription finalisation, History and the
         // destination side effects first; starting a full 12-second wait after
@@ -291,19 +293,21 @@ struct TranscribeAudioFileIntent: AppIntent {
 
 // MARK: - Get Last Transcription
 
-struct GetLastTranscriptionIntent: AppIntent {
-    static var title: LocalizedStringResource = "Get Last Transcription"
-    static var description = IntentDescription(
+public struct GetLastTranscriptionIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Get Last Transcription"
+    public static var description = IntentDescription(
         "Returns the latest transcript from History as plain text, polished when available.",
         categoryName: "Transcripts"
     )
 
-    static var openAppWhenRun: Bool = false
+    public static var openAppWhenRun: Bool = false
     /// Returns private transcript data, so never run on a locked device.
-    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+
+    public init() {}
 
     @MainActor
-    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    public func perform() async throws -> some IntentResult & ReturnsValue<String> {
         let history = iOSHistoryManager.shared
         await history.loadIfNeededAndWait()
         guard let text = AutomationIntentSupport.mostRecentTranscript(

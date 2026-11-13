@@ -294,7 +294,11 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
                 releaseRetiredArmConfiguration(generation: generation)
                 return
             }
-            await fail(HandsFreeDictationMachine.Failure(error))
+            if error as? HandsFreeDetectorCaptureError == .microphoneUnavailable {
+                await fail(.audioUnavailable)
+            } else {
+                await fail(HandsFreeDictationMachine.Failure(error))
+            }
         }
     }
 
@@ -354,6 +358,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
                 return
             }
             self.tracker.reset()
+            self.detectorCapture.resetSpeech()
             self.preRoll.reset()
             await self.apply(self.machine.handle(.captureFinished))
         } catch {
@@ -370,25 +375,15 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         }
     }
 
-    @available(iOS 26.0, *)
     private func startDetectorSession(sessionID: UUID) async throws {
-        let session = try await AppleSpeechDetectorSession(
-            onActivity: { [weak self] update in
-                Task { @MainActor [weak self] in
-                    guard self?.sessionID == sessionID, self?.stoppingForDisruption == false else { return }
-                    await self?.handleActivity(update)
-                }
-            },
-            onFailure: { [weak self] error in
-                Task { @MainActor [weak self] in
-                    guard self?.sessionID == sessionID, self?.machine.isArmed == true,
-                          self?.stoppingForDisruption == false else { return }
-                    await self?.fail(HandsFreeDictationMachine.Failure(error))
-                }
+        let session = HandsFreeVoiceActivitySession(onActivity: { [weak self] update in
+            Task { @MainActor [weak self] in
+                guard self?.sessionID == sessionID, self?.stoppingForDisruption == false else { return }
+                await self?.handleActivity(update)
             }
-        )
+        })
         guard armAttemptIsCurrent(sessionID) else {
-            await session.cancel()
+            session.cancel()
             throw CancellationError()
         }
 

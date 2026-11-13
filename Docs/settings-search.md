@@ -50,8 +50,9 @@ Hosts render from the catalogue. They don't keep their own lists:
 - a macOS `SettingsCard(title: "…")` or `ShortcutSettingsCard(title: "…")` has no
   macOS entry, or a card with a computed title omits `searchEntryID:`;
 - an iOS Settings section uses a plain `Section("…")` or has no iOS entry;
-- an `@Published` property of either platform's `AppSettings` isn't in some
-  entry's `settingKeys`, unless it is exempted there with a reason;
+- an `@Published` property of either platform's `AppSettings` (with any access
+  modifiers, such as iOS's `@Published public var`) isn't in some entry's
+  `settingKeys`, unless it is exempted there with a reason;
 - a `SettingsTab` has no searchable page root.
 
 `Tests/SpeakCoreTests/SettingsSearchIndexTests.swift` covers ranking, synonyms,

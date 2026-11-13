@@ -58,13 +58,8 @@ final class AppSettingsConfigurationTests: XCTestCase {
             .deletingLastPathComponent().appendingPathComponent("Sources/SpeakApp/Settings")
         let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasPrefix("AppSettings") && $0.pathExtension == "swift" }
-        let regex = try NSRegularExpression(pattern: #"@Published\s+(?:private\(set\)\s+)?var\s+(\w+)"#)
-        var published: [String] = []
-        for file in files {
-            let source = try String(contentsOf: file, encoding: .utf8)
-            for match in regex.matches(in: source, range: NSRange(source.startIndex..., in: source)) {
-                if let range = Range(match.range(at: 1), in: source) { published.append(String(source[range])) }
-            }
+        let published = try files.flatMap {
+            PublishedPropertyScanner.propertyNames(in: try String(contentsOf: $0, encoding: .utf8))
         }
         XCTAssertFalse(published.isEmpty)
         let missing = published.filter { SettingsSchema.field(forKey: $0) == nil && Self.unschemedSettings[$0] == nil }

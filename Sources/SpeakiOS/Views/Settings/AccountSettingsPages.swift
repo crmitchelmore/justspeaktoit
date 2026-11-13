@@ -231,6 +231,20 @@ struct PrivacyDiagnosticsSettingsPage: View {
     @State private var debugLogging = SpeakLogger.isDebugMode
 
     var body: some View {
+        SearchableSettingsSection("Troubleshooting") {
+            NavigationLink {
+                IOSTroubleshootingView()
+            } label: {
+                Label("Find what's stopping dictation", systemImage: "wrench.and.screwdriver")
+            }
+            .accessibilityIdentifier("troubleshootingNavLink")
+
+            SettingsFootnote(
+                "Checks permissions, the on-device model, provider keys and the keyboard, "
+                    + "and offers the fix for each."
+            )
+        }
+
         SearchableSettingsSection("Capture Health") {
             NavigationLink {
                 CaptureHealthView()

@@ -28,8 +28,13 @@ struct LongListPickerItems<Item, ID: Hashable> {
     let items: [Item]
     let id: (Item) -> ID
 
-    func pinned(selection: ID) -> Item? {
-        items.first { id($0) == selection }
+    func pinned(
+        selection: ID,
+        query: String = "",
+        searchText: (Item) -> [String] = { _ in [] },
+        includes: (Item) -> Bool = { _ in true }
+    ) -> Item? {
+        matches(query: query, searchText: searchText, includes: includes).first { id($0) == selection }
     }
 
     func groups(
@@ -39,15 +44,22 @@ struct LongListPickerItems<Item, ID: Hashable> {
         group: ((Item) -> String)?,
         includes: (Item) -> Bool = { _ in true }
     ) -> [Group] {
-        let terms = query.lowercased().split(whereSeparator: { $0.isWhitespace })
-        let matches = items.filter { item in
-            guard id(item) != selection, includes(item) else { return false }
-            let text = searchText(item).joined(separator: " ").lowercased()
-            return terms.allSatisfy { text.contains($0) }
-        }
+        let matches = matches(query: query, searchText: searchText, includes: includes)
+            .filter { id($0) != selection }
         guard let group else { return matches.isEmpty ? [] : [Group(title: "", items: matches)] }
         return Dictionary(grouping: matches, by: group).map { Group(title: $0.key, items: $0.value) }
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    private func matches(
+        query: String, searchText: (Item) -> [String], includes: (Item) -> Bool
+    ) -> [Item] {
+        let terms = query.lowercased().split(whereSeparator: { $0.isWhitespace })
+        return items.filter { item in
+            guard includes(item) else { return false }
+            let text = searchText(item).joined(separator: " ").lowercased()
+            return terms.allSatisfy { text.contains($0) }
+        }
     }
 }
 
@@ -97,7 +109,8 @@ struct LongListPicker<Item, ID: Hashable, Row: View>: View {
                 LongListChooserSheet(
                     title: title, items: items, id: id, selection: $selection,
                     searchText: searchText, group: group, includes: includes,
-                    controls: controls, clearFilters: clearFilters, accessory: accessory, row: row
+                    controls: controls, clearFilters: clearFilters, accessory: accessory,
+                    footer: { _ in EmptyView() }, row: row
                 )
             }
         } else {
@@ -112,7 +125,7 @@ struct LongListPicker<Item, ID: Hashable, Row: View>: View {
     }
 }
 
-struct LongListChooserSheet<Item, ID: Hashable, Row: View>: View {
+struct LongListChooserSheet<Item, ID: Hashable, Row: View, Footer: View>: View {
     let title: String
     let items: [Item]
     let id: (Item) -> ID
@@ -120,10 +133,11 @@ struct LongListChooserSheet<Item, ID: Hashable, Row: View>: View {
     let searchText: (Item) -> [String]
     var group: ((Item) -> String)?
     var includes: (Item) -> Bool = { _ in true }
+    var filtersCurrentSelection = false
     var controls: () -> AnyView = { AnyView(EmptyView()) }
     var clearFilters: () -> Void = {}
     var accessory: (Item) -> AnyView = { _ in AnyView(EmptyView()) }
-    var footer: (@escaping (ID) -> Void) -> AnyView = { _ in AnyView(EmptyView()) }
+    @ViewBuilder let footer: (@escaping (ID) -> Void) -> Footer
     @ViewBuilder let row: (Item) -> Row
 
     @Environment(\.dismiss) private var dismiss
@@ -136,6 +150,11 @@ struct LongListChooserSheet<Item, ID: Hashable, Row: View>: View {
     }
 
     var body: some View {
+        let matchingSelection = catalog.pinned(
+            selection: selection, query: query, searchText: searchText, includes: includes
+        )
+        let current = filtersCurrentSelection ? matchingSelection : catalog.pinned(selection: selection)
+        let groups = self.groups
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(title).font(.headline)
@@ -145,10 +164,10 @@ struct LongListChooserSheet<Item, ID: Hashable, Row: View>: View {
             }
             controls()
             List {
-                if let current = catalog.pinned(selection: selection) {
+                if let current {
                     Section("Current selection") { choice(current) }
                 }
-                if groups.isEmpty {
+                if matchingSelection == nil && groups.isEmpty {
                     ContentUnavailableView {
                         Label("No matching results", systemImage: "magnifyingglass")
                     } description: {
@@ -159,6 +178,7 @@ struct LongListChooserSheet<Item, ID: Hashable, Row: View>: View {
                             clearFilters()
                         }
                     }
+                    .listRowSeparator(.hidden)
                 }
                 ForEach(groups) { section in
                     if group != nil {

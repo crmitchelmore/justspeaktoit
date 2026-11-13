@@ -29,6 +29,7 @@ interface DictationPreferences {
 
     /** The chosen [DictationProfile.id], or null for none. */
     var activeProfileId: String?
+    var recordingSounds: RecordingSoundSettings
 }
 
 /** Non-secret choices. Secrets live in the Keystore-backed `SecretStore`, never here. */
@@ -102,6 +103,18 @@ class AppPreferences(context: Context) : DictationPreferences {
             .orEmpty()
         set(value) = prefs.edit { putString(KEY_OTHER_PLATFORM_SETTINGS, RawConfiguration.encode(value)) }
 
+    override var recordingSounds: RecordingSoundSettings
+        get() = RecordingSoundSettings(
+            enabled = prefs.getBoolean(KEY_SOUNDS_ENABLED, RecordingSoundSettings.DEFAULT_ENABLED),
+            profile = RecordingSoundProfile.fromId(prefs.getString(KEY_SOUND_PROFILE, null)),
+            volume = prefs.getFloat(KEY_SOUND_VOLUME, RecordingSoundSettings.DEFAULT_VOLUME).coerceIn(0f, 1f),
+        )
+        set(value) = prefs.edit {
+            putBoolean(KEY_SOUNDS_ENABLED, value.enabled)
+            putString(KEY_SOUND_PROFILE, value.profile.id)
+            putFloat(KEY_SOUND_VOLUME, value.volume.coerceIn(0f, 1f))
+        }
+
     companion object {
         const val FILE_NAME = "jsti_prefs"
 
@@ -129,5 +142,9 @@ class AppPreferences(context: Context) : DictationPreferences {
         const val KEY_PROFILES = "dictationProfiles"
         private const val KEY_ACTIVE_PROFILE = "activeDictationProfileID"
         private const val KEY_OTHER_PLATFORM_SETTINGS = "raw_configuration_other_platform_settings"
+        /** The canonical cross-platform recording sound keys, shared with the Mac, Windows and Linux apps. */
+        private const val KEY_SOUNDS_ENABLED = "recordingSoundsEnabled"
+        private const val KEY_SOUND_PROFILE = "recordingSoundProfile"
+        private const val KEY_SOUND_VOLUME = "recordingSoundVolume"
     }
 }

@@ -13,6 +13,7 @@ import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.resources.SystemResourceToken
+import com.justspeaktoit.android.settings.RecordingCue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -50,12 +51,24 @@ internal interface SessionSettings {
     val corrections: List<CorrectionRule> get() = emptyList()
 }
 
+/** Plays a recording cue when sounds are on; returns how long it lasts in milliseconds, or 0 if none plays. */
+internal fun interface RecordingCues {
+    fun play(cue: RecordingCue): Long
+
+    companion object {
+        val Silent = RecordingCues { 0L }
+    }
+}
+
 /**
  * Owns the dictation session lifecycle: start, stop, finish, cancel and leaving the app, for the
  * platform recogniser and for Cloud capture and upload, then the optional cleanup. It holds the
  * microphone in [resources] while a session captures and until a Cloud recorder has really stopped;
  * provider requests are held by [CloudCapture.call] while they run. Every ended session is recorded in
  * [history]. Call from the main thread of [scope]; each change is handed to [publish].
+ *
+ * [cues] play Start once capture is listening and Stop once it has ended normally, never on cancel or
+ * failure, matching the desktop apps. Cloud capture records silence over the Start cue.
  */
 internal class DictationSessionController(
     private val engine: SpeechEngine,
@@ -66,6 +79,7 @@ internal class DictationSessionController(
     private val scope: CoroutineScope,
     private val cacheDir: File,
     private val settings: SessionSettings,
+    private val cues: RecordingCues = RecordingCues.Silent,
     private val publish: (SessionState) -> Unit,
 ) {
     var state = SessionState()
@@ -108,7 +122,12 @@ internal class DictationSessionController(
         if (!isCapturing) return
         val mode = state.dictation.modeOrNull()
         dispatch(DictationEvent.StopRequested)
-        if (mode == RecognitionMode.Cloud) finishCloud() else engine.stop()
+        if (mode == RecognitionMode.Cloud) {
+            finishCloud()
+        } else {
+            engine.stop()
+            cues.play(RecordingCue.Stop)
+        }
     }
 
     fun cancel() {
@@ -249,6 +268,8 @@ internal class DictationSessionController(
                 // The recorder stays owned (and releasable by close) until stop() has finished.
                 val bytes = capture.stop(rec)
                 reconcileMicrophoneHold()
+                // Played once the microphone has stopped, so the cue is never in the upload.
+                if (bytes >= 0 && state.dictation is DictationState.Finishing) cues.play(RecordingCue.Stop)
                 when {
                     bytes < 0 -> DictationEvent.Error(DictationFailure.Audio)
                     bytes < MIN_AUDIO_BYTES -> DictationEvent.Error(DictationFailure.NoSpeech)
@@ -415,11 +436,22 @@ internal class DictationSessionController(
             it.copy(dictation = dictation, paused = it.paused && capturing)
         }
         val after = state.dictation
+        playCue(before, after, event)
         if (!after.isActive) _level.value = 0f
         reconcileMicrophoneHold()
         if (!before.isActive || after.isActive) return
         // A session just ended: record it now, so it survives even if optional cleanup never finishes.
         history.recordSession(after, sessionModelId, settings.retention)
+    }
+
+    private fun playCue(before: DictationState, after: DictationState, event: DictationEvent) {
+        if (before is DictationState.Starting && after is DictationState.Listening) {
+            val millis = cues.play(RecordingCue.Start)
+            if (millis > 0) capture.current?.recorder?.mute(millis)
+        } else if (before is DictationState.Listening && event is DictationEvent.Final) {
+            // The recogniser ended the capture itself, after a pause.
+            cues.play(RecordingCue.Stop)
+        }
     }
 
     private fun change(transform: (SessionState) -> SessionState) {

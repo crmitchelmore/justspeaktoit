@@ -32,6 +32,10 @@ class RawConfigurationTest {
         // Consent is only ever given on its own screen, never by pasting a document.
         "analyticsConsent" to "Analytics opt-in is a consent choice.",
         "diagnosticsConsent" to "Crash-report consent is a consent choice.",
+        // Not in the Android schema yet; binding them is tracked in #1700.
+        "recordingSoundsEnabled" to "Recording sounds are edited in Settings only for now.",
+        "recordingSoundProfile" to "Recording sounds are edited in Settings only for now.",
+        "recordingSoundVolume" to "Recording sounds are edited in Settings only for now.",
     )
 
     private fun validate(settings: String, current: Map<String, Any?> = fresh) =

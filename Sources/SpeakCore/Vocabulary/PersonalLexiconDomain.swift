@@ -269,24 +269,14 @@ public final class PersonalLexiconDomain {
 // MARK: - Matching
 
 extension PersonalLexiconDomain {
-  private func wholeWordRegex(for alias: String) -> NSRegularExpression? {
-    if let cached = regexCache[alias] { return cached }
-    let escapedAlias = NSRegularExpression.escapedPattern(for: alias)
-    let pattern = "(?i)\\b\(escapedAlias)\\b"
-    guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
-    regexCache[alias] = compiled
-    return compiled
-  }
-
-  /// Bounded by adjacent word characters rather than `\b`, so spellings that start or end with
-  /// punctuation ("C++", ".NET") still match, as on Android.
-  private func canonicalRegex(for canonical: String) -> NSRegularExpression? {
-    let key = "canonical:" + canonical
-    if let cached = regexCache[key] { return cached }
+  /// Bounded by adjacent word characters rather than `\b`, as on Android, so spellings that start
+  /// or end with punctuation match on their own ("c++", ".net") but not inside a word ("c++17").
+  private func wholeWordRegex(for term: String) -> NSRegularExpression? {
+    if let cached = regexCache[term] { return cached }
     let word = "[\\p{L}\\p{M}\\p{N}_]"
-    let pattern = "(?i)(?<!\(word))\(NSRegularExpression.escapedPattern(for: canonical))(?!\(word))"
+    let pattern = "(?i)(?<!\(word))\(NSRegularExpression.escapedPattern(for: term))(?!\(word))"
     guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
-    regexCache[key] = compiled
+    regexCache[term] = compiled
     return compiled
   }
 
@@ -309,7 +299,7 @@ extension PersonalLexiconDomain {
     of rule: PersonalLexiconRule, in text: String
   ) -> (record: PersonalLexiconCorrectionRecord, text: String)? {
     let canonical = rule.canonical
-    guard !canonical.isEmpty, let regex = canonicalRegex(for: canonical) else { return nil }
+    guard !canonical.isEmpty, let regex = wholeWordRegex(for: canonical) else { return nil }
     let source = text as NSString
     let differing = regex.matches(in: text, options: [], range: NSRange(location: 0, length: source.length))
       .filter { source.substring(with: $0.range) != canonical }

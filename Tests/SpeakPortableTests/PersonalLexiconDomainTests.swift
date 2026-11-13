@@ -81,9 +81,13 @@ final class PersonalLexiconDomainTests: XCTestCase {
         let rules = [rule("C++", alias: "see plus plus"), rule(".NET", alias: "dot nett")]
         let domain = PersonalLexiconDomain(store: LexiconTestStore(rules))
         await domain.waitUntilLoaded()
-        let result = domain.apply(to: "I use c++ and .net, not xc++ or a.netx", context: .empty)
-        XCTAssertEqual(result.transformedText, "I use C++ and .NET, not xc++ or a.netx")
+        let result = domain.apply(to: "I use c++ and .net, not xc++, c++17 or a.netx", context: .empty)
+        XCTAssertEqual(result.transformedText, "I use C++ and .NET, not xc++, c++17 or a.netx")
         XCTAssertEqual(result.applied.map(\.alias), ["c++", ".net"])
+
+        let aliasDomain = PersonalLexiconDomain(store: LexiconTestStore([rule("Swift", alias: "c++")]))
+        await aliasDomain.waitUntilLoaded()
+        XCTAssertEqual(aliasDomain.apply(to: "c++ and c++17", context: .empty).transformedText, "Swift and c++17")
     }
 
     func testLoadMutationSerializationRollbackAndDurableOrder() async throws {

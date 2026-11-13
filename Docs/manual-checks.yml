@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-12"
+updated: "2026-11-13"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -114,6 +114,21 @@ sessions:
           - "Choose Apple Dictation and read the same paragraph three more times."
           - "Mark this Pass. An agent then compares first-words latency for the two models using only the numeric latency fields in History."
         expected: "Six recordings exist, three per model. The agent posts both first-words p50 values on #614 and closes it if SpeechTranscriber\u2019s is the same or lower and iphone-hands-free has passed."
+        final_gate: false
+      - id: "mac-hands-free"
+        issues:
+          - 1553
+          - 614
+        title: "Mac hands-free: arms, starts on speech, nothing captured in silence"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac, an Alpha build that includes the #1553 voice-activity gate, macOS 26 or later (ideally macOS 27)"
+        steps:
+          - "Settings \u203a Transcription \u203a Local \u203a Streaming: choose Apple SpeechTranscriber (On-device). Turn Hands-Free Dictation on."
+          - "Click into a new TextEdit document and arm with the hotkey; wait for the armed HUD."
+          - "Stay silent for 30 seconds, tap the desk once, then say \"Hands free works on this Mac\" and stay silent until it finishes."
+          - "Disarm and open History."
+        expected: "Arming shows armed (never \u201ccouldn\u2019t access the microphone\u201d). Silence and the tap start nothing; speech starts recording within about a second, the sentence lands in TextEdit, and it returns to armed after silence. History has exactly one new item."
         final_gate: false
       - id: "mac-start-latency-sample"
         issues:
@@ -555,10 +570,11 @@ sessions:
       - id: "iphone-hands-free"
         issues:
           - 614
+          - 1553
         title: "Hands-free: fast start on speech, no capture in silence"
         minutes: 4
         core: false
-        build: "TestFlight Just Speak to It Alpha 3.2.0 (1000.0.45) or later"
+        build: "TestFlight Just Speak to It Alpha that includes the #1553 voice-activity gate"
         steps:
           - "Settings \u203a Behavior: Hands-Free Dictation on; arm with the mic button."
           - "Say \"Go quick start\", then stay silent until it finishes."

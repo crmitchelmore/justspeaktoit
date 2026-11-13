@@ -79,3 +79,6 @@ API breakage: enumelement APIKeyStatusFilter.errors has been added as a new enum
 # Model retirements gain a cleanup (post-processing) mode so retired chat models
 # such as GPT-5 Mini move to their successor. Existing cases are retained.
 API breakage: enumelement ModelRetirement.Mode.postProcessing has been added as a new enum case
+# Hands-free dictation reports an unusable SpeechAnalyzer audio format (macOS 27
+# returns 0 ch/0 Hz) separately from a microphone failure (#1553).
+API breakage: enumelement HandsFreeDictationMachine.Failure.audioFormatUnavailable has been added as a new enum case

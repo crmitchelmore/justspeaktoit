@@ -296,10 +296,8 @@ struct IOSCaptureDetails: Sendable {
     var recordingEnded: Date
     var transcriptionEnded: Date
 
-    func sessionDetails(model: String) -> (
-        modelUsages: [ApplicationModelUsage], phaseTimestamps: ApplicationPhaseTimestamps,
-        trigger: ApplicationHistoryTrigger?
-    ) {
+    /// `item` carrying this capture's trigger, transcription model and timings.
+    func applied(to item: iOSHistoryItem, model: String) -> iOSHistoryItem {
         let usages = model.isEmpty ? [] : [ApplicationModelUsage(
             modelIdentifier: model, phase: self.isBatch ? .transcriptionBatch : .transcriptionLive
         )]
@@ -309,7 +307,10 @@ struct IOSCaptureDetails: Sendable {
             recordingStarted: self.recordingStarted, recordingEnded: self.recordingEnded,
             transcriptionStarted: self.recordingEnded, transcriptionEnded: self.transcriptionEnded
         )
-        return (usages, times, self.trigger.map(ApplicationHistoryTrigger.init(captureTrigger:)))
+        return item.withSessionDetails(
+            modelUsages: usages, phaseTimestamps: times,
+            trigger: self.trigger.map(ApplicationHistoryTrigger.init(captureTrigger:))
+        )
     }
 }
 
@@ -333,10 +334,7 @@ extension iOSHistoryItem {
             wordCount: text.split(separator: " ").count, errorMessage: errorMessage, requestContext: requestContext,
             requestFailure: requestFailure
         )
-        guard let details = captureDetails?.sessionDetails(model: model) else { return item }
-        return item.withSessionDetails(
-            modelUsages: details.modelUsages, phaseTimestamps: details.phaseTimestamps, trigger: details.trigger
-        )
+        return captureDetails?.applied(to: item, model: model) ?? item
     }
 }
 #endif

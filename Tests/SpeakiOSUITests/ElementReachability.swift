@@ -97,6 +97,10 @@ extension XCUIApplication {
     /// re-sent only while `outcome` is still absent and `element` is still
     /// reachable, so a slow but successful tap is never repeated elsewhere.
     /// Pass `inChrome` for fixed bar controls, which are settled, not scrolled.
+    /// An attempt whose element never settles sends no tap and moves on to the
+    /// next attempt: on a loaded runner each snapshot took about two seconds, so
+    /// a single short settle window expired and no tap was ever sent
+    /// (run 43334565300, iPad light).
     @discardableResult
     func tap(
         _ element: XCUIElement,
@@ -108,9 +112,9 @@ extension XCUIApplication {
         for _ in 0..<attempts {
             if outcome.exists { return true }
             let reachable = inChrome
-                ? self.waitUntilSettled(element, inside: self.windowFrame, timeout: 5)
+                ? self.waitUntilSettled(element, inside: self.windowFrame, timeout: 10)
                 : self.reveal(element)
-            guard reachable else { break }
+            guard reachable else { continue }
             element.tap()
             if outcome.waitForExistence(timeout: timeout) { return true }
         }

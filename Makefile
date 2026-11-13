@@ -98,6 +98,7 @@ ci-lint: ## Run the CI Lint job: whole-repo strict SwiftLint, quality checks, su
 	$(MAKE) lint
 	$(MAKE) quality
 	python3 scripts/ci/lint-suppression-ratchet.py
+	python3 scripts/ci/check-benchmark-runtime-pin.py
 	git diff --exit-code Tooling/Package.resolved
 	$(MAKE) test-tooling
 

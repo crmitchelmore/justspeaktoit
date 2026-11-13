@@ -185,6 +185,63 @@
       "title" : "API keys"
     },
     {
+      "id" : "android.analytics",
+      "keywords" : [
+        "analytics",
+        "telemetry",
+        "tracking",
+        "usage data",
+        "posthog",
+        "opt out",
+        "opt in"
+      ],
+      "section" : "about",
+      "sectionTitle" : "About",
+      "settingKeys" : [
+        "analyticsConsent"
+      ],
+      "summary" : "Off until you turn it on. Sends typed usage events to PostHog EU, never transcripts or audio.",
+      "title" : "Share anonymous analytics"
+    },
+    {
+      "id" : "android.diagnostics",
+      "keywords" : [
+        "crash reports",
+        "diagnostics",
+        "sentry",
+        "errors",
+        "bug reports",
+        "opt out",
+        "telemetry"
+      ],
+      "section" : "about",
+      "sectionTitle" : "About",
+      "settingKeys" : [
+        "diagnosticsConsent"
+      ],
+      "summary" : "Off until you turn it on. Sends crash reports to Sentry EU, never transcripts or audio.",
+      "title" : "Send crash reports and diagnostics"
+    },
+    {
+      "id" : "android.tipJar",
+      "keywords" : [
+        "tip jar",
+        "tip",
+        "donate",
+        "support",
+        "buy me a coffee",
+        "google play",
+        "purchase"
+      ],
+      "section" : "about",
+      "sectionTitle" : "About",
+      "settingKeys" : [
+
+      ],
+      "summary" : "Leave an optional tip through Google Play. Tips don't unlock features.",
+      "title" : "Support development"
+    },
+    {
       "id" : "android.privacyPolicy",
       "keywords" : [
         "privacy",

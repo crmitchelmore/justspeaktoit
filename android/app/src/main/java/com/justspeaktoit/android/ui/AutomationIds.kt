@@ -27,6 +27,15 @@ object AutomationIds {
     const val SETTINGS_SEARCH_CLEAR = "settingsSearchClear"
     const val API_KEYS_FILTER = "settings.apiKeysFilter"
     const val SETTINGS_PRIVACY_POLICY = "settings.privacyPolicy"
+    const val SETTINGS_ANALYTICS = "settings.analytics"
+    const val SETTINGS_DIAGNOSTICS = "settings.diagnostics"
+    const val TIP_JAR_STATUS = "settings.tipJar.status"
+    const val CONSENT_ANALYTICS = "consent.analytics"
+    const val CONSENT_DIAGNOSTICS = "consent.diagnostics"
+    const val CONSENT_DONE = "consent.done"
+
+    /** One per tip, keyed by its store product ID, e.g. `settings.tip.com.justspeaktoit.tip.small`. */
+    fun tipProduct(productId: String) = "settings.tip.$productId"
     const val RESOURCES_HEADLINE = "settings.resources.headline"
     const val RESOURCES_RELEASE_EVERYTHING = "settings.resources.releaseEverything"
 

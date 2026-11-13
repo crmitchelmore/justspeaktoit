@@ -92,3 +92,8 @@ API breakage: enumelement AutomationToolArguments.CodingKeys.keys has been added
 API breakage: enumelement AutomationToolArguments.CodingKeys.prefix has been added as a new enum case
 API breakage: enumelement AutomationToolArguments.CodingKeys.changes has been added as a new enum case
 API breakage: enumelement AutomationToolArguments.CodingKeys.dryRun has been added as a new enum case
+# Android analytics (#1594) adds its platform and Google Play distribution
+# channel to the shared taxonomy. Existing raw values are unchanged; the Apple
+# apps never emit these and AnalyticsTaxonomyParityTest pins Android to them.
+API breakage: enumelement AnalyticsPlatform.android has been added as a new enum case
+API breakage: enumelement AnalyticsDistributionChannel.googlePlay has been added as a new enum case

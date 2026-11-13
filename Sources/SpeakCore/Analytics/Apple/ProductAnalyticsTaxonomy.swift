@@ -13,13 +13,14 @@ public enum AnalyticsPrivacyClass: String, Codable, Sendable {
     case pseudonymous
 }
 
-public enum AnalyticsPlatform: String, Codable, Sendable { case macOS, iOS }
+public enum AnalyticsPlatform: String, Codable, Sendable { case macOS, iOS, android }
 
 public enum AnalyticsDistributionChannel: String, Codable, Sendable {
     case direct, homebrew
     case macAppStore = "mac_app_store"
     case testFlight = "testflight"
     case appStore = "app_store"
+    case googlePlay = "google_play"
     case development
 }
 

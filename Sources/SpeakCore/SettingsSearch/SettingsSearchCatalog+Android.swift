@@ -83,6 +83,26 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.analytics", title: "Share anonymous analytics", section: .about,
+            systemImage: "chart.bar",
+            summary: "Off until you turn it on. Sends typed usage events to PostHog EU, never transcripts or audio.",
+            keywords: ["analytics", "telemetry", "tracking", "usage data", "posthog", "opt out", "opt in"],
+            settingKeys: ["analyticsConsent"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.diagnostics", title: "Send crash reports and diagnostics", section: .about,
+            systemImage: "ladybug",
+            summary: "Off until you turn it on. Sends crash reports to Sentry EU, never transcripts or audio.",
+            keywords: ["crash reports", "diagnostics", "sentry", "errors", "bug reports", "opt out", "telemetry"],
+            settingKeys: ["diagnosticsConsent"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.tipJar", title: "Support development", section: .about, systemImage: "heart.fill",
+            summary: "Leave an optional tip through Google Play. Tips don't unlock features.",
+            keywords: ["tip jar", "tip", "donate", "support", "buy me a coffee", "google play", "purchase"],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.privacyPolicy", title: "Privacy policy", section: .about,
             systemImage: "hand.raised",
             summary: "Open the Just Speak to It privacy policy on the website.",

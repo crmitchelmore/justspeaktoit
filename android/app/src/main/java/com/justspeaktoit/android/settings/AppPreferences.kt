@@ -32,7 +32,7 @@ interface DictationPreferences {
 
 /** Non-secret choices. Secrets live in the Keystore-backed `SecretStore`, never here. */
 class AppPreferences(context: Context) : DictationPreferences {
-    private val prefs = context.applicationContext.getSharedPreferences("jsti_prefs", Context.MODE_PRIVATE)
+    private val prefs = context.applicationContext.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
 
     override var chosenMode: RecognitionMode?
         get() {
@@ -92,6 +92,14 @@ class AppPreferences(context: Context) : DictationPreferences {
         set(value) = prefs.edit { if (value == null) remove(KEY_ACTIVE_PROFILE) else putString(KEY_ACTIVE_PROFILE, value) }
 
     companion object {
+        const val FILE_NAME = "jsti_prefs"
+
+        /** Product analytics consent (`telemetry.AnalyticsConsent`); absent means not asked, so off. */
+        const val KEY_ANALYTICS_CONSENT = "analyticsConsent"
+
+        /** Crash-report consent (`telemetry.DiagnosticsConsent`), the key the Mac and iOS apps use. */
+        const val KEY_DIAGNOSTICS_CONSENT = "diagnosticsConsent"
+
         /** The canonical cross-platform key, shared with the Mac, iOS, Windows and Linux apps. */
         const val KEY_KEEP_AUDIO_ON_CANCEL = "keepAudioOnCancel"
         const val DEFAULT_KEEP_AUDIO_ON_CANCEL = true

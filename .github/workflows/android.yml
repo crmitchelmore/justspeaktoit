@@ -130,6 +130,8 @@ jobs:
           JSTI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
           JSTI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
           JSTI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          # Public PostHog project key for opt-in analytics; builds without it send nothing.
+          POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
         # Play needs a higher version code for every upload, including a rerun of an older run, so
         # derive it from build time: seconds since 2026-01-01 (fits Play's 2,100,000,000 cap until
         # about 2092). Main runs are serialised by the concurrency group, so two never share a second.

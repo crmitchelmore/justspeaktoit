@@ -139,6 +139,57 @@ final class HotKeyInputWarmUpTests: XCTestCase {
         XCTAssertEqual(environment.released.count, 1)
     }
 
+    func testHold_ClaimWhilePressed_HandsOverTheWarmUpAndReleaseLeavesItAlone() {
+        let environment = Environment()
+        let warmUp = makeWarmUp(environment)
+
+        warmUp.pressBegan(at: 10)
+        let claimed = warmUp.claim()
+        warmUp.pressEnded(at: 12)
+        environment.scheduler.fire(delay: dropDelay)
+        environment.scheduler.fire(delay: lifetime)
+
+        XCTAssertTrue(claimed === environment.begun.first)
+        XCTAssertEqual(environment.begun.count, 1)
+        XCTAssertTrue(environment.released.isEmpty, "the session that claimed it owns its release")
+        XCTAssertTrue(environment.scheduler.pendingDelays.isEmpty)
+    }
+
+    func testRepeatedUnclaimedPresses_ReleaseEveryWarmUpExactlyOnce() {
+        let environment = Environment()
+        let warmUp = makeWarmUp(environment)
+
+        for press in 0 ..< 5 {
+            let start = TimeInterval(10 + press * 2)
+            warmUp.pressBegan(at: start)
+            warmUp.pressEnded(at: start + 0.08)
+            environment.scheduler.fire(delay: dropDelay)
+        }
+        environment.scheduler.fire(delay: lifetime)
+
+        XCTAssertEqual(environment.begun.count, 5)
+        XCTAssertEqual(environment.released.count, 5)
+        for (begun, released) in zip(environment.begun, environment.released) {
+            XCTAssertTrue(begun === released)
+        }
+        XCTAssertFalse(warmUp.isActive)
+        XCTAssertNil(warmUp.claim())
+    }
+
+    func testSecondTapAfterTheWindow_DoesNotReuseTheFirstWarmUp() {
+        let environment = Environment()
+        let warmUp = makeWarmUp(environment)
+
+        warmUp.pressBegan(at: 10)
+        warmUp.pressEnded(at: 10.08)
+        environment.scheduler.fire(delay: dropDelay)
+        warmUp.pressBegan(at: 10.6)
+
+        XCTAssertEqual(environment.released.count, 1)
+        XCTAssertTrue(warmUp.claim() === environment.begun.last)
+        XCTAssertFalse(environment.begun.first === environment.begun.last)
+    }
+
     func testStaleTimer_DoesNotReleaseANewerWarmUp() {
         let environment = Environment()
         let warmUp = makeWarmUp(environment)

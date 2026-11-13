@@ -140,6 +140,15 @@ final class DesktopHostControllerTests: XCTestCase {
         XCTAssertEqual(FakeLog.shared.allStatuses.last, "API key saved in the test keyring.")
     }
 
+    func testSavingAStepFunKeyTagsItInternational() async throws {
+        let index = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == FileSpeechProvider.stepfun.modelID })
+        await controller.saveKey(" step-key ", modelIndex: index)
+        let saved = FakeLog.shared.key(StepFunCredential.credentialIdentifier)
+        XCTAssertEqual(try StepFunCredential(credentials: saved), try StepFunCredential(
+            region: .international, apiKey: "step-key"
+        ))
+    }
+
     func testUnqualifiedHostsOfferNoLiveModels() {
         XCTAssertTrue(DesktopHostModels.live.isEmpty)
         XCTAssertFalse(DesktopHostModels.all.contains { DesktopHostModels.isLive($0.id) })

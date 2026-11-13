@@ -22,7 +22,11 @@ extension DesktopHostController {
                   let provider = DesktopHostModels.provider(
                     for: DesktopHostModels.all[modelIndex].id
                   ) else { throw DesktopTranscriptionError.unsupportedModel }
-            let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            var cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty, provider.apiKeyIdentifier == StepFunCredential.credentialIdentifier {
+                // Desktop hosts have no region picker yet; new keys take the International default.
+                cleaned = try StepFunCredential.credentialsForSaving(cleaned, region: .defaultForNewKeys)
+            }
             if !cleaned.isEmpty, provider.apiKeyIdentifier == AzureSpeechConfiguration.credentialIdentifier {
                 let model = DesktopHostModels.all[modelIndex].id
                 if AzureTranscriptionModels.batchIDs.contains(model) {

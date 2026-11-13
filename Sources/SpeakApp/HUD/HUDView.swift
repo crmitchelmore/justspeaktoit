@@ -124,7 +124,6 @@ struct HUDOverlay: View {
     let shell = hudShell(base)
       .frame(maxWidth: hudMaxWidth)
       .padding(.horizontal, 60)
-      .accessibilityAddTraits(.isModal)
     if shouldUseLegacyRendering || reduceMotion {
       shell
     } else {

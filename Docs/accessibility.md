@@ -55,7 +55,10 @@ Android and the website have their own sections below.
   bar item is always named "Just Speak to It" and its value is the current
   state. Announce recording lifecycle changes: macOS through `HUDManager`'s
   announcement, iOS through `RecordingServiceState.accessibilityAnnouncement`,
-  hands-free through its coordinator. Mark live text and meters
+  hands-free through its coordinator. On macOS, `HUDWindowPresenter` holds an
+  announcement made while the HUD panel is hidden until the panel is on screen:
+  VoiceOver drops an announcement posted just before a new window appears.
+  Don't mark the HUD `.isModal`; it doesn't take focus. Mark live text and meters
   `.updatesFrequently`.
 - **Toggles in agent trees.** XCUITest-based trees (agent-device, Accessibility
   Inspector's hierarchy) list a SwiftUI `Toggle` as a labelled switch with an

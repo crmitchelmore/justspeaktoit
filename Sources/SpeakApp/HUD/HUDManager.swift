@@ -85,6 +85,13 @@ final class HUDManager: ObservableObject {
 
   private let appSettings: AppSettings
   private let accessibilityAnnouncementPoster: ((String) -> Void)?
+  /// Set by `HUDWindowPresenter`: an announcement made while the HUD panel is
+  /// still hidden waits for `hudWindowDidPresent()`. VoiceOver otherwise
+  /// handles the panel appearing after the announcement and drops the
+  /// announcement (it read the HUD's elements, never "Recording started").
+  var defersAnnouncementsUntilPresented = false
+  private var isWindowPresented = false
+  private(set) var pendingAccessibilityAnnouncement: String?
   private var autoHideTimer: Timer?
   /// The interval most recently passed to `scheduleAutoHide`. `Timer.timeInterval`
   /// reads back as 0 for a non-repeating timer, so this is the only way to
@@ -284,7 +291,26 @@ final class HUDManager: ObservableObject {
     isAwaitingAudio = false
     awaitingAudioSubheadline = nil
     snapshot = .hidden
+    if pendingAccessibilityAnnouncement != nil {
+      // Shown and hidden before the panel appeared: nothing was on screen.
+      pendingAccessibilityAnnouncement = nil
+      return
+    }
     postAccessibilityAnnouncement("HUD dismissed")
+  }
+
+  /// The presenter has put the HUD panel on screen; post the announcement
+  /// that was waiting for it.
+  func hudWindowDidPresent() {
+    isWindowPresented = true
+    guard let announcement = pendingAccessibilityAnnouncement else { return }
+    pendingAccessibilityAnnouncement = nil
+    postAccessibilityAnnouncement(announcement)
+  }
+
+  /// The presenter has taken the HUD panel off screen.
+  func hudWindowDidDismiss() {
+    isWindowPresented = false
   }
 
   func updateCaptureHealth(_ health: CaptureHealthSnapshot) {
@@ -342,6 +368,10 @@ final class HUDManager: ObservableObject {
   }
 
   private func postAccessibilityAnnouncement(_ announcement: String) {
+    if defersAnnouncementsUntilPresented, !isWindowPresented, snapshot.phase.isVisible {
+      pendingAccessibilityAnnouncement = announcement
+      return
+    }
     if let accessibilityAnnouncementPoster {
       accessibilityAnnouncementPoster(announcement)
       return

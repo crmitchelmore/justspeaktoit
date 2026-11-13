@@ -109,6 +109,8 @@ class MainActivity : ComponentActivity() {
                                 onReleaseEverything = viewModel::releaseEverything,
                                 onChooseLanguage = viewModel::chooseLanguage,
                                 onCorrectionsChanged = viewModel::setCorrections,
+                                onRecordingSoundsChanged = viewModel::setRecordingSounds,
+                                onPreviewRecordingSound = viewModel::previewRecordingSound,
                             ),
                         )
                         Screen.History -> HistoryScreen(

@@ -53,6 +53,17 @@ public enum CloudCatalogAndroidExport {
 
     private struct Model: Encodable {
         let catalogId, displayName, provider, apiName, languageField: String
+        /// Whether the model takes the vocabulary glossary as its `prompt` field.
+        let supportsPrompt: Bool
+    }
+
+    private struct Language: Encodable {
+        let id, displayName: String
+    }
+
+    /// `TranscriptionKeywordPolicy.prompt` bounds, so Android builds the same glossary.
+    private struct KeywordPrompt: Encodable {
+        let maximumBytes, maximumTerms: Int
     }
 
     private struct Cleanup: Encodable {
@@ -71,6 +82,9 @@ public enum CloudCatalogAndroidExport {
         let cleanupModels: [CleanupModel]
         /// Removed cleanup selections and the offered model each now uses.
         let cleanupModelSuccessors: [String: String]
+        /// `TranscriptionLanguageCatalog.options`; the first is Automatic.
+        let languages: [Language]
+        let keywordPrompt: KeywordPrompt
     }
 
     public static func json() throws -> Data {
@@ -84,7 +98,12 @@ public enum CloudCatalogAndroidExport {
                 systemPrompt: TranscriptCleanupPolicy.systemPrompt()
             ),
             cleanupModels: cleanupModels.map(exportedCleanup),
-            cleanupModelSuccessors: cleanupModelSuccessors
+            cleanupModelSuccessors: cleanupModelSuccessors,
+            languages: TranscriptionLanguageCatalog.options.map { Language(id: $0.id, displayName: $0.displayName) },
+            keywordPrompt: KeywordPrompt(
+                maximumBytes: TranscriptionKeywordPolicy.promptMaximumCharacters,
+                maximumTerms: TranscriptionKeywordPolicy.promptMaximumTerms
+            )
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -112,7 +131,8 @@ public enum CloudCatalogAndroidExport {
         return Model(
             catalogId: option.id, displayName: option.displayName, provider: providerID(of: option.id),
             apiName: apiName,
-            languageField: OpenAITranscriptionModels.batchLanguageFieldName(for: apiName)
+            languageField: OpenAITranscriptionModels.batchLanguageFieldName(for: apiName),
+            supportsPrompt: OpenAITranscriptionModels.supportsBatchPrompt(apiName)
         )
     }
 

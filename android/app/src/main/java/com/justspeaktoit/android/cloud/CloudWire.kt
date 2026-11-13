@@ -12,11 +12,19 @@ import java.util.Locale
 
 /** Request and response formats for OpenAI-compatible endpoints. Pure, so it is unit-tested. */
 object CloudWire {
-    /** Form fields for `/audio/transcriptions`. Language is sent as an ISO 639-1 code. */
-    fun transcriptionFields(model: CloudModel, languageTag: String?): List<Pair<String, String>> {
+    /**
+     * Form fields for `/audio/transcriptions`. Language is sent as an ISO 639-1 code; [prompt] is a
+     * vocabulary glossary, sent only to models that accept one.
+     */
+    fun transcriptionFields(
+        model: CloudModel,
+        languageTag: String?,
+        prompt: String? = null,
+    ): List<Pair<String, String>> {
         val fields = mutableListOf("model" to model.apiName, "response_format" to "json")
         val language = languageTag?.let { Locale.forLanguageTag(it).language }?.takeIf { it.isNotEmpty() }
         if (language != null) fields += model.languageField to language
+        if (model.supportsPrompt && !prompt.isNullOrBlank()) fields += "prompt" to prompt
         return fields
     }
 

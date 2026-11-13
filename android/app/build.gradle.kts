@@ -121,6 +121,7 @@ abstract class GenerateCloudCatalog : DefaultTask() {
                 "            providerId = ${lit(it["provider"])},\n" +
                 "            apiName = ${lit(it["apiName"])},\n" +
                 "            languageField = ${lit(it["languageField"])},\n" +
+                "            supportsPrompt = ${it["supportsPrompt"] as Boolean},\n" +
                 "        ),\n"
         }
         val cleanupModels = objects("cleanupModels").joinToString("") {
@@ -131,6 +132,11 @@ abstract class GenerateCloudCatalog : DefaultTask() {
                 "            apiName = ${lit(it["apiName"])},\n" +
                 "        ),\n"
         }
+        val languages = objects("languages").joinToString("") {
+            "        TranscriptionLanguageSpec(id = ${lit(it["id"])}, displayName = ${lit(it["displayName"])}),\n"
+        }
+        @Suppress("UNCHECKED_CAST")
+        val keywordPrompt = json["keywordPrompt"] as Map<String, Any?>
         @Suppress("UNCHECKED_CAST")
         val successors = (json["cleanupModelSuccessors"] as Map<String, Any?>? ?: emptyMap())
             .toSortedMap().entries.joinToString("") {
@@ -158,6 +164,14 @@ abstract class GenerateCloudCatalog : DefaultTask() {
             |    val cleanupModelSuccessors: Map<String, String> = mapOf(
             |${successors.trimEnd('\n')}
             |    )
+            |
+            |    /** SpeakCore's `TranscriptionLanguageCatalog.options`; the first is Automatic. */
+            |    val languages: List<TranscriptionLanguageSpec> = listOf(
+            |${languages.trimEnd('\n')}
+            |    )
+            |
+            |    const val KEYWORD_PROMPT_MAX_BYTES = ${keywordPrompt["maximumBytes"] as Int}
+            |    const val KEYWORD_PROMPT_MAX_TERMS = ${keywordPrompt["maximumTerms"] as Int}
             |
             |    const val CLEANUP_MODEL = ${lit(cleanup["model"])}
             |    const val CLEANUP_PROVIDER = ${lit(cleanup["provider"])}

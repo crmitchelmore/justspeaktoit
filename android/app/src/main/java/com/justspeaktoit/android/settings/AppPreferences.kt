@@ -2,6 +2,8 @@ package com.justspeaktoit.android.settings
 
 import android.content.Context
 import androidx.core.content.edit
+import com.justspeaktoit.android.corrections.CorrectionRule
+import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.history.Retention
 
@@ -13,6 +15,10 @@ interface DictationPreferences {
     var cleanupEnabled: Boolean
     var retention: Retention
     var keepAudioOnCancel: Boolean
+
+    /** A `DictationLanguages` identifier; null until chosen, which means Automatic. */
+    var languageId: String?
+    var corrections: List<CorrectionRule>
 }
 
 /** Non-secret choices. Secrets live in the Keystore-backed `SecretStore`, never here. */
@@ -54,6 +60,14 @@ class AppPreferences(context: Context) : DictationPreferences {
         get() = prefs.getBoolean(KEY_KEEP_AUDIO_ON_CANCEL, DEFAULT_KEEP_AUDIO_ON_CANCEL)
         set(value) = prefs.edit { putBoolean(KEY_KEEP_AUDIO_ON_CANCEL, value) }
 
+    override var languageId: String?
+        get() = prefs.getString(KEY_LANGUAGE, null)
+        set(value) = prefs.edit { putString(KEY_LANGUAGE, value) }
+
+    override var corrections: List<CorrectionRule>
+        get() = PersonalCorrections.decode(prefs.getString(KEY_CORRECTIONS, null))
+        set(value) = prefs.edit { putString(KEY_CORRECTIONS, PersonalCorrections.encode(value)) }
+
     companion object {
         /** The canonical cross-platform key, shared with the Mac, iOS, Windows and Linux apps. */
         const val KEY_KEEP_AUDIO_ON_CANCEL = "keepAudioOnCancel"
@@ -63,5 +77,9 @@ class AppPreferences(context: Context) : DictationPreferences {
         private const val KEY_CLOUD_MODEL = "cloud_model"
         private const val KEY_CLEANUP = "cleanup_enabled"
         private const val KEY_CLEANUP_MODEL = "cleanup_model"
+
+        /** The canonical cross-platform key; values are SpeakCore `TranscriptionLanguageCatalog` IDs. */
+        private const val KEY_LANGUAGE = "preferredLocale"
+        private const val KEY_CORRECTIONS = "personal_corrections"
     }
 }

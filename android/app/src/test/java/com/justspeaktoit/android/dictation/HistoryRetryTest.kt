@@ -49,6 +49,15 @@ class HistoryRetryTest {
     }
 
     @Test
+    fun testSuccess_whenRecordingsAreKept_keepsTheAudio() {
+        cloud.onTranscribe = { "kept words" }
+        val audio = folder.newFile("a.wav")
+        val updated = runBlocking { retry.transcribe(kept(audio), model, "en-GB", keepAudio = true) }
+        assertEquals(HistoryStatus.Completed, updated.status)
+        assertEquals(audio.absolutePath, updated.audioPath)
+    }
+
+    @Test
     fun testFailures_keepTheAudioAndRecordWhy() {
         val audio = folder.newFile("a.wav")
         cloud.onTranscribe = { "   " }

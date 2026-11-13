@@ -56,6 +56,8 @@ data class DictationUiState(
     val keepAudioOnCancel: Boolean = AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL,
     /** Whether a Cloud recording stops by itself after a pause. */
     val silence: SilenceSettings = SilenceSettings(),
+    /** Finished Cloud recordings stay in History to play back or transcribe again. */
+    val keepRecordings: Boolean = false,
     /** The History entry whose kept audio is being transcribed, if any. */
     val transcribingEntryId: String? = null,
     /** Personal corrections, in the order they apply. */

@@ -24,6 +24,8 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +38,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.justspeaktoit.android.R
@@ -54,7 +59,8 @@ class HistoryActions(
     val onBack: () -> Unit,
     val onRetention: (Retention) -> Unit,
     val onDelete: (String) -> Unit,
-    val onClear: () -> Unit,
+    /** Clears History; true keeps the entries that hold a recording. */
+    val onClear: (keepRecordings: Boolean) -> Unit,
     val onTranscribe: (String) -> Unit,
 )
 
@@ -72,6 +78,13 @@ fun HistoryScreen(
     actions: HistoryActions,
 ) {
     var confirmClear by rememberSaveable { mutableStateOf(false) }
+    val player = remember { HistoryAudioPlayer() }
+    DisposableEffect(player) { onDispose { player.stop() } }
+    // Nothing plays while the microphone records, or once its entry has gone.
+    LaunchedEffect(transcribe.sessionActive, entries) {
+        val playing = player.playingPath
+        if (transcribe.sessionActive || (playing != null && entries.none { it.audioPath == playing })) player.stop()
+    }
     Scaffold { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
@@ -124,18 +137,41 @@ fun HistoryScreen(
                     )
                 }
             }
-            items(entries, key = { it.id }) { entry -> HistoryCard(entry, transcribe, actions) }
+            items(entries, key = { it.id }) { entry -> HistoryCard(entry, transcribe, player, actions) }
         }
     }
     if (confirmClear) {
+        val hasRecordings = entries.any { it.audioPath != null }
         AlertDialog(
             onDismissRequest = { confirmClear = false },
-            text = { Text(stringResource(R.string.clear_history_confirm)) },
+            text = {
+                Text(
+                    stringResource(
+                        if (hasRecordings) R.string.clear_history_confirm_recordings else R.string.clear_history_confirm,
+                    ),
+                )
+            },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmClear = false
-                    actions.onClear()
-                }) { Text(stringResource(R.string.action_delete)) }
+                Row {
+                    if (hasRecordings) {
+                        TextButton(
+                            onClick = {
+                                confirmClear = false
+                                actions.onClear(true)
+                            },
+                            modifier = Modifier.testTag(AutomationIds.HISTORY_CLEAR_KEEP_RECORDINGS),
+                        ) { Text(stringResource(R.string.action_clear_keep_recordings)) }
+                    }
+                    TextButton(
+                        onClick = {
+                            confirmClear = false
+                            actions.onClear(false)
+                        },
+                        modifier = Modifier.testTag(AutomationIds.HISTORY_CLEAR_ALL),
+                    ) {
+                        Text(stringResource(if (hasRecordings) R.string.action_delete_all else R.string.action_delete))
+                    }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.action_cancel)) }
@@ -173,7 +209,12 @@ private fun RetentionPicker(retention: Retention, onRetention: (Retention) -> Un
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun HistoryCard(entry: HistoryEntry, transcribe: HistoryTranscription, actions: HistoryActions) {
+private fun HistoryCard(
+    entry: HistoryEntry,
+    transcribe: HistoryTranscription,
+    player: HistoryAudioPlayer,
+    actions: HistoryActions,
+) {
     val context = LocalContext.current
     var reporting by rememberSaveable { mutableStateOf(false) }
     val shareTitle = stringResource(R.string.share_title)
@@ -214,8 +255,25 @@ private fun HistoryCard(entry: HistoryEntry, transcribe: HistoryTranscription, a
             if (entry.text.isNotEmpty()) {
                 Text(entry.text, style = MaterialTheme.typography.bodyLarge)
             }
+            val audio = entry.audioPath
+            if (audio != null && player.failedPath == audio) {
+                Text(
+                    stringResource(R.string.history_play_failed),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
             FlowRow {
-                if (entry.audioPath != null) {
+                if (audio != null) {
+                    val playing = player.playingPath == audio
+                    TextButton(
+                        onClick = { player.toggle(audio) },
+                        enabled = playing || !transcribe.sessionActive,
+                        modifier = Modifier.testTag(AutomationIds.historyPlay(entry.id)),
+                    ) {
+                        Text(stringResource(if (playing) R.string.action_stop_playback else R.string.action_play_recording))
+                    }
                     val running = transcribe.entryId == entry.id
                     TextButton(onClick = { actions.onTranscribe(entry.id) }, enabled = transcribe.available) {
                         Text(stringResource(if (running) R.string.history_transcribing else R.string.action_transcribe))

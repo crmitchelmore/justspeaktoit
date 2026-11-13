@@ -61,25 +61,49 @@ internal class DictationHistory(
 
     fun remove(id: String, retention: Retention): Job = update { store.remove(id, retention) }
 
-    fun clear(): Job = update { store.clear() }
+    /** Clears History; [keepRecordings] keeps the entries holding audio so it can still be played. */
+    fun clear(keepRecordings: Boolean = false, retention: Retention = Retention.Forever): Job =
+        update { if (keepRecordings) store.clearKeepingRecordings(retention) else store.clear() }
 
-    /** Records a session that just ended. Only Done and Failed sessions are recorded. */
-    fun recordSession(state: DictationState, modelId: String?, retention: Retention): Job? {
-        val entry = when (state) {
+    /**
+     * Records a session that just ended. Only Done and Failed sessions are recorded, and [audio] (a
+     * stopped recording) is moved into History beside the entry; it is deleted if it cannot be kept.
+     */
+    fun recordSession(state: DictationState, modelId: String?, retention: Retention, audio: File? = null): Job? {
+        val base = when (state) {
             is DictationState.Done -> sessionEntry(state.mode, modelId, HistoryStatus.Completed, state.transcript, null)
             is DictationState.Failed ->
                 sessionEntry(state.mode, modelId, HistoryStatus.Failed, state.unfinishedText, state.failure)
-            else -> return null
+            else -> {
+                audio?.delete()
+                return null
+            }
         }
+        val kept = audio?.let { File(recordingsDir, "${base.id}.wav") }
+        val entry = base.copy(audioPath = kept?.absolutePath)
         sessionEntry = entry
-        return update { store.add(entry, retention) }
+        return update {
+            if (audio == null || kept == null) return@update store.add(entry, retention)
+            if (!moveRecording(audio, kept)) {
+                audio.delete()
+                return@update store.add(base, retention)
+            }
+            store.add(entry, retention).also { entries ->
+                // History is off, so the recording has nowhere to live.
+                if (entries.none { it.audioPath == kept.absolutePath }) kept.delete()
+            }
+        }
     }
 
     /** Replaces the latest session's text, after a cleanup or when the user restores the original. */
     fun replaceSessionText(text: String, cleanedUp: Boolean, retention: Retention): Job? {
         val entry = sessionEntry?.copy(text = text, cleanedUp = cleanedUp) ?: return null
         sessionEntry = entry
-        return update { store.replace(entry, retention) }
+        return update {
+            // The stored entry knows whether its recording was really kept or attached later.
+            val stored = store.cached.firstOrNull { it.id == entry.id }
+            store.replace(entry.copy(audioPath = stored?.audioPath), retention)
+        }
     }
 
     /**

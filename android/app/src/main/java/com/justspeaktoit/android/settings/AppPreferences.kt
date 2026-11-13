@@ -20,6 +20,9 @@ interface DictationPreferences {
     var retention: Retention
     var keepAudioOnCancel: Boolean
 
+    /** Whether finished Cloud recordings stay in History to play back or transcribe again. */
+    var keepRecordings: Boolean
+
     /** A `DictationLanguages` identifier; null until chosen, which means Automatic. */
     var languageId: String?
     var corrections: List<CorrectionRule>
@@ -85,6 +88,10 @@ class AppPreferences(context: Context) : DictationPreferences {
     override var keepAudioOnCancel: Boolean
         get() = prefs.getBoolean(KEY_KEEP_AUDIO_ON_CANCEL, DEFAULT_KEEP_AUDIO_ON_CANCEL)
         set(value) = prefs.edit { putBoolean(KEY_KEEP_AUDIO_ON_CANCEL, value) }
+
+    override var keepRecordings: Boolean
+        get() = prefs.getBoolean(KEY_KEEP_RECORDINGS, false)
+        set(value) = prefs.edit { putBoolean(KEY_KEEP_RECORDINGS, value) }
 
     override var languageId: String?
         get() = prefs.getString(KEY_LANGUAGE, null)
@@ -190,6 +197,9 @@ class AppPreferences(context: Context) : DictationPreferences {
         /** The canonical cross-platform key, shared with the Mac, iOS, Windows and Linux apps. */
         const val KEY_KEEP_AUDIO_ON_CANCEL = "keepAudioOnCancel"
         const val DEFAULT_KEEP_AUDIO_ON_CANCEL = true
+
+        /** Android only: the Mac and iOS always keep recordings, in a folder the user can open. */
+        private const val KEY_KEEP_RECORDINGS = "keepRecordingsInHistory"
         private const val KEY_RETENTION = "history_retention"
         private const val KEY_MODE = "chosen_mode"
         private const val KEY_CLOUD_MODEL = "cloud_model"

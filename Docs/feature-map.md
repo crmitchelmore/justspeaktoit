@@ -101,7 +101,7 @@ The flags live in `Project.swift`; release selection is in
 | F13 | Transcription language selection | Yes | Yes | Yes | Yes | Yes | | |
 | F14 | History list and search | Yes | Yes | Yes | Yes | Partial | #1628 | Android has no search. |
 | F15 | History filters (model, errors, dates) | Yes | Partial | Yes | Yes | No | #1628 | |
-| F16 | History retry and audio playback | Yes | Yes | Yes | Yes | Partial | #1629 | Android has no playback. |
+| F16 | History retry and audio playback | Yes | Yes | Yes | Yes | Yes | | Android keeps recordings only when "Keep recordings in History" is on. |
 | F17 | History sync | Yes | Yes | Yes | Yes | No | #1630 | Desktops use CloudKit Web Services. |
 | F18 | Settings search | Yes | Yes | Yes | Yes | Yes | | |
 | F19 | Command palette | Yes | N/A | No | No | N/A | #1619 | |
@@ -275,13 +275,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Wrapped GTK checkbox labels must be created explicitly (`Sources/CLinuxSupport/LinuxHistoryFilters.c`).
 
 ### F16 History retry and audio playback
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1629 (no playback).
+- **Gaps:** none
 - **How:** Retry re-runs transcription from the retained recording; playback uses the original audio when it still exists.
-- **Refs:** `Sources/SpeakDesktop/History/DesktopHistoryRetry.swift`, `Sources/SpeakDesktopHost/History/DesktopHostPlayback.swift`, `Sources/SpeakApp/Views/HistoryAudioPlayback.swift`, `android/app/src/main/java/com/justspeaktoit/android/dictation/HistoryRetry.kt`
+- **Refs:** `Sources/SpeakDesktop/History/DesktopHistoryRetry.swift`, `Sources/SpeakDesktopHost/History/DesktopHostPlayback.swift`, `Sources/SpeakApp/Views/HistoryAudioPlayback.swift`, `android/app/src/main/java/com/justspeaktoit/android/dictation/HistoryRetry.kt`, `android/app/src/main/java/com/justspeaktoit/android/ui/HistoryAudioPlayer.kt`
 - **Sunset:** none
-- **Nuances:** Windows playback notes: [Windows History playback](windows-history-playback.md).
+- **Nuances:** Windows playback notes: [Windows History playback](windows-history-playback.md). Android deletes a transcribed Cloud recording unless **Keep recordings in History** (`keepRecordingsInHistory`, off by default) is on; Speech service sessions have no recording. Android recordings live only inside History, so its Clear History "Keep recordings" keeps the entries that hold audio, where desktop keeps the files on disk.
 
 ### F17 History sync
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android No

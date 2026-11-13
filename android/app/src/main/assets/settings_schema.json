@@ -165,6 +165,7 @@
     "hotKeyActivation",
     "hotKeyActivationStyle",
     "hudSizePreference",
+    "keepRecordingsInHistory",
     "liveActivitiesEnabled",
     "livePolishDebounceMs",
     "livePolishMinDeltaChars",

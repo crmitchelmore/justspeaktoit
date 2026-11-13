@@ -271,6 +271,7 @@ internal class MemoryPrefs(
     override var cleanupEnabled: Boolean = false,
     override var retention: Retention = Retention.Month,
     override var keepAudioOnCancel: Boolean = true,
+    override var keepRecordings: Boolean = false,
     override var languageId: String? = null,
     override var corrections: List<CorrectionRule> = emptyList(),
     override var learnCorrections: Boolean = true,

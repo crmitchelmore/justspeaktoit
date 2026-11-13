@@ -103,6 +103,7 @@ class DictationViewModel internal constructor(
             retention = prefs.retention,
             keepAudioOnCancel = prefs.keepAudioOnCancel,
             silence = prefs.silence,
+            keepRecordings = prefs.keepRecordings,
             corrections = prefs.corrections,
             learnCorrections = prefs.learnCorrections,
             correctionPromotionThreshold = prefs.correctionPromotionThreshold,
@@ -131,6 +132,7 @@ class DictationViewModel internal constructor(
         settings = object : SessionSettings {
             override val retention: Retention get() = _state.value.retention
             override val keepAudioOnCancel: Boolean get() = _state.value.keepAudioOnCancel
+            override val keepRecordings: Boolean get() = _state.value.keepRecordings
             override val cleanupModel: CleanupModel?
                 get() = _state.value.let { if (it.cleanupReady) it.sessionCleanupModel else null }
             override val cleanupPrompt: String? get() = _state.value.sessionCleanupPrompt
@@ -385,6 +387,12 @@ class DictationViewModel internal constructor(
         _state.update { it.copy(silence = clamped) }
     }
 
+    /** Applies from the next Cloud recording; recordings already in History stay until removed. */
+    fun setKeepRecordings(enabled: Boolean) {
+        prefs.keepRecordings = enabled
+        _state.update { it.copy(keepRecordings = enabled) }
+    }
+
     fun saveKey(provider: CloudProvider, key: String) =
         updateKeys(provider) { secrets.write(provider.credentialId, key.trim()) }
 
@@ -438,8 +446,9 @@ class DictationViewModel internal constructor(
         historyOwner.remove(id, _state.value.retention)
     }
 
-    fun clearHistory() {
-        historyOwner.clear()
+    /** Clears History; [keepRecordings] keeps the entries that hold a recording. */
+    fun clearHistory(keepRecordings: Boolean = false) {
+        historyOwner.clear(keepRecordings, _state.value.retention)
     }
 
     /** Re-reads and prunes history so the retention cutoff holds while the app stays open. */
@@ -480,7 +489,7 @@ class DictationViewModel internal constructor(
         val language = current.languageTag
         _state.update { it.copy(transcribingEntryId = id) }
         scope.launch {
-            val updated = historyRetry.transcribe(entry, model, language, current.corrections)
+            val updated = historyRetry.transcribe(entry, model, language, current.corrections, current.keepRecordings)
             val retention = _state.value.retention
             // Cleared with the updated entry, so Transcribe never reappears on the stale one.
             try {

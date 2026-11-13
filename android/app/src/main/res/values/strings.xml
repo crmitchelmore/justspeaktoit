@@ -216,6 +216,8 @@
     <string name="settings_appearance_dark">Dark</string>
     <string name="settings_dynamic_color_label">Wallpaper colours</string>
     <string name="settings_dynamic_color_note">Match the app\'s colours to your wallpaper instead of the Just Speak to It orange.</string>
+    <string name="settings_keep_recordings_title">Keep recordings in History</string>
+    <string name="settings_keep_recordings_note">Finished cloud recordings stay with their History entry so you can play them back or transcribe them again. They go when the entry is deleted or History\'s retention removes it.</string>
     <string name="settings_resources_title">System resources in use</string>
     <string name="settings_resources_note">What the app holds right now, why, and since when. Release stops it.</string>
     <string name="settings_resources_releasing">Releasing…</string>
@@ -264,6 +266,12 @@
     <string name="action_delete">Delete</string>
     <string name="action_clear_history">Clear history</string>
     <string name="clear_history_confirm">Delete all saved dictations?</string>
+    <string name="clear_history_confirm_recordings">Delete all saved dictations? You can keep the ones with a recording, so you can still play or transcribe them.</string>
+    <string name="action_clear_keep_recordings">Keep recordings</string>
+    <string name="action_delete_all">Delete all</string>
+    <string name="action_play_recording">Play</string>
+    <string name="action_stop_playback">Stop</string>
+    <string name="history_play_failed">This recording can\'t be played.</string>
     <string name="failure_missing_key">Add a cloud API key in Settings to transcribe audio files.</string>
     <string name="failure_audio_too_large">The audio file is larger than the 25 MB the cloud providers accept.</string>
     <string name="failure_unsupported_audio">This audio format is not supported. Share MP3, M4A, WAV, OGG, WebM or FLAC.</string>

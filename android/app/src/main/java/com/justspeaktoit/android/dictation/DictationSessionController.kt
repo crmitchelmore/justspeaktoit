@@ -20,6 +20,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
@@ -52,6 +53,9 @@ internal interface SessionSettings {
 
     /** Read when a Cloud recording starts; the recognisers end on a pause by themselves. */
     val silence: SilenceSettings get() = SilenceSettings()
+
+    /** Keeps a finished Cloud recording beside its History entry, to play or transcribe again. */
+    val keepRecordings: Boolean get() = false
 }
 
 /** Plays a recording cue when sounds are on; returns how long it lasts in milliseconds, or 0 if none plays. */
@@ -105,6 +109,9 @@ internal class DictationSessionController(
 
     /** Set by [close]: work cut short after it keeps its recording for recovery instead of deleting it. */
     private var closed = false
+
+    /** A finished Cloud recording waiting for its session's History entry; see [dispatch]. */
+    private var sessionAudio: File? = null
 
     val isCapturing: Boolean
         get() = state.dictation is DictationState.Starting || state.dictation is DictationState.Listening
@@ -276,6 +283,7 @@ internal class DictationSessionController(
         work = scope.launch {
             var kept = false
             var settled = false
+            var keepForHistory = false
             val event = try {
                 // The recorder stays owned (and releasable by close) until stop() has finished.
                 val bytes = capture.stop(rec)
@@ -291,7 +299,7 @@ internal class DictationSessionController(
                         plan.languageTag,
                         DictationFailure.InvalidKey,
                         vocabulary(),
-                    )
+                    ).also { keepForHistory = settings.keepRecordings }
                 }.also { settled = true }
             } catch (e: RequestReleasedException) {
                 // Releasing the upload is a cancel, so honour "Keep audio when a recording is cancelled".
@@ -307,12 +315,19 @@ internal class DictationSessionController(
                     kept -> Unit
                     // The screen went away mid-upload: keep the audio for the next History load.
                     closed && !settled -> capture.abandon(file)
+                    // Handed to the session's History entry below.
+                    keepForHistory && isActive -> sessionAudio = file
                     else -> capture.delete(file)
                 }
             }
             // A cancelled upload must not deliver a late result into a newer session.
             ensureActive()
             onEngineEvent(event)
+            // The event did not end the session, so no entry took the recording.
+            sessionAudio?.let {
+                sessionAudio = null
+                capture.delete(it)
+            }
         }
     }
 
@@ -453,7 +468,9 @@ internal class DictationSessionController(
         reconcileMicrophoneHold()
         if (!before.isActive || after.isActive) return
         // A session just ended: record it now, so it survives even if optional cleanup never finishes.
-        history.recordSession(after, sessionModelId, settings.retention)
+        val audio = sessionAudio
+        sessionAudio = null
+        history.recordSession(after, sessionModelId, settings.retention, audio)
     }
 
     private fun playCue(before: DictationState, after: DictationState, event: DictationEvent) {

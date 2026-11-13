@@ -72,6 +72,24 @@ class DictationViewModelTest {
     }
 
     @Test
+    fun testKeepRecordings_movesTheTranscribedRecordingIntoHistory_untilHistoryIsCleared() {
+        h.prefs.keepRecordings = true
+        val rec = startCloud()
+        h.onMain { h.viewModel.stop() }
+        val done = h.awaitState { it.dictation is DictationState.Done && it.history.isNotEmpty() }
+
+        val entry = done.history.single()
+        assertEquals(HistoryStatus.Completed, entry.status)
+        val kept = File(checkNotNull(entry.audioPath))
+        assertTrue(kept.exists())
+        assertFalse(rec.file.exists())
+
+        h.onMain { h.viewModel.clearHistory() }
+        h.awaitState { it.history.isEmpty() }
+        assertFalse(kept.exists())
+    }
+
+    @Test
     fun testShortRecording_failsAsNoSpeechWithoutUploading() {
         h.recorders.bytes = 100
         startCloud()

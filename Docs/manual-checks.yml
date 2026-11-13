@@ -1312,6 +1312,21 @@ sessions:
           - "Repeat the first dictation and edit in a password field."
         expected: "After the first edit, Learned corrections shows the wrong word → the right one, seen once, with Add and Dismiss. After the second, it leaves the suggestions and appears in Personal corrections, and the third dictation is spelt correctly. A dismissed suggestion does not come back. Nothing is learned from the password field."
         final_gate: false
+      - id: "android-history-playback"
+        issues:
+          - 1629
+        title: "Android: play kept recordings from History"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes History playback"
+        steps:
+          - "In Settings turn on Keep recordings in History, then make two Cloud dictations of a few seconds each."
+          - "Open History, tap Play on the newest entry, then Stop before it ends. Play it again and start a dictation while it plays."
+          - "Tap Transcribe on one entry and check it keeps its Play button."
+          - "Turn the setting off, dictate once more, then tap Clear and choose Keep recordings."
+          - "Tap Clear again and choose Delete all."
+        expected: "Each recording plays your own voice and Stop ends it at once; starting a dictation stops playback. The entry made with the setting off has no Play button and Clear with Keep recordings removes only it. Delete all empties History."
+        final_gate: false
       - id: "android-foreground-long-dictation"
         issues:
           - 1592

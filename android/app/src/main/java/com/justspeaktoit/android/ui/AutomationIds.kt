@@ -22,6 +22,11 @@ object AutomationIds {
     const val HISTORY_BACK = "history.back"
     const val HISTORY_CLEAR = "history.clear"
     const val HISTORY_INSIGHTS = "history.insights"
+    const val HISTORY_CLEAR_ALL = "history.clear.all"
+    const val HISTORY_CLEAR_KEEP_RECORDINGS = "history.clear.keepRecordings"
+
+    /** One per History entry, keyed by its generated ID, never by its text. */
+    fun historyPlay(entryId: String) = "history.play.$entryId"
     const val SETTINGS_BACK = "settings.back"
     const val SETTINGS_SEARCH = "settingsSearchField"
     const val SETTINGS_SEARCH_CLEAR = "settingsSearchClear"
@@ -57,6 +62,8 @@ object AutomationIds {
     const val ONBOARDING_OPEN_APP_SETTINGS = "onboarding.openAppSettings"
     const val ONBOARDING_KEYBOARD_SETTINGS = "onboarding.keyboardSettings"
     const val ONBOARDING_ADD_TILE = "onboarding.addTile"
+
+    const val SETTINGS_KEEP_RECORDINGS = "settings.keepRecordings"
     const val RESOURCES_HEADLINE = "settings.resources.headline"
     const val RESOURCES_RELEASE_EVERYTHING = "settings.resources.releaseEverything"
 

@@ -17,9 +17,10 @@ import java.security.GeneralSecurityException
 import java.security.ProviderException
 
 /**
- * Transcribes a cancelled recording kept in History. It only computes the updated entry; the caller
- * writes it. Success completes the entry and drops its audio; a failure keeps the audio and records
- * why, so the user can try again. A request the user released leaves the entry unchanged.
+ * Transcribes a recording kept in History. It only computes the updated entry; the caller writes it.
+ * Success completes the entry and drops its audio unless recordings are kept; a failure keeps the
+ * audio and records why, so the user can try again. A request the user released leaves the entry
+ * unchanged.
  */
 internal class HistoryRetry(
     private val cloud: CloudService,
@@ -33,6 +34,8 @@ internal class HistoryRetry(
         model: CloudModel,
         languageTag: String,
         corrections: List<CorrectionRule> = emptyList(),
+        /** Keeps the audio after a successful transcription, so it can still be played. */
+        keepAudio: Boolean = false,
     ): HistoryEntry {
         val file = File(entry.audioPath ?: return entry)
         return try {
@@ -54,7 +57,7 @@ internal class HistoryRetry(
                         model = model.catalogId,
                         text = text,
                         failure = null,
-                        audioPath = null,
+                        audioPath = entry.audioPath.takeIf { keepAudio },
                     )
                 }
             }

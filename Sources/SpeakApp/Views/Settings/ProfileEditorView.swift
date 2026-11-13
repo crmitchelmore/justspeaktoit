@@ -8,11 +8,16 @@ struct ProfileEditorView: View {
   @ObservedObject var settings: AppSettings
   private let originalID: UUID?
   private let onSave: (DictationProfile) -> Void
+  private let storage: SecureAppStorage
 
   @State private var draft: ProfileEditorDraft
 
-  init(profile: DictationProfile?, settings: AppSettings, onSave: @escaping (DictationProfile) -> Void) {
+  init(
+    profile: DictationProfile?, settings: AppSettings, storage: SecureAppStorage,
+    onSave: @escaping (DictationProfile) -> Void
+  ) {
     self.settings = settings
+    self.storage = storage
     self.originalID = profile?.id
     self.onSave = onSave
     _draft = State(initialValue: ProfileEditorDraft(profile: profile, settings: settings))
@@ -80,7 +85,8 @@ extension ProfileEditorView {
         ModelPicker(
           title: "Streaming Model",
           help: "Model used while recording when this profile is active. "
-            + "Custom identifiers must belong to a supported live provider.",
+            + "Custom identifiers must belong to a supported live provider. "
+            + "OpenRouter models can't stream; choose Remote Batch to use one.",
           options: ModelCatalog.liveTranscription,
           value: $draft.streamingModel,
           credentialPurpose: .liveTranscription,
@@ -90,10 +96,13 @@ extension ProfileEditorView {
         ModelPicker(
           title: "Batch Model",
           help: "Model the finished recording is sent to when this profile is active.",
-          options: ModelCatalog.batchTranscription,
+          options: ModelPickerOpenRouterBrowsers.batchOptions(selected: draft.batchModel),
           value: $draft.batchModel,
           credentialPurpose: .batchTranscription,
-          storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
+          storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
+          openRouterBrowser: ModelPickerOpenRouterBrowsers.batchTranscription(
+            selection: draft.batchModel, storage: storage
+          )
         )
       } else if draft.transcriptionChoice == .local {
         ModelPicker(
@@ -129,12 +138,19 @@ extension ProfileEditorView {
           title: "Polish Model",
           help: "LLM used to clean up the transcript for this profile. "
             + "Runs after recording even when Live Polish is your usual speed mode.",
-          options: ModelCatalog.postProcessing,
+          options: ModelPickerOpenRouterBrowsers.cleanupOptions(
+            ModelCatalog.postProcessing, selected: draft.polishModel
+          ),
           value: $draft.polishModel,
           credentialPurpose: .postProcessing,
           storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
           usesDetailedChooser: true,
-          allowsCustom: false
+          allowsCustom: false,
+          openRouterBrowser: ModelPickerOpenRouterBrowsers.cleanup(
+            selection: draft.polishModel,
+            discoveryEnabled: $settings.cleanupModelDiscoveryEnabled,
+            temperature: nil
+          )
         )
 
         if draft.usesRulesCleanup {

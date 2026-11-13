@@ -261,7 +261,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_cloud_sync_settings_self_test(window, failure) &&
             jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)
             && jsti_comparison_self_test(window, failure) && jsti_automation_settings_self_test(window, failure) &&
-            jsti_system_resources_self_test(window, failure);
+            jsti_system_resources_self_test(window, failure) && jsti_raw_configuration_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }

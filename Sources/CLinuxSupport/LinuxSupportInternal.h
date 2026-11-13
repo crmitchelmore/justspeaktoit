@@ -83,6 +83,8 @@ int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
  * the window's lifetime; its self-test runs with the window's. */
 struct _GtkWidget *jsti_system_resources_group_new(void);
 int32_t jsti_system_resources_self_test(char *error, size_t capacity);
+struct _GtkWidget *jsti_raw_configuration_group_new(struct _GtkWindow *owner);
+int32_t jsti_raw_configuration_self_test(char *error, size_t capacity);
 struct _GtkWidget *jsti_history_filters_button_new(void);
 struct _GtkWidget *jsti_profiles_page_new(void);
 int32_t jsti_profiles_self_test(char *error, size_t capacity);

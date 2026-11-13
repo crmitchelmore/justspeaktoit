@@ -89,7 +89,11 @@ enum JSTIWindowEvent {
     /* General > App behaviour > "System resources in use" (WindowsSystemResources.h):
      * RELEASE's text is the row's id. */
     JSTI_EVENT_SYSTEM_RESOURCE_RELEASE = 170,
-    JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL = 171
+    JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL = 171,
+    /* General > Edit raw configuration (WindowsRawConfiguration.h): model_index is
+     * the action and text the editor's JSON, an import path, or an export path, a
+     * newline and the JSON. Reply with jsti_window_set_raw_configuration. */
+    JSTI_EVENT_RAW_CONFIGURATION = 180
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index

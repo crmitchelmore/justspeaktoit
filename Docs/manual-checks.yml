@@ -594,6 +594,23 @@ sessions:
           - "Export preferences, turn the allow switch off, import the file: the switch stays off."
         expected: "Reads never show key material, writes are refused until the local switch is on and are all-or-nothing, Preferences shows the change at once, and importing a file never turns the switch on."
         final_gate: false
+      - id: "owner-desktop-raw-configuration-editor"
+        issues:
+          - 1670
+        title: "Windows and Linux: Edit raw configuration validates, applies all or none, imports and exports"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Windows or Linux, the first Alpha build that includes the #1670 raw configuration editor"
+        steps:
+          - "Open Preferences \u203a General and choose Edit raw configuration\u2026 (Windows: in App behaviour; Linux: the Edit\u2026 button). Check no API key value appears; \"apiKeys\" lists only true or false."
+          - "With Narrator (Windows) or Orca (Linux) running, Tab through the window: it reads Raw configuration JSON, then each button by name."
+          - "Change \"holdThreshold\" to 9 and \"showHUD\" to \"yes\", choose Validate, then Apply: the screen reader announces the result and first error, Issues names settings.holdThreshold and settings.showHUD, your text stays, and nothing is saved."
+          - "Set \"showHUD\" to false and the automation write switch to true, choose Apply: it saves 1 change, warns the switch is read-only, and Preferences shows Show recording HUD off with the switch unchanged."
+          - "Export\u2026 to a file, Reset to Defaults, Apply, then Import\u2026 the file and Apply: your values come back."
+          - "Start dictating and choose Apply on a changed document: it says to finish dictation first and changes nothing."
+          - "Search Preferences for \"raw\" or \"json\": Edit raw configuration is a result and opens General."
+        expected: "Errors name each bad key and nothing changes until every value is valid; read-only keys are kept with a warning; applied values show in Preferences at once; export, reset and import round-trip; Apply waits for dictation; results are announced to the screen reader."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"

@@ -63,7 +63,7 @@ unsigned pagesOf(int identifier) {
     case loginItemID: case recordingsFolderLabelID: case recordingsFolderID: case audioCleanupID:
     case backupAudioID: case backupProfilesID: case backupExportID: case backupInspectID:
     case backupRestoreID:
-    case automationSettingsID: case systemResourcesID:
+    case automationSettingsID: case systemResourcesID: case rawConfigurationID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
@@ -464,6 +464,8 @@ void layoutSettings(HWND window, const RECT &content) {
         place(window, automationSettingsID, box(right - scale(window, 220), y + row + scale(window, 12),
                                                 scale(window, 220), row));
         place(window, systemResourcesID, box(right - scale(window, 220),
+            appBehaviourTop + densitySpace(window, 16, visualDensity.card_padding), scale(window, 220), row));
+        place(window, rawConfigurationID, box(right - scale(window, 220 + 12 + 220),
             appBehaviourTop + densitySpace(window, 16, visualDensity.card_padding), scale(window, 220), row));
         label(recordingsFolderLabelID, y + 2 * row + scale(window, 24));
         control(recordingsFolderID, y + 2 * row + scale(window, 24), scale(window, 110));

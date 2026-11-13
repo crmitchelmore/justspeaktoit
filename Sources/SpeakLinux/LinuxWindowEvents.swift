@@ -35,6 +35,7 @@ private func linuxSharedEvent(
     if linuxActionEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxSettingsSearchEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxSystemResourcesEvent(event, value: value, holder: holder) { return }
+    if holder.handleRawConfigurationEvent(event, value: value, index: index) { return }
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryManagementEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }

@@ -27,4 +27,5 @@
 #include "WindowsRecordingFeedback.h"
 #include "WindowsGeneralSettings.h"
 #include "WindowsSystemResources.h"
+#include "WindowsRawConfiguration.h"
 #endif

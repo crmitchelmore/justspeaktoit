@@ -99,6 +99,9 @@ void jsti_show_automation_settings(HWND owner, bool (*enabled)(), void (*toggle)
 bool jsti_automation_settings_self_test(HWND owner, std::string &error);
 void jsti_show_system_resources(HWND owner, void (*emit)(HWND owner, int event, const char *text));
 bool jsti_system_resources_self_test(HWND owner, std::string &error);
+// General > App behaviour > Edit raw configuration; emit sends JSTI_EVENT_RAW_CONFIGURATION with the action.
+void jsti_show_raw_configuration(HWND owner, void (*emit)(HWND owner, int action, const char *text));
+bool jsti_raw_configuration_self_test(HWND owner, std::string &error);
 
 int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity);
 // WindowsWindowBridge.cpp; also called by the action shortcuts and the self-test.
@@ -159,6 +162,8 @@ constexpr int automationSettingsID = 489;
 // Opens System resources in use. It stays enabled while recording: releasing
 // the microphone mid-recording is what it is for.
 constexpr int systemResourcesID = 498;
+// Opens Edit raw configuration.
+constexpr int rawConfigurationID = 499;
 constexpr int sourceID = 175;
 constexpr int comparisonID = 183;
 // Model modes: bit 0 is live, bit 1 is local (on-device).

@@ -161,7 +161,7 @@ private final class P0Journey {
         } else {
             app.launchEnvironment["SPEAK_CORE_JOURNEY_BATCH"] = "1"
         }
-        app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
+        app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES", "-diagnosticsConsent", "declined"]
         registerCleanup(suite: suite)
         NSPasteboard.general.clearContents()
         XCTAssertTrue(NSPasteboard.general.setString(initialClipboard, forType: .string))

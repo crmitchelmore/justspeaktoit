@@ -12,7 +12,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_GB"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_GB", "-diagnosticsConsent", "declined"]
         app.launch()
         #if targetEnvironment(simulator)
         try app.skipFirstRunForUITest(ready: app.buttons["Settings"])

@@ -9,6 +9,7 @@ struct PrivacyView: View {
     /// Re-render the current workflow when transcription or post-processing settings change.
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var historySync = HistorySyncEngine.shared
+    @AppStorage(DiagnosticsConsent.defaultsKey) private var diagnosticsDecision = DiagnosticsConsentDecision.undecided
 
     /// The user's effective workflow, projected from the live settings.
     private var summary: PrivacyWorkflowSummary {
@@ -30,6 +31,7 @@ struct PrivacyView: View {
     var body: some View {
         Form {
             currentWorkflowSection
+            diagnosticsSection
             clipboardSection
             supportedProvidersSection
             apiKeysSection
@@ -55,6 +57,12 @@ struct PrivacyView: View {
     }
 
     @ViewBuilder
+    private var diagnosticsSection: some View {
+        Section("Crash Reports") {
+            DiagnosticsConsentToggle()
+        }
+    }
+
     private var clipboardSection: some View {
         Section("Clipboard") {
             Picker("Transcript expiry", selection: $settings.transcriptClipboardLifetime) {
@@ -157,7 +165,10 @@ struct PrivacyView: View {
                     value: historySync.isSyncEnabled ? PrivacyStorageDisclosure.historySyncCondition : "Off"
                 )
                 InfoRow(label: "API-Key Sync", value: PrivacyStorageDisclosure.apiKeySyncCondition)
-                InfoRow(label: "Crash and Performance Diagnostics", value: "Sentry (EU), in release builds")
+                InfoRow(
+                    label: "Crash and Performance Diagnostics",
+                    value: diagnosticsDecision == .granted ? "Sentry (EU), in release builds" : "Off"
+                )
                 Text(PrivacyStorageDisclosure.historySync)
                     .foregroundStyle(.secondary)
             }

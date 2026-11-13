@@ -170,9 +170,12 @@ extension SettingsSearchCatalog {
         ),
         SettingsSearchEntry(
             id: "about.privacy", title: "Privacy", section: .about, systemImage: "hand.raised",
-            summary: "Anonymous analytics and the privacy policy.",
-            keywords: ["share anonymous analytics", "telemetry", "tracking", "privacy policy", "opt out"],
-            settingKeys: ["analyticsEnabled"], platforms: .macOS
+            summary: "Crash reports and diagnostics, anonymous analytics and the privacy policy.",
+            keywords: [
+                "send crash reports and diagnostics", "crash reports", "diagnostics", "sentry",
+                "share anonymous analytics", "telemetry", "tracking", "privacy policy", "opt out",
+            ],
+            settingKeys: ["diagnosticsConsent", "analyticsEnabled"], platforms: .macOS
         ),
         SettingsSearchEntry(
             id: "about.transferToIOS", title: "Transfer to iOS", section: .about,

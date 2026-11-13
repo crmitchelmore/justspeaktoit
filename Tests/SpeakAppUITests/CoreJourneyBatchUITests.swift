@@ -25,7 +25,7 @@ final class CoreJourneyBatchUITests: XCTestCase {
         app.launchEnvironment["SPEAK_CORE_JOURNEY_PROFILE"] = identifier.uuidString
         app.launchEnvironment["SPEAK_CORE_JOURNEY_DIRECTORY"] = directory.path
         app.launchEnvironment["SPEAK_CORE_JOURNEY_BATCH"] = "1"
-        app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
+        app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES", "-diagnosticsConsent", "declined"]
         registerCleanup(app: app, fixture: fixture, suiteName: suiteName, directory: directory)
         NSPasteboard.general.clearContents()
         XCTAssertTrue(NSPasteboard.general.setString(initialClipboard, forType: .string))

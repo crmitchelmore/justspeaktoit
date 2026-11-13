@@ -101,6 +101,11 @@ struct OnboardingView: View {
 
                 if state.currentStep == .complete {
                     Button("Get Started") {
+                        // The crash-report switch was on screen, so leaving it
+                        // off is an answer; the launch prompt is not repeated.
+                        if DiagnosticsConsent.shared.needsDecision {
+                            DiagnosticsConsent.shared.record(granted: false)
+                        }
                         if AppEnvironment.shared?.analyticsAvailable == true {
                             UserDefaults.standard.set(true, forKey: "hasAnsweredAnalyticsConsent")
                             AppEnvironment.shared?.captureOnboardingCompletedAfterConsent()

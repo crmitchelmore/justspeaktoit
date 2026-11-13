@@ -32,7 +32,7 @@ final class SiteMediaCaptureUITests: XCTestCase {
         app.launchEnvironment["SPEAK_CORE_JOURNEY_DIRECTORY"] = directory.path
         app.launchEnvironment["SPEAK_CORE_JOURNEY_BATCH"] = "1"
         app.launchEnvironment["SPEAK_CORE_JOURNEY_SITE_MEDIA"] = "1"
-        app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
+        app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES", "-diagnosticsConsent", "declined"]
         // The workflow captures each website clip in light and dark appearance.
         let appearance = ProcessInfo.processInfo.environment["SITE_MEDIA_APPEARANCE"] ?? "light"
         app.launchEnvironment["SPEAK_CORE_JOURNEY_SITE_MEDIA_APPEARANCE"] = appearance

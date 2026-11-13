@@ -104,12 +104,12 @@ extension SettingsSearchCatalog {
         ),
         SettingsSearchEntry(
             id: "ios.privacy", title: "Privacy & Debugging", section: .about, systemImage: "hand.raised",
-            summary: "Privacy information, clipboard expiry and debug logging.",
+            summary: "Crash reports and diagnostics, privacy information, clipboard expiry and debug logging.",
             keywords: [
                 "privacy information", "debug logging", "clipboard", "transcript expiry", "universal clipboard",
-                "network activity"
+                "network activity", "send crash reports and diagnostics", "crash reports", "diagnostics", "sentry"
             ],
-            settingKeys: ["transcriptClipboardLifetime", "transcriptAllowsUniversalClipboard"],
+            settingKeys: ["diagnosticsConsent", "transcriptClipboardLifetime", "transcriptAllowsUniversalClipboard"],
             platforms: .iOS
         ),
         SettingsSearchEntry(

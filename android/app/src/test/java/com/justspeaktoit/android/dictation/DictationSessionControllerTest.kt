@@ -3,6 +3,7 @@ package com.justspeaktoit.android.dictation
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.RequestReleasedException
+import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
@@ -47,6 +48,7 @@ class DictationSessionControllerTest {
     private val states = MutableStateFlow(SessionState())
     private val history = MutableStateFlow<List<HistoryEntry>>(emptyList())
     private var keepAudio = false
+    private var rules = emptyList<CorrectionRule>()
 
     private val controller by lazy {
         val cacheDir = folder.newFolder("cache")
@@ -69,6 +71,7 @@ class DictationSessionControllerTest {
                 override val retention = Retention.Month
                 override val keepAudioOnCancel get() = keepAudio
                 override val cleanupModel: CleanupModel? = null
+                override val corrections get() = rules
             },
             publish = { states.value = it },
         )
@@ -169,4 +172,21 @@ class DictationSessionControllerTest {
         assertTrue(File(checkNotNull(kept.audioPath)).exists())
         assertTrue(holds(SystemResourceKind.ProviderConnection).isEmpty())
     }
+
+    @Test
+    fun testPersonalCorrections_fixEveryFinalAndBiasTheCloudModel() {
+        rules = listOf(CorrectionRule("Kubernetes", listOf("cooper netties")))
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("ship Cooper Netties")) }
+        assertEquals(DictationState.Done(RecognitionMode.SpeechService, "ship Kubernetes"), states.value.dictation)
+        await(history) { it.isNotEmpty() }
+
+        cloud.onTranscribe = { "cooper netties works" }
+        startCloud()
+        onMain { controller.stop() }
+        await(states) { it.dictation.text() == "Kubernetes works" }
+        assertEquals("Kubernetes", cloud.transcriptions.single().prompt)
+    }
+
+    private fun DictationState.text() = (this as? DictationState.Done)?.transcript
 }

@@ -5,6 +5,8 @@ import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.RequestReleasedException
 import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
+import com.justspeaktoit.android.corrections.CorrectionRule
+import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
@@ -36,6 +38,9 @@ internal interface SessionSettings {
 
     /** The model for an optional cleanup, or null when cleanup is off or its provider has no key. */
     val cleanupModel: CleanupModel?
+
+    /** Personal corrections applied to every final transcript, and sent to cloud models as vocabulary. */
+    val corrections: List<CorrectionRule> get() = emptyList()
 }
 
 /**
@@ -145,7 +150,9 @@ internal class DictationSessionController(
         work = scope.launch {
             val file = File(cacheDir, "shared-${System.nanoTime()}")
             val event = try {
-                requests.transcribe(model, file, languageTag, DictationFailure.MissingKey) { copyIn(file) }
+                requests.transcribe(model, file, languageTag, DictationFailure.MissingKey, vocabulary()) {
+                    copyIn(file)
+                }
             } catch (e: RequestReleasedException) {
                 DictationEvent.Cancelled
             } catch (e: IOException) {
@@ -209,7 +216,13 @@ internal class DictationSessionController(
                 when {
                     bytes < 0 -> DictationEvent.Error(DictationFailure.Audio)
                     bytes < MIN_AUDIO_BYTES -> DictationEvent.Error(DictationFailure.NoSpeech)
-                    else -> requests.transcribe(plan.model, file, plan.languageTag, DictationFailure.InvalidKey)
+                    else -> requests.transcribe(
+                        plan.model,
+                        file,
+                        plan.languageTag,
+                        DictationFailure.InvalidKey,
+                        vocabulary(),
+                    )
                 }
             } catch (e: RequestReleasedException) {
                 // Releasing the upload is a cancel, so honour "Keep audio when a recording is cancelled".
@@ -283,7 +296,15 @@ internal class DictationSessionController(
         }
     }
 
-    private fun onEngineEvent(event: DictationEvent) {
+    private fun vocabulary(): String? = PersonalCorrections.vocabularyPrompt(settings.corrections)
+
+    private fun onEngineEvent(received: DictationEvent) {
+        // Corrected before the reducer sees it, so History, cleanup and the screen all get the same text.
+        val event = if (received is DictationEvent.Final) {
+            DictationEvent.Final(PersonalCorrections.apply(received.text, settings.corrections))
+        } else {
+            received
+        }
         dispatch(event)
         val done = state.dictation as? DictationState.Done ?: return
         if (event !is DictationEvent.Final) return

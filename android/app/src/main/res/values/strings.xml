@@ -90,6 +90,19 @@
     <string name="action_save">Save</string>
     <string name="action_remove">Remove</string>
     <string name="settings_cloud_model_title">Cloud transcription model</string>
+    <string name="settings_language_title">Dictation language</string>
+    <string name="settings_language_note">The language you speak. Automatic uses your phone\'s language. Applies to every mode, the keyboard and shared audio from the next dictation.</string>
+    <string name="language_automatic">Automatic (phone language)</string>
+    <string name="language_picker_title">Dictation language</string>
+    <string name="settings_corrections_title">Personal corrections</string>
+    <string name="settings_corrections_note">Names and words the recogniser gets wrong. Each word heard as one of the alternatives is written your way in every final transcript, and cloud models that accept vocabulary are sent your spellings.</string>
+    <string name="corrections_empty">No corrections yet.</string>
+    <string name="corrections_write_as">Write as</string>
+    <string name="corrections_heard_as">Heard as (separate with commas)</string>
+    <string name="corrections_add">Add correction</string>
+    <string name="corrections_remove">Remove correction for %1$s</string>
+    <string name="corrections_rule">%1$s ← %2$s</string>
+    <string name="corrections_vocabulary_only">Vocabulary only</string>
     <string name="settings_cleanup_title">Clean up transcripts</string>
     <string name="settings_cleanup_note">Sends the final transcript to the chosen model\'s provider to fix punctuation and spelling. Needs that provider\'s key. If cleanup fails, the original transcript is kept.</string>
     <string name="settings_cleanup_needs_key">Add a %1$s key to use cleanup.</string>
@@ -120,6 +133,20 @@
     </plurals>
     <string name="settings_search_matches">Matches “%1$s” · %2$s</string>
     <string name="settings_search_result_description">%1$s, %2$s</string>
+    <string name="action_read_aloud">Read aloud</string>
+    <string name="action_stop_reading">Stop reading</string>
+    <string name="read_aloud_unavailable">No text-to-speech engine is available on this phone.</string>
+    <string name="history_insights_title">Last 7 days</string>
+    <plurals name="history_insights_dictations">
+        <item quantity="one">%1$d dictation</item>
+        <item quantity="other">%1$d dictations</item>
+    </plurals>
+    <plurals name="history_insights_words">
+        <item quantity="one">%1$d word</item>
+        <item quantity="other">%1$d words</item>
+    </plurals>
+    <string name="history_insights_summary">%1$s · %2$s</string>
+    <string name="history_insights_note">Counted from History on this phone only.</string>
     <string name="history_title">History</string>
     <string name="history_empty">Finished dictations appear here.</string>
     <string name="history_empty_off">History is off. Dictations are not saved.</string>

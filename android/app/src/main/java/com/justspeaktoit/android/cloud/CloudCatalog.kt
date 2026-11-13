@@ -18,7 +18,11 @@ internal data class CloudModelSpec(
     val providerId: String,
     val apiName: String,
     val languageField: String,
+    val supportsPrompt: Boolean,
 )
+
+/** A language row of `assets/cloud_catalog.json` (SpeakCore's `TranscriptionLanguageCatalog`). */
+internal data class TranscriptionLanguageSpec(val id: String, val displayName: String)
 
 /**
  * How Android reaches each provider: its display name and base URL are transport details the shared
@@ -51,6 +55,8 @@ data class CloudModel(
     val apiName: String,
     /** The GPT transcription family takes `languages[]`; Whisper-compatible models take `language`. */
     val languageField: String,
+    /** Whether the model takes a vocabulary glossary as its `prompt` form field. */
+    val supportsPrompt: Boolean = false,
 )
 
 /** A cleanup route: a native provider's own API, or OpenRouter. */
@@ -80,6 +86,7 @@ object CloudCatalog {
             provider = CloudProvider.forId(it.providerId),
             apiName = it.apiName,
             languageField = it.languageField,
+            supportsPrompt = it.supportsPrompt,
         )
     }
 

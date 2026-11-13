@@ -59,6 +59,7 @@ import com.justspeaktoit.android.cloud.CleanupModelPicker
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
 import com.justspeaktoit.android.settings.SettingsSearchEntry
@@ -76,6 +77,8 @@ class SettingsActions(
     val onChooseCleanupModel: (CleanupModel) -> Unit,
     val onReleaseResource: (String) -> Unit = {},
     val onReleaseEverything: () -> Unit = {},
+    val onChooseLanguage: (String) -> Unit = {},
+    val onCorrectionsChanged: (List<CorrectionRule>) -> Unit = {},
 )
 
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
@@ -166,6 +169,10 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
                 HorizontalDivider()
             }
 
+            SectionTitle(R.string.settings_language_title, anchor("android.language"))
+            LanguageRow(state.languageId, actions.onChooseLanguage)
+
+            HorizontalDivider()
             SectionTitle(R.string.settings_cloud_model_title, anchor("android.cloudModel"))
             CloudCatalog.transcriptionModels.forEach { model ->
                 Row(
@@ -229,6 +236,10 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
                 Switch(checked = state.keepAudioOnCancel, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_keep_audio_note), style = MaterialTheme.typography.bodyMedium)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_corrections_title, anchor("android.personalCorrections"))
+            CorrectionsEditor(state.corrections, actions.onCorrectionsChanged)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_resources_title, anchor("android.resourcesInUse"))

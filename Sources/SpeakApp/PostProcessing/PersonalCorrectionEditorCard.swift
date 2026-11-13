@@ -12,8 +12,19 @@ struct PersonalCorrectionEditorCard: View {
   let onReset: () -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: density.sectionSpacing) {
-      headerRow
+    SpeakDensityCard(
+      title: draft.isEditing ? "Edit correction" : "New correction",
+      systemImage: "square.and.pencil",
+      tint: .brandAccentWarm
+    ) {
+      if !density.isCompact {
+        Text(
+          "Aliases support full words only. Automatic rules run when tags match; "
+            + "manual rules stay as review-only suggestions."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
 
       VStack(alignment: .leading, spacing: density.inlineSpacing) {
         LabeledContent("Correct spelling") {
@@ -41,27 +52,12 @@ struct PersonalCorrectionEditorCard: View {
           .buttonStyle(.bordered)
         if draft.isEditing {
           Text("Editing \(draft.canonicalDisplay)")
-            .font(.footnote)
+            .font(.caption)
             .foregroundStyle(.secondary)
         }
         Spacer()
       }
     }
-    .padding(density.isCompact ? density.cardPadding : 28)
-    .background(
-      RoundedRectangle(
-        cornerRadius: density.isCompact ? density.cardCornerRadius : 26,
-        style: .continuous
-      )
-        .fill(.ultraThinMaterial)
-    )
-    .overlay(
-      RoundedRectangle(
-        cornerRadius: density.isCompact ? density.cardCornerRadius : 26,
-        style: .continuous
-      )
-        .stroke(Color.brandAccentWarm.opacity(0.15), lineWidth: 1)
-    )
   }
 
   @ViewBuilder
@@ -90,24 +86,6 @@ struct PersonalCorrectionEditorCard: View {
         .focused(focusedField, equals: .notes)
     }
   }
-
-  private var headerRow: some View {
-    HStack(alignment: .top) {
-      VStack(alignment: .leading, spacing: density.isCompact ? 1 : 6) {
-        Text(draft.isEditing ? "Edit correction" : "New correction")
-          .font(density.isCompact ? .caption.weight(.semibold) : .title3.bold())
-        if !density.isCompact {
-          Text(
-            "Aliases support full words only. Automatic rules run when tags match; "
-              + "manual rules stay as review-only suggestions."
-          )
-          .foregroundStyle(.secondary)
-          .font(.footnote)
-        }
-      }
-      Spacer()
-    }
-  }
 }
 
 /// The saved correction rules, each with Edit and Delete actions.
@@ -118,13 +96,11 @@ struct SavedCorrectionRulesSection: View {
   let onError: (Error) -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: density.groupSpacing) {
-      Text("Saved rules")
-        .font(density.isCompact ? .caption.weight(.semibold) : .title3.bold())
+    SpeakDensityCard(title: "Saved rules", systemImage: "list.bullet.rectangle", tint: .brandAccent) {
       if lexicon.rules.isEmpty {
         Text("No corrections yet. Add your preferred spellings above.")
+          .font(.caption)
           .foregroundStyle(.secondary)
-          .italic()
       } else {
         LazyVStack(spacing: density.isCompact ? density.sectionSpacing : 16) {
           ForEach(lexicon.rules) { rule in

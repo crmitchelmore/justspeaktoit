@@ -22,14 +22,7 @@ struct VoiceOutputView: View {
       .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
     }
-    .background(
-      LinearGradient(
-        colors: [Color.green.opacity(0.08), Color(nsColor: .windowBackgroundColor)],
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
-    )
+    .pageBackground(.voiceOutput)
     .task {
       composer.selectedVoice = settings.defaultTTSVoice
       await composer.loadAvailableVoices(from: tts, defaultVoice: settings.defaultTTSVoice)

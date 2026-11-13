@@ -55,7 +55,7 @@ struct TestRecordingStepView: View {
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(state.isTestRecording ? Color.red : Color.accentColor)
-                    .foregroundColor(.white)
+                    .foregroundStyle(SpeakTextStyle.onTint)
                     .cornerRadius(10)
                 }
                 .buttonStyle(.plain)

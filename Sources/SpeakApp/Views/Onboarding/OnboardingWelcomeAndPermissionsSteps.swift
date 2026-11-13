@@ -14,8 +14,9 @@ struct WelcomeStepView: View {
                 .frame(width: 100, height: 100)
 
             Text(ReleaseTrain.current.displayName)
-                .font(.largeTitle)
-                .fontWeight(.bold)
+                .font(SpeakTextStyle.pageTitle)
+                .lineLimit(1)
+                .minimumScaleFactor(SpeakTextStyle.minimumScaleFactor)
 
             Text("Voice transcription that types for you")
                 .font(.title3)

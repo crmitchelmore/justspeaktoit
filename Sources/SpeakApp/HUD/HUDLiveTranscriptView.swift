@@ -21,8 +21,7 @@ struct HUDLiveTranscriptView: View {
           .fontWeight(isFinal ? .regular : .light)
           .foregroundStyle(isFinal ? .primary : .secondary)
           .multilineTextAlignment(.center)
-          .lineLimit(2)
-          .truncationMode(.head)
+          .speakLiveTranscriptLines(2)
           .animation(animates ? .easeInOut(duration: 0.2) : nil, value: isFinal)
           .accessibilityLabel(isFinal ? "Transcript: \(text)" : "Partial transcript: \(text)")
       }

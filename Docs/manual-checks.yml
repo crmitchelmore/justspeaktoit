@@ -26,6 +26,19 @@ sessions:
           - "Clear filters again and inspect the bottom of the model list above Custom."
         expected: "No matches shows only the empty-results message and available footer actions, with no Current selection section. Searching for the selected model shows it once without an empty-results message. There are no empty rows or stacked separator lines above Custom, and filtering never changes the selected model."
         final_gate: true
+      - id: "mac-page-header-text"
+        issues:
+          - 1616
+        title: "Page headers: white text, matching fonts and tidy truncation on every page"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Mac, an Alpha build that includes the #1616 page header fix"
+        steps:
+          - "With the system in Light appearance and Settings \u203a Appearance density on Regular, open Dashboard, History, Voice Output, Corrections, Troubleshooting and Settings in turn."
+          - "Narrow the window to its minimum width and look at each header again."
+          - "Switch density to Compact and repeat, then switch the system to Dark appearance and repeat once more."
+        expected: "Every header title, subtitle, chip, badge, search field and toggle is white or soft white on its coloured header, never black or grey. Titles share one size and weight, and long titles or chip values shrink slightly then end in an ellipsis with the full text on hover, without overlapping."
+        final_gate: true
       - id: "mac-notes-streaming"
         issues:
           - 664

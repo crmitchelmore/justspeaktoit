@@ -28,9 +28,7 @@ struct VoiceOutputHeader: View {
   // MARK: - Compact
 
   private var compactHeader: some View {
-    HStack(spacing: self.density.groupSpacing) {
-      Label("Voice", systemImage: "speaker.wave.3")
-        .font(.subheadline.bold())
+    PageHeroStrip("Voice", systemImage: "speaker.wave.3", palette: .voiceOutput) {
       Spacer(minLength: 4)
       CompactHeroMetric(
         title: "Characters", value: "\(self.composer.inputText.count)", systemImage: "textformat.abc"
@@ -43,16 +41,6 @@ struct VoiceOutputHeader: View {
       }
       self.compactAction
     }
-    .padding(self.density.cardPadding)
-    .foregroundStyle(.white)
-    .background(
-      LinearGradient(
-        colors: [Color.green, Color.mint.opacity(0.8)],
-        startPoint: .leading,
-        endPoint: .trailing
-      ),
-      in: RoundedRectangle(cornerRadius: self.density.cardCornerRadius, style: .continuous)
-    )
   }
 
   @ViewBuilder
@@ -77,19 +65,13 @@ struct VoiceOutputHeader: View {
   // MARK: - Normal
 
   private var normalHeader: some View {
-    VStack(alignment: .leading, spacing: 18) {
-      HStack(alignment: .top, spacing: 20) {
-        VStack(alignment: .leading, spacing: 8) {
-          Text("Voice Output")
-            .font(.largeTitle.bold())
-            .foregroundStyle(.white)
-          Text("Convert text to natural speech with multiple providers and advanced controls.")
-            .font(.headline)
-            .foregroundStyle(.white.opacity(0.85))
-        }
-        Spacer()
-        self.heroAction
-      }
+    PageHeroHeader(
+      "Voice Output",
+      subtitle: "Convert text to natural speech with multiple providers and advanced controls.",
+      palette: .voiceOutput
+    ) {
+      self.heroAction
+    } content: {
       HStack(spacing: 16) {
         HeroStatChip(title: "Characters", value: "\(self.composer.inputText.count)", systemImage: "textformat.abc")
         if let cost = self.formattedCost {
@@ -100,20 +82,6 @@ struct VoiceOutputHeader: View {
         }
       }
     }
-    .padding(24)
-    .background(
-      LinearGradient(
-        colors: [Color.green, Color.mint.opacity(0.8)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-      .cornerRadius(32)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 32, style: .continuous)
-        .stroke(Color.white.opacity(0.15), lineWidth: 1)
-    )
-    .shadow(color: Color.green.opacity(0.3), radius: 24, x: 0, y: 16)
   }
 
   @ViewBuilder
@@ -128,17 +96,15 @@ struct VoiceOutputHeader: View {
       }
       .padding(.horizontal, 32)
       .padding(.vertical, 18)
-      .background(Capsule().fill(Color.white.opacity(0.2)))
-      .foregroundStyle(Color.white)
+      .background(Capsule().fill(SpeakTextStyle.onTintFill))
     } else if self.tts.isPlaying {
       Button("Stop") {
         self.tts.stop()
       }
       .padding(.horizontal, 32)
       .padding(.vertical, 18)
-      .background(Capsule().fill(Color.white.opacity(0.15)))
-      .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
-      .foregroundStyle(Color.white)
+      .background(Capsule().fill(SpeakTextStyle.onTintFill))
+      .overlay(Capsule().stroke(SpeakTextStyle.onTintStroke, lineWidth: 1))
       .buttonStyle(.plain)
     }
   }

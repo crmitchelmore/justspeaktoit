@@ -91,7 +91,7 @@ extension LocalModelRowPresenting {
     HStack(alignment: .top, spacing: 10) {
       Text(number)
         .font(.caption.weight(.bold))
-        .foregroundStyle(.white)
+        .foregroundStyle(SpeakTextStyle.onTint)
         .frame(width: 20, height: 20)
         .background(Circle().fill(Color.green))
       VStack(alignment: .leading, spacing: 2) {

@@ -24,7 +24,9 @@ struct TroubleshootingView: View {
         }
       }
       .padding(density.pagePadding)
+      .frame(maxWidth: 1100, alignment: .center)
     }
+    .pageBackground(.troubleshooting)
     .onAppear { runAnalysis() }
     .onChange(of: environment.settings.restoreClipboardAfterPaste) { runAnalysis() }
     .onChange(of: environment.settings.postProcessingEnabled) { runAnalysis() }
@@ -72,15 +74,21 @@ struct TroubleshootingView: View {
 
   // MARK: - Header
 
+  @ViewBuilder
   private var header: some View {
-    VStack(alignment: .leading, spacing: density.isCompact ? 1 : 8) {
-      Label("Troubleshooting", systemImage: "stethoscope")
-        .font(density.isCompact ? .subheadline.bold() : .title.bold())
-      if !density.isCompact {
-        Text("Common issues and quick fixes to get you up and running.")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
+    if density.isCompact {
+      PageHeroStrip("Troubleshooting", systemImage: "stethoscope", palette: .troubleshooting) {
+        Spacer(minLength: 4)
+        CompactHeroMetric(
+          title: "Issues found", value: "\(analyser.items.count)", systemImage: "exclamationmark.triangle"
+        )
       }
+    } else {
+      PageHeroHeader(
+        "Troubleshooting",
+        subtitle: "Common issues and quick fixes to get you up and running.",
+        palette: .troubleshooting
+      )
     }
   }
 

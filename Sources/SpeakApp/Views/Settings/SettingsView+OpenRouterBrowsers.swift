@@ -45,3 +45,21 @@ extension SettingsView {
     ]
   }
 }
+
+/// The separate Browse OpenRouter models button below a model picker, matching
+/// the voice section's Browse OpenRouter Speech… button.
+struct ModelPickerOpenRouterButton: View {
+  let identifier: String
+  let browser: ModelPickerOpenRouterBrowser
+  @Binding var value: String
+  @State private var isPresented = false
+
+  var body: some View {
+    Button("Browse OpenRouter models…") { isPresented = true }
+      .buttonStyle(.bordered)
+      .accessibilityIdentifier(identifier)
+      .sheet(isPresented: $isPresented) {
+        browser { value = $0 }
+      }
+  }
+}

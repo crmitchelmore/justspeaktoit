@@ -19,7 +19,6 @@ struct ModelPicker: View {
   @State var selection: String
   @State private var customValue: String
   @State private var isShowingChooser: Bool = false
-  @State private var isShowingOpenRouterBrowser = false
 
   init(
     title: String,
@@ -119,12 +118,11 @@ struct ModelPicker: View {
       }
 
       if let openRouterBrowser {
-        Button("Browse OpenRouter models…") { isShowingOpenRouterBrowser = true }
-          .buttonStyle(.bordered)
-          .accessibilityIdentifier("modelPicker.\(Self.accessibilityIdentifierComponent(for: title)).browseOpenRouter")
-          .sheet(isPresented: $isShowingOpenRouterBrowser) {
-            openRouterBrowser { value = $0 }
-          }
+        ModelPickerOpenRouterButton(
+          identifier: "modelPicker.\(Self.accessibilityIdentifierComponent(for: title)).browseOpenRouter",
+          browser: openRouterBrowser,
+          value: $value
+        )
       }
 
       if let help {
@@ -203,11 +201,7 @@ struct ModelPicker: View {
   /// picker does.
   private var options: [ModelCatalog.Option] {
     guard openRouterBrowser != nil else { return allOptions }
-    let current = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return allOptions.filter { option in
-      !ModelPickerGrouping.isOpenRouter(option.id, purpose: credentialPurpose)
-        || option.id.caseInsensitiveCompare(current) == .orderedSame
-    }
+    return ModelPickerSelection.nativeOptions(allOptions, selected: value, purpose: credentialPurpose)
   }
 
   /// Replaces an invalid value on the next turn unless something else has
@@ -249,18 +243,6 @@ struct ModelPicker: View {
     )
   }
 
-  /// Stable, UI-test friendly component derived from the picker's title,
-  /// e.g. "Post-processing model" -> "postProcessingModel".
-  static func accessibilityIdentifierComponent(for title: String) -> String {
-    let words = title
-      .components(separatedBy: CharacterSet.alphanumerics.inverted)
-      .filter { !$0.isEmpty }
-    guard let first = words.first else { return "model" }
-    return ([first.prefix(1).lowercased() + first.dropFirst()]
-      + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() })
-      .joined()
-  }
-
   private var selectedCredentialAvailability: ModelCredentialAvailability {
     credentialAvailability(for: selection == ModelCatalog.customOptionID ? customValue : selection)
   }
@@ -296,5 +278,19 @@ struct ModelPicker: View {
     if let replacement = synced.replacementValue, value != replacement {
       value = replacement
     }
+  }
+}
+
+extension ModelPicker {
+  /// Stable, UI-test friendly component derived from the picker's title,
+  /// e.g. "Post-processing model" -> "postProcessingModel".
+  static func accessibilityIdentifierComponent(for title: String) -> String {
+    let words = title
+      .components(separatedBy: CharacterSet.alphanumerics.inverted)
+      .filter { !$0.isEmpty }
+    guard let first = words.first else { return "model" }
+    return ([first.prefix(1).lowercased() + first.dropFirst()]
+      + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() })
+      .joined()
   }
 }

@@ -1303,6 +1303,23 @@ sessions:
           - "Open a password field and check the keyboard's microphone; then deny the microphone permission and try the keyboard."
         expected: "The tile and shortcut open the app and start dictating (after unlocking when locked). Both shared files are transcribed into History. The keyboard inserts the final text, is disabled in the password field, and explains a denied permission. Switching keyboards stops dictation without inserting stray text."
         final_gate: true
+      - id: "android-raw-configuration-editor"
+        issues:
+          - 1608
+        title: "Android raw configuration editor validates, applies all or none, imports and exports"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1608 raw configuration editor"
+        steps:
+          - "Open Settings \u203a Edit raw configuration and tap Show current. Check no API key value appears; \"apiKeys\" lists only true or false."
+          - "Change \"history_retention\" to \"Year\" and tap Validate, then Apply: an error names settings.history_retention and nothing is saved."
+          - "Set it to \"Week\" and \"cleanup_enabled\" to true, tap Apply: Settings shows History kept for 7 days and Clean up transcripts on at once."
+          - "Tap Export and save the file, tap Reset to defaults and confirm, then Import the saved file and Apply: your values come back."
+          - "Start dictating and tap Apply: it says to stop dictating first and changes nothing."
+          - "With TalkBack on, tap Validate on an invalid document: TalkBack reads the result and the first error."
+          - "Search Settings for \"raw\" or \"json\": Edit raw configuration is a result and scrolls to the editor."
+        expected: "Errors name each bad key and nothing changes until every value is valid; applied values show on their settings at once; export, reset and import round-trip; Apply is refused while dictating; results are announced to TalkBack."
+        final_gate: false
       - id: "android-language-corrections-read-aloud"
         issues:
           - 1328

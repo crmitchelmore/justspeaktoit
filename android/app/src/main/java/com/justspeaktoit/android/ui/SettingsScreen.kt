@@ -88,6 +88,8 @@ class SettingsActions(
     val onAnalyticsChanged: (Boolean) -> Unit = {},
     val onDiagnosticsChanged: (Boolean) -> Unit = {},
     val onTip: (String) -> Unit = {},
+    /** Applies validated raw-configuration changes all or none; false when they cannot apply now. */
+    val onApplyConfiguration: (Map<String, Any?>) -> Boolean = { false },
 )
 
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
@@ -270,6 +272,10 @@ fun SettingsScreen(
             HorizontalDivider()
             SectionTitle(R.string.settings_corrections_title, anchor("android.personalCorrections"))
             CorrectionsEditor(state.corrections, actions.onCorrectionsChanged)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_raw_config_title, anchor("general.rawConfiguration"))
+            RawConfigurationEditor(state, actions.onApplyConfiguration)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_resources_title, anchor("android.resourcesInUse"))

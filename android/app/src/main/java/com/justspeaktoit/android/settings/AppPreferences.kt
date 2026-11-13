@@ -6,6 +6,7 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.history.Retention
+import org.json.JSONObject
 
 /** The non-secret choices the dictation screen reads and writes; [AppPreferences] in production. */
 interface DictationPreferences {
@@ -90,6 +91,16 @@ class AppPreferences(context: Context) : DictationPreferences {
     override var activeProfileId: String?
         get() = prefs.getString(KEY_ACTIVE_PROFILE, null)
         set(value) = prefs.edit { if (value == null) remove(KEY_ACTIVE_PROFILE) else putString(KEY_ACTIVE_PROFILE, value) }
+    /**
+     * Settings another platform owns, from an applied raw configuration, as a JSON object. Kept so the
+     * next export still carries them; the app never reads them.
+     */
+    var otherPlatformSettings: Map<String, Any?>
+        get() = prefs.getString(KEY_OTHER_PLATFORM_SETTINGS, null)
+            ?.let { runCatching { RawConfiguration.plain(JSONObject(it)) as? Map<*, *> }.getOrNull() }
+            ?.mapKeys { it.key.toString() }
+            .orEmpty()
+        set(value) = prefs.edit { putString(KEY_OTHER_PLATFORM_SETTINGS, RawConfiguration.encode(value)) }
 
     companion object {
         const val FILE_NAME = "jsti_prefs"
@@ -117,5 +128,6 @@ class AppPreferences(context: Context) : DictationPreferences {
         private const val KEY_CLEANUP_PROMPT = "postProcessingSystemPrompt"
         const val KEY_PROFILES = "dictationProfiles"
         private const val KEY_ACTIVE_PROFILE = "activeDictationProfileID"
+        private const val KEY_OTHER_PLATFORM_SETTINGS = "raw_configuration_other_platform_settings"
     }
 }

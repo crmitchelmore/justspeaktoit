@@ -145,8 +145,7 @@ public enum SettingsSchema {
         case .macOS: return macOSFields
         case .windows, .linux: return desktopFields
         case .iOS: return iOSFields
-        // No raw configuration on Android yet (#1608).
-        case .android: return []
+        case .android: return androidFields
         }
     }
 

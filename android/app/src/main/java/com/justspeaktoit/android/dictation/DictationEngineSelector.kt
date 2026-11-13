@@ -108,7 +108,8 @@ internal class DictationEngineSelector(
         }
     }
 
-    fun chooseMode(mode: RecognitionMode) {
+    /** Null goes back to the best available mode. */
+    fun chooseMode(mode: RecognitionMode?) {
         if (sessionActive()) return
         prefs.chosenMode = mode
         change { it.copy(chosenMode = mode) }

@@ -111,7 +111,8 @@ ViewModel with fakes; `DictationEngineSelectorTest` and `DictationSessionControl
 owners directly.
 
 Shared catalogues are generated from `Sources/SpeakCore`, never parsed from Swift:
-`assets/settings_search.json` (settings search), `assets/cloud_catalog.json` (cloud providers,
+`assets/settings_search.json` (settings search), `assets/settings_schema.json` (the raw configuration
+editor's fields), `assets/cloud_catalog.json` (cloud providers,
 credential IDs, the models Android offers with their wire fields, the cleanup model and prompt, the
 dictation languages and the vocabulary prompt limits) and `assets/tip_catalog.json` (tip product IDs,
 names and emoji). Regenerate them with `scripts/update-android-assets`; the Swift export tests fail when an asset is

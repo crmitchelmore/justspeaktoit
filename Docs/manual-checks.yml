@@ -751,6 +751,19 @@ sessions:
           - "Re-read Resolution Center, resolve every remaining review finding and approve the frozen candidate through the normal Stable process."
         expected: "The exact candidate's device evidence, SDK privacy report, nutrition labels, published policy, consent/withdrawal behavior, support URLs and private review information agree. No credentials enter public issues or screenshots, and no submission is approved solely because the archive builds."
         final_gate: false
+      - id: "iphone-app-shortcuts-phrases"
+        issues:
+          - 1595
+        title: "Siri and Spotlight offer the app's built-in shortcut phrases"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes #1595"
+        steps:
+          - "Open the Shortcuts app and find Just Speak to It under App Shortcuts; count the shortcuts listed."
+          - "Search Spotlight for Just Speak and look for its Toggle Recording and Dictate actions."
+          - "Say \"Hey Siri, toggle recording with Just Speak to It\", speak a short made-up sentence, then say \"Hey Siri, stop recording with Just Speak to It\"."
+        expected: "Shortcuts lists the app's eight built-in shortcuts without any setup, Spotlight shows its actions, and the Siri phrases start and stop a recording that appears in History."
+        final_gate: false
       - id: "iphone-diagnostics-consent"
         issues:
           - 1468

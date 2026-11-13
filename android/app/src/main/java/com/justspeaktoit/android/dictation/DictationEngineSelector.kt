@@ -28,6 +28,8 @@ internal data class EngineSelection(
     /** The user's explicit choice; null means "use the best available on-device or device mode". */
     val chosenMode: RecognitionMode?,
     val cloudModel: CloudModel,
+    /** The saved `DictationLanguages` choice; [languageTag] is what it resolves to now. */
+    val languageId: String,
     val languageTag: String,
     /** The tag the on-device recogniser actually has, which may differ from [languageTag] by region. */
     val onDeviceLanguageTag: String,
@@ -50,12 +52,15 @@ internal class DictationEngineSelector(
     private val scope: CoroutineScope,
     private val timings: DictationTimings,
     private val sessionActive: () -> Boolean,
-    private val currentLanguageTag: () -> String = { Locale.getDefault().toLanguageTag() },
+    private val phoneLanguageTag: () -> String = { Locale.getDefault().toLanguageTag() },
     private val publish: (EngineSelection) -> Unit,
 ) {
+    private fun currentLanguageTag(): String = DictationLanguages.languageTag(prefs.languageId, phoneLanguageTag)
+
     var selection: EngineSelection = currentLanguageTag().let { tag ->
         EngineSelection(
             chosenMode = prefs.chosenMode,
+            languageId = DictationLanguages.normalized(prefs.languageId),
             cloudModel = CloudCatalog.transcriptionModel(prefs.cloudModelId),
             languageTag = tag,
             onDeviceLanguageTag = tag,
@@ -102,6 +107,15 @@ internal class DictationEngineSelector(
     fun chooseCloudModel(model: CloudModel) {
         prefs.cloudModelId = model.catalogId
         change { it.copy(cloudModel = model) }
+        refresh()
+    }
+
+    /** Takes effect from the next session; availability is rechecked for the new language. */
+    fun chooseLanguage(id: String) {
+        if (sessionActive()) return
+        val normalized = DictationLanguages.normalized(id)
+        prefs.languageId = normalized
+        change { it.copy(languageId = normalized) }
         refresh()
     }
 

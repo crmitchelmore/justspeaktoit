@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-12"
+updated: "2026-11-13"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -127,6 +127,21 @@ sessions:
           - "Once the Alpha has about 50 hotkey recordings made on such a build, mark this Pass."
           - "An agent then reads only the numeric latency fields in History and posts the result on #611."
         expected: "About 50 or more recent hotkey recordings exist. The agent reports hotkey-to-capture p50 and p95; #611 closes if p50 is under 100 ms and the #664 streaming checks have passed."
+        final_gate: false
+      - id: "mac-double-tap-start-latency"
+        issues:
+          - 611
+        title: "Double-tap start is quick, including after a pause"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Mac, Alpha build 108 or later (includes #1567, the first-tap input warm-up)"
+        steps:
+          - "Settings \u203a Keyboard: allow double tap. Leave Warm microphone on key press at its default."
+          - "In TextEdit, make 20 double-tap recordings of a short made-up sentence, back to back."
+          - "Make 6 more double-tap recordings, waiting about 30 seconds before each one."
+          - "Tap the hotkey once (no second tap) three times, and check the menu-bar microphone indicator does not stay on."
+          - "Mark this Pass. An agent then reads only the numeric latency fields and the Start timeline in History and posts p50 and p95 on #611."
+        expected: "No recording, sound or History entry comes from a single tap. The agent reports double-tap hotkey-to-capture p50 and p95, back to back and after a pause, and whether each start shows \"live input prepared from key-down\". #611 closes if back-to-back p50 is under 100 ms."
         final_gate: false
       - id: "mac-paid-new-providers"
         issues:

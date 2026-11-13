@@ -39,6 +39,8 @@ public struct CLIPlan: Equatable {
     public var pitch: Double?
     public var quality: String?
     public var language: String?
+    /// `speak config get|set`: see `CommandLineParser+Configuration`.
+    public var keys: [String]?, prefix: String?, changes: [String: AnyCodable]?, dryRun: Bool?
 
     public init(
         command: AutomationCommand,
@@ -95,6 +97,8 @@ public enum CommandLineParser {
                 [--speed <n>] [--pitch <semitones>] [--quality <q>] [--language <id>]
       speak voices [--provider <id>] [--json]
       speak status [--json]
+      speak config get [<key>...] [--prefix <p>] [--json]
+      speak config set <key>=<value>... [--dry-run] [--json]
       speak mcp
       speak --help | --version
 
@@ -115,6 +119,10 @@ public enum CommandLineParser {
                    -o writes without playing unless --play is given.
       voices       List the providers, voices and models say can use (* = app's voice).
       status       Report whether the app is reachable and dictating.
+      config       Read settings (get) or change several at once (set). Values are
+                   JSON (true, 1.2, "text") or plain text. set validates every
+                   change and applies all or none; --dry-run only validates.
+                   Writes need "Allow automation to change settings" in the app.
       mcp          Run a stdio MCP server exposing the same commands as tools.
 
     NOTES
@@ -149,7 +157,8 @@ public enum CommandLineParser {
     /// Verbs with their own argument grammar.
     private static let customVerbs: [String: ([String]) throws -> CLIPlan] = [
         "transcribe": parseTranscribe,
-        "say": parseSay
+        "say": parseSay,
+        "config": parseConfig
     ]
 
     public static func parse(_ arguments: [String]) throws -> CLIInvocation {
@@ -223,6 +232,8 @@ public enum CommandLineParser {
         case pitch = "--pitch"
         case quality = "--quality"
         case language = "--language"
+        case prefix = "--prefix"
+        case dryRun = "--dry-run"
 
         init?(token: String) {
             switch token {
@@ -233,7 +244,7 @@ public enum CommandLineParser {
         }
 
         var takesValue: Bool {
-            self != .json && self != .play
+            self != .json && self != .play && self != .dryRun
         }
     }
 
@@ -290,7 +301,11 @@ public enum CommandLineParser {
                 guard parts.count == 1 else {
                     throw CLIUsageError(message: "\(option.rawValue) does not take a value.")
                 }
-                if option == .play { plan.play = true } else { plan.json = true }
+                switch option {
+                case .play: plan.play = true
+                case .dryRun: plan.dryRun = true
+                default: plan.json = true
+                }
                 continue
             }
 
@@ -311,8 +326,13 @@ public enum CommandLineParser {
 
     private static func apply(option: Option, value: String, to plan: inout CLIPlan) throws {
         switch option {
-        case .json, .play:
+        case .json, .play, .dryRun:
             break
+        case .prefix:
+            guard !value.isEmpty, value.count <= AutomationLimits.maxIdentifierLength else {
+                throw CLIUsageError(message: "--prefix must be 1-\(AutomationLimits.maxIdentifierLength) characters.")
+            }
+            plan.prefix = value
         case .voice, .output, .file, .provider, .model, .speed, .pitch, .quality, .language:
             try self.applySpeech(option: option, value: value, to: &plan)
         case .timeout:

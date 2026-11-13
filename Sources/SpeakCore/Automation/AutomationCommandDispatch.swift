@@ -52,6 +52,15 @@ public enum AutomationCommandDispatcher {
         return speech
     }
 
+    private static func configurationHost(
+        _ host: some AutomationCommandHost
+    ) throws -> any AutomationConfigurationHost {
+        guard let configuration = host as? any AutomationConfigurationHost else {
+            throw AutomationError(code: .unsupportedCommand, message: "This app cannot read or change its settings.")
+        }
+        return configuration
+    }
+
     public static func response(
         to request: AutomationRequest,
         host: some AutomationCommandHost
@@ -85,6 +94,12 @@ public enum AutomationCommandDispatcher {
                     } ?? true
                 }
                 result = listed
+            case .getConfiguration:
+                result = try await Self.configurationHost(host).automationConfiguration(
+                    keys: request.keys, prefix: request.prefix)
+            case .setConfiguration:
+                result = try await Self.configurationHost(host).automationSetConfiguration(
+                    (request.changes ?? [:]).mapValues(\.storage), dryRun: request.dryRun ?? false)
             }
             return .success(id: request.id, command: request.command, result: result)
         } catch let error as AutomationError {

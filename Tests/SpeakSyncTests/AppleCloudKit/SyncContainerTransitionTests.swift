@@ -25,14 +25,24 @@ final class SyncContainerTransitionTests: XCTestCase {
         defaults.set(true, forKey: SyncConfiguration.dataSyncEnabledKey)
     }
 
-    func testFamilyResolution_sharedFlagSelectsMacContainerOnBothPlatforms() {
-        XCTAssertEqual(SyncConfiguration.resolveFamily(legacy: .iOS, sharedContainerEnabled: true), .macOS)
-        XCTAssertEqual(SyncConfiguration.resolveFamily(legacy: .iOS, sharedContainerEnabled: false), .iOS)
-        XCTAssertEqual(SyncConfiguration.resolveFamily(legacy: .macOS, sharedContainerEnabled: false), .macOS)
-        let shared = SyncConfiguration.resolveFamily(legacy: .iOS, sharedContainerEnabled: true)
-        for train in ReleaseTrain.allCases {
-            XCTAssertEqual(shared.containerIdentifier(in: train), train.macCloudContainer)
-        }
+    func testEveryPlatformUsesTheTrainsSharedContainer() {
+        XCTAssertEqual(SyncConfiguration.containerIdentifier, ReleaseTrain.current.cloudContainer)
+        #if os(iOS)
+        XCTAssertEqual(SyncConfiguration.legacyContainerIdentifier, ReleaseTrain.current.legacyIOSCloudContainer)
+        #else
+        XCTAssertNil(SyncConfiguration.legacyContainerIdentifier)
+        #endif
+        XCTAssertEqual(ReleaseTrain.stable.cloudContainer, "iCloud.com.justspeaktoit")
+        XCTAssertEqual(ReleaseTrain.alpha.cloudContainer, "iCloud.com.justspeaktoit.alpha")
+    }
+
+    func testMove_keepsKeySyncAccountAsideForTheCarryOver() {
+        defaults.set("fingerprint", forKey: CloudKitKeySync.accountIdentifierKey)
+        XCTAssertTrue(SyncContainerTransition.resetIfContainerChanged(
+            to: "iCloud.shared", legacy: "iCloud.legacy", defaults: defaults
+        ))
+        XCTAssertNil(defaults.object(forKey: CloudKitKeySync.accountIdentifierKey))
+        XCTAssertEqual(defaults.string(forKey: CloudKitKeySync.legacyAccountIdentifierKey), "fingerprint")
     }
 
     func testUnchangedLegacyContainer_keepsStateAndRecordsIt() {
@@ -80,7 +90,9 @@ final class SyncContainerTransitionTests: XCTestCase {
             "speak.sync.zoneCreated",
             "speak.sync.subscriptionCreated",
             "speak.sync.comparison.serverChangeToken",
-            "speak.keysync.accountIdentifier"
+            "speak.keysync.serverChangeToken",
+            "speak.keysync.zoneCreated",
+            "speak.keysync.subscriptionCreated"
         ])
     }
 }

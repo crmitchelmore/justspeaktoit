@@ -53,7 +53,10 @@ containers. Otherwise it deletes its own profile (`<bundle id> App Store
 current capabilities; it never deletes profiles it did not name. The stored
 profile secrets are used only when that fetch fails, for example for an older
 frozen source without the script. The job summary lists each profile's source,
-iCloud containers and App Groups.
+iCloud containers and App Groups. The app profile must carry exactly the
+train's shared container and the legacy iPhone one (#1119;
+[details](cloudkit-shared-container.md)); assigning containers to an App ID is
+a portal-only step.
 
 To regenerate and check both trains' profiles outside a release, run the
 **Apple App IDs and profiles** workflow (`apple-profiles.yml`). Its Alpha

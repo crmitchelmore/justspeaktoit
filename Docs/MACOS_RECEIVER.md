@@ -4,8 +4,9 @@ The iPhone app has no Bonjour transcript sender or pairing screen. Discovering a
 service, enabling the Mac receiver or having protocol support does not send an
 iPhone transcription to a Mac. Platform History sync can use iCloud when enabled
 and CloudKit is available; it is separate from live insertion at a Mac's cursor.
-Mac/iPhone History sync remains unqualified because their configured iCloud
-containers differ; see [#1119](https://github.com/crmitchelmore/justspeaktoit/issues/1119).
+Mac and iPhone now share one iCloud container; Mac/iPhone History sync stays
+unqualified until the device checks for
+[#1119](https://github.com/crmitchelmore/justspeaktoit/issues/1119) pass.
 Physical iPhone Settings/Privacy and ordinary capture-to-History smoke for #952
 remain open.
 

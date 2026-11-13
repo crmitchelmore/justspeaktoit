@@ -222,17 +222,17 @@ sessions:
       - id: "owner-cloudkit-shared-container"
         issues:
           - 1119
-        title: "Assign the shared iCloud container to the iPhone app"
-        minutes: 15
+        title: "Check the shared iCloud container on the iPhone App IDs and its schema"
+        minutes: 10
         core: false
-        build: "Apple Developer portal and CloudKit Console; current main with PR #1369"
+        build: "Apple Developer portal and CloudKit Console; current main with the #1119 container PR"
         prerequisites:
           - "Steps: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/cloudkit-shared-container.md"
         steps:
-          - "Identifiers \u203a com.justspeaktoit.ios \u203a iCloud \u203a Configure: also tick iCloud.com.justspeaktoit; do the same for com.justspeaktoit.ios.alpha with iCloud.com.justspeaktoit.alpha."
-          - "In CloudKit Console, deploy the Development schema of iCloud.com.justspeaktoit and .alpha to Production if any iPhone record type is missing."
-          - "Set the repository variable IOS_SHARED_CLOUD_CONTAINER to 1."
-        expected: "The next Alpha iOS build signs and uploads with both containers. Then run iphone-shared-icloud-container."
+          - "Identifiers \u203a com.justspeaktoit.ios \u203a iCloud \u203a Configure: iCloud.com.justspeaktoit and iCloud.com.justspeaktoit.ios are both ticked; com.justspeaktoit.ios.alpha has iCloud.com.justspeaktoit.alpha and iCloud.com.justspeaktoit.ios.alpha."
+          - "In CloudKit Console, deploy the Development schema of iCloud.com.justspeaktoit and .alpha to Production if any record type of the iPhone containers is missing."
+          - "Delete the repository variable IOS_SHARED_CLOUD_CONTAINER; builds no longer read it."
+        expected: "The Apple App IDs and profiles workflow passes for both trains, and the next Alpha iOS build signs and uploads with both containers."
         final_gate: false
       - id: "owner-posthog-gates"
         issues:
@@ -755,19 +755,38 @@ sessions:
       - id: "iphone-shared-icloud-container"
         issues:
           - 1119
-        title: "iPhone History moves into the shared iCloud container"
+        title: "A new iPhone recording reaches the shared iCloud container within a minute"
         minutes: 8
         core: false
-        build: "TestFlight Just Speak to It Alpha built after IOS_SHARED_CLOUD_CONTAINER=1"
+        build: "TestFlight Just Speak to It Alpha with the #1119 shared container"
         prerequisites:
           - "owner-cloudkit-shared-container done"
+          - "A freshly installed iPhone (delete the app first, or use a second iPhone) signed in to the same iCloud account as a Mac or Windows/Linux build with iCloud sync on."
         steps:
-          - "Before updating, check iCloud sync is on and note the date and time of your oldest iPhone History item."
+          - "Install the Alpha on the iPhone, open it, turn iCloud sync on and wait on the History screen."
+          - "Record \u201cshared container one\u201d on the iPhone."
+          - "Within a minute, look for it in the other device's History, or in CloudKit Console open iCloud.com.justspeaktoit.alpha \u203a Production \u203a Private Database, act as your iCloud account and query the History zone."
+          - "Record \u201cshared container two\u201d on the other device, if it can record, and check the iPhone's History."
+          - "Settings: turn API key sync on with your passphrase and check the keys from your other device appear."
+        expected: "Each recording appears on the other side within a minute, and key sync turns on with the same passphrase without errors."
+        final_gate: true
+      - id: "iphone-legacy-container-migration"
+        issues:
+          - 1119
+        title: "iPhone History and API keys move from the old iCloud container"
+        minutes: 10
+        core: false
+        build: "TestFlight Just Speak to It Alpha with the #1119 shared container, installed over an older Alpha"
+        prerequisites:
+          - "owner-cloudkit-shared-container done"
+          - "An iPhone whose History synced to the old container: in CloudKit Console, iCloud.com.justspeaktoit.ios.alpha \u203a Private Database has its History records. Turn API key sync on first if you use it."
+        steps:
+          - "Before updating, note the text and time of your oldest and newest iPhone History items."
           - "Update in TestFlight, open the app and wait a minute on the History screen."
           - "In CloudKit Console open iCloud.com.justspeaktoit.alpha \u203a Production \u203a Private Database, act as your iCloud account and query the History zone."
-          - "Record \u201cshared container\u201d and query again after a minute."
-          - "Settings: turn API key sync on again with your passphrase."
-        expected: "History on the iPhone is unchanged. The shared container has a History record created at the same date and time as your oldest iPhone item, and the new recording appears there within a minute. Key sync turns on without errors."
+          - "Open Settings \u203a API key sync."
+          - "Force-quit, reopen and wait a minute again."
+        expected: "History on the iPhone is unchanged, and the shared container has records for both noted items. API key sync is still on with no passphrase prompt (unless the shared container already used another passphrase, when it asks once). Nothing is duplicated after the relaunch."
         final_gate: true
       - id: "iphone-marketing-footage"
         issues:

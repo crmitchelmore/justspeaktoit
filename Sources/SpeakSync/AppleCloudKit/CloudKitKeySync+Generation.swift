@@ -9,11 +9,15 @@ import SpeakCore
 
 extension CloudKitKeySync {
     func validateCurrentAccount() async throws {
-        let recordName = try await dependencies.accountRecordName()
-        let fingerprint = SHA256.hash(data: Data(recordName.utf8))
+        let fingerprint = Self.accountFingerprint(try await dependencies.accountRecordName())
+        try await adoptLegacyContainerAccountIfNeeded(fingerprint: fingerprint)
+        try await resetAccountBoundState(ifNeededFor: fingerprint)
+    }
+
+    nonisolated static func accountFingerprint(_ recordName: String) -> String {
+        SHA256.hash(data: Data(recordName.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
-        try await resetAccountBoundState(ifNeededFor: fingerprint)
     }
 
     func handleCloudKitAccountChange() async {

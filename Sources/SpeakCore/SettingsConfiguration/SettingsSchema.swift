@@ -144,8 +144,9 @@ public enum SettingsSchema {
         switch platform {
         case .macOS: return macOSFields
         case .windows, .linux: return desktopFields
-        // No raw configuration on these hosts yet (#1608).
-        case .iOS, .android: return []
+        case .iOS: return iOSFields
+        // No raw configuration on Android yet (#1608).
+        case .android: return []
         }
     }
 

@@ -555,6 +555,10 @@ with their own field list, derived from the portable desktop preferences
 (`SettingsSchema+Desktop.swift`), so the keys there are the desktop preference
 names (`showHUD`, `preferredLocale`, `holdThreshold`). `get_configuration`
 reports which schema the host uses in `platform`.
+The iPhone has no automation server, but Settings › General › **Edit raw
+configuration** edits, validates, imports and exports the same document format
+over its own field list (`SettingsSchema+iOS.swift`, keyed by the iOS settings
+names such as `selectedModel` and `hardwareTriggerDestination`).
 
 - **Reading** works whenever automation is on. `get_configuration` returns
   `settings`, `apiKeys` and `schema`; narrow it with `keys` or `prefix`.

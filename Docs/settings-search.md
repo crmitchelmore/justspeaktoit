@@ -72,6 +72,14 @@ same list), derived from `DesktopConfiguration.fields` in
 `SettingsSchema+Desktop.swift`, so a new desktop preference joins the schema
 and `speak config` with no extra entry. Mark consent and grants read-only there.
 
+The iPhone uses `SettingsSchema.fields(for: .iOS)` (`SettingsSchema+iOS.swift`),
+bound in `Sources/SpeakiOS/Settings/IOSSettingsConfiguration.swift` and edited in
+Settings › General › **Edit raw configuration**. When you add a persisted iOS
+setting, add a field there and a binding; `SettingsSearchCoverageTests`
+(`testEveryPersistedIOSSettingHasARawConfigurationField`) fails otherwise, and
+`Tests/SpeakiOSTests/IOSSettingsConfigurationTests.swift` checks bindings,
+defaults and enum values.
+
 When you add a persisted macOS setting, also add a `SettingsSchema+macOS.swift`
 field and an `AppSettingsConfiguration` binding.
 `Tests/SpeakAppTests/AppSettingsConfigurationTests.swift` fails when an

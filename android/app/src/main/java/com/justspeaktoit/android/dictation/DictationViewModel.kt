@@ -14,6 +14,7 @@ import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.WavRecorder
+import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.AtomicHistoryFile
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
@@ -83,6 +84,7 @@ class DictationViewModel internal constructor(
             cleanupModel = CloudCatalog.cleanupModel(prefs.cleanupModelId),
             retention = prefs.retention,
             keepAudioOnCancel = prefs.keepAudioOnCancel,
+            corrections = prefs.corrections,
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
@@ -106,6 +108,7 @@ class DictationViewModel internal constructor(
             override val keepAudioOnCancel: Boolean get() = _state.value.keepAudioOnCancel
             override val cleanupModel: CleanupModel?
                 get() = _state.value.let { if (it.cleanupReady) it.cleanupModel else null }
+            override val corrections: List<CorrectionRule> get() = _state.value.corrections
         },
         publish = { s ->
             _state.update {
@@ -192,6 +195,14 @@ class DictationViewModel internal constructor(
     fun chooseMode(mode: RecognitionMode) = selector.chooseMode(mode)
 
     fun chooseCloudModel(model: CloudModel) = selector.chooseCloudModel(model)
+
+    fun chooseLanguage(id: String) = selector.chooseLanguage(id)
+
+    /** Saves [rules] in order; they apply from the next final transcript. */
+    fun setCorrections(rules: List<CorrectionRule>) {
+        prefs.corrections = rules
+        _state.update { it.copy(corrections = rules) }
+    }
 
     fun chooseCleanupModel(model: CleanupModel) {
         prefs.cleanupModelId = model.selectionId
@@ -294,7 +305,7 @@ class DictationViewModel internal constructor(
         val language = current.languageTag
         _state.update { it.copy(transcribingEntryId = id) }
         scope.launch {
-            val updated = historyRetry.transcribe(entry, model, language)
+            val updated = historyRetry.transcribe(entry, model, language, current.corrections)
             val retention = _state.value.retention
             // Cleared with the updated entry, so Transcribe never reappears on the stale one.
             try {
@@ -341,6 +352,7 @@ class DictationViewModel internal constructor(
 private fun DictationUiState.withSelection(selection: EngineSelection) = copy(
     chosenMode = selection.chosenMode,
     cloudModel = selection.cloudModel,
+    languageId = selection.languageId,
     languageTag = selection.languageTag,
     onDeviceLanguageTag = selection.onDeviceLanguageTag,
     savedKeys = selection.savedKeys,

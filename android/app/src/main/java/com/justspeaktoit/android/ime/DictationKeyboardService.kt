@@ -21,8 +21,10 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.justspeaktoit.android.MainActivity
 import com.justspeaktoit.android.R
+import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.dictation.AndroidSpeechEngine
 import com.justspeaktoit.android.dictation.DictationEvent
+import com.justspeaktoit.android.dictation.DictationLanguages
 import com.justspeaktoit.android.dictation.DictationReducer
 import com.justspeaktoit.android.dictation.DictationState
 import com.justspeaktoit.android.dictation.RecognitionMode
@@ -33,7 +35,6 @@ import com.justspeaktoit.android.resources.SystemResourceToken
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.ui.label
 import com.justspeaktoit.android.ui.message
-import java.util.Locale
 
 /**
  * A minimal dictation keyboard: the Android equivalent of the Mac's insert-at-cursor. Live partial
@@ -186,7 +187,7 @@ class DictationKeyboardService : InputMethodService() {
         checking = true
         render()
         val caps = engine.capabilities()
-        val tag = Locale.getDefault().toLanguageTag()
+        val tag = DictationLanguages.languageTag(AppPreferences(this).languageId)
         val generation = inputGeneration
         engine.checkOnDeviceLanguage(tag) { resolution ->
             // Only the editor that was tapped, if still eligible, may start capture.
@@ -278,7 +279,8 @@ class DictationKeyboardService : InputMethodService() {
                     // Remove the provisional text first, so the spacing check sees the real preceding character.
                     if (ownsComposing) ic.setComposingText("", 1)
                     editorShowedComposing = false
-                    ic.commitText(KeyboardPolicy.textToCommit(s.transcript, ic.getTextBeforeCursor(1, 0)), 1)
+                    val corrected = PersonalCorrections.apply(s.transcript, AppPreferences(this).corrections)
+                    ic.commitText(KeyboardPolicy.textToCommit(corrected, ic.getTextBeforeCursor(1, 0)), 1)
                 }
                 ownsComposing = false
                 state = DictationState.Idle

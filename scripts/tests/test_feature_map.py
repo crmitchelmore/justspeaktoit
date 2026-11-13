@@ -21,6 +21,9 @@ ENTRY = """### F01 Thing
 """
 
 
+EXCLUDED_ERROR = "F01: Excluded must give each of {} one '<platforms> (OS: …)' or '(owner decision: …)' clause"
+
+
 class FeatureMapTests(unittest.TestCase):
     def test_repository_map_is_consistent(self):
         self.assertEqual([], CHECK.check(CHECK.MAP.read_text(encoding="utf-8")))
@@ -39,24 +42,32 @@ class FeatureMapTests(unittest.TestCase):
 
     def test_gap_without_issue_fails(self):
         errors = CHECK.check(TABLE.replace("#1", "") + ENTRY.replace("Linux #1", "Linux"))
-        self.assertIn("F01: Linux gap needs an issue in Gaps", errors)
+        self.assertIn("F01: Gaps must start with exactly Linux then the issue", errors)
+        self.assertIn("F01: summary table needs exactly one cross-platform issue", errors)
+
+    def test_gap_platforms_must_lead_the_field_exactly(self):
+        table = TABLE.replace("| N/A | Yes | No |", "| N/A | No | No |")
+        entry = ENTRY.replace("Windows Yes", "Windows No")
+        self.assertEqual([], CHECK.check(table + entry.replace("Linux #1", "Windows, Linux #1")))
+        errors = CHECK.check(table + entry.replace("Linux #1", "Linux #1 (Windows fallback absent)"))
+        self.assertIn("F01: Gaps must start with exactly Windows, Linux then the issue", errors)
+
+    def test_gap_issue_must_match_summary(self):
+        errors = CHECK.check(TABLE.replace("#1", "#2") + ENTRY)
+        self.assertIn("F01: Gaps must cite the summary table's issue #2", errors)
 
     def test_exclusion_without_reason_kind_fails(self):
         errors = CHECK.check(TABLE + ENTRY.replace("(OS:", "("))
-        self.assertIn("F01: Excluded needs an '(OS' or '(owner decision' reason for iOS", errors)
+        self.assertIn(EXCLUDED_ERROR.format("iOS"), errors)
 
     def test_each_exclusion_needs_its_own_reason(self):
         table = TABLE.replace("| Yes | #1 |", "| N/A | #1 |")
         entry = ENTRY.replace("Android Yes", "Android N/A")
         self.assertEqual([], CHECK.check(table + entry.replace(").", "); Android (OS: no keys).")))
-        errors = CHECK.check(table + entry.replace(").", "); Android."))
-        self.assertIn("F01: Excluded needs an '(OS' or '(owner decision' reason for Android", errors)
-
-    def test_gap_platform_and_issue_must_match_summary(self):
-        errors = CHECK.check(TABLE + ENTRY.replace("Linux #1", "#1"))
-        self.assertIn("F01: Gaps must name Linux", errors)
-        errors = CHECK.check(TABLE.replace("#1", "#2") + ENTRY)
-        self.assertIn("F01: Gaps must name the summary table's issue #2", errors)
+        self.assertEqual([], CHECK.check(table + entry.replace("iOS (", "iOS, Android (")))
+        for reason in ("); Android.", "; not Android)."):
+            errors = CHECK.check(table + entry.replace(").", reason))
+            self.assertIn(EXCLUDED_ERROR.format("iOS, Android"), errors)
 
     def test_missing_path_fails(self):
         errors = CHECK.check(TABLE + ENTRY.replace("Docs/feature-map.md", "Sources/Missing.swift"))

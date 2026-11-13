@@ -258,7 +258,11 @@ final class SettingsConfigurationTests: XCTestCase {
         XCTAssertEqual(Set(fields.map(\.key)).count, fields.count)
         XCTAssertTrue(fields.allSatisfy { !$0.isSensitive && !$0.key.hasSuffix("APIKey") })
         let indexed = Set(SettingsSearchCatalog.entries(for: .iOS).flatMap(\.settingKeys))
-        XCTAssertEqual(Set(fields.map(\.key)).subtracting(indexed), [])
+        // The iPhone has no Read aloud Settings page yet; these are edited only in the raw configuration (#1671).
+        let readAloud: Set = [
+            "ttsProvider", "ttsModel", "ttsVoice", "ttsSpeed", "ttsLanguageIdentifier", "sonioxTTSRegion"
+        ]
+        XCTAssertEqual(Set(fields.map(\.key)).subtracting(indexed), readAloud)
 
         var context = SettingsValidationContext(currentValues: Dictionary(uniqueKeysWithValues:
             fields.compactMap { field in field.defaultValue.map { (field.key, $0) } }))
@@ -287,5 +291,76 @@ final class SettingsConfigurationTests: XCTestCase {
             ["settings.transcriptionMode", "settings.transcriptReadyNotificationsEnabled"])
         XCTAssertEqual(report.ignoredKeys, [macOnly])
         XCTAssertEqual(report.warnings.first?.path, "platform")
+    }
+}
+
+// MARK: - Read aloud (#1671)
+
+extension SettingsConfigurationTests {
+
+    func testReadAloudFieldsAreSharedBetweenMacAndIPhone() {
+        for key in ["ttsSpeed", "ttsLanguageIdentifier", "sonioxTTSRegion"] {
+            XCTAssertEqual(
+                SettingsSchema.field(forKey: key, platform: .iOS), SettingsSchema.field(forKey: key), key)
+        }
+        for platform in [SettingsSchemaPlatform.macOS, .iOS] {
+            var context = SettingsValidationContext(currentValues: ["ttsLanguageIdentifier": .string("automatic")])
+            context.platform = platform
+            let report = SettingsValidator.validate(
+                settings: ["ttsLanguageIdentifier": .string("tlh_KL")], context: context)
+            XCTAssertEqual(self.errorPaths(report), ["settings.ttsLanguageIdentifier"], platform.rawValue)
+        }
+    }
+
+    func testIOSReadAloudSelection_isCheckedAgainstTheMergedProvider() {
+        let defaults = Dictionary(uniqueKeysWithValues: SettingsSchema.fields(for: .iOS)
+            .compactMap { field in field.defaultValue.map { (field.key, $0) } })
+        var context = SettingsValidationContext(currentValues: defaults)
+        context.platform = .iOS
+
+        // Switching provider alone leaves a Deepgram voice on Soniox.
+        let providerOnly = SettingsValidator.validate(settings: ["ttsProvider": .string("soniox")], context: context)
+        XCTAssertEqual(self.errorPaths(providerOnly), ["settings.ttsModel", "settings.ttsVoice"])
+
+        let soniox = SettingsValidator.validate(settings: [
+            "ttsProvider": .string("soniox"), "ttsModel": .string(SonioxTTSCatalog.defaultModel.rawValue),
+            "ttsVoice": .string("soniox/my-clone"), "ttsSpeed": .double(1.5)
+        ], context: context)
+        XCTAssertEqual(self.errorPaths(soniox), ["settings.ttsSpeed"])
+
+        let deepgramModel = DeepgramSpeechCatalog.models.first { $0.id != VoiceOutputProvider.defaultSelection.model }!
+        let wrongVoice = SettingsValidator.validate(
+            settings: ["ttsModel": .string(deepgramModel.id)], context: context)
+        XCTAssertEqual(self.errorPaths(wrongVoice), ["settings.ttsVoice"])
+        let rightVoice = DeepgramSpeechCatalog.voices(forModelID: deepgramModel.id).first!.id
+        XCTAssertEqual(SettingsValidator.validate(
+            settings: ["ttsModel": .string(deepgramModel.id), "ttsVoice": .string(rightVoice)], context: context
+        ).errors, [])
+
+        var mac = SettingsValidationContext(currentValues: ["ttsSpeed": .double(1)])
+        mac.platform = .macOS
+        XCTAssertEqual(SettingsValidator.validate(settings: ["ttsSpeed": .double(1.8)], context: mac).errors, [])
+    }
+
+    func testVoiceOutputSelectionProblems() {
+        let builtIn = SonioxTTSCatalog.defaultVoice(for: SonioxTTSCatalog.defaultModel)
+        let model = SonioxTTSCatalog.defaultModel.rawValue
+        XCTAssertTrue(VoiceOutputProvider.soniox
+            .selectionProblems(model: model, voice: builtIn.providerVoiceID, speed: 1).isEmpty)
+        XCTAssertNotNil(VoiceOutputProvider.soniox
+            .selectionProblems(model: model, voice: builtIn.providerVoiceID.lowercased(), speed: 1).voice)
+        XCTAssertNotNil(VoiceOutputProvider.soniox.selectionProblems(model: model, voice: "soniox/", speed: 1).voice)
+
+        let selection = OpenRouterSpeechSelection(modelID: "example/speech", voice: "nova")
+        XCTAssertTrue(VoiceOutputProvider.openrouter
+            .selectionProblems(model: selection.id, voice: "nova", speed: 1).isEmpty)
+        XCTAssertNotNil(VoiceOutputProvider.openrouter
+            .selectionProblems(model: selection.id, voice: "alloy", speed: 1).voice)
+        XCTAssertNotNil(VoiceOutputProvider.openrouter
+            .selectionProblems(model: "example/speech", voice: "", speed: 1).model)
+
+        let fresh = VoiceOutputProvider.defaultSelection
+        XCTAssertTrue(VoiceOutputProvider.defaultProvider
+            .selectionProblems(model: fresh.model, voice: fresh.voice, speed: 1).isEmpty)
     }
 }

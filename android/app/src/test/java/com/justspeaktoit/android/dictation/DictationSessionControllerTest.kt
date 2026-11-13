@@ -14,6 +14,7 @@ import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
+import com.justspeaktoit.android.settings.RecordingCue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +35,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
@@ -54,6 +56,9 @@ class DictationSessionControllerTest {
     private var keepAudio = false
     private var rules = emptyList<CorrectionRule>()
     private var cleanup: CleanupModel? = null
+
+    /** Each cue played, with how many times the Cloud recorder had been stopped when it played. */
+    private val cues = CopyOnWriteArrayList<Pair<RecordingCue, Int>>()
 
     private val controller by lazy {
         val cacheDir = folder.newFolder("cache")
@@ -80,6 +85,10 @@ class DictationSessionControllerTest {
                 override val keepAudioOnCancel get() = keepAudio
                 override val cleanupModel get() = cleanup
                 override val corrections get() = rules
+            },
+            cues = { cue ->
+                cues += cue to (recorders.created.lastOrNull()?.stops ?: 0)
+                CUE_MS
             },
             publish = { states.value = it },
             liveSessions = live,
@@ -122,6 +131,54 @@ class DictationSessionControllerTest {
         val entry = await(history) { it.isNotEmpty() }.single()
         assertEquals("bonjour", entry.text)
         assertNull("a recogniser session records no cloud model", entry.model)
+    }
+
+    @Test
+    fun testCloudSession_playsStartOverSilencedAudio_andStopOnlyAfterTheMicrophoneStops() {
+        val rec = startCloud()
+        assertEquals(listOf(RecordingCue.Start to 0), cues.toList())
+        assertEquals(CUE_MS, rec.mutedFor)
+
+        onMain { controller.stop() }
+        await(states) { it.dictation is DictationState.Done }
+
+        assertEquals(listOf(RecordingCue.Start to 0, RecordingCue.Stop to 1), cues.toList())
+    }
+
+    @Test
+    fun testCancelledCloudSession_playsNoStopCue() {
+        startCloud()
+
+        onMain { controller.cancel() }
+        await(states) { it.dictation == DictationState.Idle && !it.releasingMicrophone }
+
+        assertEquals(listOf(RecordingCue.Start), cues.map { it.first })
+    }
+
+    @Test
+    fun testRecognizerSession_playsStartWhenListening_andStopWhenItEnds_butNotOnFailure() {
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        assertTrue("no cue before the recogniser is ready", cues.isEmpty())
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Ready) }
+        onMain { controller.stop() }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("done")) }
+        assertEquals(
+            "the final after a stop plays no second Stop",
+            listOf(RecordingCue.Start, RecordingCue.Stop),
+            cues.map { it.first },
+        )
+
+        cues.clear()
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Partial("hello")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("hello")) }
+        assertEquals("a recogniser that ends after a pause plays Stop", RecordingCue.Stop, cues.last().first)
+
+        cues.clear()
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Ready) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Error(DictationFailure.Network)) }
+        assertEquals(listOf(RecordingCue.Start), cues.map { it.first })
     }
 
     @Test
@@ -289,4 +346,8 @@ class DictationSessionControllerTest {
     }
 
     private fun DictationState.text() = (this as? DictationState.Done)?.transcript
+
+    private companion object {
+        const val CUE_MS = 150L
+    }
 }

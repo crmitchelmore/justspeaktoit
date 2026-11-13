@@ -97,7 +97,7 @@ The flags live in `Project.swift`; release selection is in
 | F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | Yes | | |
 | F10 | Browse OpenRouter models picker | Yes | Yes | No | No | Partial | #1618 | Android: searchable cleanup list only. |
 | F11 | Dictation profiles | Yes | Limited | Yes | Yes | Limited | | iOS and Android cannot see the frontmost app. |
-| F12 | Vocabulary, corrections, pronunciation | Yes | Yes | Yes | Yes | Partial | #1626 | Android: corrections only. |
+| F12 | Vocabulary, corrections, pronunciation | Yes | Yes | Yes | Yes | Partial | #1626 | Android: corrections only. Corrections also restore the stored spelling's case. |
 | F13 | Transcription language selection | Yes | Yes | Yes | Yes | Yes | | |
 | F14 | History list and search | Yes | Yes | Yes | Yes | Partial | #1628 | Android has no search. |
 | F15 | History filters (model, errors, dates) | Yes | Partial | Yes | Yes | No | #1628 | |
@@ -119,7 +119,7 @@ The flags live in `Project.swift`; release selection is in
 | F31 | API keys page | Yes | Yes | Yes | Yes | Yes | | |
 | F32 | Provider credit balances | Yes | Yes | No | No | No | #1621 | |
 | F33 | Configuration export/import and backup | Yes | Yes | Partial | Partial | No | #1635 | |
-| F34 | Raw settings editor and config tools | Yes | Partial | Partial | Partial | Partial | #1608 | iOS and Android have the raw JSON editor but no automation server, so no config tools; iOS Read aloud settings are not in the schema yet (#1671). Windows and Linux have `speak config` and MCP `get_configuration`/`set_configuration`; no raw JSON editor window yet (#1670). |
+| F34 | Raw settings editor and config tools | Yes | Partial | Partial | Partial | Partial | #1608 | iOS and Android have the raw JSON editor but no automation server, so no config tools. Windows and Linux have `speak config` and MCP `get_configuration`/`set_configuration`; no raw JSON editor window yet (#1670). |
 | F35 | Automation (CLI, MCP, App Intents) | Yes | Yes | Yes | Yes | Limited | | |
 | F36 | Usage insights dashboard | Yes | No | Yes | Yes | Partial | #1623 | Android: 7-day card on History. |
 | F37 | Opt-in analytics and crash reporting | Yes | Yes | No | No | Yes | #1624 | |
@@ -128,7 +128,7 @@ The flags live in `Project.swift`; release selection is in
 | F40 | Launch at login | Yes | N/A | Yes | Yes | N/A | | |
 | F41 | Updates | Yes | N/A | Yes | Yes | N/A | | |
 | F42 | Microphone selection | Yes | Partial | Yes | Yes | No | #1637 | |
-| F43 | Recording start/stop sounds | Yes | Yes | Yes | Yes | No | #1638 | |
+| F43 | Recording start/stop sounds | Yes | Yes | Yes | Yes | Yes | | |
 | F44 | Per-app output target (profiles) / Focus overrides | Yes | Yes | Yes | Limited | N/A | | |
 | F45 | Recording audio housekeeping | Yes | Yes | Yes | Yes | Partial | #1629 | |
 | F46 | Send transcripts from phone to desktop | Yes | Partial | No | No | No | #1640 | iOS: Handoff and History sync, no direct sender. macOS: direct build only; the Mac App Store build has no receiver. |
@@ -242,7 +242,7 @@ The flags live in `Project.swift`; release selection is in
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
 - **Excluded:** none
 - **Gaps:** Android #1626 (corrections and vocabulary prompt only; no pronunciation).
-- **How:** Vocabulary biases recognition (sent as the provider's keyterms or prompt when its catalogue entry accepts one); corrections rewrite final text. Limits come from `TranscriptionKeywordPolicy`.
+- **How:** Vocabulary biases recognition (sent as the provider's keyterms or prompt when its catalogue entry accepts one); corrections rewrite final text, and an automatic correction also restores the stored spelling's case when the recogniser already writes the word ("kubernetes" → "Kubernetes"). Limits come from `TranscriptionKeywordPolicy`.
 - **Refs:** `Sources/SpeakCore/Vocabulary/PersonalLexiconStore.swift`, `Sources/SpeakDesktop/Vocabulary/DesktopVocabulary.swift`, `Sources/SpeakDesktopHost/Transcription/DesktopHostVocabulary.swift`, `Sources/SpeakApp/PostProcessing/PersonalCorrectionsView.swift`, `android/app/src/main/java/com/justspeaktoit/android/corrections/PersonalCorrections.kt`
 - **Sunset:** none
 - **Nuances:** AssemblyAI keyterms are capped (50 characters each, 100 items). Corrections apply to every final path: app, keyboard, import and History retry.
@@ -439,11 +439,11 @@ The flags live in `Project.swift`; release selection is in
 ### F34 Raw settings editor and config tools
 - **Platforms:** macOS Yes · iOS Partial · Windows Partial · Linux Partial · Android Partial
 - **Excluded:** none
-- **Gaps:** iOS, Windows, Linux, Android #1608 (Windows and Linux lack only the raw JSON editor window, #1670; iOS Read aloud settings, #1671; iOS and Android have no automation server for the config tools).
+- **Gaps:** iOS, Windows, Linux, Android #1608 (Windows and Linux lack only the raw JSON editor window, #1670; iOS and Android have no automation server for the config tools).
 - **How:** One JSON document of canonical keys with all-or-nothing validation, no secrets, and keys for other platforms preserved; the same document backs `speak config` and the MCP configuration tools.
 - **Refs:** `Sources/SpeakCore/Automation/AutomationConfiguration.swift`, `Sources/SpeakCore/SettingsConfiguration/SettingsSchema+Desktop.swift`, `Sources/SpeakDesktopHost/Automation/DesktopHostAutomationConfiguration.swift`, `Sources/SpeakiOS/Views/Settings/IOSRawConfigurationEditorView.swift`, `android/app/src/main/java/com/justspeaktoit/android/settings/RawConfiguration.kt`, `Sources/SpeakApp/Views/Settings/RawConfigurationEditorView.swift`, `Sources/SpeakApp/Transport/AppAutomationHandler+Configuration.swift`
 - **Sunset:** none
-- **Nuances:** The desktop Preferences editor (`Sources/SpeakDesktopHost/Settings/DesktopHostConfigurationEditor.swift`) is a typed form, not this feature.
+- **Nuances:** The desktop Preferences editor (`Sources/SpeakDesktopHost/Settings/DesktopHostConfigurationEditor.swift`) is a typed form, not this feature. The iPhone's Read aloud keys (#1671) share the Mac's `ttsSpeed`, `ttsLanguageIdentifier` and `sonioxTTSRegion` definitions (`SettingsSchema+VoiceOutput.swift`); its provider, model, voice and speed are checked together by `VoiceOutputProvider.selectionProblems`. They have no iPhone Settings page, so they are not in Settings search on iOS.
 
 ### F35 Automation (CLI, MCP, App Intents)
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Limited
@@ -518,13 +518,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** See [Windows microphone discovery](windows-microphone-discovery.md).
 
 ### F43 Recording start/stop sounds
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1638.
-- **How:** Play the chosen cue on start and stop only, never on intermediate events.
-- **Refs:** `Sources/SpeakCore/Recording/Apple/RecordingSoundPlayer.swift`, `Sources/SpeakDesktopHost/Recording/DesktopHostRecordingFeedback.swift`, `Sources/SpeakiOS/Services/TranscriptionRecordingService.swift`
+- **Gaps:** none
+- **How:** Play the chosen cue on start and stop only, never on intermediate events, cancel or failure.
+- **Refs:** `Sources/SpeakCore/Recording/Apple/RecordingSoundPlayer.swift`, `Sources/SpeakDesktopHost/Recording/DesktopHostRecordingFeedback.swift`, `Sources/SpeakiOS/Services/TranscriptionRecordingService.swift`, `android/app/src/main/java/com/justspeaktoit/android/dictation/RecordingSoundPlayer.kt`
 - **Sunset:** none
-- **Nuances:** Apple preloads bundled sound files so the cue plays instantly.
+- **Nuances:** Apple preloads bundled sound files so the cue plays instantly. Android preloads the same files (copied byte for byte into `res/raw`) into a SoundPool, records silence over the start cue in Cloud mode and plays Stop only after the microphone has stopped; it has no haptics.
 
 ### F44 Per-app output target (profiles) / Focus overrides
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Limited · Android N/A

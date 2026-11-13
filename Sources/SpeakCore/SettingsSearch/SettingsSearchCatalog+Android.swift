@@ -67,6 +67,14 @@ extension SettingsSearchCatalog {
             settingKeys: ["keepAudioOnCancel"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.recordingSounds", title: "Recording sounds", section: .general,
+            systemImage: "speaker.wave.2",
+            summary: "Start and stop sounds, their profile and volume.",
+            keywords: ["play start/stop sounds", "sound profile", "chime", "beep", "volume", "mute sounds"],
+            settingKeys: ["recordingSoundsEnabled", "recordingSoundProfile", "recordingSoundVolume"],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.resourcesInUse", title: "System resources in use", section: .general,
             systemImage: "gauge.with.dots.needle.33percent",
             summary: "See what the app holds now, such as the microphone or a cloud request, and release it.",
@@ -80,6 +88,12 @@ extension SettingsSearchCatalog {
             id: "android.apiKeys", title: "API keys", section: .apiKeys, systemImage: "key.fill",
             summary: "Add or remove provider keys, encrypted with the Android Keystore.",
             keywords: ["credentials", "token", "keystore", "openrouter key", "openai key", "deepgram key"],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.privacy", title: "Privacy", section: .about, systemImage: "hand.raised",
+            summary: "Choose whether to share anonymous analytics and crash reports. Both start off.",
+            keywords: ["privacy", "telemetry", "analytics", "crash reports", "diagnostics", "consent", "opt out"],
             platforms: .android
         ),
         SettingsSearchEntry(
@@ -110,6 +124,14 @@ extension SettingsSearchCatalog {
             platforms: .android
         )
     ]
+
+    /// Android groups these entries under a heading other than their section's title, so search
+    /// results name the heading people see on screen.
+    static let androidSectionTitles: [String: String] = [
+        "android.privacy": "Privacy",
+        "android.analytics": "Privacy",
+        "android.diagnostics": "Privacy"
+    ]
 }
 
 /// The catalogue the Android app reads, as JSON. `SettingsSearchAndroidExportTests`
@@ -131,7 +153,8 @@ public enum SettingsSearchAndroidExport {
             synonyms: SettingsSearchSynonyms.groups,
             entries: SettingsSearchCatalog.entries(for: .android).map {
                 Entry(
-                    id: $0.id, title: $0.title, section: $0.section.rawValue, sectionTitle: $0.section.title,
+                    id: $0.id, title: $0.title, section: $0.section.rawValue,
+                    sectionTitle: SettingsSearchCatalog.androidSectionTitles[$0.id] ?? $0.section.title,
                     summary: $0.summary, keywords: $0.keywords, settingKeys: $0.settingKeys
                 )
             }

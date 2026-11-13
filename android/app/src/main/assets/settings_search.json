@@ -165,6 +165,26 @@
       "title" : "Keep audio when a recording is cancelled"
     },
     {
+      "id" : "android.recordingSounds",
+      "keywords" : [
+        "play start/stop sounds",
+        "sound profile",
+        "chime",
+        "beep",
+        "volume",
+        "mute sounds"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "recordingSoundsEnabled",
+        "recordingSoundProfile",
+        "recordingSoundVolume"
+      ],
+      "summary" : "Start and stop sounds, their profile and volume.",
+      "title" : "Recording sounds"
+    },
+    {
       "id" : "android.resourcesInUse",
       "keywords" : [
         "status",
@@ -204,6 +224,25 @@
       "title" : "API keys"
     },
     {
+      "id" : "android.privacy",
+      "keywords" : [
+        "privacy",
+        "telemetry",
+        "analytics",
+        "crash reports",
+        "diagnostics",
+        "consent",
+        "opt out"
+      ],
+      "section" : "about",
+      "sectionTitle" : "Privacy",
+      "settingKeys" : [
+
+      ],
+      "summary" : "Choose whether to share anonymous analytics and crash reports. Both start off.",
+      "title" : "Privacy"
+    },
+    {
       "id" : "android.analytics",
       "keywords" : [
         "analytics",
@@ -215,7 +254,7 @@
         "opt in"
       ],
       "section" : "about",
-      "sectionTitle" : "About",
+      "sectionTitle" : "Privacy",
       "settingKeys" : [
         "analyticsConsent"
       ],
@@ -234,7 +273,7 @@
         "telemetry"
       ],
       "section" : "about",
-      "sectionTitle" : "About",
+      "sectionTitle" : "Privacy",
       "settingKeys" : [
         "diagnosticsConsent"
       ],

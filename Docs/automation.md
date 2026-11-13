@@ -558,7 +558,11 @@ reports which schema the host uses in `platform`.
 The iPhone has no automation server, but Settings › General › **Edit raw
 configuration** edits, validates, imports and exports the same document format
 over its own field list (`SettingsSchema+iOS.swift`, keyed by the iOS settings
-names such as `selectedModel` and `hardwareTriggerDestination`). Android has
+names such as `selectedModel` and `hardwareTriggerDestination`). It includes
+the Read aloud settings (`ttsProvider`, `ttsModel`, `ttsVoice`, `ttsSpeed`,
+`ttsLanguageIdentifier`, `sonioxTTSRegion`), which the iPhone has no Settings
+page for yet; the provider, model, voice and speed must form one selection the
+shared voice catalogues accept. Android has
 no automation server either; Settings › **Edit raw configuration** does the same
 over `SettingsSchema+Android.swift` (keyed by its preference names such as
 `cloud_model` and `history_retention`) and refuses to apply while dictating.

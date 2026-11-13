@@ -138,6 +138,8 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onTip = { productId -> tipStore.purchase(this@MainActivity, productId) },
                                 onApplyConfiguration = viewModel::applyConfiguration,
+                                onRecordingSoundsChanged = viewModel::setRecordingSounds,
+                                onPreviewRecordingSound = viewModel::previewRecordingSound,
                             ),
                             privacy = privacyChoices,
                             tips = tips,

@@ -64,6 +64,7 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
 import com.justspeaktoit.android.settings.DictationProfile
+import com.justspeaktoit.android.settings.RecordingSoundSettings
 import com.justspeaktoit.android.settings.SettingsSearchEntry
 import com.justspeaktoit.android.settings.SettingsSearchIndex
 import com.justspeaktoit.android.settings.SettingsSearchRecents
@@ -90,6 +91,8 @@ class SettingsActions(
     val onTip: (String) -> Unit = {},
     /** Applies validated raw-configuration changes all or none; false when they cannot apply now. */
     val onApplyConfiguration: (Map<String, Any?>) -> Boolean = { false },
+    val onRecordingSoundsChanged: (RecordingSoundSettings) -> Unit = {},
+    val onPreviewRecordingSound: () -> Unit = {},
 )
 
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
@@ -270,6 +273,14 @@ fun SettingsScreen(
             Text(stringResource(R.string.settings_keep_audio_note), style = MaterialTheme.typography.bodyMedium)
 
             HorizontalDivider()
+            RecordingSoundsSection(
+                state.recordingSounds,
+                onChange = actions.onRecordingSoundsChanged,
+                onPreview = actions.onPreviewRecordingSound,
+                modifier = anchor("android.recordingSounds"),
+            )
+
+            HorizontalDivider()
             SectionTitle(R.string.settings_corrections_title, anchor("android.personalCorrections"))
             CorrectionsEditor(state.corrections, actions.onCorrectionsChanged)
 
@@ -310,9 +321,9 @@ fun SettingsScreen(
 
             HorizontalDivider()
             Text(
-                stringResource(R.string.settings_privacy_heading),
+                stringResource(R.string.settings_privacy_title),
                 style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.semantics { heading() },
+                modifier = anchor("android.privacy").semantics { heading() },
             )
             ConsentSwitchRow(
                 R.string.settings_analytics_title,

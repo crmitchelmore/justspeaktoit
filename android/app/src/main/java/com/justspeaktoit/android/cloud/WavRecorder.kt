@@ -67,6 +67,9 @@ interface AudioRecorder {
 
     /** While paused the microphone stays open but nothing is written, so the file holds no gap noise. */
     fun setPaused(paused: Boolean) = Unit
+
+    /** Records silence for the next [millis], so a cue the app plays is not captured into the audio. */
+    fun mute(millis: Long) {}
 }
 
 /** Creates the recorder for each Cloud session. */
@@ -97,6 +100,8 @@ class WavRecorder(
 
     @Volatile private var sink: ((ByteArray) -> Unit)? = null
     @Volatile private var paused = false
+    /** [System.nanoTime] until which captured chunks are written as silence. */
+    @Volatile private var mutedUntil = 0L
     private var thread: Thread? = null
     private var record: AudioRecord? = null
 
@@ -176,6 +181,7 @@ class WavRecorder(
                     onLevel(WavFormat.level(chunk, 0))
                     continue
                 }
+                if (System.nanoTime() < mutedUntil) chunk.fill(0, 0, read)
                 bytes.clear()
                 bytes.asShortBuffer().put(chunk, 0, read)
                 out.write(bytes.array(), 0, read * 2)
@@ -195,6 +201,11 @@ class WavRecorder(
         this.paused = paused
     }
 
+    override fun mute(millis: Long) {
+        // Chunks are read up to a buffer behind the microphone, so the margin covers the sound's tail.
+        mutedUntil = System.nanoTime() + (millis + MUTE_MARGIN_MS) * 1_000_000
+    }
+
     /**
      * Stops capture and returns the number of audio bytes recorded, or -1 if capture failed.
      * Idempotent and serialised, so overlapping disposals cannot release the recorder twice.
@@ -211,6 +222,11 @@ class WavRecorder(
         thread = null
         if (failed) return -1
         return (file.length() - WavFormat.HEADER_BYTES).coerceAtLeast(0)
+    }
+
+    private companion object {
+        /** The capture buffer (a fifth of a second) plus output latency. */
+        const val MUTE_MARGIN_MS = 250L
     }
 }
 

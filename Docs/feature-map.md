@@ -128,7 +128,7 @@ The flags live in `Project.swift`; release selection is in
 | F40 | Launch at login | Yes | N/A | Yes | Yes | N/A | | |
 | F41 | Updates | Yes | N/A | Yes | Yes | N/A | | |
 | F42 | Microphone selection | Yes | Partial | Yes | Yes | No | #1637 | |
-| F43 | Recording start/stop sounds | Yes | Yes | Yes | Yes | No | #1638 | |
+| F43 | Recording start/stop sounds | Yes | Yes | Yes | Yes | Yes | | |
 | F44 | Per-app output target (profiles) / Focus overrides | Yes | Yes | Yes | Limited | N/A | | |
 | F45 | Recording audio housekeeping | Yes | Yes | Yes | Yes | Partial | #1629 | |
 | F46 | Send transcripts from phone to desktop | Yes | Partial | No | No | No | #1640 | iOS: Handoff and History sync, no direct sender. |
@@ -518,13 +518,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** See [Windows microphone discovery](windows-microphone-discovery.md).
 
 ### F43 Recording start/stop sounds
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1638.
-- **How:** Play the chosen cue on start and stop only, never on intermediate events.
-- **Refs:** `Sources/SpeakCore/Recording/Apple/RecordingSoundPlayer.swift`, `Sources/SpeakDesktopHost/Recording/DesktopHostRecordingFeedback.swift`, `Sources/SpeakiOS/Services/TranscriptionRecordingService.swift`
+- **Gaps:** none
+- **How:** Play the chosen cue on start and stop only, never on intermediate events, cancel or failure.
+- **Refs:** `Sources/SpeakCore/Recording/Apple/RecordingSoundPlayer.swift`, `Sources/SpeakDesktopHost/Recording/DesktopHostRecordingFeedback.swift`, `Sources/SpeakiOS/Services/TranscriptionRecordingService.swift`, `android/app/src/main/java/com/justspeaktoit/android/dictation/RecordingSoundPlayer.kt`
 - **Sunset:** none
-- **Nuances:** Apple preloads bundled sound files so the cue plays instantly.
+- **Nuances:** Apple preloads bundled sound files so the cue plays instantly. Android preloads the same files (copied byte for byte into `res/raw`) into a SoundPool, records silence over the start cue in Cloud mode and plays Stop only after the microphone has stopped; it has no haptics.
 
 ### F44 Per-app output target (profiles) / Focus overrides
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Limited · Android N/A

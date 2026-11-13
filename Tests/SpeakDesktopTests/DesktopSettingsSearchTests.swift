@@ -104,6 +104,15 @@ final class DesktopSettingsSearchTests: XCTestCase {
         XCTAssertNil(DesktopSettingsSearch.entries(for: .linux).first { $0.id.hasPrefix("windows.") })
     }
 
+    func testRawConfigurationEditorOpensGeneralOnBothDesktops() throws {
+        for platform in [SettingsSearchPlatforms.windows, .linux] {
+            let session = DesktopSettingsSearchSession(platform: platform)
+            let index = try XCTUnwrap(session.results(for: "raw configuration")
+                .firstIndex { $0.title == "Edit raw configuration" })
+            XCTAssertEqual(try XCTUnwrap(session.choose(index)).destination, .general)
+        }
+    }
+
     func testSessionRanksResultsAndRecordsRecents() throws {
         let session = DesktopSettingsSearchSession(platform: .linux)
         XCTAssertTrue(session.results(for: "").isEmpty)

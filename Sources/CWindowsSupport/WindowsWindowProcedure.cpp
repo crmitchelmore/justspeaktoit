@@ -316,6 +316,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 });
             }
             return 0;
+        case rawConfigurationID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, rawConfigurationID) && IsWindowEnabled(window)) {
+                jsti_show_raw_configuration(window, [](HWND, int action, const char *text) {
+                    if (state.callback) state.callback(JSTI_EVENT_RAW_CONFIGURATION, text ? text : "", action,
+                                                       state.context);
+                });
+            }
+            return 0;
         case automationID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             emit(window, JSTI_EVENT_AUTOMATION_TOGGLED, automationShownEnabled() ? "0" : "1");

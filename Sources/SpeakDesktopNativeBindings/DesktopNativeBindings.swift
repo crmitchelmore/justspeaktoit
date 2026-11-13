@@ -18,7 +18,8 @@ package enum DesktopNativeBindings {
         cleanupPreview: jsti_window_cleanup_preview,
         endCleanupPreview: jsti_window_end_cleanup_preview,
         setHistoryManagement: jsti_window_set_history_management,
-        setHUDLayout: jsti_window_set_hud_layout
+        setHUDLayout: jsti_window_set_hud_layout,
+        setRawConfiguration: jsti_window_set_raw_configuration
     )
 
     package static let comparison = DesktopNativeComparisonCalls(

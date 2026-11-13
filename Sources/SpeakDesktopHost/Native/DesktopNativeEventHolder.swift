@@ -216,3 +216,18 @@ package final class DesktopNativeHandlerSlot<Holder: DesktopNativeEventHolder>: 
         if !slot.end(registration) { Holder.Platform.update("\(name) could not be detached safely.") }
     }
 }
+
+package extension DesktopNativeEventHolder {
+    /// Preferences › General › Edit raw configuration. Runs in settings order,
+    /// so an Apply follows the edits before it, then shows the outcome in the
+    /// window. False for other events.
+    func handleRawConfigurationEvent(_ event: DesktopNativeWindowEvent, value: String, index: Int32) -> Bool {
+        guard event == .rawConfiguration else { return false }
+        guard let action = DesktopRawConfigurationAction(rawValue: index) else { return true }
+        let controller = self.controller
+        enqueueSettings {
+            Platform.rawConfiguration(await controller.rawConfiguration(action, text: value))
+        }
+        return true
+    }
+}

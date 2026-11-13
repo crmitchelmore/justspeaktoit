@@ -71,6 +71,8 @@ Windows and Linux use `SettingsSchema.fields(for: .windows)` (`.linux` is the
 same list), derived from `DesktopConfiguration.fields` in
 `SettingsSchema+Desktop.swift`, so a new desktop preference joins the schema
 and `speak config` with no extra entry. Mark consent and grants read-only there.
+Preferences › General › **Edit raw configuration** on both validates and saves
+through `DesktopHostRawConfiguration.swift`; the native windows only edit text.
 
 The iPhone uses `SettingsSchema.fields(for: .iOS)` (`SettingsSchema+iOS.swift`),
 bound in `Sources/SpeakiOS/Settings/IOSSettingsConfiguration.swift` and edited in

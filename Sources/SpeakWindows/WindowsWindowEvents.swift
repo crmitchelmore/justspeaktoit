@@ -36,6 +36,7 @@ private func sharedWindowEvent(
     if actionWindowEvent(event, value: value, holder: holder) { return }
     if holder.settingsSearch.handle(event, query: value, row: index) { return }
     if windowsSystemResourcesEvent(event, value: value, holder: holder) { return }
+    if holder.handleRawConfigurationEvent(event, value: value, index: Int32(index)) { return }
     if inputWindowEvent(event, value: value, index: index, holder: holder) { return }
     // Otherwise a shared event this window never sends, such as Linux's closing window.
 }

@@ -1,121 +1,19 @@
 import Foundation
 import Network
 
-// MARK: - Frame limits
-
-/// Ceiling on the size of one transport frame.
-///
-/// Two ceilings exist because a peer earns capacity. Until it presents a valid
-/// pairing code it may only send frames large enough for a hello and an
-/// authenticate, so a stranger on the local network cannot make either side
-/// buffer megabytes before the pairing code is checked.
-public struct TransportFrameLimit: Equatable, Sendable {
-    /// Applies until the peer authenticates. A hello plus an authenticate frame
-    /// come to a few hundred bytes; 4 KiB leaves room for long device names.
-    public static let handshake = TransportFrameLimit(maximumBytes: 4 * 1024)
-
-    /// Applies to an authenticated session. Transcript and session-end frames
-    /// carry dictated text, so the ceiling is generous but still finite.
-    public static let session = TransportFrameLimit(maximumBytes: 1024 * 1024)
-
-    public let maximumBytes: Int
-
-    private init(maximumBytes: Int) {
-        self.maximumBytes = maximumBytes
-    }
-
-    /// Whether a frame of `byteCount` bytes may cross the wire.
-    public func admits(byteCount: Int) -> Bool {
-        byteCount > 0 && byteCount <= self.maximumBytes
-    }
-}
-
-// MARK: - Errors
-
-public enum TransportChannelError: Error, Equatable {
-    /// The connection could not be established, or it dropped mid-flight.
-    case connectionFailed(String)
-    /// The peer closed the connection, or it was cancelled locally.
-    case closed
-    /// A frame exceeded the ceiling that applies to the current phase.
-    case frameTooLarge(byteCount: Int, maximumBytes: Int)
-    /// A frame arrived with an opcode this protocol does not carry data in.
-    case unsupportedFrame
-}
-
-extension TransportChannelError: LocalizedError {
-    public var errorDescription: String? {
-        switch self {
-        case .connectionFailed(let reason):
-            "Connection failed: \(reason)"
-        case .closed:
-            "The connection closed"
-        case .frameTooLarge(let byteCount, let maximumBytes):
-            "Message of \(byteCount) bytes is above the \(maximumBytes) byte limit"
-        case .unsupportedFrame:
-            "The peer sent a frame this protocol does not use"
-        }
-    }
-}
-
-// MARK: - Wire format
-
-/// The single definition of how "Send to Mac" frames travel between the phone
-/// and the Mac.
-///
-/// Both endpoints build their `NWParameters` here, so the two sides cannot drift
-/// apart again. Before this existed the phone spoke WebSocket while the Mac read
-/// a hand-rolled four-byte length prefix, so the Mac parsed the letters of
-/// `GET ` as a frame length and no message ever decoded (issue #688).
-///
-/// The chosen wire is WebSocket (RFC 6455) over TCP: the system frames the
-/// messages on both platforms, which removes the hand-rolled length prefix that
-/// caused the mismatch.
-public enum SpeakTransportWire {
-    /// Request path in the WebSocket handshake.
-    ///
-    /// The server accepts any path. This one keeps URLs readable for a Mac
-    /// addressed directly rather than through Bonjour.
-    public static let endpointPath = "/speak"
-
-    /// URL endpoint for a Mac reached by address.
-    ///
-    /// A client must address the server either as this URL or as the Bonjour
-    /// service endpoint that discovery returns. A bare host-and-port endpoint
-    /// does not work: the WebSocket handshake needs a request line, so the
-    /// connection stalls in `preparing` and then aborts.
-    public static func endpoint(host: String, port: UInt16) -> NWEndpoint? {
-        guard let url = URL(string: "ws://\(host):\(port)\(self.endpointPath)") else { return nil }
-        return .url(url)
-    }
-
-    /// Parameters for one end of the transport.
-    ///
-    /// - Parameter includesPeerToPeer: Whether to offer peer-to-peer interfaces.
-    ///   The shipping server and client both do; tests that bind loopback do not.
-    public static func parameters(includesPeerToPeer: Bool) -> NWParameters {
-        let parameters = NWParameters.tcp
-        parameters.includePeerToPeer = includesPeerToPeer
-
-        let websocket = NWProtocolWebSocket.Options()
-        websocket.autoReplyPing = true
-        // Hard ceiling inside the framing layer itself: an oversized frame is
-        // refused before its bytes are buffered, so no peer — authenticated or
-        // not — can drive an unbounded allocation.
-        websocket.maximumMessageSize = TransportFrameLimit.session.maximumBytes
-        parameters.defaultProtocolStack.applicationProtocols.insert(websocket, at: 0)
-
-        return parameters
-    }
-}
-
 // MARK: - Channel
 
 /// One message channel over an established `NWConnection`.
 ///
 /// The phone and the Mac both send and receive through this type, so the frame
-/// format, the size ceilings and the close behaviour have exactly one
-/// implementation. Callers see `TransportMessage` values and never touch bytes.
+/// format, the encryption, the size ceilings and the close behaviour have
+/// exactly one implementation. Callers see `TransportMessage` values and never
+/// touch bytes.
+///
+/// After `start()`, the phone calls `establishSecureSession(pairingCode:)` and
+/// the Mac calls `acceptSecureSession(authorize:)`. `send` and `receive` refuse
+/// to run until that handshake has succeeded, and from then on every frame is
+/// sealed (see `TransportSecureSession.swift`).
 ///
 /// Receive is sequential: run one receive loop per channel.
 public actor TransportChannel {
@@ -125,6 +23,7 @@ public actor TransportChannel {
     private let decoder = JSONDecoder()
     private var limit = TransportFrameLimit.handshake
     private var hasStarted = false
+    private var session: TransportSessionKeys?
 
     public init(connection: NWConnection) {
         self.connection = connection
@@ -156,6 +55,11 @@ public actor TransportChannel {
         self.limit
     }
 
+    /// Whether the handshake has finished and every frame is now sealed.
+    public var isEncrypted: Bool {
+        self.session != nil
+    }
+
     /// Runs the WebSocket handshake and waits for the connection to be usable.
     public func start() async throws {
         guard !self.hasStarted else { return }
@@ -182,16 +86,167 @@ public actor TransportChannel {
         }
     }
 
-    /// Encodes and sends one message as a binary WebSocket frame.
+    // MARK: - Encrypted handshake
+
+    /// Phone side: agrees session keys with the Mac using `pairingCode`.
+    ///
+    /// Returns once the Mac has proved it holds the same code. Throws
+    /// `TransportRejection` with the Mac's reason when it refuses the code,
+    /// is locked out or runs a different protocol version.
+    public func establishSecureSession(pairingCode: String) async throws {
+        try await self.establishSecureSession(pairingCode: pairingCode, protocolVersion: SpeakTransportProtocolVersion)
+    }
+
+    func establishSecureSession(pairingCode: String, protocolVersion: Int) async throws {
+        guard self.session == nil else { return }
+        let handshake = try TransportClientHandshake(protocolVersion: protocolVersion)
+        try await self.sendFrame(handshake.frame)
+
+        let reply = try await self.receiveFrame()
+        guard TransportKeyShare.decode(reply) != nil else {
+            throw self.rejection(in: reply) ?? TransportSecurityError.malformedHandshake
+        }
+        let finish = try handshake.finish(serverFrame: reply, pairingCode: pairingCode)
+        var keys = finish.keys
+        try await self.sendFrame(finish.finished)
+
+        let confirmation = try await self.receiveFrame()
+        guard let opened = try? keys.inbound.open(confirmation) else {
+            // The Mac could not open our frame, so it answered in plaintext.
+            // Only a refusal is read from such a frame; never a success.
+            throw self.rejection(in: confirmation) ?? TransportSecurityError.unauthenticatedFrame
+        }
+        guard opened == TransportKeySchedule.serverFinished else {
+            throw TransportSecurityError.unauthenticatedFrame
+        }
+        self.session = keys
+    }
+
+    /// Mac side: answers the phone's key share and checks its pairing proof.
+    ///
+    /// `authorize` receives the phone's proof and must run it through the
+    /// pairing attempt limit. A plaintext or wrong-version peer, a wrong code and
+    /// a lockout are each refused with a plaintext reason and a thrown
+    /// `TransportRejection`; nothing encrypted is sent until the code is proved.
+    public func acceptSecureSession(
+        authorize: @Sendable (TransportPairingProof) -> PairingAttemptResult
+    ) async throws {
+        try await self.acceptSecureSession(protocolVersion: SpeakTransportProtocolVersion, authorize: authorize)
+    }
+
+    func acceptSecureSession(
+        protocolVersion: Int,
+        authorize: @Sendable (TransportPairingProof) -> PairingAttemptResult
+    ) async throws {
+        guard self.session == nil else { return }
+        let handshake: TransportServerHandshake
+        do {
+            handshake = try TransportServerHandshake(
+                clientFrame: try await self.receiveFrame(),
+                protocolVersion: protocolVersion
+            )
+        } catch let refusal as TransportServerHandshake.Refusal {
+            throw await self.refuse(refusal, serverVersion: protocolVersion)
+        }
+        try await self.sendFrame(handshake.frame)
+
+        let proof = TransportPairingProof(schedule: handshake.schedule, clientFinished: try await self.receiveFrame())
+        let message: String
+        switch authorize(proof) {
+        case .accepted:
+            guard var keys = proof.acceptedKeys else { throw TransportSecurityError.unauthenticatedFrame }
+            try await self.sendFrame(try keys.outbound.seal(TransportKeySchedule.serverFinished))
+            self.session = keys
+            return
+        case .rejected:
+            message = "Invalid pairing code"
+        case .lockedOut(let retryAfter):
+            let seconds = Int(retryAfter.rounded(.up))
+            message = "Too many failed pairing attempts. Try again in \(seconds) seconds."
+        }
+        try? await self.sendPlaintext(.authResult(AuthResultMessage(success: false, errorMessage: message)))
+        throw TransportRejection(message: message)
+    }
+
+    private func refuse(_ refusal: TransportServerHandshake.Refusal, serverVersion: Int) async -> Error {
+        let reply: ErrorMessage
+        switch refusal {
+        case .plaintextHello(let version) where version == serverVersion:
+            reply = ErrorMessage(code: 426, message: "Send to Mac requires an encrypted connection")
+        case .plaintextHello(let version), .versionMismatch(let version):
+            reply = .protocolMismatch(clientVersion: version, serverVersion: serverVersion)
+        case .malformed:
+            return TransportSecurityError.malformedHandshake
+        }
+        try? await self.sendPlaintext(.error(reply))
+        return TransportRejection(message: reply.message)
+    }
+
+    /// A plaintext refusal the peer sent instead of a handshake frame.
+    private func rejection(in frame: Data) -> TransportRejection? {
+        switch try? self.decoder.decode(TransportMessage.self, from: frame) {
+        case .authResult(let result)? where !result.success:
+            TransportRejection(message: result.errorMessage ?? "Authentication failed")
+        case .error(let error)?:
+            TransportRejection(message: error.message)
+        default:
+            nil
+        }
+    }
+
+    // MARK: - Messages
+
+    /// Encodes, seals and sends one message as a binary WebSocket frame.
     public func send(_ message: TransportMessage) async throws {
-        let data = try self.encoder.encode(message)
-        guard self.limit.admits(byteCount: data.count) else {
+        guard var session = self.session else { throw TransportSecurityError.notEncrypted }
+        let plaintext = try self.encoder.encode(message)
+        guard self.limit.admits(byteCount: plaintext.count + TransportFrameCipher.overhead) else {
             throw TransportChannelError.frameTooLarge(
-                byteCount: data.count,
+                byteCount: plaintext.count + TransportFrameCipher.overhead,
                 maximumBytes: self.limit.maximumBytes
             )
         }
+        let sealed = try session.outbound.seal(plaintext)
+        self.session = session
+        try await self.sendFrame(sealed)
+    }
 
+    /// Waits for the next message. Throws when the peer closes, when a frame
+    /// breaks the size ceiling, fails authentication, or is not a valid message.
+    public func receive() async throws -> TransportMessage {
+        guard self.session != nil else { throw TransportSecurityError.notEncrypted }
+        let frame = try await self.receiveFrame()
+        // Re-read after the suspension: a concurrent send may have advanced the
+        // outbound counter while this receive waited.
+        guard var session = self.session else { throw TransportSecurityError.notEncrypted }
+        let plaintext = try session.inbound.open(frame)
+        self.session = session
+        return try self.decoder.decode(TransportMessage.self, from: plaintext)
+    }
+
+    /// Sends a message without encryption.
+    ///
+    /// Only a refusal before the session exists goes out this way; tests use it
+    /// to play a peer that does not encrypt.
+    func sendPlaintext(_ message: TransportMessage) async throws {
+        let data = try self.encoder.encode(message)
+        guard self.limit.admits(byteCount: data.count) else {
+            throw TransportChannelError.frameTooLarge(byteCount: data.count, maximumBytes: self.limit.maximumBytes)
+        }
+        try await self.sendFrame(data)
+    }
+
+    /// Receives a message whether or not it is sealed. Tests use it to watch a
+    /// plaintext peer being refused.
+    func receiveAnyMessage() async throws -> TransportMessage {
+        if self.session != nil { return try await self.receive() }
+        return try self.decoder.decode(TransportMessage.self, from: try await self.receiveFrame())
+    }
+
+    private func sendFrame(_ data: Data) async throws {
+        guard self.limit.admits(byteCount: data.count) else {
+            throw TransportChannelError.frameTooLarge(byteCount: data.count, maximumBytes: self.limit.maximumBytes)
+        }
         let connection = self.connection
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let context = NWConnection.ContentContext(
@@ -213,13 +268,6 @@ public actor TransportChannel {
                 }
             )
         }
-    }
-
-    /// Waits for the next message. Throws when the peer closes, when a frame
-    /// breaks the size ceiling, or when the payload is not a valid message.
-    public func receive() async throws -> TransportMessage {
-        let data = try await self.receiveFrame()
-        return try self.decoder.decode(TransportMessage.self, from: data)
     }
 
     /// Closes the connection. Safe to call more than once, and from any context.

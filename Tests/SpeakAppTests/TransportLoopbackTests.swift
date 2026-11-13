@@ -31,6 +31,9 @@ final class TransportLoopbackTests: XCTestCase {
         self.savedDevices = defaults.dictionary(forKey: self.devicesKey) as? [String: String]
         defaults.removeObject(forKey: self.codeKey)
         defaults.removeObject(forKey: self.devicesKey)
+        // Also clears the in-memory attempt limiter, so one test's wrong codes
+        // cannot lock out the next.
+        _ = PairingManager.shared.regeneratePairingCode()
     }
 
     override func tearDown() {
@@ -127,7 +130,7 @@ final class TransportLoopbackTests: XCTestCase {
         await channel.admitSessionFrames()
 
         let padding = String(repeating: "n", count: TransportFrameLimit.handshake.maximumBytes)
-        try await channel.send(.hello(HelloMessage(deviceName: padding, deviceId: "oversized-device")))
+        try await channel.sendPlaintext(.hello(HelloMessage(deviceName: padding, deviceId: "oversized-device")))
 
         let didClose = await self.waitForClosure(of: channel)
         XCTAssertTrue(didClose, "The Mac must hang up on an oversized handshake frame")
@@ -146,6 +149,8 @@ final class TransportLoopbackTests: XCTestCase {
         let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
         defer { channel.close() }
         try await withHangGuard("start") { try await channel.start() }
+        let code = PairingManager.shared.pairingCode
+        try await withHangGuard("handshake") { try await channel.establishSecureSession(pairingCode: code) }
         let chunk = TranscriptChunkMessage(
             sessionId: "session-1",
             sequenceNumber: 1,
@@ -165,9 +170,8 @@ final class TransportLoopbackTests: XCTestCase {
     func testStop_closesAcceptedPeerBeforeAuthentication() async throws {
         let endpoint = try await self.startServer()
         let server = try XCTUnwrap(self.server)
-        let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
+        let channel = try await self.securedChannel(to: endpoint)
         defer { channel.close() }
-        try await channel.start()
         // The round trip proves the server owns this accepted channel before stop.
         try await self.ping(channel)
 
@@ -186,9 +190,9 @@ final class TransportLoopbackTests: XCTestCase {
         let unpaired = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
         defer { unpaired.close() }
         try await unpaired.start()
-        try await unpaired.send(.hello(HelloMessage(deviceName: "Unpaired", deviceId: "shared-id")))
-        // A session frame is rejected, triggering the unpaired peer's disconnect callback.
-        try await unpaired.send(.sessionStart(SessionStartMessage(sessionId: "rejected", model: "test")))
+        try await unpaired.sendPlaintext(.hello(HelloMessage(deviceName: "Unpaired", deviceId: "shared-id")))
+        // The plaintext peer is refused, triggering its disconnect callback.
+        _ = try? await unpaired.sendPlaintext(.sessionStart(SessionStartMessage(sessionId: "rejected", model: "test")))
         let didClose = await self.waitForClosure(of: unpaired)
         XCTAssertTrue(didClose)
         try await self.ping(paired)
@@ -268,10 +272,22 @@ final class TransportLoopbackTests: XCTestCase {
         ])
     }
 
-    func authenticatedChannel(to endpoint: NWEndpoint, deviceId: String) async throws -> TransportChannel {
+    /// A channel that finished the encrypted handshake but has not authenticated.
+    func securedChannel(to endpoint: NWEndpoint) async throws -> TransportChannel {
         let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
         do {
             try await channel.start()
+            try await channel.establishSecureSession(pairingCode: PairingManager.shared.pairingCode)
+            return channel
+        } catch {
+            channel.close()
+            throw error
+        }
+    }
+
+    func authenticatedChannel(to endpoint: NWEndpoint, deviceId: String) async throws -> TransportChannel {
+        let channel = try await self.securedChannel(to: endpoint)
+        do {
             try await channel.send(.hello(HelloMessage(deviceName: "Test Phone", deviceId: deviceId)))
             try await channel.send(.authenticate(AuthenticateMessage(pairingCode: PairingManager.shared.pairingCode)))
             guard case .authResult(let result) = try await channel.receive(), result.success else {
@@ -304,8 +320,10 @@ final class TransportLoopbackTests: XCTestCase {
         let closed = try? await withHangGuard("closure", seconds: timeout) { () -> Bool in
             do {
                 while true {
-                    let message = try await channel.receive()
+                    let message = try await channel.receiveAnyMessage()
                     if ignoringPongs, case .pong = message { continue }
+                    // A refusal is the Mac's last word before it hangs up.
+                    if case .error = message { continue }
                     return false
                 }
             } catch {
@@ -314,82 +332,5 @@ final class TransportLoopbackTests: XCTestCase {
         }
         channel.close()
         return closed ?? false
-    }
-}
-
-struct TransportHangGuardTimeout: Error, CustomStringConvertible {
-    let stage: String
-    let seconds: TimeInterval
-    var description: String { "Loopback \(stage) did not complete within \(seconds)s" }
-}
-
-/// Runs `operation` but returns within `seconds` even if it never completes,
-/// so a stuck Network.framework callback fails the test instead of the job.
-/// A timed-out operation is cancelled and left to finish on its own.
-func withHangGuard<T: Sendable>(
-    _ stage: String, seconds: TimeInterval = 10, _ operation: @escaping @Sendable () async throws -> T
-) async throws -> T {
-    let gate = HangGuardGate<T>()
-    return try await withCheckedThrowingContinuation { continuation in
-        gate.install(continuation)
-        let work = Task { gate.finish(await Result { try await operation() }) }
-        Task {
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            if gate.finish(.failure(TransportHangGuardTimeout(stage: stage, seconds: seconds))) { work.cancel() }
-        }
-    }
-}
-
-private final class HangGuardGate<T: Sendable>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<T, Error>?
-    private var pending: Result<T, Error>?
-
-    func install(_ continuation: CheckedContinuation<T, Error>) {
-        let early: Result<T, Error>? = lock.withLock {
-            if let pending { self.pending = nil; return pending }
-            self.continuation = continuation
-            return nil
-        }
-        if let early { continuation.resume(with: early) }
-    }
-
-    @discardableResult
-    func finish(_ result: Result<T, Error>) -> Bool {
-        let target: CheckedContinuation<T, Error>? = lock.withLock {
-            if let continuation { self.continuation = nil; return continuation }
-            if pending == nil { pending = result }
-            return nil
-        }
-        target?.resume(with: result)
-        return target != nil
-    }
-}
-
-private extension Result where Failure == Error {
-    init(catching body: () async throws -> Success) async {
-        do { self = .success(try await body()) } catch { self = .failure(error) }
-    }
-}
-
-/// Collects what the Mac would insert, so assertions can read it after the wait.
-private final class TranscriptInbox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedSessionId: String?
-    private var storedText: String?
-
-    var sessionId: String? {
-        self.lock.withLock { self.storedSessionId }
-    }
-
-    var text: String? {
-        self.lock.withLock { self.storedText }
-    }
-
-    func record(sessionId: String, text: String) {
-        self.lock.withLock {
-            self.storedSessionId = sessionId
-            self.storedText = text
-        }
     }
 }

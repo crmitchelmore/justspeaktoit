@@ -18,6 +18,15 @@ protocol StreamingTextField {
   func setSelectedRange(_ range: CFRange) -> AXError
   /// Replaces the current selection; `.success` when the app accepted it.
   func setSelectedText(_ text: String) -> AXError
+  /// The document the field currently shows (the `AXDocument` URL of the
+  /// field or its window), or `nil` when the app does not report one. Apps
+  /// such as Notes reuse one element for every note (#664), so equal text is
+  /// no proof the field still shows the same document; this is.
+  func readDocumentIdentity() -> String?
+}
+
+extension StreamingTextField {
+  func readDocumentIdentity() -> String? { nil }
 }
 
 /// The live implementation, backed by the focused accessibility element.
@@ -63,5 +72,23 @@ struct AccessibilityStreamingTextField: StreamingTextField {
     AXUIElementSetAttributeValue(
       self.element, kAXSelectedTextAttribute as CFString, text as CFTypeRef
     )
+  }
+
+  func readDocumentIdentity() -> String? {
+    if let document = Self.copyString(self.element, kAXDocumentAttribute), !document.isEmpty {
+      return document
+    }
+    var window: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(self.element, kAXWindowAttribute as CFString, &window) == .success,
+          let window, CFGetTypeID(window) == AXUIElementGetTypeID()
+    else { return nil }
+    let document = Self.copyString(unsafeBitCast(window, to: AXUIElement.self), kAXDocumentAttribute)
+    return document?.isEmpty == false ? document : nil
+  }
+
+  private static func copyString(_ element: AXUIElement, _ attribute: String) -> String? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
+    return value as? String
   }
 }

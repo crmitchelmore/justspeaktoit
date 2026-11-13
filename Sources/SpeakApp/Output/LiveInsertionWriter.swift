@@ -15,6 +15,9 @@ protocol LiveInsertionWriter: AnyObject {
   func update(with newText: String)
   /// Replaces what was written with the final text.
   func finalize(with finalText: String) -> LiveTextInserter.FinalizationResult
+  /// Removes what this session wrote after the recording was cancelled, only
+  /// when the field provably holds nothing but the session's own change.
+  func rollBack() -> LiveTextInserter.RollbackResult
 }
 
 /// What a live insertion writer needs from the session that owns it.

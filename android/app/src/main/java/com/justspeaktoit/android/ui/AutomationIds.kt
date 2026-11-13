@@ -16,10 +16,12 @@ object AutomationIds {
     const val SHARE = "dictation.share"
     const val CLEAR = "dictation.clear"
     const val SHOW_ORIGINAL = "dictation.showOriginal"
+    const val READ_ALOUD = "dictation.readAloud"
     const val OPEN_HISTORY = "dictation.openHistory"
     const val OPEN_SETTINGS = "dictation.openSettings"
     const val HISTORY_BACK = "history.back"
     const val HISTORY_CLEAR = "history.clear"
+    const val HISTORY_INSIGHTS = "history.insights"
     const val SETTINGS_BACK = "settings.back"
     const val SETTINGS_SEARCH = "settingsSearchField"
     const val SETTINGS_SEARCH_CLEAR = "settingsSearchClear"
@@ -36,6 +38,16 @@ object AutomationIds {
         "settings.resources.release.${kind.rawValue}.$owner"
 
     const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
+    const val SETTINGS_LANGUAGE = "settings.language"
+    const val CORRECTIONS_WRITE_AS = "settings.corrections.writeAs"
+    const val CORRECTIONS_HEARD_AS = "settings.corrections.heardAs"
+    const val CORRECTIONS_ADD = "settings.corrections.add"
+
+    /** One per language in the picker, keyed by its catalogue ID (for example `en_GB`). */
+    fun languageOption(id: String) = "languagePicker.language.$id"
+
+    /** One per correction, keyed by its spelling. */
+    fun correctionRemove(writeAs: String) = "settings.corrections.remove.$writeAs"
     const val CLEANUP_PICKER_BACK = "cleanupPicker.back"
     const val CLEANUP_PICKER_SEARCH = "cleanupPicker.search"
     const val CLEANUP_PICKER_OPENROUTER = "cleanupPicker.openRouter"

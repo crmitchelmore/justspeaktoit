@@ -5,6 +5,7 @@ import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceHold
@@ -21,6 +22,8 @@ data class DictationUiState(
     val options: List<ModeAvailability> = emptyList(),
     /** The user's explicit choice; null means "use the best available on-device or device mode". */
     val chosenMode: RecognitionMode? = null,
+    /** The saved `DictationLanguages` choice; [languageTag] is what it resolves to now. */
+    val languageId: String = DictationLanguages.AUTOMATIC,
     val languageTag: String = Locale.getDefault().toLanguageTag(),
     val onDeviceLanguageTag: String = languageTag,
     val checkingAvailability: Boolean = true,
@@ -47,6 +50,8 @@ data class DictationUiState(
     val keepAudioOnCancel: Boolean = AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL,
     /** The History entry whose kept audio is being transcribed, if any. */
     val transcribingEntryId: String? = null,
+    /** Personal corrections, in the order they apply. */
+    val corrections: List<CorrectionRule> = emptyList(),
     /** System resources the app holds now, oldest first (#1473). */
     val resourcesInUse: List<SystemResourceHold> = emptyList(),
 ) {

@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-12"
+updated: "2026-11-13"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -809,6 +809,94 @@ sessions:
           - "Open Just Speak to It, double-tap Start recording, say a fictional sentence, then double-tap Stop recording."
           - "Swipe to the new capture row."
         expected: "The button reads Start recording, then Stop recording, and the row reads its time, length and status as one item."
+        final_gate: true
+  - id: "android"
+    device: "Android"
+    title: "Android"
+    setup:
+      - "A Pixel on Android 13 or later and, for the OEM check, a non-Google phone, each with the Alpha APK installed."
+      - "An OpenAI and a Groq key saved in Settings for the Cloud checks, and an OpenRouter key for cleanup. Use made-up sentences only."
+    items:
+      - id: "android-on-device-offline"
+        issues:
+          - 1328
+        title: "On-device dictation works offline, and a missing model can be downloaded"
+        minutes: 8
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "On the Pixel, choose On-device and dictate a sentence; repeat in flight mode."
+          - "Settings: choose a Dictation language whose on-device model is not installed, tap Download language and wait for it to install, then dictate."
+          - "Repeat the first step on the non-Google phone; if it has no recognition service, or it is disabled, note what the app says."
+          - "In flight mode, try Speech service and Cloud modes."
+        expected: "Each session returns the spoken words, offline included. After the download, Start becomes available and dictation works. A phone without a recogniser shows the reason and no Start. Offline Speech service and Cloud either return a genuine transcript or fail visibly; never a false success."
+        final_gate: true
+      - id: "android-permission-interruptions"
+        issues:
+          - 1328
+        title: "Microphone permission and interruptions fail honestly"
+        minutes: 8
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "Clear the app's permissions. Start dictation and deny the microphone, then deny it permanently, then recover through the Settings link."
+          - "During a dictation, receive a call; during another, connect and then disconnect a Bluetooth headset."
+          - "During a dictation, leave the app."
+        expected: "Denial shows a rationale, then a Settings link, and dictation works once granted. A call or route change ends the session with a clear reason or carries on with correct text; leaving the app reports that dictation stopped and History keeps the unfinished words as unfinished."
+        final_gate: true
+      - id: "android-cloud-keys-cleanup"
+        issues:
+          - 1328
+        title: "Cloud transcription, a rejected key and cleanup with real keys"
+        minutes: 6
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "Choose Cloud with GPT Transcribe and dictate; repeat with Whisper Large v3 Turbo."
+          - "Save an invalid OpenAI key and dictate in Cloud."
+          - "Restore the key, turn on cleanup with an OpenRouter model and dictate."
+        expected: "Both models return the words. The invalid key fails with \"rejected the API key\". Cleanup returns tidied text and Show original restores the raw transcript."
+        final_gate: true
+      - id: "android-entry-surfaces"
+        issues:
+          - 1328
+        title: "Tile, shortcut, shared audio and the dictation keyboard"
+        minutes: 10
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "Start dictation from the Quick Settings tile and from the launcher shortcut, on a locked and an unlocked phone."
+          - "Share a WhatsApp voice note (OGG/Opus) and an M4A recording into the app and confirm the upload."
+          - "Enable the Just Speak to It keyboard and dictate into a messaging app and a browser field; switch keyboards mid-dictation."
+          - "Open a password field and check the keyboard's microphone; then deny the microphone permission and try the keyboard."
+        expected: "The tile and shortcut open the app and start dictating (after unlocking when locked). Both shared files are transcribed into History. The keyboard inserts the final text, is disabled in the password field, and explains a denied permission. Switching keyboards stops dictation without inserting stray text."
+        final_gate: true
+      - id: "android-language-corrections-read-aloud"
+        issues:
+          - 1328
+        title: "Dictation language, personal corrections and Read aloud"
+        minutes: 6
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "Settings: set Dictation language to French and dictate a French sentence in On-device, Speech service and the keyboard; then set it back to Automatic."
+          - "Settings: add a personal correction, write as \"Kubernetes\", heard as \"cooper netties\"."
+          - "Say \"I deploy to cooper netties\" in On-device mode and in Cloud with GPT Transcribe."
+          - "Tap Read aloud on the finished transcript, then Stop reading."
+        expected: "French is recognised in each mode and Automatic follows the phone language again. Both transcripts read \"I deploy to Kubernetes\". Read aloud speaks the transcript and Stop reading silences it."
+        final_gate: true
+      - id: "android-battery-latency"
+        issues:
+          - 1328
+        title: "Battery and latency over a five-minute dictation series"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "Note the battery percentage, then dictate for five minutes in short sessions in On-device mode."
+          - "Note how long each final transcript takes to appear after Stop."
+          - "Note the battery percentage again and any heat."
+        expected: "Battery use and latency are comparable to the phone's own voice typing; note the numbers in the result."
         final_gate: true
   - id: "decisions"
     device: "Decision"

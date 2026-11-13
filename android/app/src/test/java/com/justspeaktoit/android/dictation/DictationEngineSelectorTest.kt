@@ -27,7 +27,7 @@ class DictationEngineSelectorTest {
         scope,
         timings,
         sessionActive = { active },
-        currentLanguageTag = { "en-GB" },
+        phoneLanguageTag = { "en-GB" },
         publish = { published += it },
     )
 
@@ -129,5 +129,26 @@ class DictationEngineSelectorTest {
 
         assertEquals("the first check plus a recheck per state until Installed", 3, resolving.checks)
         assertEquals(ModeStatus.Ready, watched.selection.status(RecognitionMode.OnDevice))
+    }
+
+    @Test
+    fun testChoosingALanguage_persistsItAndChecksTheNewTag_butNotMidSession() {
+        val selector = selector()
+
+        selector.chooseLanguage("fr_FR")
+
+        assertEquals("fr_FR", prefs.languageId)
+        assertEquals("fr_FR", selector.selection.languageId)
+        assertEquals("fr-FR", selector.selection.languageTag)
+        assertEquals("fr-FR", selector.selection.onDeviceLanguageTag)
+
+        active = true
+        selector.chooseLanguage(DictationLanguages.AUTOMATIC)
+        assertEquals("fr_FR", prefs.languageId)
+
+        active = false
+        selector.chooseLanguage("not-a-language")
+        assertEquals(DictationLanguages.AUTOMATIC, prefs.languageId)
+        assertEquals("en-GB", selector.selection.languageTag)
     }
 }

@@ -49,6 +49,7 @@ interface CloudService {
         languageTag: String?,
         call: CallHandle,
         format: SharedAudio.Format = SharedAudio.Format("wav", "audio/wav"),
+        prompt: String? = null,
     ): String
 
     fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String
@@ -69,9 +70,10 @@ class CloudClient(
         languageTag: String?,
         call: CallHandle,
         format: SharedAudio.Format,
+        prompt: String?,
     ): String {
         val multipart = CloudWire.multipart(
-            fields = CloudWire.transcriptionFields(model, languageTag),
+            fields = CloudWire.transcriptionFields(model, languageTag, prompt),
             fileField = "file",
             fileName = "dictation.${format.extension}",
             mimeType = format.mimeType,

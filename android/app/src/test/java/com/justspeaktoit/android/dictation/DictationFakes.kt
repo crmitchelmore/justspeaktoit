@@ -13,6 +13,7 @@ import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
+import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryFile
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
@@ -143,7 +144,12 @@ internal class FakeRecorders : RecorderFactory {
 }
 
 internal class FakeCloud : CloudService {
-    data class Transcription(val model: String, val languageTag: String?, val call: CallHandle)
+    data class Transcription(
+        val model: String,
+        val languageTag: String?,
+        val call: CallHandle,
+        val prompt: String? = null,
+    )
 
     val transcriptions = CopyOnWriteArrayList<Transcription>()
     val cleanups = CopyOnWriteArrayList<String>()
@@ -159,8 +165,9 @@ internal class FakeCloud : CloudService {
         languageTag: String?,
         call: CallHandle,
         format: SharedAudio.Format,
+        prompt: String?,
     ): String {
-        transcriptions += Transcription(model.catalogId, languageTag, call)
+        transcriptions += Transcription(model.catalogId, languageTag, call, prompt)
         return onTranscribe(call)
     }
 
@@ -193,6 +200,8 @@ internal class MemoryPrefs(
     override var cleanupEnabled: Boolean = false,
     override var retention: Retention = Retention.Month,
     override var keepAudioOnCancel: Boolean = true,
+    override var languageId: String? = null,
+    override var corrections: List<CorrectionRule> = emptyList(),
 ) : DictationPreferences
 
 internal class MemoryHistoryFile : HistoryFile {

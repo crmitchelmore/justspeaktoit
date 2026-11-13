@@ -4,7 +4,8 @@ Follow [AGENTS.md](../AGENTS.md); it is the authoritative guide for this reposit
 
 Build features for every platform in the same change where possible. Otherwise
 file one cross-platform issue for the remaining platforms, link it from the PR
-and update [Docs/feature-parity.md](../Docs/feature-parity.md) (see AGENTS.md,
+and update [Docs/feature-map.md](../Docs/feature-map.md), the feature map to
+check before building, changing or removing any feature (see AGENTS.md,
 **Cross-Platform Features**).
 
 ## Before every PR or push

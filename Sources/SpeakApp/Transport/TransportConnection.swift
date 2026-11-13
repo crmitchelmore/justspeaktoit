@@ -71,9 +71,10 @@ final class TransportConnection {
         }
         do {
             // The pairing attempt limit applies to the encrypted proof, so a
-            // peer cannot guess codes any faster than it could before.
+            // peer cannot guess codes any faster than it could before. A phone
+            // that proves the code is issued a device credential for next time.
             try await self.channel.acceptSecureSession { proof in
-                PairingManager.shared.attemptPairing(provingWith: proof.verifies(pairingCode:))
+                PairingManager.shared.authorize(proof)
             }
         } catch {
             SpeakLogger.transport.warning(
@@ -150,9 +151,11 @@ final class TransportConnection {
             SpeakLogger.transport.warning("Dropping connection: authenticate arrived before hello")
             return false
         }
-        // The handshake already proved the code under the attempt limit; this
-        // only confirms the sealed message agrees, so it is not counted again.
-        guard PairingManager.shared.validatePairingCode(auth.pairingCode) else {
+        // The handshake already proved the code under the attempt limit, or a
+        // device credential in its place; this only confirms a sealed code
+        // agrees, so it is not counted again. A credential session has no code.
+        let usedCredential = await self.channel.isAuthenticatedByCredential
+        guard usedCredential || PairingManager.shared.validatePairingCode(auth.pairingCode) else {
             await self.send(.authResult(AuthResultMessage(success: false, errorMessage: "Invalid pairing code")))
             SpeakLogger.transport.warning("Authentication failed")
             return false
@@ -168,6 +171,9 @@ final class TransportConnection {
 
         guard !Task.isCancelled else { return false }
         PairingManager.shared.addPairedDevice(id: deviceId, name: deviceName)
+        if let credentialID = await self.channel.credentialID {
+            PairingManager.shared.bindCredential(credentialID, toDevice: deviceId)
+        }
         self.onAuthenticated?(deviceId, deviceName)
 
         SpeakLogger.transport.info("Authentication successful for \(deviceName, privacy: .public)")

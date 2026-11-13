@@ -206,6 +206,27 @@
       "title" : "Stop recording after silence"
     },
     {
+      "id" : "android.appearance",
+      "keywords" : [
+        "theme",
+        "dark mode",
+        "light mode",
+        "night mode",
+        "dynamic colour",
+        "dynamic color",
+        "material you",
+        "wallpaper colours"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "appearance",
+        "dynamicColor"
+      ],
+      "summary" : "Light, dark or the phone's theme, and wallpaper colours on Android 12 and later.",
+      "title" : "Appearance"
+    },
+    {
       "id" : "android.resourcesInUse",
       "keywords" : [
         "status",

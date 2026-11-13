@@ -134,7 +134,7 @@ The flags live in `Project.swift`; release selection is in
 | F46 | Send transcripts from phone to desktop | Yes | Partial | No | No | No | #1640 | iOS: Handoff and History sync, no direct sender. macOS: direct build only; the Mac App Store build has no receiver. |
 | F47 | Accessible names, IDs and recording announcements | Yes | Yes | Yes | Yes | Yes | | |
 | F48 | Learned auto-corrections | Yes | No | Yes | Yes | No | #1651 | |
-| F49 | Appearance settings | Yes | Yes | Yes | Yes | No | #1652 | |
+| F49 | Appearance settings | Yes | Yes | Yes | Yes | Yes | | |
 | F50 | Keyboard / IME surface | N/A | Yes | N/A | N/A | Yes | | |
 
 ## Features
@@ -572,13 +572,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** iOS automatic polish is cleanup, not learned correction. Desktops share `DesktopHostCorrectionLearning`.
 
 ### F49 Appearance settings
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1652 (follows the system theme).
+- **Gaps:** none
 - **How:** System, light or dark; System is stored as no override.
-- **Refs:** `Sources/SpeakDesktopHost/Settings/DesktopHostSettings.swift`, `Sources/SpeakApp/Settings/AppSettings+System.swift`, `Sources/SpeakiOS/Views/Settings/IOSSettingsPage.swift`
+- **Refs:** `Sources/SpeakDesktopHost/Settings/DesktopHostSettings.swift`, `Sources/SpeakApp/Settings/AppSettings+System.swift`, `Sources/SpeakiOS/Views/Settings/IOSSettingsPage.swift`, `android/app/src/main/java/com/justspeaktoit/android/settings/AppAppearance.kt`
 - **Sunset:** none
-- **Nuances:** Linux reads only a declarative palette file, never theme scripts (`Sources/CLinuxSupport/LinuxDesktopPalette.c`).
+- **Nuances:** Linux reads only a declarative palette file, never theme scripts (`Sources/CLinuxSupport/LinuxDesktopPalette.c`). Android also offers wallpaper (dynamic) colours on Android 12 and later, and has no density setting.
 
 ### F50 Keyboard / IME surface
 - **Platforms:** macOS N/A · iOS Yes · Windows N/A · Linux N/A · Android Yes

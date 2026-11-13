@@ -82,6 +82,15 @@ extension SettingsSearchCatalog {
             settingKeys: ["silenceDetectionEnabled", "silenceThreshold", "silenceDuration"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.appearance", title: "Appearance", section: .general, systemImage: "paintpalette",
+            summary: "Light, dark or the phone's theme, and wallpaper colours on Android 12 and later.",
+            keywords: [
+                "theme", "dark mode", "light mode", "night mode", "dynamic colour", "dynamic color",
+                "material you", "wallpaper colours"
+            ],
+            settingKeys: ["appearance", "dynamicColor"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.resourcesInUse", title: "System resources in use", section: .general,
             systemImage: "gauge.with.dots.needle.33percent",
             summary: "See what the app holds now, such as the microphone or a cloud request, and release it.",

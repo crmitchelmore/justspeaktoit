@@ -106,6 +106,10 @@ object AutomationIds {
     /** One per sound profile, keyed by its shared ID (for example `classic`). */
     fun soundProfile(id: String) = "settings.recordingSounds.profile.$id"
     const val SETTINGS_LANGUAGE = "settings.language"
+    const val SETTINGS_DYNAMIC_COLOR = "settings.appearance.dynamicColor"
+
+    /** One per appearance choice, keyed by its cross-platform raw value (`system`, `light`, `dark`). */
+    fun appearanceOption(rawValue: String) = "settings.appearance.$rawValue"
     const val CORRECTIONS_WRITE_AS = "settings.corrections.writeAs"
     const val CORRECTIONS_HEARD_AS = "settings.corrections.heardAs"
     const val CORRECTIONS_ADD = "settings.corrections.add"

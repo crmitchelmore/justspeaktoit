@@ -189,6 +189,12 @@
     <string name="settings_silence_duration_value">%1$s seconds</string>
     <string name="settings_silence_threshold">Silence threshold</string>
     <string name="settings_silence_threshold_note">Lower is more sensitive: raise it if background noise keeps recordings going.</string>
+    <string name="settings_appearance_title">Appearance</string>
+    <string name="settings_appearance_system">System</string>
+    <string name="settings_appearance_light">Light</string>
+    <string name="settings_appearance_dark">Dark</string>
+    <string name="settings_dynamic_color_label">Wallpaper colours</string>
+    <string name="settings_dynamic_color_note">Match the app\'s colours to your wallpaper instead of the Just Speak to It orange.</string>
     <string name="settings_resources_title">System resources in use</string>
     <string name="settings_resources_note">What the app holds right now, why, and since when. Release stops it.</string>
     <string name="settings_resources_releasing">Releasing…</string>

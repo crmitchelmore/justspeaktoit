@@ -4,19 +4,23 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -48,6 +52,7 @@ import com.justspeaktoit.android.ui.PrivacyChoices
 import com.justspeaktoit.android.ui.OnboardingActions
 import com.justspeaktoit.android.ui.OnboardingScreen
 import com.justspeaktoit.android.ui.OnboardingStatus
+import com.justspeaktoit.android.ui.AppearanceChoice
 import com.justspeaktoit.android.ui.SettingsActions
 import com.justspeaktoit.android.ui.SettingsScreen
 import com.justspeaktoit.android.ui.theme.JustSpeakTheme
@@ -64,6 +69,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var tipStore: PlayBillingTipStore
     private val setupStatus = mutableStateOf(OnboardingStatus(MicPermission.NotRequested, false, false))
     private val prefs by lazy { AppPreferences(this) }
+    private val appearanceState by lazy {
+        mutableStateOf(AppearanceChoice(prefs.appearance, prefs.dynamicColor))
+    }
 
     // The guide asks for the microphone without starting a recording; every other request starts one.
     private var startAfterGrant = true
@@ -121,7 +129,17 @@ class MainActivity : ComponentActivity() {
             val askConsent by consentPending
             val tips by tipStore.state.collectAsStateWithLifecycle()
             LaunchedEffect(screen) { if (screen == Screen.Settings) tipStore.connect() }
-            JustSpeakTheme {
+            var appearance by appearanceState
+            val dark = appearance.appearance.isDark(isSystemInDarkTheme())
+            // Bar icons follow the chosen appearance, not the phone's, so they stay readable.
+            DisposableEffect(dark) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark },
+                    navigationBarStyle = SystemBarStyle.auto(LIGHT_SCRIM, DARK_SCRIM) { dark },
+                )
+                onDispose {}
+            }
+            JustSpeakTheme(dark = dark, dynamicColor = appearance.dynamicColor) {
                 if (screen != Screen.Dictation) {
                     BackHandler { if (screen == Screen.Onboarding) finishOnboarding() else screen = Screen.Dictation }
                 }
@@ -132,6 +150,7 @@ class MainActivity : ComponentActivity() {
                     when (screen) {
                         Screen.Settings -> SettingsScreen(
                             state = state,
+                            appearance = appearance,
                             actions = SettingsActions(
                                 onBack = { screen = Screen.Dictation },
                                 onSaveKey = viewModel::saveKey,
@@ -161,6 +180,11 @@ class MainActivity : ComponentActivity() {
                                 onRecordingSoundsChanged = viewModel::setRecordingSounds,
                                 onPreviewRecordingSound = viewModel::previewRecordingSound,
                                 onRunSetup = { screen = Screen.Onboarding },
+                                onAppearanceChanged = { choice ->
+                                    prefs.appearance = choice.appearance
+                                    prefs.dynamicColor = choice.dynamicColor
+                                    appearance = choice
+                                },
                             ),
                             privacy = privacyChoices,
                             tips = tips,
@@ -339,6 +363,10 @@ class MainActivity : ComponentActivity() {
         private const val DICTATE_ENTRY = "com.justspeaktoit.android.DictateEntry"
         private const val KEY_SCREEN = "screen"
         private const val KEY_START_AFTER_GRANT = "startAfterGrant"
+
+        // The navigation bar scrims `enableEdgeToEdge()` uses by default.
+        private val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
+        private val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
 
         fun dictateIntent(context: Context): Intent =
             Intent(Intent.ACTION_MAIN).setClassName(context, DICTATE_ENTRY)

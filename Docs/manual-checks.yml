@@ -1438,6 +1438,20 @@ sessions:
           - "Turn Play start and stop sounds off and record once more."
         expected: "Each profile sounds different and follows the volume. Start plays when recording begins and Stop when it ends; Cancel plays no stop sound. The Cloud transcript has no stray words from the start sound. With sounds off, nothing plays."
         final_gate: false
+      - id: "android-appearance"
+        issues:
+          - 1652
+        title: "Appearance: light, dark, system and wallpaper colours"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Android, an Alpha APK that includes the #1652 appearance setting"
+        steps:
+          - "Settings: under Appearance choose Dark while the phone is in light mode, then Light while the phone is in dark mode, then System."
+          - "Check the status and navigation bar icons on each choice, then close and reopen the app."
+          - "On Android 12 or later turn on Wallpaper colours, change the wallpaper, and turn it off again."
+          - "Search settings for \"dark mode\" and open the result."
+        expected: "Each choice applies at once across Dictation, Settings and History, the bar icons stay readable, and the choice survives a restart. Wallpaper colours follow the wallpaper and turning them off restores the orange theme. The search opens Appearance."
+        final_gate: false
   - id: "decisions"
     device: "Decision"
     title: "Decisions"

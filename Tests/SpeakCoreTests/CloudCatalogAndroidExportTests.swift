@@ -77,7 +77,8 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         XCTAssertEqual(
             providers?.map { $0["credentialId"] },
             [
-                "openai.apiKey", "groq.apiKey", "deepgram.apiKey", "assemblyai.apiKey", "openrouter.apiKey", "anthropic.apiKey", "google.apiKey", "mistral.apiKey"
+                "openai.apiKey", "groq.apiKey", "deepgram.apiKey", "assemblyai.apiKey",
+                "openrouter.apiKey", "anthropic.apiKey", "google.apiKey", "mistral.apiKey"
             ]
         )
         let cleanup = object?["cleanup"] as? [String: String]

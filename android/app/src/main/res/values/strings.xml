@@ -70,7 +70,7 @@
     <string name="mode_cloud">Cloud</string>
     <string name="privacy_cloud">Audio is uploaded to %1$s with your key and transcribed by %2$s. It is deleted from this phone afterwards.</string>
     <string name="privacy_cloud_generic">Audio is uploaded to the cloud provider you chose, using your key.</string>
-    <string name="status_mode_needs_key">Add a %1$s key in Settings to use %2$s.</string>
+    <string name="status_mode_needs_key">Add your %1$s key in Settings to use %2$s.</string>
     <string name="state_transcribing">Transcribing with %1$s…</string>
     <string name="failure_key_unavailable">The saved API key could not be unlocked. Try again; if it keeps failing, enter it again in Settings.</string>
     <string name="settings_key_error">The key could not be saved securely. Try again.</string>
@@ -117,7 +117,7 @@
     <string name="corrections_vocabulary_only">Vocabulary only</string>
     <string name="settings_cleanup_title">Clean up transcripts</string>
     <string name="settings_cleanup_note">Sends the final transcript to the chosen model\'s provider to fix punctuation and spelling. Needs that provider\'s key. If cleanup fails, the original transcript is kept.</string>
-    <string name="settings_cleanup_needs_key">Add a %1$s key to use cleanup.</string>
+    <string name="settings_cleanup_needs_key">Add your %1$s key to use cleanup.</string>
     <string name="settings_cleanup_model">Cleanup model</string>
     <string name="settings_cleanup_prompt_title">Cleanup prompt</string>
     <string name="settings_cleanup_prompt_note">Replaces the built-in cleanup instructions, for example to set a tone or format. The transcript is still sent as data, and only the cleaned text is kept. Leave empty for the built-in prompt.</string>
@@ -225,7 +225,7 @@
     <string name="keyboard_profile">Profile: %1$s</string>
     <string name="keyboard_profile_description">Dictation profile, %1$s. Double-tap to switch.</string>
     <string name="keyboard_speech_service_disclosure">On-device recognition is not available, so the keyboard would use your phone\'s speech service, which may send audio to its provider. Tap the microphone again to continue.</string>
-    <string name="settings_privacy_heading">Privacy</string>
+    <string name="settings_privacy_title">Privacy</string>
     <string name="settings_analytics_title">Share anonymous analytics</string>
     <string name="settings_analytics_note">Helps improve the app with a few typed usage events, such as a daily active ping and your first successful transcription. Transcripts, audio, prompts, clipboard text, keystrokes, API keys, screen content and personal identity are never collected. Off unless you turn it on.</string>
     <string name="settings_diagnostics_title">Send crash reports and diagnostics</string>

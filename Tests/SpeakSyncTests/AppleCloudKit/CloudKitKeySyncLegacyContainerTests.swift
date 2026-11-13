@@ -37,7 +37,9 @@ final class CloudKitKeySyncLegacyContainerTests: XCTestCase {
         let fromLegacy = try await harness.secrets.secret(identifier: "openai.apiKey")
         XCTAssertEqual(fromLegacy, "from-legacy")
         let uploaded = Set(harness.cloud.savedSecretIdentifiers(in: .shared))
-        XCTAssertEqual(uploaded, ["openai.apiKey", "deepgram.apiKey"], "every key is re-encrypted into the shared container")
+        XCTAssertEqual(
+            uploaded, ["openai.apiKey", "deepgram.apiKey"], "every key is re-encrypted into the shared container"
+        )
         XCTAssertTrue(harness.cloud.savedSecretIdentifiers(in: .legacy).isEmpty, "the legacy container is only read")
         XCTAssertEqual(harness.cloud.fetchTokens[.legacy], [nil])
         XCTAssertEqual(harness.cloud.fetchTokens[.shared]?.first, .some(nil), "the shared feed starts from scratch")

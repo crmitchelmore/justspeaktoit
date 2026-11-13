@@ -25,10 +25,12 @@ Platform acceptance evidence stays in the
 - **Platforms:** `Yes` implemented; `Partial` implemented with a gap tracked by
   an issue; `Limited` implemented as far as the OS allows; `No` missing (see the
   issue); `N/A` deliberately excluded.
-- **Excluded:** each `N/A` platform and why: `(OS: …)` when the platform cannot
-  support it, `(owner decision: …)` when the owner chose not to build it. Do not
+- **Excluded:** each `N/A` platform and why, as `;`-separated clauses of the form
+  `<platforms> (OS: …)` when the platform cannot support it or
+  `<platforms> (owner decision: …)` when the owner chose not to build it. Do not
   build an excluded feature without a new owner decision.
-- **Gaps:** the one cross-platform issue for every `No`/`Partial` platform.
+- **Gaps:** the `No`/`Partial` platforms, then the one cross-platform issue from
+  the summary row (`iOS, Android #1650 (…)`).
 - **How:** the behaviour a new platform must match, then the shared type to reuse.
 - **Refs:** the reference implementation: shared code first, then platform files.
 - **Sunset:** what is scheduled to be removed or migrated, and the trigger.

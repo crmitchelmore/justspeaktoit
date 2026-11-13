@@ -586,16 +586,22 @@ class LaneTests(unittest.TestCase):
         Check = runner.Check
         with tempfile.TemporaryDirectory() as tmp:
             order = Path(tmp) / 'order'
-            step = ['sh', '-c', f'sleep 1; echo "$0" >> {order}']
-            checks = [Check('build', 'swift', 'Build', [*step, 'build'], lane='swift'),
+            step = ['sh', '-c', f'echo "start $0" >> {order}; sleep 0.2; echo "end $0" >> {order}']
+            # The build finishes only once the other lanes have started (or after 20s), so a serial
+            # run shows up in the order rather than in a load-sensitive wall-clock bound.
+            build = ['sh', '-c', f'echo "start build" >> {order}; i=0; while [ $i -lt 200 ] && '
+                                 f'! {{ grep -q "start api" {order} && grep -q "start lint" {order}; }}; '
+                                 f'do sleep 0.1; i=$((i+1)); done; echo "end build" >> {order}']
+            checks = [Check('build', 'swift', 'Build', build, lane='swift'),
                       Check('tests', 'swift', 'Tests', [*step, 'tests'], lane='swift'),
                       Check('api', 'public-api', 'API', [*step, 'api']),
                       Check('lint', 'ci-lint', 'Lint', [*step, 'lint'])]
-            elapsed = self.execute(checks)
-            lines = order.read_text().split()
+            self.execute(checks)
+            lines = order.read_text().splitlines()
         self.assertEqual([c.status for c in checks], ['pass'] * 4)
-        self.assertLess(lines.index('build'), lines.index('tests'))
-        self.assertLess(elapsed, 3.8, 'three lanes of at most two 1s steps run side by side')
+        self.assertLess(lines.index('end build'), lines.index('start tests'), 'one lane runs in order')
+        self.assertLess(lines.index('start api'), lines.index('end build'), 'lanes run side by side')
+        self.assertLess(lines.index('start lint'), lines.index('end build'), 'lanes run side by side')
 
     def test_lanes_off_runs_one_check_at_a_time(self):
         Check = runner.Check

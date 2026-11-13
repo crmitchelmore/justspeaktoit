@@ -411,14 +411,14 @@ sessions:
         title: "Mac: VoiceOver and keyboard reach every control"
         minutes: 8
         core: false
-        build: "Just Speak to It for Mac, the first Alpha build that includes the fix for #1399"
+        build: "Just Speak to It for Mac, the first Alpha build that includes the recording-start announcement fix for #1399"
         steps:
           - "Turn on VoiceOver (Command-F5). Open the menu bar item with VoiceOver and listen to its name and state."
           - "Open the main window and move through the sidebar and Settings with VoiceOver; listen for any button read only as \"button\" or an image name."
           - "In Settings \u203a Voice Output open the SSML helper, and in Profiles open New Profile; press Escape in each."
-          - "Start and stop a dictation with the hot key and listen to the announcements."
+          - "From another app, start and stop a dictation with the hot key and listen to the announcements."
           - "Turn VoiceOver off."
-        expected: "The menu bar item reads \"Just Speak to It\" with the current state. Every control has a meaningful name, both sheets close on Escape, and recording, transcribing and errors are announced."
+        expected: "The menu bar item reads \"Just Speak to It\" with the current state. Every control has a meaningful name and both sheets close on Escape. Starting a dictation says \"Recording started\", and transcribing and errors are announced."
         final_gate: true
       - id: "mac-record-button-follows-hotkey"
         issues:

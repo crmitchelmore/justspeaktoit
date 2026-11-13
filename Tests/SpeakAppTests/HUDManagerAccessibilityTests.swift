@@ -84,4 +84,96 @@ final class HUDManagerAccessibilityTests: XCTestCase {
     XCTAssertEqual(manager.snapshot, .hidden)
     XCTAssertTrue(announcements.isEmpty)
   }
+
+  @MainActor
+  func testRecordingStart_waitsForPresentedWindowBeforeAnnouncing() {
+    var announcements: [String] = []
+    let manager = HUDManager(
+      appSettings: AppSettings(),
+      accessibilityAnnouncementPoster: { announcements.append($0) }
+    )
+    manager.defersAnnouncementsUntilPresented = true
+
+    manager.beginRecording()
+    XCTAssertTrue(announcements.isEmpty, "announced before the HUD panel was on screen")
+
+    manager.hudWindowDidPresent()
+    XCTAssertEqual(announcements, ["Recording started. Capturing audio"])
+
+    manager.beginTranscribing()
+    XCTAssertEqual(announcements.last, "Transcribing. Preparing raw transcript")
+  }
+
+  @MainActor
+  func testFailureFromHiddenHUD_isAnnouncedOnceThePanelAppears() {
+    var announcements: [String] = []
+    let manager = HUDManager(
+      appSettings: AppSettings(),
+      accessibilityAnnouncementPoster: { announcements.append($0) }
+    )
+    manager.defersAnnouncementsUntilPresented = true
+
+    manager.finishFailure(headline: "Microphone unavailable", message: "Check microphone access")
+    manager.hudWindowDidPresent()
+
+    XCTAssertEqual(announcements, ["Failed. Check microphone access"])
+  }
+
+  @MainActor
+  func testTranscriptionFailureWhileVisible_announcesTranscribingThenFailure() {
+    var announcements: [String] = []
+    let manager = HUDManager(
+      appSettings: AppSettings(),
+      accessibilityAnnouncementPoster: { announcements.append($0) }
+    )
+    manager.defersAnnouncementsUntilPresented = true
+    manager.beginRecording()
+    manager.hudWindowDidPresent()
+
+    manager.beginTranscribing(subheadline: "Finalising transcript")
+    manager.finishFailure(message: "Network unavailable")
+
+    XCTAssertEqual(announcements, [
+      "Recording started. Capturing audio",
+      "Transcribing. Finalising transcript",
+      "Failed. Network unavailable"
+    ])
+  }
+
+  @MainActor
+  func testHideBeforePanelAppears_dropsPendingAnnouncement() {
+    var announcements: [String] = []
+    let manager = HUDManager(
+      appSettings: AppSettings(),
+      accessibilityAnnouncementPoster: { announcements.append($0) }
+    )
+    manager.defersAnnouncementsUntilPresented = true
+
+    manager.beginRecording()
+    manager.hide()
+    manager.hudWindowDidPresent()
+
+    XCTAssertTrue(announcements.isEmpty)
+    XCTAssertNil(manager.pendingAccessibilityAnnouncement)
+  }
+
+  @MainActor
+  func testReshowAfterDismiss_defersAgain() {
+    var announcements: [String] = []
+    let manager = HUDManager(
+      appSettings: AppSettings(),
+      accessibilityAnnouncementPoster: { announcements.append($0) }
+    )
+    manager.defersAnnouncementsUntilPresented = true
+    manager.beginRecording()
+    manager.hudWindowDidPresent()
+    manager.hide()
+    manager.hudWindowDidDismiss()
+    announcements.removeAll()
+
+    manager.beginRecording()
+    XCTAssertTrue(announcements.isEmpty)
+    manager.hudWindowDidPresent()
+    XCTAssertEqual(announcements, ["Recording started. Capturing audio"])
+  }
 }

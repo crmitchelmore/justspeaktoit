@@ -288,6 +288,11 @@ class DictationSessionControllerTest {
 
         onMain { controller.stop() }
         ViewModelHarness.await(client.finished)
+        assertEquals(
+            "a live session plays Stop once the microphone has stopped",
+            listOf(RecordingCue.Start to 0, RecordingCue.Stop to 1),
+            cues.toList(),
+        )
         client.listener.onEnd(LiveOutcome.Completed("hello cooper netties"))
 
         val done = await(states) { it.dictation is DictationState.Done }.dictation

@@ -50,7 +50,7 @@ extension ContentView {
                         if currentText.isEmpty {
                             Text(backgroundService.isRunning
                                  ? "Recording via Action Button…"
-                                 : "Tap the microphone to start transcription")
+                                 : "Tap Transcribe to start")
                                 .font(density.isCompact ? .subheadline : .title3)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .center)
@@ -200,7 +200,7 @@ extension ContentView {
 
     func presentations(_ content: some View) -> some View {
         recoveryPresentations(content)
-            .alert("Error", isPresented: $showingError) {
+            .alert(errorAlertTitle, isPresented: $showingError) {
                 if let recovery = self.startFailureRecovery {
                     Button(recovery.buttonTitle) { self.performStartFailureRecovery(recovery) }
                         .accessibilityIdentifier("captureStartRecoveryButton")
@@ -279,6 +279,7 @@ extension ContentView {
                 if let error = newError {
                     self.issueErrorSnapshot = coordinator.issueFailureSnapshot
                     self.startFailureRecovery = nil
+                    self.errorIsStartFailure = false
                     errorMessage = error
                     showingError = true
                 }
@@ -295,6 +296,7 @@ extension ContentView {
                 if let newError {
                     self.issueErrorSnapshot = IOSIssueReporter.failedRequest()
                     self.startFailureRecovery = nil
+                    self.errorIsStartFailure = false
                     errorMessage = newError
                     showingError = true
                 }
@@ -305,6 +307,7 @@ extension ContentView {
                 guard case .failed = outcome, let outcome else { return }
                 self.issueErrorSnapshot = IOSIssueReporter.failedRequest()
                 self.startFailureRecovery = nil
+                self.errorIsStartFailure = false
                 errorMessage = outcome.message
                 showingError = true
                 sharedImporter.acknowledgeOutcome()

@@ -33,9 +33,12 @@
 	<key>com.apple.security.network.client</key>
 	<true/>
 
-	<!-- Inbound Bonjour listener for Send to Mac local-network transfer -->
-	<key>com.apple.security.network.server</key>
-	<true/>
+	<!--
+	  No com.apple.security.network.server: the Store build accepts no incoming
+	  connections. The Send to Mac receiver is compiled out (SendToMacAvailability)
+	  because no shipping app can connect to it, and App Review rejects the
+	  entitlement without matching functionality.
+	-->
 
 	<!-- User-selected files (import/export audio + transcripts) -->
 	<key>com.apple.security.files.user-selected.read-write</key>

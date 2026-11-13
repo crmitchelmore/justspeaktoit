@@ -111,6 +111,14 @@ final class SettingsSearchCoverageTests: XCTestCase {
         }
     }
 
+    func testSendToMacSearchEntry_isDroppedWhenTheReceiverIsCompiledOut() {
+        let entries = SettingsSearchCatalog.entries(for: .macOS)
+        let id = SendToMacAvailability.settingsSearchEntryID
+        XCTAssertTrue(entries.contains { $0.id == id })
+        XCTAssertFalse(SendToMacAvailability.filter(entries, isAvailable: false).contains { $0.id == id })
+        XCTAssertEqual(SendToMacAvailability.filter(entries, isAvailable: true).count, entries.count)
+    }
+
     func testAPIKeyEntriesCoverEveryKeyCard() {
         let entries = MacSettingsSearch.apiKeyEntries(transcriptionProviders: [])
         let ids = Set(entries.map(\.id))

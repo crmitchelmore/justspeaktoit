@@ -103,6 +103,26 @@
       "title" : "Keep audio when a recording is cancelled"
     },
     {
+      "id" : "android.recordingSounds",
+      "keywords" : [
+        "play start/stop sounds",
+        "sound profile",
+        "chime",
+        "beep",
+        "volume",
+        "mute sounds"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "recordingSoundsEnabled",
+        "recordingSoundProfile",
+        "recordingSoundVolume"
+      ],
+      "summary" : "Start and stop sounds, their profile and volume.",
+      "title" : "Recording sounds"
+    },
+    {
       "id" : "android.resourcesInUse",
       "keywords" : [
         "status",

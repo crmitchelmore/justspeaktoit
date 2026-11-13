@@ -23,6 +23,8 @@ import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.settings.DictationPreferences
+import com.justspeaktoit.android.settings.RecordingCue
+import com.justspeaktoit.android.settings.RecordingSoundSettings
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +71,7 @@ class DictationViewModel internal constructor(
     private val resources: SystemResourceRegistry = SystemResourceRegistry.shared,
     private val interruptions: AudioInterruptions = NoAudioInterruptions,
     private val foreground: ForegroundSession = NoForegroundSession,
+    private val sounds: RecordingSoundOutput? = null,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     private val capture = CloudCapture(recorders, cacheDir, io, retirement, resources)
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
@@ -91,6 +94,7 @@ class DictationViewModel internal constructor(
             retention = prefs.retention,
             keepAudioOnCancel = prefs.keepAudioOnCancel,
             corrections = prefs.corrections,
+            recordingSounds = prefs.recordingSounds,
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
@@ -115,6 +119,10 @@ class DictationViewModel internal constructor(
             override val cleanupModel: CleanupModel?
                 get() = _state.value.let { if (it.cleanupReady) it.cleanupModel else null }
             override val corrections: List<CorrectionRule> get() = _state.value.corrections
+        },
+        cues = { cue ->
+            val choice = _state.value.recordingSounds
+            if (choice.enabled) sounds?.play(cue, choice.profile, choice.gain) ?: 0L else 0L
         },
         publish = { s ->
             // Before the screen sees the change, so the service and watching are in step with it.
@@ -228,6 +236,18 @@ class DictationViewModel internal constructor(
     fun setCorrections(rules: List<CorrectionRule>) {
         prefs.corrections = rules
         _state.update { it.copy(corrections = rules) }
+    }
+
+    /** Saves the shared start/stop sound settings; they apply from the next cue. */
+    fun setRecordingSounds(choice: RecordingSoundSettings) {
+        prefs.recordingSounds = choice
+        _state.update { it.copy(recordingSounds = choice) }
+    }
+
+    /** Plays the chosen profile's start cue so the user can hear the profile and volume. */
+    fun previewRecordingSound() {
+        val choice = _state.value.recordingSounds
+        sounds?.play(RecordingCue.Start, choice.profile, choice.gain)
     }
 
     fun chooseCleanupModel(model: CleanupModel) {
@@ -392,6 +412,7 @@ class DictationViewModel internal constructor(
         if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
         engine.close()
         session.close()
+        sounds?.close()
     }
 
     companion object {
@@ -420,6 +441,7 @@ class DictationViewModel internal constructor(
             recordingsDir = File(application.filesDir, "recordings"),
             interruptions = AndroidAudioInterruptions(application),
             foreground = AndroidForegroundSession(application),
+            sounds = RecordingSoundPlayer(application),
         )
     }
 }

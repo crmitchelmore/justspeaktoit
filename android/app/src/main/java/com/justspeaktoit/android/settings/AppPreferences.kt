@@ -19,6 +19,7 @@ interface DictationPreferences {
     /** A `DictationLanguages` identifier; null until chosen, which means Automatic. */
     var languageId: String?
     var corrections: List<CorrectionRule>
+    var recordingSounds: RecordingSoundSettings
 }
 
 /** Non-secret choices. Secrets live in the Keystore-backed `SecretStore`, never here. */
@@ -68,6 +69,18 @@ class AppPreferences(context: Context) : DictationPreferences {
         get() = PersonalCorrections.decode(prefs.getString(KEY_CORRECTIONS, null))
         set(value) = prefs.edit { putString(KEY_CORRECTIONS, PersonalCorrections.encode(value)) }
 
+    override var recordingSounds: RecordingSoundSettings
+        get() = RecordingSoundSettings(
+            enabled = prefs.getBoolean(KEY_SOUNDS_ENABLED, RecordingSoundSettings.DEFAULT_ENABLED),
+            profile = RecordingSoundProfile.fromId(prefs.getString(KEY_SOUND_PROFILE, null)),
+            volume = prefs.getFloat(KEY_SOUND_VOLUME, RecordingSoundSettings.DEFAULT_VOLUME).coerceIn(0f, 1f),
+        )
+        set(value) = prefs.edit {
+            putBoolean(KEY_SOUNDS_ENABLED, value.enabled)
+            putString(KEY_SOUND_PROFILE, value.profile.id)
+            putFloat(KEY_SOUND_VOLUME, value.volume.coerceIn(0f, 1f))
+        }
+
     companion object {
         /** The canonical cross-platform key, shared with the Mac, iOS, Windows and Linux apps. */
         const val KEY_KEEP_AUDIO_ON_CANCEL = "keepAudioOnCancel"
@@ -81,5 +94,10 @@ class AppPreferences(context: Context) : DictationPreferences {
         /** The canonical cross-platform key; values are SpeakCore `TranscriptionLanguageCatalog` IDs. */
         private const val KEY_LANGUAGE = "preferredLocale"
         private const val KEY_CORRECTIONS = "personal_corrections"
+
+        /** The canonical cross-platform recording sound keys, shared with the Mac, Windows and Linux apps. */
+        private const val KEY_SOUNDS_ENABLED = "recordingSoundsEnabled"
+        private const val KEY_SOUND_PROFILE = "recordingSoundProfile"
+        private const val KEY_SOUND_VOLUME = "recordingSoundVolume"
     }
 }

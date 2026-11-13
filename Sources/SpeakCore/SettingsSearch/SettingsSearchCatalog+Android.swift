@@ -47,6 +47,14 @@ extension SettingsSearchCatalog {
             settingKeys: ["keepAudioOnCancel"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.recordingSounds", title: "Recording sounds", section: .general,
+            systemImage: "speaker.wave.2",
+            summary: "Start and stop sounds, their profile and volume.",
+            keywords: ["play start/stop sounds", "sound profile", "chime", "beep", "volume", "mute sounds"],
+            settingKeys: ["recordingSoundsEnabled", "recordingSoundProfile", "recordingSoundVolume"],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.resourcesInUse", title: "System resources in use", section: .general,
             systemImage: "gauge.with.dots.needle.33percent",
             summary: "See what the app holds now, such as the microphone or a cloud request, and release it.",

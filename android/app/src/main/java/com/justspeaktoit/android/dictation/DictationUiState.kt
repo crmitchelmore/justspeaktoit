@@ -10,6 +10,7 @@ import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.settings.AppPreferences
+import com.justspeaktoit.android.settings.RecordingSoundSettings
 import java.util.Locale
 
 data class SharedAudioOffer(val uri: Uri, val mimeType: String?)
@@ -56,6 +57,7 @@ data class DictationUiState(
     val corrections: List<CorrectionRule> = emptyList(),
     /** System resources the app holds now, oldest first (#1473). */
     val resourcesInUse: List<SystemResourceHold> = emptyList(),
+    val recordingSounds: RecordingSoundSettings = RecordingSoundSettings(),
 ) {
     /** The mode a new session would use. */
     val activeMode: RecognitionMode?

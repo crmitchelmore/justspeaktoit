@@ -20,6 +20,7 @@ import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.DictationPreferences
+import com.justspeaktoit.android.settings.RecordingSoundSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -153,6 +154,7 @@ internal class FakeRecorder(
     @Volatile var stops = 0
     @Volatile var startedCapture = false
     @Volatile var writing = true
+    @Volatile var mutedFor = 0L
 
     override fun setPaused(paused: Boolean) {
         writing = !paused
@@ -163,6 +165,10 @@ internal class FakeRecorder(
         file.writeBytes(ByteArray(WavFormat.HEADER_BYTES + bytes.coerceAtLeast(0).toInt()))
         startedCapture = true
         return true
+    }
+
+    override fun mute(millis: Long) {
+        mutedFor = millis
     }
 
     override fun stop(): Long {
@@ -250,6 +256,7 @@ internal class MemoryPrefs(
     override var keepAudioOnCancel: Boolean = true,
     override var languageId: String? = null,
     override var corrections: List<CorrectionRule> = emptyList(),
+    override var recordingSounds: RecordingSoundSettings = RecordingSoundSettings(),
 ) : DictationPreferences
 
 internal class MemoryHistoryFile : HistoryFile {

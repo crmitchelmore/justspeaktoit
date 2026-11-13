@@ -1224,6 +1224,20 @@ sessions:
           - "Note the battery percentage again and any heat."
         expected: "Battery use and latency are comparable to the phone's own voice typing; note the numbers in the result."
         final_gate: true
+      - id: "android-recording-sounds"
+        issues:
+          - 1638
+        title: "Recording start and stop sounds"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes recording sounds"
+        steps:
+          - "Settings › Recording sounds: check Play start and stop sounds is on, pick each profile and tap Play sample; drag Volume down and up."
+          - "In Cloud mode, record a sentence and stop. Then record again and tap Cancel."
+          - "In On-device mode, record a sentence and stop."
+          - "Turn Play start and stop sounds off and record once more."
+        expected: "Each profile sounds different and follows the volume. Start plays when recording begins and Stop when it ends; Cancel plays no stop sound. The Cloud transcript has no stray words from the start sound. With sounds off, nothing plays."
+        final_gate: false
   - id: "decisions"
     device: "Decision"
     title: "Decisions"

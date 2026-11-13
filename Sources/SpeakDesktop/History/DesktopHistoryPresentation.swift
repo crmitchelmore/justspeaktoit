@@ -57,19 +57,11 @@ public enum DesktopHistoryFormat {
         return String(format: "%02dm %02ds", seconds / 60, seconds % 60)
     }
 
-    /// "—" when nothing was spent, otherwise a two-decimal amount in
-    /// `currency`; less than a cent reads "<$0.01" rather than rounding to zero.
+    /// "—" when nothing was spent, otherwise the shared History cost format,
+    /// so a sub-cent amount reads "$0.0021" as it does on the Mac.
     public static func spend(_ amount: Decimal, currency: String = "USD", locale: Locale = .current) -> String {
         guard amount > 0 else { return "—" }
-        let formatter = NumberFormatter()
-        formatter.locale = locale
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currency.isEmpty ? "USD" : currency
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        let cent = Decimal(string: "0.01")!
-        guard amount >= cent else { return "<" + (formatter.string(from: cent as NSDecimalNumber) ?? "0.01") }
-        return formatter.string(from: amount as NSDecimalNumber) ?? "—"
+        return HistoryDetailFormatting.formatCurrency(amount, currency: currency, locale: locale)
     }
 
     /// A recording's audio length with hundredths, "07.24" or "01:07.24".

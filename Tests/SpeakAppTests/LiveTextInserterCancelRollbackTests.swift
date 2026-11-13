@@ -8,7 +8,7 @@ import XCTest
 /// when the field holds nothing except this session's own change.
 final class LiveTextInserterCancelRollbackTests: XCTestCase {
     @MainActor
-    func testCancelRemovesStreamedTextAndRestoresTheCaret() {
+    func testCancelAfterStreaming_RemovesTextAndRestoresCaret() {
         let field = FakeStreamingTextField(value: "Dear Sam, ", selection: CFRange(location: 10, length: 0))
         let inserter = LiveTextInserterTestFactory.make(field: field)
         inserter.update(with: "This cancelled")
@@ -25,7 +25,7 @@ final class LiveTextInserterCancelRollbackTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelRestoresASelectionTheStreamReplaced() {
+    func testCancelAfterReplacingSelection_RestoresSelection() {
         let field = FakeStreamingTextField(value: "hello world!", selection: CFRange(location: 6, length: 5))
         let inserter = LiveTextInserterTestFactory.make(field: field)
         inserter.update(with: "there")
@@ -38,7 +38,7 @@ final class LiveTextInserterCancelRollbackTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelAfterUserEditInsideTheRegionLeavesTheDocumentAlone() {
+    func testCancelAfterUserEditInsideRegion_KeepsDocument() {
         let field = FakeStreamingTextField()
         let inserter = LiveTextInserterTestFactory.make(field: field)
         inserter.update(with: "hello there")
@@ -53,7 +53,7 @@ final class LiveTextInserterCancelRollbackTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelAfterUserTypedNextToTheRegionLeavesTheDocumentAlone() {
+    func testCancelAfterUserTypedNextToRegion_KeepsDocument() {
         let field = FakeStreamingTextField(value: "Intro ", selection: CFRange(location: 6, length: 0))
         let inserter = LiveTextInserterTestFactory.make(field: field)
         inserter.update(with: "streamed words")
@@ -69,7 +69,7 @@ final class LiveTextInserterCancelRollbackTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelInADifferentNoteBehindTheSameElementLeavesItAlone() {
+    func testCancelInDifferentNoteBehindSameElement_KeepsDocument() {
         let field = FakeStreamingTextField()
         let inserter = LiveTextInserterTestFactory.make(field: field)
         inserter.update(with: "hello")
@@ -83,7 +83,57 @@ final class LiveTextInserterCancelRollbackTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelWithNothingStreamedIsANoOp() {
+    func testCancelInIdenticalNoteWithAnotherDocument_KeepsDocument() {
+        let field = FakeStreamingTextField()
+        field.documentIdentity = "x-coredata://notes/ICNote/p1"
+        let inserter = LiveTextInserterTestFactory.make(field: field)
+        inserter.update(with: "hello")
+        // #664: the same element now shows another note that already holds "hello".
+        field.documentIdentity = "x-coredata://notes/ICNote/p2"
+        let writes = field.selectedTextWrites.count
+
+        guard case .kept = inserter.rollBackForCancellation() else {
+            return XCTFail("An identically populated note must never be edited on cancel")
+        }
+        XCTAssertEqual(field.value, "hello")
+        XCTAssertEqual(field.selectedTextWrites.count, writes)
+    }
+
+    @MainActor
+    func testCancelWhenDocumentIdentityIsUnavailable_KeepsDocument() {
+        let field = FakeStreamingTextField()
+        // Notes reports no AXDocument, so a switch to an identical note is undetectable.
+        field.documentIdentity = nil
+        let inserter = LiveTextInserterTestFactory.make(field: field)
+        inserter.update(with: "hello")
+        let writes = field.selectedTextWrites.count
+
+        guard case .kept = inserter.rollBackForCancellation() else {
+            return XCTFail("Rollback must not delete without a verified document identity")
+        }
+        XCTAssertEqual(field.value, "hello")
+        XCTAssertEqual(field.selectedTextWrites.count, writes)
+    }
+
+    @MainActor
+    func testCancelAfterPrefixRenormalised_KeepsDocument() {
+        let field = FakeStreamingTextField(value: "cafe\u{0301} END", selection: CFRange(location: 6, length: 0))
+        let inserter = LiveTextInserterTestFactory.make(field: field)
+        inserter.update(with: "hi")
+        XCTAssertEqual(field.value, "cafe\u{0301} hiEND")
+        // The editor rewrites the decomposed prefix as NFC: canonically equal, one UTF-16 unit shorter.
+        field.value = "caf\u{00E9} hiEND"
+        let writes = field.selectedTextWrites.count
+
+        guard case .kept = inserter.rollBackForCancellation() else {
+            return XCTFail("A shifted UTF-16 region must not be removed")
+        }
+        XCTAssertEqual(field.value, "caf\u{00E9} hiEND")
+        XCTAssertEqual(field.selectedTextWrites.count, writes)
+    }
+
+    @MainActor
+    func testCancelWithNothingStreamed_IsNoOp() {
         let field = FakeStreamingTextField(value: "untouched", selection: CFRange(location: 9, length: 0))
         let inserter = LiveTextInserterTestFactory.make(field: field)
 
@@ -96,7 +146,7 @@ final class LiveTextInserterCancelRollbackTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelKeepsTextWhenTheAppRefusesTheRemoval() {
+    func testCancelWhenAppRefusesRemoval_KeepsTextUnselected() {
         let field = FakeStreamingTextField()
         let inserter = LiveTextInserterTestFactory.make(field: field)
         inserter.update(with: "hello")
@@ -110,7 +160,7 @@ final class LiveTextInserterCancelRollbackTests: XCTestCase {
     }
 
     @MainActor
-    func testStopAfterAnUncancelledSessionStillFinalizesInPlace() {
+    func testStopWithoutCancel_FinalizesInPlace() {
         let field = FakeStreamingTextField(value: "Note: ", selection: CFRange(location: 6, length: 0))
         let inserter = LiveTextInserterTestFactory.make(field: field)
         inserter.update(with: "hello there")

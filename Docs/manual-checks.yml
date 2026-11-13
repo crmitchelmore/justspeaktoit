@@ -48,7 +48,7 @@ sessions:
         core: true
         build: "Just Speak to It for Mac, an Alpha build that includes the #1561 cancel rollback"
         steps:
-          - "Settings \u203a General: Cancel recording with Escape = on. Open a new, empty TextEdit document and type: Start here "
+          - "Settings \u203a General: Cancel recording with Escape = on. In TextEdit, create a plain-text document, save it (rollback only acts on a saved document it can identify), and type: Start here "
           - "With the caret after \"Start here \", dictate \"This cancelled recording should not be inserted\" and press Escape after the words appear."
           - "Dictate again; after the first words appear, type XX at the very end of the document, keep talking, then press Escape."
           - "Check the document and the two newest History entries."

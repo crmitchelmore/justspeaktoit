@@ -1,9 +1,20 @@
-#if os(iOS)
 import AppIntents
 import Foundation
 import SpeakCore
+import SpeakiOSLib
+
+/// Includes the intents compiled into the SpeakiOSLib static library.
+struct JustSpeakToItAppIntentsPackage: AppIntentsPackage {
+    static var includedPackages: [any AppIntentsPackage.Type] {
+        [SpeakiOSAppIntentsPackage.self]
+    }
+}
 
 /// App Shortcuts provider exposing transcription actions (iOS 18+, includes recording).
+///
+/// This must stay in the app target. Declared in SpeakiOSLib, Xcode emitted the
+/// eight shortcuts into the library's metadata but none into the app bundle, so
+/// Siri and Spotlight registered no phrases (`scripts/ios/check-app-shortcuts.py`).
 @available(iOS 18, *)
 struct TranscriptionShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
@@ -97,4 +108,3 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
         )
     }
 }
-#endif

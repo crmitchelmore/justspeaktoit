@@ -322,21 +322,19 @@ extension SettingsView {
 
   private var remotePostProcessingSection: some View {
     VStack(alignment: .leading, spacing: 12) {
-      CleanupModelDiscoveryView(
-        selection: settingsBinding(\AppSettings.postProcessingModel),
-        enabled: settingsBinding(\AppSettings.cleanupModelDiscoveryEnabled)
-      )
       ModelPicker(
         title: "Remote Post-processing Model",
         help: """
         Native provider models are listed first and use that provider's own key. \
-        Choose OpenRouter to pick from its wider catalogue. Mini and Lite models are faster and cheaper.
+        Choose OpenRouter to browse, discover and configure models from its wider catalogue. \
+        Mini and Lite models are faster and cheaper.
         """,
         options: cloudPostProcessingOptions,
         value: cloudPostProcessingModelBinding,
         credentialPurpose: .postProcessing,
         storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
-        usesDetailedChooser: true
+        usesDetailedChooser: true,
+        openRouterBrowser: cleanupOpenRouterBrowser
       )
 
       SettingsInlineInfo(

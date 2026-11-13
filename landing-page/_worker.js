@@ -156,6 +156,22 @@ const windowsInstallerRoutes = {
   } : {available: false, channel: 'beta'}, {headers: {'Cache-Control': 'public, max-age=30'}}),
 };
 
+// The Android beta APK pointer is advanced by alpha-release.yml only after the
+// signed APK is attached to a public Alpha, so it can lag the Alpha pointer.
+const androidApk = 'JustSpeakToIt-android.apk';
+
+async function androidDownload() {
+  const {value} = await fetchPointer('android-pointer.json');
+  if (value === undefined || value === null || typeof value !== 'object' || value.schemaVersion !== 1
+    || !alphaTag.test(value.tag) || value.asset !== androidApk) {
+    return new Response('Android beta not yet available', {status: 503});
+  }
+  return new Response(null, {status: 302, headers: {
+    Location: `${release}/${value.tag}/${androidApk}`,
+    'Cache-Control': 'public, max-age=30',
+  }});
+}
+
 // The signed Linux Flatpak repository lives on its own static Pages project,
 // published by linux-flatpak-repo.yml. These stable URLs serve its install
 // descriptors; until a repository is published they fall back to the
@@ -214,6 +230,7 @@ export default {
       '/alpha/download/linux-x86_64': 'JustSpeakToIt-linux-x86_64.flatpak',
     };
     if (Object.hasOwn(flatpakRoutes, path)) return flatpakDescriptor(flatpakRoutes[path]);
+    if (path === '/alpha/download/android') return androidDownload();
     if (Object.hasOwn(windowsInstallerRoutes, path)) {
       const installer = await windowsInstaller();
       return windowsInstallerRoutes[path](installer, new URL(request.url));

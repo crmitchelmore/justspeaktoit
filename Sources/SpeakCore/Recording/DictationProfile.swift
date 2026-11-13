@@ -250,7 +250,9 @@ public struct DictationProfile: Codable, Equatable, Identifiable, Sendable {
             DictationProfileTranscriptionRouting(rawValue: $0) == nil ? $0 : nil
         }
         polishEnabled = try container.decodeIfPresent(Bool.self, forKey: .polishEnabled)
+        // A profile saved with a removed cleanup model keeps polishing with its successor.
         polishModelID = try container.decodeIfPresent(String.self, forKey: .polishModelID)
+            .map { ModelCatalog.currentPostProcessingModel($0) }
         polishPrompt = try container.decodeIfPresent(String.self, forKey: .polishPrompt)
         polishOutputLanguage = try container.decodeIfPresent(String.self, forKey: .polishOutputLanguage)
         polishIncludeLexiconDirectives = try container.decodeIfPresent(

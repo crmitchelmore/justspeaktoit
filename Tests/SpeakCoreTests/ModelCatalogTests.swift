@@ -291,13 +291,10 @@ final class ModelCatalogTests: XCTestCase {
     func testPostProcessing_includesRecentFastCheapModels() {
         let ids = Set(ModelCatalog.postProcessing.map(\.id))
 
-        // GPT-5 Mini and GPT-5.4 Nano have scheduled shutdowns (ModelRetirementTests).
-        XCTAssertTrue(ids.contains("openai/gpt-5.6-luna"))
-        XCTAssertTrue(ids.contains("openai/gpt-5.4-mini"))
         XCTAssertTrue(ids.contains("openai/gpt-6-luna"))
         XCTAssertTrue(ids.contains("anthropic/claude-haiku-5.5"))
         XCTAssertTrue(ids.contains("google/gemini-3.1-flash-lite"))
-        XCTAssertTrue(ids.contains("qwen/qwen3.6-flash"))
+        XCTAssertTrue(ids.contains("qwen/qwen3.8-flash"))
     }
 
     func testBatchTranscription_defaultAndRetiredMigrationStayInCatalogue() {
@@ -314,12 +311,12 @@ final class ModelCatalogTests: XCTestCase {
         )
     }
 
-    func testPostProcessing_includesGPT56ModelsWithCurrentMetadata() {
+    func testPostProcessing_includesGPT61ModelsWithCurrentMetadata() {
         let expected: [String: ModelCatalog.Pricing] = [
-            // OpenAI standard-tier rates, checked 2026-11-11.
-            "openai/gpt-5.6-luna": .init(promptPerMTokens: 0.20, completionPerMTokens: 1.2),
-            "openai/gpt-5.6-terra": .init(promptPerMTokens: 2.0, completionPerMTokens: 12.0),
-            "openai/gpt-5.6-sol": .init(promptPerMTokens: 4.0, completionPerMTokens: 20.0)
+            // OpenAI standard-tier rates, checked 2026-11-12.
+            "openai/gpt-6.1-terra": .init(promptPerMTokens: 1.0, completionPerMTokens: 5.0),
+            "native/openai/gpt-6.1-terra": .init(promptPerMTokens: 1.0, completionPerMTokens: 5.0),
+            "openai/gpt-6.1-sol": .init(promptPerMTokens: 2.0, completionPerMTokens: 10.0)
         ]
 
         for (id, pricing) in expected {
@@ -362,10 +359,7 @@ final class ModelCatalogTests: XCTestCase {
                 ModelCatalog.defaultPostProcessingModel
             )
         }
-        XCTAssertEqual(
-            ModelCatalog.normalizedPostProcessingModel("openai/gpt-5.4-nano"),
-            "openai/gpt-5.4-nano"
-        )
+        XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel("openai/gpt-5.4-nano"), "openai/gpt-6-luna")
         XCTAssertEqual(
             ModelCatalog.normalizedPostProcessingModel("local/post-processing/custom"),
             "local/post-processing/custom"

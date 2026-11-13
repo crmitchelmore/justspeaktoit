@@ -58,8 +58,8 @@ const POLICY: Readonly<Record<PaidOperation, RoutePolicy>> = {
   post_processing: {
     operation: 'post_processing',
     provider: 'openrouter',
-    catalogueModelId: 'openai/gpt-5.6-luna',
-    upstreamModel: 'openai/gpt-5.6-luna',
+    catalogueModelId: 'openai/gpt-6-luna',
+    upstreamModel: 'openai/gpt-6-luna',
     unitKind: 'tokens',
     transport: 'https',
   },
@@ -93,10 +93,10 @@ export interface PolicyDocument {
 const DISPLAY_NAMES: Readonly<Record<string, string>> = {
   'deepgram/nova-3-streaming': 'Deepgram Nova-3 (Streaming)',
   'google/gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
-  'openai/gpt-5.6-luna': 'GPT-5.6 Luna',
+  'openai/gpt-6-luna': 'GPT-6 Luna',
 };
 
-export const POLICY_VERSION = '2026-11-11';
+export const POLICY_VERSION = '2026-11-12';
 
 export function policyDocument(): PolicyDocument {
   return {

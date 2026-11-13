@@ -1,6 +1,12 @@
 import SpeakCore
 import SwiftUI
 
+/// Builds the live OpenRouter browser a picker's OpenRouter entry opens: it is
+/// given a closure that applies a choice and one that returns to the native list.
+typealias ModelPickerOpenRouterBrowser = (
+  _ select: @escaping (String) -> Void, _ back: @escaping () -> Void
+) -> AnyView
+
 struct ModelPicker: View {
   let title: String
   let help: String?
@@ -9,6 +15,7 @@ struct ModelPicker: View {
   let storedAPIKeyIdentifiers: Set<String>
   let usesDetailedChooser: Bool
   let allowsCustom: Bool
+  let openRouterBrowser: ModelPickerOpenRouterBrowser?
   @Binding var value: String
 
   @State var selection: String
@@ -23,7 +30,8 @@ struct ModelPicker: View {
     credentialPurpose: ModelCredentialPurpose,
     storedAPIKeyIdentifiers: Set<String>,
     usesDetailedChooser: Bool = false,
-    allowsCustom: Bool = true
+    allowsCustom: Bool = true,
+    openRouterBrowser: ModelPickerOpenRouterBrowser? = nil
   ) {
     self.title = title
     self.help = help
@@ -32,6 +40,7 @@ struct ModelPicker: View {
     self.storedAPIKeyIdentifiers = storedAPIKeyIdentifiers
     self.usesDetailedChooser = usesDetailedChooser
     self.allowsCustom = allowsCustom
+    self.openRouterBrowser = openRouterBrowser
     _value = value
 
     let initial = ModelPickerSelection.initial(
@@ -46,7 +55,7 @@ struct ModelPicker: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if usesDetailedChooser || LongListPickerPolicy.usesSheet(count: options.count) {
+      if usesDetailedChooser || openRouterBrowser != nil || LongListPickerPolicy.usesSheet(count: options.count) {
         Button {
           isShowingChooser = true
         } label: {
@@ -78,6 +87,7 @@ struct ModelPicker: View {
             credentialPurpose: credentialPurpose,
             storedAPIKeyIdentifiers: storedAPIKeyIdentifiers,
             allowsCustom: allowsCustom,
+            openRouterBrowser: openRouterBrowser,
             selection: $selection
           )
         }

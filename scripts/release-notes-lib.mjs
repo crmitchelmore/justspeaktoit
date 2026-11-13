@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-export const DEFAULT_MODEL = "gpt-5.6-luna";
+export const DEFAULT_MODEL = "gpt-6-luna";
 export const DEFAULT_REASONING_EFFORT = "medium";
 
 export const commitPlatform = (subject) => {

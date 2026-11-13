@@ -1262,8 +1262,8 @@ sessions:
         steps:
           - "Clear the app's permissions. Start dictation and deny the microphone, then deny it permanently, then recover through the Settings link."
           - "During a dictation, receive a call; during another, connect and then disconnect a Bluetooth headset."
-          - "During a dictation, leave the app."
-        expected: "Denial shows a rationale, then a Settings link, and dictation works once granted. A call or route change ends the session with a clear reason or carries on with correct text; leaving the app reports that dictation stopped and History keeps the unfinished words as unfinished."
+          - "During a Cloud dictation, say a first phrase, leave the app, say a second, different phrase, then come back and stop."
+        expected: "Denial shows a rationale, then a Settings link, and dictation works once granted. A call or route change ends the session with a clear reason or carries on with correct text; leaving the app does not stop dictation: it carries on with the recording notification showing, and stopping after you come back keeps both phrases."
         final_gate: true
       - id: "android-foreground-long-dictation"
         issues:

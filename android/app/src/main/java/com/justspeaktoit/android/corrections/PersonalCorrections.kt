@@ -14,9 +14,13 @@ data class CorrectionRule(val writeAs: String, val heardAs: List<String>)
  * vocabulary glossary that cloud models with a `prompt` field receive.
  */
 object PersonalCorrections {
-    /** Applies [rules] in order, alias by alias, to a final transcript. */
+    /**
+     * Applies [rules] in order, alias by alias, to a final transcript. The spelling itself is matched
+     * too, so a recogniser that already writes the word in another case (`kubernetes`) still gets
+     * the casing the user entered (`Kubernetes`).
+     */
     fun apply(text: String, rules: List<CorrectionRule>): String = rules.fold(text) { current, rule ->
-        rule.heardAs.fold(current) { inner, alias ->
+        (rule.heardAs + rule.writeAs).fold(current) { inner, alias ->
             val trimmed = alias.trim()
             if (trimmed.isEmpty()) {
                 inner
@@ -83,8 +87,11 @@ object PersonalCorrections {
         }
     }
 
-    /** A letter, mark, digit or underscore in any script, so `café` is one word, not `caf` + `é`. */
-    private const val WORD = """[\p{L}\p{M}\p{N}_]"""
+    /**
+     * A letter, mark, digit, underscore or zero-width (non-)joiner in any script, so `café` is one
+     * word, not `caf` + `é`, and Persian `می‌روم` is not split at its non-joiner.
+     */
+    private const val WORD = """[\p{L}\p{M}\p{N}_\u200C\u200D]"""
 
     private fun String.utf8Size(): Int = toByteArray(Charsets.UTF_8).size
 }

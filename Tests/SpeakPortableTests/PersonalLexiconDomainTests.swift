@@ -65,6 +65,36 @@ final class PersonalLexiconDomainTests: XCTestCase {
         XCTAssertTrue(directives.contains { $0.contains("Suggestion: Only change \"Jon\"") })
     }
 
+    func testApply_keepsTheCanonicalCaseWhenTheRecogniserAlreadyWritesTheWord() async throws {
+        let rules = [rule("Kubernetes", alias: "cooper netties"), rule("Jonathan", alias: "Jon", activation: .manual)]
+        let domain = PersonalLexiconDomain(store: LexiconTestStore(rules))
+        await domain.waitUntilLoaded()
+        let result = domain.apply(to: "kubernetes, KUBERNETES, Kubernetes and kubernetesx jonathan", context: .empty)
+        XCTAssertEqual(result.transformedText, "Kubernetes, Kubernetes, Kubernetes and kubernetesx jonathan")
+        XCTAssertEqual(result.applied.map(\.alias), ["kubernetes"])
+        XCTAssertEqual(result.applied.map(\.occurrences), [2])
+        XCTAssertTrue(result.suggestions.isEmpty)
+        XCTAssertTrue(domain.apply(to: "Kubernetes", context: .empty).applied.isEmpty)
+    }
+
+    func testApply_keepsTheCanonicalCaseForSpellingsEdgedWithPunctuation() async throws {
+        let rules = [rule("C++", alias: "see plus plus"), rule(".NET", alias: "dot nett")]
+        let domain = PersonalLexiconDomain(store: LexiconTestStore(rules))
+        await domain.waitUntilLoaded()
+        let result = domain.apply(to: "I use c++ and .net, not xc++, c++17 or a.netx", context: .empty)
+        XCTAssertEqual(result.transformedText, "I use C++ and .NET, not xc++, c++17 or a.netx")
+        XCTAssertEqual(result.applied.map(\.alias), ["c++", ".net"])
+
+        let aliasDomain = PersonalLexiconDomain(store: LexiconTestStore([rule("Swift", alias: "c++")]))
+        await aliasDomain.waitUntilLoaded()
+        XCTAssertEqual(aliasDomain.apply(to: "c++ and c++17", context: .empty).transformedText, "Swift and c++17")
+
+        let persian = "\u{0645}\u{06CC}\u{200C}\u{0631}\u{0648}\u{0645}"
+        let joinerDomain = PersonalLexiconDomain(store: LexiconTestStore([rule("x", alias: "\u{0645}\u{06CC}")]))
+        await joinerDomain.waitUntilLoaded()
+        XCTAssertEqual(joinerDomain.apply(to: persian, context: .empty).transformedText, persian)
+    }
+
     func testLoadMutationSerializationRollbackAndDurableOrder() async throws {
         let first = rule("Zed", alias: "zeded"), second = rule("Alpha", alias: "alfa")
         let store = LexiconTestStore([first, second], delayed: true)

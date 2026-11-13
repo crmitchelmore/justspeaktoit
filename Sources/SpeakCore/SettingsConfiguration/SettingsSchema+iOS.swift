@@ -1,9 +1,11 @@
 import Foundation
 
 // The iPhone's persisted settings, keyed by `AppSettings` (SpeakiOS) property
-// name. API keys are never part of a document. SpeakiOS tests fail when a
-// persisted setting has no field here, a default differs from a fresh install
-// or an app enum's cases drift from `allowedValues`.
+// name, plus the Read aloud settings in `IOSVoiceOutputSettings`, whose
+// `sonioxRegion` uses the Mac's `sonioxTTSRegion` key. API keys are never part
+// of a document. SpeakiOS tests fail when a persisted setting has no field
+// here, a default differs from a fresh install or an app enum's cases drift
+// from `allowedValues`.
 extension SettingsSchema {
     private typealias Field = SettingsSchemaField
 
@@ -77,6 +79,23 @@ extension SettingsSchema {
             Field(key: "autoPostProcess", kind: .boolean, summary: "Clean up every transcript automatically.",
                   defaultValue: .bool(false))
         ]
-        return transcription + recording + cleanup
+        return transcription + recording + cleanup + iOSReadAloudFields
     }()
+
+    /// SpeakiOS's `IOSVoiceOutputSettings`. The provider, model, voice and speed
+    /// must form a selection `VoiceOutputProvider.selectionProblems` accepts.
+    private static let iOSReadAloudFields: [Field] = [
+        Field(key: "ttsProvider", kind: .enumeration, summary: "Read aloud provider.",
+              defaultValue: .string(VoiceOutputProvider.defaultProvider.rawValue),
+              allowedValues: VoiceOutputProvider.allCases.map(\.rawValue)),
+        Field(key: "ttsModel", kind: .string,
+              summary: "Read aloud model for the provider (an OpenRouter speech selection for OpenRouter).",
+              defaultValue: .string(VoiceOutputProvider.defaultSelection.model)),
+        Field(key: "ttsVoice", kind: .string,
+              summary: "Read aloud voice for the model (soniox/<voice> for Soniox).",
+              defaultValue: .string(VoiceOutputProvider.defaultSelection.voice)),
+        ttsSpeedField,
+        ttsLanguageIdentifierField,
+        sonioxTTSRegionField
+    ]
 }

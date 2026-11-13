@@ -34,6 +34,24 @@
                 <string>C617.1</string>
             </array>
         </dict>
+        <!-- Linked SpeakCore measures elapsed time between receive failures with systemUptime. -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>35F9.1</string>
+            </array>
+        </dict>
+        <!-- Linked SpeakiOSLib carries the keyboard setup screen, which reads UITextInputMode.activeInputModes. -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryActiveKeyboards</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>54BD.1</string>
+            </array>
+        </dict>
     </array>
 </dict>
 </plist>

@@ -45,17 +45,29 @@ The app and each enabled extension ship their own `PrivacyInfo.xcprivacy`:
 - `JustSpeakWatch/PrivacyInfo.xcprivacy` (optional)
 - `JustSpeakWatchWidget/PrivacyInfo.xcprivacy` (optional)
 
-The keyboard and phone widget link SpeakCore, which reads the App Group defaults and file
-attributes, so both declare the matching required-reason categories. A missing
-declaration earns ITMS-91053.
+Apple scans each binary, including statically linked SpeakCore and SpeakiOSLib
+code, so every bundle declares the required-reason categories its own and linked
+sources reference. A missing declaration earns ITMS-91053.
+`Tests/SpeakCoreTests/RequiredReasonAPIManifestTests.swift` maps each bundle to
+its source roots and fails when a category is referenced but not declared, or a
+reason is not an approved first-party code for its category.
+
+The app, keyboard and phone widget declare active keyboards
+(`UITextInputMode.activeInputModes`) under `54BD.1`: the keyboard and the
+keyboard setup screen read the count to decide whether dictation can hand back
+to the previous keyboard, which changes what the user sees. The widget links
+SpeakiOSLib, which contains that setup screen. `3EC4.1` is not used because a
+systemwide keyboard is not the app's primary functionality.
 
 The app also declares system boot time under `35F9.1`: shared transcription
 retry helpers use uptime to measure elapsed time. They do not transmit raw
 uptime. This is the timer/elapsed-event reason in Apple's
 [required-reason API reference](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
-The Share extension stages a user-selected file locally, but its linked
-SpeakCore binary retains UserDefaults/AppStorage references, so it declares
-own-app and App Group defaults reasons too. Watch transfers to the user's
+The keyboard, phone widget and Share extension link SpeakCore, so they declare
+`35F9.1` as well. The Share extension stages a user-selected file locally, but
+its linked SpeakCore binary retains UserDefaults/AppStorage and App Group file
+attribute references, so it declares own-app and App Group defaults reasons and
+`C617.1` too. Watch transfers to the user's
 paired phone. Neither declares direct service collection; Watch does not
 declare required-reason APIs absent from its current code and linked binary.
 

@@ -130,6 +130,15 @@
                 <string>35F9.1</string>
             </array>
         </dict>
+        <!-- Keyboard setup reads UITextInputMode.activeInputModes to show whether the dictation keyboard can hand back to the previous keyboard. Nothing derived from it leaves the device. -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryActiveKeyboards</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>54BD.1</string>
+            </array>
+        </dict>
     </array>
 </dict>
 </plist>

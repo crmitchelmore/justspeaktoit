@@ -10,8 +10,9 @@
     <array/>
     <key>NSPrivacyCollectedDataTypes</key>
     <array/>
-    <!-- SpeakCore retains UserDefaults/AppStorage references in this binary.
-         They access only the app's own or its shared App Group preferences. -->
+    <!-- SpeakCore retains UserDefaults/AppStorage, file-attribute and
+         systemUptime references in this binary. They access only the app's own
+         or its shared App Group preferences and container, and elapsed time. -->
     <key>NSPrivacyAccessedAPITypes</key>
     <array>
         <dict>
@@ -19,6 +20,18 @@
             <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
             <key>NSPrivacyAccessedAPITypeReasons</key>
             <array><string>CA92.1</string><string>1C8F.1</string></array>
+        </dict>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array><string>C617.1</string></array>
+        </dict>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array><string>35F9.1</string></array>
         </dict>
     </array>
 </dict>

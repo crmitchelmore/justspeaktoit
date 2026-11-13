@@ -407,6 +407,19 @@ sessions:
           - "Expand that item and read Trigger and Cost in Session Details."
         expected: "Session Details' Trigger reads Button with Compare Models below it (no Uibutton and no Hotkey: prefix). A cost under one cent shows its digits, such as US$0.0042, on the card and in Session Details instead of US$0.00."
         final_gate: true
+      - id: "mac-history-spend-totals-sub-cent"
+        issues:
+          - 1387
+        title: "History and Dashboard spend totals keep sub-cent amounts"
+        minutes: 2
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the shared History spend formatter"
+        steps:
+          - "Filter History to a single cheap item, for example a Compare Models result under one cent."
+          - "Read the Spend figure in the History header, in both normal and compact density."
+          - "Open the Dashboard and read Spend and the cost on the matching recent session."
+        expected: "Spend shows the sub-cent digits, such as US$0.0042, matching the History card, never US$0.00. With nothing spent, Dashboard shows a dash."
+        final_gate: false
       - id: "mac-settings-search"
         issues:
           - 1410

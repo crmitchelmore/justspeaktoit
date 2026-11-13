@@ -44,10 +44,7 @@ enum DashboardFormat {
 
   static func currency(_ value: Decimal) -> String {
     guard value > 0 else { return "—" }
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .currency
-    formatter.currencyCode = "USD"
-    return formatter.string(from: value as NSDecimalNumber) ?? "$0.00"
+    return HistoryDetailFormatting.formatCurrency(value, currency: "USD")
   }
 
   static func models(_ identifiers: [String]) -> String {

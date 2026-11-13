@@ -60,6 +60,17 @@ final class HistoryDetailSummaryTests: XCTestCase {
         XCTAssertTrue(usd("0").contains("0.00"))
     }
 
+    func testFormatCurrency_appliesTheGivenLocale() {
+        func format(_ text: String, _ identifier: String) -> String {
+            HistoryDetailFormatting.formatCurrency(
+                Decimal(string: text)!, currency: "USD", locale: Locale(identifier: identifier)
+            )
+        }
+        XCTAssertEqual(format("0.0042", "en_US"), "$0.0042")
+        XCTAssertEqual(format("0.0042", "en_GB"), "US$0.0042")
+        XCTAssertEqual(format("1.5", "en_US"), "$1.50")
+    }
+
     func testTrigger_labelsComparisonButtonWithoutHotKeyOrRawName() {
         let comparison = ApplicationHistoryTrigger(
             gesture: .uiButton, hotKeyDescription: ModelComparisonHistory.triggerDescription, outputMethod: .none

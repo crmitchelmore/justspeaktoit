@@ -87,8 +87,11 @@ object PersonalCorrections {
         }
     }
 
-    /** A letter, mark, digit or underscore in any script, so `café` is one word, not `caf` + `é`. */
-    private const val WORD = """[\p{L}\p{M}\p{N}_]"""
+    /**
+     * A letter, mark, digit, underscore or zero-width (non-)joiner in any script, so `café` is one
+     * word, not `caf` + `é`, and Persian `می‌روم` is not split at its non-joiner.
+     */
+    private const val WORD = """[\p{L}\p{M}\p{N}_\u200C\u200D]"""
 
     private fun String.utf8Size(): Int = toByteArray(Charsets.UTF_8).size
 }

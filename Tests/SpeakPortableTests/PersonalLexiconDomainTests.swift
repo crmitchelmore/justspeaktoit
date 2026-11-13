@@ -88,6 +88,11 @@ final class PersonalLexiconDomainTests: XCTestCase {
         let aliasDomain = PersonalLexiconDomain(store: LexiconTestStore([rule("Swift", alias: "c++")]))
         await aliasDomain.waitUntilLoaded()
         XCTAssertEqual(aliasDomain.apply(to: "c++ and c++17", context: .empty).transformedText, "Swift and c++17")
+
+        let persian = "\u{0645}\u{06CC}\u{200C}\u{0631}\u{0648}\u{0645}"
+        let joinerDomain = PersonalLexiconDomain(store: LexiconTestStore([rule("x", alias: "\u{0645}\u{06CC}")]))
+        await joinerDomain.waitUntilLoaded()
+        XCTAssertEqual(joinerDomain.apply(to: persian, context: .empty).transformedText, persian)
     }
 
     func testLoadMutationSerializationRollbackAndDurableOrder() async throws {

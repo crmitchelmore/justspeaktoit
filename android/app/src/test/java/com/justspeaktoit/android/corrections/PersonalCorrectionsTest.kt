@@ -23,6 +23,8 @@ class PersonalCorrectionsTest {
         assertEquals("I deploy to Kubernetes", PersonalCorrections.apply("I deploy to kubernetes", rules))
         assertEquals("Kubernetes, not kubernetesx", PersonalCorrections.apply("KUBERNETES, not kubernetesx", rules))
         assertEquals("iPhone", PersonalCorrections.apply("IPHONE", listOf(CorrectionRule("iPhone", emptyList()))))
+        val persian = "\u0645\u06cc\u200c\u0631\u0648\u0645"
+        assertEquals(persian, PersonalCorrections.apply(persian, listOf(CorrectionRule("x", listOf("\u0645\u06cc")))))
     }
 
     @Test

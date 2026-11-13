@@ -271,9 +271,11 @@ public final class PersonalLexiconDomain {
 extension PersonalLexiconDomain {
   /// Bounded by adjacent word characters rather than `\b`, as on Android, so spellings that start
   /// or end with punctuation match on their own ("c++", ".net") but not inside a word ("c++17").
+  /// Zero-width (non-)joiners count as word characters, as they do for `\b`, so Persian words
+  /// written with a non-joiner are not split.
   private func wholeWordRegex(for term: String) -> NSRegularExpression? {
     if let cached = regexCache[term] { return cached }
-    let word = "[\\p{L}\\p{M}\\p{N}_]"
+    let word = "[\\p{L}\\p{M}\\p{N}_\\u200C\\u200D]"
     let pattern = "(?i)(?<!\(word))\(NSRegularExpression.escapedPattern(for: term))(?!\(word))"
     guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
     regexCache[term] = compiled

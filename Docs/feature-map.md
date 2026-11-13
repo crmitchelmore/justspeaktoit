@@ -113,7 +113,7 @@ The flags live in `Project.swift`; release selection is in
 | F25 | Recording HUD / live text overlay | Yes | Yes | Yes | Yes | Partial | #1592 | Android shows an ongoing foreground-service notification with Stop, but no live text. |
 | F26 | Menu bar / tray presence | Yes | N/A | Yes | Yes | N/A | | |
 | F27 | Resources-in-use status | Yes | Yes | Yes | Yes | Yes | | |
-| F28 | Report an issue with diagnostics | Yes | Yes | Yes | Yes | No | #1633 | |
+| F28 | Report an issue with diagnostics | Yes | Yes | Yes | Yes | Yes | | |
 | F29 | Troubleshooting page | Yes | Partial | Yes | Yes | No | #1634 | iOS has Capture Health only. |
 | F30 | Onboarding and permissions guide | Yes | Yes | Yes | Yes | Partial | #1639 | |
 | F31 | API keys page | Yes | Yes | Yes | Yes | Yes | | |
@@ -383,13 +383,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** See [system resources](system-resources.md).
 
 ### F28 Report an issue with diagnostics
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1633.
+- **Gaps:** none
 - **How:** Build a frozen allowlisted report, show the exact bytes, and ask consent per report before copy, export or open.
-- **Refs:** `Sources/SpeakCore/History/IssueDiagnosticReport.swift`, `Sources/SpeakApp/History/HistoryIssueReporter.swift`, `Sources/SpeakiOS/Views/IOSIssueReportPreview.swift`, `Sources/SpeakWindows/WindowsIssueReports.swift`
+- **Refs:** `Sources/SpeakCore/History/IssueDiagnosticReport.swift`, `Sources/SpeakApp/History/HistoryIssueReporter.swift`, `Sources/SpeakiOS/Views/IOSIssueReportPreview.swift`, `Sources/SpeakWindows/WindowsIssueReports.swift`, `android/app/src/main/java/com/justspeaktoit/android/diagnostics/IssueReport.kt`
 - **Sunset:** none
-- **Nuances:** Reports never include transcript text, audio, raw errors, logs, keys, persistent IDs or absolute timestamps ([transcript logging](SECURITY_TRANSCRIPT_LOGGING.md)).
+- **Nuances:** Android mirrors the SpeakCore JSON schema in Kotlin with `platform` `android`, and its History records no stage timings, so its timeline is always empty. Reports never include transcript text, audio, raw errors, logs, keys, persistent IDs or absolute timestamps ([transcript logging](SECURITY_TRANSCRIPT_LOGGING.md)).
 
 ### F29 Troubleshooting page
 - **Platforms:** macOS Yes · iOS Partial · Windows Yes · Linux Yes · Android No

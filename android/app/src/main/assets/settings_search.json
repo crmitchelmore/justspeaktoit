@@ -315,6 +315,25 @@
       ],
       "summary" : "Open the Just Speak to It privacy policy on the website.",
       "title" : "Privacy policy"
+    },
+    {
+      "id" : "android.reportIssue",
+      "keywords" : [
+        "bug",
+        "report",
+        "feedback",
+        "diagnostics",
+        "github",
+        "problem",
+        "support"
+      ],
+      "section" : "about",
+      "sectionTitle" : "About",
+      "settingKeys" : [
+
+      ],
+      "summary" : "Preview a GitHub issue draft with privacy-safe diagnostics before you share it.",
+      "title" : "Report an issue"
     }
   ],
   "synonyms" : [

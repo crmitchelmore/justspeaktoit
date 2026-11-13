@@ -36,6 +36,14 @@ object AutomationIds {
 
     /** One per tip, keyed by its store product ID, e.g. `settings.tip.com.justspeaktoit.tip.small`. */
     fun tipProduct(productId: String) = "settings.tip.$productId"
+    const val SETTINGS_REPORT_ISSUE = "settings.reportIssue"
+    const val HISTORY_REPORT_ISSUE = "history.reportIssue"
+    const val ISSUE_REPORT = "issueReport"
+    const val ISSUE_REPORT_INCLUDE = "issueReport.includeDiagnostics"
+    const val ISSUE_REPORT_DRAFT = "issueReport.draft"
+    const val ISSUE_REPORT_COPY = "issueReport.copy"
+    const val ISSUE_REPORT_OPEN = "issueReport.open"
+    const val ISSUE_REPORT_CLOSE = "issueReport.close"
     const val RESOURCES_HEADLINE = "settings.resources.headline"
     const val RESOURCES_RELEASE_EVERYTHING = "settings.resources.releaseEverything"
 

@@ -3,6 +3,8 @@ package com.justspeaktoit.android.ui
 import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +26,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,6 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.justspeaktoit.android.R
 import com.justspeaktoit.android.cloud.CloudCatalog
+import com.justspeaktoit.android.diagnostics.AndroidIssueEnvironment
+import com.justspeaktoit.android.diagnostics.IssueFacts
 import com.justspeaktoit.android.dictation.DictationFailure
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.history.HistoryEntry
@@ -166,9 +171,11 @@ private fun RetentionPicker(retention: Retention, onRetention: (Retention) -> Un
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HistoryCard(entry: HistoryEntry, transcribe: HistoryTranscription, actions: HistoryActions) {
     val context = LocalContext.current
+    var reporting by rememberSaveable { mutableStateOf(false) }
     val shareTitle = stringResource(R.string.share_title)
     val failed = entry.status == HistoryStatus.Failed
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -207,7 +214,7 @@ private fun HistoryCard(entry: HistoryEntry, transcribe: HistoryTranscription, a
             if (entry.text.isNotEmpty()) {
                 Text(entry.text, style = MaterialTheme.typography.bodyLarge)
             }
-            Row {
+            FlowRow {
                 if (entry.audioPath != null) {
                     val running = transcribe.entryId == entry.id
                     TextButton(onClick = { actions.onTranscribe(entry.id) }, enabled = transcribe.available) {
@@ -224,9 +231,17 @@ private fun HistoryCard(entry: HistoryEntry, transcribe: HistoryTranscription, a
                         }
                     }
                 }
+                TextButton(
+                    onClick = { reporting = true },
+                    modifier = Modifier.testTag(AutomationIds.HISTORY_REPORT_ISSUE),
+                ) { Text(stringResource(R.string.action_report_issue)) }
                 TextButton(onClick = { actions.onDelete(entry.id) }) { Text(stringResource(R.string.action_delete)) }
             }
         }
+    }
+    if (reporting) {
+        val facts = remember(entry) { IssueFacts.forHistory(entry, AndroidIssueEnvironment.current(context)) }
+        IssueReportDialog(facts) { reporting = false }
     }
 }
 

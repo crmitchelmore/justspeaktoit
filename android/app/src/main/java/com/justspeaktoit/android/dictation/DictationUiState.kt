@@ -5,6 +5,8 @@ import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.corrections.AutoCorrectionCandidate
+import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
@@ -58,6 +60,12 @@ data class DictationUiState(
     val transcribingEntryId: String? = null,
     /** Personal corrections, in the order they apply. */
     val corrections: List<CorrectionRule> = emptyList(),
+    /** Whether the keyboard learns corrections from the user's edits. */
+    val learnCorrections: Boolean = AutoCorrectionLearningPolicy.ENABLED_BY_DEFAULT,
+    /** Edits seen before one becomes a correction automatically. */
+    val correctionPromotionThreshold: Int = AutoCorrectionLearningPolicy.DEFAULT_PROMOTION_THRESHOLD,
+    /** Learned edits waiting for review, dismissed ones excluded. */
+    val correctionCandidates: List<AutoCorrectionCandidate> = emptyList(),
     /** System resources the app holds now, oldest first (#1473). */
     val resourcesInUse: List<SystemResourceHold> = emptyList(),
     /** The user's base cleanup prompt; null means the built-in one. */

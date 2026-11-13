@@ -115,6 +115,27 @@
     <string name="corrections_remove">Remove correction for %1$s</string>
     <string name="corrections_rule">%1$s ← %2$s</string>
     <string name="corrections_vocabulary_only">Vocabulary only</string>
+    <string name="settings_learned_corrections_title">Learned corrections</string>
+    <string name="learned_corrections_toggle">Learn corrections from your edits</string>
+    <string name="learned_corrections_note">When you change a word the Just Speak to It keyboard has just typed, while the keyboard is still open in that field, the change is noted on this phone. An edit you make often becomes a personal correction. Password fields and fields that ask keyboards not to learn are never read.</string>
+    <plurals name="learned_corrections_threshold">
+        <item quantity="one">Add automatically after %1$d edit</item>
+        <item quantity="other">Add automatically after %1$d edits</item>
+    </plurals>
+    <string name="learned_corrections_fewer">Fewer edits before adding</string>
+    <string name="learned_corrections_more">More edits before adding</string>
+    <string name="learned_corrections_suggestions">Suggestions</string>
+    <string name="learned_corrections_empty">No suggestions yet.</string>
+    <string name="learned_corrections_pair">%1$s → %2$s</string>
+    <plurals name="learned_corrections_seen">
+        <item quantity="one">Seen %1$d time</item>
+        <item quantity="other">Seen %1$d times</item>
+    </plurals>
+    <string name="learned_corrections_accept">Add</string>
+    <string name="learned_corrections_accept_description">Add correction from %1$s to %2$s</string>
+    <string name="learned_corrections_dismiss">Dismiss</string>
+    <string name="learned_corrections_dismiss_description">Dismiss suggestion from %1$s to %2$s</string>
+    <string name="learned_corrections_clear">Clear suggestions</string>
     <string name="settings_cleanup_title">Clean up transcripts</string>
     <string name="settings_cleanup_note">Sends the final transcript to the chosen model\'s provider to fix punctuation and spelling. Needs that provider\'s key. If cleanup fails, the original transcript is kept.</string>
     <string name="settings_cleanup_needs_key">Add your %1$s key to use cleanup.</string>

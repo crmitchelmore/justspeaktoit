@@ -32,6 +32,7 @@ class RawConfigurationTest {
         // Consent is only ever given on its own screen, never by pasting a document.
         "analyticsConsent" to "Analytics opt-in is a consent choice.",
         "diagnosticsConsent" to "Crash-report consent is a consent choice.",
+        "autoCorrectionCandidates" to "Learned suggestions are app state, reviewed in Settings.",
         // Not in the Android schema yet; binding them is tracked in #1700.
         "recordingSoundsEnabled" to "Recording sounds are edited in Settings only for now.",
         "recordingSoundProfile" to "Recording sounds are edited in Settings only for now.",
@@ -42,6 +43,8 @@ class RawConfigurationTest {
         "hasCompletedOnboarding" to "First-run state, reopened from Settings > Setup guide, not a preference.",
         "appearance" to "Appearance is edited in Settings only for now.",
         "dynamicColor" to "Appearance is edited in Settings only for now.",
+        "autoCorrectionsEnabled" to "Learned corrections are edited in Settings only for now.",
+        "autoCorrectionsPromotionThreshold" to "Learned corrections are edited in Settings only for now.",
     )
 
     private fun validate(settings: String, current: Map<String, Any?> = fresh) =

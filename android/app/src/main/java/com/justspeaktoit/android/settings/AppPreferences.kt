@@ -2,6 +2,8 @@ package com.justspeaktoit.android.settings
 
 import android.content.Context
 import androidx.core.content.edit
+import com.justspeaktoit.android.corrections.AutoCorrectionCandidate
+import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.dictation.RecognitionMode
@@ -21,6 +23,15 @@ interface DictationPreferences {
     /** A `DictationLanguages` identifier; null until chosen, which means Automatic. */
     var languageId: String?
     var corrections: List<CorrectionRule>
+
+    /** Whether the keyboard learns corrections from edits to text it inserted. */
+    var learnCorrections: Boolean
+
+    /** How many times an edit is seen before it becomes a correction, within the shared range. */
+    var correctionPromotionThreshold: Int
+
+    /** Learned edits not yet promoted, dismissed ones included; see `AutoCorrectionLearner`. */
+    var correctionCandidates: List<AutoCorrectionCandidate>
 
     /** The user's base cleanup prompt; null or blank means the built-in one. */
     var cleanupPrompt: String?
@@ -82,6 +93,24 @@ class AppPreferences(context: Context) : DictationPreferences {
     override var corrections: List<CorrectionRule>
         get() = PersonalCorrections.decode(prefs.getString(KEY_CORRECTIONS, null))
         set(value) = prefs.edit { putString(KEY_CORRECTIONS, PersonalCorrections.encode(value)) }
+
+    override var learnCorrections: Boolean
+        get() = prefs.getBoolean(KEY_LEARN_CORRECTIONS, AutoCorrectionLearningPolicy.ENABLED_BY_DEFAULT)
+        set(value) = prefs.edit { putBoolean(KEY_LEARN_CORRECTIONS, value) }
+
+    override var correctionPromotionThreshold: Int
+        get() = AutoCorrectionLearningPolicy.clampThreshold(
+            prefs.getInt(KEY_CORRECTION_THRESHOLD, AutoCorrectionLearningPolicy.DEFAULT_PROMOTION_THRESHOLD),
+        )
+        set(value) = prefs.edit {
+            putInt(KEY_CORRECTION_THRESHOLD, AutoCorrectionLearningPolicy.clampThreshold(value))
+        }
+
+    override var correctionCandidates: List<AutoCorrectionCandidate>
+        get() = AutoCorrectionCandidate.decode(prefs.getString(KEY_CORRECTION_CANDIDATES, null))
+        set(value) = prefs.edit {
+            putString(KEY_CORRECTION_CANDIDATES, AutoCorrectionCandidate.encode(value))
+        }
 
     override var cleanupPrompt: String?
         get() = prefs.getString(KEY_CLEANUP_PROMPT, null)
@@ -170,6 +199,11 @@ class AppPreferences(context: Context) : DictationPreferences {
         /** The canonical cross-platform key; values are SpeakCore `TranscriptionLanguageCatalog` IDs. */
         private const val KEY_LANGUAGE = "preferredLocale"
         private const val KEY_CORRECTIONS = "personal_corrections"
+
+        /** Canonical cross-platform keys, shared with the Mac and desktop apps' correction learning. */
+        private const val KEY_LEARN_CORRECTIONS = "autoCorrectionsEnabled"
+        private const val KEY_CORRECTION_THRESHOLD = "autoCorrectionsPromotionThreshold"
+        private const val KEY_CORRECTION_CANDIDATES = "autoCorrectionCandidates"
 
         /** Canonical cross-platform keys, shared with the desktop apps and SpeakCore's profile store. */
         private const val KEY_CLEANUP_PROMPT = "postProcessingSystemPrompt"

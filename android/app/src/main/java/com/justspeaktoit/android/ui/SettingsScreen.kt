@@ -89,6 +89,11 @@ class SettingsActions(
     val onReleaseEverything: () -> Unit = {},
     val onChooseLanguage: (String) -> Unit = {},
     val onCorrectionsChanged: (List<CorrectionRule>) -> Unit = {},
+    val onLearnCorrectionsChanged: (Boolean) -> Unit = {},
+    val onCorrectionThresholdChanged: (Int) -> Unit = {},
+    val onAcceptCorrection: (String) -> Unit = {},
+    val onDismissCorrection: (String) -> Unit = {},
+    val onClearCorrectionSuggestions: () -> Unit = {},
     val onCleanupPromptChanged: (String) -> Unit = {},
     val onSaveProfile: (DictationProfile) -> Unit = {},
     val onDeleteProfile: (String) -> Unit = {},
@@ -318,6 +323,15 @@ fun SettingsScreen(
             HorizontalDivider()
             SectionTitle(R.string.settings_corrections_title, anchor("android.personalCorrections"))
             CorrectionsEditor(state.corrections, actions.onCorrectionsChanged)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_learned_corrections_title, anchor("android.learnedCorrections"))
+            LearnedCorrections(
+                enabled = state.learnCorrections,
+                threshold = state.correctionPromotionThreshold,
+                candidates = state.correctionCandidates,
+                actions = actions,
+            )
 
             HorizontalDivider()
             SectionTitle(R.string.settings_appearance_title, anchor("android.appearance"))

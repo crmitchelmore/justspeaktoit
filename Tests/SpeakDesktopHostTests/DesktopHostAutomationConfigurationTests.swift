@@ -52,7 +52,8 @@ final class DesktopHostAutomationConfigurationTests: XCTestCase {
         }
         let dryRun = try await controller.automationSetConfiguration(["showHUD": .bool(false)], dryRun: true)
         XCTAssertEqual(try object(dryRun.configuration?.storage)["applied"], .bool(false))
-        XCTAssertEqual(try await setting("showHUD"), .bool(true))
+        let showHUD = try await setting("showHUD")
+        XCTAssertEqual(showHUD, .bool(true))
     }
 
     func testSet_AppliesValidChangesThroughThePreferencesSavePath() async throws {
@@ -61,9 +62,12 @@ final class DesktopHostAutomationConfigurationTests: XCTestCase {
             ["showHUD": .bool(false), "holdThreshold": .double(0.5)], dryRun: false
         )
         XCTAssertEqual(try object(result.configuration?.storage)["applied"], .bool(true))
-        XCTAssertEqual(try await setting("showHUD"), .bool(false))
-        XCTAssertEqual(try await setting("holdThreshold"), .double(0.5))
-        XCTAssertEqual(try await controller.configuration().enabled("showHUD"), false)
+        let showHUD = try await setting("showHUD")
+        let holdThreshold = try await setting("holdThreshold")
+        let configuration = try await controller.configuration()
+        XCTAssertEqual(showHUD, .bool(false))
+        XCTAssertEqual(holdThreshold, .double(0.5))
+        XCTAssertEqual(configuration.enabled("showHUD"), false)
     }
 
     func testSet_IsAllOrNothingAndNeverChangesTheGrantOrUnknownKeys() async throws {
@@ -79,8 +83,10 @@ final class DesktopHostAutomationConfigurationTests: XCTestCase {
             } catch let error as AutomationError {
                 XCTAssertEqual(error.code, .invalidArgument)
             }
-            XCTAssertEqual(try await setting("showHUD"), .bool(true))
-            XCTAssertEqual(try await setting(grantKey), .bool(true))
+            let showHUD = try await setting("showHUD")
+            let grant = try await setting(grantKey)
+            XCTAssertEqual(showHUD, .bool(true))
+            XCTAssertEqual(grant, .bool(true))
         }
     }
 
@@ -89,7 +95,8 @@ final class DesktopHostAutomationConfigurationTests: XCTestCase {
         let preferences = try DesktopConfiguration(values: [grantKey: AnyCodable(.bool(true))])
         try JSONEncoder().encode(DesktopConfigurationDocument(preferences: preferences)).write(to: file)
         try await controller.importConfiguration(path: file.path)
-        XCTAssertEqual(try await setting(grantKey), .bool(false))
+        let grant = try await setting(grantKey)
+        XCTAssertEqual(grant, .bool(false))
     }
 
     private func grantWrites() async throws {

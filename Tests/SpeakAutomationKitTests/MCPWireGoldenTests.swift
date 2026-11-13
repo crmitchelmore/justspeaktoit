@@ -29,7 +29,7 @@ final class MCPWireGoldenTests: XCTestCase {
         XCTAssertEqual(self.handler.handle(line: request), expected, request, file: file, line: line)
     }
 
-    func testInitializeAndToolsList_keepTheirBytes() {
+    func testInitialize_keepsItsBytes() {
         self.assertReply(
             #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
             #"{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{"listChanged":false}},"instructions":"Dic"#
@@ -37,6 +37,9 @@ final class MCPWireGoldenTests: XCTestCase {
             + #"dentials; this server never sees them.","protocolVersion":"2025-06-18","serverInfo":{"name":"justspe"#
             + #"aktoit","version":"9.9.9"}}}"#
         )
+    }
+
+    func testToolsList_keepsItsBytes() {
         self.assertReply(
             #"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
             #"{"id":2,"jsonrpc":"2.0","result":{"tools":[{"description":"Await an identified active local Mac capt"#

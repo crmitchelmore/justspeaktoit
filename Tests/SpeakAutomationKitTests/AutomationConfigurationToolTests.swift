@@ -13,7 +13,7 @@ final class AutomationConfigurationToolTests: XCTestCase {
             "params": ["name": name, "arguments": arguments]
         ]
         let data = try JSONSerialization.data(withJSONObject: message)
-        let line = try XCTUnwrap(handler.handle(line: String(decoding: data, as: UTF8.self)))
+        let line = try XCTUnwrap(handler.handle(line: XCTUnwrap(String(bytes: data, encoding: .utf8))))
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
         return try XCTUnwrap(object["result"] as? [String: Any])
     }

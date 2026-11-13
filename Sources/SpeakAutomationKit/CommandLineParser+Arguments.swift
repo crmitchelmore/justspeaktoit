@@ -100,3 +100,71 @@ extension CLIPlan {
         }
     }
 }
+
+extension CommandLineParser {
+    /// Applies recognised options to `plan` and returns the positional leftovers.
+    static func applyOptions(
+        _ plan: inout CLIPlan,
+        arguments: [String],
+        allowed: Set<Option>
+    ) throws -> [String] {
+        var positional: [String] = []
+        var index = 0
+
+        while index < arguments.count {
+            let token = arguments[index]
+            index += 1
+
+            // `-` names standard input and `--` ends the options, so text that
+            // starts with a dash can still be spoken.
+            if token == "--" {
+                positional.append(contentsOf: arguments[index...])
+                break
+            }
+            guard token.hasPrefix("-"), token != "-" else {
+                positional.append(token)
+                continue
+            }
+            // Support --flag=value as well as --flag value. Empty subsequences are
+            // kept so `--timeout=` fails as a missing value instead of silently
+            // swallowing the next argument.
+            let parts = token
+                .split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                .map(String.init)
+            guard let option = Option(token: parts[0]) else {
+                throw CLIUsageError(message: "Unknown option \"\(parts[0])\".")
+            }
+            guard allowed.contains(option) else {
+                throw CLIUsageError(message: "\(option.rawValue) is not valid for this command.")
+            }
+            guard option.takesValue else {
+                guard parts.count == 1 else {
+                    throw CLIUsageError(message: "\(option.rawValue) does not take a value.")
+                }
+                self.applyFlag(option, to: &plan)
+                continue
+            }
+
+            let value: String
+            if parts.count == 2 {
+                value = parts[1]
+            } else {
+                guard index < arguments.count else {
+                    throw CLIUsageError(message: "\(option.rawValue) requires a value.")
+                }
+                value = arguments[index]
+                index += 1
+            }
+            try self.apply(option: option, value: value, to: &plan)
+        }
+        return positional
+    }
+
+    private static func applyFlag(_ option: Option, to plan: inout CLIPlan) {
+        switch option {
+        case .play: plan.play = true
+        case .dryRun: plan.dryRun = true
+        default: plan.json = true
+        }
+    }
+}

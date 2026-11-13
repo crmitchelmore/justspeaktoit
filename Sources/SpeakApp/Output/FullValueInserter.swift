@@ -40,6 +40,14 @@ final class FullValueInserter: LiveInsertionWriter {
     insertedText.isEmpty ? insertFresh(finalText) : replaceInsertedText(with: finalText)
   }
 
+  /// Whole-value rewrites keep no pre-session baseline, so there is no way to
+  /// prove the field holds only this session's change; the text stays.
+  func rollBack() -> LiveTextInserter.RollbackResult {
+    insertedText.isEmpty
+      ? .nothingInserted
+      : .kept(reason: "full-value live insertion cannot verify the region to remove")
+  }
+
   private func appendText(_ text: String) {
     guard let host else { return }
     guard let focusedElement = host.focusedTextElement() else {

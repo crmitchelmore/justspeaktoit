@@ -19,6 +19,16 @@ extension SettingsSearchCatalog {
             platforms: .iOS
         ),
         SettingsSearchEntry(
+            id: "ios.microphone", title: "Microphone", section: .general, systemImage: "mic",
+            summary: "Choose the microphone recording uses, or follow the system default.",
+            keywords: [
+                "microphone", "input device", "audio input", "mic", "headset", "bluetooth", "usb microphone",
+                "external microphone", "system default"
+            ],
+            settingKeys: ["preferredAudioInputUID"],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
             id: "ios.behavior", title: "Behavior", section: .general, systemImage: "slider.horizontal.3",
             summary: "Auto-start recording, hands-free dictation and Live Activities.",
             keywords: [

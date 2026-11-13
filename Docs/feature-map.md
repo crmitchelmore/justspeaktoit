@@ -127,7 +127,7 @@ The flags live in `Project.swift`; release selection is in
 | F39 | Audio file import | Yes | Yes | Yes | Yes | Yes | | |
 | F40 | Launch at login | Yes | N/A | Yes | Yes | N/A | | |
 | F41 | Updates | Yes | N/A | Yes | Yes | N/A | | |
-| F42 | Microphone selection | Yes | Partial | Yes | Yes | No | #1637 | |
+| F42 | Microphone selection | Yes | Yes | Yes | Yes | No | #1637 | |
 | F43 | Recording start/stop sounds | Yes | Yes | Yes | Yes | Yes | | |
 | F44 | Per-app output target (profiles) / Focus overrides | Yes | Yes | Yes | Limited | N/A | | |
 | F45 | Recording audio housekeeping | Yes | Yes | Yes | Yes | Partial | #1629 | |
@@ -509,13 +509,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Never offer an arm64-only update to Intel or Rosetta. Store submission happens only after Stable publication (`.github/workflows/windows-store.yml`). See [release trains](alpha-stable-release-trains.md).
 
 ### F42 Microphone selection
-- **Platforms:** macOS Yes · iOS Partial · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android No
 - **Excluded:** none
-- **Gaps:** iOS, Android #1637 (iOS follows the system route).
+- **Gaps:** Android #1637.
 - **How:** The chosen device applies when the next input session begins; otherwise the OS default is used. Label it as a preference, not the measured route (#852).
-- **Refs:** `Sources/SpeakApp/Audio/AudioInputDeviceManager.swift`, `Sources/SpeakWindows/WindowsMicrophones.swift`, `Sources/SpeakLinux/LinuxMicrophoneMonitor.swift`
+- **Refs:** `Sources/SpeakApp/Audio/AudioInputDeviceManager.swift`, `Sources/SpeakWindows/WindowsMicrophones.swift`, `Sources/SpeakLinux/LinuxMicrophoneMonitor.swift`, `Sources/SpeakiOS/Services/AudioSessionManager+PreferredInput.swift`, `Sources/SpeakCore/Capture/PreferredAudioInput.swift`
 - **Sunset:** none
-- **Nuances:** See [Windows microphone discovery](windows-microphone-discovery.md).
+- **Nuances:** See [Windows microphone discovery](windows-microphone-discovery.md). iOS lists `AVAudioSession.availableInputs` (built-in, wired, Bluetooth, USB) and applies the choice with `setPreferredInput` after the recording session activates, waiting up to 500 ms for the route before capture starts. A missing choice falls back to the system route and the recording screen says so; keyboard readiness's held session is never re-routed.
 
 ### F43 Recording start/stop sounds
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

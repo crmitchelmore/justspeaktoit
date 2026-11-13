@@ -44,7 +44,6 @@ struct CompactHUDContent: View {
     .shadow(color: .black.opacity(0.16), radius: 16, x: 0, y: 10)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("compactHUD")
-    .accessibilityAddTraits(.isModal)
   }
 
   // MARK: - Top row (dot · meter · timer)

@@ -168,6 +168,10 @@ fail on any non-enum string property, exactly as issue #591 specifies.
   autocapture, replay, survey, person-profile or error-capture request path.
   This source boundary is not a full-process release network audit; any
   unapproved traffic still blocks rollout.
+- Android (#1594) mirrors that transport in `PostHogTransport.kt`: the same
+  envelope, the same first-rollout events and coarse context with
+  `platform=android`, one random ID deleted on opt-out, and no SDK. Release
+  builds get the key from `POSTHOG_PROJECT_KEY`; other builds send nothing.
 
 ### Consent: opt-IN, three states, with a real preview
 

@@ -197,6 +197,8 @@ jobs:
           JSTI_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
           JSTI_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
           JSTI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          # Public PostHog project key for opt-in analytics; builds without it send nothing.
+          POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
         # Same version code scheme as android.yml, so sideloaded builds upgrade in place.
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then

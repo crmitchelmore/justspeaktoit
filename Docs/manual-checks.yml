@@ -333,6 +333,53 @@ sessions:
           - "Fill in the App content forms and store listing from the guide."
         expected: "The next green Android run on main publishes to the internal track without manual steps."
         final_gate: false
+      - id: "android-telemetry-consent"
+        issues:
+          - 1594
+        title: "Android: analytics and crash reports stay off until you opt in"
+        minutes: 6
+        core: false
+        build: "An Android 10+ phone and the newest Alpha APK that includes #1594, installed fresh (uninstall first)"
+        steps:
+          - "Open Just Speak to It and check the first-run prompt shows both switches off."
+          - "Tap Done without changing anything, then open Settings \u203a Privacy."
+          - "Check Share anonymous analytics and Send crash reports and diagnostics are both off."
+          - "Search Settings for crash reports and for analytics; each result opens its switch."
+          - "Turn both on with TalkBack running, then turn both off again."
+          - "Force-stop and reopen the app."
+        expected: "The prompt appears once with both switches off, dismissing it keeps both off, TalkBack reads each switch with its on or off state, search finds both, and the prompt does not return."
+        final_gate: false
+      - id: "owner-android-play-tip-products"
+        issues:
+          - 1594
+        title: "Android: create the Google Play tip products"
+        minutes: 15
+        core: false
+        build: "Google Play Console with a payments profile"
+        prerequisites:
+          - "Steps: Docs/android-play-store-submission.md (Owner setup, step 8)"
+        steps:
+          - "In Monetise \u203a Products \u203a In-app products create com.justspeaktoit.tip.small, com.justspeaktoit.tip.medium and com.justspeaktoit.tip.large."
+          - "Name them Buy me a coffee, Buy me lunch and Generous support, price them like the App Store tiers and activate them."
+          - "Update the Data safety form and the purchase digital goods answer from the guide."
+        expected: "The three products are active and the Data safety form matches the guide."
+        final_gate: false
+      - id: "android-play-tip-jar"
+        issues:
+          - 1594
+        title: "Android: leave a tip from a Play internal-testing build"
+        minutes: 5
+        core: false
+        build: "An Android phone with the newest internal-testing build from Google Play, signed in as a licence tester"
+        prerequisites:
+          - "The owner-android-play-tip-products check is done"
+        steps:
+          - "Open Settings and scroll to Support development."
+          - "Check three tips are listed cheapest first with local prices."
+          - "Tap the cheapest tip and complete the test purchase."
+          - "Tap the same tip again and cancel the Google Play sheet."
+        expected: "Each tip shows a local price, the purchase completes with a thank-you message, the same tip can be bought again, and cancelling shows no error."
+        final_gate: false
       - id: "mac-compare-models-history"
         issues:
           - 1387
@@ -360,6 +407,19 @@ sessions:
           - "Expand that item and read Trigger and Cost in Session Details."
         expected: "Session Details' Trigger reads Button with Compare Models below it (no Uibutton and no Hotkey: prefix). A cost under one cent shows its digits, such as US$0.0042, on the card and in Session Details instead of US$0.00."
         final_gate: true
+      - id: "mac-history-spend-totals-sub-cent"
+        issues:
+          - 1387
+        title: "History and Dashboard spend totals keep sub-cent amounts"
+        minutes: 2
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the shared History spend formatter"
+        steps:
+          - "Filter History to a single cheap item, for example a Compare Models result under one cent."
+          - "Read the Spend figure in the History header, in both normal and compact density."
+          - "Open the Dashboard and read Spend and the cost on the matching recent session."
+        expected: "Spend shows the sub-cent digits, such as US$0.0042, matching the History card, never US$0.00. With nothing spent, Dashboard shows a dash."
+        final_gate: false
       - id: "mac-settings-search"
         issues:
           - 1410
@@ -411,14 +471,14 @@ sessions:
         title: "Mac: VoiceOver and keyboard reach every control"
         minutes: 8
         core: false
-        build: "Just Speak to It for Mac, the first Alpha build that includes the fix for #1399"
+        build: "Just Speak to It for Mac, the first Alpha build that includes the recording-start announcement fix for #1399"
         steps:
           - "Turn on VoiceOver (Command-F5). Open the menu bar item with VoiceOver and listen to its name and state."
           - "Open the main window and move through the sidebar and Settings with VoiceOver; listen for any button read only as \"button\" or an image name."
           - "In Settings \u203a Voice Output open the SSML helper, and in Profiles open New Profile; press Escape in each."
-          - "Start and stop a dictation with the hot key and listen to the announcements."
+          - "From another app, start and stop a dictation with the hot key and listen to the announcements."
           - "Turn VoiceOver off."
-        expected: "The menu bar item reads \"Just Speak to It\" with the current state. Every control has a meaningful name, both sheets close on Escape, and recording, transcribing and errors are announced."
+        expected: "The menu bar item reads \"Just Speak to It\" with the current state. Every control has a meaningful name and both sheets close on Escape. Starting a dictation says \"Recording started\", and transcribing and errors are announced."
         final_gate: true
       - id: "mac-record-button-follows-hotkey"
         issues:

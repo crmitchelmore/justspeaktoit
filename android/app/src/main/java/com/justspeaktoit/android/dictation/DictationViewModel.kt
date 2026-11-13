@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.justspeaktoit.android.JustSpeakApplication
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
@@ -70,6 +71,8 @@ class DictationViewModel internal constructor(
     private val resources: SystemResourceRegistry = SystemResourceRegistry.shared,
     private val interruptions: AudioInterruptions = NoAudioInterruptions,
     private val foreground: ForegroundSession = NoForegroundSession,
+    // Told when a dictation produces a transcript; only its mode and model are passed, never the text.
+    private val onTranscriptionSucceeded: (RecognitionMode, CloudModel) -> Unit = { _, _ -> },
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     private val capture = CloudCapture(recorders, cacheDir, io, retirement, resources)
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
@@ -123,6 +126,10 @@ class DictationViewModel internal constructor(
         publish = { s ->
             // Before the screen sees the change, so the service and watching are in step with it.
             onSessionChanged(s)
+            val finished = s.dictation as? DictationState.Done
+            if (finished != null && _state.value.dictation !is DictationState.Done) {
+                onTranscriptionSucceeded(finished.mode, _state.value.cloudModel)
+            }
             _state.update {
                 it.copy(
                     dictation = s.dictation,
@@ -457,6 +464,9 @@ class DictationViewModel internal constructor(
             recordingsDir = File(application.filesDir, "recordings"),
             interruptions = AndroidAudioInterruptions(application),
             foreground = AndroidForegroundSession(application),
+            onTranscriptionSucceeded = { mode, model ->
+                (application as? JustSpeakApplication)?.telemetry?.transcriptionSucceeded(mode, model)
+            },
         )
     }
 }

@@ -31,11 +31,7 @@ public final class TipStore: ObservableObject {
         }
     }
 
-    private let productIDs = [
-        "com.justspeaktoit.tip.small",
-        "com.justspeaktoit.tip.medium",
-        "com.justspeaktoit.tip.large"
-    ]
+    private let productIDs = TipCatalog.productIDs
 
     private init() {}
 

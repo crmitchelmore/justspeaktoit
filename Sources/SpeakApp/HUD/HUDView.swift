@@ -108,7 +108,6 @@ struct HUDOverlay: View {
       .modifier(HUDShell(style: style, usesLegacyRendering: shouldUseLegacyRendering))
       .frame(maxWidth: hudMaxWidth)
       .padding(.horizontal, 60)
-      .accessibilityAddTraits(.isModal)
     if animates {
       // The phase/expansion springs live on `presentedContent` so the compact
       // HUD gets the same animation; only the shadow is specific to this shell.

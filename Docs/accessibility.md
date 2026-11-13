@@ -55,7 +55,10 @@ Android and the website have their own sections below.
   bar item is always named "Just Speak to It" and its value is the current
   state. Announce recording lifecycle changes: macOS through `HUDManager`'s
   announcement, iOS through `RecordingServiceState.accessibilityAnnouncement`,
-  hands-free through its coordinator. Mark live text and meters
+  hands-free through its coordinator. On macOS, `HUDWindowPresenter` holds an
+  announcement made while the HUD panel is hidden until the panel is on screen:
+  VoiceOver drops an announcement posted just before a new window appears.
+  Don't mark the HUD `.isModal`; it doesn't take focus. Mark live text and meters
   `.updatesFrequently`.
 - **Toggles in agent trees.** XCUITest-based trees (agent-device, Accessibility
   Inspector's hierarchy) list a SwiftUI `Toggle` as a labelled switch with an
@@ -82,7 +85,8 @@ Android and the website have their own sections below.
   `PageHeroStrip` make every label inside them white on the palette gradient,
   and `SpeakTextStyle` holds the fonts, on-tint colours and truncation
   (`speakSingleLine`, `speakLiveTranscriptLines`) for the whole app. Change
-  them there, not per page. SwiftLint rejects copies outside that folder:
+  them there, not per page. `PageHeroContrastTests` fails if any palette stop
+  or on-tint token drops below 4.5:1. SwiftLint rejects copies outside that folder:
   `hand_rolled_on_tint_text` (`.white` foregrounds), `hand_rolled_page_title`
   (`Text(…).font(.largeTitle)`) and `hand_rolled_gradient_surface`
   (`LinearGradient(`; use `.pageBackground(_:)` for page washes). The HUD is

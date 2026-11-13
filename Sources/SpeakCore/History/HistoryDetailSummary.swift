@@ -84,18 +84,24 @@ public enum HistoryDetailFormatting {
     /// Whole-cent amounts use the currency's usual digits; a non-zero amount under one cent keeps up to
     /// four decimal places, and anything smaller reads "< $0.0001", so cheap requests never show "$0.00".
     public static func formatCurrency(_ value: Decimal, currency: String) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = currency.isEmpty ? "USD" : currency
+        formatCurrency(value, currency: currency, locale: .current)
+    }
+
+    /// ``formatCurrency(_:currency:)`` in a given locale, so every History surface shares one rule.
+    public static func formatCurrency(_ value: Decimal, currency: String, locale: Locale) -> String {
+        let code = currency.isEmpty ? "USD" : currency
         let smallest = Decimal(sign: .plus, exponent: -4, significand: 1)
         guard value > 0, value < Decimal(sign: .plus, exponent: -2, significand: 1) else {
+            let formatter = NumberFormatter()
+            formatter.locale = locale
+            formatter.numberStyle = .currency
+            formatter.currencyCode = code
             return formatter.string(from: NSDecimalNumber(decimal: value)) ?? "$0.00"
         }
-        formatter.maximumFractionDigits = 4
-        if value < smallest {
-            return "< " + (formatter.string(from: NSDecimalNumber(decimal: smallest)) ?? "$0.0001")
-        }
-        return formatter.string(from: NSDecimalNumber(decimal: value)) ?? "$0.00"
+        // Not NumberFormatter: on Linux and Windows Foundation its currency code
+        // resets maximumFractionDigits, so sub-cent amounts would read "$0.00".
+        let style = Decimal.FormatStyle.Currency(code: code, locale: locale).precision(.fractionLength(2...4))
+        return value < smallest ? "< " + smallest.formatted(style) : value.formatted(style)
     }
 
     /// "850 ms" below a second, otherwise "2.4 s" or "1m 05s"; nil when unknown.

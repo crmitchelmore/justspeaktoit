@@ -59,15 +59,6 @@ struct HistoryModelFilterPicker: View {
 
 /// Formats the header's summary figures.
 enum HistoryHeaderFormat {
-  private static let currencyFormatter: NumberFormatter = {
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .currency
-    formatter.currencyCode = "USD"
-    formatter.maximumFractionDigits = 2
-    formatter.minimumFractionDigits = 2
-    return formatter
-  }()
-
   static func duration(_ duration: TimeInterval) -> String {
     guard duration.isFinite, duration > 0 else { return "—" }
     let minutes = Int(duration) / 60
@@ -76,6 +67,6 @@ enum HistoryHeaderFormat {
   }
 
   static func currency(_ value: Decimal) -> String {
-    Self.currencyFormatter.string(from: value as NSDecimalNumber) ?? "—"
+    HistoryDetailFormatting.formatCurrency(value, currency: "USD")
   }
 }

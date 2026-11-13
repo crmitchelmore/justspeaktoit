@@ -99,6 +99,8 @@ app/src/main/java/com/justspeaktoit/android/
 ├── corrections/             # personal corrections and the cloud vocabulary prompt
 ├── history/                 # transcript history, retention, atomic storage and usage insights
 ├── settings/                # non-secret preferences
+├── telemetry/               # opt-in PostHog analytics and Sentry crash reports, consent gating
+├── tips/                    # Google Play Billing tip jar
 ├── security/                # Keystore-backed AES-GCM secret store for BYOK keys
 ├── output/                  # copy and share (Read aloud lives in ui/ReadAloudButton.kt)
 └── ui/                      # Compose screen and brand theme
@@ -111,10 +113,10 @@ ViewModel with fakes; `DictationEngineSelectorTest` and `DictationSessionControl
 owners directly.
 
 Shared catalogues are generated from `Sources/SpeakCore`, never parsed from Swift:
-`assets/settings_search.json` (settings search) and `assets/cloud_catalog.json` (cloud providers,
+`assets/settings_search.json` (settings search), `assets/cloud_catalog.json` (cloud providers,
 credential IDs, the models Android offers with their wire fields, the cleanup model and prompt, the
-dictation languages and the vocabulary prompt limits).
-Regenerate both with `scripts/update-android-assets`; the Swift export tests fail when an asset is
+dictation languages and the vocabulary prompt limits) and `assets/tip_catalog.json` (tip product IDs,
+names and emoji). Regenerate them with `scripts/update-android-assets`; the Swift export tests fail when an asset is
 stale. The build's `generateCloudCatalog` task writes `GeneratedCloudCatalog.kt` from the cloud asset,
 so `CloudCatalog` and `CleanupPolicy` hold no hand-typed copy; only each provider's base URL and
 display name (Android transport) are authored, and `CloudCatalogParityTest` checks the generated
@@ -146,3 +148,12 @@ values against the asset and that every provider has a transport.
   retention chosen in History; Off saves nothing and deletes existing entries.
 - Secrets are encrypted with a non-exportable Android Keystore key. App data is excluded
   from cloud backup and device transfer.
+- **Share anonymous analytics** and **Send crash reports and diagnostics** (Settings › Privacy,
+  shared keys `analyticsConsent` and `diagnosticsConsent`) are off until the user turns them on;
+  the app asks once on first launch with both switches off. Analytics sends the Mac's three
+  first-rollout events to PostHog EU with coarse context and a random ID that opting out deletes,
+  and only from release builds given `POSTHOG_PROJECT_KEY`. Crash reports go to Sentry EU from
+  release builds only, without user, IP, screenshots or an installation ID. Neither ever includes
+  transcripts, audio, prompts or keys.
+- **Support development** offers optional Google Play tips (consumables that unlock nothing); a
+  sideloaded or debug build shows that tips are available in the Google Play version.

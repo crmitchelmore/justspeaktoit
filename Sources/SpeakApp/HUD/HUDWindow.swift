@@ -3,14 +3,21 @@ import Combine
 import SwiftUI
 
 @MainActor
-final class HUDWindowPresenter {
+final class HUDWindowPresenter: NSObject {
+  /// How long after the panel is ordered front before the waiting announcement
+  /// is posted, so VoiceOver has handled the new window first.
+  static let announcementSettleDelay: TimeInterval = 0.25
+
   private let manager: HUDManager
   private let windowController: HUDWindowController
   private var cancellable: AnyCancellable?
+  private var presentedTimer: Timer?
 
   init(manager: HUDManager, settings: AppSettings) {
     self.manager = manager
     self.windowController = HUDWindowController(manager: manager, settings: settings)
+    super.init()
+    manager.defersAnnouncementsUntilPresented = true
     observeSnapshot()
   }
 
@@ -23,10 +30,33 @@ final class HUDWindowPresenter {
         guard let self else { return }
         if isVisible {
           self.windowController.present()
+          self.schedulePresentedNotification()
         } else {
+          self.presentedTimer?.invalidate()
+          self.presentedTimer = nil
           self.windowController.dismiss()
+          self.manager.hudWindowDidDismiss()
         }
       }
+  }
+
+  private func schedulePresentedNotification() {
+    presentedTimer?.invalidate()
+    // Target-selector timer, as in HUDManager, to stay off the Swift concurrency runtime.
+    let timer = Timer(
+      timeInterval: Self.announcementSettleDelay,
+      target: self,
+      selector: #selector(presentedTimerFired),
+      userInfo: nil,
+      repeats: false
+    )
+    RunLoop.main.add(timer, forMode: .common)
+    presentedTimer = timer
+  }
+
+  @objc private func presentedTimerFired() {
+    presentedTimer = nil
+    manager.hudWindowDidPresent()
   }
 }
 

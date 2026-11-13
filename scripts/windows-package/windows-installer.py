@@ -4,9 +4,12 @@
   version       --build 202610301641                 -> 2026.1030.1641.0
   appinstaller  --bundle-uri URI --publisher P --version V --output F [--self-uri URI] [--rehearsal]
   verify-bundle --bundle B --publisher P --version V --package ARCH=FILE [...] (--signed|--unsigned) [--evidence F]
+                [--channel beta|store]
 
 Published App Installer files must point at the website URI and an immutable
-GitHub release asset; ``--rehearsal`` permits file URIs for CI install tests.
+GitHub release asset; ``--rehearsal`` permits file URIs for CI install tests. ``verify-bundle
+--channel store`` checks the unsigned Microsoft Store bundle instead of the
+beta bundle.
 """
 import argparse
 import json
@@ -41,8 +44,10 @@ def main(argv=None):
     state.add_argument("--signed", action="store_true")
     state.add_argument("--unsigned", action="store_true")
     verify.add_argument("--evidence", type=pathlib.Path)
+    verify.add_argument("--channel", choices=("beta", "store"), default="beta")
     args = parser.parse_args(argv)
-    name = windows_msix.load_identity(windows_msix.BETA_IDENTITY_PATH)["identity"]["name"]
+    channel = getattr(args, "channel", "beta")
+    name = windows_msix.load_identity(windows_msix.IDENTITY_PATHS[channel])["identity"]["name"]
     if args.command == "version":
         print(windows_installer.package_version(args.build))
     elif args.command == "appinstaller":

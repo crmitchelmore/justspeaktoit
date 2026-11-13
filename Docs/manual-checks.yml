@@ -26,6 +26,19 @@ sessions:
           - "Clear filters again and inspect the bottom of the model list above Custom."
         expected: "No matches shows only the empty-results message and available footer actions, with no Current selection section. Searching for the selected model shows it once without an empty-results message. There are no empty rows or stacked separator lines above Custom, and filtering never changes the selected model."
         final_gate: true
+      - id: "mac-page-header-text"
+        issues:
+          - 1616
+        title: "Page headers: white text, matching fonts and tidy truncation on every page"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Mac, an Alpha build that includes the #1616 page header fix"
+        steps:
+          - "With the system in Light appearance and Settings \u203a Appearance density on Regular, open Dashboard, History, Voice Output, Corrections, Troubleshooting and Settings in turn."
+          - "Narrow the window to its minimum width and look at each header again."
+          - "Switch density to Compact and repeat, then switch the system to Dark appearance and repeat once more."
+        expected: "Every header title, subtitle, chip, badge, search field and toggle is white or soft white on its coloured header, never black or grey. Titles share one size and weight, and long titles or chip values shrink slightly then end in an ellipsis with the full text on hover, without overlapping."
+        final_gate: true
       - id: "mac-notes-streaming"
         issues:
           - 664
@@ -171,6 +184,21 @@ sessions:
           - "An agent then reads only the numeric latency fields in History and posts the result on #611."
         expected: "About 50 or more recent hotkey recordings exist. The agent reports hotkey-to-capture p50 and p95; #611 closes if p50 is under 100 ms and the #664 streaming checks have passed."
         final_gate: false
+      - id: "mac-double-tap-start-latency"
+        issues:
+          - 611
+        title: "Double-tap start is quick, including after a pause"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Mac, Alpha build 108 or later (includes #1567, the first-tap input warm-up)"
+        steps:
+          - "Settings \u203a Keyboard: allow double tap. Leave Warm microphone on key press at its default."
+          - "In TextEdit, make 20 double-tap recordings of a short made-up sentence, back to back."
+          - "Make 6 more double-tap recordings, waiting about 30 seconds before each one."
+          - "Tap the hotkey once (no second tap) three times, and check the menu-bar microphone indicator does not stay on."
+          - "Mark this Pass. An agent then reads only the numeric latency fields and the Start timeline in History and posts p50 and p95 on #611."
+        expected: "No recording, sound or History entry comes from a single tap. The agent reports double-tap hotkey-to-capture p50 and p95, back to back and after a pause, and whether each start shows \"live input prepared from key-down\". #611 closes if back-to-back p50 is under 100 ms."
+        final_gate: false
       - id: "mac-paid-new-providers"
         issues:
           - 1210
@@ -194,35 +222,33 @@ sessions:
       - id: "owner-cloudkit-shared-container"
         issues:
           - 1119
-        title: "Assign the shared iCloud container to the iPhone app"
-        minutes: 15
+        title: "Check the shared iCloud container on the iPhone App IDs and its schema"
+        minutes: 10
         core: false
-        build: "Apple Developer portal and CloudKit Console; current main with PR #1369"
+        build: "Apple Developer portal and CloudKit Console; current main with the #1119 container PR"
         prerequisites:
           - "Steps: https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/cloudkit-shared-container.md"
         steps:
-          - "Identifiers \u203a com.justspeaktoit.ios \u203a iCloud \u203a Configure: also tick iCloud.com.justspeaktoit; do the same for com.justspeaktoit.ios.alpha with iCloud.com.justspeaktoit.alpha."
-          - "In CloudKit Console, deploy the Development schema of iCloud.com.justspeaktoit and .alpha to Production if any iPhone record type is missing."
-          - "Set the repository variable IOS_SHARED_CLOUD_CONTAINER to 1."
-        expected: "The next Alpha iOS build signs and uploads with both containers. Then run iphone-shared-icloud-container."
+          - "Identifiers \u203a com.justspeaktoit.ios \u203a iCloud \u203a Configure: iCloud.com.justspeaktoit and iCloud.com.justspeaktoit.ios are both ticked; com.justspeaktoit.ios.alpha has iCloud.com.justspeaktoit.alpha and iCloud.com.justspeaktoit.ios.alpha."
+          - "In CloudKit Console, deploy the Development schema of iCloud.com.justspeaktoit and .alpha to Production if any record type of the iPhone containers is missing."
+          - "Delete the repository variable IOS_SHARED_CLOUD_CONTAINER; builds no longer read it."
+        expected: "The Apple App IDs and profiles workflow passes for both trains, and the next Alpha iOS build signs and uploads with both containers."
         final_gate: false
       - id: "owner-posthog-gates"
         issues:
           - 776
           - 814
-        title: "PostHog: purge key, deletion and production evidence"
-        minutes: 30
+        title: "PostHog: production evidence before the inspection week"
+        minutes: 20
         core: false
-        build: "PostHog EU Production and GitHub settings; current main with PR #1370"
+        build: "PostHog EU Production; current Alpha with analytics opted in"
         prerequisites:
-          - "Steps: Docs/posthog-maintenance.md (12-month retention purge)"
+          - "Steps: Docs/posthog-maintenance.md (Rollout gate and 12-month retention)"
         steps:
-          - "Create a PostHog personal API key for the Production project with only Data deletion write access; add it as POSTHOG_PURGE_API_KEY, and the project id as POSTHOG_PROJECT_ID, in a new GitHub environment posthog-purge limited to main."
-          - "Run the PostHog retention purge workflow with mode geoip-test-events, first as a dry run (expect 7), then for real; then run mode retention as a dry run."
-          - "Screenshot PostHog Production settings showing EU hosting, GeoIP off and IP discarding, and add them to #776."
           - "Rotate the PostHog project API key once, let an agent ship the new key in an Alpha, and confirm opted-in events still arrive."
           - "Approve one Release-build network capture with analytics opted in, for an agent to inspect."
-        expected: "Purge runs succeed, the 7 GeoIP-tagged events are gone, and the settings, rotation and capture evidence is on #776. One clean inspection week then unblocks #814."
+          - "When PostHog support enables self-service deletion for project 254700, run the retention purge as a dry run. This does not block rollout."
+        expected: "Rotation and capture evidence is on #776 (EU hosting and IP-discard screenshots were added on 13 Nov 2026). One clean inspection week then unblocks #814. Retention deletion does not block rollout; if self-service deletion is still unavailable, delete through PostHog support or the UI before the date in Docs/posthog-maintenance.md."
         final_gate: false
       - id: "owner-stripe-setup"
         issues:
@@ -241,20 +267,40 @@ sessions:
           - "Sign off the privacy and retention text in Docs/paid-access-privacy.md."
         expected: "Staging is configured so an agent can sign in on a Developer ID build through the web flow and run the staging purchase and refund drill. Paid Access stays switched off for users."
         final_gate: false
-      - id: "owner-partner-center"
+      - id: "owner-microsoft-store-first-submission"
         issues:
           - 1157
-        title: "Microsoft Store: open a Partner Center account"
-        minutes: 30
+        title: "Microsoft Store: make the first submission by hand"
+        minutes: 45
         core: false
-        build: "Microsoft Partner Center"
+        build: "Microsoft Partner Center and the windows-store-bundle artifact"
         prerequisites:
-          - "Steps: Docs/windows-installer.md (Owner steps: Microsoft Store)"
+          - "Steps: Docs/windows-installer.md (Owner steps: Microsoft Store, step 4)"
+          - "Deadline: the name reservation lapses unless a submission is made by 13 February 2027."
         steps:
-          - "Go to https://storedeveloper.microsoft.com and create a free individual developer account, completing the ID check."
-          - "Reserve the app name Just Speak to It."
-          - "Copy the Package/Identity Name and Publisher values from Product identity into a comment on #1157."
-        expected: "The reserved identity is on #1157, so an agent can set the MSIX identity and add the Store submission job."
+          - "In GitHub Actions run Microsoft Store (windows-store.yml) on main with the newest Stable candidate or Alpha tag as manifest, then download the windows-store-bundle artifact."
+          - "In Partner Center open Apps and games \u203a Just Speak to It and start a submission; upload the .msixbundle under Packages."
+          - "Set pricing and markets, the privacy policy URL, the age rating questionnaire and the Store listing."
+          - "Justify the restricted capabilities runFullTrust (inserts dictated text into other apps) and unvirtualizedResources (keeps History and settings in %LOCALAPPDATA%\\JustSpeakToIt)."
+          - "Submit for certification and note the outcome on #1157."
+        expected: "Store ID 9PDFKWGH31HP has a submission in certification or published, so later Stable releases can update it through the API."
+        final_gate: false
+      - id: "owner-microsoft-store-api"
+        issues:
+          - 1157
+        title: "Microsoft Store: connect automated Stable submission"
+        minutes: 20
+        core: false
+        build: "Microsoft Partner Center and GitHub repository settings"
+        prerequisites:
+          - "Steps: Docs/windows-installer.md (Owner steps: Microsoft Store, step 5)"
+        steps:
+          - "In Partner Center open Account settings \u203a User management \u203a Microsoft Entra applications and create (or add) an Entra application."
+          - "Give it the Manager role, then copy its Tenant ID and Client ID and add a new key, copying the client secret."
+          - "Copy the Seller ID from Account settings \u203a Legal info \u203a Developer."
+          - "In GitHub create the environment microsoft-store, limited to the main branch only."
+          - "Add the environment secrets MICROSOFT_STORE_TENANT_ID, MICROSOFT_STORE_CLIENT_ID, MICROSOFT_STORE_CLIENT_SECRET and MICROSOFT_STORE_SELLER_ID."
+        expected: "After the first submission is live, the next Publish Stable run's submit-microsoft-store job submits the Store bundle instead of skipping with a notice."
         final_gate: false
       - id: "owner-android-apk-install"
         issues:
@@ -300,6 +346,19 @@ sessions:
           - "Start listening, say \"Compare these models please\", press Stop, then rank or finish the round."
           - "Open History."
         expected: "Flux and Soniox finish with a transcript and no error. Any failed lane shows its error under the reveal and in the scoreboard. History has one new item per selected model (failures show their error), each tagged Compare Models with its model, cost and latency. With the toggle off, a new round adds nothing to History."
+        final_gate: true
+      - id: "mac-compare-models-history-labels"
+        issues:
+          - 1387
+        title: "Compare Models History items show a readable trigger and sub-cent cost"
+        minutes: 2
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the History label fix for #1387"
+        steps:
+          - "Open Compare Models \u203a Streaming, turn on Save results to History and run one round with a cheap streaming model."
+          - "Open History and look at the cost on one of the new Compare Models cards."
+          - "Expand that item and read Trigger and Cost in Session Details."
+        expected: "Session Details' Trigger reads Button with Compare Models below it (no Uibutton and no Hotkey: prefix). A cost under one cent shows its digits, such as US$0.0042, on the card and in Session Details instead of US$0.00."
         final_gate: true
       - id: "mac-settings-search"
         issues:
@@ -406,17 +465,30 @@ sessions:
       - id: "mac-openrouter-discover-configure"
         issues:
           - 1575
-        title: "Cleanup and transcription have a separate Browse OpenRouter models button, like voice"
-        minutes: 4
+        title: "Every Mac picker that can use OpenRouter has a Browse OpenRouter models button, like voice"
+        minutes: 6
         core: false
-        build: "Just Speak to It for Mac, the first Alpha build that includes the Browse OpenRouter models button"
+        build: "Just Speak to It for Mac, the first Alpha build that adds Browse OpenRouter models to dictation profiles"
         steps:
-          - "Open Settings \u203a Post-processing, choose Remote and check the Remote Post-processing Model picker lists native models only, with Browse OpenRouter models\u2026 below it."
-          - "Click Browse OpenRouter models\u2026, turn on Discover OpenAI cleanup models via OpenRouter, search for gpt, click a model, check its Pricing and Temperature, then click Use for cleanup."
-          - "Open Settings \u203a Transcription, click Browse OpenRouter models\u2026 under the Remote Batch Model picker, wait for the list to refresh, click any model and click Use for transcription."
-          - "Open each picker again."
-        expected: "Neither picker has an OpenRouter drill-in row. Each Browse OpenRouter models\u2026 button opens a searchable list with provider and price filters and a Refresh button, each model opens a page with its pricing, and choosing one closes the sheet. Each picker then shows OpenRouter \u203a the chosen model, as the voice picker does."
+          - "Open Settings \u203a Post-processing, choose Remote, click Browse OpenRouter models\u2026 under Remote Post-processing Model, turn on Discover OpenAI cleanup models via OpenRouter, click a model, check its Pricing and Temperature, then click Use for cleanup."
+          - "Open Settings \u203a Transcription, choose Remote Streaming and read the Remote Streaming Model help text."
+          - "Switch to Remote Batch, click Browse OpenRouter models\u2026 under Remote Batch Model, click any model and click Use for transcription."
+          - "Open Settings \u203a Profiles, edit a profile, set Transcription to Remote Batch and Polish to Enabled, and use Browse OpenRouter models\u2026 under Batch Model and under Polish Model."
+        expected: "Each Browse OpenRouter models\u2026 button sits directly under its picker, like Browse OpenRouter Speech\u2026 in Voice Output, and opens a searchable list where each model has a pricing page. After choosing, the picker shows OpenRouter \u203a the chosen model. Remote Streaming has no button and its help says OpenRouter models can't stream."
         final_gate: true
+      - id: "mac-diagnostics-consent"
+        issues:
+          - 1468
+        title: "Crash reports are asked once, off until agreed, and can be turned off"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes diagnostics consent"
+        steps:
+          - "Open the app after updating; read the Send crash reports and diagnostics prompt and choose Don't Send."
+          - "Quit and reopen the app."
+          - "Open Settings \u203a About \u203a Privacy, search Settings for crash reports, then turn Send crash reports and diagnostics on and off again."
+        expected: "The prompt appears once before the analytics question (if any) and explains what is sent; it does not return after relaunch. Search finds the Privacy card, the switch reflects your choice, and turning it on or off needs no restart."
+        final_gate: false
       - id: "mac-raw-configuration-editor"
         issues:
           - 1546
@@ -442,6 +514,20 @@ sessions:
       - "iOS Settings \u203a Action Button \u203a Controls: choose Transcribe Voice (Just Speak to It Alpha)."
       - "Have Notes open on a scratch note, AirPods in their case, and your Mac (same Apple ID, Handoff on) nearby."
     items:
+      - id: "iphone-ipad-device-copy"
+        issues:
+          - 1598
+        title: "iPad Settings never says \"this iPhone\" or mentions the Dynamic Island"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes the #1598 device-copy fix, on an iPad and an iPhone"
+        steps:
+          - "On an iPad, open Settings and read the Recommended setup card."
+          - "Open Transcription, Recording & Shortcuts (with Live Activities on), Sync and Privacy & Diagnostics and read their footnotes."
+          - "Start a recording, open Settings \u203a System resources in use and read the Live Activity row."
+          - "Repeat the Recommended setup and Live Activity checks on an iPhone."
+        expected: "On iPad, copy says \"this iPad\" or \"your iPad\", the setup card suggests Control Center rather than the Action Button, and nothing mentions the Dynamic Island. On iPhone, copy says \"this iPhone\" and the Live Activity text says \"on supported iPhones, in the Dynamic Island\"."
+        final_gate: false
       - id: "iphone-clipboard-e2e"
         issues:
           - 934
@@ -473,6 +559,22 @@ sessions:
           - "Wait 20 seconds, unlock and paste into Notes."
         expected: "Paste is the raw \"locked stop\"; History has one polished item. No placeholder. Add your iOS version and whether Stop needed an unlock to any Fail note."
         final_gate: true
+      - id: "iphone-interrupted-recording-prompt"
+        issues:
+          - 1617
+        title: "Recording interrupted prompt: only after a real interruption, and every answer sticks"
+        minutes: 6
+        core: false
+        build: "TestFlight Just Speak to It Alpha that includes the #1617 fix"
+        steps:
+          - "If \"Recording interrupted\" appears on the first launch after updating, tap Not now once (older recordings may still be listed)."
+          - "In the app, record \"normal recording\" and stop. Force-quit the app and reopen it."
+          - "In the app, start recording, say \"interrupted test\", and while it is recording force-quit the app. Reopen it and tap Transcribe it."
+          - "Repeat the interrupted recording, reopen, tap Not now, then force-quit and reopen again."
+          - "Repeat the interrupted recording once more, reopen and tap Discard recording."
+          - "Turn on Airplane Mode, repeat the interrupted recording, reopen and tap Transcribe it."
+        expected: "No prompt after the normal recording. Transcribe it shows a \"Transcribing interrupted recording\u2026\" banner, then opens the new History item containing \"interrupted test\" and the prompt does not return. After Not now the prompt does not come back on the next launch. Discard recording removes it with no prompt on the next launch. In Airplane Mode a \"Couldn't transcribe recording\" alert offers Try again, Discard recording and Keep for later; nothing is deleted unless you choose Discard."
+        final_gate: false
       - id: "iphone-siri-interruption"
         issues:
           - 1117
@@ -687,19 +789,38 @@ sessions:
       - id: "iphone-shared-icloud-container"
         issues:
           - 1119
-        title: "iPhone History moves into the shared iCloud container"
+        title: "A new iPhone recording reaches the shared iCloud container within a minute"
         minutes: 8
         core: false
-        build: "TestFlight Just Speak to It Alpha built after IOS_SHARED_CLOUD_CONTAINER=1"
+        build: "TestFlight Just Speak to It Alpha with the #1119 shared container"
         prerequisites:
           - "owner-cloudkit-shared-container done"
+          - "A freshly installed iPhone (delete the app first, or use a second iPhone) signed in to the same iCloud account as a Mac or Windows/Linux build with iCloud sync on."
         steps:
-          - "Before updating, check iCloud sync is on and note the date and time of your oldest iPhone History item."
+          - "Install the Alpha on the iPhone, open it, turn iCloud sync on and wait on the History screen."
+          - "Record \u201cshared container one\u201d on the iPhone."
+          - "Within a minute, look for it in the other device's History, or in CloudKit Console open iCloud.com.justspeaktoit.alpha \u203a Production \u203a Private Database, act as your iCloud account and query the History zone."
+          - "Record \u201cshared container two\u201d on the other device, if it can record, and check the iPhone's History."
+          - "Settings: turn API key sync on with your passphrase and check the keys from your other device appear."
+        expected: "Each recording appears on the other side within a minute, and key sync turns on with the same passphrase without errors."
+        final_gate: true
+      - id: "iphone-legacy-container-migration"
+        issues:
+          - 1119
+        title: "iPhone History and API keys move from the old iCloud container"
+        minutes: 10
+        core: false
+        build: "TestFlight Just Speak to It Alpha with the #1119 shared container, installed over an older Alpha"
+        prerequisites:
+          - "owner-cloudkit-shared-container done"
+          - "An iPhone whose History synced to the old container: in CloudKit Console, iCloud.com.justspeaktoit.ios.alpha \u203a Private Database has its History records. Turn API key sync on first if you use it."
+        steps:
+          - "Before updating, note the text and time of your oldest and newest iPhone History items."
           - "Update in TestFlight, open the app and wait a minute on the History screen."
           - "In CloudKit Console open iCloud.com.justspeaktoit.alpha \u203a Production \u203a Private Database, act as your iCloud account and query the History zone."
-          - "Record \u201cshared container\u201d and query again after a minute."
-          - "Settings: turn API key sync on again with your passphrase."
-        expected: "History on the iPhone is unchanged. The shared container has a History record created at the same date and time as your oldest iPhone item, and the new recording appears there within a minute. Key sync turns on without errors."
+          - "Open Settings \u203a API key sync."
+          - "Force-quit, reopen and wait a minute again."
+        expected: "History on the iPhone is unchanged, and the shared container has records for both noted items. API key sync is still on with no passphrase prompt (unless the shared container already used another passphrase, when it asks once). Nothing is duplicated after the relaunch."
         final_gate: true
       - id: "iphone-marketing-footage"
         issues:
@@ -803,7 +924,7 @@ sessions:
         build: "The exact signed iOS candidate selected for resubmission, plus App Store Connect"
         prerequisites:
           - "Read Docs/ios-app-store-submission.md; static archive checks do not prove consent, retention, support-site deployment or App Store Connect answers."
-          - "Default-on Sentry diagnostics are separate from product-analytics consent; resolve that consent/withdrawal policy before marking this Pass."
+          - "Sentry diagnostics are opt-in (Send crash reports and diagnostics, off until agreed) and separate from product-analytics consent; run owner-diagnostics-consent-signed-candidate first."
         steps:
           - "Generate the exact archive's Privacy Report in Xcode Organizer and compare it with the app, all SDKs and enabled extension data flows."
           - "In App Store Connect declare Audio Data and Other User Content for App Functionality, and installation-linked Crash Data, Performance Data, Other Diagnostic Data and Device ID for App Functionality; reconcile any additional SDK types in the report rather than answering No automatically."
@@ -812,6 +933,48 @@ sessions:
           - "Add dedicated provider credentials and reproducible device steps only to private App Review information; confirm screenshots and export-compliance answers match the candidate."
           - "Re-read Resolution Center, resolve every remaining review finding and approve the frozen candidate through the normal Stable process."
         expected: "The exact candidate's device evidence, SDK privacy report, nutrition labels, published policy, consent/withdrawal behavior, support URLs and private review information agree. No credentials enter public issues or screenshots, and no submission is approved solely because the archive builds."
+        final_gate: false
+      - id: "iphone-app-shortcuts-phrases"
+        issues:
+          - 1595
+        title: "Siri and Spotlight offer the app's built-in shortcut phrases"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes #1595"
+        steps:
+          - "Open the Shortcuts app and find Just Speak to It under App Shortcuts; count the shortcuts listed."
+          - "Search Spotlight for Just Speak and look for its Toggle Recording and Dictate actions."
+          - "Say \"Hey Siri, toggle recording with Just Speak to It\", speak a short made-up sentence, then say \"Hey Siri, stop recording with Just Speak to It\"."
+        expected: "Shortcuts lists the app's eight built-in shortcuts without any setup, Spotlight shows its actions, and the Siri phrases start and stop a recording that appears in History."
+        final_gate: false
+      - id: "iphone-diagnostics-consent"
+        issues:
+          - 1468
+        title: "Crash reports are asked once, off until agreed, and can be turned off"
+        minutes: 3
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes diagnostics consent"
+        steps:
+          - "Open the app after updating; read the Send crash reports and diagnostics prompt and choose Don't Send."
+          - "Close and reopen the app."
+          - "Open Settings \u203a Privacy & Diagnostics \u203a Privacy Information, then turn Send crash reports and diagnostics on and off again; check the Network Activity row each time."
+        expected: "The prompt appears once and explains what is sent; it does not return. The switch reflects your choice, and the Crash and Performance Diagnostics row reads Off whenever the switch is off."
+        final_gate: false
+      - id: "owner-diagnostics-consent-signed-candidate"
+        issues:
+          - 1468
+        title: "Store candidate: no Sentry traffic before consent; withdrawal deletes unsent reports"
+        minutes: 15
+        core: false
+        build: "The exact signed iOS and Mac App Store candidates selected for resubmission"
+        prerequisites:
+          - "A test installation and a proxy or network log (for example Charles or the iOS Network privacy report) that shows requests to ingest.de.sentry.io."
+        steps:
+          - "Fresh-install each candidate and complete onboarding without agreeing to crash reports; use the app for a minute and check the network log and the app container's Caches folder."
+          - "Turn Send crash reports and diagnostics on, use the app, then turn it off; check the network log and that Caches/<bundle id>/Sentry, io.sentry and the INSTALLATION file are gone."
+          - "In Sentry (de.sentry.io, org tally-lz) confirm the event data retention for the justspeaktoit projects is 90 days or less, matching Docs/PRIVACY.md."
+          - "Answer the App Store Connect privacy label as in Docs/ios-app-store-submission.md (installation-linked Crash Data, Performance Data, Other Diagnostic Data and Device ID for App Functionality)."
+        expected: "No request reaches Sentry and no Sentry files exist before consent; after withdrawal no further request is made and the on-device Sentry data is deleted. Sentry retention is 90 days or less and the published policy, in-app text and nutrition label agree."
         final_gate: false
       - id: "iphone-openrouter-cleanup-discover-configure"
         issues:
@@ -840,6 +1003,19 @@ sessions:
           - "With VoiceOver on, swipe through the Session details rows."
         expected: "Each entry lists its trigger (Button or Automation), friendly model names per phase, recording length, transcript and post-processing times and a total. The issue preview has relative timings but no transcript text or dates. VoiceOver reads each row's title and value."
         final_gate: true
+      - id: "owner-ios-upload-required-reason-apis"
+        issues:
+          - 1644
+        title: "iOS upload processes without ITMS-91053"
+        minutes: 3
+        core: false
+        build: "App Store Connect; the first Alpha iOS build that includes the active-keyboards privacy manifest fix"
+        steps:
+          - "In App Store Connect \u203a TestFlight, find the new iOS build and wait for processing to finish."
+          - "Confirm the build shows as ready to test rather than invalid."
+          - "Check the Apple email for the build, or the build upload's errors."
+        expected: "The build finishes processing and no ITMS-91053 (missing required-reason API declaration) is reported for the app, keyboard, widget or Share extension."
+        final_gate: false
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"
@@ -929,6 +1105,140 @@ sessions:
           - "Open Just Speak to It, double-tap Start recording, say a fictional sentence, then double-tap Stop recording."
           - "Swipe to the new capture row."
         expected: "The button reads Start recording, then Stop recording, and the row reads its time, length and status as one item."
+        final_gate: true
+  - id: "android"
+    device: "Android"
+    title: "Android"
+    setup:
+      - "A Pixel on Android 13 or later and, for the OEM check, a non-Google phone, each with the Alpha APK installed."
+      - "An OpenAI and a Groq key saved in Settings for the Cloud checks, and an OpenRouter key for cleanup. Use made-up sentences only."
+    items:
+      - id: "android-on-device-offline"
+        issues:
+          - 1328
+        title: "On-device dictation works offline, and a missing model can be downloaded"
+        minutes: 8
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "On the Pixel, choose On-device and dictate a sentence; repeat in flight mode."
+          - "Settings: choose a Dictation language whose on-device model is not installed, tap Download language and wait for it to install, then dictate."
+          - "Repeat the first step on the non-Google phone; if it has no recognition service, or it is disabled, note what the app says."
+          - "In flight mode, try Speech service and Cloud modes."
+        expected: "Each session returns the spoken words, offline included. After the download, Start becomes available and dictation works. A phone without a recogniser shows the reason and no Start. Offline Speech service and Cloud either return a genuine transcript or fail visibly; never a false success."
+        final_gate: true
+      - id: "android-permission-interruptions"
+        issues:
+          - 1328
+        title: "Microphone permission and interruptions fail honestly"
+        minutes: 8
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "Clear the app's permissions. Start dictation and deny the microphone, then deny it permanently, then recover through the Settings link."
+          - "During a dictation, receive a call; during another, connect and then disconnect a Bluetooth headset."
+          - "During a dictation, leave the app."
+        expected: "Denial shows a rationale, then a Settings link, and dictation works once granted. A call or route change ends the session with a clear reason or carries on with correct text; leaving the app reports that dictation stopped and History keeps the unfinished words as unfinished."
+        final_gate: true
+      - id: "android-foreground-long-dictation"
+        issues:
+          - 1592
+        title: "Long dictation keeps going in the background, and Stop works from the notification"
+        minutes: 15
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the foreground dictation change"
+        steps:
+          - "On Android 13 or later, start the first dictation after installing and allow notifications when asked."
+          - "Choose Cloud and dictate for about five minutes: after a minute open another app, then turn the screen off for a minute, then come back and keep talking."
+          - "Check the notification while recording, then tap Stop in the notification."
+          - "Repeat in Speech service mode with another app in front for 30 seconds, and note whether words spoken there arrive."
+          - "Start a Cloud dictation, talk for 20 seconds, then swipe the app away from Recents. Open the app again and go to History."
+        expected: "A silent \"Just Speak to It is dictating\" notification with Stop shows for the whole session. Cloud returns every word, including those spoken with another app in front and with the screen off. Stop in the notification finishes the session like the Stop button and the notification goes once the transcript is in. Speech service either keeps listening in the background or ends with a clear reason and keeps its unfinished words. After swiping the app away, History has a failed entry saying the recording ended before it could be transcribed, whose Transcribe returns the 20 seconds of speech."
+        final_gate: true
+      - id: "android-interruptions-focus-route"
+        issues:
+          - 1592
+        title: "Calls, other apps' audio and headset changes never lose a recording"
+        minutes: 12
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the foreground dictation change"
+        steps:
+          - "During a Cloud dictation, receive a phone call (answer it or let it ring), then go to History."
+          - "During a Cloud dictation, start a voice note or the Google Assistant for a few seconds, then return."
+          - "During a Cloud dictation, start music or a video in another app."
+          - "During a Cloud dictation, connect a Bluetooth headset; during another, unplug or disconnect a headset that was connected before you started."
+          - "Repeat the call and headset steps in Speech service mode after saying a few words."
+        expected: "A call ends the session with \"Dictation stopped for a call\"; a headset change ends it saying a headset or Bluetooth microphone was connected or disconnected. Each keeps everything said before: Cloud saves the recording with the failed History entry and Transcribe returns its words; Speech service keeps the unfinished words. A short assistant or voice note pauses the Cloud recording (the screen and notification say Paused) and it resumes by itself afterwards. Music taking over for good stops the session with a clear reason and keeps the audio."
+        final_gate: true
+      - id: "android-cloud-keys-cleanup"
+        issues:
+          - 1328
+        title: "Cloud transcription, a rejected key and cleanup with real keys"
+        minutes: 6
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "Choose Cloud with GPT Transcribe and dictate; repeat with Whisper Large v3 Turbo."
+          - "Save an invalid OpenAI key and dictate in Cloud."
+          - "Restore the key, turn on cleanup with an OpenRouter model and dictate."
+        expected: "Both models return the words. The invalid key fails with \"rejected the API key\". Cleanup returns tidied text and Show original restores the raw transcript."
+        final_gate: true
+      - id: "android-entry-surfaces"
+        issues:
+          - 1328
+        title: "Tile, shortcut, shared audio and the dictation keyboard"
+        minutes: 10
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "Start dictation from the Quick Settings tile and from the launcher shortcut, on a locked and an unlocked phone."
+          - "Share a WhatsApp voice note (OGG/Opus) and an M4A recording into the app and confirm the upload."
+          - "Enable the Just Speak to It keyboard and dictate into a messaging app and a browser field; switch keyboards mid-dictation."
+          - "Open a password field and check the keyboard's microphone; then deny the microphone permission and try the keyboard."
+        expected: "The tile and shortcut open the app and start dictating (after unlocking when locked). Both shared files are transcribed into History. The keyboard inserts the final text, is disabled in the password field, and explains a denied permission. Switching keyboards stops dictation without inserting stray text."
+        final_gate: true
+      - id: "android-language-corrections-read-aloud"
+        issues:
+          - 1328
+        title: "Dictation language, personal corrections and Read aloud"
+        minutes: 6
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "Settings: set Dictation language to French and dictate a French sentence in On-device, Speech service and the keyboard; then set it back to Automatic."
+          - "Settings: add a personal correction, write as \"Kubernetes\", heard as \"cooper netties\"."
+          - "Say \"I deploy to cooper netties\" in On-device mode and in Cloud with GPT Transcribe."
+          - "Tap Read aloud on the finished transcript, then Stop reading."
+        expected: "French is recognised in each mode and Automatic follows the phone language again. Both transcripts read \"I deploy to Kubernetes\". Read aloud speaks the transcript and Stop reading silences it."
+        final_gate: true
+      - id: "android-profiles-cleanup-prompt"
+        issues:
+          - 1591
+        title: "Dictation profiles and the custom cleanup prompt"
+        minutes: 8
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes dictation profiles"
+        steps:
+          - "With an OpenAI and an OpenRouter key saved and Clean up transcripts on, set Settings \u203a Cleanup prompt to \"Rewrite the transcript in capital letters.\" and dictate one sentence in Cloud mode."
+          - "Tap Use the built-in prompt and dictate again."
+          - "Settings \u203a Dictation profiles: add a profile named Spanish with Cloud model Whisper Large v3 Turbo (Groq key saved), Language Spanish (Spain) and Cleanup prompt \"End every sentence with an exclamation mark.\""
+          - "On the dictation screen choose Profile: Spanish, check the privacy line names Groq, and dictate a Spanish sentence in Cloud mode; then switch to On-device and dictate again."
+          - "Open the keyboard in a messaging app, tap the Profile key until it shows No profile and then Spanish, and dictate a Spanish sentence; repeat with TalkBack on."
+          - "Delete the Spanish profile in Settings."
+        expected: "The first transcript is in capitals and the second is normal cleanup. With the profile, Cloud uses Groq, recognises Spanish and ends sentences with exclamation marks, and On-device stays on the phone in Spanish. The keyboard key cycles profiles, TalkBack announces the profile name, and the key is disabled while listening. Deleting the profile hides the chooser and restores your own settings."
+        final_gate: true
+      - id: "android-battery-latency"
+        issues:
+          - 1328
+        title: "Battery and latency over a five-minute dictation series"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the language and corrections change"
+        steps:
+          - "Note the battery percentage, then dictate for five minutes in short sessions in On-device mode."
+          - "Note how long each final transcript takes to appear after Stop."
+          - "Note the battery percentage again and any heat."
+        expected: "Battery use and latency are comparable to the phone's own voice typing; note the numbers in the result."
         final_gate: true
   - id: "decisions"
     device: "Decision"

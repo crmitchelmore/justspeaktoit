@@ -51,7 +51,7 @@ final class CaptureFlowUITests: XCTestCase {
 
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_GB"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_GB", "-diagnosticsConsent", "declined"]
         // The app reads this in `SharedTranscriptionState`; setting it in the
         // launch environment is what makes the capture path deterministic.
         app.launchEnvironment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"] = Self.transcript

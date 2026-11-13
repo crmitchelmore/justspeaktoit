@@ -38,7 +38,7 @@ extension SettingsView {
         processingSpeedCard
       }
       if settings.hasSelectedModulateModel {
-        modulateFeatureSettings
+        ModulateFeatureSettingsCard()
       }
       if settings.hasSelectedMetaMuseModel {
         metaMuseRecognitionBiasCard
@@ -151,7 +151,8 @@ extension SettingsView {
           .foregroundStyle(.secondary)
         ModelPicker(
           title: "Remote Streaming Model",
-          help: "Choose the remote provider model used while recording.",
+          help: "Choose the remote provider model used while recording. "
+            + "OpenRouter models can't stream; choose Remote Batch to use one.",
           options: ModelCatalog.remoteLiveTranscription,
           value: remoteTranscriptionModelBinding(
             \AppSettings.liveTranscriptionModel,
@@ -289,20 +290,20 @@ extension SettingsView {
               HStack(spacing: 12) {
                 Image(systemName: speedModeIcon(for: mode))
                   .font(.title3)
-                  .foregroundStyle(settings.speedMode == mode ? .white : .brandLagoon)
+                  .foregroundStyle(settings.speedMode == mode ? SpeakTextStyle.onTint : .brandLagoon)
                   .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
                   Text(mode.displayName)
                     .font(.headline)
-                    .foregroundStyle(settings.speedMode == mode ? .white : .primary)
+                    .foregroundStyle(SpeakTextStyle.primary(onTint: settings.speedMode == mode))
                   Text(mode.description)
                     .font(.caption)
-                    .foregroundStyle(settings.speedMode == mode ? .white.opacity(0.8) : .secondary)
+                    .foregroundStyle(SpeakTextStyle.secondary(onTint: settings.speedMode == mode))
                 }
                 Spacer()
                 if settings.speedMode == mode {
                   Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.white)
+                    .foregroundStyle(SpeakTextStyle.onTint)
                 }
               }
               .padding(12)

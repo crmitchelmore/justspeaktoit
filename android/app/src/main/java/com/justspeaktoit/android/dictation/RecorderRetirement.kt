@@ -8,6 +8,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.io.File
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -22,8 +25,11 @@ import java.util.concurrent.atomic.AtomicInteger
  *   is either retired on the lane ([retire]) or a stop its owner had already started before going
  *   away ([adopt]); that stop keeps its own thread, so at most [maxPendingOrphans] such threads can
  *   be held across recreated owners.
- * - **Stop before delete.** Each orphan's file is deleted only after its recorder has stopped, and
- *   only by the path that stopped it ([CloudCapture.Recording.claimStop]).
+ * - **Stop, then keep.** An orphan's audio is never deleted: once its recorder has stopped, the
+ *   file is listed by [recoverable] so the next History load saves it ([abandon]). Only the path
+ *   that stopped a recorder decides its file ([CloudCapture.Recording.claimStop]).
+ * - **Process token.** Recordings are named with [processToken], so files left by an earlier
+ *   process (one that died mid-recording) are recoverable too, while this process's live ones are not.
  *
  * Nothing here blocks the main thread or forces a native release: a stalled stop stays stalled
  * until the recorder returns, and admission reopens when it does.
@@ -36,19 +42,41 @@ internal class RecorderRetirement(
     private val lane =
         CoroutineScope(SupervisorJob() + io.limitedParallelism(1) + CoroutineName("jsti-recorder-teardown"))
     private val pending = AtomicInteger(0)
+    private val abandoned = ConcurrentHashMap.newKeySet<String>()
+
+    /** Names this process's recordings; see [recordingFile]. */
+    val processToken: String = UUID.randomUUID().toString().substringBefore('-')
+
+    /** A new recording's file in [dir]. */
+    fun recordingFile(dir: File): File = File(dir, "$PREFIX$processToken-${System.nanoTime()}.wav")
+
+    /** Hands a stopped recording that no session will finish to the next History load. */
+    fun abandon(file: File) {
+        abandoned += file.absolutePath
+    }
+
+    /**
+     * Recordings in [dir] that no session owns: those [abandon]ed in this process and any left by an
+     * earlier one. Each is returned once; the caller moves or deletes it.
+     */
+    fun recoverable(dir: File): List<File> = dir.listFiles().orEmpty().filter { file ->
+        val name = file.name
+        name.startsWith(PREFIX) && name.endsWith(".wav") &&
+            (abandoned.remove(file.absolutePath) || !name.startsWith("$PREFIX$processToken-"))
+    }
 
     /** Orphans queued, stopping on the lane, or adopted and still stopping. */
     val pendingOrphans: Int get() = pending.get()
 
     fun admitsNewRecording(): Boolean = pending.get() < maxPendingOrphans
 
-    /** Stops [recording], which the caller has claimed, then deletes its file. */
+    /** Stops [recording], which the caller has claimed, then keeps its file for recovery. */
     fun retire(recording: CloudCapture.Recording): Job {
         pending.incrementAndGet()
         return lane.launch {
             try {
                 recording.stopClaimed()
-                recording.file.delete()
+                abandon(recording.file)
             } finally {
                 pending.decrementAndGet()
             }
@@ -68,6 +96,7 @@ internal class RecorderRetirement(
 
     companion object {
         private const val DEFAULT_MAX_PENDING_ORPHANS = 2
+        private const val PREFIX = "dictation-"
 
         /** The process-wide lane every production owner shares. */
         val shared: RecorderRetirement by lazy { RecorderRetirement(Dispatchers.IO) }

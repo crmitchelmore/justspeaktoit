@@ -94,7 +94,7 @@ final class StatusBarController {
     observeDeliveryRemedy()
     observeHandsFreeState()
 
-    appSettings.$compactStatusBarIcon
+    appSettings.shell.$compactStatusBarIcon
       .receive(on: RunLoop.main)
       .sink { [weak self] _ in
         guard let self else { return }

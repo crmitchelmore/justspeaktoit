@@ -38,6 +38,34 @@ custom_rules:
     regex: '(\.(foregroundStyle|foregroundColor)\(\s*(Color)?\.black\b)|((textColor|\.foregroundColor)\s*[=:]\s*(NSColor|UIColor)?\.black\b)'
     message: "Black text is unreadable in dark mode; use .primary, .label or labelColor."
     severity: error
+  # Text on a saturated fill comes from SpeakTextStyle (Sources/SpeakApp/Views/
+  # PageChrome), so a restyle reaches every screen and no copy drifts. A hand-made
+  # hero once left its title in the default black on an orange gradient.
+  hand_rolled_on_tint_text:
+    name: "Hand-rolled on-tint text"
+    regex: '\.(foregroundStyle|foregroundColor)\([^)\n]*(\bColor)?\.white\b'
+    included: 'Sources/SpeakApp/.*\.swift'
+    excluded: 'Sources/SpeakApp/Views/PageChrome/'
+    message: "Use SpeakTextStyle.onTint / primary(onTint:) / secondary(onTint:), or put the view in a PageHeroHeader or PageHeroStrip."
+    severity: error
+  hand_rolled_page_title:
+    name: "Hand-rolled page title"
+    regex: 'Text\([^\n]*\)\s*\.font\(\s*\.largeTitle\b'
+    included: 'Sources/SpeakApp/.*\.swift'
+    excluded: 'Sources/SpeakApp/Views/PageChrome/'
+    message: "Page titles use PageHeroHeader or SpeakTextStyle.pageTitle so weight, colour and truncation stay consistent."
+    severity: error
+  # A gradient surface needs every label on it recoloured; PageHeroHeader and
+  # PageHeroStrip do that for the whole subtree. The HUD draws its own chrome.
+  hand_rolled_gradient_surface:
+    name: "Hand-rolled gradient surface"
+    regex: '\bLinearGradient\('
+    included: 'Sources/SpeakApp/.*\.swift'
+    excluded:
+      - 'Sources/SpeakApp/Views/PageChrome/'
+      - 'Sources/SpeakApp/HUD/'
+    message: "Use PageHeroHeader / PageHeroStrip for headers and .pageBackground(_:) for page washes."
+    severity: error
   # AppKit and UIKit draw an attributed string without a foreground colour in
   # black, whatever the appearance.
   attributed_string_without_foreground:

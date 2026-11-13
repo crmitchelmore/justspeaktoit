@@ -16,10 +16,12 @@ object AutomationIds {
     const val SHARE = "dictation.share"
     const val CLEAR = "dictation.clear"
     const val SHOW_ORIGINAL = "dictation.showOriginal"
+    const val READ_ALOUD = "dictation.readAloud"
     const val OPEN_HISTORY = "dictation.openHistory"
     const val OPEN_SETTINGS = "dictation.openSettings"
     const val HISTORY_BACK = "history.back"
     const val HISTORY_CLEAR = "history.clear"
+    const val HISTORY_INSIGHTS = "history.insights"
     const val SETTINGS_BACK = "settings.back"
     const val SETTINGS_SEARCH = "settingsSearchField"
     const val SETTINGS_SEARCH_CLEAR = "settingsSearchClear"
@@ -36,6 +38,36 @@ object AutomationIds {
         "settings.resources.release.${kind.rawValue}.$owner"
 
     const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
+    const val SETTINGS_CLEANUP_PROMPT = "settings.cleanupPrompt"
+    const val SETTINGS_CLEANUP_PROMPT_RESET = "settings.cleanupPrompt.reset"
+    const val SETTINGS_PROFILE_ADD = "settings.profiles.add"
+    const val PROFILE_CHOOSER = "dictation.profile"
+    const val PROFILE_CHOOSER_NONE = "dictation.profile.none"
+    const val PROFILE_EDITOR_NAME = "profileEditor.name"
+    const val PROFILE_EDITOR_CLOUD_MODEL = "profileEditor.cloudModel"
+    const val PROFILE_EDITOR_LANGUAGE = "profileEditor.language"
+    const val PROFILE_EDITOR_CLEANUP = "profileEditor.cleanup"
+    const val PROFILE_EDITOR_CLEANUP_MODEL = "profileEditor.cleanupModel"
+    const val PROFILE_EDITOR_CLEANUP_MODEL_RESET = "profileEditor.cleanupModel.reset"
+    const val PROFILE_EDITOR_PROMPT = "profileEditor.prompt"
+    const val PROFILE_EDITOR_DELETE = "profileEditor.delete"
+    const val PROFILE_EDITOR_SAVE = "profileEditor.save"
+
+    /** One per profile, keyed by its position in the list, never by the user's own name for it. */
+    fun profileOption(index: Int) = "dictation.profile.option.$index"
+
+    /** One per profile row in Settings, keyed by its position. */
+    fun profileEdit(index: Int) = "settings.profiles.edit.$index"
+    const val SETTINGS_LANGUAGE = "settings.language"
+    const val CORRECTIONS_WRITE_AS = "settings.corrections.writeAs"
+    const val CORRECTIONS_HEARD_AS = "settings.corrections.heardAs"
+    const val CORRECTIONS_ADD = "settings.corrections.add"
+
+    /** One per language in the picker, keyed by its catalogue ID (for example `en_GB`). */
+    fun languageOption(id: String) = "languagePicker.language.$id"
+
+    /** One per correction, keyed by its position in the list, never by the user's own text. */
+    fun correctionRemove(index: Int) = "settings.corrections.remove.$index"
     const val CLEANUP_PICKER_BACK = "cleanupPicker.back"
     const val CLEANUP_PICKER_SEARCH = "cleanupPicker.search"
     const val CLEANUP_PICKER_OPENROUTER = "cleanupPicker.openRouter"

@@ -41,13 +41,14 @@ internal class SessionRequests(
     /**
      * Transcribes [file] with [model]. [missingKey] is the failure when no key is saved; [prepare]
      * runs after the key is read and before the upload (a shared file is copied in there) and returns
-     * its format. Without it the file is the recorder's WAV.
+     * its format. Without it the file is the recorder's WAV. [prompt] is the vocabulary glossary.
      */
     suspend fun transcribe(
         model: CloudModel,
         file: File,
         languageTag: String,
         missingKey: DictationFailure,
+        prompt: String? = null,
         prepare: suspend () -> SharedAudio.Format? = { null },
     ): DictationEvent = try {
         val key = withContext(io) { secrets.read(model.provider.credentialId) }
@@ -58,9 +59,9 @@ internal class SessionRequests(
             DictationEvent.Final(
                 capture.call(timings.transcribeMs, model.provider) { call ->
                     if (format == null) {
-                        cloud.transcribe(model, key, file, languageTag, call)
+                        cloud.transcribe(model, key, file, languageTag, call, prompt = prompt)
                     } else {
-                        cloud.transcribe(model, key, file, languageTag, call, format)
+                        cloud.transcribe(model, key, file, languageTag, call, format, prompt)
                     }
                 },
             )
@@ -76,12 +77,17 @@ internal class SessionRequests(
         DictationEvent.Error(DictationFailure.KeyUnavailable)
     }
 
-    /** Cleans up [transcript]. Any failure, including a missing key, keeps the original text. */
-    suspend fun cleanup(model: CleanupModel, transcript: String): CleanupOutcome {
+    /**
+     * Cleans up [transcript] with [systemPrompt]. Any failure, including a missing key, keeps the
+     * original text.
+     */
+    suspend fun cleanup(model: CleanupModel, transcript: String, systemPrompt: String): CleanupOutcome {
         val cleaned = try {
             val key = withContext(io) { secrets.read(model.provider.credentialId) }
             key?.let {
-                capture.call(timings.cleanupMs, model.provider) { call -> cloud.cleanup(model, it, transcript, call) }
+                capture.call(timings.cleanupMs, model.provider) { call ->
+                    cloud.cleanup(model, it, transcript, systemPrompt, call)
+                }
             }
         } catch (e: RequestReleasedException) {
             return CleanupOutcome.Released

@@ -10,8 +10,8 @@ import SpeakCore
 /// dependencies replace each live CloudKit call in tests.
 @MainActor
 struct KeySyncCloudOperations {
-    static let subscriptionCreatedKey = "speak.keysync.subscriptionCreated"
-    static let zoneCreatedKey = "speak.keysync.zoneCreated"
+    nonisolated static let subscriptionCreatedKey = "speak.keysync.subscriptionCreated"
+    nonisolated static let zoneCreatedKey = "speak.keysync.zoneCreated"
     private static let subscriptionID = SyncSchema.EncryptedSecret.subscriptionID
 
     let dependencies: CloudKitKeySyncDependencies

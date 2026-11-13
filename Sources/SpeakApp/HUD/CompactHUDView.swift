@@ -117,8 +117,7 @@ struct CompactHUDContent: View {
         Text(text)
           .font(.body)
           .foregroundStyle(.primary)
-          .lineLimit(1)
-          .truncationMode(.head)
+          .speakLiveTranscriptLines(1)
           .frame(maxWidth: .infinity, alignment: .trailing)
           .accessibilityLabel("Transcript: \(text)")
       }

@@ -166,8 +166,30 @@ extension ContentView {
         }
     }
 
+    /// Shown while a Transcribe started from the launch prompt runs, so the
+    /// tap visibly does something (issue #1617).
+    @ViewBuilder var recoveryProgressBanner: some View {
+        if let inFlight = recoveryInFlight, recovery.recovering == inFlight {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text("Transcribing interrupted recording…")
+                    .font(.subheadline)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.regularMaterial, in: Capsule())
+            .padding(.top, 8)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("captureRecoveryProgress")
+            .onAppear {
+                AccessibilityNotification.Announcement("Transcribing interrupted recording").post()
+            }
+        }
+    }
+
     func chrome(_ content: some View) -> some View {
         content
+            .overlay(alignment: .top) { recoveryProgressBanner }
             .navigationTitle("Just Speak to It")
             .navigationBarTitleDisplayMode(usesInlineDensityLayout ? .inline : .automatic)
             .navigationDestination(item: $recoveryDestination) { destination in
@@ -177,7 +199,7 @@ extension ContentView {
     }
 
     func presentations(_ content: some View) -> some View {
-        content
+        recoveryPresentations(content)
             .alert("Error", isPresented: $showingError) {
                 if let recovery = self.startFailureRecovery {
                     Button(recovery.buttonTitle) { self.performStartFailureRecovery(recovery) }
@@ -191,17 +213,15 @@ extension ContentView {
             } message: {
                 Text(errorMessage)
             }
-            // Audio that survived a crash, offered back once per launch
-            // (issue #992). "Not now" keeps the recording exactly where it is;
-            // nothing on this path deletes audio.
-            .alert("Recording interrupted", isPresented: $showingRecoveryPrompt) {
-                Button("Transcribe it") {
-                    guard let finding = recovery.recoverable.first else { return }
-                    Task { await recovery.recover(finding) }
-                }
-                Button("Not now", role: .cancel) {}
+            // Asked once before any crash report is collected; "Don't send"
+            // is a decision too, so the prompt never returns.
+            .alert(DiagnosticsConsent.title + "?", isPresented: $showingDiagnosticsConsent) {
+                Button("Send") { DiagnosticsConsent.shared.record(granted: true) }
+                    .accessibilityIdentifier("diagnosticsConsentAllowButton")
+                Button("Don't Send", role: .cancel) { DiagnosticsConsent.shared.record(granted: false) }
+                    .accessibilityIdentifier("diagnosticsConsentDeclineButton")
             } message: {
-                Text(recovery.recoverable.first.map(recovery.promptMessage) ?? "")
+                Text(DiagnosticsConsent.explanation + " You can change this in Settings > Privacy & Diagnostics.")
             }
             .navigationDestination(isPresented: Binding(
                 get: { self.historyRouter.pendingHistoryID != nil },
@@ -210,6 +230,42 @@ extension ContentView {
                 if let identifier = self.historyRouter.pendingHistoryID {
                     IdentifiedHistoryView(identifier: identifier)
                 }
+            }
+    }
+
+    func recoveryPresentations(_ content: some View) -> some View {
+        content
+            // Audio that survived a crash, offered back at most once per launch
+            // (issues #992, #1617). "Not now" puts it off until a newer
+            // capture is interrupted; only Discard deletes audio.
+            .alert(
+                "Recording interrupted", isPresented: $showingRecoveryPrompt, presenting: recoveryPromptFinding
+            ) { finding in
+                Button("Transcribe it") { self.transcribeRecoveredCapture(finding) }
+                    .accessibilityIdentifier("captureRecoveryTranscribeButton")
+                Button("Discard recording", role: .destructive) { self.recovery.discard(finding) }
+                    .accessibilityIdentifier("captureRecoveryDiscardButton")
+                Button("Not now", role: .cancel) { self.snoozeCaptureRecovery() }
+                    .accessibilityIdentifier("captureRecoveryNotNowButton")
+            } message: { finding in
+                Text(recovery.promptMessage(for: finding))
+            }
+            .alert(
+                "Couldn't transcribe recording",
+                isPresented: Binding(
+                    get: { self.recoveryFailure != nil },
+                    set: { if !$0 { self.recoveryFailure = nil } }
+                ),
+                presenting: recoveryFailure
+            ) { finding in
+                Button("Try again") { self.transcribeRecoveredCapture(finding) }
+                    .accessibilityIdentifier("captureRecoveryRetryButton")
+                Button("Discard recording", role: .destructive) { self.recovery.discard(finding) }
+                    .accessibilityIdentifier("captureRecoveryFailureDiscardButton")
+                Button("Keep for later", role: .cancel) { self.recovery.snooze([finding]) }
+                    .accessibilityIdentifier("captureRecoveryKeepButton")
+            } message: { _ in
+                Text(recoveryFailureMessage)
             }
     }
 
@@ -267,6 +323,7 @@ extension ContentView {
                 if onboarding.shouldPresentFirstRun {
                     showingFirstRun = true
                 } else {
+                    showingDiagnosticsConsent = DiagnosticsConsent.shared.needsDecision
                     await autoStartIfEnabled()
                 }
             }
@@ -323,6 +380,7 @@ extension ContentView {
             // by then, and `coordinator.start()` is single-flight regardless.
             .sheet(isPresented: $showingFirstRun, onDismiss: {
                 onboarding.completeFirstRun()
+                showingDiagnosticsConsent = DiagnosticsConsent.shared.needsDecision
                 Task { await autoStartIfEnabled() }
             }, content: {
                 FirstRunOnboardingView(

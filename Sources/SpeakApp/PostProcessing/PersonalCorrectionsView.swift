@@ -37,9 +37,7 @@ struct PersonalCorrectionsView: View {
       .padding(density.pagePadding)
       .frame(maxWidth: 1100, alignment: .center)
     }
-    .background(
-      LinearGradient(colors: [Color.brandAccentWarm.opacity(0.08), .clear], startPoint: .top, endPoint: .center)
-    )
+    .pageBackground(.corrections)
     .alert("Unable to Save", isPresented: Binding<Bool>(
       get: { alertMessage != nil },
       set: { if !$0 { alertMessage = nil } }
@@ -53,61 +51,32 @@ struct PersonalCorrectionsView: View {
   @ViewBuilder
   private var hero: some View {
     if density.isCompact {
-      HStack(spacing: density.groupSpacing) {
-        Label("Corrections", systemImage: "text.badge.checkmark")
-          .font(.subheadline.bold())
+      PageHeroStrip("Corrections", systemImage: "text.badge.checkmark", palette: .corrections) {
         Spacer(minLength: 4)
-        Label("Automatic when context matches", systemImage: "checkmark.seal.fill")
-          .labelStyle(.iconOnly)
-          .foregroundStyle(.green)
-          .speakTooltip("Automatic when context matches")
-        Label("Manual rules stay as suggestions", systemImage: "hand.raised")
-          .labelStyle(.iconOnly)
-          .foregroundStyle(.orange)
-          .speakTooltip("Manual rules stay as suggestions")
-      }
-      .padding(density.cardPadding)
-      .foregroundStyle(.white)
-      .background(
-        LinearGradient(
-          colors: [Color.brandAccentWarm, Color.brandAccent.opacity(0.85)],
-          startPoint: .leading,
-          endPoint: .trailing
-        ),
-        in: RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
-      )
-    } else {
-      VStack(alignment: .leading, spacing: 16) {
-        Text("Corrections")
-          .font(.largeTitle.bold())
-        Text(
-          "Teach Speak how your world sounds. Define preferred spellings and let the app "
-            + "correct transcripts when the context fits without leaking private names."
-        )
-        .font(.title3)
-        .foregroundStyle(.secondary)
-        HStack(spacing: 20) {
-          Label("Automatic when context matches", systemImage: "checkmark.seal.fill")
-            .labelStyle(.titleAndIcon)
-            .foregroundStyle(.green)
-          Label("Manual rules stay as suggestions", systemImage: "hand.raised")
-            .labelStyle(.titleAndIcon)
-            .foregroundStyle(.orange)
+        ForEach(Self.heroBadges, id: \.title) { badge in
+          PageHeroBadge(title: badge.title, systemImage: badge.systemImage, iconOnly: true)
         }
-        .font(.callout)
       }
-      .padding(32)
-      .background(
-        LinearGradient(
-          colors: [Color.brandAccentWarm, Color.brandAccent.opacity(0.85)],
-          startPoint: .topLeading,
-          endPoint: .bottomTrailing
-        )
-        .cornerRadius(32)
-        .shadow(color: Color.brandAccentWarm.opacity(0.28), radius: 24, x: 0, y: 12)
-      )
+    } else {
+      PageHeroHeader(
+        "Corrections",
+        subtitle: "Teach Speak how your world sounds. Define preferred spellings and let the app "
+          + "correct transcripts when the context fits without leaking private names.",
+        palette: .corrections
+      ) {
+        HStack(spacing: 12) {
+          ForEach(Self.heroBadges, id: \.title) { badge in
+            PageHeroBadge(title: badge.title, systemImage: badge.systemImage)
+          }
+        }
+      }
     }
   }
+
+  private static let heroBadges: [(title: String, systemImage: String)] = [
+    ("Automatic when context matches", "checkmark.seal.fill"),
+    ("Manual rules stay as suggestions", "hand.raised")
+  ]
 
   private var postProcessingInfoBanner: some View {
     HStack(alignment: .top, spacing: density.groupSpacing) {

@@ -33,7 +33,7 @@ struct PostProcessingLocationPicker: View {
             .padding(.horizontal, 28)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(postProcessingLocationBinding.wrappedValue == location ? .white : .primary)
+        .foregroundStyle(SpeakTextStyle.primary(onTint: postProcessingLocationBinding.wrappedValue == location))
         .background(
           RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(postProcessingLocationBinding.wrappedValue == location ? Color.brandAccent : Color.clear)

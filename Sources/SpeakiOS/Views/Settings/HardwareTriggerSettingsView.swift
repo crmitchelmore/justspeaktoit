@@ -58,7 +58,7 @@ struct HardwareTriggerSettingsView: View {
                 Text(
                     LocalizedStringKey(
                         "**Open JustSpeakToIt once and allow microphone access** before your first trigger. "
-                            + "You may need to unlock your iPhone or open the app to start recording."
+                            + "You may need to unlock \(DeviceCopy.yourDevice) or open the app to start recording."
                     )
                 )
                     .font(.callout)

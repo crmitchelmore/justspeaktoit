@@ -1,5 +1,6 @@
 package com.justspeaktoit.android.dictation
 
+import com.justspeaktoit.android.cloud.RecordingRecovery
 import com.justspeaktoit.android.history.HistoryAudio
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
@@ -37,16 +38,26 @@ internal class DictationHistory(
     /** The latest session's entry, so a later cleanup updates it rather than adding another. */
     private var sessionEntry: HistoryEntry? = null
 
-    /** Loads History and deletes audio no entry refers to (for example after a crash mid-save). */
-    fun load(retention: Retention): Job = update {
-        store.load(retention).also { entries ->
+    /** The entry [recordSession] wrote last, so an interrupted recording can be attached to it. */
+    val latestSession: HistoryEntry? get() = sessionEntry
+
+    /**
+     * Loads History, saves the [recoverable] recordings no session finished, and deletes audio no
+     * entry refers to (for example after a crash mid-save). [recoverable] runs on the History thread.
+     */
+    fun load(retention: Retention, recoverable: () -> List<File> = { emptyList() }): Job = update {
+        store.load(retention)
+        recover(recoverable(), retention).also { entries ->
             val stored = recordingsDir.listFiles().orEmpty().map { it.absolutePath }
             HistoryAudio.orphans(stored, entries).forEach { File(it).delete() }
         }
     }
 
     /** Re-reads and prunes, so the retention cutoff holds while the app stays open. */
-    fun refresh(retention: Retention): Job = update { store.load(retention) }
+    fun refresh(retention: Retention, recoverable: () -> List<File> = { emptyList() }): Job = update {
+        store.load(retention)
+        recover(recoverable(), retention)
+    }
 
     fun remove(id: String, retention: Retention): Job = update { store.remove(id, retention) }
 
@@ -96,8 +107,62 @@ internal class DictationHistory(
         }
     }
 
+    /**
+     * Moves an interrupted session's stopped recording into History beside its entry, so it can be
+     * transcribed later. Runs after [recordSession] wrote [entry]; too short a recording is deleted.
+     */
+    fun attachAudio(file: File, entry: HistoryEntry?, retention: Retention): Job =
+        update {
+            if (entry == null || RecordingRecovery.finalise(file) < 0) {
+                file.delete()
+                return@update store.cached
+            }
+            val kept = File(recordingsDir, "${entry.id}.wav")
+            if (!moveRecording(file, kept)) {
+                file.delete()
+                return@update store.cached
+            }
+            val updated = entry.copy(audioPath = kept.absolutePath)
+            val entries = store.replace(updated, retention)
+            // The entry was pruned or removed meanwhile, so nothing refers to the audio.
+            if (entries.none { it.audioPath == kept.absolutePath }) kept.delete()
+            entries
+        }
+
     /** Replaces an entry and returns once the change is written and published. */
     suspend fun replace(entry: HistoryEntry, retention: Retention) = apply { store.replace(entry, retention) }
+
+    /** Saves each recording as a failed Cloud entry with its audio, ready to transcribe. */
+    private fun recover(files: List<File>, retention: Retention): List<HistoryEntry> {
+        var entries = store.cached
+        files.forEach { file ->
+            val createdAt = file.lastModified().takeIf { it > 0 } ?: now()
+            if (RecordingRecovery.finalise(file) < 0) {
+                file.delete()
+                return@forEach
+            }
+            val id = newId()
+            val kept = File(recordingsDir, "$id.wav")
+            if (!moveRecording(file, kept)) {
+                file.delete()
+                return@forEach
+            }
+            val entry = HistoryEntry(
+                id = id,
+                createdAtMs = createdAt,
+                mode = RecognitionMode.Cloud.name,
+                model = null,
+                status = HistoryStatus.Failed,
+                text = "",
+                failure = DictationFailure.RecordingRecovered.name,
+                audioPath = kept.absolutePath,
+            )
+            entries = store.add(entry, retention)
+            // History is off, so the recording has nowhere to live.
+            if (entries.none { it.id == id }) kept.delete()
+        }
+        return entries
+    }
 
     private fun update(change: () -> List<HistoryEntry>): Job = scope.launch { apply(change) }
 

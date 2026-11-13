@@ -20,6 +20,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -59,8 +60,10 @@ import com.justspeaktoit.android.cloud.CleanupModelPicker
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
+import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.SettingsSearchEntry
 import com.justspeaktoit.android.settings.SettingsSearchIndex
 import com.justspeaktoit.android.settings.SettingsSearchRecents
@@ -76,6 +79,11 @@ class SettingsActions(
     val onChooseCleanupModel: (CleanupModel) -> Unit,
     val onReleaseResource: (String) -> Unit = {},
     val onReleaseEverything: () -> Unit = {},
+    val onChooseLanguage: (String) -> Unit = {},
+    val onCorrectionsChanged: (List<CorrectionRule>) -> Unit = {},
+    val onCleanupPromptChanged: (String) -> Unit = {},
+    val onSaveProfile: (DictationProfile) -> Unit = {},
+    val onDeleteProfile: (String) -> Unit = {},
 )
 
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
@@ -166,6 +174,10 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
                 HorizontalDivider()
             }
 
+            SectionTitle(R.string.settings_language_title, anchor("android.language"))
+            LanguageRow(state.languageId, actions.onChooseLanguage)
+
+            HorizontalDivider()
             SectionTitle(R.string.settings_cloud_model_title, anchor("android.cloudModel"))
             CloudCatalog.transcriptionModels.forEach { model ->
                 Row(
@@ -209,6 +221,22 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
                     color = MaterialTheme.colorScheme.error,
                 )
             }
+            CleanupPromptField(
+                stringResource(R.string.settings_cleanup_prompt_title),
+                state.cleanupPrompt,
+                actions.onCleanupPromptChanged,
+                anchor("android.cleanupPrompt"),
+            )
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_profiles_title, anchor("android.profiles"))
+            ProfilesEditor(
+                profiles = state.profiles,
+                activeId = state.profile?.id,
+                savedKeys = state.savedKeys,
+                onSave = actions.onSaveProfile,
+                onDelete = actions.onDeleteProfile,
+            )
 
             HorizontalDivider()
             Row(
@@ -229,6 +257,10 @@ fun SettingsScreen(state: DictationUiState, actions: SettingsActions) {
                 Switch(checked = state.keepAudioOnCancel, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_keep_audio_note), style = MaterialTheme.typography.bodyMedium)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_corrections_title, anchor("android.personalCorrections"))
+            CorrectionsEditor(state.corrections, actions.onCorrectionsChanged)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_resources_title, anchor("android.resourcesInUse"))
@@ -309,6 +341,36 @@ private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions) {
             },
             onDismiss = { picking = false },
         )
+    }
+}
+
+/** The user's base cleanup prompt; every edit is saved, and empty means the built-in prompt. */
+@Composable
+private fun CleanupPromptField(title: String, saved: String?, onChange: (String) -> Unit, modifier: Modifier) {
+    var text by rememberSaveable { mutableStateOf(saved.orEmpty()) }
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = {
+                text = it
+                onChange(it)
+            },
+            label = { Text(title) },
+            supportingText = { Text(stringResource(R.string.settings_cleanup_prompt_note)) },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth().testTag(AutomationIds.SETTINGS_CLEANUP_PROMPT),
+        )
+        if (text.isNotBlank()) {
+            TextButton(
+                onClick = {
+                    text = ""
+                    onChange("")
+                },
+                modifier = Modifier.testTag(AutomationIds.SETTINGS_CLEANUP_PROMPT_RESET),
+            ) {
+                Text(stringResource(R.string.settings_cleanup_prompt_reset))
+            }
+        }
     }
 }
 

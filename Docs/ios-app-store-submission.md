@@ -45,17 +45,29 @@ The app and each enabled extension ship their own `PrivacyInfo.xcprivacy`:
 - `JustSpeakWatch/PrivacyInfo.xcprivacy` (optional)
 - `JustSpeakWatchWidget/PrivacyInfo.xcprivacy` (optional)
 
-The keyboard and phone widget link SpeakCore, which reads the App Group defaults and file
-attributes, so both declare the matching required-reason categories. A missing
-declaration earns ITMS-91053.
+Apple scans each binary, including statically linked SpeakCore and SpeakiOSLib
+code, so every bundle declares the required-reason categories its own and linked
+sources reference. A missing declaration earns ITMS-91053.
+`Tests/SpeakCoreTests/RequiredReasonAPIManifestTests.swift` maps each bundle to
+its source roots and fails when a category is referenced but not declared, or a
+reason is not an approved first-party code for its category.
+
+The app, keyboard and phone widget declare active keyboards
+(`UITextInputMode.activeInputModes`) under `54BD.1`: the keyboard and the
+keyboard setup screen read the count to decide whether dictation can hand back
+to the previous keyboard, which changes what the user sees. The widget links
+SpeakiOSLib, which contains that setup screen. `3EC4.1` is not used because a
+systemwide keyboard is not the app's primary functionality.
 
 The app also declares system boot time under `35F9.1`: shared transcription
 retry helpers use uptime to measure elapsed time. They do not transmit raw
 uptime. This is the timer/elapsed-event reason in Apple's
 [required-reason API reference](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
-The Share extension stages a user-selected file locally, but its linked
-SpeakCore binary retains UserDefaults/AppStorage references, so it declares
-own-app and App Group defaults reasons too. Watch transfers to the user's
+The keyboard, phone widget and Share extension link SpeakCore, so they declare
+`35F9.1` as well. The Share extension stages a user-selected file locally, but
+its linked SpeakCore binary retains UserDefaults/AppStorage and App Group file
+attribute references, so it declares own-app and App Group defaults reasons and
+`C617.1` too. Watch transfers to the user's
 paired phone. Neither declares direct service collection; Watch does not
 declare required-reason APIs absent from its current code and linked binary.
 
@@ -130,7 +142,13 @@ the candidate privacy report and disclosure review.
 | Audio Data | App Functionality | Recordings go to the transcription provider chosen in Settings |
 | Other User Content | App Functionality | Post-processing sends transcript text to a language model; voice output sends it to a speech provider |
 
-**Data linked to you: four diagnostic/identifier types.** Sentry's
+**Data linked to you: four diagnostic/identifier types.** Collection is
+optional and off until the user agrees to **Send crash reports and
+diagnostics** (first-run onboarding, a one-time prompt for existing users, and
+Settings › Privacy); `SentryManager.start()` does nothing before that, and
+turning it off closes the SDK and deletes its on-device queue, crash reports and
+installation ID. Apple's label still declares the types, because a consenting
+user's data is collected. Sentry's
 `SentryClient` supplies a random installation ID when the app has not assigned
 a user, and `SentryHub` puts that ID in release-health sessions. Neither
 `sendDefaultPii = false` nor credential scrubbing removes that linkage.
@@ -154,9 +172,10 @@ answers:
   Keychain and only sends it to a paired Mac over the local network.
 - **Usage Data and Diagnostics.** The iOS app initialises no product-analytics SDK, so
   Usage Data stays No until issue #776 ships opt-in PostHog to iOS. The app
-  (not its extensions) does run Sentry, sharing the Mac's `SentryManager`
-  configuration and credential scrubber, so Diagnostics declares Crash Data,
-  Performance Data and Other Diagnostic Data as above.
+  (not its extensions) runs Sentry after the diagnostics opt-in, sharing the
+  Mac's `SentryManager` consent gate, configuration and credential scrubber, so
+  Diagnostics declares Crash Data, Performance Data and Other Diagnostic Data as
+  above.
 - **History and API keys in iCloud.** History, including transcript text,
   syncs to the user's own private CloudKit database automatically when the
   device is signed in to iCloud, unless the user turns off iCloud History Sync
@@ -267,8 +286,8 @@ localisation and App Information.
 > private iCloud, unless you turn that off. Already use the Mac app? Scan its QR code to
 > copy your settings and keys across.
 >
-> No ads, no cross-app tracking, no product analytics. Installation-linked crash
-> and performance diagnostics are disclosed in our privacy policy. Open source
+> No ads, no cross-app tracking, no product analytics. Crash reports are sent only
+> if you agree, and you can turn them off at any time. Open source
 > under the MIT licence.
 
 ## Screenshots
@@ -335,12 +354,30 @@ and the final period, and fails unsupported description expressions rather
 than silently omitting them. It does **not** establish sentence case,
 shortness, localized compiler metadata, or every App Store validation rule.
 
+The same notice came back for builds 1000.1.4 onward, which re-uploaded a
+source from before the fix. Apple publishes no list of the terms it rejects,
+so `scripts/ios/check-app-intents-terms.py` (run by `make lint`) applies a
+conservative one: Siri and Apple device names (iPhone, iPad, iPod, Apple
+Watch, Apple TV, Apple Vision, Vision Pro, AirPods, HomePod, CarPlay). It
+checks every App Intents title, description, parameter, entity, enum case,
+parameter summary and App Shortcut phrase in Swift sources that import
+`AppIntents`. With `--metadata`, it checks every localized string in the
+compiled `Metadata.appintents` instead; CI's iOS build runs it on the
+simulator products, and the archive verifier applies it before upload. Say
+"a locked device" or "voice commands" instead.
+
+When Apple rejects an upload during processing, no build record appears.
+`scripts/release-apple.rb` therefore reads the app's `buildUploads`
+(`GET /v1/apps/{id}/buildUploads`). A `FAILED` state fails `distribute`,
+`upload-status` and the hourly reconciler with Apple's error codes, and
+writes an `invalid` receipt, so the same binary is not uploaded again.
+
 `scripts/verify-release-train-archive.py`, already invoked before release
 export/upload, checks the **actual bundled** privacy manifests, their audited
 required reasons, collected-data field types, microphone/speech purpose
 strings and excluded Store product analytics. It also reads the compiler's
-`Metadata.appintents/extract.actionsdata`: description keys are checked for
-the rejected terms and final period; App Shortcuts are limited to ten,
+`Metadata.appintents/extract.actionsdata`: every localized string is checked
+for the rejected terms, and description keys for the final period; App Shortcuts are limited to ten,
 phrases must contain the application-name placeholder, and the iOS app must
 register at least one. Xcode merges a static library's actions into the app
 but drops its `autoShortcuts`, so `TranscriptionShortcuts` lives in the app
@@ -368,9 +405,10 @@ Existing Store compilation guards exclude Sparkle and external executable
 model runtimes. The keyboard's blocked Full Access state disables dictation,
 not its editing keys or next-keyboard control. Real-device microphone,
 locked/background recording and consent/withdrawal behavior still need
-release-candidate evidence. In particular, default-on Sentry diagnostics
-must not be mistaken for the separate Direct-only product-analytics opt-in:
-its disclosure/consent and retention need explicit release review. Static
+release-candidate evidence. Sentry diagnostics have their own opt-in, separate
+from the Direct-only product-analytics opt-in; unit tests cover the gate and
+withdrawal, but the signed candidate's network behaviour, on-device deletion and
+Sentry's retention setting are owner checks in `Docs/manual-checks.yml`. Static
 metadata tests cannot close those gates or the App Store Connect findings.
 
 The July rejection remains an `UNRESOLVED_ISSUES` submission. After the owner

@@ -46,13 +46,12 @@ jobs:
           config = json.load(open("Sources/SpeakCore/Resources/ReleaseTrains.json"))[os.environ["TRAIN"]]
           for env, key in [("BUNDLE_ID", "iosBundleIdentifier"), ("IOS_APP_GROUP", "iosAppGroup"),
                            ("WATCH_APP_GROUP", "watchAppGroup"),
-                           ("IOS_CLOUD_CONTAINER", "iosCloudContainer"), ("MAC_CLOUD_CONTAINER", "macCloudContainer")]:
+                           ("IOS_CLOUD_CONTAINER", "iosCloudContainer"), ("MAC_CLOUD_CONTAINER", "cloudContainer")]:
               print(f"{env}={config[key]}")
           PY
 
       - name: Ensure and check App Store profiles
         env:
-          SHARED_CONTAINER: ${{ vars.IOS_SHARED_CLOUD_CONTAINER == '1' && '1' || '0' }}
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
@@ -69,8 +68,6 @@ jobs:
           GROUP_KEY=com.apple.security.application-groups
           ICLOUD_KEY=com.apple.developer.icloud-container-identifiers
           echo "### ${{ matrix.train }} App Store profiles" >> "$GITHUB_STEP_SUMMARY"
-          SHARED_CONTAINER_RULE=--prefer
-          [ "$SHARED_CONTAINER" = "1" ] && SHARED_CONTAINER_RULE=--require
           # Mirrors release-ios.yml. Extension profiles may carry containers they don't use.
           check() {
             local bundle="$1" expected_containers="$2" group="${GROUP:-$IOS_APP_GROUP}"
@@ -105,7 +102,7 @@ jobs:
             fi
           }
           check "$BUNDLE_ID" "$IOS_CLOUD_CONTAINER,$MAC_CLOUD_CONTAINER" \
-            --require "$ICLOUD_KEY=$IOS_CLOUD_CONTAINER" "$SHARED_CONTAINER_RULE" "$ICLOUD_KEY=$MAC_CLOUD_CONTAINER" \
+            --require "$ICLOUD_KEY=$IOS_CLOUD_CONTAINER" --require "$ICLOUD_KEY=$MAC_CLOUD_CONTAINER" \
             --exact "$ICLOUD_KEY"
           check "$BUNDLE_ID.JustSpeakToItWidgetExtension" ""
           check "$BUNDLE_ID.keyboard" ""

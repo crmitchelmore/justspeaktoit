@@ -49,9 +49,11 @@ interface CloudService {
         languageTag: String?,
         call: CallHandle,
         format: SharedAudio.Format = SharedAudio.Format("wav", "audio/wav"),
+        prompt: String? = null,
     ): String
 
-    fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String
+    /** [systemPrompt] is the full cleanup instruction, built by [CleanupPolicy.systemPrompt]. */
+    fun cleanup(model: CleanupModel, apiKey: String, transcript: String, systemPrompt: String, call: CallHandle): String
 }
 
 /**
@@ -69,9 +71,10 @@ class CloudClient(
         languageTag: String?,
         call: CallHandle,
         format: SharedAudio.Format,
+        prompt: String?,
     ): String {
         val multipart = CloudWire.multipart(
-            fields = CloudWire.transcriptionFields(model, languageTag),
+            fields = CloudWire.transcriptionFields(model, languageTag, prompt),
             fileField = "file",
             fileName = "dictation.${format.extension}",
             mimeType = format.mimeType,
@@ -90,8 +93,15 @@ class CloudClient(
     }
 
     /** Sends cleanup to the model's own route: its native provider, or OpenRouter. */
-    override fun cleanup(model: CleanupModel, apiKey: String, transcript: String, call: CallHandle): String {
-        val json = CloudWire.cleanupBody(model.apiName, transcript, CloudWire.cleanupMaxTokens(model)).toByteArray()
+    override fun cleanup(
+        model: CleanupModel,
+        apiKey: String,
+        transcript: String,
+        systemPrompt: String,
+        call: CallHandle,
+    ): String {
+        val json = CloudWire.cleanupBody(model.apiName, transcript, CloudWire.cleanupMaxTokens(model), systemPrompt)
+            .toByteArray()
         val url = CloudWire.cleanupUrl(model)
         val body = post(url, apiKey, "application/json", call) { conn ->
             conn.setFixedLengthStreamingMode(json.size)

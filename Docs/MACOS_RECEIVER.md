@@ -4,8 +4,9 @@ The iPhone app has no Bonjour transcript sender or pairing screen. Discovering a
 service, enabling the Mac receiver or having protocol support does not send an
 iPhone transcription to a Mac. Platform History sync can use iCloud when enabled
 and CloudKit is available; it is separate from live insertion at a Mac's cursor.
-Mac/iPhone History sync remains unqualified because their configured iCloud
-containers differ; see [#1119](https://github.com/crmitchelmore/justspeaktoit/issues/1119).
+Mac and iPhone now share one iCloud container; Mac/iPhone History sync stays
+unqualified until the device checks for
+[#1119](https://github.com/crmitchelmore/justspeaktoit/issues/1119) pass.
 Physical iPhone Settings/Privacy and ordinary capture-to-History smoke for #952
 remain open.
 
@@ -36,28 +37,69 @@ Both receiver and client use `SpeakTransportWire` in
 | Item | Current contract |
 | --- | --- |
 | Transport | WebSocket over TCP via `NWProtocolWebSocket` |
+| Protocol version | 2 (`SpeakTransportProtocolVersion`); v1 plaintext peers are refused |
 | Discovery | Train-specific `SpeakTransportServiceType` Bonjour service |
 | Endpoint | Bonjour service endpoint, or `ws://<host>:<port>/speak` |
-| Frame | One binary WebSocket message per JSON `TransportMessage`, ISO8601 dates |
+| Encryption | X25519 key share each way, then ChaCha20-Poly1305 with HKDF-SHA256 keys from the X25519 secret and the pairing code |
+| Frame | One binary WebSocket message per sealed JSON `TransportMessage`, ISO8601 dates |
 | Unauthenticated ceiling | 4 KiB |
 | Authenticated ceiling | 1 MiB |
 
 A bare host-and-port endpoint lacks the HTTP request line required for the
-WebSocket handshake. The receiver accepts any request path. A client sends
-`hello` and authenticates with the pairing code before sending text. Wrong codes,
-protocol-version mismatch and transcript frames before authentication are
-rejected; framing limits also apply inside `NWProtocolWebSocket`. Codes are
-compared in constant time, and after five consecutive wrong codes (counted across
-all connections) every attempt is refused for a lockout that starts at 30 seconds
-and doubles per further failure up to an hour. A correct code or regenerating the
-code clears it.
+WebSocket handshake. The receiver accepts any request path.
+
+### Encryption
+
+[`TransportSecureSession.swift`](../Sources/SpeakCore/Sync/Apple/TransportSecureSession.swift)
+defines the handshake, which `TransportChannel` runs before any message:
+
+1. The client sends its protocol version and an ephemeral X25519 public key. This
+   and the Mac's reply are the only plaintext frames.
+2. The Mac replies with its own ephemeral key. Both sides derive one key per
+   direction with HKDF-SHA256 from the X25519 secret, a key HKDF-derived from the
+   pairing code, and a hash of both key-share frames.
+3. The client sends a sealed "client finished" frame. The Mac checks it through
+   `PairingManager.attemptPairing(provingWith:)`, so it is the pairing check and
+   counts towards the lockout below.
+4. The Mac answers with a sealed "server finished" frame, or, for a wrong code or
+   a lockout, a plaintext failure `authResult` that the client only ever reads as
+   a refusal.
+
+After that `send` and `receive` accept only sealed frames, and refuse to run
+before the handshake. Nonces are per-direction frame counters, so a tampered,
+replayed or reordered frame fails to open and closes the connection. Ephemeral
+keys make every session's keys unique. The pairing code never crosses the wire.
+
+A plaintext `hello` gets a plaintext error (a protocol-version mismatch for v1,
+"requires an encrypted connection" for v2) and the connection closes. There is
+no plaintext fallback: no shipping iPhone sender exists, so no v1 peer needs one.
+
+Limits: the code has six digits. The Mac sends nothing that depends on the code
+until the client has proved it, so guesses against the Mac are rate-limited. A
+device that impersonates the Mac to the phone, however, can test codes offline
+against the phone's "client finished" frame. Closing that needs a PAKE or a
+high-entropy per-device key issued at pairing, which a future sender should add.
+
+### Authentication
+
+Inside the encrypted session the client sends `hello` and `authenticate` before
+sending text. Protocol-version mismatch and transcript frames before
+authentication are rejected; framing limits also apply inside
+`NWProtocolWebSocket`. Codes are compared in constant time, and after five
+consecutive wrong codes (counted across all connections) every attempt is refused
+for a lockout that starts at 30 seconds and doubles per further failure up to an
+hour. A correct code or regenerating the code clears it.
 
 ## Existing coverage and remaining qualification
 
 `TransportLoopbackTests` connects the actual `MacConnection` and `TransportServer`
 on loopback. Its cases cover authenticated transcript delivery, wrong pairing
-code, protocol mismatch, oversized/pre-authentication frames, disconnect,
-reconnection identity and listener restart. These are protocol fixtures, not
+code, protocol mismatch, plaintext peers, peers without the pairing key, the
+lockout through the encrypted handshake, oversized/pre-authentication frames,
+disconnect, reconnection identity and listener restart.
+`TransportSecureSessionTests` checks the handshake and framing byte by byte:
+round trips, an eavesdropper who knows the code, injection without the key, and
+tampered, replayed, reordered and cross-session frames. These are protocol fixtures, not
 phone-to-Mac delivery or physical microphone/cursor-insertion evidence. No fresh
 build or test execution is claimed by this documentation correction.
 

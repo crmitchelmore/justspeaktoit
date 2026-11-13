@@ -37,11 +37,8 @@ for name, identifier in profiles:
     if name in ['ios-appstore', 'mac-app-store']:
         containers = set(entitlements.get('com.apple.developer.icloud-container-identifiers', []))
         if surface == 'ios':
-            # #1119: a profile may also authorise this train's shared Mac container;
-            # builds that use it must have it.
-            legacy, shared = os.environ['IOS_CLOUD_CONTAINER'], os.environ['MAC_CLOUD_CONTAINER']
-            needs_shared = os.environ.get('TUIST_IOS_SHARED_CLOUD_CONTAINER') == '1'
-            allowed = [{legacy, shared}] if needs_shared else [{legacy}, {legacy, shared}]
+            # #1119: the shared container plus the legacy one the migration reads.
+            allowed = [{os.environ['IOS_CLOUD_CONTAINER'], os.environ['MAC_CLOUD_CONTAINER']}]
         else:
             allowed = [{os.environ['MAC_CLOUD_CONTAINER']}]
         if containers not in allowed:

@@ -18,10 +18,10 @@ env:
   # The extension ships on every train, always as Instant Dictation hand-off
   # (see "Select keyboard capture policy").
   TUIST_IOS_KEYBOARD: "1"
-  # #1119: set the IOS_SHARED_CLOUD_CONTAINER repository variable to 1 only
-  # after the Mac container is assigned to the iOS App IDs
-  # (Docs/cloudkit-shared-container.md); profiles are then fetched with it.
-  TUIST_IOS_SHARED_CLOUD_CONTAINER: ${{ vars.IOS_SHARED_CLOUD_CONTAINER == '1' && '1' || '0' }}
+  # #1119: the iPhone syncs through the train's shared container. Current
+  # sources always carry it; this keeps frozen sources from before that
+  # change, which only did so behind the flag, on the same container.
+  TUIST_IOS_SHARED_CLOUD_CONTAINER: "1"
 
 jobs:
   build-and-upload:
@@ -148,8 +148,6 @@ jobs:
           mkdir -p "$PROFILE_DIR"
           GROUP_KEY=com.apple.security.application-groups
           ICLOUD_KEY=com.apple.developer.icloud-container-identifiers
-          SHARED_CONTAINER_RULE=--prefer
-          [ "$TUIST_IOS_SHARED_CLOUD_CONTAINER" = "1" ] && SHARED_CONTAINER_RULE=--require
           install_profile() {
             local name="$1" bundle="$2" stored="$3"
             shift 3
@@ -169,7 +167,7 @@ jobs:
 
           install_profile ios-appstore "$BUNDLE_ID" "$IOS_APPSTORE_PROFILE" \
             --require "$GROUP_KEY=$IOS_APP_GROUP" --require "$ICLOUD_KEY=$IOS_CLOUD_CONTAINER" \
-            "$SHARED_CONTAINER_RULE" "$ICLOUD_KEY=$MAC_CLOUD_CONTAINER" --exact "$GROUP_KEY" --exact "$ICLOUD_KEY" \
+            --require "$ICLOUD_KEY=$MAC_CLOUD_CONTAINER" --exact "$GROUP_KEY" --exact "$ICLOUD_KEY" \
             || { echo "::error::No App Store profile for $BUNDLE_ID"; exit 1; }
           APP_PROFILE_PATH="$PROFILE_DIR/ios-appstore.provisionprofile"
           APP_PROFILE_UUID=$(security cms -D -i "$APP_PROFILE_PATH" | plutil -extract UUID raw -)

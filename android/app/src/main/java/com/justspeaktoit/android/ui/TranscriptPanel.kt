@@ -91,7 +91,7 @@ private fun CleanupNote(cleanup: CleanupStatus) {
     )
 }
 
-/** What can be done with a finished or unfinished transcript: copy, share, show original, clear. */
+/** What can be done with a finished or unfinished transcript: copy, share, show original, clear, read aloud. */
 @Composable
 internal fun ResultActions(state: DictationUiState, snackbar: SnackbarHostState, actions: DictationActions) {
     val dictation = state.dictation
@@ -136,15 +136,17 @@ internal fun ResultActions(state: DictationUiState, snackbar: SnackbarHostState,
             Text(stringResource(R.string.action_clear))
         }
     }
+    if (final && text.isNotBlank()) ReadAloudButton(text, snackbar)
 }
 
 @Composable
 private fun statusText(state: DictationUiState): String = when (val dictation = state.dictation) {
     DictationState.Idle -> stringResource(R.string.state_ready)
     is DictationState.Starting -> stringResource(R.string.state_starting)
-    is DictationState.Listening -> stringResource(R.string.state_listening)
+    is DictationState.Listening ->
+        stringResource(if (state.paused) R.string.state_paused else R.string.state_listening)
     is DictationState.Finishing -> if (dictation.mode == RecognitionMode.Cloud) {
-        stringResource(R.string.state_transcribing, state.cloudModel.provider.displayName)
+        stringResource(R.string.state_transcribing, state.sessionCloudModel.provider.displayName)
     } else {
         stringResource(R.string.state_finishing)
     }

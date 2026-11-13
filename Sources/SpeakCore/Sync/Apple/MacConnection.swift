@@ -3,8 +3,8 @@ import Foundation
 import Network
 
 /// Client half of the local transport: connects to a Mac that runs
-/// `TransportServer`, authenticates with the pairing code, then streams
-/// transcripts to it.
+/// `TransportServer`, agrees encryption keys from the pairing code,
+/// authenticates, then streams transcripts to it.
 ///
 /// It lives in `SpeakCore` rather than the iOS library so that the shipping
 /// client and the shipping server can be exercised against each other in one
@@ -64,6 +64,10 @@ public final class MacConnection: ObservableObject {
         do {
             try await channel.start()
             self.state = .authenticating
+            try await channel.establishSecureSession(
+                pairingCode: pairingCode,
+                protocolVersion: self.announcedProtocolVersion
+            )
             try await self.authenticate(on: channel, pairingCode: pairingCode)
         } catch {
             self.fail(with: error.localizedDescription)

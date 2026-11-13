@@ -1,5 +1,6 @@
 package com.justspeaktoit.android.cloud
 
+import com.justspeaktoit.android.dictation.DictationLanguages
 import com.justspeaktoit.android.settings.SettingsSearchAsset
 import org.json.JSONArray
 import org.json.JSONObject
@@ -48,10 +49,11 @@ class CloudCatalogParityTest {
                 it.getString("provider"),
                 it.getString("apiName"),
                 it.getString("languageField"),
+                it.getBoolean("supportsPrompt").toString(),
             )
         }
         val actual = CloudCatalog.transcriptionModels.map {
-            listOf(it.catalogId, it.displayName, it.provider.id, it.apiName, it.languageField)
+            listOf(it.catalogId, it.displayName, it.provider.id, it.apiName, it.languageField, it.supportsPrompt.toString())
         }
         assertEquals(expected, actual)
         assertEquals(CloudCatalog.transcriptionModels.first(), CloudCatalog.defaultTranscriptionModel)
@@ -63,6 +65,13 @@ class CloudCatalogParityTest {
         assertEquals(cleanup.getString("model"), CloudCatalog.CLEANUP_MODEL)
         assertEquals(cleanup.getString("provider"), CloudCatalog.cleanupProvider.id)
         assertEquals(cleanup.getString("systemPrompt"), CleanupPolicy.systemPrompt())
+        assertEquals(cleanup.getString("systemPrompt"), CleanupPolicy.systemPrompt("  "))
+    }
+
+    @Test
+    fun testCustomCleanupPrompt_replacesTheBaseAndKeepsTheSharedClosing() {
+        val closing = asset.getJSONObject("cleanup").getString("customPromptClosing")
+        assertEquals("Answer in haiku.\n\n$closing", CleanupPolicy.systemPrompt("  Answer in haiku.\n"))
     }
 
     @Test
@@ -92,5 +101,14 @@ class CloudCatalogParityTest {
         CloudCatalog.cleanupModels.filterNot { it.isOpenRouter }.map { it.provider }.distinct().forEach { provider ->
             assertEquals(provider.id, urls[provider.id], "${provider.baseUrl}/chat/completions")
         }
+    }
+
+    @Test
+    fun testLanguagesAndVocabularyPromptRules_matchTheGeneratedCatalogue() {
+        val expected = asset.getJSONArray("languages").objects().map { it.getString("id") to it.getString("displayName") }
+        assertEquals(expected, DictationLanguages.all.map { it.id to it.displayName })
+        val prompt = asset.getJSONObject("keywordPrompt")
+        assertEquals(prompt.getInt("maximumBytes"), GeneratedCloudCatalog.KEYWORD_PROMPT_MAX_BYTES)
+        assertEquals(prompt.getInt("maximumTerms"), GeneratedCloudCatalog.KEYWORD_PROMPT_MAX_TERMS)
     }
 }

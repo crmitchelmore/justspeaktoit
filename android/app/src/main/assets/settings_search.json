@@ -19,6 +19,47 @@
       "title" : "Cloud transcription model"
     },
     {
+      "id" : "android.language",
+      "keywords" : [
+        "language",
+        "locale",
+        "spoken language",
+        "accent",
+        "english",
+        "spanish",
+        "french",
+        "german"
+      ],
+      "section" : "transcription",
+      "sectionTitle" : "Transcription",
+      "settingKeys" : [
+        "preferredLocale"
+      ],
+      "summary" : "The language you speak. Automatic uses the phone's language.",
+      "title" : "Dictation language"
+    },
+    {
+      "id" : "android.personalCorrections",
+      "keywords" : [
+        "vocabulary",
+        "dictionary",
+        "custom words",
+        "names",
+        "spelling",
+        "replace",
+        "lexicon",
+        "keyterms",
+        "jargon"
+      ],
+      "section" : "corrections",
+      "sectionTitle" : "Corrections",
+      "settingKeys" : [
+        "personal_corrections"
+      ],
+      "summary" : "Words the recogniser gets wrong and how to write them; also sent to cloud models as vocabulary.",
+      "title" : "Personal corrections"
+    },
+    {
       "id" : "android.cleanup",
       "keywords" : [
         "post-processing",
@@ -43,6 +84,49 @@
       ],
       "summary" : "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",
       "title" : "Clean up transcripts"
+    },
+    {
+      "id" : "android.cleanupPrompt",
+      "keywords" : [
+        "custom prompt",
+        "system prompt",
+        "instructions",
+        "post-processing prompt",
+        "polish prompt",
+        "tone",
+        "style",
+        "formatting"
+      ],
+      "section" : "postProcessing",
+      "sectionTitle" : "Post-processing",
+      "settingKeys" : [
+        "postProcessingSystemPrompt"
+      ],
+      "summary" : "Replace the built-in cleanup instructions with your own system prompt.",
+      "title" : "Cleanup prompt"
+    },
+    {
+      "id" : "android.profiles",
+      "keywords" : [
+        "profile",
+        "profiles",
+        "power mode",
+        "preset",
+        "mode",
+        "work",
+        "personal",
+        "context",
+        "per app",
+        "custom prompt"
+      ],
+      "section" : "profiles",
+      "sectionTitle" : "Profiles",
+      "settingKeys" : [
+        "dictationProfiles",
+        "activeDictationProfileID"
+      ],
+      "summary" : "Named sets of cloud model, language and cleanup settings, chosen in the app or the keyboard.",
+      "title" : "Dictation profiles"
     },
     {
       "id" : "android.keepAudio",

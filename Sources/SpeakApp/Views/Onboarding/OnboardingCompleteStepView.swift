@@ -27,6 +27,10 @@ struct CompleteStepView: View {
                 Text("\(ReleaseTrain.current.displayName) is ready to use")
                     .foregroundColor(.secondary)
 
+                DiagnosticsConsentToggle(accessibilityIdentifier: "onboardingDiagnosticsConsentToggle")
+                    .toggleStyle(.switch)
+                    .frame(maxWidth: 440)
+
                 if AppEnvironment.shared?.analyticsAvailable == true {
                     Toggle(
                         "Share anonymous analytics",
@@ -38,7 +42,8 @@ struct CompleteStepView: View {
                     .accessibilityIdentifier("onboardingAnalyticsConsentToggle")
                     Text(
                         "Optional. Never includes transcripts, audio, prompts, clipboard text, "
-                            + "keystrokes, API keys, screen content or personal identity."
+                            + "keystrokes, API keys, screen content or personal identity. "
+                            + "Sent to PostHog in the EU, which discards your IP address."
                     )
                     .font(.caption)
                     .foregroundColor(.secondary)

@@ -15,7 +15,8 @@ from bundle_policy import APPLICATION, CLI, RESERVED_NAMES
 REPOSITORY = HERE.parent.parent
 IDENTITY_PATH = HERE / "package-identity.json"
 BETA_IDENTITY_PATH = HERE / "package-identity-beta.json"
-IDENTITY_PATHS = {"developer": IDENTITY_PATH, "beta": BETA_IDENTITY_PATH}
+STORE_IDENTITY_PATH = HERE / "package-identity-store.json"
+IDENTITY_PATHS = {"developer": IDENTITY_PATH, "beta": BETA_IDENTITY_PATH, "store": STORE_IDENTITY_PATH}
 # The reviewed execution aliases of each channel. The native automation
 # settings (WindowsAutomationSettings.cpp) choose the CLI alias by package name.
 CHANNEL_IDENTITIES = {
@@ -23,6 +24,17 @@ CHANNEL_IDENTITIES = {
                   "cliExecutionAlias": "JustSpeakToItDeveloperCLI.exe"},
     "beta": {"name": "com.justspeaktoit.windows", "executionAlias": "JustSpeakToIt.exe",
              "cliExecutionAlias": "JustSpeakToItCLI.exe"},
+    "store": {"name": "ChrisMitchelmore.JustSpeaktoIt", "executionAlias": "JustSpeakToIt.exe",
+              "cliExecutionAlias": "JustSpeakToItCLI.exe"},
+}
+# The Microsoft Store identity Partner Center reserved (Product identity, #1157).
+# The Store refuses an upload whose manifest differs from any of these.
+STORE_RESERVATION = {
+    "publisher": "CN=4F44EE59-E9FC-48C5-A032-B34982E6C0CB",
+    "packageFamilyName": "ChrisMitchelmore.JustSpeaktoIt_wqe2sjac9b4k8",
+    "storeProductId": "9PDFKWGH31HP",
+    "displayName": "Just Speak to It",
+    "publisherDisplayName": "Chris Mitchelmore",
 }
 
 
@@ -139,18 +151,40 @@ def check_execution_identity(data):
                            % data["channel"])
 
 
+def fixed_publisher(identity):
+    """The publisher a channel always uses: the developer placeholder or the Store reservation; None for beta."""
+    return identity["identity"].get("developerPublisher") or identity["identity"].get("publisher")
+
+
+def _check_store_reservation(data):
+    identity, presentation = data["identity"], data["presentation"]
+    stated = {"publisher": identity.get("publisher"), "packageFamilyName": identity.get("packageFamilyName"),
+              "storeProductId": identity.get("storeProductId"), "displayName": presentation.get("displayName"),
+              "publisherDisplayName": presentation.get("publisherDisplayName")}
+    if stated != STORE_RESERVATION:
+        raise PackageError("the store channel must state exactly the Partner Center reservation: %r" % (stated,))
+    validate_publisher(identity["publisher"])
+    if identity["name"] + "_" + publisher_id(identity["publisher"]) != identity["packageFamilyName"]:
+        raise PackageError("the store package family name does not match its name and publisher")
+
+
 def load_identity(path=IDENTITY_PATH):
-    """Load and check a channel identity: ``developer`` (package-identity.json) or ``beta``."""
+    """Load and check a channel identity: ``developer`` (package-identity.json), ``beta`` or ``store``."""
     data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     channel = data.get("channel")
     if data.get("schemaVersion") != 1 or channel not in CHANNEL_IDENTITIES or data.get("releaseTrain") is not None:
         raise PackageError("package identity must describe the developer or beta channel outside the release trains")
     if validate_name(data["identity"]["name"]) != CHANNEL_IDENTITIES[channel]["name"]:
         raise PackageError("the %s channel must keep its reviewed package name" % channel)
+    store_keys = {"publisher", "packageFamilyName", "storeProductId"} & set(data["identity"])
     if channel == "developer":
         validate_publisher(data["identity"]["developerPublisher"])
     elif "developerPublisher" in data["identity"]:
-        raise PackageError("the beta channel has no default publisher; supply the signing certificate subject")
+        raise PackageError("the %s channel has no developer publisher" % channel)
+    if channel == "store":
+        _check_store_reservation(data)
+    elif store_keys:
+        raise PackageError("only the store channel states a fixed Store publisher, family or product id")
     supported = sorted(target["msixArchitecture"] for target in windows_targets.TARGETS.values())
     architectures = data["identity"].get("processorArchitectures")
     if (not isinstance(architectures, list) or not architectures or len(set(architectures)) != len(architectures)

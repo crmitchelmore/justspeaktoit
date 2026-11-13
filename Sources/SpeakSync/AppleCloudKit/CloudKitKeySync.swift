@@ -27,8 +27,12 @@ public final class CloudKitKeySync: ObservableObject {
     @Published public internal(set) var status = CloudKitKeySyncStatus()
 
     static let enabledKey = "speak.keysync.enabled"
-    static let syncTokenKey = "speak.keysync.serverChangeToken"
-    static let accountIdentifierKey = "speak.keysync.accountIdentifier"
+    nonisolated static let syncTokenKey = "speak.keysync.serverChangeToken"
+    nonisolated static let accountIdentifierKey = "speak.keysync.accountIdentifier"
+    /// The account fingerprint from the container used before #1119.
+    nonisolated static let legacyAccountIdentifierKey = "speak.keysync.legacyAccountIdentifier"
+    /// Set when this device's keys still have to be carried into the shared container.
+    static let legacyContainerCopyPendingKey = "speak.keysync.legacyContainerCopyPending"
 
     struct ActiveSync {
         let id: UUID
@@ -246,6 +250,8 @@ public final class CloudKitKeySync: ObservableObject {
         let ensureActive = { try self.ensureSyncIsActive(generation: generation) }
         do {
             try await transfer.cloud.setupInfrastructure(database: database)
+            try ensureActive()
+            try await carryLegacyContainerSecretsIfNeeded(database: database, key: key, ensureActive: ensureActive)
             try ensureActive()
             try await transfer.fetchRemoteChanges(database: database, key: key, ensureActive: ensureActive)
             try ensureActive()

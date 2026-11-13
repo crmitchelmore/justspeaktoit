@@ -14,6 +14,7 @@ import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.WavRecorder
+import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.AtomicHistoryFile
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
@@ -22,6 +23,7 @@ import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.settings.DictationPreferences
+import com.justspeaktoit.android.settings.DictationProfile
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +45,10 @@ import java.security.ProviderException
  * History, [HistoryRetry] transcribes kept audio and [SharedAudioImporter] copies shared audio. Every
  * collaborator is injected ([Factory] wires the production ones), and all calls run on the main thread
  * of [scope]; blocking work moves to [io] through [CloudCapture].
+ *
+ * While a session captures or saves its audio, [foreground] runs a microphone foreground service so
+ * the session keeps going with the screen off or another app in front, and [interruptions] reports
+ * calls, audio focus changes and microphone route changes.
  */
 class DictationViewModel internal constructor(
     private val engine: SpeechEngine,
@@ -62,6 +68,8 @@ class DictationViewModel internal constructor(
     retirement: RecorderRetirement = RecorderRetirement.shared,
     // Process-wide, so Settings and the keyboard list every hold the app has.
     private val resources: SystemResourceRegistry = SystemResourceRegistry.shared,
+    private val interruptions: AudioInterruptions = NoAudioInterruptions,
+    private val foreground: ForegroundSession = NoForegroundSession,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     private val capture = CloudCapture(recorders, cacheDir, io, retirement, resources)
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
@@ -83,6 +91,9 @@ class DictationViewModel internal constructor(
             cleanupModel = CloudCatalog.cleanupModel(prefs.cleanupModelId),
             retention = prefs.retention,
             keepAudioOnCancel = prefs.keepAudioOnCancel,
+            corrections = prefs.corrections,
+            cleanupPrompt = prefs.cleanupPrompt,
+            profiles = prefs.profiles,
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
@@ -105,15 +116,20 @@ class DictationViewModel internal constructor(
             override val retention: Retention get() = _state.value.retention
             override val keepAudioOnCancel: Boolean get() = _state.value.keepAudioOnCancel
             override val cleanupModel: CleanupModel?
-                get() = _state.value.let { if (it.cleanupReady) it.cleanupModel else null }
+                get() = _state.value.let { if (it.cleanupReady) it.sessionCleanupModel else null }
+            override val cleanupPrompt: String? get() = _state.value.sessionCleanupPrompt
+            override val corrections: List<CorrectionRule> get() = _state.value.corrections
         },
         publish = { s ->
+            // Before the screen sees the change, so the service and watching are in step with it.
+            onSessionChanged(s)
             _state.update {
                 it.copy(
                     dictation = s.dictation,
                     cleanup = s.cleanup,
                     originalTranscript = s.originalTranscript,
                     releasingMicrophone = s.releasingMicrophone,
+                    paused = s.paused,
                 )
             }
         },
@@ -124,11 +140,28 @@ class DictationViewModel internal constructor(
 
     private var autoStartPending = false
 
+    private var appVisible = true
+    private var watchingInterruptions = false
+    private var foregroundPhase: ForegroundPhase? = null
+
+    /** True while Android lets the foreground service keep the session running off screen. */
+    private var foregroundActive = false
+
+    private val foregroundListener = object : ForegroundDictation.Listener {
+        override fun onStopRequested() = stop()
+
+        override fun onForegroundRefused() {
+            foregroundActive = false
+            foreground.hide()
+            if (!appVisible) session.leaveApp()
+        }
+    }
+
     init {
         scope.launch {
             resources.holds.collect { holds -> _state.update { it.copy(resourcesInUse = holds) } }
         }
-        historyOwner.load(prefs.retention)
+        historyOwner.load(prefs.retention, capture::recoverable)
     }
 
     /** Called whenever the screen starts, so newly installed models, services or keys are noticed. */
@@ -163,7 +196,7 @@ class DictationViewModel internal constructor(
     fun offerSharedAudio(uri: Uri, mimeType: String?) {
         if (_state.value.dictation.isActive) return
         if (!sharedAudioSource.accepts(uri)) {
-            session.rejectSharedAudio(_state.value.cloudModel)
+            session.rejectSharedAudio(_state.value.sessionCloudModel)
             return
         }
         _state.update { it.copy(sharedAudio = SharedAudioOffer(uri, mimeType)) }
@@ -179,7 +212,7 @@ class DictationViewModel internal constructor(
         // Confirming takes priority over an optional cleanup; the transcript is already in History.
         session.cancelCleanup()
         val current = _state.value
-        session.transcribeSharedAudio(current.cloudModel, current.languageTag) { file ->
+        session.transcribeSharedAudio(current.sessionCloudModel, current.languageTag) { file ->
             sharedAudioImporter.import(
                 offer.mimeType,
                 file,
@@ -193,6 +226,14 @@ class DictationViewModel internal constructor(
 
     fun chooseCloudModel(model: CloudModel) = selector.chooseCloudModel(model)
 
+    fun chooseLanguage(id: String) = selector.chooseLanguage(id)
+
+    /** Saves [rules] in order; they apply from the next final transcript. */
+    fun setCorrections(rules: List<CorrectionRule>) {
+        prefs.corrections = rules
+        _state.update { it.copy(corrections = rules) }
+    }
+
     fun chooseCleanupModel(model: CleanupModel) {
         prefs.cleanupModelId = model.selectionId
         _state.update { it.copy(cleanupModel = model) }
@@ -201,6 +242,39 @@ class DictationViewModel internal constructor(
     fun setCleanupEnabled(enabled: Boolean) {
         prefs.cleanupEnabled = enabled
         _state.update { it.copy(cleanupEnabled = enabled) }
+    }
+
+    /** A blank prompt restores the built-in one. Applies from the next cleanup. */
+    fun setCleanupPrompt(prompt: String) {
+        val saved = prompt.takeIf { it.isNotBlank() }
+        prefs.cleanupPrompt = saved
+        _state.update { it.copy(cleanupPrompt = saved) }
+    }
+
+    /** Adds [profile], or replaces the saved one with its id. Applies from the next session. */
+    fun saveProfile(profile: DictationProfile) {
+        val current = prefs.profiles
+        val updated = if (current.any { it.id == profile.id }) {
+            current.map { if (it.id == profile.id) profile else it }
+        } else {
+            current + profile
+        }
+        storeProfiles(updated)
+    }
+
+    /** Deleting the active profile leaves no profile chosen. */
+    fun deleteProfile(id: String) {
+        if (prefs.activeProfileId == id) prefs.activeProfileId = null
+        storeProfiles(prefs.profiles.filterNot { it.id == id })
+    }
+
+    /** Ignored while dictating, so a running session keeps the settings it started with. */
+    fun chooseProfile(id: String?) = selector.chooseProfile(id)
+
+    private fun storeProfiles(profiles: List<DictationProfile>) {
+        prefs.profiles = profiles
+        _state.update { it.copy(profiles = profiles) }
+        selector.refresh()
     }
 
     fun setKeepAudioOnCancel(enabled: Boolean) {
@@ -254,7 +328,7 @@ class DictationViewModel internal constructor(
     fun setRetention(retention: Retention) {
         prefs.retention = retention
         _state.update { it.copy(retention = retention) }
-        historyOwner.refresh(retention)
+        historyOwner.refresh(retention, capture::recoverable)
     }
 
     fun deleteHistoryEntry(id: String) {
@@ -267,13 +341,22 @@ class DictationViewModel internal constructor(
 
     /** Re-reads and prunes history so the retention cutoff holds while the app stays open. */
     fun refreshHistory() {
-        historyOwner.refresh(_state.value.retention)
+        historyOwner.refresh(_state.value.retention, capture::recoverable)
     }
 
-    /** Capture cannot continue once the app is hidden; see [DictationSessionController.leaveApp]. */
+    fun onEnteredApp() {
+        appVisible = true
+    }
+
+    /**
+     * A session protected by the foreground service carries on; without it, capture cannot continue
+     * once the app is hidden (see [DictationSessionController.leaveApp]).
+     */
     fun onLeftApp() {
+        appVisible = false
         // A tile or shortcut start that has not happened yet must not start once the app is hidden.
         autoStartPending = false
+        if (foregroundActive) return
         session.leaveApp()
     }
 
@@ -290,11 +373,11 @@ class DictationViewModel internal constructor(
         if (current.dictation.isActive || current.transcribingEntryId != null) return
         val entry = current.history.firstOrNull { it.id == id } ?: return
         if (entry.audioPath == null) return
-        val model = current.cloudModel
+        val model = current.sessionCloudModel
         val language = current.languageTag
         _state.update { it.copy(transcribingEntryId = id) }
         scope.launch {
-            val updated = historyRetry.transcribe(entry, model, language)
+            val updated = historyRetry.transcribe(entry, model, language, current.corrections)
             val retention = _state.value.retention
             // Cleared with the updated entry, so Transcribe never reappears on the stale one.
             try {
@@ -305,7 +388,45 @@ class DictationViewModel internal constructor(
         }
     }
 
+    /** Keeps the foreground service and interruption watching in step with the session. */
+    private fun onSessionChanged(s: SessionState) {
+        val capturing = s.dictation is DictationState.Starting || s.dictation is DictationState.Listening
+        if (capturing != watchingInterruptions) {
+            watchingInterruptions = capturing
+            if (capturing) {
+                interruptions.start(requestFocus = s.dictation.modeOrNull() == RecognitionMode.Cloud, ::onInterruption)
+            } else {
+                interruptions.stop()
+            }
+        }
+        val phase = foregroundPhase(s)
+        if (phase == foregroundPhase) return
+        foregroundPhase = phase
+        if (phase == null) {
+            foregroundActive = false
+            foreground.hide()
+            if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
+        } else {
+            ForegroundDictation.listener = foregroundListener
+            foregroundActive = foreground.show(phase)
+        }
+    }
+
+    private fun onInterruption(signal: InterruptionSignal) {
+        if (!session.isCapturing) return
+        val mode = session.state.dictation.modeOrNull() ?: return
+        when (val action = InterruptionPolicy.decide(signal, mode, session.state.paused)) {
+            InterruptionAction.None -> Unit
+            InterruptionAction.Pause -> session.pause()
+            InterruptionAction.Resume -> session.resume()
+            is InterruptionAction.Stop -> session.interrupt(action.failure)
+        }
+    }
+
     override fun onCleared() {
+        interruptions.stop()
+        if (foregroundPhase != null) foreground.hide()
+        if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
         engine.close()
         session.close()
     }
@@ -334,6 +455,8 @@ class DictationViewModel internal constructor(
             sharedAudioSource = ContentSharedAudioSource(application),
             cacheDir = application.cacheDir,
             recordingsDir = File(application.filesDir, "recordings"),
+            interruptions = AndroidAudioInterruptions(application),
+            foreground = AndroidForegroundSession(application),
         )
     }
 }
@@ -341,9 +464,11 @@ class DictationViewModel internal constructor(
 private fun DictationUiState.withSelection(selection: EngineSelection) = copy(
     chosenMode = selection.chosenMode,
     cloudModel = selection.cloudModel,
+    languageId = selection.languageId,
     languageTag = selection.languageTag,
     onDeviceLanguageTag = selection.onDeviceLanguageTag,
     savedKeys = selection.savedKeys,
     options = selection.options,
     checkingAvailability = selection.checking,
+    profile = selection.profile,
 )

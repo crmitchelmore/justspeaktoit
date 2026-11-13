@@ -3,6 +3,7 @@ package com.justspeaktoit.android.dictation
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.RequestReleasedException
+import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
@@ -47,11 +48,16 @@ class DictationSessionControllerTest {
     private val states = MutableStateFlow(SessionState())
     private val history = MutableStateFlow<List<HistoryEntry>>(emptyList())
     private var keepAudio = false
+    private var rules = emptyList<CorrectionRule>()
+    private var cleanup: CleanupModel? = null
 
     private val controller by lazy {
         val cacheDir = folder.newFolder("cache")
         val capture = CloudCapture(recorders, cacheDir, Dispatchers.IO, RecorderRetirement(Dispatchers.IO), resources)
-        val secrets = MemorySecrets("openai.apiKey" to "sk-test")
+        val secrets = MemorySecrets(
+            "openai.apiKey" to "sk-test",
+            CloudCatalog.cleanupModels.first().provider.credentialId to "sk-cleanup",
+        )
         DictationSessionController(
             engine = engine,
             capture = capture,
@@ -68,7 +74,8 @@ class DictationSessionControllerTest {
             settings = object : SessionSettings {
                 override val retention = Retention.Month
                 override val keepAudioOnCancel get() = keepAudio
-                override val cleanupModel: CleanupModel? = null
+                override val cleanupModel get() = cleanup
+                override val corrections get() = rules
             },
             publish = { states.value = it },
         )
@@ -169,4 +176,33 @@ class DictationSessionControllerTest {
         assertTrue(File(checkNotNull(kept.audioPath)).exists())
         assertTrue(holds(SystemResourceKind.ProviderConnection).isEmpty())
     }
+
+    @Test
+    fun testPersonalCorrections_fixEveryFinalAndBiasTheCloudModel() {
+        rules = listOf(CorrectionRule("Kubernetes", listOf("cooper netties")))
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("ship Cooper Netties")) }
+        assertEquals(DictationState.Done(RecognitionMode.SpeechService, "ship Kubernetes"), states.value.dictation)
+        await(history) { it.isNotEmpty() }
+
+        cloud.onTranscribe = { "cooper netties works" }
+        startCloud()
+        onMain { controller.stop() }
+        await(states) { it.dictation.text() == "Kubernetes works" }
+        assertEquals("Kubernetes", cloud.transcriptions.single().prompt)
+    }
+
+    @Test
+    fun testCleanupThatRestoresAMisheardWord_isCorrectedAgain() {
+        rules = listOf(CorrectionRule("Kubernetes", listOf("cooper netties")))
+        cleanup = CloudCatalog.cleanupModels.first()
+        cloud.onCleanup = { "Ship Cooper Netties." }
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("ship cooper netties")) }
+        await(states) { it.cleanup == CleanupStatus.Applied }
+        assertEquals("ship Kubernetes", cloud.cleanups.single())
+        assertEquals("Ship Kubernetes.", states.value.dictation.text())
+    }
+
+    private fun DictationState.text() = (this as? DictationState.Done)?.transcript
 }

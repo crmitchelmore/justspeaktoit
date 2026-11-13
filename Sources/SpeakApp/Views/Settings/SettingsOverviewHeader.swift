@@ -17,98 +17,43 @@ struct SettingsOverviewHeader: View {
   }
 
   private var compactOverviewHeader: some View {
-    HStack(spacing: settings.visualDensity.groupSpacing) {
-      Label("Settings", systemImage: "slider.horizontal.3")
-        .font(.subheadline.bold())
-        .lineLimit(1)
-
+    PageHeroStrip("Settings", systemImage: "slider.horizontal.3", palette: .settings) {
       Spacer(minLength: 4)
+      ForEach(overviewFigures, id: \.title) { figure in
+        CompactHeroMetric(title: figure.title, value: figure.value, systemImage: figure.systemImage)
+      }
+    }
+  }
 
-      CompactHeroMetric(
-        title: "Mode",
-        value: overviewModeValue,
-        systemImage: "waveform"
-      )
-      CompactHeroMetric(
+  private var normalOverviewHeader: some View {
+    PageHeroHeader(
+      "Tune Speak to match your flow",
+      subtitle: "Choose recording modes, manage keys, and keep permissions in sync—all in one place.",
+      palette: .settings
+    ) {
+      HStack(spacing: 16) {
+        ForEach(overviewFigures, id: \.title) { figure in
+          HeroStatChip(title: figure.title, value: figure.value, systemImage: figure.systemImage)
+        }
+      }
+    }
+  }
+
+  private var overviewFigures: [HeroFigure] {
+    [
+      HeroFigure(title: "Mode", value: overviewModeValue, systemImage: "waveform"),
+      HeroFigure(
         title: settings.isActiveAssemblyAILiveModel ? "Pre-processing" : "Post-processing",
         value: overviewPostProcessingValue,
         systemImage: "wand.and.stars"
-      )
-      CompactHeroMetric(
-        title: "Output",
-        value: settings.textOutputMethod.displayName,
-        systemImage: "text.alignleft"
-      )
-      CompactHeroMetric(
+      ),
+      HeroFigure(title: "Output", value: settings.textOutputMethod.displayName, systemImage: "text.alignleft"),
+      HeroFigure(
         title: "OpenRouter Key",
         value: isOpenRouterKeyStored ? "Stored" : "Missing",
         systemImage: isOpenRouterKeyStored ? "checkmark.seal.fill" : "key.fill"
       )
-    }
-    .padding(settings.visualDensity.cardPadding)
-    .foregroundStyle(.white)
-    .background(
-      LinearGradient(
-        colors: [Color.orange, Color.orange.opacity(0.72)],
-        startPoint: .leading,
-        endPoint: .trailing
-      ),
-      in: RoundedRectangle(
-        cornerRadius: settings.visualDensity.cardCornerRadius,
-        style: .continuous
-      )
-    )
-  }
-
-  private var normalOverviewHeader: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      HStack(alignment: .center) {
-        Image(systemName: "sparkles.rectangle.stack")
-          .symbolRenderingMode(.palette)
-          .foregroundStyle(.white, .white.opacity(0.7))
-          .font(.system(size: 34, weight: .semibold))
-          .frame(width: 56, height: 56)
-          .background(
-            Color.orange.opacity(0.6),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-        VStack(alignment: .leading, spacing: 6) {
-          Text("Tune Speak to match your flow")
-            .font(.title2.bold())
-            .foregroundStyle(.white)
-          Text(
-            "Choose recording modes, manage keys, and keep permissions in sync—all in one place."
-          )
-          .font(.callout)
-          .foregroundStyle(.white.opacity(0.8))
-        }
-        Spacer()
-      }
-
-      HStack(spacing: 16) {
-        overviewChip(
-          title: "Mode", value: overviewModeValue, systemImage: "waveform")
-        overviewChip(
-          title: settings.isActiveAssemblyAILiveModel ? "Pre-processing" : "Post-processing",
-          value: overviewPostProcessingValue,
-          systemImage: "wand.and.stars")
-        overviewChip(
-          title: "Output", value: settings.textOutputMethod.displayName,
-          systemImage: "text.alignleft")
-        overviewChip(
-          title: "OpenRouter Key", value: isOpenRouterKeyStored ? "Stored" : "Missing",
-          systemImage: isOpenRouterKeyStored ? "checkmark.seal.fill" : "key.fill")
-      }
-    }
-    .padding(24)
-    .background(
-      LinearGradient(
-        colors: [Color.orange, Color.orange.opacity(0.7)], startPoint: .topLeading,
-        endPoint: .bottomTrailing
-      )
-      .cornerRadius(24)
-      .shadow(color: Color.orange.opacity(0.3), radius: 18, x: 0, y: 12)
-    )
+    ]
   }
 
   private var overviewModeValue: String {
@@ -125,21 +70,5 @@ struct SettingsOverviewHeader: View {
     return PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel)
       ? "Local"
       : "Remote"
-  }
-
-  private func overviewChip(title: String, value: String, systemImage: String) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Label(title, systemImage: systemImage)
-        .font(.caption)
-        .labelStyle(.titleAndIcon)
-        .foregroundStyle(.white.opacity(0.8))
-      Text(value)
-        .font(.headline)
-        .foregroundStyle(.white)
-    }
-    .padding(16)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .background(
-      Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
   }
 }

@@ -45,9 +45,11 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         // A new app process cannot own the previous process's recording. Reset
         // before launch actions can start a session, never on foreground entry.
         SharedTranscriptionState.shared.clearRecordingState()
-        // Next, so a crash anywhere else in launch is reported. Test runs and
-        // DEBUG builds start the SDK disabled.
+        // Next, so a crash anywhere else in launch is reported, but only after
+        // the user agreed to send diagnostics. Test runs and DEBUG builds start
+        // the SDK disabled.
         SentryManager.start()
+        SentryManager.observeConsent()
         if HostedUnitTestLaunch.isActive { return true }
         iOSHistoryManager.resetSyncStateIfContainerChanged()
         UNUserNotificationCenter.current().delegate = self

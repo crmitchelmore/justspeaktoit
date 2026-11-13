@@ -1,7 +1,11 @@
 package com.justspeaktoit.android.dictation
 
+import com.justspeaktoit.android.cloud.CleanupPolicy
+import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudException
+import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.history.HistoryStatus
+import com.justspeaktoit.android.settings.DictationProfile
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,12 +40,6 @@ class DictationViewModelTest {
         h.onMain { vm.start() }
         h.awaitState { it.dictation is DictationState.Listening }
         return h.recorders.last
-    }
-
-    private fun awaitGone(file: File) {
-        val end = System.currentTimeMillis() + ViewModelHarness.TIMEOUT_MS
-        while (file.exists() && System.currentTimeMillis() < end) Thread.sleep(5)
-        assertFalse("$file still exists", file.exists())
     }
 
     @Test
@@ -188,6 +186,54 @@ class DictationViewModelTest {
     }
 
     @Test
+    fun testCleanupPrompt_isTheSystemInstruction_andTheActiveProfileOverridesIt() {
+        h.prefs.cleanupEnabled = true
+        h.prefs.cleanupPrompt = "Write in British English."
+        h.secrets.write("openrouter.apiKey", "or-test")
+        startCloud()
+        h.onMain { h.viewModel.stop() }
+        h.awaitState { it.cleanup == CleanupStatus.Applied }
+        assertEquals(CleanupPolicy.systemPrompt("Write in British English."), h.cloud.cleanupPrompts.single())
+
+        val profile = DictationProfile.create("Formal").copy(cleanupPrompt = "Write formally.")
+        h.onMain {
+            h.viewModel.saveProfile(profile)
+            h.viewModel.chooseProfile(profile.id)
+        }
+        h.awaitState { it.profile == profile && it.canStart }
+        h.onMain { h.viewModel.start() }
+        h.awaitState { it.dictation is DictationState.Listening }
+        h.onMain { h.viewModel.stop() }
+        h.awaitState { it.cleanup == CleanupStatus.Applied && it.history.size == 2 }
+        assertEquals(CleanupPolicy.systemPrompt("Write formally."), h.cloud.cleanupPrompts.last())
+    }
+
+    @Test
+    fun testActiveProfile_setsTheSessionCloudModelAndLanguage_withoutChangingSettings() {
+        val groq = CloudCatalog.transcriptionModels.first { it.provider == CloudProvider.Groq }
+        h.secrets.write(CloudProvider.Groq.credentialId, "gsk-test")
+        val profile = DictationProfile.create("Spanish").withCloudModel(groq).copy(languageId = "es_ES")
+        h.prefs.profiles = listOf(profile)
+        h.prefs.activeProfileId = profile.id
+
+        val ready = h.ready().state.value
+        assertEquals(CloudCatalog.defaultTranscriptionModel, ready.cloudModel)
+        assertEquals(groq, ready.sessionCloudModel)
+        h.onMain { h.viewModel.start() }
+        h.awaitState { it.dictation is DictationState.Listening }
+        h.onMain { h.viewModel.stop() }
+        h.awaitState { it.dictation is DictationState.Done }
+        val request = h.cloud.transcriptions.single()
+        assertEquals(groq.catalogId, request.model)
+        assertEquals("es-ES", request.languageTag)
+
+        h.onMain { h.viewModel.deleteProfile(profile.id) }
+        val cleared = h.awaitState { it.profile == null && it.profiles.isEmpty() }
+        assertNull(h.prefs.activeProfileId)
+        assertEquals(CloudCatalog.defaultTranscriptionModel, cleared.sessionCloudModel)
+    }
+
+    @Test
     fun testCleanupFailure_keepsTranscript() {
         h.prefs.cleanupEnabled = true
         h.secrets.write("openrouter.apiKey", "or-test")
@@ -241,15 +287,126 @@ class DictationViewModelTest {
     }
 
     @Test
-    fun testLeavingTheApp_failsCaptureAndReleasesMicrophone() {
+    fun testLeavingTheApp_withoutTheForegroundService_failsCaptureAndKeepsTheAudioInHistory() {
+        h.foreground.refuses = true
         val rec = startCloud()
         h.onMain { h.viewModel.onLeftApp() }
+        val failed = h.awaitState {
+            it.dictation is DictationState.Failed && !it.releasingMicrophone && it.history.any { e -> e.audioPath != null }
+        }
+
+        assertEquals(DictationFailure.LeftApp, (failed.dictation as DictationState.Failed).failure)
+        assertEquals(1, rec.stops)
+        assertFalse("moved out of the cache", rec.file.exists())
+        val entry = failed.history.single()
+        assertEquals(HistoryStatus.Failed, entry.status)
+        assertEquals(DictationFailure.LeftApp.name, entry.failure)
+        assertTrue(File(checkNotNull(entry.audioPath)).exists())
+        assertTrue(h.cloud.transcriptions.isEmpty())
+    }
+
+    @Test
+    fun testLeavingTheApp_withTheForegroundService_keepsRecording_untilTheNotificationsStop() {
+        val rec = startCloud()
+        assertEquals(listOf(ForegroundPhase.Recording), h.foreground.shown.toList())
+        assertEquals("Cloud capture holds audio focus", listOf(true), h.interruptions.starts.toList())
+
+        h.onMain { h.viewModel.onLeftApp() }
+        h.onMain { }
+        assertTrue(h.viewModel.state.value.dictation is DictationState.Listening)
+        assertEquals(0, rec.stops)
+
+        h.onMain { checkNotNull(ForegroundDictation.listener).onStopRequested() }
+        h.awaitState { it.dictation is DictationState.Done }
+        assertEquals(1, rec.stops)
+        assertEquals(listOf(ForegroundPhase.Recording, ForegroundPhase.Finishing), h.foreground.shown.toList())
+        assertFalse("hidden once the transcript is in", h.foreground.visible)
+        assertFalse(h.interruptions.watching)
+        assertNull(ForegroundDictation.listener)
+    }
+
+    @Test
+    fun testForegroundRefusedAfterLeaving_endsCaptureAsLeftApp() {
+        val rec = startCloud()
+        h.onMain { h.viewModel.onLeftApp() }
+        h.onMain { checkNotNull(ForegroundDictation.listener).onForegroundRefused() }
         val failed = h.awaitState { it.dictation is DictationState.Failed && !it.releasingMicrophone }
 
         assertEquals(DictationFailure.LeftApp, (failed.dictation as DictationState.Failed).failure)
         assertEquals(1, rec.stops)
-        assertFalse(rec.file.exists())
+    }
+
+    @Test
+    fun testTransientFocusLoss_pausesCloudCapture_andFocusGainResumesIt() {
+        val rec = startCloud()
+        h.onMain { h.interruptions.signal(InterruptionSignal.FocusLostTransient) }
+        assertTrue(h.awaitState { it.paused }.paused)
+        assertFalse(rec.writing)
+        assertEquals(ForegroundPhase.Paused, h.foreground.shown.last())
+
+        h.onMain { h.interruptions.signal(InterruptionSignal.FocusGained) }
+        h.awaitState { !it.paused }
+        assertTrue(rec.writing)
+        assertEquals(ForegroundPhase.Recording, h.foreground.shown.last())
+        assertTrue(h.viewModel.state.value.dictation is DictationState.Listening)
+    }
+
+    @Test
+    fun testCallDuringCloudCapture_endsItAndKeepsTheAudioToTranscribeLater() {
+        val rec = startCloud()
+        h.onMain { h.interruptions.signal(InterruptionSignal.CallStarted) }
+        val failed = h.awaitState {
+            it.dictation is DictationState.Failed && !it.releasingMicrophone && it.history.any { e -> e.audioPath != null }
+        }
+
+        assertEquals(DictationFailure.InterruptedByCall, (failed.dictation as DictationState.Failed).failure)
+        assertEquals(1, rec.stops)
         assertTrue(h.cloud.transcriptions.isEmpty())
+        assertFalse(h.foreground.visible)
+
+        h.onMain { h.viewModel.transcribeHistoryEntry(failed.history.single().id) }
+        val done = h.awaitState { it.history.singleOrNull()?.status == HistoryStatus.Completed }
+        assertEquals("hello world", done.history.single().text)
+    }
+
+    @Test
+    fun testHeadsetChangeDuringRecognition_keepsTheUnfinishedText() {
+        h.prefs.chosenMode = RecognitionMode.SpeechService
+        val vm = h.ready()
+        h.onMain { vm.start() }
+        h.onMain { checkNotNull(h.engine.onEvent)(DictationEvent.Ready) }
+        h.onMain { checkNotNull(h.engine.onEvent)(DictationEvent.Partial("half a sentence")) }
+        assertEquals("the recogniser manages its own focus", listOf(false), h.interruptions.starts.toList())
+
+        h.onMain { h.interruptions.signal(InterruptionSignal.InputDeviceChanged) }
+        val failed = h.awaitState { it.dictation is DictationState.Failed && it.history.isNotEmpty() }
+
+        val dictation = failed.dictation as DictationState.Failed
+        assertEquals(DictationFailure.AudioDeviceChanged, dictation.failure)
+        assertEquals("half a sentence", dictation.unfinishedText)
+        assertEquals("half a sentence", failed.history.single().text)
+        assertEquals(1, h.engine.cancels)
+    }
+
+    @Test
+    fun testClosingTheScreenMidRecording_recoversTheAudioOnTheNextLoad() {
+        val rec = startCloud()
+        h.clear()
+        val end = System.currentTimeMillis() + ViewModelHarness.TIMEOUT_MS
+        while ((rec.stops == 0 || h.retirement.pendingOrphans > 0) && System.currentTimeMillis() < end) {
+            Thread.sleep(5)
+        }
+        assertTrue("kept in the cache until History recovers it", rec.file.exists())
+
+        val next = ViewModelHarness(folder.root, h.retirement, h.historyFile)
+        try {
+            val entry = next.awaitState { it.history.isNotEmpty() }.history.single()
+            assertEquals(DictationFailure.RecordingRecovered.name, entry.failure)
+            assertTrue(File(checkNotNull(entry.audioPath)).exists())
+            assertFalse(rec.file.exists())
+        } finally {
+            next.close()
+        }
     }
 
     @Test
@@ -316,13 +473,14 @@ class DictationViewModelTest {
     }
 
     @Test
-    fun testClear_closesEngineAndReleasesTheRecordingOffTheMainThread() {
+    fun testClear_closesEngineAndKeepsTheRecordingForRecovery() {
         val rec = startCloud()
         h.clear()
 
         assertTrue(h.engine.closed)
         ViewModelHarness.await(rec.stopped)
-        awaitGone(rec.file)
+        awaitRetired()
+        assertEquals(listOf(rec.file), h.retirement.recoverable(rec.file.parentFile!!))
         // Callbacks from the released recording reach nothing.
         rec.onLimitReached()
         rec.onCaptureFailed()
@@ -332,7 +490,7 @@ class DictationViewModelTest {
     }
 
     @Test
-    fun testClear_whileTheRecorderStopStalls_returnsAtOnceAndReleasesWhenItUnblocks() {
+    fun testClear_whileTheRecorderStopStalls_returnsAtOnceAndKeepsTheRecordingWhenItUnblocks() {
         val gate = CountDownLatch(1)
         h.recorders.stopGate = gate
         val rec = startCloud()
@@ -343,6 +501,14 @@ class DictationViewModelTest {
         assertTrue(rec.file.exists())
 
         gate.countDown()
-        awaitGone(rec.file)
+        awaitRetired()
+        assertTrue(rec.file.exists())
+        assertEquals(listOf(rec.file), h.retirement.recoverable(rec.file.parentFile!!))
+    }
+
+    private fun awaitRetired() {
+        val end = System.currentTimeMillis() + ViewModelHarness.TIMEOUT_MS
+        while (h.retirement.pendingOrphans > 0 && System.currentTimeMillis() < end) Thread.sleep(5)
+        assertEquals(0, h.retirement.pendingOrphans)
     }
 }

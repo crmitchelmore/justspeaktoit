@@ -3,7 +3,7 @@ import Combine
 import SpeakCore
 import SwiftUI
 
-/// The iPhone's live view of ``SystemResourceRegistry`` (issue #1471). It also
+/// The iOS app's live view of ``SystemResourceRegistry`` (issue #1471). It also
 /// registers holds for owners whose state is already published: the recording
 /// service and the Live Activity.
 @MainActor
@@ -45,6 +45,7 @@ public final class IOSSystemResourceMonitor: ObservableObject {
             }
             .store(in: &cancellables)
         let activities = TranscriptionActivityManager.shared
+        let liveActivityReason = "Shows the dictation \(DeviceCopy.liveActivityPlacement)."
         activities.$currentActivity
             .map { $0 != nil }
             .removeDuplicates()
@@ -52,7 +53,7 @@ public final class IOSSystemResourceMonitor: ObservableObject {
                 self?.setHold("liveActivity", active: active) { registry in
                     registry.acquire(
                         kind: .liveActivity, title: "Live Activity",
-                        reason: "Shows the dictation on the Lock Screen and in the Dynamic Island.",
+                        reason: liveActivityReason,
                         owner: "TranscriptionActivityManager", releaseTitle: "End",
                         release: { await MainActor.run { activities?.endActivity() } }
                     )

@@ -10,39 +10,20 @@ struct AutoCorrectionsSection: View {
   let onError: (Error) -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: density.groupSpacing) {
-      HStack {
-        VStack(alignment: .leading, spacing: 4) {
-          HStack(spacing: 8) {
-            Image(systemName: "wand.and.stars")
-              .foregroundStyle(Color.brandAccent)
-            Text("Auto-Corrections")
-              .font(.headline)
-          }
-          Text("Learn from your edits after transcription")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
-        Toggle("", isOn: $settings.autoCorrectionsEnabled)
-          .labelsHidden()
-          .accessibilityLabel("Learn corrections automatically")
-          .accessibilityIdentifier("autoCorrectionsToggle")
-      }
+    SpeakDensityCard(title: "Auto-Corrections", systemImage: "wand.and.stars", tint: .brandAccent) {
+      Toggle("", isOn: $settings.autoCorrectionsEnabled)
+        .labelsHidden()
+        .accessibilityLabel("Learn corrections automatically")
+        .accessibilityIdentifier("autoCorrectionsToggle")
+    } content: {
+      Text("Learn from your edits after transcription")
+        .font(.caption)
+        .foregroundStyle(.secondary)
 
       if settings.autoCorrectionsEnabled {
         learningOptions
       }
     }
-    .padding(density.isCompact ? density.cardPadding : 20)
-    .background(
-      RoundedRectangle(cornerRadius: density.isCompact ? 8 : 16, style: .continuous)
-        .fill(Color.brandAccent.opacity(0.06))
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: density.isCompact ? 8 : 16, style: .continuous)
-        .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
-    )
   }
 
   private var learningOptions: some View {

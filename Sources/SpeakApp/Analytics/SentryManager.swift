@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SpeakCore
 #if canImport(Sentry)
@@ -47,14 +48,97 @@ enum SentryManager {
     struct PerformanceSpan {}
     #endif
 
-    /// Initialize Sentry SDK - call as early as possible in app lifecycle.
-    /// Runs in both DEBUG and release to verify the SDK loads and configures
-    /// without crashing. DEBUG builds use a disabled DSN to avoid sending data.
-    static func start() {
+    /// Starts Sentry only after the user agreed to "Send crash reports and
+    /// diagnostics" (`DiagnosticsConsent`); collection is off until then
+    /// (App Review 5.1.1). Without consent it deletes anything an earlier
+    /// version or session left behind. Call as early as possible at launch,
+    /// then `observeConsent()` so later changes apply immediately.
+    static func start(consent: DiagnosticsConsent = .shared) {
+        guard consent.permitsCollection else {
+            purgeLocalData()
+            return
+        }
         #if canImport(Sentry)
-        SentrySDK.start { options in configure(options) }
+        guard !SentrySDK.isEnabled else { return }
+        SentrySDK.start { options in
+            configure(options)
+            liveOptions.set(options)
+        }
         #endif
     }
+
+    /// Applies the current decision: starts reporting when granted, otherwise
+    /// stops it and deletes unsent reports.
+    static func applyConsent(_ consent: DiagnosticsConsent = .shared) {
+        if consent.permitsCollection {
+            start(consent: consent)
+        } else {
+            stop()
+        }
+    }
+
+    /// Applies every later decision recorded in `consent`. Safe to call more
+    /// than once; only the first call installs the observer.
+    static func observeConsent(_ consent: DiagnosticsConsent = .shared, center: NotificationCenter = .default) {
+        consentObservation.installOnce {
+            center.addObserver(
+                forName: DiagnosticsConsent.didChangeNotification, object: consent, queue: .main
+            ) { _ in
+                applyConsent(consent)
+            }
+        }
+    }
+
+    /// Withdrawal: stops reporting at once and deletes every report not yet sent.
+    static func stop() {
+        #if canImport(Sentry)
+        if let options = liveOptions.take() {
+            // `close()` ends the session, which writes one more envelope, then
+            // flushes the transport. Disabling the live options makes the
+            // client drop anything captured from here on, and deleting the
+            // queue first leaves the flush nothing to send.
+            options.enabled = false
+            purgeLocalData()
+            SentrySDK.close()
+        }
+        #endif
+        purgeLocalData()
+    }
+
+    /// Where Sentry keeps queued envelopes, crash reports, session state and
+    /// its installation ID. App-owned, so withdrawal can delete all of it: the
+    /// SDK default is the Caches root, which an unsandboxed Mac shares with
+    /// every other app.
+    static var storage: DiagnosticsStorage {
+        DiagnosticsStorage(
+            caches: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+                ?? FileManager.default.temporaryDirectory,
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.justspeaktoit",
+            bundleName: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+        )
+    }
+
+    /// Deletes every report not yet sent. Without an explicit `storage`, unit
+    /// test runs delete nothing, so they never touch a developer's real queue.
+    static func purgeLocalData(_ storage: DiagnosticsStorage? = nil, fileManager: FileManager = .default) {
+        guard let storage = storage ?? (NSClassFromString("XCTestCase") == nil ? Self.storage : nil) else { return }
+        for url in storage.purgeTargets(dsnHash: dsnHash) where fileManager.fileExists(atPath: url.path) {
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
+    static var dsnHash: String? {
+        #if canImport(Sentry)
+        guard let url = (try? SentryDsn(string: destination.dsn))?.url else { return nil }
+        // The SDK names its default queue folder with this digest (`SentryDsn.getHash()`, SPI).
+        return Insecure.SHA1.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+        #else
+        return nil
+        #endif
+    }
+
+    private static let liveOptions = LiveOptions()
+    private static let consentObservation = ConsentObservation()
 
     #if canImport(Sentry)
     /// Applies the app's collection contract to a fresh options object.
@@ -65,6 +149,7 @@ enum SentryManager {
     /// - Parameter options: The options object the SDK is about to start with
     static func configure(_ options: Sentry.Options) {
         options.dsn = destination.dsn
+        options.cacheDirectoryPath = storage.directory.path
         // Set app version from bundle
         if let info = Bundle.main.infoDictionary,
            let version = info["CFBundleShortVersionString"] as? String,
@@ -187,3 +272,63 @@ enum SentryManager {
         #endif
     }
 }
+
+/// Sentry's on-disk state for one app, plus the shared-default locations that
+/// versions before the dedicated directory wrote to.
+struct DiagnosticsStorage: Equatable {
+    let caches: URL
+    let bundleIdentifier: String
+    let bundleName: String?
+
+    var directory: URL {
+        caches.appendingPathComponent(bundleIdentifier, isDirectory: true)
+            .appendingPathComponent("Sentry", isDirectory: true)
+    }
+
+    func purgeTargets(dsnHash: String?) -> [URL] {
+        var targets = [directory]
+        #if os(iOS)
+        // iOS Caches belongs to this app alone, so the SDK's defaults can go whole.
+        targets += ["io.sentry", "SentryCrash", "INSTALLATION"].map { caches.appendingPathComponent($0) }
+        #else
+        // Other apps may share these roots on an unsandboxed Mac: only this
+        // app's DSN queue and crash-report folder are removed.
+        if let dsnHash {
+            targets.append(caches.appendingPathComponent("io.sentry").appendingPathComponent(dsnHash))
+        }
+        if let bundleName, !bundleName.isEmpty {
+            targets.append(caches.appendingPathComponent("SentryCrash").appendingPathComponent(bundleName))
+        }
+        #endif
+        return targets
+    }
+}
+
+private final class ConsentObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var token: NSObjectProtocol?
+
+    func installOnce(_ install: () -> NSObjectProtocol) {
+        lock.withLock {
+            if token == nil { token = install() }
+        }
+    }
+}
+
+#if canImport(Sentry)
+/// The options object the running SDK holds, so withdrawal can disable it.
+private final class LiveOptions: @unchecked Sendable {
+    private let lock = NSLock()
+    private var options: Sentry.Options?
+
+    func set(_ options: Sentry.Options) { lock.withLock { self.options = options } }
+    func take() -> Sentry.Options? {
+        lock.withLock {
+            defer { options = nil }
+            return options
+        }
+    }
+}
+#else
+private final class LiveOptions: @unchecked Sendable {}
+#endif

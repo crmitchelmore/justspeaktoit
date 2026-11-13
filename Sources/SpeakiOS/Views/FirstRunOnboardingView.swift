@@ -43,6 +43,7 @@ struct FirstRunOnboardingView: View {
     @State private var secondsRemaining = Int(CaptureOnboardingPolicy.testDictationLimit)
     @State private var failureMessage: String?
     @State private var countdown: Task<Void, Never>?
+    @AppStorage(DiagnosticsConsent.defaultsKey) private var diagnosticsDecision = DiagnosticsConsentDecision.undecided
 
     private var permissionsGranted: Bool {
         microphoneGranted == true && speechGranted == true
@@ -87,6 +88,7 @@ struct FirstRunOnboardingView: View {
 
                 permissionSection
                 testDictationSection
+                diagnosticsSection
             }
             .navigationTitle("Welcome")
             .navigationBarTitleDisplayMode(.inline)
@@ -114,6 +116,35 @@ struct FirstRunOnboardingView: View {
     // MARK: - Steps
 
     @ViewBuilder
+    /// Asked once, before anything is collected. Skipping leaves it
+    /// undecided, so the app asks again rather than assuming an answer.
+    private var diagnosticsSection: some View {
+        Section("3. Crash reports") {
+            Text(DiagnosticsConsent.explanation)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            diagnosticsChoice("Send crash reports", granted: true, id: "firstRunDiagnosticsAllowButton")
+            diagnosticsChoice("Don't send", granted: false, id: "firstRunDiagnosticsDeclineButton")
+        }
+    }
+
+    private func diagnosticsChoice(_ title: String, granted: Bool, id: String) -> some View {
+        let selected = diagnosticsDecision == (granted ? .granted : .declined)
+        return Button {
+            DiagnosticsConsent.shared.record(granted: granted)
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                if selected {
+                    Image(systemName: "checkmark").accessibilityHidden(true)
+                }
+            }
+        }
+        .accessibilityIdentifier(id)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
     private var permissionSection: some View {
         Section("1. Allow the microphone") {
             statusRow(title: "Microphone", granted: microphoneGranted)

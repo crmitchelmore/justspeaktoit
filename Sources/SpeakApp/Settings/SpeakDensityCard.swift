@@ -1,21 +1,27 @@
 import SpeakCore
 import SwiftUI
 
-struct SpeakDensityCard<Content: View>: View {
+/// The titled card every main-window page uses for its sections, so card
+/// titles share one font, colour and truncation rule at each density.
+struct SpeakDensityCard<Accessory: View, Content: View>: View {
   @Environment(\.appVisualDensity) private var density
   let title: String
   let systemImage: String
   let tint: Color
   let regularCornerRadius: CGFloat
   let regularSpacerMinLength: CGFloat
+  let accessory: Accessory
   @ViewBuilder let content: Content
 
+  /// `accessory` sits at the trailing end of the title row, for a card-wide
+  /// toggle or action.
   init(
     title: String,
     systemImage: String,
     tint: Color,
     regularCornerRadius: CGFloat = 28,
     regularSpacerMinLength: CGFloat = 0,
+    @ViewBuilder accessory: () -> Accessory,
     @ViewBuilder content: () -> Content
   ) {
     self.title = title
@@ -23,6 +29,7 @@ struct SpeakDensityCard<Content: View>: View {
     self.tint = tint
     self.regularCornerRadius = regularCornerRadius
     self.regularSpacerMinLength = regularSpacerMinLength
+    self.accessory = accessory()
     self.content = content()
   }
 
@@ -33,7 +40,10 @@ struct SpeakDensityCard<Content: View>: View {
         Text(title)
           .font(density.isCompact ? .caption.weight(.semibold) : .headline)
           .foregroundStyle(.primary)
+          .lineLimit(density.isCompact ? 1 : 2)
+          .accessibilityAddTraits(.isHeader)
         Spacer(minLength: density.isCompact ? 0 : regularSpacerMinLength)
+        accessory
       }
 
       content
@@ -78,5 +88,26 @@ struct SpeakDensityCard<Content: View>: View {
 
   private var cornerRadius: CGFloat {
     density.isCompact ? density.cardCornerRadius : regularCornerRadius
+  }
+}
+
+extension SpeakDensityCard where Accessory == EmptyView {
+  init(
+    title: String,
+    systemImage: String,
+    tint: Color,
+    regularCornerRadius: CGFloat = 28,
+    regularSpacerMinLength: CGFloat = 0,
+    @ViewBuilder content: () -> Content
+  ) {
+    self.init(
+      title: title,
+      systemImage: systemImage,
+      tint: tint,
+      regularCornerRadius: regularCornerRadius,
+      regularSpacerMinLength: regularSpacerMinLength,
+      accessory: { EmptyView() },
+      content: content
+    )
   }
 }

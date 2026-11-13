@@ -158,14 +158,26 @@ delete data already stored in iCloud.
 
 ### macOS and iOS diagnostics
 
-Production macOS and iOS builds use separate projects in Sentry's EU service for reliability monitoring. The
-Sentry SDK sends:
+Crash reporting is **off until you agree**. On first launch (and in onboarding)
+the macOS and iOS apps ask whether to **Send crash reports and diagnostics**;
+the same switch is in Settings › About › Privacy on Mac and Settings › Privacy &
+Diagnostics › Privacy Information on iPhone. Until you turn it on, the Sentry SDK is not
+started and nothing is collected, queued or sent. Declining does not affect any
+feature, and the question is asked once per device; the answer is not synced.
+
+With your consent, production macOS and iOS builds use separate projects in
+Sentry's EU service for reliability monitoring. The Sentry SDK sends:
 
 - Crash and error reports
 - Performance traces (sampled at 20%)
 - Automatic app sessions, associated with a persistent random installation ID
 - Automatic diagnostic breadcrumbs, and failed HTTP-request metadata for the
   app's own update domain only
+
+Turning the switch off withdraws consent immediately: the app stops the SDK,
+drops anything captured from then on, and deletes crash reports, queued events,
+session state and the installation ID still on the device. Reports already
+delivered are kept by Sentry for at most 90 days and are then deleted.
 
 Sentry is disabled in debug builds and test runs. `sendDefaultPii` is disabled,
 and the data is not used to track users across other companies' apps or websites.
@@ -194,6 +206,11 @@ Each Mac uses a separate random identifier that is not synced through iCloud and
 is not linked to Sentry. Raw product events are retained for no more than 12
 months and are not used for advertising or cross-company tracking.
 
+PostHog receives your IP address with each event and discards it rather than
+storing it. Before discarding it, PostHog's location lookup (GeoIP) can add an
+approximate location, such as country, region and city, to the event. The Mac
+app asks PostHog to skip this lookup for its events (`$geoip_disable`).
+
 The Mac App Store build and all iOS/keyboard targets compile this transport out.
 
 Apple may separately provide aggregated App Store and crash diagnostics under
@@ -201,7 +218,8 @@ Apple's own privacy terms. That is distinct from the app's Sentry collection.
 
 ### Identifiability
 
-The Sentry installation ID is random and is not an account identifier. The SDK
+When you have agreed to send diagnostics, the Sentry installation ID is random
+and is not an account identifier. The SDK
 adds it to events and release-health sessions even with `sendDefaultPii` disabled;
 the app's credential scrubber does not remove it. Diagnostics are therefore
 linked to an installation, which must be disclosed as linked data under Apple's

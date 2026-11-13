@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -52,8 +53,15 @@ class MainActivity : ComponentActivity() {
             shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) -> MicPermission.Denied
             else -> MicPermission.DeniedPermanently
         }
-        if (granted) viewModel.requestAutoStart()
+        if (granted) {
+            requestNotifications()
+            viewModel.requestAutoStart()
+        }
     }
+
+    // The answer does not matter: without it the recording notification is only hidden from the shade.
+    private val requestNotification = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    private var askedForNotifications = false
 
     @OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,6 +90,8 @@ class MainActivity : ComponentActivity() {
             var screen by screenState
             JustSpeakTheme {
                 if (screen != Screen.Dictation) BackHandler { screen = Screen.Dictation }
+                // Back leaves a session running in the background rather than closing it with the screen.
+                if (screen == Screen.Dictation && state.dictation.isActive) BackHandler { moveTaskToBack(true) }
                 // Expose test tags as resource IDs so UiAutomator and accessibility-driven agents can find controls.
                 Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
                     when (screen) {
@@ -97,6 +107,11 @@ class MainActivity : ComponentActivity() {
                                 onChooseCleanupModel = viewModel::chooseCleanupModel,
                                 onReleaseResource = viewModel::releaseResource,
                                 onReleaseEverything = viewModel::releaseEverything,
+                                onChooseLanguage = viewModel::chooseLanguage,
+                                onCorrectionsChanged = viewModel::setCorrections,
+                                onCleanupPromptChanged = viewModel::setCleanupPrompt,
+                                onSaveProfile = viewModel::saveProfile,
+                                onDeleteProfile = viewModel::deleteProfile,
                             ),
                         )
                         Screen.History -> HistoryScreen(
@@ -124,6 +139,7 @@ class MainActivity : ComponentActivity() {
                                 onShowHistory = { screen = Screen.History },
                                 onConfirmSharedAudio = viewModel::confirmSharedAudio,
                                 onDismissSharedAudio = viewModel::dismissSharedAudio,
+                                onChooseProfile = viewModel::chooseProfile,
                             ),
                         )
                     }
@@ -170,6 +186,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        viewModel.onEnteredApp()
         if (hasMic()) permission.value = MicPermission.Granted
         viewModel.refreshAvailability()
         viewModel.refreshHistory()
@@ -183,10 +200,20 @@ class MainActivity : ComponentActivity() {
     private fun startWithPermission() {
         if (hasMic()) {
             permission.value = MicPermission.Granted
+            requestNotifications()
             viewModel.requestAutoStart()
         } else {
             requestMic.launch(Manifest.permission.RECORD_AUDIO)
         }
+    }
+
+    /** The ongoing recording notification needs this from Android 13; asked once, when dictation starts. */
+    private fun requestNotifications() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || askedForNotifications) return
+        askedForNotifications = true
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) requestNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun hasMic() =

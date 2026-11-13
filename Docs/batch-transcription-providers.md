@@ -41,10 +41,15 @@ Source recordings are never deleted by these clients.
   `Authorization: ApiKey`, raw recording bytes, word timings in milliseconds.
   Automatic omits the language hint; supported explicit codes are `de`, `en`,
   `es`, `fr`, `fy`, `it`, `nl`, `pl`, `pt`, `sv`. Unsupported hints fail before
-  upload. The public API currently exposes **no base-model selector**:
-  `reson8/resonant-1` is the app's stable selection identifier for the
-  provider-served engine, not an on-wire guarantee of a pinned model version.
-  No guessed `model` query is sent and no unverified price is displayed.
+  upload. Reson8 documents a `model` query parameter with three models:
+  `rumble-2` (recommended, about 55 languages, prerecorded and realtime),
+  `rumble-2-flash` (prerecorded plain text only; it rejects timestamps and
+  words) and `resonant-1`, the default when `model` is omitted. Both
+  `reson8/resonant-1` and `reson8/resonant-1-streaming` send
+  `model=resonant-1` explicitly, so a change to the server default cannot
+  change the engine behind the identifier, and the language allow-list above
+  is Resonant-1's. Rumble-2 is not offered yet: it needs its own routes and
+  language list (#1656). No unverified price is displayed.
 - **StepAudio 3**: `POST https://api.stepfun.com/v1/audio/asr/sse`,
   Bearer authorization, JSON containing one base64-encoded recording and
   `audio.input.transcription.model=stepaudio-3-asr-max`. Supports WAV, M4A,
@@ -75,7 +80,9 @@ Official contracts checked 2026-10-13:
 [Reson8 prerecorded](https://docs.reson8.dev/api/speech-to-text/prerecorded.md),
 [realtime](https://docs.reson8.dev/api/speech-to-text/realtime.md),
 [languages](https://docs.reson8.dev/speech-to-text/features/languages/),
+[models](https://docs.reson8.dev/speech-to-text/models/) (checked 2026-11-13),
 [Resonant-1 announcement](https://www.reson8.dev/blog/benchmarks),
+[models](https://docs.reson8.dev/speech-to-text/models/) (checked 2026-11-13),
 [StepFun SSE](https://platform.stepfun.com/docs/zh/api-reference/audio/asr-sse.md),
 [pricing](https://platform.stepfun.com/docs/zh/guides/pricing/details.md).
 

@@ -13,6 +13,23 @@ extension SettingsSearchCatalog {
             settingKeys: ["cloud_model"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.language", title: "Dictation language", section: .transcription,
+            systemImage: "globe",
+            summary: "The language you speak. Automatic uses the phone's language.",
+            keywords: ["language", "locale", "spoken language", "accent", "english", "spanish", "french", "german"],
+            settingKeys: ["preferredLocale"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.personalCorrections", title: "Personal corrections", section: .corrections,
+            systemImage: "character.book.closed",
+            summary: "Words the recogniser gets wrong and how to write them; also sent to cloud models as vocabulary.",
+            keywords: [
+                "vocabulary", "dictionary", "custom words", "names", "spelling", "replace", "lexicon",
+                "keyterms", "jargon"
+            ],
+            settingKeys: ["personal_corrections"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.cleanup", title: "Clean up transcripts", section: .postProcessing,
             systemImage: "wand.and.stars",
             summary: "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",
@@ -21,6 +38,26 @@ extension SettingsSearchCatalog {
                 "anthropic", "claude", "openai", "gemini", "groq", "mistral"
             ],
             settingKeys: ["cleanup_enabled", "cleanup_model"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.cleanupPrompt", title: "Cleanup prompt", section: .postProcessing,
+            systemImage: "text.quote",
+            summary: "Replace the built-in cleanup instructions with your own system prompt.",
+            keywords: [
+                "custom prompt", "system prompt", "instructions", "post-processing prompt", "polish prompt",
+                "tone", "style", "formatting"
+            ],
+            settingKeys: ["postProcessingSystemPrompt"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.profiles", title: "Dictation profiles", section: .profiles,
+            systemImage: "person.crop.rectangle.stack",
+            summary: "Named sets of cloud model, language and cleanup settings, chosen in the app or the keyboard.",
+            keywords: [
+                "profile", "profiles", "power mode", "preset", "mode", "work", "personal", "context",
+                "per app", "custom prompt"
+            ],
+            settingKeys: ["dictationProfiles", "activeDictationProfileID"], platforms: .android
         ),
         SettingsSearchEntry(
             id: "android.keepAudio", title: "Keep audio when a recording is cancelled", section: .general,

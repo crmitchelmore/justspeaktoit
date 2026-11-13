@@ -109,14 +109,17 @@ extension SettingsView {
         }
       }
 
-      if environment.analyticsAvailable {
-        SettingsCard(title: "Privacy", systemImage: "hand.raised", tint: Color.indigo) {
-          VStack(alignment: .leading, spacing: 12) {
+      SettingsCard(title: "Privacy", systemImage: "hand.raised", tint: Color.indigo) {
+        VStack(alignment: .leading, spacing: 12) {
+          DiagnosticsConsentToggle()
+          if environment.analyticsAvailable {
+            Divider()
             Toggle("Share anonymous analytics", isOn: $settings.analyticsEnabled)
             Text(
               "Helps improve the app using typed usage and reliability events. "
                 + "Transcripts, audio, prompts, clipboard text, keystrokes, API keys, "
-                + "screen content and personal identity are never collected."
+                + "screen content and personal identity are never collected. "
+                + "Data goes to PostHog in the EU, which discards your IP address."
             )
               .font(.callout)
               .foregroundStyle(.secondary)
@@ -125,9 +128,9 @@ extension SettingsView {
               AnalyticsInspectorButton(controls: controls)
             }
             #endif
-            Link("Privacy policy", destination: PrivacyPolicy.url)
-              .font(.callout)
           }
+          Link("Privacy policy", destination: PrivacyPolicy.url)
+            .font(.callout)
         }
       }
 

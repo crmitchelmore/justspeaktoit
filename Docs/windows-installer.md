@@ -1,9 +1,12 @@
 # Windows installer and developer MSIX package
 
-This page covers two packages:
+This page covers three packages:
 
 - the **public beta installer**: one signed `.msixbundle` (x64 and ARM64)
-  opened through an App Installer file, with automatic updates; and
+  opened through an App Installer file, with automatic updates;
+- the **Microsoft Store package**: the same two packages under the identity
+  Partner Center reserved, uploaded unsigned and re-signed by the Store
+  ([Microsoft Store package](#microsoft-store-package)); and
 - the **developer MSIX**, an unsigned per-architecture package used only for
   CI lifecycle checks. The rest of this page, from
   [Identity and version](#identity-and-version), describes it.
@@ -84,7 +87,7 @@ publish (from `main`) or blank to rehearse the current Alpha.
 | Publisher name shown in App Installer | Identity validation of the signing account | Owner action ([routes](#routes-for-a-uk-individual-november-2026)) |
 | Signature valid after the certificate expires | RFC 3161 timestamp (`http://timestamp.acs.microsoft.com`) | Checked by the `sign` job |
 | No SmartScreen "unrecognised app" prompt | Reputation earned by the signing identity over time and downloads | Not guaranteed. A trusted signature replaces "Unknown publisher" with the validated name; SmartScreen may still warn on early downloads of a new identity until consecutive releases signed with it build reputation |
-| Store verification | Microsoft Store certification | Not used (direct download) |
+| Store verification | Microsoft Store certification | Not used by the direct download; the [Store package](#microsoft-store-package) is certified by the Store |
 | Malware scanning | Microsoft Defender at download/install | Normal OS behaviour |
 | Clean-device install and update | `verify` on clean hosted runners | Per release, in CI; physical Windows 10/11 machines remain a manual check |
 
@@ -95,6 +98,80 @@ available; see [Routes for a UK individual](#routes-for-a-uk-individual-november
 for the options, costs and enrolment steps. The pipeline below is wired for
 Artifact Signing and rehearsed with a job-only test certificate; it does not
 switch provider until a route is chosen.
+
+## Microsoft Store package
+
+The Store bundle is the beta installer's x64 and ARM64 packages, built from
+the same qualified runtime bundles, under the identity Partner Center reserved
+for product `9PDFKWGH31HP` (issue #1157). The sideloaded beta and developer
+packages, their identities and their signing are unchanged.
+
+| Field | Value |
+|---|---|
+| `Package/Identity/Name` | `ChrisMitchelmore.JustSpeaktoIt` |
+| `Package/Identity/Publisher` | `CN=4F44EE59-E9FC-48C5-A032-B34982E6C0CB` |
+| `Package/Properties/PublisherDisplayName` | `Chris Mitchelmore` |
+| Package family name | `ChrisMitchelmore.JustSpeaktoIt_wqe2sjac9b4k8` |
+| Display name | Just Speak to It (the reserved name) |
+| Store ID | `9PDFKWGH31HP` (<https://apps.microsoft.com/detail/9PDFKWGH31HP>) |
+
+`scripts/windows-package/package-identity-store.json` holds these values.
+`msix_identity.py` refuses a store identity that differs from the reservation
+in any of them, or whose family name does not follow from its name and
+publisher, and the layout builder refuses any other publisher. Execution
+aliases are the beta's (`JustSpeakToIt.exe`, `JustSpeakToItCLI.exe`), so the
+Store app and the sideloaded beta are not meant to be installed together. All
+three families share `%LOCALAPPDATA%\JustSpeakToIt`, so moving from the beta to
+the Store keeps History and settings.
+
+**Unsigned.** The Store signs every package it certifies, so the Store bundle
+is never signed here and its workflow reads no `windows-signing` secret.
+
+```powershell
+./scripts/windows-package/build-windows-installer-bundle.ps1 -Channel store `
+  -X64Bundle sources/x64 -Arm64Bundle sources/arm64 -ExpectedCommit <commit> `
+  -Version <version> -Output out -ToolCache $env:TEMP\jsti-packaging-tools
+```
+
+writes `JustSpeakToIt-store_<version>_unsigned.msixbundle` and checks it with
+`windows-installer.py verify-bundle --channel store`.
+
+**Workflow.** `.github/workflows/windows-store.yml`:
+
+| Job | Runs | Secrets |
+|---|---|---|
+| `sources` | Fetches the manifest's qualified x64 and ARM64 runtime bundles. Skips with a notice when the manifest has no desktop qualification receipt (for example an iOS-only candidate) | None |
+| `package` | Runs the packaging tests, builds and verifies the Store bundle, uploads `windows-store-bundle` (30 days) | None |
+| `submit` | Only when called with `submit: true` for a `stable-candidate-N` manifest on `main`. Checks the bundle carries the reserved identity and no signature, downloads the pinned [Microsoft Store Developer CLI](https://github.com/microsoft/msstore-cli) (`dependencies.json`, `microsoftStoreCli`, SHA-256, size and Microsoft Authenticode checked), then runs `msstore publish <bundle> --appId 9PDFKWGH31HP` through `submit-microsoft-store.ps1`. Uploads `windows-store-submission` | `microsoft-store` environment |
+
+**Publish Stable** calls it with `submit: true` after the Stable publication
+succeeds (`submit-microsoft-store` in `publish-stable.yml`). Alpha builds,
+manifest preparation, tag pushes and main merges never submit. A manual
+dispatch, or a main push that changes the Store packaging, only builds the
+bundle; a dispatch with a manifest is how the owner gets the bundle for the
+first, manual submission. With no credentials in the environment the `submit`
+job writes a notice and succeeds; with some but not all it fails and names the
+missing ones.
+
+**Credentials.** The main-only `microsoft-store` environment holds four
+secrets, read only by the `submit` job:
+
+| Secret | Value |
+|---|---|
+| `MICROSOFT_STORE_TENANT_ID` | Microsoft Entra tenant ID (Directory ID) |
+| `MICROSOFT_STORE_CLIENT_ID` | The Entra application's client ID |
+| `MICROSOFT_STORE_CLIENT_SECRET` | A client secret (key) of that application |
+| `MICROSOFT_STORE_SELLER_ID` | Partner Center Seller ID (Account settings > Legal info > Developer) |
+
+**Limits.** The [submission API](https://learn.microsoft.com/windows/uwp/monetize/create-and-manage-submissions-using-windows-store-services)
+updates a product that already has a published submission, so the first
+submission (listing, privacy policy, age rating and capability
+justifications) is made by hand. Each Stable submission then replaces the
+packages and keeps the listing. The package version is the Stable build's
+`YYYY.MMDD.hhmm.0`, which always increases and has the fourth part 0 that the
+Store requires. `runFullTrust` and `unvirtualizedResources` are restricted
+capabilities: certification may refuse `unvirtualizedResources`, which would
+need a different data design ([File system](#file-system-and-user-data)).
 
 ## Identity and version
 
@@ -215,8 +292,9 @@ The resulting contract:
   registry values, and shell or dialog state Windows records in HKCU stays per
   package and is removed on uninstall.
 - Microsoft describes `unvirtualizedResources` as intended for specific
-  scenarios. Sideloading needs no approval; a Store submission would need
-  approval or a different data design.
+  scenarios. Sideloading needs no approval; the Store package declares it as
+  a restricted capability that must be justified at submission, and
+  certification refusing it would need a different data design.
 - Credential Manager entries are stored by the system credential service, not
   in package state. The lifecycle test shows the installed app reading
   Credential Manager without error (it reports no saved key); it does not
@@ -338,21 +416,46 @@ identity.
 
 Done by the owner only; each step creates an account or accepts terms.
 
-1. Go to <https://storedeveloper.microsoft.com>, choose **Get started for
-   free** > **Individual developer**, sign in with a Microsoft account with
-   MFA, and complete ID and selfie verification. Review the pre-filled
-   profile and choose the publisher display name users will see.
-2. In Partner Center > Apps and games, **reserve the name** "Just Speak to
-   It". From Product identity copy `Package/Identity/Name`,
-   `Package/Identity/Publisher` and `PublisherDisplayName`.
-3. Tell the maintainers those three values. They are not secrets. An agent
-   then builds the bundle with that identity and the `runFullTrust`
-   justification and adds an upload job.
-4. Provide a privacy policy URL and age rating, upload the first package by
-   hand, and submit for certification.
-5. Only if automated submission is wanted later: register an Entra ID app for
-   the Partner Center submission API and store its credentials in a
-   `main`-only environment.
+1. Done (November 2026): Partner Center individual developer account.
+2. Done (13 November 2026): the name "Just Speak to It" is reserved as Store
+   ID `9PDFKWGH31HP`. The reservation lapses unless a submission is made by
+   13 February 2027.
+3. Done: the identity values are in
+   [Microsoft Store package](#microsoft-store-package), and the Store bundle
+   and submission job exist.
+4. **First submission, by hand** (`owner-microsoft-store-first-submission`).
+   Run **Microsoft Store** (`windows-store.yml`) from `main` with the newest
+   Stable candidate (or Alpha) tag as `manifest`, and download the
+   `windows-store-bundle` artifact. In Partner Center > Apps and games > Just
+   Speak to It, start a submission: upload the `.msixbundle` under Packages,
+   set pricing and markets, a privacy policy URL, the age rating
+   questionnaire and the Store listing, and justify the restricted
+   capabilities `runFullTrust` (a desktop app that inserts dictated text into
+   other apps) and `unvirtualizedResources` (keeps History and settings in
+   `%LOCALAPPDATA%\JustSpeakToIt`, shared with the portable build). Submit
+   before 13 February 2027.
+5. **Automated submission** (`owner-microsoft-store-api`):
+   1. In Partner Center, open **Account settings** (gear icon) > **User
+      management** > **Microsoft Entra applications**, and choose **Create
+      Microsoft Entra application** (or **Add Microsoft Entra application**
+      to use an existing one). Name it, for example, "JustSpeakToIt Store
+      submission".
+   2. Give it the **Manager** role and save.
+   3. Open the application, copy its **Tenant ID** and **Client ID**, and
+      under **Keys** choose **Add new key**; copy the client secret at once
+      (it is shown once) and note its expiry.
+   4. Copy the **Seller ID** from **Account settings** > **Legal info** >
+      **Developer**.
+   5. In GitHub, **Settings** > **Environments** > **New environment**
+      `microsoft-store`. Under **Deployment branches and tags** choose
+      **Selected branches and tags** and add only `main`.
+   6. Add the environment secrets `MICROSOFT_STORE_TENANT_ID`,
+      `MICROSOFT_STORE_CLIENT_ID`, `MICROSOFT_STORE_CLIENT_SECRET` and
+      `MICROSOFT_STORE_SELLER_ID`, for example
+      `gh secret set MICROSOFT_STORE_CLIENT_SECRET --env microsoft-store`.
+      Never add them as repository secrets.
+   7. After the first submission is live, the next **Publish Stable** submits
+      automatically. Renew the client secret before it expires.
 
 #### Owner steps: SignPath Foundation (direct download)
 
@@ -484,6 +587,10 @@ secrets and four variables: CI returns to the unsigned package.
   catalog in `scripts/windows-package/dependencies.json`. Only its x64 tool
   directory is extracted, and both tools must carry valid Microsoft signatures.
   The Windows SDK is not shipped.
+- The Microsoft Store Developer CLI (`msstore`) 0.4.4 is pinned by the GitHub
+  release asset's SHA-256 and size in the same file. Only the Store `submit`
+  job downloads it, `msstore.exe` must carry a valid Microsoft signature, and
+  it is never shipped.
 - `build-windows-package-layout.py` authenticates the bundle exactly as the
   bundle job recorded it: archive hash and size, manifest hash, every file
   hash, source commit, an optimised production executable without test

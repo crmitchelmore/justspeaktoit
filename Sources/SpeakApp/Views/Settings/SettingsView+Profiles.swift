@@ -4,7 +4,7 @@ import SwiftUI
 
 extension SettingsView {
   var profilesSettings: some View {
-    ProfilesSettingsContent(store: environment.profiles, settings: settings)
+    ProfilesSettingsContent(store: environment.profiles, settings: settings, storage: environment.secureStorage)
   }
 }
 
@@ -13,6 +13,7 @@ extension SettingsView {
 struct ProfilesSettingsContent: View {
   @ObservedObject var store: DictationProfileStore
   @ObservedObject var settings: AppSettings
+  let storage: SecureAppStorage
   @State private var editingProfile: DictationProfile?
   @State private var isCreatingProfile = false
 
@@ -59,12 +60,12 @@ struct ProfilesSettingsContent: View {
       .speakTooltip("Configure per-app dictation profiles (Power Mode).")
     }
     .sheet(item: $editingProfile) { profile in
-      ProfileEditorView(profile: profile, settings: settings) { updated in
+      ProfileEditorView(profile: profile, settings: settings, storage: storage) { updated in
         store.upsert(updated)
       }
     }
     .sheet(isPresented: $isCreatingProfile) {
-      ProfileEditorView(profile: nil, settings: settings) { created in
+      ProfileEditorView(profile: nil, settings: settings, storage: storage) { created in
         store.upsert(created)
       }
     }

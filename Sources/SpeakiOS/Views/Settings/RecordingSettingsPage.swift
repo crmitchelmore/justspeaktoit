@@ -57,7 +57,7 @@ struct RecordingSettingsPage: View {
             }
 
             if settings.liveActivitiesEnabled {
-                SettingsFootnote("Shows progress on the Lock Screen and in the Dynamic Island.")
+                SettingsFootnote("Shows progress \(DeviceCopy.liveActivityPlacement).")
             }
         }
 
@@ -88,7 +88,7 @@ struct RecordingSettingsPage: View {
             return "Requires iOS 26 or later — Apple's on-device speech detector isn't available here."
         }
         return "**Arm it from the microphone button.** The microphone stays on while armed; "
-            + "silent audio stays in memory and never leaves this iPhone."
+            + "silent audio stays in memory and never leaves \(DeviceCopy.thisDevice)."
     }
 
     private var keyboardStatusLabel: String {
@@ -161,7 +161,8 @@ struct ResultsSettingsPage: View {
                     : "Cancelling a recording deletes its audio."
             )
             SettingsFootnote(
-                "Audio is kept on this iPhone so you can replay it, or transcribe it again after a lost connection."
+                "Audio is kept on \(DeviceCopy.thisDevice) so you can replay it, "
+                    + "or transcribe it again after a lost connection."
             )
         }
     }

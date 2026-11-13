@@ -261,7 +261,7 @@ struct HistoryItemRow: View {
         case "macos":
             return "Mac"
         case "ios":
-            return "iPhone"
+            return "iPhone or iPad"
         default:
             return item.originPlatform
         }

@@ -2,6 +2,12 @@
 
 Follow [AGENTS.md](../AGENTS.md); it is the authoritative guide for this repository.
 
+Build features for every platform in the same change where possible. Otherwise
+file one cross-platform issue for the remaining platforms, link it from the PR
+and update [Docs/feature-map.md](../Docs/feature-map.md), the feature map to
+check before building, changing or removing any feature (see AGENTS.md,
+**Cross-Platform Features**).
+
 ## Before every PR or push
 
 1. Run `scripts/pre-pr` (or `make pre-pr`). It runs what the CI Gate's

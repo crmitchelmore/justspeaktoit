@@ -16,9 +16,7 @@ struct PersonalCorrectionsPreviewSection: View {
     )
     let preview = lexicon.apply(to: previewText, context: context)
 
-    return VStack(alignment: .leading, spacing: density.groupSpacing) {
-      Text("Preview")
-        .font(density.isCompact ? .caption.weight(.semibold) : .title3.bold())
+    return SpeakDensityCard(title: "Preview", systemImage: "eye", tint: .brandLagoon) {
       TextEditor(text: $previewText)
         .accessibilityLabel("Preview text")
         .frame(minHeight: density.isCompact ? 64 : 120)
@@ -42,14 +40,6 @@ struct PersonalCorrectionsPreviewSection: View {
       recordList("Applied corrections", records: preview.applied)
       recordList("Suggestions", records: preview.suggestions)
     }
-    .padding(density.cardPadding)
-    .background(
-      RoundedRectangle(
-        cornerRadius: density.isCompact ? density.cardCornerRadius : 24,
-        style: .continuous
-      )
-        .fill(.ultraThinMaterial)
-    )
   }
 
   @ViewBuilder

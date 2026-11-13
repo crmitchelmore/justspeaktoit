@@ -12,6 +12,8 @@ final class FakeStreamingTextField: StreamingTextField {
     var selectedRangeIsReadable = true
     var setSelectedRangeResult: AXError = .success
     var setSelectedTextResult: AXError = .success
+    /// The `AXDocument` the field reports; nil models apps such as Notes that report none.
+    var documentIdentity: String? = "file:///Users/test/Document.txt"
 
     /// The range that was selected at the moment each replacement was attempted,
     /// with the text it tried to write. One entry per attempted AX write.
@@ -30,6 +32,10 @@ final class FakeStreamingTextField: StreamingTextField {
 
     func readSelectedRange() -> CFRange? {
         self.selectedRangeIsReadable ? self.selection : nil
+    }
+
+    func readDocumentIdentity() -> String? {
+        self.documentIdentity
     }
 
     func setSelectedRange(_ range: CFRange) -> AXError {

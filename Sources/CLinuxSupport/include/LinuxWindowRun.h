@@ -52,7 +52,7 @@ int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const 
 int32_t jsti_window_set_history_management(const char *identifiers);
 int32_t jsti_window_confirm_audio_cleanup(const char *token, size_t count);
 int32_t jsti_window_show_migration_report(const char *text);
-/* Owned, modal preview; Replace profiles requires a second affirmative response.
+/* Owned, modal preview; Replace requires a second affirmative response.
  * Both stages default to Cancel. Called from the Host's ordered publication path. */
 int32_t jsti_window_confirm_migration_restore(const char *token, const char *text, int32_t offers_replace);
 /* Modeless setup guide. Commands: 0 opened, 1 next, 2 back, 3 skip,

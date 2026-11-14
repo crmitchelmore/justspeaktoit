@@ -138,7 +138,7 @@ int jsti_shell_open_directory(const char *path, char *error, size_t error_capaci
 int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *error, size_t error_capacity);
 int jsti_window_show_migration_report(const char *text, char *error, size_t error_capacity);
 /* Shows a restore preview and answers MIGRATION_RESTORE_RESPONSE exactly once
- * with token. offers_replace enables the Replace app profiles choice. */
+ * with token. offers_replace enables the Replace choice. */
 int jsti_window_confirm_migration_restore(const char *token, const char *text, int offers_replace,
                                           char *error, size_t error_capacity);
 

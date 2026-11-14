@@ -1,8 +1,8 @@
 # macOS data export and import
 
 Open **Settings → Data & Migration** for full manual export/import on macOS.
-Windows/Linux provide History backups with optional saved audio and app profiles, plus read-only inspection;
-full native category collection and transactional import remain unfinished.
+Windows and Linux save, inspect and restore the same ZIP for every category; see
+[Windows and Linux](#windows-and-linux).
 Native ZIP inspection also validates profile structure and declared coverage
 through the shared profile catalogue. Missing profile data is not an empty
 collection; prompts and identifiers are never displayed. Profile checks are not
@@ -13,8 +13,7 @@ The source is read through the shared bounded owned-file reader and exact-byte,
 file and directory-chain revalidation. Unsupported identity metadata, changed
 sources and malformed collections fail the backup rather than becoming empty
 replacement authority. Profiles preserved as unreadable on startup must be
-recovered before selecting them. These read receipts are not write/CAS authority
-or an atomic multi-store transaction; native import remains unavailable.
+recovered before selecting them.
 
 ## Export
 
@@ -164,3 +163,38 @@ history IDs, and re-registers active global shortcuts after import.
 Rejected global shortcuts are shown in the import report and Keyboard conflicts,
 with instructions to choose another binding. Archive replacement is tested on a
 separate mounted volume as well as the default temporary filesystem.
+
+## Windows and Linux
+
+Windows (General › Audio, output and backup) and Linux (General › Data backup)
+save the same version-2 ZIP. Every backup holds History text, settings,
+shortcuts, connections, vocabulary (pronunciations, lexicon and corrections)
+and references to downloaded local models. Saved audio and app profiles are
+optional; API keys are added only when the user says yes (Windows asks with a
+prompt that defaults to No, Linux has an **Include API keys** switch that
+starts off).
+
+**Restore** reads the whole archive first and shows a preview: per-category
+counts, conflicts, skipped items and why. Nothing is written until the user
+chooses Merge or Replace. Merge keeps this device's value when both sides
+differ; Replace takes the backup's. History is only ever merged, and items
+already on this device keep their own audio. The restore is all-or-nothing:
+vocabulary, settings, API keys, app profiles, History and audio are rolled back
+if any step fails, and an invalid archive changes nothing. API keys are read or
+written only when the user opts in again on restore; without it the preview
+says the backup's keys were left out.
+
+Shared logic lives in `SpeakDesktop` (`DesktopMigrationRestore`,
+`DesktopMigrationBackup`) and `SpeakDesktopHost`
+(`DesktopHostMigrationConfiguration`); the Win32 and GTK files only add the
+prompts and switches.
+
+| Category | Windows and Linux |
+| --- | --- |
+| Settings & shortcuts, Connections | Portable preferences this device supports. Keys with no desktop equivalent, the active model, appearance, run at login and automation permission are skipped and counted in the preview. |
+| History, Recordings | History merges; audio is attached only to History items the restore adds. |
+| API keys & credentials | Provider API keys, only with the opt-in on both export and restore. Mac pairing details do not apply and are skipped with a reason. |
+| Dictation profiles | Merge or Replace, as before. |
+| Vocabulary | Pronunciations, lexicon and corrections. |
+| Local models | Not applicable: model files are never downloaded or copied. The preview names models this device can download from Local models and counts those it cannot run. |
+

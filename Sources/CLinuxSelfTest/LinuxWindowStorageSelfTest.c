@@ -6,6 +6,7 @@
 int32_t storage_self_test(char *error, size_t capacity) {
     if (storage_page()->recordings_folder == NULL || history_page()->audio_cleanup == NULL ||
         storage_page()->backup_audio == NULL || storage_page()->backup_profiles == NULL ||
+        storage_page()->backup_api_keys == NULL || adw_switch_row_get_active(storage_page()->backup_api_keys) ||
         storage_page()->backup_export == NULL || storage_page()->backup_inspect == NULL || storage_page()->backup_restore == NULL ||
         !adw_switch_row_get_active(storage_page()->backup_audio) ||
         adw_switch_row_get_active(storage_page()->backup_profiles) ||
@@ -22,14 +23,17 @@ int32_t storage_self_test(char *error, size_t capacity) {
     gboolean backup_ok = backup_choice_active(&choice, choice_parent) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(storage_page()->backup_audio)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(storage_page()->backup_profiles)) &&
+        !gtk_widget_get_sensitive(GTK_WIDGET(storage_page()->backup_api_keys)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(storage_page()->backup_export)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(storage_page()->backup_inspect)) &&
         !gtk_widget_get_sensitive(GTK_WIDGET(storage_page()->backup_restore));
     jsti_window_event_fn backup_callback = ui.callback;
     ui.callback = observe_event;
-    for (gint32 flags = 0; flags < 4; ++flags) {
+    for (gint32 flags = 0; flags < 16; ++flags) {
         choice.include_audio = flags & 1;
         choice.include_profiles = flags & 2;
+        choice.include_settings = flags & 4;
+        choice.include_api_keys = flags & 8;
         backup_emit_path(&choice, "synthetic-export.zip");
         backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_EXPORT && observed.index == flags &&
             g_strcmp0(observed.text, "synthetic-export.zip") == 0;
@@ -40,9 +44,15 @@ int32_t storage_self_test(char *error, size_t capacity) {
     backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_INSPECT && observed.index == 0 &&
         g_strcmp0(observed.text, "synthetic-review.zip") == 0;
     choice.action = 2;
+    choice.include_api_keys = 0;
     backup_emit_path(&choice, "synthetic-restore.zip");
     backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_RESTORE && observed.index == 0 &&
         g_strcmp0(observed.text, "synthetic-restore.zip") == 0;
+    choice.include_api_keys = 8;
+    backup_emit_path(&choice, "synthetic-restore-keys.zip");
+    backup_ok = backup_ok && observed.event == JSTI_EVENT_MIGRATION_RESTORE && observed.index == 8 &&
+        g_strcmp0(observed.text, "synthetic-restore-keys.zip") == 0;
+    choice.include_api_keys = 0;
     observed.event = 0;
     on_recordings_default(NULL, NULL);
     backup_ok = backup_ok && observed.event == JSTI_EVENT_RECORDINGS_LOCATION &&

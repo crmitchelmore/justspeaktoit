@@ -67,8 +67,24 @@ void emitMigrationBackup(HWND window, const std::string &path, int options) {
     if (state.callback) state.callback(JSTI_EVENT_MIGRATION_EXPORT, path.c_str(), options, state.context);
 }
 
+// Settings, vocabulary, connections and model references are always saved.
+// API keys need an explicit Yes each time; the default is No.
+constexpr int backupSettingsFlag = 4, backupAPIKeysFlag = 8;
+
+int askIncludeAPIKeys(HWND window, const wchar_t *body, const wchar_t *title) {
+    const int answer = MessageBoxW(window, body, title, MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON2);
+    if (answer == IDYES) return backupAPIKeysFlag;
+    return answer == IDNO ? 0 : -1;
+}
+
 void exportMigrationBackup(HWND window) {
-    const int options = migrationBackupOptions(window);
+    const int keys = askIncludeAPIKeys(window,
+        L"Include your API keys in this backup?\n\n"
+        L"Settings and vocabulary are always included. API keys are stored unencrypted in the ZIP, "
+        L"so keep it private.\n\nYes includes API keys. No leaves them out. Cancel stops.",
+        L"Include API keys?");
+    if (keys < 0) return;
+    const int options = migrationBackupOptions(window) | backupSettingsFlag | keys;
     std::vector<wchar_t> path(32768);
     const std::wstring name = L"JustSpeakToIt-History.zip";
     std::copy(name.begin(), name.end(), path.begin());
@@ -103,6 +119,24 @@ void exportMigrationBackup(HWND window) {
         return;
     }
     emitMigrationBackup(window, selected, options);
+}
+
+void restoreMigrationBackup(HWND window) {
+    std::string failure;
+    const std::string selected = jsti::migrationRestore::choose(window, failure);
+    if (!failure.empty()) {
+        showFailure(window, failure);
+        return;
+    }
+    if (selected.empty()) return;
+    const int keys = askIncludeAPIKeys(window,
+        L"Restore API keys from this backup?\n\n"
+        L"You will see a preview before anything is written. Without this, API keys in the backup "
+        L"are left out and the keys on this PC stay as they are.\n\n"
+        L"Yes includes API keys. No leaves them out. Cancel stops.",
+        L"Restore API keys?");
+    if (keys < 0) return;
+    if (state.callback) state.callback(JSTI_EVENT_MIGRATION_RESTORE, selected.c_str(), keys, state.context);
 }
 } // namespace jsti_window
 

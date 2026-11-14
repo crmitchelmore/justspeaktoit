@@ -48,13 +48,14 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
     }
 
     /// Android offers every provider whose shared batch client iOS calls, plus OpenAI, Reson8, the
-    /// direct routes the desktop hosts run and OpenRouter. Only region-bound keys stay off Android.
+    /// direct routes the desktop hosts run, the region-bound Azure, Alibaba and StepFun routes and
+    /// OpenRouter, so every current batch model reaches Android.
     func testAndroidTranscriptionProvidersCoverEverySharedBatchClientProvider() {
         XCTAssertEqual(
             Set(CloudCatalogAndroidExport.transcriptionProviderIDs),
             BatchTranscriptionRouting.iosSharedClientProviderIDs.union([
-                "openai", "reson8", "cartesia", "gladia", "google", "meta", "smallest", "xai",
-                OpenRouterService.providerID
+                "openai", "reson8", "cartesia", "gladia", "google", "meta", "smallest", "xai", "azure",
+                "alibaba", "stepfun", OpenRouterService.providerID
             ])
         )
         let offered = Set(CloudCatalogAndroidExport.transcriptionModels.map(\.id))
@@ -69,7 +70,7 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
             }
             XCTAssertTrue(offered.contains(option.id), option.id)
         }
-        XCTAssertEqual(missing, ["alibaba", "azure", "stepfun"])
+        XCTAssertEqual(missing, [])
     }
 
     func testOnlyOpenAICompatibleModelsTakeAPromptAndLanguageRulesMatchSpeakCore() throws {
@@ -88,6 +89,8 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
             XCTAssertEqual(
                 model["requiresPCM16WAV"] as? Bool,
                 id == MetaMuseVoiceTranscribe.batchCatalogID
+                    || AzureTranscriptionModels.batchIDs.contains(id)
+                    || AlibabaSpeechModels.batchIDs.contains(id)
                     || OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: id),
                 id
             )

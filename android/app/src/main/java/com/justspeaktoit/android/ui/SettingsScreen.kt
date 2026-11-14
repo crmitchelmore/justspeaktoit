@@ -116,6 +116,8 @@ class SettingsActions(
     val onRunSetup: () -> Unit = {},
     val onAppearanceChanged: (AppearanceChoice) -> Unit = {},
     val onCheckBalance: (CloudProvider) -> Unit = {},
+    val onSaveAzureEndpoint: (String) -> Unit = {},
+    val onClearAzureEndpoint: () -> Unit = {},
     val onExportConfiguration: () -> Unit = {},
     val onImportConfiguration: () -> Unit = {},
     val onExportCredentialsChanged: (Boolean) -> Unit = {},
@@ -473,6 +475,7 @@ fun SettingsScreen(
                     balance = state.balanceAccounts[provider.credentialId]?.let { account ->
                         KeyBalance(account, account.id in state.checkableBalances, state.balances[account.id])
                     },
+                    azureEndpoint = state.azureEndpoint,
                 )
             }
 

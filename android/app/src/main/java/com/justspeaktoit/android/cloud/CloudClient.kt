@@ -76,8 +76,13 @@ interface CloudService {
 class CloudClient(
     private val connectTimeoutMs: Int = 15_000,
     private val readTimeoutMs: Int = 120_000,
+    /** The saved Azure Speech resource endpoint ([AzureSpeechCredential.ENDPOINT_SECRET]); blank for none. */
+    azureEndpoint: () -> String = { "" },
 ) : CloudService {
-    private val batch = BatchTranscriber(transport = { request, call -> exchange(request, call) })
+    private val batch = BatchTranscriber(
+        transport = { request, call -> exchange(request, call) },
+        azureEndpoint = azureEndpoint,
+    )
 
     override fun transcribe(
         model: CloudModel,

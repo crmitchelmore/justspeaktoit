@@ -25,6 +25,7 @@ class BatchTranscriberTest {
     private fun transcriber(
         replies: List<Pair<String, BatchWire.Response>>,
         pause: BatchPause = BatchPause { _, _ -> pauses++ },
+        azureEndpoint: String = "",
     ): BatchTranscriber {
         val queue = replies.toMutableList()
         return BatchTranscriber(
@@ -37,6 +38,7 @@ class BatchTranscriberTest {
             },
             pause = pause,
             background = { it() },
+            azureEndpoint = { azureEndpoint },
         )
     }
 
@@ -287,5 +289,108 @@ class BatchTranscriberTest {
         }
         assertEquals(DictationFailure.AudioTooLarge, error.failure)
         assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    fun testAzure_sendsToTheSavedEndpointAndTakesOnly200AsATranscript() {
+        val fast = model(BatchWire.AZURE_FAST)
+        audio.writeBytes(WavFormat.header(2) + byteArrayOf(1, 0))
+        val endpoint = "https://speak.cognitiveservices.azure.com"
+        val url = "POST $endpoint/speechtotext/transcriptions:transcribe"
+        val text = transcriber(listOf(url to ok("""{"combinedPhrases":[{"text":" Hello "}]}""")), azureEndpoint = endpoint)
+            .transcribe(fast, "secret:westeurope", audio, null, CallHandle(), wav, emptyList())
+        assertEquals("Hello", text)
+        assertEquals("secret", sent.single().headers["Ocp-Apim-Subscription-Key"])
+
+        val accepted = transcriber(listOf(url to BatchWire.Response(202, "{}")), azureEndpoint = endpoint)
+        val error = assertThrows(CloudException::class.java) {
+            accepted.transcribe(fast, "secret", audio, null, CallHandle(), wav, emptyList())
+        }
+        assertEquals(DictationFailure.Server, error.failure)
+    }
+
+    @Test
+    fun testAzure_refusesALocalProxyTokenAndABadEndpointWithoutSending() {
+        audio.writeBytes(WavFormat.header(2) + byteArrayOf(1, 0))
+        for ((key, endpoint) in listOf("local-proxy/token" to "", "secret" to "https://example.com")) {
+            val error = assertThrows(CloudException::class.java) {
+                transcriber(emptyList(), azureEndpoint = endpoint)
+                    .transcribe(model(BatchWire.AZURE_FAST), key, audio, null, CallHandle(), wav, emptyList())
+            }
+            assertEquals(DictationFailure.InvalidKey, error.failure)
+        }
+        assertTrue(sent.isEmpty())
+    }
+
+    private fun alibabaKey(region: AlibabaCredential.Region): String =
+        checkNotNull(AlibabaCredential.credentialsForSaving("sk-1", region, "llm-abc"))
+
+    @Test
+    fun testAlibaba_neverSendsSilenceAndRefusesARegionTheModelDoesNotServe() {
+        val funFlash = model(BatchWire.ALIBABA_FUN_FLASH)
+        audio.writeBytes(WavFormat.header(4) + ByteArray(4))
+        val silent = transcriber(emptyList())
+            .transcribe(funFlash, alibabaKey(AlibabaCredential.Region.Beijing), audio, null, CallHandle(), wav, emptyList())
+        assertEquals("", silent)
+
+        val error = assertThrows(CloudException::class.java) {
+            transcriber(emptyList()).transcribe(
+                funFlash, alibabaKey(AlibabaCredential.Region.Frankfurt), audio, null, CallHandle(), wav, emptyList(),
+            )
+        }
+        assertEquals(DictationFailure.InvalidKey, error.failure)
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    fun testAlibaba_sendsQwenOmniToTheWorkspaceInItsRegion() {
+        audio.writeBytes(WavFormat.header(2) + byteArrayOf(1, 0))
+        val stream = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hal\"}}]}\n" +
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n" +
+            "data: [DONE]\n"
+        val text = transcriber(
+            listOf("POST https://llm-abc.eu-central-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions" to ok(stream)),
+        ).transcribe(
+            model(BatchWire.ALIBABA_QWEN_38),
+            alibabaKey(AlibabaCredential.Region.Frankfurt),
+            audio,
+            "de-DE",
+            CallHandle(),
+            wav,
+            emptyList(),
+        )
+        assertEquals("Hallo", text)
+        assertEquals("Bearer sk-1", sent.single().headers["Authorization"])
+    }
+
+    @Test
+    fun testStepFun_usesTheKeysRegionAndNeedsAnEventStream() {
+        val stepFun = model("stepfun/stepaudio-3-asr-max")
+        val key = checkNotNull(StepFunCredential.credentialsForSaving("sk", StepFunCredential.Region.International))
+        audio.writeBytes(WavFormat.header(2) + byteArrayOf(1, 0))
+        val url = "POST https://api.stepfun.ai/v1/audio/asr/sse"
+        val events = mapOf("content-type" to "text/event-stream; charset=utf-8")
+        val done = "data: {\"type\":\"transcript.text.done\",\"text\":\" Hi \"}\n\n"
+        val text = transcriber(listOf(url to BatchWire.Response(200, done, events)))
+            .transcribe(stepFun, key, audio, null, CallHandle(), wav, emptyList())
+        assertEquals("Hi", text)
+
+        val notStreamed = assertThrows(CloudException::class.java) {
+            transcriber(listOf(url to BatchWire.Response(200, done, mapOf("content-type" to "application/json"))))
+                .transcribe(stepFun, key, audio, null, CallHandle(), wav, emptyList())
+        }
+        assertEquals(DictationFailure.Server, notStreamed.failure)
+
+        val wrongRegion = assertThrows(CloudException::class.java) {
+            transcriber(listOf(url to BatchWire.Response(401, "")))
+                .transcribe(stepFun, key, audio, null, CallHandle(), wav, emptyList())
+        }
+        assertEquals(DictationFailure.InvalidKey, wrongRegion.failure)
+
+        val flac = assertThrows(CloudException::class.java) {
+            transcriber(emptyList())
+                .transcribe(stepFun, key, audio, null, CallHandle(), SharedAudio.Format("flac", "audio/flac"), emptyList())
+        }
+        assertEquals(DictationFailure.UnsupportedAudio, flac.failure)
     }
 }

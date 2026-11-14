@@ -60,6 +60,20 @@ object AutomationIds {
     const val CONSENT_DIAGNOSTICS = "consent.diagnostics"
     const val CONSENT_DONE = "consent.done"
 
+    const val AZURE_REGION = "settings.apiKeys.azure.region"
+    const val AZURE_ENDPOINT = "settings.apiKeys.azure.endpoint"
+    const val AZURE_ENDPOINT_SAVE = "settings.apiKeys.azure.endpoint.save"
+    const val AZURE_ENDPOINT_CLEAR = "settings.apiKeys.azure.endpoint.clear"
+    const val ALIBABA_REGION = "settings.apiKeys.alibaba.region"
+    const val ALIBABA_WORKSPACE = "settings.apiKeys.alibaba.workspace"
+    const val STEPFUN_REGION = "settings.apiKeys.stepfun.region"
+
+    /** One per Alibaba region in its picker, keyed by region ID, e.g. `settings.apiKeys.alibaba.region.cn-beijing`. */
+    fun alibabaRegionOption(regionId: String) = "settings.apiKeys.alibaba.region.$regionId"
+
+    /** One per StepFun region button, e.g. `settings.apiKeys.stepfun.region.international`. */
+    fun stepFunRegionOption(regionId: String) = "settings.apiKeys.stepfun.region.$regionId"
+
     /** The balance line beside an API key, e.g. `settings.apiKeys.balance.openrouter.apiKey`. */
     fun apiKeyBalance(credentialId: String) = "settings.apiKeys.balance.$credentialId"
 

@@ -138,6 +138,21 @@
     </plurals>
     <string name="settings_keys_empty_unset">Every provider has a saved key.</string>
     <string name="settings_key_label">%1$s API key</string>
+    <string name="settings_azure_region">Azure region</string>
+    <string name="settings_azure_region_help">The Speech resource\'s region, such as eastus. A key entered as key:region keeps its own region.</string>
+    <string name="settings_azure_region_invalid">Use the region name from Azure: lowercase letters and digits only.</string>
+    <string name="settings_azure_endpoint">Azure resource endpoint</string>
+    <string name="settings_azure_endpoint_help">Optional. Paste the HTTPS endpoint from your Speech resource\'s Keys and Endpoint page. Empty uses your key\'s region. Stays on this phone.</string>
+    <string name="settings_azure_endpoint_invalid">Use an Azure HTTPS resource address, with no path.</string>
+    <string name="settings_azure_endpoint_saved">Endpoint saved: %1$s</string>
+    <string name="settings_azure_endpoint_clear">Clear endpoint</string>
+    <string name="settings_azure_endpoint_save">Save endpoint</string>
+    <string name="settings_alibaba_region">Alibaba region: %1$s</string>
+    <string name="settings_alibaba_workspace">Alibaba workspace ID</string>
+    <string name="settings_alibaba_help">Choose the region and workspace your Model Studio key belongs to. Fun-ASR and Qwen3.5-Omni-Plus need Beijing or Singapore. Access is checked when transcribing, with no cross-region retry.</string>
+    <string name="settings_alibaba_workspace_invalid">Use the workspace ID from Model Studio, such as llm-abc123: lowercase letters, digits and dashes. The shared trial workspace cannot be used.</string>
+    <string name="settings_stepfun_region">StepFun region</string>
+    <string name="settings_stepfun_help">Keys only work in the region that issued them. Choose it before saving the key.</string>
     <string name="action_save">Save</string>
     <string name="action_remove">Remove</string>
     <string name="settings_key_balance_not_shown">Balance: not shown here. %1$s</string>

@@ -565,4 +565,163 @@ class BatchWireTest {
             assertThrows(CloudException::class.java) { BatchWire.requiredString("""{"text":null}""", "text") }.failure,
         )
     }
+
+    @Test
+    fun testAzure_postsTheDefinitionThenTheRecordingToTheRegionalOrigin() {
+        val connection = AzureSpeechCredential.connection("secret:WestEurope", "")
+        val request = BatchWire.azure(connection, catalogue(BatchWire.AZURE_MAI_2), audio, "en_GB", listOf(" Kubectl "))
+        assertEquals(
+            "https://westeurope.api.cognitive.microsoft.com/speechtotext/transcriptions:transcribe?api-version=2025-10-15",
+            request.url,
+        )
+        assertEquals("secret", request.headers["Ocp-Apim-Subscription-Key"])
+        val fields = formFields(request)
+        assertEquals(listOf("definition", "<file:audio>"), fields.map { it.first })
+        assertEquals("recording.wav", fields[1].second)
+        assertTrue("Content-Type: audio/wav" in String(form(request).multipart.head))
+        val definition = JSONObject(fields[0].second)
+        assertEquals("MAI-Transcribe-2", definition.getJSONObject("enhancedMode").getString("model"))
+        assertTrue(definition.getJSONObject("enhancedMode").getBoolean("enabled"))
+        assertEquals("en-GB", definition.getJSONArray("locales").getString(0))
+        assertEquals("Kubectl", definition.getJSONObject("phraseList").getJSONArray("phrases").getString(0))
+
+        assertEquals("{}", BatchWire.azureDefinition(BatchWire.AZURE_FAST, "auto", emptyList()).toString())
+        assertEquals(
+            "MAI-Transcribe-1.5",
+            BatchWire.azureDefinition("azure/mai-transcribe-1.5", null, emptyList())
+                .getJSONObject("enhancedMode").getString("model"),
+        )
+    }
+
+    @Test
+    fun testAzureText_prefersCombinedPhrasesAndNeedsOneOrTheOther() {
+        assertEquals("One two", BatchWire.azureText("""{"combinedPhrases":[{"text":"One two"}],"phrases":[{"text":"x"}]}"""))
+        assertEquals("One two", BatchWire.azureText("""{"phrases":[{"text":"One"},{"text":"two"}]}"""))
+        assertEquals("", BatchWire.azureText("""{"combinedPhrases":[]}"""))
+        for (body in listOf("{}", """{"phrases":[{"text":1}]}""", "not json")) {
+            assertEquals(
+                DictationFailure.Server,
+                assertThrows(CloudException::class.java) { BatchWire.azureText(body) }.failure,
+            )
+        }
+    }
+
+    private fun alibaba(region: AlibabaCredential.Region = AlibabaCredential.Region.Singapore) =
+        checkNotNull(AlibabaCredential.parse(checkNotNull(AlibabaCredential.credentialsForSaving("sk-1", region, "llm-abc"))))
+
+    @Test
+    fun testAlibaba_sendsFunAsrToTheGenerationEndpointWithTheWavInline() {
+        val bytes = byteArrayOf(1, 2, 3, 4, 5)
+        withFile(bytes) { file ->
+            val request = BatchWire.alibaba(alibaba(), catalogue(BatchWire.ALIBABA_FUN_FLASH), file, "en")
+            assertEquals(
+                "https://llm-abc.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+                request.url,
+            )
+            assertEquals("Bearer sk-1", request.headers["Authorization"])
+            assertEquals("disable", request.headers["X-DashScope-SSE"])
+            val json = streamedJson(request)
+            assertEquals("fun-asr-flash-2026-06-15", json.getString("model"))
+            assertEquals("wav", json.getJSONObject("parameters").getString("format"))
+            val input = json.getJSONObject("input").getJSONArray("messages").getJSONObject(0)
+                .getJSONArray("content").getJSONObject(0)
+            assertEquals("input_audio", input.getString("type"))
+            assertEquals(
+                "data:audio/wav;base64," + java.util.Base64.getEncoder().encodeToString(bytes),
+                input.getJSONObject("input_audio").getString("data"),
+            )
+        }
+    }
+
+    @Test
+    fun testAlibaba_streamsQwenOmniWithThePromptAndOnlyQwen38SkipsReasoning() {
+        withFile(byteArrayOf(9, 8, 7)) { file ->
+            val qwen38 = BatchWire.alibaba(alibaba(), catalogue(BatchWire.ALIBABA_QWEN_38), file, "fr-FR")
+            assertEquals("https://llm-abc.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions", qwen38.url)
+            assertNull(qwen38.headers["X-DashScope-SSE"])
+            val json = streamedJson(qwen38)
+            assertTrue(json.getBoolean("stream"))
+            assertTrue(json.getJSONObject("stream_options").getBoolean("include_usage"))
+            assertEquals("none", json.getString("reasoning_effort"))
+            assertEquals("text", json.getJSONArray("modalities").getString(0))
+            val content = json.getJSONArray("messages").getJSONObject(0).getJSONArray("content")
+            assertTrue(content.getJSONObject(0).getString("text").endsWith("hint is fr; preserve the original language."))
+            assertEquals("data:audio/wav;base64,CQgH", content.getJSONObject(1).getJSONObject("input_audio").getString("data"))
+
+            val plus = BatchWire.alibaba(alibaba(), catalogue("alibaba/qwen3.5-omni-plus"), file, null)
+            assertFalse(streamedJson(plus).has("reasoning_effort"))
+        }
+        assertFalse(BatchWire.alibabaSupportsRegion(BatchWire.ALIBABA_FUN_FLASH, AlibabaCredential.Region.Virginia))
+        assertTrue(BatchWire.alibabaSupportsRegion(BatchWire.ALIBABA_QWEN_38, AlibabaCredential.Region.Virginia))
+        assertTrue(BatchWire.alibabaSupportsRegion("alibaba/qwen3.5-omni-plus", AlibabaCredential.Region.Beijing))
+    }
+
+    @Test
+    fun testAlibabaText_readsFunAsrAndConfirmedOmniStreams() {
+        assertEquals("Hi", BatchWire.alibabaFunText("""{"output":{"text":" Hi "}}"""))
+        assertEquals("Hi", BatchWire.alibabaFunText("""{"output":{"output":{"sentence":{"text":"Hi"}}}}"""))
+        assertEquals(
+            DictationFailure.Server,
+            assertThrows(CloudException::class.java) {
+                BatchWire.alibabaFunText("""{"code":"InvalidParameter","output":{"text":"x"}}""")
+            }.failure,
+        )
+        val chunk = { index: Int, text: String, reason: String? ->
+            val finish = reason?.let { ",\"finish_reason\":\"$it\"" }.orEmpty()
+            "data: {\"choices\":[{\"index\":$index,\"delta\":{\"content\":\"$text\"}$finish}]}"
+        }
+        val stream = listOf(chunk(0, "One ", null), chunk(1, "ignored", null), chunk(0, "two", "stop"), "data: [DONE]")
+        assertEquals("One two", BatchWire.alibabaOmniText(stream.joinToString("\n")))
+        for (unfinished in listOf(chunk(0, "One", null), chunk(0, "One", "length"), "data: {\"error\":{}}")) {
+            assertEquals(
+                DictationFailure.Server,
+                assertThrows(CloudException::class.java) { BatchWire.alibabaOmniText(unfinished) }.failure,
+            )
+        }
+    }
+
+    @Test
+    fun testStepFun_postsBase64ToTheKeysRegionalEndpoint() {
+        val international = checkNotNull(
+            StepFunCredential.parse(checkNotNull(StepFunCredential.credentialsForSaving("sk", StepFunCredential.Region.International))),
+        )
+        withFile(byteArrayOf(1, 2, 3)) { file ->
+            val request = BatchWire.stepFun(international, file, "wav", "en-GB")
+            assertEquals("https://api.stepfun.ai/v1/audio/asr/sse", request.url)
+            assertEquals("Bearer sk", request.headers["Authorization"])
+            assertEquals("text/event-stream", request.headers["Accept"])
+            val audioJson = streamedJson(request).getJSONObject("audio")
+            assertEquals("AQID", audioJson.getString("data"))
+            val input = audioJson.getJSONObject("input")
+            assertEquals("wav", input.getJSONObject("format").getString("type"))
+            val transcription = input.getJSONObject("transcription")
+            assertEquals("stepaudio-3-asr-max", transcription.getString("model"))
+            assertEquals("en", transcription.getString("language"))
+            assertTrue(transcription.getBoolean("enable_itn"))
+
+            val china = checkNotNull(StepFunCredential.parse("legacy-key"))
+            assertEquals("https://api.stepfun.com/v1/audio/asr/sse", BatchWire.stepFun(china, file, "m4a", null).url)
+        }
+        assertEquals("m4a", BatchWire.stepFunFormat(m4a))
+        assertNull(BatchWire.stepFunFormat(SharedAudio.Format("webm", "audio/webm")))
+    }
+
+    @Test
+    fun testStepFunText_takesTheDoneEventAndFailsOnErrorsOrAnUnfinishedStream() {
+        val stream = "data: {\"type\":\"transcript.text.delta\",\"delta\":\"He\"}\r\n\r\n" +
+            "data: {\"type\":\"transcript.text.done\",\"text\":\" Hello \"}\n\ndata: [DONE]\n\n"
+        assertEquals("Hello", BatchWire.stepFunText(stream))
+        val error = "data: {\"type\":\"error\",\"message\":\"quota\"}\n\n"
+        val unfinished = "data: {\"type\":\"transcript.text.delta\",\"delta\":\"He\"}\n\n"
+        for (body in listOf(error, unfinished)) {
+            assertEquals(
+                DictationFailure.Server,
+                assertThrows(CloudException::class.java) { BatchWire.stepFunText(body) }.failure,
+            )
+        }
+        val streamed = BatchWire.Response(200, "", mapOf("content-type" to "Text/Event-Stream; charset=utf-8"))
+        assertTrue(BatchWire.isEventStream(streamed))
+        assertFalse(BatchWire.isEventStream(BatchWire.Response(200, "", mapOf("content-type" to "application/json"))))
+        assertFalse(BatchWire.isEventStream(BatchWire.Response(200, "")))
+    }
 }

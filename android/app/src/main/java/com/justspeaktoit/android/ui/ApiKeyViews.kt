@@ -68,9 +68,12 @@ internal fun KeyRow(
     actions: SettingsActions,
     modifier: Modifier = Modifier,
     balance: KeyBalance? = null,
+    azureEndpoint: String = "",
 ) {
     // The entered key is held only in this composable until saved; saved keys are never read back.
     var draft by remember(provider, saved) { mutableStateOf("") }
+    val regional = rememberRegionalKeyDraft(provider, saved)
+    val credential = regional.credential(draft)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(provider.displayName, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
@@ -90,6 +93,7 @@ internal fun KeyRow(
                 style = MaterialTheme.typography.labelLarge,
             )
         }
+        RegionalKeyFields(provider, regional, azureEndpoint, actions)
         OutlinedTextField(
             value = draft,
             onValueChange = { draft = it },
@@ -102,10 +106,10 @@ internal fun KeyRow(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
-                    actions.onSaveKey(provider, draft)
+                    credential?.let { actions.onSaveKey(provider, it) }
                     draft = ""
                 },
-                enabled = draft.isNotBlank()) {
+                enabled = credential != null) {
                 Text(stringResource(R.string.action_save))
             }
             if (saved) {

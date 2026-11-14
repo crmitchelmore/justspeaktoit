@@ -53,6 +53,12 @@ enum class CloudProvider(val id: String, val displayName: String, val baseUrl: S
     Meta("meta", "Meta", "https://api.meta.ai/v1"),
     Smallest("smallest", "Smallest AI", "https://api.smallest.ai/waves/v1"),
     XAI("xai", "xAI", "https://api.x.ai/v1"),
+
+    // Regional keys: each request's origin comes from the saved credential (see RegionalCredentials),
+    // so these base URLs are only the providers' default hosts.
+    Azure("azure", "Azure Speech", "https://eastus.api.cognitive.microsoft.com"),
+    Alibaba("alibaba", "Alibaba Model Studio", "https://dashscope.aliyuncs.com"),
+    StepFun("stepfun", "StepFun", "https://api.stepfun.ai/v1"),
     ;
 
     /** OpenAI and Groq take the OpenAI `/audio/transcriptions` form; the rest use [BatchTranscriber]. */

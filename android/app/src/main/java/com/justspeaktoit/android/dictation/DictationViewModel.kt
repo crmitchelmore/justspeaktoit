@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.justspeaktoit.android.JustSpeakApplication
 import com.justspeaktoit.android.cloud.AndroidAudioInputs
+import com.justspeaktoit.android.cloud.AzureSpeechCredential
 import com.justspeaktoit.android.cloud.AudioInputSource
 import com.justspeaktoit.android.cloud.BalanceDirectory
 import com.justspeaktoit.android.cloud.CleanupModel
@@ -172,6 +173,7 @@ class DictationViewModel internal constructor(
             audioInputs = audioInputs.inputs(),
             appearance = prefs.appearance,
             dynamicColor = prefs.dynamicColor,
+            azureEndpoint = readAzureEndpoint(),
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
@@ -581,6 +583,29 @@ class DictationViewModel internal constructor(
 
     fun removeKey(provider: CloudProvider) {
         updateKeys(provider) { secrets.remove(provider.credentialId) }
+    }
+
+    /** Saves an Azure Speech resource endpoint; one that is not a Speech resource origin is ignored. */
+    fun saveAzureEndpoint(endpoint: String) {
+        val value = endpoint.trim()
+        if (AzureSpeechCredential.resourceOrigin(value) == null) return
+        if (updateKeys(CloudProvider.Azure) { secrets.write(AzureSpeechCredential.ENDPOINT_SECRET, value) }) {
+            _state.update { it.copy(azureEndpoint = value) }
+        }
+    }
+
+    fun clearAzureEndpoint() {
+        if (updateKeys(CloudProvider.Azure) { secrets.remove(AzureSpeechCredential.ENDPOINT_SECRET) }) {
+            _state.update { it.copy(azureEndpoint = "") }
+        }
+    }
+
+    private fun readAzureEndpoint(): String = try {
+        secrets.read(AzureSpeechCredential.ENDPOINT_SECRET).orEmpty()
+    } catch (e: GeneralSecurityException) {
+        ""
+    } catch (e: ProviderException) {
+        ""
     }
 
     /** Checks every saved key's balance, as the Apple key pages do when they open. */
@@ -997,6 +1022,7 @@ class DictationViewModel internal constructor(
             val prefs = AppPreferences(application)
             val balanceDirectory = loadBalanceDirectory(application)
             val inputs = AndroidAudioInputs(application)
+            val secrets = KeystoreSecretStore.create(application)
             return DictationViewModel(
                 engine = AndroidSpeechEngine(application),
                 recorders = { file, onLevel, onLimitReached, onCaptureFailed ->
@@ -1004,8 +1030,10 @@ class DictationViewModel internal constructor(
                     val input = prefs.audioInputId?.let(inputs::route)
                     WavRecorder(file, onLevel, onLimitReached, onCaptureFailed, input = input)
                 },
-                cloud = CloudClient(),
-                secrets = KeystoreSecretStore.create(application),
+                cloud = CloudClient(
+                    azureEndpoint = { secrets.read(AzureSpeechCredential.ENDPOINT_SECRET).orEmpty() },
+                ),
+                secrets = secrets,
                 prefs = prefs,
                 history = HistoryStore(
                     AtomicHistoryFile(File(application.filesDir, "history.json")),

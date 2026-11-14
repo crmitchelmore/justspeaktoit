@@ -364,7 +364,13 @@
         "deepgram key",
         "balance",
         "credit",
-        "billing"
+        "billing",
+        "azure region",
+        "azure endpoint",
+        "resource endpoint",
+        "alibaba workspace",
+        "alibaba region",
+        "stepfun region"
       ],
       "section" : "apiKeys",
       "sectionTitle" : "API Keys",

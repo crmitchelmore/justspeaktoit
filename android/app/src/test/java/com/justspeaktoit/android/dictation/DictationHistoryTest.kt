@@ -145,9 +145,9 @@ class DictationHistoryTest {
     @Test
     fun testWritesApplyInCallOrder() = runBlocking {
         val history = history()
-        repeat(20) { history.recordSession(DictationState.Done(RecognitionMode.Cloud, "t$it"), null, Retention.Month) }
+        repeat(100) { history.recordSession(DictationState.Done(RecognitionMode.Cloud, "t$it"), null, Retention.Month) }
         history.clear().join()
-        assertEquals((1..20).toList() + 0, published.map { it.first.size })
+        assertEquals((1..100).toList() + 0, published.map { it.first.size })
     }
 
     @Test

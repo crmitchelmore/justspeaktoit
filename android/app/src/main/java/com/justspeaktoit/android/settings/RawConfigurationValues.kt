@@ -18,6 +18,7 @@ object RawConfigurationValues {
         "cleanup_enabled" to state.cleanupEnabled,
         "cleanup_model" to state.cleanupModel.selectionId,
         "keepAudioOnCancel" to state.keepAudioOnCancel,
+        "handsFreeDictationEnabled" to state.handsFreeEnabled,
         "history_retention" to state.retention.name,
     )
 

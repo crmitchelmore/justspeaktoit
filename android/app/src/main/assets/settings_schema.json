@@ -130,6 +130,14 @@
       "type" : "boolean"
     },
     {
+      "default" : false,
+      "description" : "Speech starts and stops Cloud recordings.",
+      "key" : "handsFreeDictationEnabled",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "boolean"
+    },
+    {
       "allowedValues" : [
         "Off",
         "Week",
@@ -176,7 +184,6 @@
     "dynamicColor",
     "enableAutomationServer",
     "enableSendToMac",
-    "handsFreeDictationEnabled",
     "hardwareTriggerDestination",
     "hasCompletedOnboarding",
     "historyFlushInterval",

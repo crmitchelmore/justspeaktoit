@@ -110,6 +110,7 @@ class SettingsActions(
     val onAudioInputChanged: (String?) -> Unit = {},
     val onPreviewRecordingSound: () -> Unit = {},
     val onSilenceChanged: (SilenceSettings) -> Unit = {},
+    val onHandsFreeChanged: (Boolean) -> Unit = {},
     val onRunSetup: () -> Unit = {},
     val onAppearanceChanged: (AppearanceChoice) -> Unit = {},
     val onCheckBalance: (CloudProvider) -> Unit = {},
@@ -386,7 +387,29 @@ fun SettingsScreen(
                 Switch(checked = state.silence.enabled, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_silence_note), style = MaterialTheme.typography.bodyMedium)
-            if (state.silence.enabled) SilenceSliders(state.silence, actions.onSilenceChanged)
+            // Hands-free recordings stop after the silence duration even with this switch off.
+            if (state.silence.enabled || state.handsFreeEnabled) SilenceSliders(state.silence, actions.onSilenceChanged)
+
+            HorizontalDivider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = anchor("android.handsFree")
+                    .fillMaxWidth()
+                    .testTag(AutomationIds.SETTINGS_HANDS_FREE)
+                    .toggleable(
+                        value = state.handsFreeEnabled,
+                        role = Role.Switch,
+                        onValueChange = actions.onHandsFreeChanged,
+                    ),
+            ) {
+                Text(
+                    stringResource(R.string.settings_hands_free_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.handsFreeEnabled, onCheckedChange = null)
+            }
+            Text(stringResource(R.string.settings_hands_free_note), style = MaterialTheme.typography.bodyMedium)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_corrections_title, anchor("android.personalCorrections"))

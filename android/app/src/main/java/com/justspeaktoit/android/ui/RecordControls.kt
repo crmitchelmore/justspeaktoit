@@ -25,24 +25,44 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justspeaktoit.android.R
 import com.justspeaktoit.android.dictation.DictationUiState
+import com.justspeaktoit.android.dictation.HandsFreeStatus
 import com.justspeaktoit.android.ui.theme.BrandAccentDeep
 import com.justspeaktoit.android.ui.theme.BrandAccentWarm
 import kotlinx.coroutines.flow.StateFlow
 
-/** The record/stop button, its live level halo and the cancel action while a session runs. */
+/**
+ * The record/stop button, its live level halo, the cancel action while a session runs and, with
+ * hands-free on, what hands-free is doing. While hands-free only listens, the button turns it off.
+ */
 @Composable
 internal fun RecordControls(state: DictationUiState, level: StateFlow<Float>, actions: DictationActions) {
     val active = state.dictation.isActive
-    val enabled = active || state.canStart
-    val description = stringResource(if (active) R.string.action_stop else R.string.action_start)
+    val listening = state.handsFreeArmed && !active
+    val enabled = active || listening || state.canStart
+    val description = stringResource(
+        when {
+            active -> R.string.action_stop
+            listening -> R.string.action_turn_off_hands_free
+            state.armsHandsFree -> R.string.action_start_hands_free
+            else -> R.string.action_start
+        },
+    )
+    val onClick = when {
+        active -> actions.onStop
+        listening -> actions.onTurnOffHandsFree
+        else -> actions.onRecordTapped
+    }
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(132.dp)) {
             if (active) LevelHalo(level)
@@ -59,14 +79,14 @@ internal fun RecordControls(state: DictationUiState, level: StateFlow<Float>, ac
                         },
                     )
                     .testTag(AutomationIds.RECORD)
-                    .clickable(enabled = enabled) { if (active) actions.onStop() else actions.onRecordTapped() }
+                    .clickable(enabled = enabled, onClick = onClick)
                     .semantics {
                         role = Role.Button
                         contentDescription = description
                     },
             ) {
                 Icon(
-                    painter = painterResource(if (active) R.drawable.ic_stop else R.drawable.ic_mic),
+                    painter = painterResource(if (active || listening) R.drawable.ic_stop else R.drawable.ic_mic),
                     // Decorative: the enclosing button carries the Start/Stop label.
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onPrimary,
@@ -79,6 +99,35 @@ internal fun RecordControls(state: DictationUiState, level: StateFlow<Float>, ac
             TextButton(onClick = actions.onCancel, modifier = Modifier.testTag(AutomationIds.CANCEL)) {
                 Text(stringResource(R.string.action_cancel))
             }
+        }
+        if (state.armsHandsFree || state.handsFree != HandsFreeStatus.Off) {
+            HandsFreeLine(state.handsFree, actions.onTurnOffHandsFree)
+        }
+    }
+}
+
+/** Hands-free's state, announced politely as it changes, with a way to turn it off while it runs. */
+@Composable
+private fun HandsFreeLine(status: HandsFreeStatus, onTurnOff: () -> Unit) {
+    Text(
+        text = stringResource(
+            when (status) {
+                HandsFreeStatus.Off -> R.string.hands_free_ready
+                HandsFreeStatus.Listening -> R.string.hands_free_listening
+                HandsFreeStatus.Recording -> R.string.hands_free_recording
+                HandsFreeStatus.Stopped -> R.string.hands_free_stopped
+            },
+        ),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .testTag(AutomationIds.HANDS_FREE_STATUS)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+    )
+    if (status == HandsFreeStatus.Listening || status == HandsFreeStatus.Recording) {
+        TextButton(onClick = onTurnOff, modifier = Modifier.testTag(AutomationIds.HANDS_FREE_OFF)) {
+            Text(stringResource(R.string.action_turn_off_hands_free))
         }
     }
 }

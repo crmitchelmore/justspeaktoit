@@ -138,6 +138,7 @@ class MainActivity : ComponentActivity() {
             onOpenSettings = ::openAppSettings,
             onShowSettings = {},
             onShowOriginal = viewModel::showOriginal,
+            onTurnOffHandsFree = viewModel::turnOffHandsFree,
         )
         setContent {
             val state by viewModel.state.collectAsStateWithLifecycle()
@@ -186,6 +187,7 @@ class MainActivity : ComponentActivity() {
                                 onCleanupChanged = viewModel::setCleanupEnabled,
                                 onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
                                 onSilenceChanged = viewModel::setSilence,
+                                onHandsFreeChanged = viewModel::setHandsFree,
                                 onKeepRecordingsChanged = viewModel::setKeepRecordings,
                                 onChooseCleanupModel = viewModel::chooseCleanupModel,
                                 onReleaseResource = viewModel::releaseResource,

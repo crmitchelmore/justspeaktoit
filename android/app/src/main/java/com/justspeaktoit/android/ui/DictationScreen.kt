@@ -55,6 +55,8 @@ data class DictationActions(
     val onDismissSharedAudio: () -> Unit = {},
     /** Makes a profile active, or none with null; applies from the next session. */
     val onChooseProfile: (String?) -> Unit = {},
+    /** Stops hands-free listening; a hands-free recording under way is transcribed. */
+    val onTurnOffHandsFree: () -> Unit = {},
 )
 
 @Composable

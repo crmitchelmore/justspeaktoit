@@ -108,7 +108,7 @@ The flags live in `Project.swift`; release selection is in
 | F20 | Compare models | Yes | N/A | Yes | Yes | N/A | #1622 | Desktop-only by owner decision. |
 | F21 | Voice output / read aloud | Yes | Yes | Yes | Yes | Partial | #1631 | Android: system TTS only. |
 | F22 | Voice edit of selected text | Yes | Yes | Yes | No | No | #1620 | |
-| F23 | Hands-free and silence auto-stop | Yes | Yes | Yes | Yes | Partial | #1632 | Android: Cloud silence auto-stop only; no hands-free. |
+| F23 | Hands-free and silence auto-stop | Yes | Yes | Yes | Yes | Yes | | Android: Cloud mode only. |
 | F24 | Insert text into other apps | Yes | Limited | Yes | Limited | Yes | | |
 | F25 | Recording HUD / live text overlay | Yes | Yes | Yes | Yes | Partial | #1592 | Android shows an ongoing foreground-service notification with Stop, but no live text. |
 | F26 | Menu bar / tray presence | Yes | N/A | Yes | Yes | N/A | | |
@@ -338,13 +338,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** The Mac rejects missing or cross-process AX targets (`Sources/SpeakApp/Output/AccessibilityTextOutput.swift`).
 
 ### F23 Hands-free and silence auto-stop
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1632 (no hands-free voice-activity start with pre-roll; silence auto-stop only).
+- **Gaps:** none
 - **How:** Voice activity starts and stops capture; configured silence ends the session through the normal stop path.
-- **Refs:** `Sources/SpeakCore/Capture/HandsFreeVoiceActivity.swift`, `Sources/SpeakCore/Capture/Apple/HandsFreeVoiceActivitySession.swift`, `Sources/SpeakDesktopHost/Recording/DesktopHostHandsFree.swift`, `Sources/SpeakApp/Session/HandsFreeDictationCoordinator.swift`, `Sources/SpeakiOS/Services/IOSHandsFreeDictationCoordinator.swift`, `android/app/src/main/java/com/justspeaktoit/android/dictation/SilenceAutoStop.kt`
+- **Refs:** `Sources/SpeakCore/Capture/HandsFreeVoiceActivity.swift`, `Sources/SpeakCore/Capture/Apple/HandsFreeVoiceActivitySession.swift`, `Sources/SpeakDesktopHost/Recording/DesktopHostHandsFree.swift`, `Sources/SpeakApp/Session/HandsFreeDictationCoordinator.swift`, `Sources/SpeakiOS/Services/IOSHandsFreeDictationCoordinator.swift`, `android/app/src/main/java/com/justspeaktoit/android/dictation/SilenceAutoStop.kt`, `android/app/src/main/java/com/justspeaktoit/android/dictation/HandsFreeVoiceActivity.kt`, `android/app/src/main/java/com/justspeaktoit/android/dictation/HandsFreeDictation.kt`
 - **Sunset:** none
-- **Nuances:** iOS scene lifecycle rules: [iOS hands-free lifecycle](ios-hands-free-scene-lifecycle.md). Android ports `DictationSilenceMonitor` and the SpeakCore level scale for Cloud capture only, with the shared defaults (0.05 threshold, 2 s) and keys; its on-device and speech-service recognisers already end on a pause.
+- **Nuances:** iOS scene lifecycle rules: [iOS hands-free lifecycle](ios-hands-free-scene-lifecycle.md). Android ports `DictationSilenceMonitor` and the SpeakCore level scale for Cloud capture only, with the shared defaults (0.05 threshold, 2 s) and keys; its on-device and speech-service recognisers already end on a pause. Android hands-free (`handsFreeDictationEnabled`) ports `EnergyVoiceActivityDetector` and the 0.5 s pre-roll gate to Kotlin, with a test that reads the Swift constants. It works in Cloud mode only: `SpeechRecognizer` opens its own microphone, so the on-device and speech-service modes cannot receive the buffered pre-roll, and the Settings toggle says so. Between recordings the microphone stays open (level only, nothing recorded or sent) under the foreground service's Listening notification, whose Stop turns hands-free off; silence auto-stop is forced on for each hands-free recording, and leaving the app without the service turns it off.
 
 ### F24 Insert text into other apps
 - **Platforms:** macOS Yes · iOS Limited · Windows Yes · Linux Limited · Android Yes

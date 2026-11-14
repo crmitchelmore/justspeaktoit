@@ -80,6 +80,9 @@ object AutomationIds {
     const val SETTINGS_SILENCE = "settings.silenceDetection"
     const val SETTINGS_SILENCE_DURATION = "settings.silenceDuration"
     const val SETTINGS_SILENCE_THRESHOLD = "settings.silenceThreshold"
+    const val SETTINGS_HANDS_FREE = "settings.handsFreeDictation"
+    const val HANDS_FREE_STATUS = "dictation.handsFree.status"
+    const val HANDS_FREE_OFF = "dictation.handsFree.turnOff"
 
     const val SETTINGS_RUN_SETUP = "settings.runSetup"
     const val TROUBLESHOOTING_SUMMARY = "settings.troubleshooting.summary"

@@ -145,6 +145,37 @@ internal class FakeForeground : ForegroundSession {
     }
 }
 
+/** A hands-free microphone the test feeds, from its own thread as the capture thread would. */
+internal class FakeHandsFreeMicrophone : HandsFreeMicrophone {
+    @Volatile var opens = true
+    @Volatile var starts = 0
+    @Volatile var stops = 0
+    @Volatile private var onAudio: ((ShortArray, Int) -> Unit)? = null
+    @Volatile private var onFailed: (() -> Unit)? = null
+
+    val open: Boolean get() = onAudio != null
+
+    override fun start(onAudio: (ShortArray, Int) -> Unit, onFailed: () -> Unit): Boolean {
+        if (!opens) return false
+        starts++
+        this.onAudio = onAudio
+        this.onFailed = onFailed
+        return true
+    }
+
+    override fun stop() {
+        stops++
+        onAudio = null
+        onFailed = null
+    }
+
+    fun feed(chunks: List<ShortArray>) = chunks.forEach { onAudio?.invoke(it, it.size) }
+
+    fun fail() {
+        onFailed?.invoke()
+    }
+}
+
 /** Writes a WAV-sized file on start and reports [bytes] on stop. */
 internal class FakeRecorder(
     val file: File,
@@ -218,6 +249,9 @@ internal class FakeCloud : CloudService {
     )
 
     val transcriptions = CopyOnWriteArrayList<Transcription>()
+
+    /** Each transcribed file's bytes, read as it was sent. */
+    val sentAudio = CopyOnWriteArrayList<ByteArray>()
     val cleanups = CopyOnWriteArrayList<String>()
     val cleanupPrompts = CopyOnWriteArrayList<String>()
 
@@ -235,6 +269,7 @@ internal class FakeCloud : CloudService {
         vocabulary: List<String>,
     ): String {
         transcriptions += Transcription(model.catalogId, languageTag, call, vocabulary)
+        sentAudio += audio.readBytes()
         return onTranscribe(call)
     }
 
@@ -286,6 +321,7 @@ internal class MemoryPrefs(
     override var recordingSounds: RecordingSoundSettings = RecordingSoundSettings(),
     override var audioInputId: String? = null,
     override var silence: SilenceSettings = SilenceSettings(),
+    override var handsFreeEnabled: Boolean = false,
 ) : DictationPreferences
 
 internal class MemoryHistoryFile : HistoryFile {
@@ -359,6 +395,7 @@ internal class ViewModelHarness(
     val interruptions = FakeInterruptions()
     val foreground = FakeForeground()
     val audioInputs = FakeAudioInputs()
+    val handsFreeMicrophone = FakeHandsFreeMicrophone()
     /** The (mode, model) pairs the ViewModel reported as successful transcriptions. */
     val successes = CopyOnWriteArrayList<Pair<RecognitionMode, CloudModel>>()
 
@@ -388,6 +425,7 @@ internal class ViewModelHarness(
                     foreground = foreground,
                     onTranscriptionSucceeded = { mode, model -> successes += mode to model },
                     audioInputs = audioInputs,
+                    handsFreeMicrophone = handsFreeMicrophone,
                 )
             }
         }

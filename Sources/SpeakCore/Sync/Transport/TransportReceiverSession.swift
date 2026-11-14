@@ -82,6 +82,8 @@ package final class TransportReceiverSession {
     package private(set) var frameLimit = TransportFrameLimit.handshake
     package private(set) var isAuthenticated = false
     package private(set) var currentSessionID: String?
+    /// The name the phone gave in its hello, once it has sent one.
+    package var deviceName: String? { device?.name }
 
     package init(
         pairing: TransportReceiverPairingStore, wording: TransportReceiverWording = .desktop,

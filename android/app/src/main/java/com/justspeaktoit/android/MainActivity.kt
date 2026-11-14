@@ -128,7 +128,13 @@ class MainActivity : ComponentActivity() {
             val privacyChoices by privacy
             val askConsent by consentPending
             val tips by tipStore.state.collectAsStateWithLifecycle()
-            LaunchedEffect(screen) { if (screen == Screen.Settings) tipStore.connect() }
+            LaunchedEffect(screen) {
+                if (screen == Screen.Settings) {
+                    tipStore.connect()
+                    // The keyboard may have learned corrections since the app last looked.
+                    viewModel.refreshLearnedCorrections()
+                }
+            }
             var appearance by appearanceState
             val dark = appearance.appearance.isDark(isSystemInDarkTheme())
             // Bar icons follow the chosen appearance, not the phone's, so they stay readable.
@@ -164,6 +170,11 @@ class MainActivity : ComponentActivity() {
                                 onReleaseEverything = viewModel::releaseEverything,
                                 onChooseLanguage = viewModel::chooseLanguage,
                                 onCorrectionsChanged = viewModel::setCorrections,
+                                onLearnCorrectionsChanged = viewModel::setLearnCorrections,
+                                onCorrectionThresholdChanged = viewModel::setCorrectionPromotionThreshold,
+                                onAcceptCorrection = viewModel::acceptCorrectionCandidate,
+                                onDismissCorrection = viewModel::dismissCorrectionCandidate,
+                                onClearCorrectionSuggestions = viewModel::clearCorrectionCandidates,
                                 onCleanupPromptChanged = viewModel::setCleanupPrompt,
                                 onSaveProfile = viewModel::saveProfile,
                                 onDeleteProfile = viewModel::deleteProfile,
@@ -282,6 +293,7 @@ class MainActivity : ComponentActivity() {
         setupStatus.value = setupStatus.value.copy(keyboardEnabled = SetupSystem.isKeyboardEnabled(this))
         viewModel.refreshAvailability()
         viewModel.refreshHistory()
+        viewModel.refreshLearnedCorrections()
         telemetry.analytics.appBecameActive()
     }
 

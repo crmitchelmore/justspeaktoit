@@ -1,6 +1,7 @@
 package com.justspeaktoit.android.ime
 
 import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import com.justspeaktoit.android.dictation.ModeAvailability
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.RecognizerAvailability
@@ -18,6 +19,16 @@ object KeyboardPolicy {
             else -> true
         }
     }
+
+    /**
+     * Edits are learned only in ordinary text fields: never in password fields, fields that ask for
+     * no suggestions, or fields that ask keyboards not to learn from them (for example incognito tabs).
+     */
+    fun allowsLearning(inputType: Int, imeOptions: Int): Boolean =
+        (inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT &&
+            allowsDictation(inputType) &&
+            (inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) == 0 &&
+            (imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
 
     /**
      * The keyboard never uses the app's Cloud (BYOK) providers until their privacy UX is reviewed

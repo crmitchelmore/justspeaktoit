@@ -15,6 +15,7 @@ import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.WavRecorder
+import com.justspeaktoit.android.corrections.AutoCorrectionLearner
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.AtomicHistoryFile
 import com.justspeaktoit.android.history.HistoryStore
@@ -82,6 +83,9 @@ class DictationViewModel internal constructor(
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
     private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs)
 
+    /** Shares the keyboard's preferences, so edits it learned appear on [refreshLearnedCorrections]. */
+    private val learner = AutoCorrectionLearner(prefs)
+
     private val selector: DictationEngineSelector = DictationEngineSelector(
         engine,
         secrets,
@@ -100,6 +104,9 @@ class DictationViewModel internal constructor(
             keepAudioOnCancel = prefs.keepAudioOnCancel,
             silence = prefs.silence,
             corrections = prefs.corrections,
+            learnCorrections = prefs.learnCorrections,
+            correctionPromotionThreshold = prefs.correctionPromotionThreshold,
+            correctionCandidates = learner.pending(),
             cleanupPrompt = prefs.cleanupPrompt,
             profiles = prefs.profiles,
             recordingSounds = prefs.recordingSounds,
@@ -263,6 +270,41 @@ class DictationViewModel internal constructor(
     fun previewRecordingSound() {
         val choice = _state.value.recordingSounds
         sounds?.play(RecordingCue.Start, choice.profile, choice.gain)
+    }
+
+    fun setLearnCorrections(enabled: Boolean) {
+        prefs.learnCorrections = enabled
+        _state.update { it.copy(learnCorrections = enabled) }
+    }
+
+    fun setCorrectionPromotionThreshold(threshold: Int) {
+        prefs.correctionPromotionThreshold = threshold
+        _state.update { it.copy(correctionPromotionThreshold = prefs.correctionPromotionThreshold) }
+    }
+
+    /** Adds a learned edit to the personal corrections now. */
+    fun acceptCorrectionCandidate(id: String) {
+        learner.accept(id)
+        refreshLearnedCorrections()
+    }
+
+    /** Hides a learned edit; the same edit is not suggested again. */
+    fun dismissCorrectionCandidate(id: String) {
+        learner.dismiss(id)
+        refreshLearnedCorrections()
+    }
+
+    fun clearCorrectionCandidates() {
+        learner.clear()
+        refreshLearnedCorrections()
+    }
+
+    /**
+     * Re-reads what the keyboard may have learned while the app was elsewhere: new candidates and
+     * corrections promoted from them.
+     */
+    fun refreshLearnedCorrections() {
+        _state.update { it.copy(corrections = prefs.corrections, correctionCandidates = learner.pending()) }
     }
 
     fun chooseCleanupModel(model: CleanupModel) {

@@ -1296,6 +1296,22 @@ sessions:
           - "Set the duration to 5 seconds and repeat the first dictation; then turn the setting off and stay quiet for 10 seconds."
         expected: "With the setting on, the recording stops about the set time after you go quiet and the sentence is transcribed. Saying nothing stops after the set time with no invented text. A pause shorter than the duration does not stop it. With the setting off, the recording keeps going until you stop it."
         final_gate: false
+      - id: "android-learned-corrections"
+        issues:
+          - 1651
+        title: "The dictation keyboard learns a correction you make twice"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes learned corrections"
+        steps:
+          - "Settings > Learned corrections: check Learn corrections from your edits is on and Add automatically after 2 edits is shown."
+          - "In a notes app, dictate with the Just Speak to It keyboard a made-up sentence containing a name it gets wrong, for example Suzy for Susie."
+          - "Within ten seconds, without switching keyboards, delete the wrong word with the keyboard's delete key and dictate or paste the right spelling."
+          - "Wait fifteen seconds, open Settings > Learned corrections and check the suggestion; tap Dismiss on another suggestion if there is one."
+          - "Repeat the dictation and the same correction once more, then dictate the sentence a third time."
+          - "Repeat the first dictation and edit in a password field."
+        expected: "After the first edit, Learned corrections shows the wrong word → the right one, seen once, with Add and Dismiss. After the second, it leaves the suggestions and appears in Personal corrections, and the third dictation is spelt correctly. A dismissed suggestion does not come back. Nothing is learned from the password field."
+        final_gate: false
       - id: "android-foreground-long-dictation"
         issues:
           - 1592

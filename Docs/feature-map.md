@@ -133,7 +133,7 @@ The flags live in `Project.swift`; release selection is in
 | F45 | Recording audio housekeeping | Yes | Yes | Yes | Yes | Partial | #1629 | |
 | F46 | Send transcripts from phone to desktop | Yes | Partial | No | No | No | #1640 | iOS: Handoff and History sync, no direct sender. macOS: direct build only; the Mac App Store build has no receiver. |
 | F47 | Accessible names, IDs and recording announcements | Yes | Yes | Yes | Yes | Yes | | |
-| F48 | Learned auto-corrections | Yes | No | Yes | Yes | No | #1651 | |
+| F48 | Learned auto-corrections | Yes | No | Yes | Yes | Limited | #1651 | Android learns only from edits made while its keyboard is in the field. |
 | F49 | Appearance settings | Yes | Yes | Yes | Yes | Yes | | |
 | F50 | Keyboard / IME surface | N/A | Yes | N/A | N/A | Yes | | |
 
@@ -563,13 +563,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** `make lint` enforces the Apple rules; suppress only with `// a11y-ignore: reason`. Owner passes are tracked in #1399.
 
 ### F48 Learned auto-corrections
-- **Platforms:** macOS Yes · iOS No · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS No · Windows Yes · Linux Yes · Android Limited
 - **Excluded:** none
-- **Gaps:** iOS, Android #1651.
+- **Gaps:** iOS #1651.
 - **How:** Watch the field after inserting; when the same edit recurs it is promoted to a correction rule (F12). Platforms supply only field monitoring.
-- **Refs:** `Sources/SpeakCore/Vocabulary/Apple/AutoCorrectionEngine.swift`, `Sources/SpeakApp/PostProcessing/AutoCorrectionTracker.swift`, `Sources/SpeakDesktopHost/Controller/DesktopHostController.swift`, `Sources/SpeakApp/PostProcessing/PersonalCorrectionsView.swift`
+- **Refs:** `Sources/SpeakCore/Vocabulary/Apple/AutoCorrectionEngine.swift`, `Sources/SpeakApp/PostProcessing/AutoCorrectionTracker.swift`, `Sources/SpeakDesktopHost/Controller/DesktopHostController.swift`, `Sources/SpeakApp/PostProcessing/PersonalCorrectionsView.swift`, `android/app/src/main/java/com/justspeaktoit/android/corrections/AutoCorrectionLearning.kt`, `android/app/src/main/java/com/justspeaktoit/android/ime/KeyboardCorrectionObserver.kt`
 - **Sunset:** none
-- **Nuances:** iOS automatic polish is cleanup, not learned correction. Desktops share `DesktopHostCorrectionLearning`.
+- **Nuances:** iOS automatic polish is cleanup, not learned correction. Desktops share `DesktopHostCorrectionLearning`. Android mirrors `WordDiffer` and the learning policy in Kotlin (`WordDifferParityTest` pins shared cases; change both together). Its keyboard reads only the field it typed into, while it is still in that field, between the text remembered either side of the insertion; switching to another keyboard ends the watch. Password, no-suggestion and no-personalised-learning fields are never read. Promoted edits join Personal corrections; dismissed suggestions stay hidden.
 
 ### F49 Appearance settings
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

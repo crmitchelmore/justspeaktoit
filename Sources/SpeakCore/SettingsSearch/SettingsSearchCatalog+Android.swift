@@ -30,6 +30,17 @@ extension SettingsSearchCatalog {
             settingKeys: ["personal_corrections"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.learnedCorrections", title: "Learned corrections", section: .corrections,
+            systemImage: "text.badge.checkmark",
+            summary: "Learn corrections from your edits to text the keyboard typed, and review the suggestions.",
+            keywords: [
+                "learn", "learning", "auto-correct", "autocorrect", "auto corrections", "suggestions", "edits",
+                "threshold", "dismiss"
+            ],
+            settingKeys: ["autoCorrectionsEnabled", "autoCorrectionsPromotionThreshold", "autoCorrectionCandidates"],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.cleanup", title: "Clean up transcripts", section: .postProcessing,
             systemImage: "wand.and.stars",
             summary: "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",

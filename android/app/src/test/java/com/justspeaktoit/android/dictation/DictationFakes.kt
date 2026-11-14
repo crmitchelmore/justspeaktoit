@@ -14,6 +14,7 @@ import com.justspeaktoit.android.cloud.CaptureLevel
 import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.cloud.WavFormat
+import com.justspeaktoit.android.corrections.AutoCorrectionCandidate
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryFile
 import com.justspeaktoit.android.history.HistoryStore
@@ -272,6 +273,9 @@ internal class MemoryPrefs(
     override var keepAudioOnCancel: Boolean = true,
     override var languageId: String? = null,
     override var corrections: List<CorrectionRule> = emptyList(),
+    override var learnCorrections: Boolean = true,
+    override var correctionPromotionThreshold: Int = 2,
+    override var correctionCandidates: List<AutoCorrectionCandidate> = emptyList(),
     override var cleanupPrompt: String? = null,
     override var profiles: List<DictationProfile> = emptyList(),
     override var activeProfileId: String? = null,

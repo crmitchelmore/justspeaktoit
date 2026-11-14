@@ -81,12 +81,22 @@ class DictationKeyboardService : InputMethodService() {
     private var profiles: List<DictationProfile> = emptyList()
     private var activeProfile: DictationProfile? = null
 
+    /** Learns corrections from the user's edits to text the keyboard inserted. */
+    private val corrections = KeyboardCorrectionObserver(
+        prefs = { AppPreferences(this) },
+        connection = { currentInputConnection },
+        editor = { currentInputEditorInfo },
+        busy = { state.isActive || ownsComposing },
+        hasSelection = { selectionStart != selectionEnd },
+    )
+
     override fun onCreate() {
         super.onCreate()
         engine = AndroidSpeechEngine(this)
     }
 
     override fun onDestroy() {
+        corrections.cancel()
         engine.close()
         microphoneHold?.end()
         microphoneHold = null
@@ -164,6 +174,17 @@ class DictationKeyboardService : InputMethodService() {
         val isColor = theme.resolveAttribute(attr, value, true) &&
             value.type in TypedValue.TYPE_FIRST_COLOR_INT..TypedValue.TYPE_LAST_COLOR_INT
         return if (isColor) value.data else fallback
+    }
+
+    override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
+        super.onStartInput(attribute, restarting)
+        corrections.inputStarted(attribute)
+    }
+
+    override fun onFinishInput() {
+        // Edits are read only from the field the text went into, while this keyboard is still in it.
+        corrections.cancel()
+        super.onFinishInput()
     }
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
@@ -271,6 +292,7 @@ class DictationKeyboardService : InputMethodService() {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         selectionStart = newSelStart
         selectionEnd = newSelEnd
+        if (newSelStart == 0 && newSelEnd == 0) corrections.cursorAtStart()
         // Updates can lag behind our writes, so only an end after the editor showed our region counts:
         // the app or user ended composing, and that text is now theirs rather than provisional.
         if (!ownsComposing) return
@@ -301,7 +323,9 @@ class DictationKeyboardService : InputMethodService() {
                     if (ownsComposing) ic.setComposingText("", 1)
                     editorShowedComposing = false
                     val corrected = PersonalCorrections.apply(s.transcript, AppPreferences(this).corrections)
-                    ic.commitText(KeyboardPolicy.textToCommit(corrected, ic.getTextBeforeCursor(1, 0)), 1)
+                    val text = KeyboardPolicy.textToCommit(corrected, ic.getTextBeforeCursor(1, 0))
+                    ic.commitText(text, 1)
+                    corrections.inserted(text, currentInputEditorInfo)
                 }
                 ownsComposing = false
                 state = DictationState.Idle

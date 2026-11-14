@@ -79,6 +79,29 @@
       "title" : "Personal corrections"
     },
     {
+      "id" : "android.learnedCorrections",
+      "keywords" : [
+        "learn",
+        "learning",
+        "auto-correct",
+        "autocorrect",
+        "auto corrections",
+        "suggestions",
+        "edits",
+        "threshold",
+        "dismiss"
+      ],
+      "section" : "corrections",
+      "sectionTitle" : "Corrections",
+      "settingKeys" : [
+        "autoCorrectionsEnabled",
+        "autoCorrectionsPromotionThreshold",
+        "autoCorrectionCandidates"
+      ],
+      "summary" : "Learn corrections from your edits to text the keyboard typed, and review the suggestions.",
+      "title" : "Learned corrections"
+    },
+    {
       "id" : "android.cleanup",
       "keywords" : [
         "post-processing",

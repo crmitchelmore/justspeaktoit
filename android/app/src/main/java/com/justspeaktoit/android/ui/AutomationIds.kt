@@ -119,6 +119,14 @@ object AutomationIds {
 
     /** One per correction, keyed by its position in the list, never by the user's own text. */
     fun correctionRemove(index: Int) = "settings.corrections.remove.$index"
+    const val LEARNED_CORRECTIONS_TOGGLE = "settings.learnedCorrections.toggle"
+    const val LEARNED_CORRECTIONS_FEWER = "settings.learnedCorrections.fewer"
+    const val LEARNED_CORRECTIONS_MORE = "settings.learnedCorrections.more"
+    const val LEARNED_CORRECTIONS_CLEAR = "settings.learnedCorrections.clear"
+
+    /** One per learned suggestion, keyed by its position in the list, never by the user's own text. */
+    fun learnedCorrectionAccept(index: Int) = "settings.learnedCorrections.accept.$index"
+    fun learnedCorrectionDismiss(index: Int) = "settings.learnedCorrections.dismiss.$index"
     const val CLEANUP_PICKER_BACK = "cleanupPicker.back"
     const val CLEANUP_PICKER_SEARCH = "cleanupPicker.search"
     const val CLEANUP_PICKER_OPENROUTER = "cleanupPicker.openRouter"

@@ -180,9 +180,20 @@
         <item quantity="one">%1$d model from many providers with one OpenRouter key</item>
         <item quantity="other">%1$d models from many providers with one OpenRouter key</item>
     </plurals>
-    <string name="cleanup_picker_openrouter_footer">These models are sent to OpenRouter with your OpenRouter key.</string>
-    <string name="cleanup_picker_search">Search OpenRouter models</string>
     <string name="cleanup_picker_no_results">No models match.</string>
+    <plurals name="cleanup_picker_result_count">
+        <item quantity="one">%1$d model</item>
+        <item quantity="other">%1$d models</item>
+    </plurals>
+    <string name="cleanup_picker_provider_choice">Provider: %1$s</string>
+    <string name="cleanup_picker_detail_provider">Provider</string>
+    <string name="cleanup_picker_detail_context">Context limit</string>
+    <string name="cleanup_picker_detail_speed">Speed</string>
+    <string name="cleanup_picker_detail_strengths">Strengths</string>
+    <string name="cleanup_picker_detail_pricing_heading">Pricing</string>
+    <string name="cleanup_picker_detail_pricing">Input / output</string>
+    <string name="cleanup_picker_detail_tokens">%1$s tokens</string>
+    <string name="cleanup_picker_detail_link">Model details on OpenRouter</string>
     <string name="settings_keep_audio_title">Keep audio when a recording is cancelled</string>
     <string name="settings_keep_audio_note">Cancelled cloud recordings stay in History so you can transcribe them later.</string>
     <string name="settings_raw_config_title">Edit raw configuration</string>

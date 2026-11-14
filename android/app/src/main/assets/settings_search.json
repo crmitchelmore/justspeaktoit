@@ -116,7 +116,12 @@
         "openai",
         "gemini",
         "groq",
-        "mistral"
+        "mistral",
+        "browse openrouter models",
+        "openrouter models",
+        "model browser",
+        "model pricing",
+        "zero listed prices"
       ],
       "section" : "postProcessing",
       "sectionTitle" : "Post-processing",

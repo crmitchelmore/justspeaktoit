@@ -20,6 +20,10 @@ excluded from the shared settings-transfer catalogue: each installation opts in.
   Preferences form, under Post-processing. **Apply** refreshes stale metadata
   before the existing cleanup picker is repopulated. Startup only restores the
   bounded cache. There is no background timer or mid-edit picker replacement.
+- **Android:** no discovery yet (#1618). **Browse OpenRouter models…** browses the
+  bundled OpenRouter cleanup routes exported in the `openRouterBrowser` section of
+  `cloud_catalog.json`; its filter is a Kotlin port of `OpenRouterBrowserFilter`
+  checked against the shared `Tests/Fixtures/openrouter-browser/` cases.
 - Disabling discovery cancels an active fetch and hides additional choices.
   An already selected discovery remains selected and usable through the existing
   cleanup flow. It does not grant new inference consent or enable post-processing.

@@ -46,7 +46,8 @@ extension SettingsSearchCatalog {
             summary: "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",
             keywords: [
                 "post-processing", "polish", "cleanup", "llm", "openrouter", "grammar", "cleanup model",
-                "anthropic", "claude", "openai", "gemini", "groq", "mistral"
+                "anthropic", "claude", "openai", "gemini", "groq", "mistral", "browse openrouter models",
+                "openrouter models", "model browser", "model pricing", "zero listed prices"
             ],
             settingKeys: ["cleanup_enabled", "cleanup_model"], platforms: .android
         ),

@@ -42,9 +42,8 @@ public struct OpenRouterCleanupBrowser: View {
 
     public var body: some View {
         OpenRouterModelBrowser(
-            title: "OpenRouter cleanup models",
-            intro: "Use your OpenRouter key for transcript cleanup. Bundled models are tested for cleanup; "
-                + "discovered models are not.",
+            title: OpenRouterModelBrowserCatalog.title(for: .cleanup),
+            intro: OpenRouterModelBrowserCatalog.intro(for: .cleanup),
             items: OpenRouterCatalogOptions.models(from: options(), purpose: .postProcessing),
             status: status,
             canRefresh: discoveryEnabled,
@@ -65,9 +64,9 @@ public struct OpenRouterCleanupBrowser: View {
                 OpenRouterOptionDetail(
                     option: option,
                     purpose: .postProcessing,
-                    actionTitle: "Use for cleanup",
-                    selectedTitle: "Selected for cleanup",
-                    routeNote: "Cleanup requests for this model are sent to OpenRouter with your OpenRouter key.",
+                    actionTitle: OpenRouterModelBrowserCatalog.actionTitle(for: .cleanup, selected: false),
+                    selectedTitle: OpenRouterModelBrowserCatalog.actionTitle(for: .cleanup, selected: true),
+                    routeNote: OpenRouterModelBrowserCatalog.routeNote(for: .cleanup),
                     isSelected: option.id.caseInsensitiveCompare(selection) == .orderedSame,
                     temperature: temperature
                 ) { identifier in
@@ -97,8 +96,7 @@ public struct OpenRouterCleanupBrowser: View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(CleanupModelSelection.settingTitle, isOn: $discoveryEnabled)
                 .accessibilityIdentifier("openRouterCleanup.discovery")
-            Text("Discovery downloads public model details only. No key or transcript is sent. "
-                + "Turning it off keeps your saved model; bundled models remain available offline.")
+            Text(OpenRouterModelBrowserCatalog.discoveryNote)
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

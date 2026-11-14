@@ -1,12 +1,23 @@
 import Foundation
 
 /// Search, provider and listed-price filtering shared by every OpenRouter browser.
-struct OpenRouterBrowserFilter: Equatable {
-    var query = ""
-    var provider = ""
-    var freeOnly = false
+/// Android ports these rules (`OpenRouterBrowser.kt`); `Tests/Fixtures/openrouter-browser`
+/// holds the cases both platforms test against.
+public struct OpenRouterBrowserFilter: Equatable, Sendable {
+    /// Trimmed and matched case-insensitively against each item's search text.
+    public var query: String
+    /// The vendor name to match exactly; empty means every provider.
+    public var provider: String
+    /// Only items whose listed prices are all zero; a missing price is unknown, not free.
+    public var freeOnly: Bool
 
-    func matches(searchText: [String], provider itemProvider: String, hasZeroPrices: Bool) -> Bool {
+    public init(query: String = "", provider: String = "", freeOnly: Bool = false) {
+        self.query = query
+        self.provider = provider
+        self.freeOnly = freeOnly
+    }
+
+    public func matches(searchText: [String], provider itemProvider: String, hasZeroPrices: Bool) -> Bool {
         if !provider.isEmpty, itemProvider != provider { return false }
         if freeOnly, !hasZeroPrices { return false }
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)

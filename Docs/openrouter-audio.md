@@ -71,6 +71,11 @@ sanitised errors, limits, cancellation, and temporary-file ownership. Both nativ
 targets must compile and pass their existing test gates before merge. Paid-provider
 acceptance across the changing catalogue is separate from these mocked contracts.
 
+Browser copy, ordering and the search/provider/zero-price filter live in
+`OpenRouterModelBrowserCatalog` and `OpenRouterBrowserFilter` (SpeakCore), so
+other platforms reuse them. Windows, Linux and Android have no OpenRouter
+transcription browser yet (#1618).
+
 Issue #821 remains open for progressive speech playback, provider-specific cost
 enrichment and capability controls, and full real-provider/device qualification.
 This change delivers discovery, explicit testing, selection, and normal STT/TTS

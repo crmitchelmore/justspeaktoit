@@ -316,14 +316,17 @@
         "keystore",
         "openrouter key",
         "openai key",
-        "deepgram key"
+        "deepgram key",
+        "balance",
+        "credit",
+        "billing"
       ],
       "section" : "apiKeys",
       "sectionTitle" : "API Keys",
       "settingKeys" : [
 
       ],
-      "summary" : "Add or remove provider keys, encrypted with the Android Keystore.",
+      "summary" : "Add or remove provider keys, encrypted with the Android Keystore, and check account balances.",
       "title" : "API keys"
     },
     {

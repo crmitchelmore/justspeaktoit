@@ -25,6 +25,17 @@ extension WindowsNative {
         }
     }
 
+    /// Balance text beside one key, on its own channel so it never makes the
+    /// dialog busy. The text comes from the shared formatter, never a key.
+    static func presentAPIKeyBalance(_ line: DesktopProviderBalanceLine) {
+        let result = line.identifier.withCString { identifier in
+            line.text.withCString { text in
+                jsti_window_set_api_key_balance(identifier, text, line.canRefresh ? 1 : 0, line.isResult ? 1 : 0)
+            }
+        }
+        if result != 0 { update("A provider balance could not be shown. Reopen API keys to check it again.") }
+    }
+
     /// The entry hook for settings, onboarding or any later caller: opens the
     /// dialog over the main window once it is idle. Thread safe.
     static func openAPIKeys() {
@@ -39,6 +50,7 @@ extension WindowsEventContext {
         if !WindowsNative.presentAPIKeys(rows, status: status, context: callbackContext) {
             WindowsNative.update("The API keys page could not be shown. Reopen it and try again.")
         }
+        await balances.show(rows)
     }
 }
 
@@ -63,14 +75,28 @@ func apiKeyEvent(
     let typed = key.map { String(cString: $0) } ?? ""
     holder.enqueueSettings {
         let controller = holder.controller
+        let balances = holder.balances
         let status: String
         switch action {
-        case Int32(JSTI_API_KEY_SAVE.rawValue): status = await controller.saveAPIKey(identifier: name, key: typed)
-        case Int32(JSTI_API_KEY_REMOVE.rawValue): status = await controller.removeAPIKey(identifier: name)
+        case Int32(JSTI_API_KEY_BALANCE.rawValue):
+            // Balance checks leave the rows, and so the dialog's busy state, alone.
+            await balances.refresh(credentialIdentifier: name)
+            return
+        case Int32(JSTI_API_KEY_SAVE.rawValue):
+            status = await controller.saveAPIKey(identifier: name, key: typed)
+            await balances.credentialChanged(name)
+        case Int32(JSTI_API_KEY_REMOVE.rawValue):
+            status = await controller.removeAPIKey(identifier: name)
+            await balances.credentialChanged(name)
         case Int32(JSTI_API_KEY_VALIDATE.rawValue):
             status = await controller.validateAPIKey(identifier: name, typed: typed)
         default: status = ""
         }
         await holder.refreshAPIKeys(status: status)
+        switch action {
+        case Int32(JSTI_API_KEY_REFRESH.rawValue): await balances.refreshSaved()
+        case Int32(JSTI_API_KEY_SAVE.rawValue): await balances.refresh(credentialIdentifier: name)
+        default: break
+        }
     }
 }

@@ -127,8 +127,11 @@ extension SettingsSearchCatalog {
         ),
         SettingsSearchEntry(
             id: "android.apiKeys", title: "API keys", section: .apiKeys, systemImage: "key.fill",
-            summary: "Add or remove provider keys, encrypted with the Android Keystore.",
-            keywords: ["credentials", "token", "keystore", "openrouter key", "openai key", "deepgram key"],
+            summary: "Add or remove provider keys, encrypted with the Android Keystore, and check account balances.",
+            keywords: [
+                "credentials", "token", "keystore", "openrouter key", "openai key", "deepgram key", "balance",
+                "credit", "billing"
+            ],
             platforms: .android
         ),
         SettingsSearchEntry(

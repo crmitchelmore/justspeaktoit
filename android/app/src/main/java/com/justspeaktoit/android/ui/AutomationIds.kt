@@ -51,6 +51,13 @@ object AutomationIds {
     const val CONSENT_DIAGNOSTICS = "consent.diagnostics"
     const val CONSENT_DONE = "consent.done"
 
+    /** The balance line beside an API key, e.g. `settings.apiKeys.balance.openrouter.apiKey`. */
+    fun apiKeyBalance(credentialId: String) = "settings.apiKeys.balance.$credentialId"
+
+    fun apiKeyBalanceCheck(credentialId: String) = "settings.apiKeys.balanceCheck.$credentialId"
+
+    fun apiKeyBilling(credentialId: String) = "settings.apiKeys.billing.$credentialId"
+
     /** One per tip, keyed by its store product ID, e.g. `settings.tip.com.justspeaktoit.tip.small`. */
     fun tipProduct(productId: String) = "settings.tip.$productId"
     const val SETTINGS_REPORT_ISSUE = "settings.reportIssue"

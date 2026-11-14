@@ -611,6 +611,34 @@ sessions:
           - "Export preferences, turn the allow switch off, import the file: the switch stays off."
         expected: "Reads never show key material, writes are refused until the local switch is on and are all-or-nothing, Preferences shows the change at once, and importing a file never turns the switch on."
         final_gate: false
+      - id: "windows-provider-balances"
+        issues:
+          - 1621
+        title: "Windows: API keys shows provider balances beside saved keys"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Windows, the first Alpha build that includes #1621, with a funded OpenRouter key"
+        steps:
+          - "With Narrator running, open the API keys window, save an OpenRouter key and select OpenRouter."
+          - "Read the Balance line, then choose Check balance and keep typing in the key field while it checks."
+          - "Select OpenAI and read its Balance line. Then replace the OpenRouter key with an invalid one and choose Check balance."
+          - "Remove the OpenRouter key."
+        expected: "OpenRouter shows its credit in dollars with when it was checked, and Narrator reads the new line. Typing never stalls. OpenAI says why no figure is shown and gives its billing page. The invalid key shows Balance unknown with a reason and no key text; after removal the line asks for a key."
+        final_gate: false
+      - id: "linux-provider-balances"
+        issues:
+          - 1621
+        title: "Linux: API Keys shows provider balances beside saved keys"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Linux, the first Alpha build that includes #1621, with a funded OpenRouter key"
+        steps:
+          - "With Orca running, open the API Keys window, save an OpenRouter key and select OpenRouter."
+          - "Read the Balance line, then choose Check balance and keep typing in the key field while it checks."
+          - "Select OpenAI and read its Balance line. Then replace the OpenRouter key with an invalid one and choose Check balance."
+          - "Remove the OpenRouter key."
+        expected: "OpenRouter shows its credit in dollars with when it was checked, and Orca reads the new line. Typing never stalls. OpenAI says why no figure is shown and gives its billing page. The invalid key shows Balance unknown with a reason and no key text; after removal the line asks for a key."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"
@@ -1607,6 +1635,20 @@ sessions:
           - "On Android 12 or later turn on Wallpaper colours, change the wallpaper, and turn it off again."
           - "Search settings for \"dark mode\" and open the result."
         expected: "Each choice applies at once across Dictation, Settings and History, the bar icons stay readable, and the choice survives a restart. Wallpaper colours follow the wallpaper and turning them off restores the orange theme. The search opens Appearance."
+        final_gate: false
+      - id: "android-provider-balances"
+        issues:
+          - 1621
+        title: "API keys shows the OpenRouter balance and billing links"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1621, with a funded OpenRouter key"
+        steps:
+          - "Save an OpenRouter key, then open Settings \u203a API keys with TalkBack on."
+          - "Read the OpenRouter Balance line, tap Check balance and type in another key field while it checks."
+          - "Read the OpenAI Balance line and tap Open billing page."
+          - "Save an invalid OpenRouter key and tap Check balance, then remove the key."
+        expected: "OpenRouter shows its credit in dollars and when it was checked, and TalkBack reads the update. Typing never stalls. OpenAI explains why no figure is shown and opens its billing page. The invalid key shows Balance unknown with a reason and no key text; after removal the line asks for a key."
         final_gate: false
   - id: "windows"
     device: "Windows"

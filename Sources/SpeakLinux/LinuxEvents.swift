@@ -31,6 +31,8 @@ final class LinuxEventContext: DesktopNativeEventHolder, @unchecked Sendable {
     let globalActionShortcuts = LinuxGlobalActionShortcuts()
     let automation: LinuxAutomationSwitch
     let apiKeys = DesktopAPIKeyRequests()
+    /// Provider balances beside API keys, on their own channel to the dialog.
+    let balances: DesktopProviderBalances
     let historyPaste = DesktopHistoryPasteAdmission()
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
@@ -65,6 +67,10 @@ final class LinuxEventContext: DesktopNativeEventHolder, @unchecked Sendable {
             await controller.copyTranscript(text, variant: variant)
         }
         self.historyEvents = Self.makeHistoryEvents(controller)
+        self.balances = DesktopProviderBalances(
+            readKey: { await controller.savedAPIKeyForBalance(identifier: $0) },
+            publish: { LinuxWindow.presentAPIKeyBalance($0) }
+        )
         callbacks = NativeCallbackContext(self)
     }
 

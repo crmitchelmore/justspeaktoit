@@ -41,7 +41,10 @@ int32_t jsti_troubleshooting_set_rows(const JSTILinuxTroubleshootingRow *rows, s
                                       const char *summary, uint64_t revision);
 enum {
     JSTI_LINUX_API_KEY_REFRESH = 0, JSTI_LINUX_API_KEY_SAVE = 1, JSTI_LINUX_API_KEY_REMOVE = 2,
-    JSTI_LINUX_API_KEY_VALIDATE = 3, JSTI_LINUX_API_KEY_CANCEL = 4
+    JSTI_LINUX_API_KEY_VALIDATE = 3, JSTI_LINUX_API_KEY_CANCEL = 4,
+    /* Check balance: carries the dialog's identity instead of a request
+     * ticket and no key, and never makes the dialog pending. */
+    JSTI_LINUX_API_KEY_BALANCE = 5
 };
 typedef struct {
     const char *identifier, *label, *uses, *status, *url, *hint;
@@ -61,6 +64,11 @@ int32_t jsti_api_keys_request_is_current(const char *request);
 int32_t jsti_window_request_api_keys(void);
 int32_t jsti_api_keys_finish(const JSTILinuxAPIKeyRow *rows, size_t count,
                            const char *request, const char *status);
+/* Balance text beside one row's key, on its own channel so a slow billing
+ * check never holds key entry. Copied onto the GTK queue; host-written text
+ * only, never key material. `refreshable` enables Check balance and `result`
+ * announces the text when that row is selected. 0 means queued. */
+int32_t jsti_api_keys_set_balance(const char *identifier, const char *text, int32_t refreshable, int32_t result);
 typedef struct {
     const char *title, *status, *detail, *action;
     int32_t page;

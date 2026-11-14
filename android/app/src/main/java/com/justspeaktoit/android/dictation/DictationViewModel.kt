@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.justspeaktoit.android.JustSpeakApplication
 import com.justspeaktoit.android.cloud.AndroidAudioInputs
 import com.justspeaktoit.android.cloud.AudioInputSource
+import com.justspeaktoit.android.cloud.BalanceDirectory
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
@@ -16,6 +17,9 @@ import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.NoAudioInputs
+import com.justspeaktoit.android.cloud.ProviderBalanceClient
+import com.justspeaktoit.android.cloud.ProviderBalanceClients
+import com.justspeaktoit.android.cloud.ProviderBalanceStore
 import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.corrections.AutoCorrectionLearner
@@ -83,6 +87,9 @@ class DictationViewModel internal constructor(
     private val sounds: RecordingSoundOutput? = null,
     // The microphones Settings offers; the recorder factory routes to the chosen one itself.
     private val audioInputs: AudioInputSource = NoAudioInputs,
+    // provider_balances.json and Android's billing transports; empty shows no balance lines.
+    balanceDirectory: BalanceDirectory = BalanceDirectory.EMPTY,
+    balanceClients: List<ProviderBalanceClient> = emptyList(),
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     private val capture = CloudCapture(recorders, cacheDir, io, retirement, resources)
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
@@ -121,6 +128,25 @@ class DictationViewModel internal constructor(
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
+
+    private val balances = ProviderBalanceStore(
+        directory = balanceDirectory,
+        clients = balanceClients,
+        readKey = secrets::read,
+        scope = scope,
+        io = io,
+        publish = { entries -> _state.update { it.copy(balances = entries) } },
+    )
+
+    init {
+        _state.update {
+            it.copy(
+                balanceAccounts = balanceDirectory.accounts.associateBy { account -> account.primaryCredentialId },
+                checkableBalances = balanceDirectory.accounts.filter(balances::canCheck).map { account -> account.id }
+                    .toSet(),
+            )
+        }
+    }
 
     private val historyOwner = DictationHistory(history, recordingsDir, scope, io) { entries, failed ->
         _state.update { it.copy(history = entries, historyError = failed) }
@@ -408,12 +434,23 @@ class DictationViewModel internal constructor(
         _state.update { it.copy(keepRecordings = enabled) }
     }
 
-    fun saveKey(provider: CloudProvider, key: String) =
-        updateKeys(provider) { secrets.write(provider.credentialId, key.trim()) }
+    fun saveKey(provider: CloudProvider, key: String) {
+        if (updateKeys(provider) { secrets.write(provider.credentialId, key.trim()) }) {
+            balances.refresh(provider.credentialId)
+        }
+    }
 
-    fun removeKey(provider: CloudProvider) = updateKeys(provider) { secrets.remove(provider.credentialId) }
+    fun removeKey(provider: CloudProvider) {
+        updateKeys(provider) { secrets.remove(provider.credentialId) }
+    }
 
-    private fun updateKeys(provider: CloudProvider, change: () -> Unit) {
+    /** Checks every saved key's balance, as the Apple key pages do when they open. */
+    fun refreshBalances() = balances.refreshSaved(_state.value.savedKeys.map { it.credentialId }.toSet())
+
+    fun checkBalance(provider: CloudProvider) = balances.refresh(provider.credentialId)
+
+    private fun updateKeys(provider: CloudProvider, change: () -> Unit): Boolean {
+        balances.credentialChanged(provider.credentialId)
         val ok = try {
             change()
             true
@@ -426,6 +463,7 @@ class DictationViewModel internal constructor(
             it.copy(keyStoreError = !ok, keyErrors = if (ok) it.keyErrors - provider else it.keyErrors + provider)
         }
         refreshAvailability()
+        return ok
     }
 
     fun downloadOnDeviceModel() = selector.downloadOnDeviceModel()
@@ -571,6 +609,7 @@ class DictationViewModel internal constructor(
 
         private fun create(application: Application): DictationViewModel {
             val prefs = AppPreferences(application)
+            val balanceDirectory = loadBalanceDirectory(application)
             val inputs = AndroidAudioInputs(application)
             return DictationViewModel(
                 engine = AndroidSpeechEngine(application),
@@ -596,7 +635,22 @@ class DictationViewModel internal constructor(
                 },
                 sounds = RecordingSoundPlayer(application),
                 audioInputs = inputs,
+                balanceDirectory = balanceDirectory,
+                balanceClients = ProviderBalanceClients.defaults(balanceDirectory),
             )
+        }
+
+        /** A missing or unreadable asset hides balances rather than stopping the app. */
+        private fun loadBalanceDirectory(application: Application): BalanceDirectory = try {
+            application.assets.open(BalanceDirectory.ASSET).bufferedReader().use {
+                BalanceDirectory.parse(it.readText())
+            }
+        } catch (e: java.io.IOException) {
+            BalanceDirectory.EMPTY
+        } catch (e: org.json.JSONException) {
+            BalanceDirectory.EMPTY
+        } catch (e: IllegalArgumentException) {
+            BalanceDirectory.EMPTY
         }
     }
 }

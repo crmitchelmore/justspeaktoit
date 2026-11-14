@@ -99,8 +99,8 @@ The flags live in `Project.swift`; release selection is in
 | F11 | Dictation profiles | Yes | Limited | Yes | Yes | Limited | | iOS and Android cannot see the frontmost app. |
 | F12 | Vocabulary, corrections, pronunciation | Yes | Yes | Yes | Yes | Partial | #1626 | Android: corrections only. Corrections also restore the stored spelling's case. |
 | F13 | Transcription language selection | Yes | Yes | Yes | Yes | Yes | | |
-| F14 | History list and search | Yes | Yes | Yes | Yes | Partial | #1628 | Android has no search. |
-| F15 | History filters (model, errors, dates) | Yes | Partial | Yes | Yes | No | #1628 | |
+| F14 | History list and search | Yes | Yes | Yes | Yes | Yes | | |
+| F15 | History filters (model, errors, dates) | Yes | Yes | Yes | Yes | Yes | | Android filters by Cloud model or recognition mode. |
 | F16 | History retry and audio playback | Yes | Yes | Yes | Yes | Yes | | Android keeps recordings only when "Keep recordings in History" is on. |
 | F17 | History sync | Yes | Yes | Yes | Yes | No | #1630 | Desktops use CloudKit Web Services. |
 | F18 | Settings search | Yes | Yes | Yes | Yes | Yes | | |
@@ -257,22 +257,22 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** OpenAI `gpt-live-transcribe`/`gpt-transcribe` take plural `languages`; older OpenAI models take singular `language`. Android's list is exported in `cloud_catalog.json`.
 
 ### F14 History list and search
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1628 (no search).
+- **Gaps:** none
 - **How:** Every capture, including failures and cancellations, lands in History with friendly model names; search covers raw and processed text.
-- **Refs:** `Sources/SpeakCore/History/HistoryPresentation.swift`, `Sources/SpeakDesktop/History/DesktopHistorySearch.swift`, `Sources/SpeakDesktopHost/History/DesktopHostHistory.swift`, `Sources/SpeakApp/History/HistoryManager.swift`, `android/app/src/main/java/com/justspeaktoit/android/history/History.kt`
+- **Refs:** `Sources/SpeakCore/History/HistoryPresentation.swift`, `Sources/SpeakDesktop/History/DesktopHistorySearch.swift`, `Sources/SpeakDesktopHost/History/DesktopHostHistory.swift`, `Sources/SpeakApp/History/HistoryManager.swift`, `android/app/src/main/java/com/justspeaktoit/android/history/History.kt`, `android/app/src/main/java/com/justspeaktoit/android/history/HistoryFilter.kt`
 - **Sunset:** none
 - **Nuances:** iOS persistence rules: [iOS History persistence](ios-history-persistence.md). Cancelled recordings: [cancelled recordings](cancelled-recordings.md).
 
 ### F15 History filters (model, errors, dates)
-- **Platforms:** macOS Yes · iOS Partial · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** iOS, Android #1628.
+- **Gaps:** none
 - **How:** Filters narrow the visible list by model, error state and date; they never change stored entries.
-- **Refs:** `Sources/SpeakDesktop/History/DesktopHistoryFilter.swift`, `Sources/SpeakApp/History/HistoryListModel.swift`, `Sources/SpeakWindows/WindowsHistoryFilters.swift`, `Sources/SpeakLinux/LinuxHistoryFilters.swift`
+- **Refs:** `Sources/SpeakDesktop/History/DesktopHistoryFilter.swift`, `Sources/SpeakApp/History/HistoryListModel.swift`, `Sources/SpeakWindows/WindowsHistoryFilters.swift`, `Sources/SpeakLinux/LinuxHistoryFilters.swift`, `Sources/SpeakiOS/Views/HistoryFilterSheet.swift`, `Sources/SpeakiOS/Views/HistoryViewDerivedState.swift`, `android/app/src/main/java/com/justspeaktoit/android/history/HistoryFilter.kt`
 - **Sunset:** none
-- **Nuances:** Wrapped GTK checkbox labels must be created explicitly (`Sources/CLinuxSupport/LinuxHistoryFilters.c`).
+- **Nuances:** Every platform uses the shared day policy (`HistorySearchQuery.normalizedDayRange`): whole local calendar days, inclusive, and an end before the start means the start day only; Android mirrors it in Kotlin with tests. Android filters by Cloud model or by recognition mode (On-device, Speech service), counts a kept recording whose later transcription failed as an error, and lets either date end stay open. iOS filters by the entry's transcription model and its recorded error. Wrapped GTK checkbox labels must be created explicitly (`Sources/CLinuxSupport/LinuxHistoryFilters.c`).
 
 ### F16 History retry and audio playback
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

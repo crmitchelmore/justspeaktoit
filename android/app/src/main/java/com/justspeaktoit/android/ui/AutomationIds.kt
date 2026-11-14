@@ -24,6 +24,18 @@ object AutomationIds {
     const val HISTORY_INSIGHTS = "history.insights"
     const val HISTORY_CLEAR_ALL = "history.clear.all"
     const val HISTORY_CLEAR_KEEP_RECORDINGS = "history.clear.keepRecordings"
+    const val HISTORY_SEARCH = "history.search"
+    const val HISTORY_SEARCH_CLEAR = "history.search.clear"
+    const val HISTORY_FILTER_MODEL = "history.filter.model"
+    const val HISTORY_FILTER_MODEL_ALL = "history.filter.model.all"
+    const val HISTORY_FILTER_ERRORS = "history.filter.errorsOnly"
+    const val HISTORY_FILTER_FROM = "history.filter.from"
+    const val HISTORY_FILTER_THROUGH = "history.filter.through"
+    const val HISTORY_FILTER_CLEAR = "history.filter.clear"
+    const val HISTORY_FILTER_SUMMARY = "history.filter.summary"
+
+    /** One per model in the History filter, keyed by its catalogue ID or recognition mode. */
+    fun historyFilterModel(key: String) = "history.filter.model.option.$key"
 
     /** One per History entry, keyed by its generated ID, never by its text. */
     fun historyPlay(entryId: String) = "history.play.$entryId"

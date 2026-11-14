@@ -50,10 +50,12 @@ import com.justspeaktoit.android.diagnostics.IssueFacts
 import com.justspeaktoit.android.dictation.DictationFailure
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.history.HistoryEntry
+import com.justspeaktoit.android.history.HistoryFilter
 import com.justspeaktoit.android.history.HistoryInsights
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.output.TranscriptOutput
+import java.time.LocalDate
 
 class HistoryActions(
     val onBack: () -> Unit,
@@ -78,6 +80,25 @@ fun HistoryScreen(
     actions: HistoryActions,
 ) {
     var confirmClear by rememberSaveable { mutableStateOf(false) }
+    // Filters are view state only: they never change the stored entries.
+    var searchText by rememberSaveable { mutableStateOf("") }
+    var modelFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    var errorsOnly by rememberSaveable { mutableStateOf(false) }
+    var fromEpochDay by rememberSaveable { mutableStateOf<Long?>(null) }
+    var throughEpochDay by rememberSaveable { mutableStateOf<Long?>(null) }
+    val filter = HistoryFilter(
+        searchText = searchText,
+        model = modelFilter,
+        errorsOnly = errorsOnly,
+        fromDay = fromEpochDay?.let(LocalDate::ofEpochDay),
+        throughDay = throughEpochDay?.let(LocalDate::ofEpochDay),
+    )
+    val modeLabels = RecognitionMode.entries.associate { it.name to stringResource(it.label()) }
+    val modelName: (String) -> String = { key ->
+        modeLabels[key] ?: CloudCatalog.transcriptionModels.firstOrNull { it.catalogId == key }?.displayName ?: key
+    }
+    val models = remember(entries, modeLabels) { HistoryFilter.models(entries).sortedBy(modelName) }
+    val visible = remember(entries, filter, modeLabels) { filter.matching(entries, modelName = modelName) }
     val player = remember { HistoryAudioPlayer() }
     DisposableEffect(player) { onDispose { player.stop() } }
     // Nothing plays while the microphone records, or once its entry has gone.
@@ -136,8 +157,19 @@ fun HistoryScreen(
                         style = MaterialTheme.typography.bodyLarge,
                     )
                 }
+            } else {
+                item(key = "historyFilters") {
+                    HistoryFilterBar(filter, models, modelName) { next ->
+                        searchText = next.searchText
+                        modelFilter = next.model
+                        errorsOnly = next.errorsOnly
+                        fromEpochDay = next.fromDay?.toEpochDay()
+                        throughEpochDay = next.throughDay?.toEpochDay()
+                    }
+                }
+                if (filter.isActive) item(key = "historyFilterSummary") { FilterSummary(visible.size, entries.size) }
             }
-            items(entries, key = { it.id }) { entry -> HistoryCard(entry, transcribe, player, actions) }
+            items(visible, key = { it.id }) { entry -> HistoryCard(entry, transcribe, player, actions) }
         }
     }
     if (confirmClear) {
@@ -301,6 +333,22 @@ private fun HistoryCard(
         val facts = remember(entry) { IssueFacts.forHistory(entry, AndroidIssueEnvironment.current(context)) }
         IssueReportDialog(facts) { reporting = false }
     }
+}
+
+/** How many entries the search and filters leave, announced as it changes. */
+@Composable
+private fun FilterSummary(shown: Int, total: Int) {
+    Text(
+        if (shown == 0) {
+            stringResource(R.string.history_filter_no_matches)
+        } else {
+            pluralStringResource(R.plurals.history_filter_shown, total, shown, total)
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier
+            .testTag(AutomationIds.HISTORY_FILTER_SUMMARY)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 @Composable

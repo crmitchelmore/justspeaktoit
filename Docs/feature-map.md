@@ -114,7 +114,7 @@ The flags live in `Project.swift`; release selection is in
 | F26 | Menu bar / tray presence | Yes | N/A | Yes | Yes | N/A | | |
 | F27 | Resources-in-use status | Yes | Yes | Yes | Yes | Yes | | |
 | F28 | Report an issue with diagnostics | Yes | Yes | Yes | Yes | Yes | | |
-| F29 | Troubleshooting page | Yes | Partial | Yes | Yes | No | #1634 | iOS has Capture Health only. |
+| F29 | Troubleshooting page | Yes | Yes | Yes | Yes | No | #1634 | Phone rules shared in SpeakCore; Android to port them. |
 | F30 | Onboarding and permissions guide | Yes | Yes | Yes | Yes | Yes | | |
 | F31 | API keys page | Yes | Yes | Yes | Yes | Yes | | |
 | F32 | Provider credit balances | Yes | Yes | No | No | No | #1621 | |
@@ -392,13 +392,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Android mirrors the SpeakCore JSON schema in Kotlin with `platform` `android`, and its History records no stage timings, so its timeline is always empty. Reports never include transcript text, audio, raw errors, logs, keys, persistent IDs or absolute timestamps ([transcript logging](SECURITY_TRANSCRIPT_LOGGING.md)).
 
 ### F29 Troubleshooting page
-- **Platforms:** macOS Yes · iOS Partial · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android No
 - **Excluded:** none
-- **Gaps:** iOS, Android #1634 (iOS has Capture Health only).
+- **Gaps:** Android #1634.
 - **How:** Check permissions, devices, keys and connectivity, explain each failure and link straight to its fix.
-- **Refs:** `Sources/SpeakCore/Desktop/DesktopTroubleshooting.swift`, `Sources/SpeakApp/Views/TroubleshootingView.swift`, `Sources/SpeakiOS/Views/CaptureHealthView.swift`, `Sources/SpeakWindows/WindowsTroubleshooting.swift`, `Sources/SpeakLinux/LinuxTroubleshooting.swift`
+- **Refs:** `Sources/SpeakCore/Desktop/DesktopTroubleshooting.swift`, `Sources/SpeakCore/Troubleshooting/MobileTroubleshooting.swift`, `Sources/SpeakApp/Views/TroubleshootingView.swift`, `Sources/SpeakiOS/Views/Settings/IOSTroubleshootingView.swift`, `Sources/SpeakiOS/Views/CaptureHealthView.swift`, `Sources/SpeakWindows/WindowsTroubleshooting.swift`, `Sources/SpeakLinux/LinuxTroubleshooting.swift`
 - **Sunset:** none
-- **Nuances:** Re-read permission state after the user returns; a click is not proof of a grant.
+- **Nuances:** Re-read permission state after the user returns; a click is not proof of a grant. Phones use `MobileTroubleshooting` (microphone and speech permissions, on-device model, missing/rejected/unreadable keys, keyboard Full Access); a key is reported rejected only after Check key asks the provider. Capture Health stays the deeper capture self-test.
 
 ### F30 Onboarding and permissions guide
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

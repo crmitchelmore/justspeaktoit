@@ -87,6 +87,16 @@ extension SettingsSearchCatalog {
             platforms: .iOS
         ),
         SettingsSearchEntry(
+            id: "ios.troubleshooting", title: "Troubleshooting", section: .troubleshooting,
+            systemImage: "wrench.and.screwdriver",
+            summary: "Find what's stopping dictation and fix it.",
+            keywords: [
+                "troubleshoot", "not working", "permissions", "microphone", "speech recognition", "api key",
+                "rejected key", "keyboard", "full access", "on-device model", "fix"
+            ],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
             id: "ios.captureHealth", title: "Capture Health", section: .troubleshooting, systemImage: "stethoscope",
             summary: "Check capture is working.",
             keywords: ["diagnostics", "self test", "microphone not working", "troubleshoot"],

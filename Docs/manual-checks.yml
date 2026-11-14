@@ -669,6 +669,21 @@ sessions:
           - "Repeat with a second provider, then open History."
         expected: "The batch list shows Deepgram, AssemblyAI, ElevenLabs, Groq, Mistral, Modulate, Rev.ai, Soniox and Speechmatics sections. Each recording returns the spoken words, History names the chosen provider and model, and no recording needs or uses the OpenRouter key."
         final_gate: false
+      - id: "iphone-troubleshooting-page"
+        issues:
+          - 1634
+        title: "Troubleshooting lists what stops dictation and each fix works"
+        minutes: 4
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes the #1634 Troubleshooting page"
+        steps:
+          - "Open Settings \u203a Privacy & Diagnostics \u203a Troubleshooting with a cloud model selected and its key saved."
+          - "In the system Settings app turn the microphone off for Just Speak, return to the app and read the page."
+          - "Tap Open Settings on the Microphone row, turn it back on and return."
+          - "Choose a cloud model whose key is not saved, then open Troubleshooting again and tap API keys."
+          - "With a saved Deepgram or ElevenLabs key selected, tap Check key."
+        expected: "With the microphone off, a red Microphone row is listed first and the summary says something is stopping dictation; after turning it back on and returning, the row turns green without reopening the page. The missing key row names the provider and opens API Keys. Check key reports whether the provider accepted the saved key, and a rejected key turns the row red."
+        final_gate: false
       - id: "iphone-clipboard-e2e"
         issues:
           - 934

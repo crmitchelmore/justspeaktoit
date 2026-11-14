@@ -59,7 +59,9 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         )
         let offered = Set(CloudCatalogAndroidExport.transcriptionModels.map(\.id))
         var missing: Set<String> = []
-        for option in ModelCatalog.batchTranscription where ModelRetirements.retirement(for: option.id) == nil {
+        // On-device Apple models are listed only on hosts that support them and are not cloud routes.
+        for option in ModelCatalog.batchTranscription
+        where ModelRetirements.retirement(for: option.id) == nil && !option.id.hasPrefix("apple/") {
             guard let provider = CloudCatalogAndroidExport.transcriptionProviderID(of: option.id),
                   CloudCatalogAndroidExport.transcriptionProviderIDs.contains(provider) else {
                 missing.insert(String(option.id.prefix { $0 != "/" }))

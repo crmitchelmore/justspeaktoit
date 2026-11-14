@@ -565,7 +565,9 @@ page for yet; the provider, model, voice and speed must form one selection the
 shared voice catalogues accept. Android has
 no automation server either; Settings › **Edit raw configuration** does the same
 over `SettingsSchema+Android.swift` (keyed by its preference names such as
-`cloud_model` and `history_retention`) and refuses to apply while dictating.
+`cloud_model` and `history_retention`, plus the shared `appearance`,
+`recordingSound*`, `silence*` and `autoCorrections*` keys) and refuses to apply
+while dictating.
 
 - **Reading** works whenever automation is on. `get_configuration` returns
   `settings`, `apiKeys` and `schema`; narrow it with `keys` or `prefix`.

@@ -30,11 +30,13 @@ import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
+import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.settings.DictationPreferences
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RawConfigurationValues
 import com.justspeaktoit.android.settings.RecordingCue
+import com.justspeaktoit.android.settings.RecordingSoundProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
 import com.justspeaktoit.android.transfer.ConfigArchiveException
 import com.justspeaktoit.android.transfer.ConfigExporter
@@ -158,6 +160,8 @@ class DictationViewModel internal constructor(
             recordingSounds = prefs.recordingSounds,
             audioInputId = prefs.audioInputId,
             audioInputs = audioInputs.inputs(),
+            appearance = prefs.appearance,
+            dynamicColor = prefs.dynamicColor,
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
@@ -478,6 +482,21 @@ class DictationViewModel internal constructor(
                 "keepAudioOnCancel" -> setKeepAudioOnCancel(value as Boolean)
                 "handsFreeDictationEnabled" -> setHandsFree(value as Boolean)
                 "history_retention" -> setRetention(Retention.valueOf(value as String))
+                "keepRecordingsInHistory" -> setKeepRecordings(value as Boolean)
+                "silenceDetectionEnabled" -> setSilence(_state.value.silence.copy(enabled = value as Boolean))
+                "silenceThreshold" -> setSilence(_state.value.silence.copy(threshold = value as Double))
+                "silenceDuration" -> setSilence(_state.value.silence.copy(durationSeconds = value as Double))
+                "autoCorrectionsEnabled" -> setLearnCorrections(value as Boolean)
+                "autoCorrectionsPromotionThreshold" -> setCorrectionPromotionThreshold((value as Long).toInt())
+                "recordingSoundsEnabled" ->
+                    setRecordingSounds(_state.value.recordingSounds.copy(enabled = value as Boolean))
+                "recordingSoundProfile" -> setRecordingSounds(
+                    _state.value.recordingSounds.copy(profile = RecordingSoundProfile.fromId(value as String)),
+                )
+                "recordingSoundVolume" ->
+                    setRecordingSounds(_state.value.recordingSounds.copy(volume = (value as Double).toFloat()))
+                "appearance" -> setAppearance(AppAppearance.fromRawValue(value as String), _state.value.dynamicColor)
+                "dynamicColor" -> setAppearance(_state.value.appearance, value as Boolean)
                 else -> error("No raw-configuration binding for $key")
             }
         }
@@ -502,6 +521,12 @@ class DictationViewModel internal constructor(
         prefs.handsFreeEnabled = enabled
         _state.update { it.copy(handsFreeEnabled = enabled) }
         if (!enabled) handsFree.disarm()
+    }
+
+    fun setAppearance(appearance: AppAppearance, dynamicColor: Boolean) {
+        prefs.appearance = appearance
+        prefs.dynamicColor = dynamicColor
+        _state.update { it.copy(appearance = appearance, dynamicColor = dynamicColor) }
     }
 
     /** Applies from the next Cloud recording; recordings already in History stay until removed. */

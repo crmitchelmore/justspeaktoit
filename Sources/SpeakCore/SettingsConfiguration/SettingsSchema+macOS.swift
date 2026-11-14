@@ -193,7 +193,7 @@ extension SettingsSchema {
               defaultValue: .string(RecordingFeedbackDefaults.profile.rawValue),
               allowedValues: names(RecordingFeedbackProfile.self)),
         Field(key: "recordingSoundVolume", kind: .number, summary: "Start and stop sound volume.",
-              defaultValue: .double(RecordingFeedbackDefaults.volume), range: 0.02...1)
+              defaultValue: .double(RecordingFeedbackDefaults.volume), range: RecordingFeedbackDefaults.volumeRange)
     ]
 
     private static let voiceOutputFields: [Field] = [

@@ -44,10 +44,13 @@ class RawConfigurationSchema(
                 fields = (0 until fields.length()).map { index ->
                     val field = fields.getJSONObject(index)
                     val allowed = field.optJSONArray("allowedValues")
+                    val type = field.getString("type")
+                    val default = if (field.has("default")) RawConfiguration.plain(field.get("default")) else null
                     RawConfigurationField(
                         key = field.getString("key"),
-                        type = field.getString("type"),
-                        default = if (field.has("default")) RawConfiguration.plain(field.get("default")) else null,
+                        type = type,
+                        // JSON writes 2.0 as 2; a number field's default is a Double, as validated values are.
+                        default = if (type == "number" && default is Number) default.toDouble() else default,
                         allowedValues = allowed?.let { array -> (0 until array.length()).map(array::getString) },
                         minimum = if (field.has("minimum")) field.getDouble("minimum") else null,
                         maximum = if (field.has("maximum")) field.getDouble("maximum") else null,

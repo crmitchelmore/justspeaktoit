@@ -54,7 +54,15 @@ interface DictationPreferences {
 
     /** Whether the record button arms hands-free dictation for Cloud recordings. */
     var handsFreeEnabled: Boolean
+
+    var appearance: AppAppearance
+
+    /** Wallpaper (Material You) colours instead of the brand palette; Android 12 and later only. */
+    var dynamicColor: Boolean
 }
+
+/** The float's shortest decimal as a double, so a stored 0.05f reads back as 0.05, not 0.0500000007. */
+internal fun Float.decimal(): Double = toString().toDouble()
 
 /** Non-secret choices. Secrets live in the Keystore-backed `SecretStore`, never here. */
 class AppPreferences(context: Context) : DictationPreferences {
@@ -157,19 +165,19 @@ class AppPreferences(context: Context) : DictationPreferences {
         get() = RecordingSoundSettings(
             enabled = prefs.getBoolean(KEY_SOUNDS_ENABLED, RecordingSoundSettings.DEFAULT_ENABLED),
             profile = RecordingSoundProfile.fromId(prefs.getString(KEY_SOUND_PROFILE, null)),
-            volume = prefs.getFloat(KEY_SOUND_VOLUME, RecordingSoundSettings.DEFAULT_VOLUME).coerceIn(0f, 1f),
+            volume = RecordingSoundSettings.clampVolume(prefs.getFloat(KEY_SOUND_VOLUME, RecordingSoundSettings.DEFAULT_VOLUME)),
         )
         set(value) = prefs.edit {
             putBoolean(KEY_SOUNDS_ENABLED, value.enabled)
             putString(KEY_SOUND_PROFILE, value.profile.id)
-            putFloat(KEY_SOUND_VOLUME, value.volume.coerceIn(0f, 1f))
+            putFloat(KEY_SOUND_VOLUME, RecordingSoundSettings.clampVolume(value.volume))
         }
 
     override var silence: SilenceSettings
         get() = SilenceSettings.of(
             enabled = prefs.getBoolean(KEY_SILENCE_ENABLED, false),
-            threshold = prefs.getFloat(KEY_SILENCE_THRESHOLD, SilenceSettings.DEFAULT_THRESHOLD.toFloat()).toDouble(),
-            durationSeconds = prefs.getFloat(KEY_SILENCE_DURATION, SilenceSettings.DEFAULT_DURATION.toFloat()).toDouble(),
+            threshold = prefs.getFloat(KEY_SILENCE_THRESHOLD, SilenceSettings.DEFAULT_THRESHOLD.toFloat()).decimal(),
+            durationSeconds = prefs.getFloat(KEY_SILENCE_DURATION, SilenceSettings.DEFAULT_DURATION.toFloat()).decimal(),
         )
         set(value) = prefs.edit {
             putBoolean(KEY_SILENCE_ENABLED, value.enabled)
@@ -186,12 +194,11 @@ class AppPreferences(context: Context) : DictationPreferences {
         get() = if (prefs.contains(KEY_ONBOARDING)) prefs.getBoolean(KEY_ONBOARDING, false) else null
         set(value) = prefs.edit { if (value == null) remove(KEY_ONBOARDING) else putBoolean(KEY_ONBOARDING, value) }
 
-    var appearance: AppAppearance
+    override var appearance: AppAppearance
         get() = AppAppearance.fromRawValue(prefs.getString(KEY_APPEARANCE, null))
         set(value) = prefs.edit { putString(KEY_APPEARANCE, value.rawValue) }
 
-    /** Wallpaper (Material You) colours instead of the brand palette; Android 12 and later only. */
-    var dynamicColor: Boolean
+    override var dynamicColor: Boolean
         get() = prefs.getBoolean(KEY_DYNAMIC_COLOR, false)
         set(value) = prefs.edit { putBoolean(KEY_DYNAMIC_COLOR, value) }
 

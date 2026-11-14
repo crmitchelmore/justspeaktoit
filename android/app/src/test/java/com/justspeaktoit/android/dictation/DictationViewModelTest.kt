@@ -11,8 +11,11 @@ import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RawConfigurationValues
+import com.justspeaktoit.android.settings.RecordingSoundProfile
+import com.justspeaktoit.android.settings.RecordingSoundSettings
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -627,6 +630,17 @@ class DictationViewModelTest {
             "keepAudioOnCancel" to false,
             "handsFreeDictationEnabled" to true,
             "history_retention" to "Forever",
+            "keepRecordingsInHistory" to true,
+            "silenceDetectionEnabled" to true,
+            "silenceThreshold" to 0.1,
+            "silenceDuration" to 3.5,
+            "autoCorrectionsEnabled" to false,
+            "autoCorrectionsPromotionThreshold" to 5L,
+            "recordingSoundsEnabled" to false,
+            "recordingSoundProfile" to "soft",
+            "recordingSoundVolume" to 0.4,
+            "appearance" to "dark",
+            "dynamicColor" to true,
         )
         var applied = false
         h.onMain { applied = vm.applyConfiguration(changes) }
@@ -642,6 +656,13 @@ class DictationViewModelTest {
         assertFalse(h.prefs.keepAudioOnCancel)
         assertTrue(h.prefs.handsFreeEnabled)
         assertEquals(Retention.Forever, h.prefs.retention)
+        assertTrue(h.prefs.keepRecordings)
+        assertEquals(SilenceSettings(enabled = true, threshold = 0.1, durationSeconds = 3.5), h.prefs.silence)
+        assertFalse(h.prefs.learnCorrections)
+        assertEquals(5, h.prefs.correctionPromotionThreshold)
+        assertEquals(RecordingSoundSettings(false, RecordingSoundProfile.Soft, 0.4f), h.prefs.recordingSounds)
+        assertEquals(AppAppearance.Dark, h.prefs.appearance)
+        assertTrue(h.prefs.dynamicColor)
     }
 
     @Test

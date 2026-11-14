@@ -133,6 +133,8 @@ class MainActivity : ComponentActivity() {
                     tipStore.connect()
                     // The keyboard may have learned corrections since the app last looked.
                     viewModel.refreshLearnedCorrections()
+                    // As the Apple key pages do on open; it never blocks typing a key.
+                    viewModel.refreshBalances()
                 }
             }
             var appearance by appearanceState
@@ -161,6 +163,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = { screen = Screen.Dictation },
                                 onSaveKey = viewModel::saveKey,
                                 onRemoveKey = viewModel::removeKey,
+                                onCheckBalance = viewModel::checkBalance,
                                 onChooseModel = viewModel::chooseCloudModel,
                                 onCleanupChanged = viewModel::setCleanupEnabled,
                                 onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,

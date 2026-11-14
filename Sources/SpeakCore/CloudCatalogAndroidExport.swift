@@ -130,6 +130,9 @@ public enum CloudCatalogAndroidExport {
         return data
     }
 
+    /// The credential identifiers Android stores, in settings order.
+    static var providerCredentialIdentifiers: [String] { providers.map(\.credentialId) }
+
     /// Transcription providers, then OpenRouter, then the remaining native text providers.
     private static var providers: [Provider] {
         var ids = transcriptionProviderIDs + [OpenRouterService.providerID]

@@ -37,8 +37,11 @@ extension SettingsSearchCatalog {
         ),
         SettingsSearchEntry(
             id: "desktop.apiKeys", title: "API Keys", section: .apiKeys, systemImage: "key.fill",
-            summary: "Add, validate and remove provider API keys.",
-            keywords: ["manage api keys", "credentials", "token", "openrouter key", "openai key", "deepgram key"],
+            summary: "Add, validate and remove provider API keys, and check account balances.",
+            keywords: [
+                "manage api keys", "credentials", "token", "openrouter key", "openai key", "deepgram key", "balance",
+                "credit", "billing"
+            ],
             platforms: .linux
         ),
         SettingsSearchEntry(
@@ -177,10 +180,10 @@ extension SettingsSearchCatalog {
         ),
         SettingsSearchEntry(
             id: "windows.apiKeys", title: "API keys", section: .apiKeys, systemImage: "key.fill",
-            summary: "Add, validate and remove provider API keys in Windows Credential Manager.",
+            summary: "Add, validate and remove provider API keys in Windows Credential Manager, and check balances.",
             keywords: [
                 "manage api keys", "credentials", "credential manager", "token", "openrouter key", "openai key",
-                "deepgram key", "save key"
+                "deepgram key", "save key", "balance", "credit", "billing"
             ],
             platforms: .windows
         ),

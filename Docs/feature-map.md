@@ -117,7 +117,7 @@ The flags live in `Project.swift`; release selection is in
 | F29 | Troubleshooting page | Yes | Yes | Yes | Yes | No | #1634 | Phone rules shared in SpeakCore; Android to port them. |
 | F30 | Onboarding and permissions guide | Yes | Yes | Yes | Yes | Yes | | |
 | F31 | API keys page | Yes | Yes | Yes | Yes | Yes | | |
-| F32 | Provider credit balances | Yes | Yes | No | No | No | #1621 | |
+| F32 | Provider credit balances | Yes | Yes | Yes | Yes | Yes | | Android reads OpenRouter; its other providers link to billing. |
 | F33 | Configuration export/import and backup | Yes | Yes | Partial | Partial | No | #1635 | |
 | F34 | Raw settings editor and config tools | Yes | Partial | Partial | Partial | Partial | #1608 | iOS and Android have the raw JSON editor but no automation server, so no config tools. Windows and Linux have `speak config` and MCP `get_configuration`/`set_configuration`; no raw JSON editor window yet (#1670). |
 | F35 | Automation (CLI, MCP, App Intents) | Yes | Yes | Yes | Yes | Limited | | |
@@ -419,13 +419,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Guidance per provider: [API key guidance](api-key-guidance.md). Tests use a disposable Keychain (`scripts/with-test-keychain.py`).
 
 ### F32 Provider credit balances
-- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Windows, Linux, Android #1621.
-- **How:** Read-only balance per provider that exposes one; show nothing for providers without a supported endpoint.
-- **Refs:** `Sources/SpeakCore/Balance/ProviderBalance.swift`, `Sources/SpeakCore/Balance/ProviderBalanceDirectory.swift`, `Sources/SpeakCore/AppleUI/ProviderBalanceView.swift`
+- **Gaps:** none
+- **How:** Read-only balance beside each provider's primary key card, for providers that expose one; others state why and link to billing. Checks run on page open, after a save and on Check balance, never block key entry and never show or log the key.
+- **Refs:** `Sources/SpeakCore/Balance/ProviderBalance.swift`, `Sources/SpeakCore/Balance/ProviderBalanceDirectory.swift`, `Sources/SpeakCore/Balance/ProviderBalanceSources.swift`, `Sources/SpeakCore/AppleUI/ProviderBalanceView.swift`, `Sources/SpeakDesktopHost/Credentials/DesktopProviderBalances.swift`, `Sources/CWindowsSupport/WindowsAPIKeysPage.cpp`, `Sources/CLinuxSupport/LinuxAPIKeys.c`, `android/app/src/main/java/com/justspeaktoit/android/cloud/ProviderBalanceStore.kt`
 - **Sunset:** none
-- **Nuances:** See [provider balances](provider-balances.md).
+- **Nuances:** See [provider balances](provider-balances.md). Android's account list is exported from SpeakCore (`provider_balances.json`); a new readable account needs a Kotlin client or `ProviderBalancesTest` fails.
 
 ### F33 Configuration export/import and backup
 - **Platforms:** macOS Yes · iOS Yes · Windows Partial · Linux Partial · Android No

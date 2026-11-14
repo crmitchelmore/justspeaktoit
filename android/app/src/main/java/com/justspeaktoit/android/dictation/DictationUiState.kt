@@ -3,6 +3,8 @@ package com.justspeaktoit.android.dictation
 import android.net.Uri
 import com.justspeaktoit.android.cloud.AudioInput
 import com.justspeaktoit.android.cloud.AudioInputChoice
+import com.justspeaktoit.android.cloud.BalanceAccount
+import com.justspeaktoit.android.cloud.BalanceEntry
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
@@ -43,6 +45,12 @@ data class DictationUiState(
     val keyStoreError: Boolean = false,
     /** Providers whose key last failed to save, be read or be accepted, for the Errors filter. */
     val keyErrors: Set<CloudProvider> = emptySet(),
+    /** Balance accounts keyed by the credential whose card shows the balance. */
+    val balanceAccounts: Map<String, BalanceAccount> = emptyMap(),
+    /** Accounts whose balance Android can read once their key is saved. */
+    val checkableBalances: Set<String> = emptySet(),
+    /** Checked or checking balances by account id; never holds a key. */
+    val balances: Map<String, BalanceEntry> = emptyMap(),
     /** True until a discarded recording has released the microphone. */
     val releasingMicrophone: Boolean = false,
     /** A Cloud recording paused while another app holds audio focus. */

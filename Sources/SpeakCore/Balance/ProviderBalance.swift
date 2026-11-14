@@ -191,7 +191,9 @@ public enum ProviderBalanceFormatter {
         #else
         // swift-corelibs has no RelativeDateTimeFormatter. An absolute timestamp
         // still states when the value was verified without implying freshness.
-        let formatter = ISO8601DateFormatter()
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
         return "Checked \(formatter.string(from: snapshot.refreshedAt))"
         #endif
     }

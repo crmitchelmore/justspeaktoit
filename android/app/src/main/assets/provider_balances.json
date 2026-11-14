@@ -1,0 +1,72 @@
+{
+  "accounts" : [
+    {
+      "billingUrl" : "https://platform.openai.com/settings/organization/billing/overview",
+      "credentialIds" : [
+        "openai.apiKey",
+        "openai.tts.apiKey"
+      ],
+      "displayName" : "OpenAI",
+      "id" : "openai",
+      "primaryCredentialId" : "openai.apiKey",
+      "reason" : "OpenAI's admin API reports costs already incurred, not a wallet balance, and it needs an admin key this app does not hold.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://console.groq.com/settings/billing",
+      "credentialIds" : [
+        "groq.apiKey"
+      ],
+      "displayName" : "Groq",
+      "id" : "groq",
+      "primaryCredentialId" : "groq.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://openrouter.ai/credits",
+      "credentialIds" : [
+        "openrouter.apiKey"
+      ],
+      "displayName" : "OpenRouter",
+      "id" : "openrouter",
+      "primaryCredentialId" : "openrouter.apiKey",
+      "support" : "balance"
+    },
+    {
+      "billingUrl" : "https://platform.claude.com/settings/billing",
+      "credentialIds" : [
+        "anthropic.apiKey"
+      ],
+      "displayName" : "Anthropic",
+      "id" : "anthropic",
+      "primaryCredentialId" : "anthropic.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://aistudio.google.com/app/plan_information",
+      "credentialIds" : [
+        "google.apiKey"
+      ],
+      "displayName" : "Google Gemini",
+      "id" : "google",
+      "primaryCredentialId" : "google.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://console.mistral.ai/billing",
+      "credentialIds" : [
+        "mistral.apiKey"
+      ],
+      "displayName" : "Mistral",
+      "id" : "mistral",
+      "primaryCredentialId" : "mistral.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    }
+  ],
+  "requestTimeoutSeconds" : 15,
+  "version" : 1
+}

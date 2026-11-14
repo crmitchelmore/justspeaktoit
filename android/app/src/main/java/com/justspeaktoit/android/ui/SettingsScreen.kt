@@ -109,6 +109,7 @@ class SettingsActions(
     val onSilenceChanged: (SilenceSettings) -> Unit = {},
     val onRunSetup: () -> Unit = {},
     val onAppearanceChanged: (AppearanceChoice) -> Unit = {},
+    val onCheckBalance: (CloudProvider) -> Unit = {},
 )
 
 /** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
@@ -400,6 +401,9 @@ fun SettingsScreen(
                     failed = provider in state.keyErrors,
                     actions,
                     anchor("${SettingsSearchIndex.KEY_PREFIX}${provider.id}"),
+                    balance = state.balanceAccounts[provider.credentialId]?.let { account ->
+                        KeyBalance(account, account.id in state.checkableBalances, state.balances[account.id])
+                    },
                 )
             }
 

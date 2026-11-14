@@ -20,6 +20,8 @@ final class WindowsEventContext: DesktopNativeEventHolder {
     let historyPaste = DesktopHistoryPasteAdmission()
     lazy var commandPalette = WindowsCommandPalette(history: controller.paletteHistory)
     let postProcessingPicker = DesktopPostProcessingPicker()
+    /// Provider balances beside API keys, on their own channel to the dialog.
+    let balances: DesktopProviderBalances
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
     lazy var automation = WindowsAutomationSwitch(controller: controller)
     lazy var systemResources = WindowsSystemResources.makeMonitor()
@@ -41,6 +43,10 @@ final class WindowsEventContext: DesktopNativeEventHolder {
             await controller.copyTranscript(text, variant: variant)
         }
         self.historyEvents = Self.makeHistoryEvents(controller)
+        self.balances = DesktopProviderBalances(
+            readKey: { await controller.savedAPIKeyForBalance(identifier: $0) },
+            publish: { WindowsNative.presentAPIKeyBalance($0) }
+        )
         callbacks = NativeCallbackContext(self)
     }
 

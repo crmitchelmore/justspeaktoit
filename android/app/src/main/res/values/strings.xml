@@ -101,6 +101,15 @@
     <string name="settings_key_label">%1$s API key</string>
     <string name="action_save">Save</string>
     <string name="action_remove">Remove</string>
+    <string name="settings_key_balance_not_shown">Balance: not shown here. %1$s</string>
+    <string name="settings_key_balance_needs_key">Balance: save a %1$s key to see the account balance.</string>
+    <string name="settings_key_balance_idle">Balance: not checked yet. Choose Check balance.</string>
+    <string name="settings_key_balance_checking">Balance: checking…</string>
+    <string name="settings_key_balance_checked">%1$s Checked %2$s.</string>
+    <string name="action_check_balance">Check balance</string>
+    <string name="action_check_balance_description">Check %1$s balance</string>
+    <string name="action_open_billing">Open billing page</string>
+    <string name="action_open_billing_description">Open %1$s billing page</string>
     <string name="settings_cloud_model_title">Cloud transcription model</string>
     <string name="settings_language_title">Dictation language</string>
     <string name="settings_language_note">The language you speak. Automatic uses your phone\'s language. Applies to every mode, the keyboard and shared audio from the next dictation.</string>

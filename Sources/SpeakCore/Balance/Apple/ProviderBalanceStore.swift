@@ -47,12 +47,7 @@ public final class ProviderBalanceStore: ObservableObject {
     /// Only providers with a documented balance contract get a transport.
     /// Everything else is a billing link, decided by `ProviderBalanceDirectory`.
     public static func defaultSources(session: URLSession = .shared) -> [any ProviderBalanceSource] {
-        [
-            DeepgramBalanceClient(session: session),
-            RevAIBalanceClient(session: session),
-            ElevenLabsBalanceClient(session: session),
-            OpenRouterBalanceClient(session: session)
-        ]
+        ProviderBalanceSources.defaults(session: session)
     }
 
     /// Supplies the credential reader. Kept separate from `init` so the store

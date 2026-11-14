@@ -1,8 +1,8 @@
 # Provider credit balances and allowances
 
 Settings shows what each provider account currently holds, beside the API key
-that unlocks it, on both macOS and iOS. This page records what is shown, what
-is deliberately not shown, and why.
+that unlocks it, on macOS, iOS, Windows, Linux and Android. This page records
+what is shown, what is deliberately not shown, and why.
 
 ## The model
 
@@ -37,9 +37,33 @@ and unknown are not, and the views style them accordingly.
 | ElevenLabs | `GET /v1/user/subscription` | `allowance` (or `freeQuota` on the free tier) of characters, with the reset date |
 | OpenRouter | `GET /api/v1/credits` | `cash` of `total_credits - total_usage` |
 
-All four reuse the Keychain credential the account already stores; none needs an
-extra key. No balance credential is ever written to defaults or plaintext —
+All four reuse the credential the account already stores; none needs an extra
+key. No balance credential is ever written to defaults or plaintext:
 `ProviderBalanceStore` reads through `SecureStorage` and holds nothing.
+
+The clients live in portable SpeakCore (`Sources/SpeakCore/Balance/`) and send
+through `ProviderBalanceTransport`, a `URLSession` that the desktop injects
+(URLSession on Apple and Linux, the WinHTTP-backed session on Windows).
+`ProviderBalanceSources.defaults()` is the one list of readable accounts.
+
+## Per platform
+
+- **macOS and iOS** — `ProviderBalanceStore` and `ProviderBalanceView`
+  (`Sources/SpeakCore/AppleUI/`) render the figure on each primary key card and
+  refresh when the page opens.
+- **Windows and Linux** — `DesktopProviderBalances` (SpeakDesktopHost) owns the
+  checks; the native API Keys pages show a `Balance:` line under the selected
+  provider and a **Check balance** button. Saved keys are checked when the page
+  opens and after a key is saved; checks run off the key-entry path and never
+  block it. The finished line is announced to screen readers.
+- **Android** — `ProviderBalanceAndroidExport` writes
+  `android/app/src/main/assets/provider_balances.json` (regenerate with
+  `scripts/update-android-assets`), the directory account for each Android key.
+  `ProviderBalanceStore.kt` reads balances with the Kotlin clients in
+  `ProviderBalances.kt`; only OpenRouter is readable among Android's providers,
+  and the others show the stated reason and an **Open billing page** link.
+  `ProviderBalancesTest` checks that every readable account in the asset has a
+  Kotlin client and that its wording matches SpeakCore.
 
 ## What is deliberately a billing link only
 

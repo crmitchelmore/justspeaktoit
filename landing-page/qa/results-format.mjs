@@ -7,8 +7,16 @@ export const MAX_NOTE_LENGTH = 2000;
 export const MAX_ISSUE_URL_LENGTH = 7500;
 
 // Backticks would let a note close the fence, so encode them inside the JSON.
-export function encodeResultsBlock(catalogue, results) {
-  const json = JSON.stringify({ format: RESULTS_FORMAT, catalogue, results }).replace(/`/g, '\\u0060');
+// compact moves passes and skips into id lists, so a full run's link grows by
+// little more than each check's id.
+export function encodeResultsBlock(catalogue, results, compact = false) {
+  const block = { format: RESULTS_FORMAT, catalogue, results };
+  if (compact) {
+    const ids = kind => results.filter(entry => entry.result === kind && !entry.note).map(entry => entry.id);
+    block.results = results.filter(entry => !(entry.result === 'pass' || entry.result === 'skip') || entry.note);
+    for (const kind of ['pass', 'skip']) if (ids(kind).length) block[kind] = ids(kind);
+  }
+  const json = JSON.stringify(block).replace(/`/g, '\\u0060');
   return `\`\`\`${RESULTS_FENCE}\n${json}\n\`\`\``;
 }
 
@@ -38,7 +46,7 @@ export function formatResultsIssue({ catalogue, results, items, date, compact = 
     }
   }
   if (compact) lines.push(`- Passes and skips: see the results block (${summary.join(', ')}).`);
-  lines.push('', '<!-- Machine-readable results: do not edit below this line. -->', encodeResultsBlock(catalogue, results));
+  lines.push('', '<!-- Machine-readable results: do not edit below this line. -->', encodeResultsBlock(catalogue, results, compact));
   return { title, body: lines.join('\n') };
 }
 

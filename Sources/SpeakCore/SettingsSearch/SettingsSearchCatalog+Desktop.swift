@@ -58,7 +58,11 @@ extension SettingsSearchCatalog {
         SettingsSearchEntry(
             id: "desktop.model", title: "Model", section: .transcription, systemImage: "waveform",
             summary: "The transcription model and its provider key.",
-            keywords: ["transcription model", "model picker", "provider", "api key for the selected provider"],
+            keywords: [
+                "transcription model", "model picker", "provider", "api key for the selected provider",
+                "browse openrouter models", "openrouter models", "model browser", "model pricing",
+                "zero listed prices"
+            ],
             settingKeys: ["liveTranscriptionModel", "batchTranscriptionModel", "transcriptionMode"],
             platforms: [.windows, .linux]
         ),
@@ -88,7 +92,8 @@ extension SettingsSearchCatalog {
             summary: "Turn post-processing on and choose a local or remote model and prompt.",
             keywords: [
                 "enable post-processing", "polish", "llm", "openrouter", "model source", "local", "remote",
-                "instructions", "prompt", "lexicon directives"
+                "instructions", "prompt", "lexicon directives", "browse openrouter models", "openrouter models",
+                "model browser", "model pricing", "zero listed prices"
             ],
             settingKeys: [
                 "postProcessingEnabled", "postProcessingModel", "postProcessingIncludeLexiconDirectives",

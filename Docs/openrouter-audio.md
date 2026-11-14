@@ -73,7 +73,11 @@ acceptance across the changing catalogue is separate from these mocked contracts
 
 Browser copy, ordering and the search/provider/zero-price filter live in
 `OpenRouterModelBrowserCatalog` and `OpenRouterBrowserFilter` (SpeakCore), so
-other platforms reuse them. Windows, Linux and Android have no OpenRouter
+other platforms reuse them. Windows and Linux build their browser pages from them
+in `DesktopOpenRouterBrowser` (SpeakDesktop): the Transcription page shows
+**Browse OpenRouter models…** for Remote Batch only, the browser offers the
+OpenRouter batch routes the picker lists (bundled, then discovered), and choosing
+one selects that route, labelled `OpenRouter › name`. Android has no OpenRouter
 transcription browser yet (#1618).
 
 Issue #821 remains open for progressive speech playback, provider-specific cost

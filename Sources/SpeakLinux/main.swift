@@ -2,6 +2,7 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
+import SpeakDesktopNativeBindings
 import SpeakLinuxPlatform
 import CLinuxSupport
 
@@ -55,6 +56,7 @@ func runSelfTest() throws {
 /// until the window closes, then drains every queue and closes the controller.
 func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
     try LinuxWindow.configureAbout()
+    try DesktopNativeBindings.configureOpenRouterBrowser()
     try LinuxWindow.configureTroubleshooting(holder)
     defer { jsti_troubleshooting_clear() }
     try LinuxWindow.configureAPIKeys(holder)

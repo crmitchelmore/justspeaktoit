@@ -14,6 +14,8 @@ typedef struct ModelsPage {
     AdwComboRow *model_row;
     GtkLabel *catalog_status;
     GtkButton *catalog_refresh;
+    /* Browse OpenRouter models… (#1618): Remote Batch only, as OpenRouter cannot stream. */
+    GtkWidget *openrouter_browse;
     AdwPasswordEntryRow *key_row;
     /* Shown while an Azure model is selected: live routes need the endpoint. */
     AdwEntryRow *azure_row;

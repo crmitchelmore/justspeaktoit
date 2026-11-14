@@ -60,6 +60,7 @@ final class DesktopSettingsSearchTests: XCTestCase {
         "Dictation preferences": "Container dialog; every DesktopConfiguration field is indexed.",
         "App profiles": "Dialog opened by Per-app profiles, which is indexed.",
         "Post-processing": "Dialog opened by Clean-up; the Post-processing page root is indexed.",
+        "Browse OpenRouter models": "Dialog opened from Model and Clean-up, whose keywords index it.",
         "Voice output": "Dialog opened by Read aloud; the Voice Output page root is indexed.",
         "Corrections": "Editor opened by Personal corrections, which is indexed.",
         "Pronunciation": "Editor opened by Pronunciation dictionary, which is indexed.",
@@ -113,6 +114,14 @@ final class DesktopSettingsSearchTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(session.choose(0)).destination, .general)
         XCTAssertEqual(session.results(for: "").first?.title, "Microphone")
         XCTAssertNil(session.choose(99))
+    }
+
+    func testBrowseOpenRouterModelsFindsBothPickers() {
+        for platform: SettingsSearchPlatforms in [.windows, .linux] {
+            let titles = Set(DesktopSettingsSearchSession(platform: platform)
+                .results(for: "browse openrouter models").map(\.title))
+            XCTAssertTrue(titles.isSuperset(of: ["Model", "Clean-up"]), "\(platform): \(titles)")
+        }
     }
 
     func testDesktopPagesHaveRootsAndTargets() {

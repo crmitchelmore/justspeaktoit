@@ -7,6 +7,7 @@
 #include "VoiceAudioCodec.h"
 #include "VoiceCredentials.h"
 #include "LocalCleanup.h"
+#include "OpenRouterBrowser.h"
 #include "Onboarding.h"
 
 /* Domain headers, in declaration order. */

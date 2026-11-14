@@ -68,6 +68,16 @@ gboolean jsti_model_filters_live(void);
 gboolean jsti_model_filters_preferred_live(gboolean local);
 int32_t jsti_model_filters_self_test(char *error, size_t capacity);
 
+/* LinuxOpenRouterBrowser.c: Browse OpenRouter models… (#1618), a modal window
+ * over the host's JSTIOpenRouterBrowserQuery. `purpose` is
+ * JSTI_OPENROUTER_BROWSER_*; `selected_slot` is the picker's current choice.
+ * Choose closes the window, then calls `chosen` with the row's slot. Main thread. */
+typedef void (*jsti_openrouter_chosen_fn)(int32_t slot);
+void jsti_openrouter_browser_open(struct _GtkWindow *owner, int32_t purpose, int32_t selected_slot,
+                                  jsti_openrouter_chosen_fn chosen);
+void jsti_openrouter_browser_close(void);
+int32_t jsti_openrouter_browser_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
+
 /* LinuxSettingsSearch.c: the sidebar's settings search. Returns the entry over
  * a stack that shows `navigation` (the page list) or the results. Ctrl+F and
  * Ctrl+K call jsti_settings_search_focus. Main thread. */

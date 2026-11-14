@@ -1918,6 +1918,21 @@ sessions:
           - "Restore a Mac export (Settings \u203a Data & Migration on the Mac) and read the preview's skipped items. With Narrator on, listen to each prompt and switch."
         expected: "Nothing changes until Merge or Replace. The preview lists counts and conflicts for settings, connections, vocabulary, History and recordings, and says the backup's API keys were left out unless you chose them. Restoring brings everything back in one step; API keys move only when chosen on both save and restore. Model files are never copied: the preview names models to download from Local models. A Mac export restores what this device supports and lists what it skipped, without changing anything else."
         final_gate: false
+      - id: "windows-openrouter-model-browser"
+        issues:
+          - 1618
+        title: "Browse OpenRouter models for transcription and cleanup, check details, then choose one"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Windows, an Alpha build that includes the #1618 desktop OpenRouter browser"
+        steps:
+          - "Settings \u203a Transcription: choose Remote and Batch. Check Browse OpenRouter models\u2026 appears beside Refresh models, then switch to Live or Local and check it disappears."
+          - "Back on Remote Batch, open Browse OpenRouter models\u2026. Search for a made-up name, then clear it; choose a provider and turn on Zero listed prices, then turn it off and choose All providers."
+          - "Select a model and read its pricing in the details pane, then choose it. Check the model picker now shows OpenRouter \u203a the model name."
+          - "Settings \u203a Post-processing, Clean-up: choose the Remote source, open Browse OpenRouter models\u2026, choose a cleanup model and press Apply. Reopen the browser and check that model is marked as selected."
+          - "With Narrator on, repeat the search and filters using only the keyboard, then press Escape to close the browser."
+        expected: "The browser lists only OpenRouter models the picker offers, narrows as you search and filter, and shows a clear message when nothing matches. The details pane shows pricing (or says it is not listed) before choosing. A chosen transcription model shows as OpenRouter \u203a name; a chosen cleanup model is kept after Apply. Narrator reads every control's name and the result count, and Escape closes the browser without changing the model."
+        final_gate: false
   - id: "linux"
     device: "Linux"
     title: "Linux"
@@ -1998,6 +2013,21 @@ sessions:
           - "Save a second backup with API keys included, change one key, then restore it with API keys included and choose Replace."
           - "Restore a Mac export (Settings \u203a Data & Migration on the Mac) and read the preview's skipped items. With Orca on, listen to each prompt and switch."
         expected: "Nothing changes until Merge or Replace. The preview lists counts and conflicts for settings, connections, vocabulary, History and recordings, and says the backup's API keys were left out unless you chose them. Restoring brings everything back in one step; API keys move only when chosen on both save and restore. Model files are never copied: the preview names models to download from Local models. A Mac export restores what this device supports and lists what it skipped, without changing anything else."
+        final_gate: false
+      - id: "linux-openrouter-model-browser"
+        issues:
+          - 1618
+        title: "Browse OpenRouter models for transcription and cleanup, check details, then choose one"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Linux, an Alpha build that includes the #1618 desktop OpenRouter browser"
+        steps:
+          - "Settings \u203a Transcription: choose Remote and Batch. Check Browse OpenRouter models\u2026 appears beside Refresh models, then switch to Live or Local and check it disappears."
+          - "Back on Remote Batch, open Browse OpenRouter models\u2026. Search for a made-up name, then clear it; choose a provider and turn on Zero listed prices, then turn it off and choose All providers."
+          - "Select a model and read its pricing in the details pane, then choose it. Check the model picker now shows OpenRouter \u203a the model name."
+          - "Settings \u203a Post-processing: choose the Remote source, open Browse OpenRouter models\u2026, choose a cleanup model and press Apply. Reopen the browser and check that model is marked as selected."
+          - "With Orca on, repeat the search and filters using only the keyboard, then press Escape to close the browser."
+        expected: "The browser lists only OpenRouter models the picker offers, narrows as you search and filter, and shows a clear message when nothing matches. The details pane shows pricing (or says it is not listed) before choosing. A chosen transcription model shows as OpenRouter \u203a name; a chosen cleanup model is kept after Apply. Orca reads every control's name and the result count, and Escape closes the browser without changing the model."
         final_gate: false
   - id: "decisions"
     device: "Decision"

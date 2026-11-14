@@ -32,13 +32,22 @@ public enum DesktopPostProcessing {
     }
 
     public static func nativeModels(selected: String?, rememberedRemote: String?) -> [ModelCatalog.Option] {
+        nativeChoices(selected: selected, rememberedRemote: rememberedRemote).models
+    }
+
+    /// The native picker's list and the OpenRouter browser over it, read from one
+    /// discovery snapshot so every browser slot is an index into `models`.
+    package static func nativeChoices(
+        selected: String?, rememberedRemote: String?
+    ) -> (models: [ModelCatalog.Option], browser: DesktopOpenRouterBrowser) {
         var remote = CleanupModelDiscoveryStore.shared.options(selected: selected)
         if let rememberedRemote, !remote.contains(where: { $0.id == rememberedRemote }),
            let retained = CleanupModelSelection.retainedOption(rememberedRemote) { remote.append(retained) }
-        return ModelPickerGrouping.flattened(remote, purpose: .postProcessing) + localModels
+        let models = ModelPickerGrouping.flattened(remote, purpose: .postProcessing) + localModels
             + DesktopLocalLLMModels.choices(selected: selected).filter {
             LocalPostProcessingModel.isDownloadedModelID($0.id)
         }
+        return (models, DesktopOpenRouterBrowser.cleanup(remote: remote, published: models))
     }
 
     public static let localRulesNotice =

@@ -15,6 +15,8 @@ final class WindowsEventContext: DesktopNativeEventHolder {
     var screenshotDirectory: String?
     var microphoneMonitor: WindowsMicrophoneMonitor?
     var cloudSync: WindowsCloudSync?
+    var phoneReceiver: WindowsPhoneReceiver?
+    var phoneReceiverLink: WindowsPhoneReceiverLink?
     let search: WindowsSearchCoalescer
     private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher

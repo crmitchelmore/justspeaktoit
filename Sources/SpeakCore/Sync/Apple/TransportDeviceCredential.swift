@@ -6,69 +6,18 @@ import Foundation
 // See the header of `TransportSecureSession.swift` for why the pairing code is
 // used only once and how a credential replaces it.
 
-/// A high-entropy key the Mac issues to one phone after it proves the pairing
-/// code. Later sessions authenticate with it instead of the code.
-public struct TransportDeviceCredential: Codable, Equatable, Sendable {
-    static let secretByteCount = TransportProtocolConstants.credentialSecretByteCount
-
-    /// Names the credential in the phone's key share. Not secret.
-    public let id: UUID
-    /// 32 random bytes. Never sent again after the Mac issues it.
-    public let secret: Data
-
-    public init(id: UUID, secret: Data) {
-        self.id = id
-        self.secret = secret
-    }
-
-    static func generate() -> TransportDeviceCredential {
-        let secret = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
-        return TransportDeviceCredential(id: UUID(), secret: secret)
-    }
-
-    /// The credential as the Mac appends it to "server finished": id, then secret.
-    var wireBytes: Data {
-        withUnsafeBytes(of: self.id.uuid) { Data($0) } + self.secret
-    }
-
-    init?(wireBytes: Data) {
-        guard wireBytes.count == TransportProtocolConstants.credentialIDByteCount + Self.secretByteCount else {
-            return nil
-        }
-        let bytes = Array(wireBytes)
-        let id = UUID(uuid: (
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
-        ))
-        self.init(id: id, secret: Data(bytes[TransportProtocolConstants.credentialIDByteCount...]))
-    }
-}
-
-/// What the phone proves in the handshake: the six-digit code at pairing, or the
-/// credential the Mac issued then.
-public enum TransportPairingSecret: Sendable, Equatable {
-    case code(String)
-    case credential(TransportDeviceCredential)
-}
-
 // MARK: - Key schedule
 
 extension TransportKeySchedule {
     /// "Server finished", followed by a newly issued credential when there is one.
     static func serverFinished(issuing credential: TransportDeviceCredential?) -> Data {
-        Self.serverFinished + (credential?.wireBytes ?? Data())
+        TransportHandshakeLabel.serverFinished(issuing: credential)
     }
 
     /// Reads an opened "server finished" frame. Throws unless it is exactly the
     /// marker, or the marker followed by one credential.
     static func credential(inServerFinished opened: Data) throws -> TransportDeviceCredential? {
-        guard opened.starts(with: Self.serverFinished) else { throw TransportSecurityError.unauthenticatedFrame }
-        let rest = opened.dropFirst(Self.serverFinished.count)
-        guard !rest.isEmpty else { return nil }
-        guard let credential = TransportDeviceCredential(wireBytes: Data(rest)) else {
-            throw TransportSecurityError.unauthenticatedFrame
-        }
-        return credential
+        try TransportHandshakeLabel.credential(inServerFinished: opened)
     }
 
     /// The pre-shared key a phone and Mac hold once the Mac has issued `secret`.
@@ -76,9 +25,9 @@ extension TransportKeySchedule {
     static func credentialKey(for secret: Data) -> SymmetricKey {
         HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: secret),
-            salt: Data(TransportProtocolConstants.credentialKeySalt.utf8),
-            info: Data(TransportProtocolConstants.preSharedKeyInfo.utf8),
-            outputByteCount: TransportProtocolConstants.keyByteCount
+            salt: TransportHandshakeLabel.credentialKeySalt,
+            info: TransportHandshakeLabel.preSharedKeyInfo,
+            outputByteCount: 32
         )
     }
 

@@ -142,7 +142,7 @@ phone side, because Android cannot run SpeakCore's Swift sender:
 
 The constants (service types, labels, sizes, frame limits) come from
 `android/app/src/main/assets/send_to_mac_protocol.json`, which
-[`TransportProtocolConstants`](../Sources/SpeakCore/Sync/Apple/TransportProtocolConstants.swift)
+[`TransportProtocolConstants`](../Sources/SpeakCore/Sync/Transport/TransportProtocolConstants.swift)
 and [`SendToMacProtocolAndroidExport`](../Sources/SpeakCore/Sync/Apple/SendToMacProtocolAndroidExport.swift)
 generate with handshake and message test vectors from the real
 `TransportSecureSession`. `SendToMacProtocolAndroidExportTests` fails when the

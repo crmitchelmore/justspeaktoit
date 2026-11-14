@@ -77,7 +77,8 @@ public enum DesktopSettingsSearch {
 
     /// Entries whose desktop page differs from their section's usual page.
     private static let pageOverrides: [String: DesktopSettingsDestination] = [
-        "desktop.cloudSync": .cloudSync, "windows.apiKeys": .transcription, "apiKeys.azure": .transcription
+        "desktop.cloudSync": .cloudSync, "desktop.receiveFromPhone": .cloudSync,
+        "windows.apiKeys": .transcription, "apiKeys.azure": .transcription
     ]
 
     static func destination(for section: SettingsSearchSection) -> DesktopSettingsDestination {

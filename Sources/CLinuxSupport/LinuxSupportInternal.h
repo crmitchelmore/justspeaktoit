@@ -89,6 +89,9 @@ int32_t jsti_settings_search_self_test(char *error, size_t capacity);
  * iCloud sync page, and exercised by the window self-test. */
 struct _GtkWidget *jsti_cloud_sync_group_new(void);
 int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
+/* The Send from phone group (LinuxPhoneReceiver.c), shown on the same page. */
+struct _GtkWidget *jsti_phone_receiver_group_new(void);
+int32_t jsti_phone_receiver_self_test(char *error, size_t capacity);
 /* General > System resources in use (LinuxSystemResources.c): built once for
  * the window's lifetime; its self-test runs with the window's. */
 struct _GtkWidget *jsti_system_resources_group_new(void);

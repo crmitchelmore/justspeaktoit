@@ -125,11 +125,12 @@ func saveKeyEvent(_ value: String, index: Int, holder: WindowsEventContext) {
 }
 
 extension SpeakWindowsMain {
-    /// Saved automation and iCloud sync, once the window's dialogs are configured.
+    /// Saved automation, iCloud sync and Send from phone, once the window's dialogs are configured.
     static func restoreServices(_ holder: WindowsEventContext) async {
         WindowsAutomationSetup.configure()
         if !holder.smokeTest { await WindowsAutomationSwitch.restore(holder) }
         await WindowsCloudSync.configure(holder)
+        WindowsPhoneReceiver.configure(holder)
     }
 
     /// Detaches dialogs that hold the event context before it can be released.
@@ -137,5 +138,6 @@ extension SpeakWindowsMain {
         jsti_window_clear_voice_output()
         jsti_window_clear_local_models()
         await WindowsCloudSync.shutDown(holder)
+        await WindowsPhoneReceiver.shutDown(holder)
     }
 }

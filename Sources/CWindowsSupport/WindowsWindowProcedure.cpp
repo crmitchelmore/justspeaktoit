@@ -312,6 +312,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 jsti_show_cloud_sync_settings(window);
             }
             return 0;
+        case phoneReceiverID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, phoneReceiverID) && IsWindowEnabled(window)) {
+                jsti_show_phone_receiver_settings(window);
+            }
+            return 0;
         case automationSettingsID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, automationSettingsID) && IsWindowEnabled(window)) {
                 jsti_show_automation_settings(window, automationShownEnabled, requestAutomationToggle);

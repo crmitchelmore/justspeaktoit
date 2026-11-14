@@ -159,6 +159,16 @@ extension SettingsSearchCatalog {
             platforms: [.windows, .linux]
         ),
         SettingsSearchEntry(
+            id: "desktop.receiveFromPhone", title: "Send from phone", section: .general,
+            systemImage: "iphone.and.arrow.forward",
+            summary: "Receive transcripts dictated on a paired iPhone or iPad and type them at the cursor.",
+            keywords: [
+                "send to computer", "send to pc", "send to mac", "receive from phone", "pair phone", "pairing code",
+                "paired devices", "forget phone", "iphone", "ipad"
+            ],
+            platforms: [.windows, .linux]
+        ),
+        SettingsSearchEntry(
             id: "desktop.correctionLearning", title: "Correction learning", section: .corrections,
             systemImage: "character.book.closed",
             summary: "Learn corrections you make to inserted text.",

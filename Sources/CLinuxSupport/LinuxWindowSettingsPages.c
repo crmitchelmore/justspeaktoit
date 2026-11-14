@@ -235,6 +235,7 @@ GtkWidget *build_cloud_sync(void) {
     gtk_box_append(GTK_BOX(column), settings_hero(
         "iCloud Sync", "Keep History in step with your Mac, through your own iCloud account."));
     gtk_box_append(GTK_BOX(column), jsti_cloud_sync_group_new());
+    gtk_box_append(GTK_BOX(column), jsti_phone_receiver_group_new());
     return page;
 }
 

@@ -183,7 +183,7 @@ bool cleanupPreviewSelfTest(HWND window) {
 }
 
 // Results replace the list and read as "<title>, <detail>"; Enter reports the
-// chosen row and closes the search; an empty set says "No settings match";
+// chosen row and closes the search; an empty set says "No results";
 // invalid input and an unknown preference are refused.
 bool settingsSearchSelfTest(HWND window) {
     struct Observed { int event = 0, row = -1, calls = 0; std::string text; } observed;
@@ -231,7 +231,7 @@ bool settingsSearchSelfTest(HWND window) {
     okay = jsti_window_set_settings_search_results(nullptr, 0) == 0 && okay;
     SendMessageW(window, settingsSearchMessage, 0, 0);
     okay = okay && visible(settingsNoMatchID) && !visible(settingsResultsID) && !visible(navBaseID) &&
-        controlText(GetDlgItem(window, settingsNoMatchID)) == L"No settings match";
+        controlText(GetDlgItem(window, settingsNoMatchID)) == L"No results";
     closeSettingsSearch(window, true);
     okay = okay && !visible(settingsNoMatchID) && visible(navBaseID);
     state.callback = originalCallback;
@@ -253,8 +253,8 @@ bool screenReaderSelfTest(HWND window, std::string &failure) {
     };
     expect(jsti::accessibility::attached(window),
            "The main window serves no UI Automation provider, so announcements are dropped.");
-    expect(settingsSearchSummary(0) == L"No settings match" && settingsSearchSummary(1) == L"1 setting found" &&
-               settingsSearchSummary(12) == L"12 settings found",
+    expect(settingsSearchSummary(0) == L"No results" && settingsSearchSummary(1) == L"1 result found" &&
+               settingsSearchSummary(12) == L"12 results found",
            "Settings search does not summarise its results for screen readers.");
     const JSTISettingsSearchResult rows[] = {
         {"Microphone", "General - The input device.", "settingsSearchResult.general.microphone"}};

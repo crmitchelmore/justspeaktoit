@@ -142,6 +142,11 @@ int jsti_window_set_action_shortcuts(const JSTIActionShortcut *rows, size_t coun
                                      JSTIActionShortcutsRefresh refresh, void *context);
 /* Unregisters every action shortcut and drops the callbacks and context. */
 void jsti_window_clear_action_shortcuts(void);
+/* Runs one action as its shortcut would (JSTI_ACTION_RUN_*; `page` names the
+ * sidebar page for JSTI_ACTION_RUN_PAGE and may be NULL otherwise), on the UI
+ * thread after pending messages, for the command palette. Disabled controls
+ * stay disabled. Thread safe; -1 for an unknown run or no window. */
+int jsti_window_run_action(int run, const char *page);
 
 #ifdef __cplusplus
 }

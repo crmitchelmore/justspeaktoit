@@ -13,6 +13,7 @@ typedef struct StoragePage {
     GCancellable *location_chooser;
     AdwSwitchRow *backup_audio;
     AdwSwitchRow *backup_profiles;
+    AdwSwitchRow *backup_api_keys;
     GtkButton *backup_export;
     GtkButton *backup_inspect;
     GtkButton *backup_restore;

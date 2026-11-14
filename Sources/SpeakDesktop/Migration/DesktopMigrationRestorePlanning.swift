@@ -7,6 +7,8 @@ extension DesktopMigrationRestore {
         let record: DataMigrationRecord
         let id: UUID
         let replacing: Bool
+        /// Backup audio copied beside the item; only for items this restore adds.
+        var audio: AudioSource?
     }
 
     struct Computed: Sendable {
@@ -15,6 +17,13 @@ extension DesktopMigrationRestore {
         var history: [HistoryWrite] = []
         /// Nil leaves profiles.json untouched.
         var profiles: [DataMigrationRecord]?
+        var conflicts: [DataMigrationCategory: Int] = [:]
+        /// The complete preference set to apply, or nil to leave settings unchanged.
+        var preferences: [String: AnyCodable]?
+        var credentials: [CredentialWrite] = []
+        var vocabulary: [VocabularyWrite] = []
+
+        var configurationWrite: ConfigurationWrite { .init(preferences: preferences, credentials: credentials) }
     }
 
     static func plannedModes(
@@ -22,7 +31,7 @@ extension DesktopMigrationRestore {
     ) -> [DataMigrationCategory: DataMigrationMode] {
         var modes: [DataMigrationCategory: DataMigrationMode] = [:]
         // Absent or unreadable categories are never planned, so they cannot clear existing data.
-        for category in applied where incoming.manifest.categories.contains(category)
+        for category in [DataMigrationCategory.history, .profiles] where incoming.manifest.categories.contains(category)
             && incoming.records[category] != nil {
             modes[category] = category == .profiles && choice == .replace ? .replace : .merge
         }
@@ -34,6 +43,16 @@ extension DesktopMigrationRestore {
             manifest: .init(categories: [.history, .profiles], scopes: [:]),
             records: [.history: baseline.history, .profiles: baseline.profiles]
         )
+    }
+
+    static func currentBaseline(
+        _ targets: Targets, incoming: DataMigrationSnapshot, configuration: Configuration?
+    ) async throws -> Baseline {
+        var baseline = try await currentBaseline(targets)
+        baseline.preferences = configuration?.preferences?.values ?? [:]
+        baseline.credentials = try currentCredentials(incoming, configuration: configuration)
+        baseline.vocabulary = try currentVocabulary(targets.appDirectory, incoming: incoming)
+        return baseline
     }
 
     static func currentBaseline(_ targets: Targets) async throws -> Baseline {
@@ -64,7 +83,8 @@ extension DesktopMigrationRestore {
 
     static func compute(
         _ incoming: DataMigrationSnapshot, baseline: Baseline, choice: Choice,
-        guards: DesktopRecordingStore.MigrationRestoreGuards, digests: LocalModelDigestProvider
+        guards: DesktopRecordingStore.MigrationRestoreGuards, digests: LocalModelDigestProvider,
+        configuration: Configuration? = nil
     ) throws -> Computed {
         let modes = plannedModes(incoming, choice: choice)
         let planned = try DesktopMigrationPlanner.plan(
@@ -77,6 +97,10 @@ extension DesktopMigrationRestore {
         if modes[.profiles] != nil {
             computeProfiles(planned.records[.profiles] ?? [], baseline: baseline, into: &result)
         }
+        computeAudio(incoming, into: &result)
+        computePreferences(incoming, baseline: baseline, choice: choice, configuration: configuration, into: &result)
+        computeCredentials(incoming, baseline: baseline, choice: choice, configuration: configuration, into: &result)
+        try computeVocabulary(incoming, baseline: baseline, choice: choice, digests: digests, into: &result)
         try Task.checkCancellation()
         return result
     }
@@ -159,8 +183,9 @@ extension DesktopMigrationRestore {
         let value = try DataMigrationHistoryValue.value(write.record.value, id: write.record.id)
         var materialised = write.record
         materialised.value = value
+        let audioFilename = write.audio.map { write.id.uuidString + "." + $0.pathExtension }
         var native = try DesktopMigrationHistory.record(
-            materialised, category: .history, audioFilename: existing?.audioFilename ?? ""
+            materialised, category: .history, audioFilename: audioFilename ?? existing?.audioFilename ?? ""
         )
         guard native.id == write.id else {
             throw DataMigrationError.invalid("History: a restored item changed identity.")

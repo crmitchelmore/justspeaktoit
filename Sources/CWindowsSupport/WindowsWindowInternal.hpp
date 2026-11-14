@@ -476,6 +476,8 @@ void importAudio(HWND window);
 int migrationBackupOptions(HWND window);
 void emitMigrationBackup(HWND window, const std::string &path, int options);
 void exportMigrationBackup(HWND window);
+// Chooses a ZIP and asks whether to restore its API keys, then asks the host for a preview.
+void restoreMigrationBackup(HWND window);
 void tourShow(HWND window, int step);
 // Starts the screenshot tour unless one is already running (WindowsWindowTour.cpp).
 bool tourBegin(HWND window, const std::wstring &directory);

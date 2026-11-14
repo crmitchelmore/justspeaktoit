@@ -24,7 +24,8 @@ func windowsHistoryManagementEvent(
     case .migrationInspect:
         holder.enqueueSettings { await controller.beginMigrationInspection(URL(fileURLWithPath: value)) }
     case .migrationRestore:
-        holder.enqueueSettings { await controller.beginMigrationRestore(URL(fileURLWithPath: value)) }
+        let url = URL(fileURLWithPath: value)
+        holder.enqueueSettings { await controller.beginMigrationRestore(url, nativeFlags: index) }
     case .migrationRestoreResponse:
         holder.enqueueSettings { await controller.answerMigrationRestore(value, choice: index) }
     default: return false

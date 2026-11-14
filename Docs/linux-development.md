@@ -458,15 +458,17 @@ Unavailable/wrong-mode IDs and changes to the active mode remain preserved but
 unapplied, with a notice; choosing a model explicitly replaces that pending
 choice. The queued GTK update emits no selection callback. Source-only restart,
 round-trip, failure and native smoke assertions accompany this mapping; all are
-NOT_RUN here. History-backup restore still does not apply settings.
+NOT_RUN here.
 
 General > Data backup > **Restore...** now uses the shared cancellable ZIP
 reader, privacy-safe preview, current single-use confirmation and transactional
 rollback. History text merges; app profiles can merge or, after a second
 confirmation, replace. Both GTK dialogs default to Cancel. The owned picker
 rejects late or cancelled results, the preview copies its token/report, busy
-state disables apply, and shutdown retires the dialog. Settings, saved audio,
-credentials, vocabulary, connections and models remain unapplied. Native
+state disables apply, and shutdown retires the dialog. Backups now carry and
+restore settings, connections, vocabulary, saved audio and, with the
+**Include API keys** switch (off by default), API keys; model files are never
+copied (see [data migration](data-migration.md#windows-and-linux)). Native
 smoke assertions and seven shared Host regressions are authored but NOT_RUN
 locally; this is source wiring, not an installed-desktop acceptance receipt.
 The shared restore engine also rechecks the preview's full History baseline

@@ -255,7 +255,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         )
     }
 
-    private func apiKeyChanged(_ identifier: String) async {
+    func apiKeyChanged(_ identifier: String) async {
         invalidateConnectionPreWarming(resetCapture: true)
         if let slot = VoiceAccountProvider.all.lazy
             .compactMap({ try? VoiceOutputCredentialSlot(provider: $0) })

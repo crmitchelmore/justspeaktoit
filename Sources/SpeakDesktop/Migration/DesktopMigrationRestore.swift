@@ -1,12 +1,14 @@
 import Foundation
 import SpeakCore
 
-/// Previews and applies a Mac-compatible ZIP backup to desktop History text and
-/// dictation profiles. Nothing is written until `apply` runs with an explicit
-/// choice; every other category is reported as preserved but not applied.
+/// Previews and applies a Mac-compatible ZIP backup to desktop History, audio,
+/// profiles, vocabulary and, through the host, settings and opted-in API keys.
+/// Nothing is written until `apply` runs with an explicit choice; categories
+/// this device cannot use are reported as preserved but not applied.
 public enum DesktopMigrationRestore {
     /// History always merges: replacing it would need permanent deletion
-    /// tombstones that cannot be rolled back. Replace changes profiles only.
+    /// tombstones that cannot be rolled back. Replace uses the backup's version
+    /// of conflicting settings, vocabulary, API keys and profiles.
     public enum Choice: Int, Equatable, Sendable {
         case merge = 1
         case replace = 2
@@ -16,14 +18,21 @@ public enum DesktopMigrationRestore {
         let history: DesktopRecordingStore
         let profiles: DesktopDictationProfileStore
         let digests: LocalModelDigestProvider
+        /// Nil keeps settings and API keys out of the restore.
+        let configuration: ConfigurationSource?
 
         public init(
-            history: DesktopRecordingStore, profiles: DesktopDictationProfileStore, digests: LocalModelDigestProvider
+            history: DesktopRecordingStore, profiles: DesktopDictationProfileStore, digests: LocalModelDigestProvider,
+            configuration: ConfigurationSource? = nil
         ) {
             self.history = history
             self.profiles = profiles
             self.digests = digests
+            self.configuration = configuration
         }
+
+        /// Vocabulary stores live beside profiles.json in the app directory.
+        var appDirectory: URL { profiles.fileURL.deletingLastPathComponent() }
     }
 
     public struct Changes: Equatable, Sendable {
@@ -36,6 +45,8 @@ public enum DesktopMigrationRestore {
         public let reordered: Bool
 
         public var isEmpty: Bool { added == 0 && updated == 0 && removed == 0 && !reordered }
+
+        static let unchanged = Changes(existing: 0, added: 0, updated: 0, removed: 0, retained: 0, reordered: false)
     }
 
     public struct Row: Equatable, Sendable {
@@ -58,6 +69,8 @@ public enum DesktopMigrationRestore {
         /// Item-level reasons an otherwise valid item is not written.
         public let skipped: [String]
         public let noticeCount: Int
+        /// True when API keys in the backup stay unapplied because the restore was not opted in.
+        public var credentialsDeclined = true
 
         public func changes(_ choice: Choice) -> Bool {
             rows.contains { row in
@@ -73,6 +86,9 @@ public enum DesktopMigrationRestore {
         public let preview: Preview
         let incoming: DataMigrationSnapshot
         let baseline: Baseline
+        /// Private staging that still holds backup audio. `apply` or `discard` removes it.
+        var staging: URL?
+        let usesStagedAudio: Bool
     }
 
     struct Baseline: Equatable, Sendable {
@@ -80,6 +96,11 @@ public enum DesktopMigrationRestore {
         let profiles: [DataMigrationRecord]
         /// Raw bytes, or nil when profiles.json is absent.
         let profileDocument: Data?
+        var preferences: [String: AnyCodable] = [:]
+        /// Current values of the API keys the backup carries; never shown.
+        var credentials: [String: String] = [:]
+        /// Raw bytes of each vocabulary store by desktop path, or nil when absent.
+        var vocabulary: [String: Data?] = [:]
     }
 
     public enum Preparation: Sendable {
@@ -93,6 +114,10 @@ public enum DesktopMigrationRestore {
         public let history: [DesktopRecordingStore.Record]
         public let profilesChanged: Bool
         public let preview: Preview
+        public var audio = 0
+        public var vocabularyChanged = false
+        public var settingsChanged = false
+        public var credentials = 0
     }
 
     public enum Outcome: Sendable {
@@ -128,7 +153,12 @@ public enum DesktopMigrationRestore {
                 throw DataMigrationError.invalid("Restore refuses to remove the source archive's directory.")
             }
             staging = owned
-            outcome = .ready(try await plan(snapshot, targets: targets))
+            var plan = try await plan(snapshot, targets: targets)
+            if plan.usesStagedAudio {
+                plan.staging = owned
+                staging = nil
+            }
+            outcome = .ready(plan)
         } catch is CancellationError {
             outcome = .cancelled
         } catch {
@@ -146,62 +176,95 @@ public enum DesktopMigrationRestore {
                 }
             }
         }
-        if case .ready = outcome, Task.isCancelled { return .cancelled }
+        if case let .ready(plan) = outcome, Task.isCancelled {
+            discard(plan)
+            return .cancelled
+        }
         return outcome
+    }
+
+    /// Removes the private staging a plan keeps for audio. Safe to call more than once.
+    public static func discard(_ plan: Plan) {
+        guard let staging = plan.staging else { return }
+        try? FileManager.default.removeItem(at: staging)
     }
 
     /// Validates an already-read snapshot and previews both choices.
     static func plan(_ snapshot: DataMigrationSnapshot, targets: Targets) async throws -> Plan {
+        let configuration = try await targets.configuration?.read()
+        let applied = appliedCategories(configuration)
         let checked = try DataMigrationRecordValidation.validate(
-            snapshot, checkCancellation: { try Task.checkCancellation() }, recordValidator: validateRecord
+            snapshot, checkCancellation: { try Task.checkCancellation() }, recordValidator: { record, category in
+                guard applied.contains(category) else { return }
+                try validateRecord(record, category: category)
+            }
         )
         var incoming = DataMigrationSnapshot(
             manifest: checked.manifest,
             records: checked.records.filter { applied.contains($0.key) },
-            notices: checked.notices
+            files: checked.files, notices: checked.notices
         )
         incoming.manifest.categories = checked.manifest.categories.filter(applied.contains)
         for category in applied {
             try requireUnique(incoming.records[category] ?? [], category: category)
         }
-        let baseline = try await currentBaseline(targets)
+        let baseline = try await currentBaseline(targets, incoming: incoming, configuration: configuration)
         let guards = try await targets.history.migrationRestoreGuards()
-        let merge = try compute(incoming, baseline: baseline, choice: .merge, guards: guards, digests: targets.digests)
+        let merge = try compute(
+            incoming, baseline: baseline, choice: .merge, guards: guards, digests: targets.digests,
+            configuration: configuration
+        )
         let replace = try compute(
-            incoming, baseline: baseline, choice: .replace, guards: guards, digests: targets.digests
+            incoming, baseline: baseline, choice: .replace, guards: guards, digests: targets.digests,
+            configuration: configuration
         )
-        let invalid = Dictionary(grouping: checked.notices.filter { $0.hasSuffix(invalidSuffix) }) { notice in
-            applied.first { notice.hasPrefix($0.title + ",") }
-        }
-        let conflicts = DataMigrationPlanner.conflicts(
-            current: baselineSnapshot(baseline), incoming: incoming, modes: [.profiles: .merge]
+        let rows = previewRows(
+            DataMigrationCategory.allCases.filter { applied.contains($0) && snapshot.manifest.categories.contains($0) },
+            notices: checked.notices, incoming: incoming, baseline: baseline, computed: (merge, replace)
         )
-        let rows = DataMigrationCategory.allCases.filter {
-            applied.contains($0) && snapshot.manifest.categories.contains($0)
-        }.map { category in
-            Row(
-                category: category, merge: merge.changes[category], replace: replace.changes[category],
-                conflicts: conflicts.filter { $0.category == category }.count,
-                invalid: invalid[category]?.count ?? 0,
-                preservedOnReplace: category == .profiles && incoming.records[category] != nil
-                    && hasDamage(incoming, category: category)
-            )
-        }
         try Task.checkCancellation()
         let preview = Preview(
             rows: rows,
             notApplied: DataMigrationCategory.allCases.filter {
                 !applied.contains($0) && snapshot.manifest.categories.contains($0)
             },
-            skipped: Array(Set(merge.skipped + replace.skipped)).sorted(),
-            noticeCount: snapshot.notices.count
+            skipped: Array(Set(merge.skipped + replace.skipped)).sorted()
+                + modelNotes(checked, configuration: configuration),
+            noticeCount: snapshot.notices.count,
+            credentialsDeclined: configuration?.credentials?.include != true
         )
-        return Plan(preview: preview, incoming: incoming, baseline: baseline)
+        let usesAudio = !(merge.history + replace.history).allSatisfy { $0.audio == nil }
+        return Plan(
+            preview: preview, incoming: incoming, baseline: baseline, staging: nil, usesStagedAudio: usesAudio
+        )
     }
 
-    /// Categories this host can write and roll back. Credentials are never
-    /// installed silently; other categories stay preserved but not applied.
-    static let applied: Set<DataMigrationCategory> = [.history, .profiles]
+    private static func previewRows(
+        _ categories: [DataMigrationCategory], notices: [String], incoming: DataMigrationSnapshot,
+        baseline: Baseline, computed: (merge: Computed, replace: Computed)
+    ) -> [Row] {
+        let (merge, replace) = computed
+        let invalid = Dictionary(grouping: notices.filter { $0.hasSuffix(invalidSuffix) }) { notice in
+            categories.first { notice.hasPrefix($0.title + ",") }
+        }
+        let conflicts = DataMigrationPlanner.conflicts(
+            current: baselineSnapshot(baseline), incoming: incoming, modes: [.profiles: .merge]
+        )
+        return categories.map { category in
+            // History and profiles are nil only when unreadable; other categories may simply have nothing to change.
+            let fallback: Changes? = category == .history || category == .profiles ? nil : .unchanged
+            return Row(
+                category: category, merge: merge.changes[category] ?? fallback,
+                replace: replace.changes[category] ?? fallback,
+                conflicts: category == .history || category == .profiles
+                    ? conflicts.filter { $0.category == category }.count : merge.conflicts[category] ?? 0,
+                invalid: invalid[category]?.count ?? 0,
+                preservedOnReplace: category == .profiles && incoming.records[category] != nil
+                    && hasDamage(incoming, category: category)
+            )
+        }
+    }
+
     static let invalidSuffix = ": skipped invalid or unsupported item."
 
     static func validateRecord(_ record: DataMigrationRecord, category: DataMigrationCategory) throws {
@@ -211,7 +274,7 @@ public enum DesktopMigrationRestore {
         case .profiles:
             try DataMigrationProfileCatalog.validate(record, category: category)
         default:
-            break
+            try validateConfigurationRecord(record, category: category)
         }
     }
 

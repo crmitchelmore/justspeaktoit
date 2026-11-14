@@ -56,6 +56,10 @@ package extension DesktopHostPlatform {
         "This on-device model is not available in this \(displayName) build."
     }
 
+    static func migrationModels(
+        host: isolated some DesktopHostLocalModelHost<Self>
+    ) -> DesktopMigrationRestore.ConfigurationModels { .init() }
+
     static func transcribeLocally(
         _ audio: URL, model: String, language: String?, host: isolated some DesktopHostLocalModelHost<Self>
     ) async throws -> TranscriptionResult {

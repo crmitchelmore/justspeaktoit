@@ -255,6 +255,7 @@ extension DesktopHostController {
         migrationWork.restoreWorker?.cancel()
         migrationWork.restoreApplyWorker?.cancel()
         migrationWork.restoreTask?.cancel()
+        if let confirmation = migrationWork.restoreConfirmation { DesktopMigrationRestore.discard(confirmation.plan) }
         migrationWork.restoreConfirmation = nil
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()

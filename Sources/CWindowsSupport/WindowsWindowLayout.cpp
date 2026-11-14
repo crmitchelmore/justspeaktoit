@@ -436,8 +436,8 @@ void layoutSettings(HWND window, const RECT &content) {
         const int cardTop = top;
         int y = layoutSettingsCard(window, top, content, 0xE720, L"Audio, output and backup",
             L"Finished text goes to the starting app or clipboard. "
-            L"ZIPs can include audio and app profiles with prompts; they are unencrypted. "
-            L"Settings and credentials are excluded.",
+            L"ZIPs hold settings and vocabulary, plus audio, app profiles and, if you choose, API keys. "
+            L"They are unencrypted.",
             2 * row + scale(window, 12));
         place(window, configurationID, box(right - scale(window, 220),
             cardTop + densitySpace(window, 16, visualDensity.card_padding), scale(window, 220), row));

@@ -5,7 +5,7 @@ import XCTest
 @testable import SpeakDesktopHost
 
 final class DesktopHostMigrationRestoreTests: XCTestCase {
-    func testRealZIP_RestoresHistoryTextWithoutAudioSettingsOrSourceMutation() async throws {
+    func testRealZIP_RestoresHistoryAndAudioWithoutSettingsOrSourceMutation() async throws {
         FakeLog.shared.reset()
         let source = try BackupHostFixture()
         let target = try BackupHostFixture()
@@ -38,7 +38,12 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         let records = try await target.controller.store.records()
         XCTAssertEqual(records.count, 1)
         XCTAssertEqual(records.first?.processedText, original.processedText)
-        XCTAssertEqual(records.first?.audioFilename, "")
+        let restoredAudio = try XCTUnwrap(records.first?.audioFilename)
+        XCTAssertFalse(restoredAudio.isEmpty)
+        let targetDirectory = await target.controller.store.directory
+        XCTAssertEqual(
+            try Data(contentsOf: targetDirectory.appendingPathComponent(restoredAudio)), Data([1, 2, 3])
+        )
         XCTAssertNil(records.first?.originPlatform)
         let after = await target.controller.settings
         XCTAssertEqual(after.model, before.model)
@@ -78,7 +83,8 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         XCTAssertEqual(after.model, before.model)
         XCTAssertEqual(after.configuration, before.configuration)
         let status = FakeLog.shared.allStatuses.last
-        XCTAssertTrue(status?.contains("Settings, audio and credentials were not applied") == true)
+        XCTAssertTrue(status?.contains("app profiles updated") == true)
+        XCTAssertFalse(status?.contains("settings updated") == true)
         await fixture.controller.answerMigrationRestore(token, choice: 1, using: restorer)
         XCTAssertEqual(try store.load().count, 1)
         XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("no longer current") == true)

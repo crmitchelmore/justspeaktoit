@@ -12,7 +12,7 @@ constexpr UINT message = WM_APP + 47;
 bool stage(const std::string &token, std::wstring text, bool offersReplace);
 void clear();
 // Shows the staged preview when `available`, then answers its token exactly once:
-// 0 cancels, 1 merges, 2 replaces app profiles. Nothing is written before the answer.
+// 0 cancels, 1 merges, 2 uses the backup's version of anything that conflicts. Nothing is written before the answer.
 void present(HWND window, bool available, JSTIWindowCallback callback, void *context);
 // Returns the chosen ZIP as UTF-8, or empty when cancelled; `failure` explains a failed chooser.
 std::string choose(HWND window, std::string &failure);

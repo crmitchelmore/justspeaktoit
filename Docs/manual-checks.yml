@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-13"
+updated: "2026-11-14"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -1840,6 +1840,22 @@ sessions:
           - "Ask the owner to look in Sentry for a desktop.unclean_exit event from this build."
         expected: "Exactly one unclean-exit report arrives, with the app version and OS but no transcript text, file path, user name or installation ID. A normal quit and relaunch sends nothing more."
         final_gate: false
+      - id: "windows-config-transfer"
+        issues:
+          - 1635
+        title: "Back up and restore every setting, with a preview and API keys only on request"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Windows, an Alpha build that includes the #1635 desktop configuration backup"
+        steps:
+          - "Open Settings \u203a General \u203a Audio, output and backup, tick Saved audio, choose Save ZIP backup and answer No when asked to include API keys."
+          - "Change a setting (for example Voice commands), add a pronunciation and delete a History entry with audio, then choose Restore backup and pick the first ZIP."
+          - "Answer No when asked to restore API keys, read the preview, then cancel and confirm nothing changed."
+          - "Restore the ZIP again, choose Merge and check the setting, pronunciation and History entry (with its audio) are back."
+          - "Save a second backup with API keys included, change one key, then restore it with API keys included and choose Replace."
+          - "Restore a Mac export (Settings \u203a Data & Migration on the Mac) and read the preview's skipped items. With Narrator on, listen to each prompt and switch."
+        expected: "Nothing changes until Merge or Replace. The preview lists counts and conflicts for settings, connections, vocabulary, History and recordings, and says the backup's API keys were left out unless you chose them. Restoring brings everything back in one step; API keys move only when chosen on both save and restore. Model files are never copied: the preview names models to download from Local models. A Mac export restores what this device supports and lists what it skipped, without changing anything else."
+        final_gate: false
   - id: "linux"
     device: "Linux"
     title: "Linux"
@@ -1889,6 +1905,22 @@ sessions:
           - "Open the app, wait a minute, then quit normally and open it again."
           - "Ask the owner to look in Sentry for a desktop.unclean_exit event from this build."
         expected: "Exactly one unclean-exit report arrives, with the app version and OS but no transcript text, file path, user name or installation ID. A normal quit and relaunch sends nothing more."
+        final_gate: false
+      - id: "linux-config-transfer"
+        issues:
+          - 1635
+        title: "Back up and restore every setting, with a preview and API keys only on request"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Linux, an Alpha build that includes the #1635 desktop configuration backup"
+        steps:
+          - "Open Settings \u203a General \u203a Data backup, turn on Include saved recording audio, leave Include API keys off and choose Save backup."
+          - "Change a setting (for example Voice commands), add a pronunciation and delete a History entry with audio, then choose Restore backup and pick the first ZIP."
+          - "Read the preview, then cancel and confirm nothing changed."
+          - "Restore the ZIP again, choose Merge and check the setting, pronunciation and History entry (with its audio) are back."
+          - "Save a second backup with API keys included, change one key, then restore it with API keys included and choose Replace."
+          - "Restore a Mac export (Settings \u203a Data & Migration on the Mac) and read the preview's skipped items. With Orca on, listen to each prompt and switch."
+        expected: "Nothing changes until Merge or Replace. The preview lists counts and conflicts for settings, connections, vocabulary, History and recordings, and says the backup's API keys were left out unless you chose them. Restoring brings everything back in one step; API keys move only when chosen on both save and restore. Model files are never copied: the preview names models to download from Local models. A Mac export restores what this device supports and lists what it skipped, without changing anything else."
         final_gate: false
   - id: "decisions"
     device: "Decision"

@@ -21,17 +21,18 @@ int chooseAction(HWND window, const Pending &staged) {
             == IDOK ? 1 : 0;
     }
     const std::wstring body = staged.text +
-        L"\n\nYes merges the backup. No replaces app profiles with the backup's profiles "
-        L"(everything else is still merged). Cancel leaves everything as it is.";
+        L"\n\nYes merges the backup. No uses the backup's version of conflicting settings, vocabulary, "
+        L"API keys and app profiles (History is still merged). Cancel leaves everything as it is.";
     const int answer = MessageBoxW(window, body.c_str(), title.c_str(),
         MB_YESNOCANCEL | MB_ICONINFORMATION | MB_DEFBUTTON3);
     if (answer == IDYES) return 1;
     if (answer != IDNO) return 0;
     const int confirmed = MessageBoxW(window,
-        L"Replace your app profiles with the profiles in this backup?\n\n"
-        L"Profiles that are not in the backup will be removed. History is still only merged. "
+        L"Use the backup's version of everything that conflicts?\n\n"
+        L"Conflicting settings, vocabulary and API keys take the backup's values, and app profiles that are "
+        L"not in the backup are removed. History is still only merged. "
         L"If anything fails, every change is put back.",
-        L"Replace app profiles?", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+        L"Replace with the backup's version?", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
     return confirmed == IDYES ? 2 : 0;
 }
 }

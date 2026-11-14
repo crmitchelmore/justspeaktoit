@@ -96,12 +96,14 @@ final class DesktopProfileMigrationSnapshotTests: XCTestCase {
     }
 
     func testNativeCategoryFlags_PreserveLegacyChoicesAndRejectUnrecognizedBits() throws {
-        for flags in 0...3 {
+        for flags in 0...15 {
             let choice = try DesktopMigrationBackup.Selection(nativeFlags: flags)
             XCTAssertEqual(choice.includeAudio, flags & 1 != 0)
             XCTAssertEqual(choice.includeProfiles, flags & 2 != 0)
+            XCTAssertEqual(choice.includeConfiguration, flags & 4 != 0)
+            XCTAssertEqual(choice.includeCredentials, flags & 8 != 0)
         }
-        for flags in [-1, 4, Int.min, Int.max] {
+        for flags in [-1, 16, Int.min, Int.max] {
             XCTAssertThrowsError(try DesktopMigrationBackup.Selection(nativeFlags: flags))
         }
         XCTAssertFalse(DesktopMigrationBackup.Selection(includeAudio: true).includeProfiles)

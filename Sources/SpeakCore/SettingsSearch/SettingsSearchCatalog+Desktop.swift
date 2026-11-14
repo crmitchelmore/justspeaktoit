@@ -24,8 +24,12 @@ extension SettingsSearchCatalog {
         ),
         SettingsSearchEntry(
             id: "desktop.dataBackup", title: "Data backup", section: .dataMigration, systemImage: "archivebox",
-            summary: "Save History, optional audio and app profiles in a ZIP backup, or restore one.",
-            keywords: ["backup", "export history", "zip", "restore", "include saved recording audio", "migrate"],
+            summary: "Save History, settings and vocabulary, with optional audio, app profiles and API keys, "
+                + "in a ZIP backup, or restore one.",
+            keywords: [
+                "backup", "export history", "zip", "restore", "include saved recording audio", "migrate",
+                "include api keys", "export settings", "transfer settings"
+            ],
             platforms: .linux
         ),
         SettingsSearchEntry(
@@ -162,10 +166,11 @@ extension SettingsSearchCatalog {
         SettingsSearchEntry(
             id: "windows.audioOutputBackup", title: "Audio, output and backup", section: .general,
             systemImage: "mic",
-            summary: "The microphone, where finished text goes, and ZIP backups of History, audio and app profiles.",
+            summary: "The microphone, where finished text goes, and ZIP backups of History, settings, vocabulary, "
+                + "audio, app profiles and API keys.",
             keywords: [
                 "microphone", "input device", "text output", "backup", "zip", "restore backup", "saved audio",
-                "export history", "migrate"
+                "export history", "migrate", "export settings", "api keys"
             ],
             settingKeys: ["preferredAudioInputUID"], platforms: .windows
         ),

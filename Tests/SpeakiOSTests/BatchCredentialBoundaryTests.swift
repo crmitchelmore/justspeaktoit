@@ -12,7 +12,9 @@ final class BatchCredentialBoundaryTests: XCTestCase {
         let suite = "BatchCredentialBoundaryTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set("elevenlabs/scribe_v2", forKey: "batchTranscriptionModel")
+        // ElevenLabs batch models iOS lists route directly (#1719); a manual ID
+        // outside the catalogue still resolves to the ElevenLabs key.
+        defaults.set("elevenlabs/manual-model", forKey: "batchTranscriptionModel")
         let storage = SecureStorage(
             configuration: .init(service: suite), permissionsChecker: BoundaryDeniedKeychainAccess()
         )
@@ -20,7 +22,7 @@ final class BatchCredentialBoundaryTests: XCTestCase {
         settings.elevenLabsAPIKey = "synthetic-elevenlabs-only"
         settings.openRouterAPIKey = "synthetic-openrouter-only"
         await settings.awaitPendingSecretWrites()
-        XCTAssertEqual(settings.batchTranscriptionModel, "elevenlabs/scribe_v2")
+        XCTAssertEqual(settings.batchTranscriptionModel, "elevenlabs/manual-model")
         XCTAssertEqual(settings.batchAPIKey, "synthetic-elevenlabs-only")
 
         let session = StubURLProtocol.makeSession()
@@ -41,7 +43,7 @@ final class BatchCredentialBoundaryTests: XCTestCase {
             return .fail(URLError(.userAuthenticationRequired))
         }
         for model in [
-            "elevenlabs/scribe_v2", " \nelevenlabs/scribe_v2\t ", "xai/grok-voice",
+            "elevenlabs/manual-model", " \nelevenlabs/manual-model\t ", "xai/grok-voice",
             "cartesia/unknown", "deepgram/unknown", "speechmatics/batch",
             "local/whisper", "apple/unknown", "system/unknown"
         ] {

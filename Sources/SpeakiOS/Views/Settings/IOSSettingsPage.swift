@@ -68,7 +68,8 @@ enum IOSSettingsPage: String, CaseIterable, Identifiable, Hashable {
         case .transcription: return ["Transcription"]
         case .postProcessing: return ["Post-Processing"]
         case .apiKeys: return ["Subscription", "API Keys"]
-        case .recording: return ["Hardware Trigger", "Behavior", "Just Speak Keyboard", "Focus Capture Overrides"]
+        case .recording:
+            return ["Hardware Trigger", "Microphone", "Behavior", "Just Speak Keyboard", "Focus Capture Overrides"]
         case .results: return ["Saved Results", "Recordings"]
         case .sync: return ["Sync"]
         case .privacy: return ["Troubleshooting", "Capture Health", "Privacy & Debugging"]

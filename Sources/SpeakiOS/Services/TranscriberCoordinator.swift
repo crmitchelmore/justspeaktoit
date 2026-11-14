@@ -296,7 +296,8 @@ private extension TranscriberCoordinator {
                 return rearmHandsFree != nil || captureStopNotice != nil // Explicit Cancel clears content.
             }
         )
-        guard case .finished(let result) = settlement else { return settlement.discarded }
+        guard case .finished(let finished) = settlement else { return settlement.discarded }
+        let result = finished.replacingText(IOSLearnedCorrections.shared.apply(to: finished.text))
         shown.show(final: result.text)
         liveActivity.complete(
             result, words: wordCount, seconds: duration, rearmHandsFree: rearmHandsFree, stopNotice: captureStopNotice

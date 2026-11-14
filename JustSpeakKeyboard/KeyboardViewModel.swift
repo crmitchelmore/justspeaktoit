@@ -51,6 +51,8 @@ final class KeyboardViewModel: ObservableObject {
     private var isSecureField = false
     private var activeInputModeCount = 0
     private var handBack: (() -> Void)?
+    private var readContext: KeyboardProxyReader?
+    private let corrections: KeyboardCorrectionObserver
 
     convenience init() {
         self.init(
@@ -79,8 +81,10 @@ final class KeyboardViewModel: ObservableObject {
         preferences: KeyboardDictationPreferencesStore,
         deliveryStore: KeyboardDeliveryStore = .shared,
         directCapturePolicy: KeyboardCapturePlanner.DirectCapturePolicy,
-        directCaptureCapabilities: @escaping @MainActor () -> DirectCaptureCapabilities
+        directCaptureCapabilities: @escaping @MainActor () -> DirectCaptureCapabilities,
+        corrections: KeyboardCorrectionObserver? = nil
     ) {
+        self.corrections = corrections ?? .shared
         self.direct = KeyboardDirectCaptureSession(engine: engine)
         self.handoff = handoff
         self.handoffStore = handoffStore
@@ -108,8 +112,12 @@ final class KeyboardViewModel: ObservableObject {
         handoffForwarder = handoff.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
-        handoff.onDidInsert = { [weak self] in
+        handoff.onDidInsert = { [weak self] text in
+            self?.watchForCorrections(of: text)
             self?.delivery.handBackAfterInsertIfPermitted()
+        }
+        delivery.onDidDeliver = { [weak self] text in
+            self?.watchForCorrections(of: text)
         }
     }
 
@@ -183,6 +191,7 @@ final class KeyboardViewModel: ObservableObject {
         deleteBackward: @escaping () -> Void,
         contextBeforeInput: @escaping () -> String?,
         contextAfterInput: @escaping () -> String?,
+        selectedText: @escaping () -> String? = { nil },
         setMarkedText: ((String) -> Void)? = nil,
         unmarkText: (() -> Void)? = nil
     ) {
@@ -194,6 +203,12 @@ final class KeyboardViewModel: ObservableObject {
         self.proxyInsert = insertText
         self.proxySetMarkedText = setMarkedText
         self.proxyUnmarkText = unmarkText
+        self.readContext = KeyboardProxyReader(
+            before: contextBeforeInput, selected: selectedText, after: contextAfterInput
+        )
+        // Before any capture starts: an edit made since the last insertion is
+        // still in the field exactly as the user left it.
+        if corrections.isWatching, let reads = documentReads() { corrections.keyboardDidAppear(reads) }
         direct.attach(KeyboardDocumentSession(
             insertText: insertText,
             deleteBackward: deleteBackward,
@@ -295,6 +310,8 @@ final class KeyboardViewModel: ObservableObject {
         proxySetMarkedText = nil
         proxyUnmarkText = nil
         handBack = nil
+        readContext = nil
+        corrections.keyboardDidDisappear()
         // No document is open to this keyboard any more, so nothing can be
         // advertised or aimed at even if a late callback does arrive.
         currentDocumentIdentifier = nil
@@ -314,6 +331,7 @@ final class KeyboardViewModel: ObservableObject {
         let becameSecure = isSecureField && !self.isSecureField
         currentDocumentIdentifier = documentIdentifier
         self.isSecureField = isSecureField
+        noteDocumentChangeForCorrections()
         if becameSecure {
             // Nothing may keep aiming at a field that is now collecting a
             // secret: withdraw the advertisement, drop the chip, and abandon
@@ -493,4 +511,43 @@ final class KeyboardViewModel: ObservableObject {
             : nil
         profileChipLabel = profileSelection.availableProfiles.count > 1 ? profileSelection.chipLabel : nil
     }
+}
+
+// MARK: - Learned corrections (#1651)
+
+extension KeyboardViewModel {
+    /// What the proxy can read of the open field right now; `nil` when no
+    /// field is open to this appearance. A password field is never read.
+    private func documentReads() -> KeyboardDocumentReads? {
+        guard let currentDocumentIdentifier, let readContext else { return nil }
+        guard !isSecureField else {
+            return KeyboardDocumentReads(
+                documentIdentifier: currentDocumentIdentifier, isSecureField: true, before: nil, after: nil
+            )
+        }
+        return KeyboardDocumentReads(
+            documentIdentifier: currentDocumentIdentifier,
+            isSecureField: false,
+            before: readContext.before(),
+            selected: readContext.selected(),
+            after: readContext.after()
+        )
+    }
+
+    private func noteDocumentChangeForCorrections() {
+        guard corrections.isWatching, let reads = documentReads() else { return }
+        corrections.documentChanged(reads)
+    }
+
+    private func watchForCorrections(of text: String) {
+        guard let reads = documentReads() else { return }
+        corrections.didInsert(text, into: reads)
+    }
+}
+
+/// The proxy reads a learned-correction watch needs (#1651).
+private struct KeyboardProxyReader {
+    let before: () -> String?
+    let selected: () -> String?
+    let after: () -> String?
 }

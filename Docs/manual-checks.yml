@@ -1279,6 +1279,23 @@ sessions:
           - "Check the Apple email for the build, or the build upload's errors."
         expected: "The build finishes processing and no ITMS-91053 (missing required-reason API declaration) is reported for the app, keyboard, widget or Share extension."
         final_gate: false
+      - id: "iphone-learned-corrections"
+        issues:
+          - 1651
+        title: "The Just Speak Keyboard learns a correction you make twice"
+        minutes: 8
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes iOS learned corrections"
+        steps:
+          - "Settings \u203a Post-Processing \u203a Auto-Corrections: check Learn Corrections Automatically is on and the threshold reads 2 edits. The Just Speak Keyboard needs Full Access."
+          - "In Notes, dictate with the Just Speak Keyboard a made-up sentence containing a name it gets wrong, for example Suzy for Susie."
+          - "Switch to the system keyboard with the globe key, fix the wrong word, then switch back to the Just Speak Keyboard."
+          - "Open Just Speak to It, then Settings \u203a Post-Processing \u203a Auto-Corrections \u203a Learned Corrections."
+          - "Repeat the dictation and the same fix once more, open the app, then dictate the sentence a third time in the app and with the keyboard."
+          - "In Learned Corrections remove the new correction with its trash button, then dictate the sentence again."
+          - "Repeat the first dictation and fix in a password field, and once with Learn Corrections Automatically off."
+        expected: "After the first fix, Candidates shows the wrong word \u2192 the right one, seen once, with Add and Dismiss buttons. After the second it moves to Applied to Transcripts and the third dictation is spelt correctly in the app and the keyboard. Once removed, the wrong spelling comes back. Nothing is learned from the password field or with learning off. VoiceOver reads every button's label."
+        final_gate: false
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"

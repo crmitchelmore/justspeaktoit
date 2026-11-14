@@ -43,12 +43,7 @@ public final class AppSettings: ObservableObject {
     /// The remote sub-mode the user last chose, remembered while they are in
     /// local mode so returning to remote restores streaming or batch.
     @Published public var rememberedRemoteTranscriptionMode: IOSTranscriptionMode {
-        didSet {
-            defaults.set(
-                rememberedRemoteTranscriptionMode.rawValue,
-                forKey: DefaultsKey.rememberedRemoteTranscriptionMode.rawValue
-            )
-        }
+        didSet { save(rememberedRemoteTranscriptionMode.rawValue, .rememberedRemoteTranscriptionMode) }
     }
 
     @Published public var batchTranscriptionModel: String {
@@ -275,6 +270,13 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(autoPostProcess, forKey: DefaultsKey.autoPostProcess.rawValue) }
     }
 
+    /// Learn corrections from keyboard-inserted transcripts the user edits (#1651).
+    @Published public var autoCorrectionsEnabled: Bool { didSet { persistAutoCorrectionsEnabled() } }
+
+    @Published public var autoCorrectionsPromotionThreshold: Int {
+        didSet { persistAutoCorrectionsPromotionThreshold() }
+    }
+
     /// - Parameters:
     ///   - defaults: Backing store. Injectable so persistence behaviour (including
     ///     relaunch restoration) is testable without touching the user's defaults.
@@ -334,6 +336,8 @@ public final class AppSettings: ObservableObject {
         self.cleanupModelDiscoveryEnabled = Shared.cleanupModelDiscoveryEnabled.iOS.value(in: defaults)
         self.postProcessingModel = Self.storedPostProcessingModel(in: defaults)
         self.autoPostProcess = defaults.bool(forKey: DefaultsKey.autoPostProcess.rawValue)
+        self.autoCorrectionsEnabled = Self.storedAutoCorrectionsEnabled(in: defaults)
+        self.autoCorrectionsPromotionThreshold = Self.storedAutoCorrectionsPromotionThreshold(in: defaults)
         persistSeededTranscriptionMemory(selection)
         if loadsSecureStorage { startLoadingCredentials() }
     }

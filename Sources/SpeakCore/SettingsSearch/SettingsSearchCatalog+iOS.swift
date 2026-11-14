@@ -19,6 +19,19 @@ extension SettingsSearchCatalog {
             platforms: .iOS
         ),
         SettingsSearchEntry(
+            id: "ios.autoCorrections", title: "Auto-Corrections", section: .postProcessing,
+            systemImage: "text.badge.checkmark",
+            summary: "Learn corrections from edits to transcripts the Just Speak Keyboard inserted, "
+                + "and review or remove them.",
+            keywords: [
+                "learned corrections", "learn", "learning", "auto-correct", "autocorrect", "auto corrections",
+                "candidate corrections", "promotion threshold", "threshold", "personal corrections", "edits",
+                "keyboard edits", "dismiss", "suggestions"
+            ],
+            settingKeys: ["autoCorrectionsEnabled", "autoCorrectionsPromotionThreshold"],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
             id: "ios.microphone", title: "Microphone", section: .general, systemImage: "mic",
             summary: "Choose the microphone recording uses, or follow the system default.",
             keywords: [

@@ -84,7 +84,13 @@ public final class AutoCorrectionDomain {
     }
 
     let changes = WordDiffer.findChanges(original: original, edited: edited)
+    try await recordValidatedChanges(changes, app: app, threshold: threshold, isCurrent: isCurrent)
+  }
 
+  fileprivate func recordValidatedChanges(
+    _ changes: [WordChange], app: String?, threshold: Int?,
+    isCurrent: @escaping @Sendable () -> Bool
+  ) async throws {
     guard !changes.isEmpty else {
       return
     }
@@ -280,6 +286,20 @@ public final class AutoCorrectionDomain {
 }
 
 extension AutoCorrectionDomain {
+    /// Records word-level changes a platform has already extracted, exactly as
+    /// `recordEdit` records the changes it finds. The iOS keyboard extension
+    /// diffs the edited span in its own process and hands the app only the
+    /// changed words, never the surrounding text.
+    public func recordChanges(
+        _ changes: [WordChange], app: String?, threshold: Int?,
+        isCurrent: @escaping @Sendable () -> Bool = { true }
+    ) async throws {
+        if let threshold, !AutoCorrectionLearningPolicy.promotionThresholdRange.contains(threshold) {
+            throw DesktopConfigurationError.invalidField("Correction promotion threshold")
+        }
+        try await recordValidatedChanges(changes, app: app, threshold: threshold, isCurrent: isCurrent)
+    }
+
     public func reloadAfterMigration() async {
         let previous = operationTail
         let reload = Task { @VocabularyActor in

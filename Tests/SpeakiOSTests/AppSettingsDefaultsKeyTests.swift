@@ -121,7 +121,9 @@ final class AppSettingsDefaultsKeyTests: XCTestCase {
             "transcriptClipboardNoticeVersion",
             "upgradeOfflineTranscriptsWhenOnline",
             "keepAudioOnCancel",
-            "preferredAudioInputUID"
+            "preferredAudioInputUID",
+            "autoCorrectionsEnabled",
+            "autoCorrectionsPromotionThreshold"
         ])
         let actual = AppSettings.DefaultsKey.allCases.map(\.rawValue)
         XCTAssertEqual(AppSettings.DefaultsKey.allCases.map(\.storageKey), actual)

@@ -81,7 +81,16 @@ extension SettingsSchema {
             Field(key: "autoPostProcess", kind: .boolean, summary: "Clean up every transcript automatically.",
                   defaultValue: .bool(false))
         ]
-        return transcription + recording + cleanup + iOSReadAloudFields
+        // Learned from edits to keyboard-inserted transcripts (#1651).
+        let learnedCorrections: [Field] = [
+            Field(key: "autoCorrectionsEnabled", kind: .boolean, summary: "Learn corrections from your edits.",
+                  defaultValue: .bool(AutoCorrectionLearningPolicy.enabledByDefault)),
+            Field(key: "autoCorrectionsPromotionThreshold", kind: .integer,
+                  summary: "Edits before a correction is learned.",
+                  defaultValue: .int(AutoCorrectionLearningPolicy.defaultPromotionThreshold),
+                  range: AutoCorrectionLearningPolicy.numericPromotionThresholdRange)
+        ]
+        return transcription + recording + cleanup + learnedCorrections + iOSReadAloudFields
     }()
 
     /// SpeakiOS's `IOSVoiceOutputSettings`. The provider, model, voice and speed

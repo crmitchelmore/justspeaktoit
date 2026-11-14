@@ -606,9 +606,9 @@ int layoutSettingsSearch(HWND window, int sidebarWidth, int bottom) {
     const UINT dpi = GetDpiForWindow(window);
     const int inner = sidebarWidth - scale(window, 44);
     HDC dc = GetDC(window);
-    const int captionHeight = jsti::chrome::measure(dc, L"Search settings", inner, jsti::chrome::Font::caption, dpi);
+    const int captionHeight = jsti::chrome::measure(dc, L"Search for anything", inner, jsti::chrome::Font::caption, dpi);
     const int lineHeight = jsti::chrome::measure(dc, L"Ag", inner, jsti::chrome::Font::body, dpi);
-    const int noMatchHeight = jsti::chrome::measure(dc, L"No settings match", inner, jsti::chrome::Font::caption, dpi);
+    const int noMatchHeight = jsti::chrome::measure(dc, L"No results", inner, jsti::chrome::Font::caption, dpi);
     ReleaseDC(window, dc);
     int y = scale(window, 58);
     const RECT label = box(scale(window, 22), y, inner, captionHeight);

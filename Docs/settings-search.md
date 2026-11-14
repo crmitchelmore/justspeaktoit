@@ -112,12 +112,17 @@ from VoiceOver.
 `DesktopSettingsSearch` (SpeakCore) indexes every `DesktopConfiguration` field
 automatically, adds catalogue entries marked `.windows` / `.linux` for
 hand-built groups, and maps results to a `DesktopSettingsDestination` page and,
-for a preference field, the field to reveal. Each host keeps one
-`DesktopSettingsSearchSession`: the native window emits
-`JSTI_EVENT_SETTINGS_SEARCH` as the query changes and
-`JSTI_EVENT_SETTINGS_SEARCH_OPEN` when a row is chosen. Swift ranks the query,
-then calls `jsti_window_set_settings_search_results`, `jsti_window_show_page` and
-`jsti_window_reveal_configuration_field`.
+for a preference field, the field to reveal. The sidebar search box is the
+"Search for anything" command palette (Ctrl+K or Ctrl+F): each host keeps one
+`DesktopCommandPaletteSession`, which ranks these settings together with the
+actions the host can run and its recent History through the shared
+`CommandPaletteSearch` (the Mac's ⌘K palette uses the same model). The native
+window emits `JSTI_EVENT_SETTINGS_SEARCH` as the query changes and
+`JSTI_EVENT_SETTINGS_SEARCH_OPEN` when a row is chosen. Swift ranks the query
+and calls `jsti_window_set_settings_search_results`; a chosen setting calls
+`jsti_window_show_page` and `jsti_window_reveal_configuration_field`, an action
+`jsti_window_run_action`, and a History record selects it on the History page.
+`DesktopSettingsSearchSession` remains as the settings-only session.
 
 `Tests/SpeakDesktopTests/DesktopSettingsSearchTests.swift` fails when an
 `ApplicationPreferenceKey` isn't indexed (or exempted with a reason), or when a

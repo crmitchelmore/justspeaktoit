@@ -142,8 +142,8 @@ extension AppEnvironment {
   /// Runs a command chosen in the "Search for anything" palette.
   func runPaletteCommand(_ command: CommandPaletteCommand) {
     switch command.run {
-    case .shortcut(let action):
-      shortcuts.perform(action)
+    case .shortcut:
+      if let action = command.shortcutAction { shortcuts.perform(action) }
     case .copyLastTranscript:
       copyLastHistoryItem()
     }

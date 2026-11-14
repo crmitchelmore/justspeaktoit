@@ -118,16 +118,16 @@ bool createControls(HWND window) {
         return control != nullptr;
     };
     // The search label precedes its box, so the box's accessible name is
-    // "Search settings"; results are hidden until a search opens.
+    // "Search for anything"; results are hidden until a search opens.
     state.wanted[settingsResultsID] = false;
     state.wanted[settingsNoMatchID] = false;
-    bool okay = add(L"STATIC", L"Search settings", 0, settingsSearchLabelID) &&
+    bool okay = add(L"STATIC", L"Search for anything", 0, settingsSearchLabelID) &&
         add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, settingsSearchID) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL |
             WS_TABSTOP, settingsResultsID) &&
-        add(L"STATIC", L"No settings match", 0, settingsNoMatchID);
+        add(L"STATIC", L"No results", 0, settingsNoMatchID);
     // The list follows the search box, not a label, so it is named directly.
-    if (okay) jsti::accessibility::name(GetDlgItem(window, settingsResultsID), L"Settings results");
+    if (okay) jsti::accessibility::name(GetDlgItem(window, settingsResultsID), L"Search results");
     for (int page = 0; page < pageCount && okay; ++page) {
         okay = add(L"BUTTON", pageInfo[page].title, BS_PUSHBUTTON | WS_TABSTOP, navBaseID + page);
     }
@@ -236,7 +236,7 @@ bool createControls(HWND window) {
     SendDlgItemMessageW(window, searchID, EM_SETCUEBANNER, TRUE,
                         reinterpret_cast<LPARAM>(L"Search transcripts, models and profiles"));
     SendDlgItemMessageW(window, settingsSearchID, EM_LIMITTEXT, 256, 0);
-    SendDlgItemMessageW(window, settingsSearchID, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Search settings"));
+    SendDlgItemMessageW(window, settingsSearchID, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Search for anything"));
     SendDlgItemMessageW(window, transcriptID, EM_LIMITTEXT, 4 * 1024 * 1024, 0);
     SetWindowPos(GetDlgItem(window, transcriptNameID), nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_NOACTIVATE);
     refreshFont(window);

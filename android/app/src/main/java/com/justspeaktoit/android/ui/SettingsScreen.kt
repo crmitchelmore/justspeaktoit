@@ -84,6 +84,7 @@ class SettingsActions(
     val onChooseModel: (CloudModel) -> Unit,
     val onCleanupChanged: (Boolean) -> Unit,
     val onKeepAudioOnCancelChanged: (Boolean) -> Unit,
+    val onKeepRecordingsChanged: (Boolean) -> Unit = {},
     val onChooseCleanupModel: (CleanupModel) -> Unit,
     val onReleaseResource: (String) -> Unit = {},
     val onReleaseEverything: () -> Unit = {},
@@ -289,6 +290,27 @@ fun SettingsScreen(
                 Switch(checked = state.keepAudioOnCancel, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_keep_audio_note), style = MaterialTheme.typography.bodyMedium)
+
+            HorizontalDivider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = anchor("android.keepRecordings")
+                    .fillMaxWidth()
+                    .testTag(AutomationIds.SETTINGS_KEEP_RECORDINGS)
+                    .toggleable(
+                        value = state.keepRecordings,
+                        role = Role.Switch,
+                        onValueChange = actions.onKeepRecordingsChanged,
+                    ),
+            ) {
+                Text(
+                    stringResource(R.string.settings_keep_recordings_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.keepRecordings, onCheckedChange = null)
+            }
+            Text(stringResource(R.string.settings_keep_recordings_note), style = MaterialTheme.typography.bodyMedium)
 
             HorizontalDivider()
             RecordingSoundsSection(

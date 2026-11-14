@@ -173,6 +173,51 @@ class DictationHistoryTest {
     }
 
     @Test
+    fun testRecordSession_withAudio_keepsTheRecordingBesideTheEntry() = runBlocking {
+        val history = history()
+        val source = folder.newFile("dictation.wav").apply { writeText("audio") }
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "hello"), null, Retention.Month, source)
+        history.replaceSessionText("Hello.", cleanedUp = true, Retention.Month)?.join()
+
+        val entry = latest.single()
+        assertEquals("Hello.", entry.text)
+        assertEquals(File(recordingsDir, "id-1.wav").absolutePath, entry.audioPath)
+        assertEquals("audio", File(checkNotNull(entry.audioPath)).readText())
+        assertFalse(source.exists())
+    }
+
+    @Test
+    fun testRecordSession_withHistoryOffOrNoSession_deletesTheAudio() = runBlocking {
+        val history = history()
+        val off = folder.newFile("off.wav").apply { writeText("audio") }
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "hello"), null, Retention.Off, off)?.join()
+        val idle = folder.newFile("idle.wav").apply { writeText("audio") }
+        assertNull(history.recordSession(DictationState.Idle, null, Retention.Month, idle))
+
+        assertTrue(latest.isEmpty())
+        assertFalse(off.exists())
+        assertFalse(idle.exists())
+        assertTrue(recordingsDir.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun testClearKeepingRecordings_keepsOnlyEntriesWithAudio() = runBlocking {
+        val history = history()
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "text only"), null, Retention.Month)
+        val source = folder.newFile("dictation.wav").apply { writeText("audio") }
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "with audio"), null, Retention.Month, source)
+        history.clear(keepRecordings = true, Retention.Month).join()
+
+        val entry = latest.single()
+        assertEquals("with audio", entry.text)
+        assertTrue(File(checkNotNull(entry.audioPath)).exists())
+
+        history.clear().join()
+        assertTrue(latest.isEmpty())
+        assertTrue(recordingsDir.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
     fun testFailedWrite_publishesTheErrorAndIsRetriedByTheNextChange() = runBlocking {
         val history = history()
         file.failWrites = true

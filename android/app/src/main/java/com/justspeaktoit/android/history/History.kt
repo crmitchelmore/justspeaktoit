@@ -161,6 +161,10 @@ class HistoryStore(
 
     fun clear(): List<HistoryEntry> = save(emptyList())
 
+    /** Clears every entry except those holding a recording, which on Android lives only in History. */
+    fun clearKeepingRecordings(retention: Retention): List<HistoryEntry> =
+        save(current(retention).filter { it.audioPath != null })
+
     private fun current(retention: Retention) = entries ?: load(retention)
 
     /**

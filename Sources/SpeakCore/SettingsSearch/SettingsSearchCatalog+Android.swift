@@ -78,6 +78,13 @@ extension SettingsSearchCatalog {
             settingKeys: ["keepAudioOnCancel"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.keepRecordings", title: "Keep recordings in History", section: .general,
+            systemImage: "waveform.circle",
+            summary: "Keep finished cloud recordings with their History entry to play back or transcribe again.",
+            keywords: ["recordings", "audio files", "playback", "play recording", "listen", "keep audio", "storage"],
+            settingKeys: ["keepRecordingsInHistory"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.recordingSounds", title: "Recording sounds", section: .general,
             systemImage: "speaker.wave.2",
             summary: "Start and stop sounds, their profile and volume.",

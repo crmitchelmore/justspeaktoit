@@ -188,6 +188,25 @@
       "title" : "Keep audio when a recording is cancelled"
     },
     {
+      "id" : "android.keepRecordings",
+      "keywords" : [
+        "recordings",
+        "audio files",
+        "playback",
+        "play recording",
+        "listen",
+        "keep audio",
+        "storage"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "keepRecordingsInHistory"
+      ],
+      "summary" : "Keep finished cloud recordings with their History entry to play back or transcribe again.",
+      "title" : "Keep recordings in History"
+    },
+    {
       "id" : "android.recordingSounds",
       "keywords" : [
         "play start/stop sounds",

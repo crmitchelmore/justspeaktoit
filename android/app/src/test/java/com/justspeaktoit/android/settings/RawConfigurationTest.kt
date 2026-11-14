@@ -45,6 +45,7 @@ class RawConfigurationTest {
         "dynamicColor" to "Appearance is edited in Settings only for now.",
         "autoCorrectionsEnabled" to "Learned corrections are edited in Settings only for now.",
         "autoCorrectionsPromotionThreshold" to "Learned corrections are edited in Settings only for now.",
+        "keepRecordingsInHistory" to "Keeping recordings is edited in Settings only for now.",
     )
 
     private fun validate(settings: String, current: Map<String, Any?> = fresh) =

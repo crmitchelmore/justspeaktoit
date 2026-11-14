@@ -83,7 +83,10 @@ public final class DesktopCommandPaletteSession {
             recents = SettingsSearchRecents.recording(entry.id, in: recents)
             return .setting(DesktopSettingsSearch.target(for: entry))
         case .command(let command):
-            return command.shortcut.map(DesktopCommandPaletteTarget.action)
+            // Not `shortcut.map(DesktopCommandPaletteTarget.action)`: that
+            // crashes Swift 6.2.3's optimiser in the Windows release build.
+            guard let action = command.shortcut else { return nil }
+            return .action(action)
         case .history(let record):
             return .history(record.id)
         }

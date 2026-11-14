@@ -34,26 +34,35 @@ object CloudWire {
         fun contentLength(fileBytes: Long): Long = head.size + fileBytes + tail.size
     }
 
-    /** Builds everything around the file part so the audio itself can be streamed from disk. */
+    /**
+     * Builds everything around the file part so the audio itself can be streamed from disk.
+     * [trailingFields] follow the file, for providers (Modulate) that read their options after it.
+     */
     fun multipart(
         fields: List<Pair<String, String>>,
         fileField: String,
         fileName: String,
         mimeType: String,
         boundary: String,
+        trailingFields: List<Pair<String, String>> = emptyList(),
     ): Multipart {
+        fun StringBuilder.field(name: String, value: String) {
+            append("--").append(boundary).append("\r\n")
+            append("Content-Disposition: form-data; name=\"").append(name).append("\"\r\n\r\n")
+            append(value).append("\r\n")
+        }
         val head = buildString {
-            for ((name, value) in fields) {
-                append("--").append(boundary).append("\r\n")
-                append("Content-Disposition: form-data; name=\"").append(name).append("\"\r\n\r\n")
-                append(value).append("\r\n")
-            }
+            for ((name, value) in fields) field(name, value)
             append("--").append(boundary).append("\r\n")
             append("Content-Disposition: form-data; name=\"").append(fileField)
                 .append("\"; filename=\"").append(fileName).append("\"\r\n")
             append("Content-Type: ").append(mimeType).append("\r\n\r\n")
         }
-        val tail = "\r\n--$boundary--\r\n"
+        val tail = buildString {
+            append("\r\n")
+            for ((name, value) in trailingFields) field(name, value)
+            append("--").append(boundary).append("--\r\n")
+        }
         return Multipart(boundary, head.toByteArray(), tail.toByteArray())
     }
 

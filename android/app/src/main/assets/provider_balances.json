@@ -24,6 +24,102 @@
       "support" : "billingLinkOnly"
     },
     {
+      "billingUrl" : "https://www.assemblyai.com/app/account",
+      "credentialIds" : [
+        "assemblyai.apiKey"
+      ],
+      "displayName" : "AssemblyAI",
+      "id" : "assemblyai",
+      "primaryCredentialId" : "assemblyai.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://console.deepgram.com/project",
+      "credentialIds" : [
+        "deepgram.apiKey"
+      ],
+      "displayName" : "Deepgram",
+      "id" : "deepgram",
+      "primaryCredentialId" : "deepgram.apiKey",
+      "support" : "balance"
+    },
+    {
+      "billingUrl" : "https://elevenlabs.io/app/subscription",
+      "credentialIds" : [
+        "elevenlabs.apiKey"
+      ],
+      "displayName" : "ElevenLabs",
+      "id" : "elevenlabs",
+      "primaryCredentialId" : "elevenlabs.apiKey",
+      "support" : "balance"
+    },
+    {
+      "billingUrl" : "https://console.mistral.ai/billing",
+      "credentialIds" : [
+        "mistral.apiKey"
+      ],
+      "displayName" : "Mistral",
+      "id" : "mistral",
+      "primaryCredentialId" : "mistral.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://modulate.ai",
+      "credentialIds" : [
+        "modulate.apiKey"
+      ],
+      "displayName" : "Modulate",
+      "id" : "modulate",
+      "primaryCredentialId" : "modulate.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://console.reson8.dev",
+      "credentialIds" : [
+        "reson8.apiKey"
+      ],
+      "displayName" : "Reson8",
+      "id" : "reson8",
+      "primaryCredentialId" : "reson8.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://www.rev.ai/account",
+      "credentialIds" : [
+        "revai.apiKey"
+      ],
+      "displayName" : "Rev.ai",
+      "id" : "revai",
+      "primaryCredentialId" : "revai.apiKey",
+      "support" : "balance"
+    },
+    {
+      "billingUrl" : "https://console.soniox.com/billing",
+      "credentialIds" : [
+        "soniox.apiKey"
+      ],
+      "displayName" : "Soniox",
+      "id" : "soniox",
+      "primaryCredentialId" : "soniox.apiKey",
+      "reason" : "Soniox reports consumed usage rather than a wallet balance.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://portal.speechmatics.com",
+      "credentialIds" : [
+        "speechmatics.apiKey"
+      ],
+      "displayName" : "Speechmatics",
+      "id" : "speechmatics",
+      "primaryCredentialId" : "speechmatics.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
       "billingUrl" : "https://openrouter.ai/credits",
       "credentialIds" : [
         "openrouter.apiKey"
@@ -52,17 +148,6 @@
       "displayName" : "Google Gemini",
       "id" : "google",
       "primaryCredentialId" : "google.apiKey",
-      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
-      "support" : "billingLinkOnly"
-    },
-    {
-      "billingUrl" : "https://console.mistral.ai/billing",
-      "credentialIds" : [
-        "mistral.apiKey"
-      ],
-      "displayName" : "Mistral",
-      "id" : "mistral",
-      "primaryCredentialId" : "mistral.apiKey",
       "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
       "support" : "billingLinkOnly"
     }

@@ -214,7 +214,7 @@ internal class FakeCloud : CloudService {
         val model: String,
         val languageTag: String?,
         val call: CallHandle,
-        val prompt: String? = null,
+        val vocabulary: List<String> = emptyList(),
     )
 
     val transcriptions = CopyOnWriteArrayList<Transcription>()
@@ -232,9 +232,9 @@ internal class FakeCloud : CloudService {
         languageTag: String?,
         call: CallHandle,
         format: SharedAudio.Format,
-        prompt: String?,
+        vocabulary: List<String>,
     ): String {
-        transcriptions += Transcription(model.catalogId, languageTag, call, prompt)
+        transcriptions += Transcription(model.catalogId, languageTag, call, vocabulary)
         return onTranscribe(call)
     }
 

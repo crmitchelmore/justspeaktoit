@@ -3,22 +3,30 @@ import Foundation
 /// The cloud catalogue the Android app offers, as JSON, so Android never keeps its own copy of
 /// model identifiers, names, wire fields, the cleanup prompt or the dictation profile format.
 ///
-/// Android implements OpenAI-compatible `/audio/transcriptions` uploads for OpenAI and Groq, and
-/// OpenAI-compatible chat for cleanup through every native text provider and OpenRouter. It
-/// therefore offers every current batch model of those transcription providers that OpenAI's
-/// client sends directly (Groq reuses that client), except models with an announced retirement:
-/// Android has no saved-selection migration, so it never starts offering a model that is about to
-/// shut down.
+/// Android uploads finished recordings over plain HTTPS to OpenAI, Reson8 and every provider whose
+/// shared batch client iOS calls (`BatchTranscriptionRouting.iosSharedClientProviderIDs`), with
+/// Kotlin clients that match those shared clients' wire formats. It uses OpenAI-compatible chat for
+/// cleanup through every native text provider and OpenRouter. It offers every current batch model of
+/// those transcription providers (only the models OpenAI's client sends directly), except models
+/// with an announced retirement: Android has no saved-selection migration, so it never starts
+/// offering a model that is about to shut down.
 ///
 /// `CloudCatalogAndroidExportTests` fails when the committed asset is stale; regenerate it with
 /// `UPDATE_CLOUD_CATALOG_ANDROID=1 swift test --filter CloudCatalogAndroidExportTests`.
 public enum CloudCatalogAndroidExport {
-    /// Providers whose OpenAI-compatible transcription endpoint Android implements, in settings order.
-    static let transcriptionProviderIDs = ["openai", "groq"]
+    /// Providers whose batch transcription API Android implements, in settings order.
+    static let transcriptionProviderIDs = [
+        "openai", "groq", "assemblyai", "deepgram", "elevenlabs", "mistral", "modulate", "reson8", "revai",
+        "soniox", "speechmatics"
+    ]
 
-    /// The batch models Android offers, in catalogue order; the first is Android's default.
+    /// Providers Android reaches through OpenAI's `/audio/transcriptions` upload.
+    static let openAICompatibleProviderIDs: Set<String> = ["openai", "groq"]
+
+    /// The batch models Android offers, grouped in settings order and then in catalogue order, so
+    /// OpenAI's model stays first: the first is Android's default.
     static var transcriptionModels: [ModelCatalog.Option] {
-        ModelCatalog.batchTranscription.filter { option in
+        let offered = ModelCatalog.batchTranscription.filter { option in
             let provider = providerID(of: option.id)
             guard transcriptionProviderIDs.contains(provider) else { return false }
             if provider == "openai", !OpenAITranscriptionModels.directBatchModelIDs.contains(option.id) {
@@ -26,6 +34,7 @@ public enum CloudCatalogAndroidExport {
             }
             return ModelRetirements.retirement(for: option.id) == nil
         }
+        return transcriptionProviderIDs.flatMap { provider in offered.filter { providerID(of: $0.id) == provider } }
     }
 
     /// Cleanup models Android offers, in catalogue order: native provider routes, then OpenRouter
@@ -55,6 +64,9 @@ public enum CloudCatalogAndroidExport {
         let catalogId, displayName, provider, apiName, languageField: String
         /// Whether the model takes the vocabulary glossary as its `prompt` field.
         let supportsPrompt: Bool
+        /// The only language codes the model accepts, when it documents a fixed set (Reson8); an
+        /// explicit language outside it fails before upload. Absent means any language.
+        let languageCodes: [String]?
     }
 
     private struct Language: Encodable {
@@ -170,13 +182,18 @@ public enum CloudCatalogAndroidExport {
     }
 
     private static func exported(_ option: ModelCatalog.Option) -> Model {
-        // The OpenAI client (also used for Groq) sends the last path component as the model.
+        // Every Android client sends the last path component as the model.
         let apiName = String(option.id.split(separator: "/").last ?? Substring(option.id))
+        let provider = providerID(of: option.id)
         return Model(
-            catalogId: option.id, displayName: option.displayName, provider: providerID(of: option.id),
+            catalogId: option.id, displayName: option.displayName, provider: provider,
             apiName: apiName,
             languageField: OpenAITranscriptionModels.batchLanguageFieldName(for: apiName),
-            supportsPrompt: OpenAITranscriptionModels.supportsBatchPrompt(apiName)
+            // Only the OpenAI-compatible upload (OpenAI and Groq) has a `prompt` field; the other
+            // providers take the vocabulary as their own keyterm fields.
+            supportsPrompt: openAICompatibleProviderIDs.contains(provider)
+                && OpenAITranscriptionModels.supportsBatchPrompt(apiName),
+            languageCodes: Reson8Model(modelID: option.id).map { $0.languageCodes.sorted() }
         )
     }
 

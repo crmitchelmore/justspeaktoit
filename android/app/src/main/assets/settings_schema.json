@@ -16,7 +16,26 @@
     {
       "allowedValues" : [
         "openai/gpt-transcribe",
-        "groq/whisper-large-v3-turbo"
+        "groq/whisper-large-v3-turbo",
+        "assemblyai/universal-3-5-pro",
+        "assemblyai/universal-2",
+        "deepgram/nova-3",
+        "deepgram/nova",
+        "deepgram/enhanced",
+        "deepgram/base",
+        "elevenlabs/scribe_v3",
+        "elevenlabs/scribe_v2",
+        "elevenlabs/scribe_v2_medical",
+        "mistral/voxtral-mini-transcribe-3-0",
+        "mistral/voxtral-small-transcribe-3-0",
+        "modulate/velma-2-stt-batch",
+        "modulate/velma-2-stt-batch-english-vfast",
+        "reson8/rumble-2",
+        "reson8/resonant-1",
+        "revai/default",
+        "soniox/stt-async-v6",
+        "speechmatics/enhanced",
+        "speechmatics/standard"
       ],
       "default" : "openai/gpt-transcribe",
       "description" : "Model used when dictating in cloud mode.",

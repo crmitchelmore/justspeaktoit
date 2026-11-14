@@ -41,14 +41,14 @@ internal class SessionRequests(
     /**
      * Transcribes [file] with [model]. [missingKey] is the failure when no key is saved; [prepare]
      * runs after the key is read and before the upload (a shared file is copied in there) and returns
-     * its format. Without it the file is the recorder's WAV. [prompt] is the vocabulary glossary.
+     * its format. Without it the file is the recorder's WAV. [vocabulary] is the personal dictionary's terms.
      */
     suspend fun transcribe(
         model: CloudModel,
         file: File,
         languageTag: String,
         missingKey: DictationFailure,
-        prompt: String? = null,
+        vocabulary: List<String> = emptyList(),
         prepare: suspend () -> SharedAudio.Format? = { null },
     ): DictationEvent = try {
         val key = withContext(io) { secrets.read(model.provider.credentialId) }
@@ -59,9 +59,9 @@ internal class SessionRequests(
             DictationEvent.Final(
                 capture.call(timings.transcribeMs, model.provider) { call ->
                     if (format == null) {
-                        cloud.transcribe(model, key, file, languageTag, call, prompt = prompt)
+                        cloud.transcribe(model, key, file, languageTag, call, vocabulary = vocabulary)
                     } else {
-                        cloud.transcribe(model, key, file, languageTag, call, format, prompt)
+                        cloud.transcribe(model, key, file, languageTag, call, format, vocabulary)
                     }
                 },
             )

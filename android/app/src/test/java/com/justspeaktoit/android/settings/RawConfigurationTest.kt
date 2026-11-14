@@ -97,7 +97,7 @@ class RawConfigurationTest {
     @Test
     fun reportsEveryProblemAndChangesNothingWhenInvalid() {
         val report = validate(
-            """{"cleanup_enabled": "yes", "cloud_model": "deepgram/nova-3", "history_retention": "Year",
+            """{"cleanup_enabled": "yes", "cloud_model": "acme/not-a-model", "history_retention": "Year",
                "keepAudioOnCancel": false, "colour": "blue"}""",
         )
         assertEquals(

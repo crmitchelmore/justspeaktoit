@@ -118,6 +118,8 @@ class ProductAnalyticsTest {
         assertEquals(ProviderType.Groq to EngineType.Cloud, Telemetry.classify(RecognitionMode.Cloud, groq))
         assertEquals(ProviderType.Other to EngineType.OnDevice, Telemetry.classify(RecognitionMode.OnDevice, groq))
         assertEquals(ProviderType.Other to EngineType.Cloud, Telemetry.classify(RecognitionMode.SpeechService, groq))
+        val assemblyAI = CloudCatalog.transcriptionModels.first { it.provider.id == "assemblyai" }
+        assertEquals(ProviderType.AssemblyAI to EngineType.Cloud, Telemetry.classify(RecognitionMode.Cloud, assemblyAI))
     }
 
     @Test

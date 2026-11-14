@@ -411,7 +411,7 @@ internal class DictationSessionController(
         }
     }
 
-    private fun vocabulary(): String? = PersonalCorrections.vocabularyPrompt(settings.corrections)
+    private fun vocabulary(): List<String> = settings.corrections.map { it.writeAs }
 
     private fun onEngineEvent(received: DictationEvent) {
         // Corrected before the reducer sees it, so History, cleanup and the screen all get the same text.

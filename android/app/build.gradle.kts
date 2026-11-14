@@ -128,6 +128,9 @@ abstract class GenerateCloudCatalog : DefaultTask() {
         val providers = objects("providers").joinToString("") {
             "        CloudProviderSpec(id = ${lit(it["id"])}, credentialId = ${lit(it["credentialId"])}),\n"
         }
+        @Suppress("UNCHECKED_CAST")
+        fun codes(value: Any?): String = (value as List<Any?>?)
+            ?.joinToString(", ", prefix = "listOf(", postfix = ")") { lit(it) } ?: "null"
         val models = objects("transcriptionModels").joinToString("") {
             "        CloudModelSpec(\n" +
                 "            catalogId = ${lit(it["catalogId"])},\n" +
@@ -136,6 +139,7 @@ abstract class GenerateCloudCatalog : DefaultTask() {
                 "            apiName = ${lit(it["apiName"])},\n" +
                 "            languageField = ${lit(it["languageField"])},\n" +
                 "            supportsPrompt = ${it["supportsPrompt"] as Boolean},\n" +
+                "            languageCodes = ${codes(it["languageCodes"])},\n" +
                 "        ),\n"
         }
         val cleanupModels = objects("cleanupModels").joinToString("") {

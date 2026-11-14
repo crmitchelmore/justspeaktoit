@@ -19,6 +19,7 @@ internal data class CloudModelSpec(
     val apiName: String,
     val languageField: String,
     val supportsPrompt: Boolean,
+    val languageCodes: List<String>?,
 )
 
 /** A language row of `assets/cloud_catalog.json` (SpeakCore's `TranscriptionLanguageCatalog`). */
@@ -37,7 +38,19 @@ enum class CloudProvider(val id: String, val displayName: String, val baseUrl: S
     Anthropic("anthropic", "Anthropic", "https://api.anthropic.com/v1"),
     Google("google", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai"),
     Mistral("mistral", "Mistral", "https://api.mistral.ai/v1"),
+    AssemblyAI("assemblyai", "AssemblyAI", "https://api.assemblyai.com/v2"),
+    Deepgram("deepgram", "Deepgram", "https://api.deepgram.com/v1"),
+    ElevenLabs("elevenlabs", "ElevenLabs", "https://api.elevenlabs.io/v1"),
+    Modulate("modulate", "Modulate", "https://platform.modulate.ai"),
+    Reson8("reson8", "Reson8", "https://api.reson8.dev/v1"),
+    RevAI("revai", "Rev AI", "https://api.rev.ai/speechtotext/v1"),
+    Soniox("soniox", "Soniox", "https://api.soniox.com/v1"),
+    Speechmatics("speechmatics", "Speechmatics", "https://eu1.asr.api.speechmatics.com"),
     ;
+
+    /** OpenAI and Groq take the OpenAI `/audio/transcriptions` form; the rest use [BatchTranscriber]. */
+    val isOpenAICompatible: Boolean
+        get() = this == OpenAI || this == Groq
 
     val credentialId: String
         get() = GeneratedCloudCatalog.providers.first { it.id == id }.credentialId
@@ -57,6 +70,8 @@ data class CloudModel(
     val languageField: String,
     /** Whether the model takes a vocabulary glossary as its `prompt` form field. */
     val supportsPrompt: Boolean = false,
+    /** The only languages the model accepts (Reson8); null when the provider takes any. */
+    val languageCodes: List<String>? = null,
 )
 
 /** A cleanup route: a native provider's own API, or OpenRouter. */
@@ -87,6 +102,7 @@ object CloudCatalog {
             apiName = it.apiName,
             languageField = it.languageField,
             supportsPrompt = it.supportsPrompt,
+            languageCodes = it.languageCodes,
         )
     }
 

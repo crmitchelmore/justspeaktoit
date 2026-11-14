@@ -1582,6 +1582,21 @@ sessions:
           - "Open a password field and check the keyboard's microphone; then deny the microphone permission and try the keyboard."
         expected: "The tile and shortcut open the app and start dictating (after unlocking when locked). Both shared files are transcribed into History. The keyboard inserts the final text, is disabled in the password field, and explains a denied permission. Switching keyboards stops dictation without inserting stray text."
         final_gate: true
+      - id: "android-keyboard-voice-edit"
+        issues:
+          - 1620
+        title: "Dictation keyboard: rewrite selected text by voice and never touch another field"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1620 keyboard voice edit"
+        steps:
+          - "With an OpenRouter key saved, open a notes app with the Just Speak to It keyboard and check Edit is greyed out with nothing selected."
+          - "Type or dictate a made-up sentence, select part of it, tap Edit, read the notice naming the provider and tap Edit again. Say make it more formal, then tap Done."
+          - "Select text again, tap Edit and while it says Rewriting switch to another field or move the selection; then repeat with Airplane mode on."
+          - "Turn Airplane mode off, remove the OpenRouter key in Settings, then select text and tap Edit."
+          - "With TalkBack on, focus the Edit key with and without a selection."
+        expected: "Edit is enabled only with a selection. The rewrite replaces only the selected words and the rest of the sentence is unchanged. Moving away or changing the selection leaves the text as it was with a message that it changed, Airplane mode leaves it unchanged with a network message, and a missing key names the provider without recording. TalkBack reads Edit with its state and a description of what it does."
+        final_gate: false
       - id: "android-raw-configuration-editor"
         issues:
           - 1608

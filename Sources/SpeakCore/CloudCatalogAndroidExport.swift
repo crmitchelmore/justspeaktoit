@@ -1,7 +1,8 @@
 import Foundation
 
 /// The cloud catalogue the Android app offers, as JSON, so Android never keeps its own copy of
-/// model identifiers, names, wire fields, the cleanup prompt or the dictation profile format.
+/// model identifiers, names, wire fields, the cleanup and voice-edit prompts or the dictation profile
+/// format.
 ///
 /// Android uploads finished recordings over plain HTTPS to OpenAI, Reson8 and every provider whose
 /// shared batch client iOS calls (`BatchTranscriptionRouting.iosSharedClientProviderIDs`), with
@@ -84,6 +85,13 @@ public enum CloudCatalogAndroidExport {
         let customPromptClosing: String
     }
 
+    /// `VoiceEditPolicy`'s prompt and the instruction words that keep requested formatting, so the
+    /// Android keyboard's voice edit asks the model exactly what every other platform asks.
+    private struct VoiceEdit: Encodable {
+        let systemPrompt, userMessageIntro: String
+        let quoteTerms, codeFenceTerms, whitespaceTerms: [String]
+    }
+
     /// Where and how Android stores `DictationProfile`s, so its profiles keep the shared shape.
     private struct Profiles: Encodable {
         let storageKey: String
@@ -131,6 +139,7 @@ public enum CloudCatalogAndroidExport {
         let keywordPrompt: KeywordPrompt
         let profiles: Profiles
         let openRouterBrowser: OpenRouterBrowser
+        let voiceEdit: VoiceEdit
     }
 
     public static func json() throws -> Data {
@@ -156,7 +165,14 @@ public enum CloudCatalogAndroidExport {
                 cloudTranscriptionRouting: DictationProfileTranscriptionRouting.remoteBatch.rawValue,
                 fields: DictationProfile.CodingKeys.allCases.map(\.rawValue)
             ),
-            openRouterBrowser: openRouterBrowser
+            openRouterBrowser: openRouterBrowser,
+            voiceEdit: VoiceEdit(
+                systemPrompt: VoiceEditPolicy.systemPrompt,
+                userMessageIntro: VoiceEditPolicy.userMessageIntro,
+                quoteTerms: VoiceEditFormattingIntent.quoteTerms,
+                codeFenceTerms: VoiceEditFormattingIntent.codeFenceTerms,
+                whitespaceTerms: VoiceEditFormattingIntent.whitespaceTerms
+            )
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
